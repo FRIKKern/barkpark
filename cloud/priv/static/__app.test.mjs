@@ -15950,6 +15950,119 @@ test("cch-w55-s3: both trial cards — owner and member — carry the same teard
   assert.ok(!/<button/i.test(member), "the member card gains the sentence, not a button");
 });
 
+// ── cch-w50 · THE LAPSED-TRIAL COPY CLAMP ───────────────────────────────────
+//
+// Measured on the live control plane 2026-08-07: 15 of 18 trial subscriptions
+// were past `current_period_end` while all 18 still read `status = 'active'`
+// (the oldest lapsed three weeks earlier), every one of those teams with both
+// notice stamps spent and ZERO barkparks — the teardown had already run. Driven
+// against production's exact app.js bytes with days=0, the owner card rendered:
+//
+//   "A real dedicated instance, free while your trial runs. When the trial ends,
+//    the instance is torn down."   ← already torn down
+//   "Pick a plan below to keep it."                ← nothing left to keep
+//   "We'll remind you 3 days and 1 day before the trial ends."
+//                                                  ← an event three weeks past
+//
+// and the member twin rendered the first of those. THREE future tenses about a
+// finished event, plus an offer to keep a box that no longer exists.
+//
+// These tests pin the CLAMP, not the sentences: the days=9 control asserts every
+// retracted string is still there for a RUNNING trial, so a future edit cannot
+// pass this file by deleting the copy outright instead of branching on the state.
+//
+// MUTATION-PROVED (both directions, run before commit):
+//   * `trialTagline` made unconditional (always the running-trial sentence) reds
+//     "the ended arm speaks only in the past" on the /When the trial ends/ leg,
+//     for BOTH cards — the days=9 control stays green, which is what shows the
+//     assertion is about the ended arm and not about the sentence existing.
+//   * `trialEnded` weakened to `days < 0` (the shape a "days can't be zero"
+//     reading would produce) reds every days=0 assertion while days=9 and the
+//     server-side clamp pin stay green.
+
+test("cch-w50: trialEnded is the terminal predicate — 0 is ENDED, unknown is not", () => {
+  assert.equal(hooks.trialEnded(0), true, "0 is the server's clamped terminal value, not a midpoint");
+  assert.equal(hooks.trialEnded(-1), true, "and a value below it stays ended, though the server never emits one");
+  assert.equal(hooks.trialEnded(1), false);
+  assert.equal(hooks.trialEnded(14), false);
+  // An unloaded / non-trial subscription must NOT render the terminal copy.
+  assert.equal(hooks.trialEnded(null), false, "an unknown countdown is not an ended trial");
+  assert.equal(hooks.trialEnded(undefined), false);
+  assert.equal(hooks.trialEnded("0"), false, "a string is not a countdown");
+});
+
+test("cch-w50: the ended arm speaks only in the past — no reminder, no 'keep it', no future tense", () => {
+  const ended = { plan: "trial", status: "active", trial_days_remaining: 0 };
+
+  for (const [label, html] of [
+    ["owner", hooks.trialCardHtml(ended)],
+    ["member", hooks.readOnlyPlanCardHtml(ended)],
+  ]) {
+    // The three retracted strings, each named so a red says WHICH one came back.
+    assert.doesNotMatch(html, /We'll remind you/,
+      label + ": no future reminder for a threshold that has already passed");
+    assert.doesNotMatch(html, /to keep it/,
+      label + ": no offer to KEEP an instance that is being torn down");
+    assert.doesNotMatch(html, /When the trial ends/,
+      label + ": no future tense about the event that already happened");
+    // The general form, so a REWORDED future promise is caught too.
+    assert.doesNotMatch(html, /\bwill\b|\bWe'll\b|\bwhen the trial ends\b/i,
+      label + ": no future-tense promise of any wording");
+    // And the positive: the card actually says the trial is over.
+    assert.ok(html.includes("Your free trial has ended."),
+      label + ": the ended state is stated, not merely un-promised");
+    assert.ok(html.includes("is being torn down"),
+      label + ": present tense — true whether the deprovision job has drained yet or not");
+  }
+
+  // The chip is already past tense and stays that way.
+  assert.ok(hooks.trialCardHtml(ended).includes(">Trial ended<"));
+  assert.equal(hooks.billingChipModel(ended).label, "Trial ended");
+
+  // The member card gains no affordance from any of this (GR36 plain-member law).
+  assert.ok(!/<button/i.test(hooks.readOnlyPlanCardHtml(ended)),
+    "the member card is still button-free");
+});
+
+test("cch-w50: NON-VACUITY CONTROL — a RUNNING trial keeps every retracted string", () => {
+  // If this ever goes green with the retracted copy deleted from the file, the
+  // test above is passing for the wrong reason: the clamp would have become a
+  // blanket removal, and a team mid-trial would have lost its teardown warning
+  // and its reminder promise (both of which are BACKED — TrialExpiryWorker
+  // really tears down and really sends T-3/T-1).
+  const running = { plan: "trial", status: "active", trial_days_remaining: 9 };
+  const owner = hooks.trialCardHtml(running);
+  const member = hooks.readOnlyPlanCardHtml(running);
+
+  assert.ok(owner.includes("When the trial ends, the instance is torn down."),
+    "the running trial still gets the backed teardown warning");
+  assert.ok(owner.includes("Pick a plan below to keep it."),
+    "and the RATIFIED CTA, verbatim (task-2ed0ea068f37345d)");
+  assert.ok(owner.includes("We'll remind you 3 days and 1 day before the trial ends."),
+    "and the reminder promise the worker actually keeps");
+  assert.ok(member.includes("When the trial ends, the instance is torn down."),
+    "the member twin keeps the warning half too (cch-w55-s3)");
+
+  // The countdown chip is untouched by the clamp.
+  assert.ok(owner.includes("9 days left"));
+});
+
+test("cch-w50: the two cards read ONE tagline model, so the clamp cannot land on only one", () => {
+  // cch-w55-s3 fixed a drift in which the member card had silently lost the
+  // owner card's second sentence. Sharing the model is what keeps that fix from
+  // needing to be made a second time on this axis.
+  for (const days of [14, 4, 1, 0]) {
+    const sub = { plan: "trial", status: "active", trial_days_remaining: days };
+    const tagline = hooks.trialTagline(days);
+    assert.ok(hooks.trialCardHtml(sub).includes(tagline),
+      "the owner card renders trialTagline(" + days + ") verbatim");
+    assert.ok(hooks.readOnlyPlanCardHtml(sub).includes(tagline),
+      "and the member twin renders the SAME bytes");
+  }
+  assert.notEqual(hooks.trialTagline(0), hooks.trialTagline(1),
+    "the model genuinely branches — a constant would make the loop above vacuous");
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // G-04 — Notifications (the crown): the settings-anatomy pure builders
 // (GR33 form-page anatomy, GR34 check grammars, GR36 per-page rulings)
