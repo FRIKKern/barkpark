@@ -26,7 +26,7 @@ A PR targeting `main` must clear:
    comment directly beneath it records why it was removed, and a reader who
    plans around a test→compile ordering is planning around an edge that no
    longer exists. Cited by JOB KEY, not by line, and the reason is measured:
-   this sentence read "elixir.yml:510 … at :515" until 2026-09-01, by which
+   this sentence pinned bare line numbers (510, 515) until 2026-09-01, by which
    time the job had moved past line 760 — and it moved AGAIN during the very
    session that fixed it, when an unrelated merge landed in the same workflow.
    A line number in a doc is correct exactly once; `grep -n '^  mix-prod-compile:'`
