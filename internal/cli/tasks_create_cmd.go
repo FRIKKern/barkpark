@@ -462,6 +462,24 @@ func mutateErrorMessage(status int, body []byte) string {
 		if len(lines) > 0 {
 			msg += "\n  " + strings.Join(lines, "\n  ")
 		}
+		// SERVER FAULT (5xx): print the request_id. The registered hint for
+		// `internal_error` is "Retry shortly; if it persists, report the
+		// request_id to the API operator" — a remedy that names an identifier
+		// this renderer used to drop, which is the SAME unappealable shape the
+		// dedup 409 above was fixed for, reproduced on the fault arm. It matters
+		// most in the worst case: when the server declines to name the fault at
+		// all (a bare `unknown error`, which MutateController still renders via
+		// Errors.build/1's catch-all), the request_id is the ONLY handle the
+		// caller has, and a create failure with no handle reports on its exit
+		// code alone.
+		//
+		// Deliberately 5xx-only. A 4xx refusal already names WHICH field, WHICH
+		// row, WHICH id (validation_failed, duplicate_task), so the caller can
+		// act without an operator; adding the id there would be noise on every
+		// well-named refusal.
+		if status >= 500 && env.RequestID != "" {
+			msg += "\n  request_id: " + env.RequestID
+		}
 		return msg
 	}
 	// Unknown shape. Do NOT truncate: the body is the only diagnosis left, and
