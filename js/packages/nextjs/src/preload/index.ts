@@ -30,8 +30,135 @@ export interface Preloader {
   loadDocument<T = unknown>(id: string, opts?: BarkparkFetchOptions): Promise<T>
 }
 
+/**
+ * Identity registry for values a structural encoding cannot represent — an
+ * `AbortSignal`, a function, a `Map`, a class instance. A `WeakMap`, so the key
+ * STRING (which carries only the integer id) never keeps the value itself
+ * alive. Ids are handed out monotonically, so the same value always encodes to
+ * the same token within a process.
+ */
+const objectIds = new WeakMap<object, number>()
+/**
+ * Same registry for symbols. Symbols are not valid `WeakMap` keys under this
+ * package's ES2022 target, so this one holds strong references: it grows by one
+ * entry per DISTINCT symbol ever passed as an option value or used as an
+ * enumerable option key. None of `BarkparkFetchOptions`' declared fields is a
+ * symbol, but the package ships CJS/ESM to plain JS callers with no types, so
+ * the encoder handles the case rather than silently collapsing it.
+ */
+const symbolIds = new Map<symbol, number>()
+let nextId = 0
+
+function identityOf(value: object | symbol): number {
+  if (typeof value === 'symbol') {
+    const known = symbolIds.get(value)
+    if (known !== undefined) return known
+    const id = ++nextId
+    symbolIds.set(value, id)
+    return id
+  }
+  const known = objectIds.get(value)
+  if (known !== undefined) return known
+  const id = ++nextId
+  objectIds.set(value, id)
+  return id
+}
+
+function isPlainObject(value: object): boolean {
+  const proto: unknown = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * Self-delimiting, type-tagged encoding of an arbitrary value.
+ *
+ * Every branch dispatches on `typeof` FIRST, so a bare string is a scalar and
+ * is never walked character by character — `expand: 'author'` and
+ * `expand: ['author']` must not, and do not, encode alike. Plain objects have
+ * their keys sorted RECURSIVELY (so `{a,b}` and `{b,a}` agree at every depth);
+ * arrays keep their order, because array order is meaningful in `tags`,
+ * `fields` and `expand`.
+ */
+function encode(value: unknown, seen: Set<object>): string {
+  switch (typeof value) {
+    case 'string':
+      return `s${JSON.stringify(value)}`
+    case 'number':
+      // -0 and 0 both render as "0" via String(); keep them apart.
+      return Object.is(value, -0) ? 'n-0' : `n${String(value)}`
+    case 'boolean':
+      return value ? 'bT' : 'bF'
+    case 'undefined':
+      return 'u'
+    case 'bigint':
+      return `g${String(value)}`
+    case 'symbol':
+      return `y${identityOf(value)}`
+    case 'function':
+      return `f${identityOf(value as unknown as object)}`
+    default:
+      break
+  }
+
+  if (value === null) return 'z'
+  const obj = value as object
+
+  // A cycle has no structural encoding (JSON.stringify throws on one). Fall
+  // back to the identity token and stop descending.
+  if (seen.has(obj)) return `r${identityOf(obj)}`
+
+  if (Array.isArray(value)) {
+    seen.add(obj)
+    const parts = (value as unknown[]).map((entry) => encode(entry, seen))
+    seen.delete(obj)
+    return `[${parts.join(',')}]`
+  }
+
+  if (!isPlainObject(obj)) {
+    // AbortSignal, Map, Set, URL, RegExp, Date, class instances — and a plain
+    // object built in another realm. Structural encoding is unsafe for these:
+    // an AbortSignal exposes no enumerable own state, so JSON.stringify renders
+    // EVERY one of them as `{}` and two different signals collide. They
+    // contribute IDENTITY instead — distinct instances get distinct keys, the
+    // same instance reused still dedupes. A cross-realm plain object lands here
+    // too and merely misses a dedup, which is the safe direction to err.
+    return `o${identityOf(obj)}`
+  }
+
+  seen.add(obj)
+  const record = obj as Record<PropertyKey, unknown>
+  const parts = Object.keys(record)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${encode(record[k], seen)}`)
+  // Enumerable symbol-keyed properties, ordered by their identity token (stable
+  // within a process). JSON.stringify drops these outright.
+  const symbolParts = Object.getOwnPropertySymbols(record)
+    .filter((s) => Object.prototype.propertyIsEnumerable.call(record, s))
+    .map((s) => ({ id: identityOf(s), value: record[s] }))
+    .sort((a, b) => a.id - b.id)
+    .map((entry) => `@${entry.id}:${encode(entry.value, seen)}`)
+  seen.delete(obj)
+  return `{${[...parts, ...symbolParts].join(',')}}`
+}
+
+/**
+ * Dedup key for one `(id, opts)` tuple.
+ *
+ * Replaces `JSON.stringify([id, opts])`, which had three faults: it is
+ * key-ORDER sensitive (the same options bag written `{a,b}` vs `{b,a}` produced
+ * two keys and so missed a dedup); it renders every non-serializable value as
+ * `{}` (so two DIFFERENT `AbortSignal`s produced ONE key and were wrongly
+ * collapsed onto a single in-flight request governed by whichever signal
+ * arrived first); and it THROWS on a cyclic options bag. None of the three can
+ * hand back a wrong document body — the key is only ever consulted for the
+ * tuple that produced it.
+ *
+ * `undefined` and `{}` are normalised to the same key: `{ ...opts, id }` is
+ * `{ id }` either way, so they describe the same request.
+ */
 function stableKey(id: string, opts?: BarkparkFetchOptions): string {
-  return JSON.stringify([id, opts ?? null])
+  const seen = new Set<object>()
+  return `${encode(id, seen)}|${encode(opts ?? {}, seen)}`
 }
 
 /**
@@ -85,6 +212,15 @@ export function createPreloader(server: PreloadableServer): Preloader {
   // the later load. It intentionally lives for the instance's lifetime, so the
   // instance MUST be request-scoped (cache()-bound) — a module-scoped instance
   // turns this into a cross-request cache that serves stale documents.
+  //
+  // Nothing evicts from this Map, so the key's precision governs its size: it
+  // holds one entry per DISTINCT (id, opts) tuple the request actually asked
+  // for. stableKey no longer collapses two AbortSignals onto one entry, so a
+  // request that preloads the same document under several signals now stores
+  // several entries instead of one — bounded by the calls that request makes,
+  // and the point of the fix. The keys stay plain strings carrying only an
+  // integer identity token, so an entry never keeps a signal (or any other
+  // non-serializable option value) alive.
   const inflight = new Map<string, Promise<unknown>>()
 
   const fetchOnce = (id: string, opts?: BarkparkFetchOptions): Promise<unknown> => {

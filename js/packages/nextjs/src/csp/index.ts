@@ -88,6 +88,28 @@ function isExtendable(name: string): name is ExtendableDirective {
   return (EXTENDABLE_DIRECTIVES as readonly string[]).includes(name)
 }
 
+/**
+ * Coerce one `additional` value into a real source array.
+ *
+ * The same reason the EXTENDABLE_DIRECTIVES runtime check exists, applied one
+ * level down: `additional`'s values are TYPED `readonly string[]`, but a bare
+ * STRING is iterable, so `{ 'script-src': "'unsafe-inline'" }` walked the value
+ * CHARACTER by character. The FORBIDDEN_SCRIPT_SOURCES loop below then compared
+ * `'`, `u`, `n`, `s`… against the forbidden list and NEVER FIRED, and the merge
+ * loop appended those characters as separate sources. The emitted policy was
+ * not actually weaker — a single character is not a valid CSP source
+ * expression, so browsers drop it — so this was a FAILED CONTROL, not an open
+ * hole. It still mattered: the note on EXTENDABLE_DIRECTIVES justifies its own
+ * runtime check by saying the package "ships CJS/ESM consumable from plain JS,
+ * where no type exists at all", and the throw was defeated in exactly that
+ * scenario. Coercing (rather than throwing on a non-array) keeps the intended
+ * value and lets the forbidden-source throw judge it on its merits.
+ */
+function asSources(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value as readonly string[]
+  return typeof value === 'string' && value.length > 0 ? [value] : []
+}
+
 /** Sources that make a nonce-based `script-src` meaningless. */
 const FORBIDDEN_SCRIPT_SOURCES = ["'unsafe-inline'", "'unsafe-eval'"] as const
 
@@ -159,7 +181,7 @@ export function buildCspPolicy(nonce: string, options: CspOptions = {}): string 
     }
   }
 
-  const scriptExtras = extra['script-src'] ?? []
+  const scriptExtras = asSources(extra['script-src'])
   for (const src of scriptExtras) {
     if ((FORBIDDEN_SCRIPT_SOURCES as readonly string[]).includes(src.trim())) {
       throw new Error(
@@ -176,7 +198,7 @@ export function buildCspPolicy(nonce: string, options: CspOptions = {}): string 
     // one is present. The guard above already refuses such a key — this keeps
     // the invariant readable where it matters instead of depending on a check
     // twenty lines up.
-    const additions = (isExtendable(name) ? extra[name] : undefined) ?? []
+    const additions = asSources(isExtendable(name) ? extra[name] : undefined)
     const merged = [...sources]
     for (const src of additions) {
       if (!merged.includes(src)) merged.push(src)
@@ -187,8 +209,9 @@ export function buildCspPolicy(nonce: string, options: CspOptions = {}): string 
   // A directive a consumer widens but the base policy never named (e.g.
   // `worker-src`) still needs to exist, or the addition silently falls through
   // to `default-src`.
-  for (const [name, additions] of Object.entries(extra)) {
-    if (!additions || additions.length === 0) continue
+  for (const [name, raw] of Object.entries(extra)) {
+    const additions = asSources(raw)
+    if (additions.length === 0) continue
     if (directives.some((d) => d.startsWith(`${name} `))) continue
     directives.push(`${name} ${["'self'", ...additions].join(' ')}`)
   }

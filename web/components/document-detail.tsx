@@ -24,13 +24,30 @@ function docBodyHtml(doc: import("@/lib/get-document").GenericDoc): string | nul
 }
 
 /**
- * Defense-in-depth pass over the trusted corpus HTML before it reaches
- * `dangerouslySetInnerHTML`. `body_html` is produced by the API's own
- * server-side renderer (`Barkpark.PortableDoc.Render` behind its
- * `HtmlSanitizer`) from the SAME published corpus the block arrays come from,
- * so this is a belt-and-braces strip of active content — script elements,
- * inline `on*` handlers, `javascript:` URLs — not a general-purpose sanitizer
- * for untrusted input.
+ * A COSMETIC pass over the corpus HTML before it reaches
+ * `dangerouslySetInnerHTML`. It is NOT a sanitizer and NOT the security
+ * boundary on this surface, despite what this comment used to say.
+ *
+ * `body_html` is produced by the API's own server-side renderer
+ * (`Barkpark.PortableDoc.Render` behind its `HtmlSanitizer`) from the SAME
+ * published corpus the block arrays come from, so the input arrives already
+ * server-sanitized. What is left here is a regex pass, and a regex cannot
+ * parse HTML. It removes well-formed script elements and the common
+ * whitespace-separated handler attribute, and it is stepped around by an
+ * attribute separated with `/` (`<img/onerror=alert(1) src=x>`,
+ * `<svg/onload=alert(1)>`), by an entity-encoded scheme
+ * (`<a href="jav&#x61;script:…">`), and by `<iframe srcdoc="…">`. Those
+ * bypasses are measured, and pinned as behaviour, in
+ * `__tests__/sanitize-trusted-html.test.ts`.
+ *
+ * So: the CSP in `lib/csp.ts` is the control. An enforcing `script-src` with
+ * no `'unsafe-inline'` and no `'unsafe-eval'`, `object-src 'none'`, and a
+ * per-request 128-bit nonce is what actually stops an injected inline handler
+ * or a script-scheme URL from executing in the browser. Keep this filter for
+ * the belt-and-braces value it genuinely has; do NOT restore a claim here that
+ * the runtime does not deliver. The previous wording promised handler and URL
+ * stripping this function never performed — and a comment claiming a defence
+ * that is not there is precisely why nobody adds the real one.
  */
 function sanitizeTrustedHtml(html: string): string {
   return html

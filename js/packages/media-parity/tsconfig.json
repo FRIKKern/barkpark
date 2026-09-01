@@ -10,7 +10,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": ["@vitest/browser/providers/playwright"]
+    "types": ["@vitest/browser-playwright"]
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules"]

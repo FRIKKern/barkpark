@@ -143,3 +143,94 @@ describe('preload rejection safety', () => {
     }
   })
 })
+
+describe('preload dedup key stability', () => {
+  // The dedup key used to be `JSON.stringify([id, opts])`, which inherits two
+  // faults from JSON.stringify:
+  //   1. key ORDER — `{a,b}` and `{b,a}` are the same options bag but stringify
+  //      differently, so an identical preload was NOT deduped (extra fetch);
+  //   2. non-serializable values — an AbortSignal stringifies to `{}`, so two
+  //      DIFFERENT signals produced the SAME key and were WRONGLY collapsed
+  //      into one in-flight request.
+  // Neither fault could return a wrong document BODY (the key is only ever
+  // consulted for the tuple that produced it), but (2) hands a caller a promise
+  // for a request governed by somebody else's signal.
+
+  it('dedupes the same options bag written in a different key order', async () => {
+    const { server, fetchSpy } = makeServer()
+    const p = createPreloader(server)
+
+    p.preloadDocument('p1', { type: 'post', perspective: 'drafts' })
+    const doc = await p.loadDocument('p1', { perspective: 'drafts', type: 'post' })
+
+    // Assert the subject is present: the fetch really happened with both fields,
+    // so this cannot pass by the options going missing.
+    expect(fetchSpy).toHaveBeenCalledWith({ type: 'post', perspective: 'drafts', id: 'p1' })
+    expect(doc).toEqual({ _id: 'p1', _type: 'post' })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('dedupes a NESTED options object written in a different key order', async () => {
+    const { server, fetchSpy } = makeServer()
+    const p = createPreloader(server)
+
+    p.preloadDocument('p1', { type: 'post', query: { filters: [], limit: 10, order: 'a:asc' } })
+    await p.loadDocument('p1', { type: 'post', query: { order: 'a:asc', limit: 10, filters: [] } })
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSpy.mock.calls[0]?.[0]).toMatchObject({ id: 'p1', query: { limit: 10 } })
+  })
+
+  it('does NOT collapse two distinct AbortSignals into one request', async () => {
+    const { server, fetchSpy } = makeServer()
+    const p = createPreloader(server)
+    const a = new AbortController()
+    const b = new AbortController()
+
+    await p.loadDocument('p1', { type: 'post', signal: a.signal })
+    await p.loadDocument('p1', { type: 'post', signal: b.signal })
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    // Assert the signals are actually present and are the ones we passed — a
+    // pass must not be obtainable by `signal` being dropped on the way through.
+    expect(fetchSpy.mock.calls[0]?.[0]?.signal).toBe(a.signal)
+    expect(fetchSpy.mock.calls[1]?.[0]?.signal).toBe(b.signal)
+  })
+
+  it('still dedupes when the SAME AbortSignal instance is reused', async () => {
+    const { server, fetchSpy } = makeServer()
+    const p = createPreloader(server)
+    const c = new AbortController()
+
+    p.preloadDocument('p1', { type: 'post', signal: c.signal })
+    await p.loadDocument('p1', { type: 'post', signal: c.signal })
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSpy.mock.calls[0]?.[0]?.signal).toBe(c.signal)
+  })
+
+  it('keeps a bare string option distinct from the one-element array form', async () => {
+    // `expand`/`fields` are `string | string[]`. A key builder that branches on
+    // "is this iterable?" walks '/blog' character by character, and one that
+    // stringifies loosely makes `'author'` and `['author']` the same key.
+    const { server, fetchSpy } = makeServer()
+    const p = createPreloader(server)
+
+    await p.loadDocument('p1', { type: 'post', expand: 'author' })
+    await p.loadDocument('p1', { type: 'post', expand: ['author'] })
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(fetchSpy.mock.calls[0]?.[0]?.expand).toBe('author')
+    expect(fetchSpy.mock.calls[1]?.[0]?.expand).toEqual(['author'])
+  })
+
+  it('keeps array ORDER significant while object key order is not', async () => {
+    const { server, fetchSpy } = makeServer()
+    const p = createPreloader(server)
+
+    await p.loadDocument('p1', { type: 'post', tags: ['a', 'b'] })
+    await p.loadDocument('p1', { type: 'post', tags: ['b', 'a'] })
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+})

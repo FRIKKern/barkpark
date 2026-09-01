@@ -7,6 +7,7 @@
 // for an unknown document.
 
 import { scopePrefix } from './scope'
+import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { assertPaging } from './filter-builder'
 import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
@@ -30,10 +31,8 @@ export async function getHistory(
   opts?: HistoryOptions,
 ): Promise<DocumentRevision[]> {
   assertPaging(opts?.limit)
-  if (typeof type !== 'string' || type.length === 0)
-    throw new BarkparkValidationError('getHistory requires a non-empty type', { field: 'type' })
-  if (typeof id !== 'string' || id.length === 0)
-    throw new BarkparkValidationError('getHistory requires a non-empty id', { field: 'id' })
+  assertSegment(type, 'type')
+  assertSegment(id, 'id')
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   const query = qp.toString() ? `?${qp.toString()}` : ''
@@ -54,8 +53,7 @@ export async function getRevision(
   revId: string,
   opts?: RevisionOptions,
 ): Promise<DocumentRevision | null> {
-  if (typeof revId !== 'string' || revId.length === 0)
-    throw new BarkparkValidationError('getRevision requires a non-empty revId', { field: 'revId' })
+  assertSegment(revId, 'revId')
   const path = `${scopePrefix(config)}/v1/data/revision/${encodeURIComponent(config.dataset)}/${encodeURIComponent(revId)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
@@ -79,10 +77,7 @@ export async function restoreRevision(
   type: string,
   opts?: RevisionOptions,
 ): Promise<RestoreResult> {
-  if (typeof revId !== 'string' || revId.length === 0)
-    throw new BarkparkValidationError('restoreRevision requires a non-empty revId', {
-      field: 'revId',
-    })
+  assertSegment(revId, 'revId')
   if (typeof type !== 'string' || type.length === 0)
     throw new BarkparkValidationError('restoreRevision requires a non-empty type', {
       field: 'type',

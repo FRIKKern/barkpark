@@ -9,20 +9,54 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       `/v1/data` read pipeline the parent fix mounts `strict_on_presented: true`
       on. A presented-but-unverifiable bearer will 401 there before it ever
       reaches the perspective logic. SUBSUMED.
-    * `GET /v1/search/:dataset` (`FederatedSearchController`) rides BARE `:api`
-      (api/lib/barkpark_web/router.ex — the "Federated discovery" scope). The
-      parent fix does not mount there, and `Plugs.PublicRead` — the plug that
-      turns a drafts request into a LOUD 403 — is mounted on `:api_grant_read`,
-      `:shared_docs_api` and `:require_token`, never on bare `:api`.
+    * `GET /v1/search/:dataset` (`FederatedSearchController`) rides the
+      "Federated discovery" scope (api/lib/barkpark_web/router.ex). It rode
+      BARE `:api` when this file was written; `Plugs.PublicRead` — the plug
+      that turns a drafts request into a LOUD 403 — is mounted on
+      `:api_grant_read`, `:shared_docs_api` and `:require_token`, never on
+      bare `:api`.
 
-  So on the federated route a decayed bearer is still silently downgraded to
-  anonymous and still silently pinned to `:published` by
-  `BarkparkWeb.AnonPerspective`.
+  So on the federated route a caller whose perspective request cannot be
+  honoured is still silently pinned to `:published` by
+  `BarkparkWeb.AnonPerspective`, and the envelope echo is what tells it so.
+
+  THE ASYMMETRY WAS WIDER THAN WHEN THIS FILE WAS WRITTEN, AND IS NOW CLOSED.
+  #14318 merged nine seconds before the commit that added the flat-route
+  contrast test, so neither could see the other: that test asserted the silent
+  200 the flat route used to give a decayed bearer, and it went red on main the
+  moment the two landed together. #14433 restated it against the behaviour that
+  actually shipped — `/v1/data/query` refusing 401 in the open while the
+  federated route still answered 200 in silence.
+
+  ## UPDATE (task-f7230d4a500fffb6): THE DECAYED HALF IS NOW REFUSED HERE TOO
+
+  That remaining asymmetry WAS the defect, and it is now fixed: the Federated
+  discovery scope pipes through `[:api, :api_strict_bearer]`, whose
+  `OptionalToken, strict_on_presented: true` refuses a presented-but-
+  unverifiable bearer with 401 — closing a tenant swap in which a revoked
+  workspace-B bearer was served the seeded **Default** workspace's rows at 200.
+
+  This file's decayed-credential cells anticipated their own obsolescence, in
+  these words: "if such a gate ever lands on bare `:api`, this half starts
+  401ing and its RED goes away." It has landed. Those cells now assert the
+  REFUSAL rather than the clamp — for that population the strict gate SUBSUMES
+  the perspective question, because the request never reaches the perspective
+  logic at all. The two read surfaces now agree: both refuse a decayed bearer.
+
+  Nothing else about this file's thesis moves. The envelope echo is still the
+  finding and is still load-bearing — it is now carried entirely by the
+  populations no bearer gate can reach: the VALID `public-read` token
+  (population 2 below) and the ANONYMOUS caller. Every echo assertion that used
+  a garbage bearer now uses one of those, so the coverage is preserved rather
+  than deleted.
 
   THE SIGNAL ASYMMETRY WAS THE FINDING, stated precisely rather than maximally.
   `QueryController` echoes the perspective it ACTUALLY used at
   `result.perspective`, so a caller on `/v1/data/query` could detect the
-  downgrade from the response envelope alone.
+  downgrade from the response envelope alone. That echo is still pinned here,
+  now via an ANONYMOUS caller — the population the strict-bearer arm
+  deliberately leaves untouched, and therefore the one that can still reach
+  `QueryController` to demonstrate it.
   `FederatedSearchController`'s body was
   `%{query, surfaces, results, searchEventId, ms}` — no perspective key at any
   level. Same downgrade, same instant, one route told you and the other did
@@ -49,11 +83,11 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
 
   TWO POPULATIONS, and the second is the durable one:
 
-    1. DECAYED credential (garbage/revoked/expired bearer). Silently downgraded
-       to anonymous by `OptionalToken`, then pinned. A strict-on-presented
-       bearer gate mounted on `:api_grant_read` does NOT reach this route, so
-       it is live today — but if such a gate ever lands on bare `:api`, this
-       half starts 401ing and its RED goes away.
+    1. DECAYED credential (garbage/revoked/expired bearer). WAS silently
+       downgraded to anonymous by `OptionalToken`, then pinned. NOW REFUSED 401
+       by the `:api_strict_bearer` overlay (task-f7230d4a500fffb6) — the
+       population is gone from the perspective question entirely, and its cells
+       below pin the refusal instead.
     2. VALID credential with insufficient permission (a `public-read` token).
        `Auth.verify_token/1` SUCCEEDS, so NO bearer gate can ever refuse it.
        `AnonPerspective.anon_pinned?/1` pins it exactly like an anonymous
@@ -153,41 +187,55 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
                "assertion in this file would be vacuous. Got ids: #{inspect(ids(body))}"
     end
 
-    test "a garbage bearer gets 200 with published-only rows (fails CLOSED)", %{conn: conn} do
-      body = conn |> bearer(@garbage) |> federated_body(@drafts_url)
+    # WAS: "a garbage bearer gets 200 with published-only rows (fails CLOSED)".
+    # The strict gate now refuses this caller outright, which is strictly
+    # stronger than the clamp this cell used to assert.
+    test "a garbage bearer is REFUSED 401 — the strict gate subsumes the clamp", %{conn: conn} do
+      resp = conn |> bearer(@garbage) |> get(@drafts_url)
 
-      # Positive half, so the refute below cannot pass on an empty page: the
-      # query DOES return a row for this caller, it is just the wrong one.
-      assert ids(body) == ["fsd-pub"],
-             "expected exactly the published row; got #{inspect(ids(body))}"
+      assert resp.status == 401,
+             "a presented-but-unverifiable bearer must be refused on this route; got " <>
+               "#{resp.status} with body #{resp.resp_body}"
 
-      refute "drafts.fsd-draft" in ids(body)
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "unauthorized"
+
+      # The refusal must WITHHOLD the corpus, not merely relabel it. Both the
+      # draft and the published row must be absent from the body.
+      refute resp.resp_body =~ "fsd-draft"
+      refute resp.resp_body =~ "fsd-pub"
     end
 
-    test "DECAYED half: the envelope signals that the drafts request was downgraded", %{
-      conn: conn
-    } do
-      body = conn |> bearer(@garbage) |> federated_body(@drafts_url)
+    # WAS: "DECAYED half: the envelope signals that the drafts request was
+    # downgraded". There is no longer a downgrade to signal for this
+    # population — the request never reaches the perspective logic. The
+    # envelope-echo claim now lives in the DURABLE half below and in the
+    # anonymous cell, neither of which any authentication change can reach.
+    test "DECAYED half: there is no envelope to read, because there is no answer", %{conn: conn} do
+      resp = conn |> bearer(@garbage) |> get(@drafts_url)
 
-      assert Map.has_key?(body, "perspective"),
-             "federated search asked for ?perspective=drafts and answered with the " <>
-               "PUBLISHED corpus, but the body carries no perspective key to say so. " <>
-               "Body keys: #{inspect(Enum.sort(Map.keys(body)))}"
+      assert resp.status == 401
 
-      # Not merely "the key exists": it must carry the perspective ACTUALLY
-      # used, so a caller that requested drafts reads back `published` and
-      # knows it was clamped.
-      assert body["perspective"] == "published"
+      body = Jason.decode!(resp.resp_body)
 
-      # And the clamp itself must be UNMOVED. A green that came from the route
-      # suddenly SERVING drafts would be a false green — the fix is a signal
-      # addition, never a posture change.
-      assert ids(body) == ["fsd-pub"]
+      # Explicitly NOT a search envelope: no perspective key, no results. A 401
+      # that still carried a perspective echo would mean the controller ran.
+      refute Map.has_key?(body, "perspective"),
+             "a refused request must not render a search envelope: #{resp.resp_body}"
+
+      refute Map.has_key?(body, "results")
     end
 
+    # MOVED ONTO THE DURABLE CREDENTIAL (task-f7230d4a500fffb6). This cell used
+    # a garbage bearer, which is now refused 401 and never reaches a page at
+    # all. The argument it makes — a row-level indicator cannot speak on a
+    # zero-row page, so only an envelope echo can — is about the CLAMP, not
+    # about authentication, so it belongs on the valid-but-insufficient
+    # `public-read` token that is still clamped. Same claim, same assertions,
+    # on a population that survives every bearer gate.
     test "QUALIFIER: a per-row _draft flag is the ONLY indicator, and it needs a non-empty page",
-         %{conn: conn} do
-      body = conn |> bearer(@garbage) |> federated_body(@drafts_url)
+         %{conn: conn, pubread: pubread} do
+      body = conn |> bearer(pubread) |> federated_body(@drafts_url)
 
       # This is what a caller CAN see today — recorded so the RED above is not
       # read as "no information of any kind reaches the caller".
@@ -200,7 +248,7 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       # which is the entire justification for adding it.
       empty =
         conn
-        |> bearer(@garbage)
+        |> bearer(pubread)
         |> federated_body(
           "/v1/search/#{@dataset}?q=zzznomatchzzz&surfaces=documents&perspective=drafts"
         )
@@ -262,7 +310,8 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
     # must say `drafts`, and the rows must agree with what it says.
     test "the echo is DYNAMIC: an honoured drafts request echoes drafts, not published", %{
       conn: conn,
-      admin: admin
+      admin: admin,
+      pubread: pubread
     } do
       body = conn |> bearer(admin) |> federated_body(@drafts_url)
 
@@ -277,7 +326,13 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
 
       # Two DIFFERENT values from the same route, same query, same instant —
       # only the credential differs. That is what makes it an echo.
-      clamped = conn |> bearer(@garbage) |> federated_body(@drafts_url)
+      #
+      # The clamped side uses the `public-read` token rather than a garbage
+      # bearer (task-f7230d4a500fffb6): a garbage bearer is now refused 401 and
+      # produces no envelope to compare against. Both credentials here VERIFY,
+      # so this contrast is now purely about PERMISSION — a sharper
+      # demonstration that the echo tracks the perspective actually used.
+      clamped = conn |> bearer(pubread) |> federated_body(@drafts_url)
       assert clamped["perspective"] == "published"
       refute clamped["perspective"] == body["perspective"]
     end
@@ -301,23 +356,78 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       assert body["error"]["message"] =~ "perspective"
     end
 
-    test "CONTRAST: the flat /v1/data/query route DOES echo the perspective it used", %{
-      conn: conn
-    } do
-      resp =
+    # WAS "…refused 401 on the flat route, answered 200 here" (#14433). That
+    # cell pinned the LAST STANDING HALF of the asymmetry — the federated route
+    # still answering a decayed bearer 200 in silence. task-f7230d4a500fffb6
+    # closed exactly that, so the cell is restated as the PARITY it became.
+    #
+    # This is the cell that would silently rot if left alone: its flat-route
+    # half would keep passing while the claim in its name went false. Renamed
+    # and re-asserted rather than deleted, because "the two read surfaces agree"
+    # is a contract worth pinning — a future mount that reaches one route and
+    # not the other reopens the tenant swap this file documents.
+    test "PARITY: the SAME decayed bearer is refused 401 on BOTH read surfaces",
+         %{conn: conn} do
+      refused_flat =
         conn
         |> bearer(@garbage)
         |> get("/v1/data/query/#{@dataset}/#{@type_name}?perspective=drafts")
 
-      assert resp.status == 200
+      assert refused_flat.status == 401,
+             "the flat route must REFUSE a presented-but-unverifiable bearer " <>
+               "(#14318 mounts `strict_on_presented: true` on `:api_grant_read`); " <>
+               "got #{refused_flat.status}"
+
+      flat_body = Jason.decode!(refused_flat.resp_body)
+      assert flat_body["error"]["code"] == "unauthorized"
+
+      # A refusal carries no corpus and no perspective — there is nothing here a
+      # caller could mistake for an answer.
+      refute Map.has_key?(flat_body, "result")
+
+      # THE HALF THAT MOVED. The federated route rode bare `:api` and answered
+      # this identical credential 200 over the DEFAULT workspace's published
+      # corpus — a tenant swap by credential decay. It now pipes through
+      # `[:api, :api_strict_bearer]` and refuses the same way.
+      refused_fed = conn |> bearer(@garbage) |> get(@drafts_url)
+
+      assert refused_fed.status == 401,
+             "the federated route must refuse the same decayed bearer the flat " <>
+               "route refuses (task-f7230d4a500fffb6); got #{refused_fed.status} " <>
+               "with body #{refused_fed.resp_body}"
+
+      fed_body = Jason.decode!(refused_fed.resp_body)
+      assert fed_body["error"]["code"] == "unauthorized"
+      refute Map.has_key?(fed_body, "results")
+
+      # Same credential, same question, same instant, two routes, ONE answer.
+      assert refused_flat.status == refused_fed.status
+      assert flat_body["error"]["code"] == fed_body["error"]["code"]
+    end
+
+    test "the flat route's echo is REAL: an anonymous drafts request reads back published", %{
+      conn: conn
+    } do
+      # The signal asymmetry in the @moduledoc rests on `QueryController`
+      # echoing `result.perspective`, and the test above can no longer show it
+      # (that caller is refused before the controller ever runs). So it is shown
+      # with the population #14318 deliberately does NOT touch: a request that
+      # presents NO `Authorization` header, which is a supported public read
+      # tier and passes `OptionalToken` untouched on every mount, strict arm
+      # included. `AnonPerspective.anon_pinned?/1` pins it to `:published`.
+      resp = get(conn, "/v1/data/query/#{@dataset}/#{@type_name}?perspective=drafts")
+
+      assert resp.status == 200,
+             "an anonymous read is a supported surface on the flat route; got #{resp.status}"
+
       body = Jason.decode!(resp.resp_body)
 
-      # This is the route the parent fix (#14318) covers, and it is ALREADY the
-      # route that tells the caller the truth. The federated route above is
-      # neither covered by that fix nor honest about the downgrade.
+      # It asked for drafts, it was clamped to published, and it SAYS SO. That
+      # honesty is what the federated route lacked before the echo was added.
       assert body["result"]["perspective"] == "published",
              "expected the flat query route to echo its resolved perspective"
 
+      # And the clamp itself holds: the seeded draft is not served.
       assert Enum.map(body["result"]["documents"], & &1["_id"]) == ["fsd-pub"]
     end
   end

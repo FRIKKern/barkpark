@@ -6,25 +6,18 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { cac } from 'cac'
-import { buildSchemaPath } from './schema-url'
+import { assertScopedPair, buildSchemaPath } from './schema-url'
 import { fetchSchema } from './fetch-schema'
 import { generateTypes } from './generate'
 import { schemaEnvelopeSchema, type BarkparkCodegenConfig } from './types'
 
 const cli = cac('barkpark')
 
-/**
- * Workspace + project are the two halves of a scoped schema path; supplying
- * only one silently falls back to the flat /v1/schemas/<dataset> path and
- * emits/prints the wrong (unscoped) content model. Enforce both-or-neither.
- */
-function assertScopedPair(workspace: string | undefined, project: string | undefined): void {
-  if (Boolean(workspace) !== Boolean(project)) {
-    throw new Error(
-      'workspace and project must be provided together (pass both --workspace and --project, or neither).',
-    )
-  }
-}
+// `assertScopedPair` used to live here, so only the CLI was protected while
+// `fetchSchema` — exported from the package root — silently mis-scoped. It now
+// lives beside `buildSchemaPath`, the chokepoint every entry point runs through.
+// The CLI keeps calling it directly so a half-set flag pair is reported as a
+// clean stderr line + exit 1, before any config loading or network work.
 
 cli
   .command('schema-path <dataset>', 'Print the schema-introspection path for a dataset')

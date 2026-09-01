@@ -147,6 +147,40 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PublicRead)
   end
 
+  # Strict-bearer overlay, layered on TOP of `:api` (task-f7230d4a500fffb6).
+  # Refuses a PRESENTED-but-unverifiable bearer with 401 — the same plug, same
+  # opt and same rationale as `:api_grant_read` above, carried to a surface
+  # that pipeline does not reach.
+  #
+  # WHY A SEPARATE PIPELINE rather than reusing `:api_grant_read`: that one also
+  # mounts `ResolveTokenOwner`, `AssignGrantScope` and `PublicRead`. Those three
+  # would change grant-folding and perspective behaviour on this route, which is
+  # a posture change nobody asked for. This overlay carries the ONE plug the fix
+  # needs and nothing else.
+  #
+  # WHY NOT ON `:api` ITSELF — this is the load-bearing narrowing. THREE
+  # credential classes ride `Authorization: Bearer` and ALL THREE fail
+  # `Auth.verify_token/1`: user SESSION tokens, TICKET keys, and genuinely
+  # decayed api tokens. Only the third is a defect. Session tokens ride
+  # `:access_principal` / `:session_token_root` and ticket keys ride
+  # `:ticket_key` — different pipelines — so an overlay layered onto a specific
+  # scope cannot reach them, while `strict_on_presented` on bare `:api` itself
+  # would 401 legitimate callers (measured: 11 `/v1/access/*` tests presenting
+  # session tokens flip when the strict arm is applied to all four
+  # `OptionalToken` mounts).
+  #
+  # Anonymous is UNTOUCHED on every mount: `OptionalToken` refuses only a
+  # bearer that was PRESENTED and failed to verify. No `Authorization` header,
+  # or a non-`Bearer` scheme, falls straight through to the public read tier.
+  # A VALID token — public-read included, since `verify_token/1` succeeds on it
+  # — is untouched. This is NOT a blanket 401.
+  #
+  # No-ops when `:api` already assigned `:api_token`, so the extra
+  # `verify_token/1` is paid only on the failing path.
+  pipeline :api_strict_bearer do
+    plug(BarkparkWeb.Plugs.OptionalToken, strict_on_presented: true)
+  end
+
   # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
   pipeline :scim do
     plug(:accepts, ["json"])
@@ -790,6 +824,40 @@ defmodule BarkparkWeb.Router do
   # RequireBearerOrSessionToken's `x-requested-with` check; bearer callers are
   # token-auth. protect_from_forgery cannot apply (no Phoenix CSRF token on API /
   # Web-Component uploads).
+  # Presented-but-UNVERIFIABLE bearer → 401, on the two FLAT media READ blocks
+  # (task-6716af864218081b for `/media`, task-79e10984bbb23734 for `/v1/media`).
+  #
+  # Both blocks ride bare `:api`, whose `OptionalToken` runs in its default
+  # fail-soft mode and SWALLOWS a revoked/expired/unknown bearer: the conn
+  # continued anonymous, `DeriveWorkspaceFromToken` had no `:api_token` to
+  # derive from, and `AssignDefaultScope` stamped the seeded Default workspace.
+  # A caller holding a decayed workspace-B token got a 200 describing ANOTHER
+  # TENANT's media library, with no signal that its credential had died.
+  #
+  # Layered as a SECOND pipeline rather than added to `:api`, deliberately:
+  # `:api` backs the whole flat `/v1` surface plus every `[:api, :require_token]`
+  # composite, and widening it would clamp far more than the two blocks that
+  # were actually traced. The opt is a no-op once `:api` has already assigned
+  # `:api_token`, so a valid bearer pays nothing.
+  #
+  # SEVERITY, held deliberately: integrity/mislead, NOT confidentiality. Both
+  # privilege gates on these controllers key on
+  # `Barkpark.Media.Storage.Access.authenticated?/1`, which is FALSE for a
+  # decayed bearer — `visibility_clamp_opts/1` pins the read to the public tier
+  # and `render_opts/3` withholds signed URLs — so a decayed bearer reads
+  # nothing an anonymous caller could not. What it closes is the SILENCE.
+  #
+  # The plug and its `strict_on_presented` opt are owned by the `fix-tenant-swap`
+  # lane (PR #14318), which mounts the same opt on `:api_grant_read`. Reused
+  # here rather than forked; see that lane's note at `:api_grant_read` for why
+  # the capability is an opt on `OptionalToken` and not a standalone plug.
+  #
+  # NOT a liveness surface: `deploy.sh`, the docker-compose healthcheck and
+  # `cloud/` all probe `/api/schemas`, never a media path (grep in the PR body).
+  pipeline :strict_bearer_media_read do
+    plug(BarkparkWeb.Plugs.OptionalToken, strict_on_presented: true)
+  end
+
   pipeline :media_mutate do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -863,16 +931,37 @@ defmodule BarkparkWeb.Router do
   # path) admin route that must attribute per-workspace. It is the flat twin of
   # `:scoped_admin`, and it REPLACES `:api` — never layers on it.
   #
-  # ORDER IS THE ENTIRE FIX (charter D45/D49; task-2b396416a680ff0b). A naive
-  # `[:api, :require_admin]` cannot attribute per-workspace: `:api` runs
-  # `AssignDefaultScope`, which stamps `current_workspace = <seeded Default>`
-  # BEFORE the admin gate, and `ScopeHelpers.scope_opts/1` reads exactly that
-  # assign — so every caller, from every workspace, converges on Default.
-  # `DeriveWorkspaceFromToken` is NO-OP-IF-SET, so appending it after `:api` is
-  # a pure no-op: Default has already won. Only this ordering works —
-  # token-resolve → DeriveWorkspaceFromToken → AssignDefaultScope → admin
-  # (the same shape as `:media_mutate`). `BarkparkWeb.FlatAdminTenancyTest`
-  # reads this block and goes RED if the two are ever swapped.
+  # ORDER IS THE ENTIRE FIX (charter D45/D49; task-2b396416a680ff0b). Only this
+  # ordering attributes per-workspace — token-resolve → DeriveWorkspaceFromToken
+  # → AssignDefaultScope → admin (the same shape as `:media_mutate`) — because
+  # `AssignDefaultScope` stamps `current_workspace = <seeded Default>` whenever
+  # that assign is absent, `ScopeHelpers.scope_opts/1` reads exactly that assign,
+  # and `DeriveWorkspaceFromToken` is NO-OP-IF-SET: place it second and Default
+  # has already won, for every caller from every workspace.
+  # `BarkparkWeb.FlatAdminTenancyTest` reads this block and goes RED if the two
+  # are ever swapped.
+  #
+  # HISTORICAL CLAIM, NOW FALSE — do not reason from it (task-ee099124abc578ef).
+  # This comment used to say a naive `[:api, :require_admin]` "cannot attribute
+  # per-workspace", because `:api` ran `AssignDefaultScope` with no derivation
+  # ahead of it. That stopped being true on 2026-08-24: `8dd6600f99` (#13886)
+  # put `DeriveWorkspaceFromToken` INTO `pipeline :api` itself, ahead of
+  # `AssignDefaultScope`, to close the same hole on the flat `/v1` alias. So
+  # `[:api, :require_admin]` DOES derive today, and the two pipelines now differ
+  # only in `OptionalToken` vs `RequireToken` (a distinction `:require_admin`
+  # erases one plug later by running `RequireToken` anyway).
+  #
+  # The stale sentence was not harmless: a security census read it, concluded
+  # that every `[:api, :require_admin]` route still collapsed to Default, and
+  # filed cross-tenant defect rows against surfaces that were already correct
+  # (the tickets key-mint surface among them — see
+  # `BarkparkWeb.TicketKeysWorkspaceAttributionTest`, which pins that surface's
+  # attribution end-to-end precisely because nothing else did). If you change
+  # either pipeline, re-state what is TRUE here rather than what was.
+  #
+  # None of that makes this pipeline redundant: it is the EXPLICIT, order-pinned
+  # mount, guarded by a test that names its plugs. `:api` carries the derivation
+  # by convergence, not by contract.
   #
   # It re-includes every `:api` security plug (AcceptBarkparkVendor, accepts
   # json, ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit,
@@ -1929,8 +2018,28 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Federated discovery ─────────────────────────────────────────────────
+  # `:api_strict_bearer` layers the presented-but-unverifiable bearer refusal on
+  # top of `:api` (task-f7230d4a500fffb6). Bare `:api` runs `OptionalToken` in
+  # its DEFAULT fail-soft mode, which SWALLOWS a revoked/expired/unknown bearer:
+  # the conn continued anonymous, `DeriveWorkspaceFromToken` had no `:api_token`
+  # to derive from, and `AssignDefaultScope` stamped the seeded Default
+  # workspace — so a caller holding a decayed workspace-B token got a 200
+  # carrying ANOTHER TENANT's published rows with zero signal. A tenant swap by
+  # credential decay, not a refusal.
+  #
+  # Integrity/mislead, NOT confidentiality, and that distinction is MEASURED
+  # rather than asserted: the downgrade only ever lands on the anonymous
+  # published tier, so the decayed bearer gains nothing over sending no header
+  # at all. A private-visibility Default row is invisible to both.
+  #
+  # The sibling fix (#14318) mounts the same plug+opt on `:api_grant_read`,
+  # which layers only on the flat `/v1/data` read scope — this route never
+  # touches it. This scope holds exactly ONE route, so the overlay's blast
+  # radius is that route and nothing else.
+  # `test/barkpark_web/contract/federated_search_decayed_bearer_tenant_swap_test.exs`
+  # is the regression.
   scope "/v1", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:api, :api_strict_bearer])
 
     get("/search/:dataset", FederatedSearchController, :search)
   end
@@ -2392,7 +2501,7 @@ defmodule BarkparkWeb.Router do
 
   # ── Media — upload requires token, serving is public ────────────────────
   scope "/media", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:api, :strict_bearer_media_read])
 
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
     get("/", MediaController, :index)
@@ -2452,7 +2561,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/v1/media", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:api, :strict_bearer_media_read])
 
     get("/:dataset/search/suggestions", V1.MediaController, :search_suggestions)
     post("/:dataset/search/interaction", V1.MediaController, :search_interaction)

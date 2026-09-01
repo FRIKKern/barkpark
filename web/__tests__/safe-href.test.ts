@@ -63,3 +63,78 @@ test("returns undefined for empty/whitespace/non-string", () => {
   assert.equal(safeHref(42), undefined);
   assert.equal(safeHref({}), undefined);
 });
+
+/* ── the tab / newline protocol-relative bypass ────────────────────────────── */
+
+/**
+ * The WHATWG URL parser DELETES every ASCII tab (0x09), LF (0x0A) and CR (0x0D)
+ * from a URL string BEFORE it parses it — measured over 0x00-0x20, those three
+ * and only those three collapse. So `/<TAB>/evil.example` is not a path called
+ * "<TAB>": the browser resolves it as the protocol-relative `//evil.example`
+ * and navigates off-site. A guard that strips control characters LEADING-ONLY
+ * and then tests position 1 for `/` or `\` never sees that.
+ *
+ * These cases assert the RESOLVED URL, not just the returned string —
+ * resolution is where the harm lands, and a returned string that "looks
+ * relative" is exactly how this hid.
+ */
+const RESOLUTION_BASE = "https://demo.barkpark.cloud/d/paper/x";
+
+/** Where a browser would actually go for this href on a Barkpark page. */
+function resolves(href: string): string {
+  return new URL(href, RESOLUTION_BASE).href;
+}
+
+test("subject presence: safeHref is the exported guard under test", () => {
+  assert.equal(typeof safeHref, "function");
+  // A pass must not be obtainable by the guard degrading to a pass-through.
+  assert.equal(safeHref("javascript:alert(1)"), undefined);
+});
+
+test("an embedded tab/LF/CR cannot smuggle a protocol-relative host past safeHref", () => {
+  for (const raw of [
+    "/\t/evil.example/phish",
+    "/\n/evil.example/phish",
+    "/\r/evil.example/phish",
+    "/\t\\evil.example/phish",
+    "/\n\\evil.example/phish",
+    "/\r\\evil.example/phish",
+    "/\t\t//evil.example/phish",
+    "/\r\n/evil.example/phish",
+  ]) {
+    const out = safeHref(raw);
+    assert.equal(
+      out,
+      undefined,
+      `safeHref(${JSON.stringify(raw)}) returned ${JSON.stringify(out)}, ` +
+        `which a browser resolves to ${resolves(out!)}`,
+    );
+  }
+});
+
+test("an embedded tab/LF/CR cannot smuggle a dangerous scheme past safeHref", () => {
+  assert.equal(safeHref("jav\tascript:alert(1)"), undefined);
+  assert.equal(safeHref("jav\nascript:alert(1)"), undefined);
+  assert.equal(safeHref("java\r\nscript:alert(1)"), undefined);
+});
+
+test("what safeHref returns is what the browser resolves — no smuggled chars", () => {
+  // Whatever comes back must already be free of the three characters the URL
+  // parser deletes, so the string that was CHECKED is the string that RESOLVES.
+  for (const raw of ["/d/po\tst/x", "https://example.com/a\nb", "#an\rchor"]) {
+    const out = safeHref(raw);
+    if (out === undefined) continue;
+    assert.doesNotMatch(
+      out,
+      /[\t\n\r]/,
+      `safeHref(${JSON.stringify(raw)}) returned ${JSON.stringify(out)} — the ` +
+        `browser strips those bytes, so the checked string is not the resolved one`,
+    );
+  }
+});
+
+test("legitimate URLs are untouched by the control-character clean", () => {
+  assert.equal(safeHref("/d/paper/my-paper"), "/d/paper/my-paper");
+  assert.equal(safeHref("https://example.com/a?b=1#c"), "https://example.com/a?b=1#c");
+  assert.equal(resolves(safeHref("/d/paper/x")!), "https://demo.barkpark.cloud/d/paper/x");
+});

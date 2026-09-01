@@ -25,8 +25,8 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "lint": "eslint src tests tsup.config.ts vitest.config.ts",
     "test": "vitest run"
   },
   "dependencies": {

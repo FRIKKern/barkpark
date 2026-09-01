@@ -15,9 +15,16 @@ defmodule BarkparkCloud.RouterTierLens do
   Four guard idioms, because the naive "`Auth.require_*` on the next line" regex
   reaches barely two thirds of the table and is vacuously green over the rest:
 
-    * `Auth.require_*` in the route body;
+    * `Auth.require_*` in the route body — a CALL, never a mention: full-line
+      comments are stripped first, so prose about `Auth.require_ability/2` above a
+      `cond` is not read as that route's gate;
     * `with_team_role(conn, "role")`;
-    * a helper the body delegates the whole `conn` to (depth 2);
+    * a helper the body delegates the whole `conn` to (depth 2), resolved PER CALL
+      SITE: when the helper gates on a mode argument (`with_team_site(conn,
+      :session, …)` vs `with_team_site(conn, {:ability, "write"}, …)`), the literal
+      the CALLER passes selects the branch. Reading the textually-first
+      `Auth.require_*` out of a joined multi-clause helper gave all eleven
+      /v1/sites delegators one answer, whichever of the three modes they passed;
     * a POST-GUARD ELEVATION — an `Auth.forbidden(conn, required: "…")` BELOW a
       permissive guard, which is the tier the route actually enforces. The
       signal is a REFUSAL, never a mention: a `team_admin?` that SCOPES a query
@@ -36,11 +43,16 @@ defmodule BarkparkCloud.RouterTierLens do
 
   @default_source Path.expand("../../lib/barkpark_cloud/web/router.ex", __DIR__)
 
-  # The tier vocabulary the route table uses. `user*` (ticket-or-Bearer) and
-  # `user(s)` (session-or-PAT) are `user` with a footnote; `admin(d)` (session
-  # team-admin OR a PAT carrying the `deploy` ability) is a tier of its OWN —
-  # deliberately NOT folded into `admin` by normalize_tier/1, because a
-  # deploy-PAT holder needs no role at all and telling them "admin" is its own lie.
+  # The tier vocabulary the route table uses. `user*` (ticket-or-Bearer) is
+  # `user` with a footnote — same credential, presented two ways. `user(s)`
+  # (session OR Personal Access Token) is a tier of its OWN, for the same reason
+  # `admin(d)` is: it names a DIFFERENT credential, not a footnote on `user`.
+  # Folding it down is how the eleven `with_team_site` routes, six of which a PAT
+  # reaches and five of which turn one away, all read `user` — and how the
+  # /v1/tokens rows advertised PAT-reachable management the code has never
+  # allowed. `admin(d)` (session team-admin OR a PAT carrying the `deploy`
+  # ability) stays its own tier too: a deploy-PAT holder needs no role at all and
+  # telling them "admin" is its own lie.
   @tier_tokens ~w[user user* user(s) admin admin(d) owner worker operator agent]
 
   # Every guard idiom the router uses, mapped to the tier column it justifies. A
@@ -48,8 +60,14 @@ defmodule BarkparkCloud.RouterTierLens do
   # guard therefore reds instead of quietly widening a census's blind spot.
   @guard_tier %{
     "require_user" => "user",
-    "require_user_or_pat" => "user",
-    "require_ability" => "user",
+
+    # SESSION OR PAT — a different credential from `require_user`, and the whole
+    # point of the `(s)`. `require_ability` never stands alone: it is always the
+    # second half of a `require_user_or_pat |> require_ability(ab)` pipe, so it
+    # carries the same credential kind. The ABILITY is documented in the row's
+    # description column; the tier column names the credential.
+    "require_user_or_pat" => "user(s)",
+    "require_ability" => "user(s)",
     "require_team_role" => "user",
     "require_team_admin" => "admin",
     "require_primary_team_admin" => "admin",
@@ -182,14 +200,18 @@ defmodule BarkparkCloud.RouterTierLens do
   defp close_block({:route, key}, lines, routes, defs),
     do: {Map.put_new(routes, key, Enum.join(lines, "\n")), defs}
 
-  # ALL clauses of a multi-clause helper are joined, never just the first: a
-  # `defp with_team_site(conn, nil, _fun), do: …` head would otherwise shadow the
-  # clause that actually carries the gate, and every route delegating to it would
-  # silently fall out of the census.
+  # EVERY clause of a multi-clause helper is kept, in source order, and each one
+  # stays WHOLE: a `defp with_team_site(conn, nil, _fun), do: …` head must not
+  # shadow the clause that carries the gate (that would drop every delegating
+  # route out of the census) — but the clauses must not be BLENDED into one blob
+  # either. The blend is how `with_team_site/3`'s `:session` branch answered for
+  # its `{:ability, ab}` callers: joined, the textually-first `Auth.require_*`
+  # wins for everyone, and eleven /v1/sites routes censused as one tier no
+  # matter which credential mode they actually passed.
   defp close_block({:def, name}, lines, routes, defs),
     do:
       {routes,
-       Map.update(defs, name, Enum.join(lines, "\n"), &(&1 <> "\n" <> Enum.join(lines, "\n")))}
+       Map.update(defs, name, [Enum.join(lines, "\n")], &(&1 ++ [Enum.join(lines, "\n")]))}
 
   @doc """
   The guard a route body literally composes, elevations included — or `nil` when
@@ -210,12 +232,28 @@ defmodule BarkparkCloud.RouterTierLens do
   def base_guard(nil), do: nil
   def base_guard(guard), do: guard |> String.split("+") |> hd()
 
+  # `with_team_site(conn, {:ability, "write"}, fn conn, site ->` — the delegated
+  # helper's name, then everything the call says AFTER `conn`. The tail is what
+  # makes a delegation resolvable per call site rather than per helper.
+  @delegate_re ~r/(?<![\w.])(\w+)\(conn\b([^\n]*)/
+
+  # A `case` branch head that patterns on a mode: `:session ->`, `{:ability, ab} ->`.
+  @mode_branch_re ~r/^\s*(:\w+|\{:\w+[^}]*\})\s*->/
+
   @doc """
   The guard key a body composes, walking the four idioms (see the moduledoc).
-  `defs` are the helper bodies a route may delegate to; `depth` bounds the walk.
+  `defs` are the helper CLAUSE LISTS a route may delegate to; `depth` bounds the
+  walk. A delegation resolves PER CALL SITE — see `mode_of/1` and `delegate/5`.
   """
   @spec guard_in(binary(), map(), non_neg_integer()) :: binary() | nil
   def guard_in(body, defs, depth) do
+    # A guard is a CALL, never a MENTION — the same doctrine the refusal lens
+    # already states. `PATCH /v1/sites/:id` carries the prose "the same way
+    # `Auth.require_ability/2` does" in a comment above its `cond`, and reading
+    # that sentence as its gate resolved the route off documentation, one edit
+    # away from answering for the whole family. Full-line comments go first.
+    body = uncommented(body)
+
     cond do
       match = Regex.run(~r/Auth\.(require_\w+)/, body) ->
         elevate(Enum.at(match, 1), body)
@@ -224,11 +262,11 @@ defmodule BarkparkCloud.RouterTierLens do
         "with_team_role:" <> Enum.at(match, 1)
 
       depth < 2 ->
-        ~r/(?<![\w.])(\w+)\(conn\b/
+        @delegate_re
         |> Regex.scan(body)
-        |> Enum.find_value(fn [_, name] ->
+        |> Enum.find_value(fn [_, name, rest] ->
           case Map.fetch(defs, name) do
-            {:ok, helper_body} -> guard_in(helper_body, defs, depth + 1)
+            {:ok, clauses} -> delegate(name, clauses, defs, depth + 1, mode_of(rest))
             :error -> nil
           end
         end)
@@ -236,6 +274,125 @@ defmodule BarkparkCloud.RouterTierLens do
       true ->
         nil
     end
+  end
+
+  # ── Per-call-site delegation ───────────────────────────────────────────────
+  #
+  # A helper whose gate is a `case` on one of its own arguments carries ONE
+  # `Auth.require_*` per branch, and which branch runs is decided by the CALLER,
+  # never by source order. `with_team_site/3` is the live instance:
+  #
+  #     defp with_team_site(conn, fun), do: with_team_site(conn, :session, fun)
+  #     defp with_team_site(conn, auth, fun) do
+  #       conn =
+  #         case auth do
+  #           :session -> Auth.require_user(conn, [])
+  #           {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+  #         end
+  #
+  # Read first-hit-wins, that hands `require_user` to all ELEVEN delegating
+  # /v1/sites routes — including the six that a PAT carrying the right ability
+  # reaches, which is precisely the distinction the route table exists to state.
+  # So the literal at the call site selects the branch, and a call naming no mode
+  # is resolved through the helper's own default-filling clause — `:session`,
+  # read out of the source, never assumed.
+
+  @doc """
+  The mode a call site passes to a delegated helper, read off the call tail:
+  `{:tuple, "ability"}`, `{:tag, "session"}`, or `:default` when it named none.
+  """
+  @spec mode_of(binary()) :: {:tag, binary()} | {:tuple, binary()} | :default
+  def mode_of(rest) do
+    cond do
+      m = Regex.run(~r/^\s*,\s*\{:(\w+)\b/, rest) -> {:tuple, Enum.at(m, 1)}
+      m = Regex.run(~r/^\s*,\s*:(\w+)\b/, rest) -> {:tag, Enum.at(m, 1)}
+      true -> :default
+    end
+  end
+
+  # The clauses a call in `mode` can actually reach, each narrowed to the branch
+  # that mode selects. When the helper branches on a mode and NONE of its
+  # branches matches, the answer is `[]` — an honest refusal that surfaces as
+  # `no_guard_found`, never a neighbouring branch's guard lent to a caller who
+  # could not have reached it.
+  defp delegate(name, clauses, defs, depth, mode) do
+    mode = if mode == :default, do: default_mode(name, clauses), else: mode
+
+    reachable =
+      case {mode, Enum.flat_map(clauses, &List.wrap(branch_of(&1, mode)))} do
+        {:default, _} -> clauses
+        {_, [_ | _] = branches} -> branches
+        {_, []} -> if Enum.any?(clauses, &branching?/1), do: [], else: clauses
+      end
+
+    Enum.find_value(reachable, &guard_in(&1, defs, depth))
+  end
+
+  # The mode a call that named none actually gets, read from the helper's own
+  # default-filling clause — `with_team_site(conn, fun), do: with_team_site(conn,
+  # :session, fun)` says `:session` in bytes, so nothing here has to assume it.
+  defp default_mode(name, clauses) do
+    self_call = ~r/#{Regex.escape(name)}\(conn\b([^\n]*)/
+
+    clauses
+    |> Enum.find_value(fn clause ->
+      case Regex.run(self_call, uncommented(clause)) do
+        [_, rest] ->
+          case mode_of(rest) do
+            :default -> nil
+            mode -> mode
+          end
+
+        nil ->
+          nil
+      end
+    end)
+    |> Kernel.||(:default)
+  end
+
+  defp branching?(clause),
+    do: clause |> String.split("\n") |> Enum.any?(&Regex.match?(@mode_branch_re, &1))
+
+  # The `case` branch `mode` selects, as text: the branch head plus every line
+  # indented under it. `nil` when this clause carries no branch for that mode.
+  defp branch_of(clause, mode) do
+    lines = String.split(clause, "\n")
+
+    case Enum.find_index(lines, &branch_head?(&1, mode)) do
+      nil -> nil
+      i -> take_branch(lines, i)
+    end
+  end
+
+  defp branch_head?(line, {:tag, name}), do: Regex.match?(~r/^\s*:#{name}\s*->/, line)
+
+  defp branch_head?(line, {:tuple, name}),
+    do: Regex.match?(~r/^\s*\{:#{name}\b[^}]*\}\s*->/, line)
+
+  defp branch_head?(_line, :default), do: false
+
+  defp take_branch(lines, i) do
+    head = Enum.at(lines, i)
+    indent = indent_of(head)
+
+    rest =
+      lines
+      |> Enum.drop(i + 1)
+      |> Enum.take_while(fn l -> String.trim(l) == "" or indent_of(l) > indent end)
+
+    Enum.join([head | rest], "\n")
+  end
+
+  defp indent_of(line), do: byte_size(line) - byte_size(String.trim_leading(line))
+
+  # FULL-LINE comments only. A trailing `#` cannot be stripped safely from Elixir
+  # source (`"#{x}"`, the literal `"#"`), and a half-right stripper is worse than
+  # none: it would silently eat the guard it was meant to preserve.
+  defp uncommented(body) do
+    body
+    |> String.split("\n")
+    |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+    |> Enum.join("\n")
   end
 
   # ── The refusal lens ───────────────────────────────────────────────────────
@@ -269,8 +426,9 @@ defmodule BarkparkCloud.RouterTierLens do
     end
   end
 
-  @doc "`user*` / `user(s)` are footnoted `user`; `admin(d)` is its own tier."
+  @doc "`user*` is a footnoted `user`; `user(s)` and `admin(d)` are their own tiers."
   @spec normalize_tier(binary()) :: binary()
+  def normalize_tier("user(s)"), do: "user(s)"
   def normalize_tier("user" <> _), do: "user"
   def normalize_tier(tier), do: tier
 
