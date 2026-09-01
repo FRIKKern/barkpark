@@ -58,8 +58,10 @@ defmodule Barkpark.SheetsTest do
       for col <- [1, 13, 26, 27, 52, 53, 100, 703], row <- [1, 5, 99] do
         addr = Sheets.format_ref({col, row})
 
-        assert {:ok, {^col, ^row}} = Sheets.parse_ref(addr),
-               "round-trip failed for {#{col}, #{row}} -> #{addr}"
+        result = Sheets.parse_ref(addr)
+
+        assert match?({:ok, {^col, ^row}}, result),
+               "round-trip failed for {#{col}, #{row}} -> #{addr}, got #{inspect(result)}"
       end
     end
   end

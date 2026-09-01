@@ -26,7 +26,11 @@ defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
   end
 
   test "the manifest entry exists and carries a file flag" do
-    assert %{} = patch_entry(), "bulldocs.patch vanished from the capabilities manifest"
+    entry = patch_entry()
+
+    assert match?(%{}, entry),
+           "bulldocs.patch vanished from the capabilities manifest, got #{inspect(entry)}"
+
     assert is_binary(file_flag_summary())
   end
 

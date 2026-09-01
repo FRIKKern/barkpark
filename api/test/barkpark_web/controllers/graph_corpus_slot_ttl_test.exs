@@ -87,8 +87,10 @@ defmodule BarkparkWeb.GraphCorpusSlotTtlTest do
       twin = new_twin_table()
       seed_twin_slots(twin, @cap, owners, deadline_offset_ms: -1)
 
-      assert {:ok, _ref} = legacy_acquire(twin),
-             "the twin did not reproduce the defect, so this suite could not have seen it"
+      acquired = legacy_acquire(twin)
+
+      assert match?({:ok, _}, acquired),
+             "the twin did not reproduce the defect, so this suite could not have seen it (#{inspect(acquired)})"
 
       assert :ets.info(twin, :size) == 1,
              "the legacy sweep should have deleted both live holders' rows"
@@ -107,8 +109,12 @@ defmodule BarkparkWeb.GraphCorpusSlotTtlTest do
       dead = Enum.map(1..@cap, fn _ -> dead_pid() end)
       seed_slots(@cap, dead, deadline_offset_ms: 60_000)
 
-      assert {:ok, ref} = TasksController.__acquire_graph_corpus_slot_for_test__(),
-             "a dead owner's slot leaked: the cap now fails CLOSED forever"
+      acquired = TasksController.__acquire_graph_corpus_slot_for_test__()
+
+      assert match?({:ok, _}, acquired),
+             "a dead owner's slot leaked: the cap now fails CLOSED forever (#{inspect(acquired)})"
+
+      {:ok, ref} = acquired
 
       assert :ets.info(@table, :size) == 1
       TasksController.__release_graph_corpus_slot_for_test__(ref)

@@ -90,8 +90,8 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
       |> Enum.flat_map(fn group -> [group | group.items || []] end)
       |> Enum.find(fn n -> n.type == :plugin_link and n.filter == "/admin/pulse" end)
 
-    assert %Barkpark.Structure.Node{title: "Lightning Storm"} = node,
-           "the /admin/pulse link must appear under Plugins when pulse is enabled"
+    assert match?(%Barkpark.Structure.Node{title: "Lightning Storm"}, node),
+           "the /admin/pulse link must appear under Plugins when pulse is enabled, got #{inspect(node)}"
   end
 
   test "the Lightning Storm link is ABSENT from the desk by default (off-by-default)" do

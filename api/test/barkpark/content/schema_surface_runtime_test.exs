@@ -56,9 +56,12 @@ defmodule Barkpark.Content.SchemaSurfaceRuntimeTest do
     assert schemas != []
 
     for schema <- schemas do
-      assert {:ok, parsed} =
-               SchemaDefinition.parse(%{"name" => schema.name, "fields" => schema.fields}),
-             "seed schema #{schema.name} failed to parse"
+      parse_result = SchemaDefinition.parse(%{"name" => schema.name, "fields" => schema.fields})
+
+      assert match?({:ok, _}, parse_result),
+             "seed schema #{schema.name} failed to parse: #{inspect(parse_result)}"
+
+      {:ok, parsed} = parse_result
 
       for f <- parsed.fields do
         assert f.surface in [nil, "body", "sidebar"],

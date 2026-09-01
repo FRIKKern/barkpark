@@ -135,8 +135,10 @@ defmodule BarkparkWeb.Studio.StudioLiveUnpublishGuardTest do
       _ = render_click(view, "unpublish", %{})
       _ = render_click(view, "confirm-unpublish", %{})
 
-      assert {:error, _} = Content.get_document("ug-target", @schema_name, @dataset),
-             "confirm-unpublish must run the real Content.unpublish_document"
+      fetched = Content.get_document("ug-target", @schema_name, @dataset)
+
+      assert match?({:error, _}, fetched),
+             "confirm-unpublish must run the real Content.unpublish_document (#{inspect(fetched)})"
     end
 
     test "close-unpublish-guard cancels with the doc still published", %{conn: conn} do

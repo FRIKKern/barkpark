@@ -82,8 +82,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ValidatorTest do
         book = load_fixture(name)
         {:ok, xml} = export_xml(book)
 
-        assert :ok = Validator.validate_xsd(xml),
-               "expected #{name}.json to validate against the EDItEUR XSD"
+        result = Validator.validate_xsd(xml)
+
+        assert result == :ok,
+               "expected #{name}.json to validate against the EDItEUR XSD, got #{inspect(result)}"
       end
     end
   end

@@ -272,21 +272,25 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
           {"wtg-verbs", "open", "researching", "bp task stage"},
           {"wtg-verbs-done", "done", "considering", "bp task stage"}
         ] do
-      assert {:error, {:invalid_task_content, %{"lifecycle_status" => [message]}}} =
-               Content.apply_mutations(
-                 [
-                   %{
-                     "patch" => %{
-                       "id" => id,
-                       "type" => "task",
-                       "set" => %{"lifecycle_status" => target}
-                     }
-                   }
-                 ],
-                 @dataset,
-                 scope ++ [source: :api]
-               ),
-             "expected the #{from} → #{target} patch to be refused"
+      result =
+        Content.apply_mutations(
+          [
+            %{
+              "patch" => %{
+                "id" => id,
+                "type" => "task",
+                "set" => %{"lifecycle_status" => target}
+              }
+            }
+          ],
+          @dataset,
+          scope ++ [source: :api]
+        )
+
+      assert match?({:error, {:invalid_task_content, %{"lifecycle_status" => [_]}}}, result),
+             "expected the #{from} → #{target} patch to be refused, got #{inspect(result)}"
+
+      {:error, {:invalid_task_content, %{"lifecycle_status" => [message]}}} = result
 
       assert message =~ "\"#{from}\""
       assert message =~ "\"#{target}\""

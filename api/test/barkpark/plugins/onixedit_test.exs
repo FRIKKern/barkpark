@@ -84,8 +84,10 @@ defmodule Barkpark.Plugins.OnixEditTest do
       assert contributors.type == "arrayOf"
       assert contributors.ordered == true
 
-      assert %SchemaDefinition.Field{type: "composite"} = contributors.of,
-             "contributors `of` should be a composite for WI2 to enrich"
+      of = contributors.of
+
+      assert match?(%SchemaDefinition.Field{type: "composite"}, of),
+             "contributors `of` should be a composite for WI2 to enrich, got #{inspect(of)}"
     end
 
     test "themaSubjectCategory is an arrayOf codelist pinned to ONIX list 93", %{parsed: parsed} do
