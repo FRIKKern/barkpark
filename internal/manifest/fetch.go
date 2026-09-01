@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // CapabilitiesPath is the flat endpoint that emits the manifest. The CLI
@@ -28,6 +30,17 @@ const CapabilitiesPath = "/v1/capabilities"
 // A nil cache disables caching: Fetch always does an unconditional GET. Cache
 // write failures are swallowed — the cache is an optimisation, never a
 // correctness dependency.
+//
+// THE CACHE IS ALSO A FALLBACK, NOT ONLY A FAST PATH (task-154120e78138085a).
+// /v1/capabilities is the FIRST call every bp invocation makes, so any refusal
+// on it kills the real command before it is ever attempted — measured on
+// 2026-08-23, a `bp task close` carrying two thousand bytes of evidence died on
+// a 429 for a write the server never received. When the network cannot be
+// reached or answers 429/5xx AND a validated manifest for this exact key is
+// already on disk, Fetch serves that manifest with one stderr notice instead of
+// failing the command. A 401/403 is NOT covered: a rejected credential is an
+// answer about the CALLER, and papering over it with a cache minted by a token
+// that still worked would let a revoked token keep driving a full command tree.
 func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	if client == nil {
 		return nil, fmt.Errorf("fetch manifest: nil client")
@@ -54,7 +67,36 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	}
 
 	res, err := client.GetConditional(url, cachedETag)
+
+	// ONE retry on 429, and only when the server named a wait we are willing to
+	// serve (see retryAfterDelay). The row that filed this measured the server
+	// sending {"details":{"retry_after":1}} and the client discarding it: three
+	// consecutive closes, two dead, the third identical and fine. A single
+	// re-ask after the interval the refusal itself named is the difference. It
+	// is deliberately ONE retry — this is a rate limiter, and the correct
+	// response to "too many requests" is emphatically not more of them.
+	if err == nil && res.StatusCode == http.StatusTooManyRequests {
+		if delay, ok := retryAfterDelay(res); ok {
+			time.Sleep(delay)
+			// A transport failure on the retry keeps the ORIGINAL 429: the
+			// server already told us something specific, and reporting a
+			// dial error instead would lose the diagnosis. Either way the
+			// cache fallback below still applies.
+			if retried, rerr := client.GetConditional(url, cachedETag); rerr == nil {
+				res = retried
+			}
+		}
+	}
+
 	if err != nil {
+		// Transport failure (DNS, dial, timeout). A cached manifest is a
+		// perfectly good command tree; the command's own request will fail on
+		// its own terms if the network really is gone, and it will say so about
+		// the request the operator actually made.
+		if haveCacheHit {
+			warnServingCachedManifest(client.BaseURL(), fmt.Sprintf("the request failed (%v)", err))
+			return cachedM, nil
+		}
 		return nil, fmt.Errorf("fetch manifest: %w", err)
 	}
 
@@ -114,6 +156,13 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		}
 		return m, nil
 	default:
+		// A refusal we can ride out on the cache: the server is overloaded or
+		// broken, not saying anything about who we are. Serve the cached
+		// manifest so the command the operator typed gets to run.
+		if haveCacheHit && servableFromCacheOnStatus(res.StatusCode) {
+			warnServingCachedManifest(client.BaseURL(), fmt.Sprintf("it answered %d", res.StatusCode))
+			return cachedM, nil
+		}
 		// The server's explanatory envelope is sitting in res.Body (already
 		// bounded upstream by GetConditional's maxManifestBytes LimitReader) —
 		// surface it instead of a zero-diagnostic dead end. GET /v1/capabilities
@@ -125,6 +174,99 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("fetch manifest: unexpected status %d", res.StatusCode)
 	}
+}
+
+// retryAfterCap bounds the wait Fetch will sit through on a 429. Two seconds is
+// chosen against the two sides of the trade: the measured refusal named
+// retry_after: 1, so the real case fits comfortably; and this sleep rides inside
+// an interactive CLI call that has not yet run the command the operator typed.
+//
+// A LONGER DIRECTIVE IS NOT CLAMPED DOWN TO THE CAP — it is declined outright,
+// and Fetch falls through to the cache (or to the honest 429 error). Clamping
+// would re-ask at 2s a server that just said "wait 60", which is precisely the
+// hammering the retry exists to avoid; "I cannot wait that long" is an honest
+// answer and "I will wait a thirtieth of what you asked" is not.
+const retryAfterCap = 2 * time.Second
+
+// retryAfterDelay reads the wait a 429 named, from the Retry-After header first
+// and the error envelope's details.retry_after second (the shape the Barkpark
+// API actually sends: {"error":{"code":"rate_limited","details":{"retry_after":1}}}).
+//
+// ok=false means DO NOT RETRY, and it covers every case where a retry would be
+// a guess rather than an instruction: no header and no envelope field, a header
+// in the HTTP-date form (declined deliberately — parsing a date to decide a
+// sub-second sleep buys nothing and mis-parsing it buys a stall), a negative or
+// NaN value, or a value larger than retryAfterCap. Absence is never treated as
+// "retry immediately": a limiter that did not say when is a limiter to leave
+// alone.
+func retryAfterDelay(res *apiclient.ConditionalGetResult) (time.Duration, bool) {
+	if res == nil {
+		return 0, false
+	}
+	if secs, ok := headerRetryAfterSeconds(res.RetryAfter); ok {
+		return boundedRetryDelay(secs)
+	}
+	if env, ok := apierr.Parse(res.Body); ok {
+		if secs, ok := env.RetryAfterSeconds(); ok {
+			return boundedRetryDelay(secs)
+		}
+	}
+	return 0, false
+}
+
+// headerRetryAfterSeconds reads the delta-seconds form of Retry-After. The
+// HTTP-date form returns ok=false (see retryAfterDelay).
+func headerRetryAfterSeconds(h string) (float64, bool) {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(h)
+	if err != nil {
+		return 0, false
+	}
+	return float64(n), true
+}
+
+// boundedRetryDelay turns a server-named second count into a wait, refusing
+// anything negative, NaN (the !(secs >= 0) form catches both) or over the cap.
+// The bound is checked in SECONDS, before the multiply, so an absurd value can
+// never overflow the float→Duration conversion into a plausible-looking wait.
+func boundedRetryDelay(secs float64) (time.Duration, bool) {
+	if !(secs >= 0) {
+		return 0, false
+	}
+	if secs > retryAfterCap.Seconds() {
+		return 0, false
+	}
+	return time.Duration(secs * float64(time.Second)), true
+}
+
+// servableFromCacheOnStatus reports whether a cached manifest may stand in for a
+// response with this status.
+//
+// The line is drawn at WHAT THE STATUS IS ABOUT. 429 and 5xx are statements
+// about the SERVER's current condition — load, a bad deploy, a sick replica —
+// and say nothing that invalidates a manifest the same server minted for this
+// same key earlier. 401 and 403 are statements about the CALLER, and the cache
+// is keyed by a hash of the token: serving one would let a revoked or expired
+// credential keep driving the full command tree its old token earned, turning a
+// crisp "your token was rejected" into a command that fails later and stranger.
+// 404 is excluded too — /v1/capabilities not being deployed is exactly what the
+// --manifest / BARKPARK_MANIFEST escape hatch is for, and it must keep saying so.
+func servableFromCacheOnStatus(status int) bool {
+	return status == http.StatusTooManyRequests || (status >= 500 && status <= 599)
+}
+
+// warnServingCachedManifest emits the ONE line that says a cached command tree
+// is standing in for a live one. On stderr, always: stdout carries `-o json`
+// and a notice there would corrupt every machine-readable result. It does not
+// touch the exit code either — the command the operator typed runs, and
+// succeeds or fails on its own merits.
+func warnServingCachedManifest(baseURL, because string) {
+	fmt.Fprintf(os.Stderr,
+		"bp: could not refresh the capabilities manifest from %s — %s; using the cached manifest (it may be stale, and the command itself is unaffected)\n",
+		baseURL, because)
 }
 
 // isOlderGeneration reports whether incoming is strictly older than cached.
