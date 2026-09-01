@@ -1037,8 +1037,9 @@ const activityFeed = [
 ];
 
 // ── instance events + verify runs (event_json: {id,type,payload,inserted_at};
-//    types from the closed AgentEvent vocabulary: health status backup tls
-//    content verify; verify payload ⇐ Verify.run/1's result envelope) ─────────
+//    types from the closed AgentEvent vocabulary — read AgentEvent.types/0, not
+//    this line: health status content verify space, since cch-w51-bl struck
+//    backup and tls; verify payload ⇐ Verify.run/1's result envelope) ─────────
 function verifyEnvelope(over) {
   const base = {
     ok: true,
@@ -3722,8 +3723,11 @@ export const SCENARIOS = {
   },
   // ── gr-p3 D-04: the timeline coalescing grammar (tail-append, OC9) ─────────
   // A 10-beat health-down burst (one per minute) that MUST fold to one
-  // "<thing> × N · cadence · shared verdict" row, with a status change and a
-  // TLS event around it proving singletons pass through untouched.
+  // "<thing> × N · cadence · shared verdict" row, with a `status` change beside
+  // it proving a singleton passes through untouched. A `tls` event stood beside
+  // it too until wave 51 removed it, and cch-w51-bl then struck `tls` from
+  // AgentEvent's @types — this corpus manufactures nothing the control plane
+  // cannot write, which is the arm-C rule the vocabulary census enforces.
   "timeline-coalesced": {
     label: "Timeline coalescing — a 10-beat health-down burst folds to ONE worst-verdict row (D-04, styleguide §07)",
     authed: true,

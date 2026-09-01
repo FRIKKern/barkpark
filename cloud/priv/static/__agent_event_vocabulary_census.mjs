@@ -57,10 +57,13 @@
 // ── SIDE B IS cloud/lib/** ONLY, AND THAT IS LOAD-BEARING ───────────────────
 //
 // A variant globbing `cloud/**` runs GREEN on the very tree this census exists
-// to red: cloud/test/.../registry_test.exs:369-370 and accounts_test.exs supply
-// `backup`, `tls` and `content` as false producers, and registry_test.exs:393's
-// deliberate negative-test type `meltdown` is invented as a fifth. The wide
-// variant certifies the exact lie. Tests are not producers.
+// to red, and it does so on the strength of TEST FIXTURES. registry_test.exs's
+// ordering test supplied `backup` and `tls` as false producers until cch-w51-bl
+// rewrote it onto real types; accounts_test.exs still supplies `content`;
+// registry_test.exs's deliberate negative-test type `meltdown` is invented
+// alongside them; and `__app.test.mjs` still manufactures `backup`/`tls` EV()
+// rows for the timeline grammar. The wide variant certifies the exact lie.
+// Tests are not producers.
 //
 // Heredocs and `#` comments are stripped before the scan for the same reason:
 // telemetry.ex's @moduledoc QUOTES a call site (`Registry.record_event(barkpark,
@@ -376,8 +379,9 @@ if (orphanTitles.length || untitled.length || impossibleFixtures.length) {
   console.error(`  rendered (${rendered.size}): ${sorted(rendered).join(", ")}`);
   console.error(`  fixtured (${fixtured.size}): ${sorted(fixtured).join(", ")}`);
   console.error("");
-  console.error("  NOTE: AgentEvent's @types allowlist is NOT the oracle here and still declares");
-  console.error("  backup/tls/content on purpose (charter D576). DECLARED is not PRODUCED.");
+  console.error("  NOTE: AgentEvent's @types allowlist is NOT the oracle here. It declares");
+  console.error("  `content` with no producer on purpose (charter D576) — that word has a");
+  console.error("  server-side consumer. DECLARED is not PRODUCED.");
   process.exit(1);
 }
 
