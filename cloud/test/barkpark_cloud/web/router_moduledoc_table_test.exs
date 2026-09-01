@@ -139,8 +139,10 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
       "the 403 is PAYLOAD-conditional, not principal-conditional: any member may " <>
         "mint a `read` PAT, and `create_personal_access_token/3` refuses only when " <>
         "the requested abilities include deploy/root/write (anti-escalation). The " <>
-        "row's `user(s)` is correct — an `admin` cell here would tell every member " <>
-        "they cannot mint the token they can in fact mint."
+        "row's `user` is correct — an `admin` cell here would tell every member " <>
+        "they cannot mint the token they can in fact mint. `user` and not `user(s)`: " <>
+        "the outer guard IS `Auth.require_user`, so PAT management is session-only, " <>
+        "exactly as the comment above the route says."
   }
 
   # Rows whose guard this resolver CANNOT reach, each with the reason it cannot.
@@ -413,6 +415,94 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
     assert raw_route_guard("POST", "/v1/fleet/supports") ==
              guard_in(@fixture_flag_deploy, %{}, 0)
+  end
+
+  test "a delegated helper resolves per CALL SITE, not by its first clause" do
+    # `with_team_site/3` gates on a `case` over its `auth` argument: `:session`
+    # takes `Auth.require_user`, `{:ability, ab}` takes `require_user_or_pat |>
+    # require_ability(ab)`. The `:session` branch is textually FIRST, so a lens
+    # that reads the joined helper body first-hit-wins hands `require_user` to
+    # all ELEVEN delegating /v1/sites routes — and the one distinction this
+    # family draws (a PAT reaches six of them, and is turned away from five)
+    # becomes unsayable in the contract a CLI or SDK author reads.
+    #
+    # This is a GATE defect, never a live auth hole: every one of the eleven
+    # enforces exactly what its own code says. What could not be stated was WHICH.
+    session_only = [
+      {"GET", "/v1/sites/:id/deployments"},
+      {"GET", "/v1/sites/:id/previews"},
+      {"POST", "/v1/sites/:id/env"},
+      {"POST", "/v1/sites/:id/domains"},
+      {"POST", "/v1/sites/:id/github"}
+    ]
+
+    pat_reachable = [
+      {"PATCH", "/v1/sites/:id"},
+      {"DELETE", "/v1/sites/:id"},
+      {"POST", "/v1/sites/:id/deploy"},
+      {"POST", "/v1/sites/:id/rollback"},
+      {"POST", "/v1/sites/:id/deployments/:dep_id/artifact"},
+      {"GET", "/v1/sites/:id/deployments/:dep_id"}
+    ]
+
+    # The count is load-bearing: if a route joins or leaves the family, this
+    # enumeration is stale and the split has to be re-derived, not patched.
+    assert length(session_only) + length(pat_reachable) == 11
+
+    for {m, p} <- session_only do
+      assert raw_route_guard(m, p) == "require_user",
+             "#{m} #{p} passes NO mode to with_team_site, so it takes the helper's " <>
+               "own default (`:session`) and enforces Auth.require_user"
+
+      assert documented_tier(m, p) == "user",
+             "#{m} #{p} is session-only; `user(s)` would tell a PAT holder they can reach it"
+    end
+
+    for {m, p} <- pat_reachable do
+      assert raw_route_guard(m, p) == "require_user_or_pat",
+             "#{m} #{p} passes {:ability, _}, so it enforces require_user_or_pat |> " <>
+               "require_ability — a PAT carrying that ability reaches it"
+
+      assert documented_tier(m, p) == "user(s)",
+             "#{m} #{p} is PAT-reachable; a plain `user` cell hides the one distinction " <>
+               "the /v1/sites family draws"
+    end
+
+    # THE DISCRIMINATION, stated as an inequality so it cannot pass vacuously:
+    # two routes into the same helper, differing only in the mode they pass.
+    assert raw_route_guard("POST", "/v1/sites/:id/env") !=
+             raw_route_guard("PATCH", "/v1/sites/:id"),
+           "POST /v1/sites/:id/env (:session) and PATCH /v1/sites/:id ({:ability, \"write\"}) " <>
+             "collapsed to one guard key — the lens is back to first-clause-wins"
+
+    assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/env")] == "user"
+    assert guard_tier()[raw_route_guard("PATCH", "/v1/sites/:id")] == "user(s)"
+
+    # …and `user(s)` must survive normalization as its own tier, or the census
+    # folds it back into `user` and both halves agree again by construction.
+    assert normalize_tier("user(s)") == "user(s)"
+    assert normalize_tier("user*") == "user"
+  end
+
+  test "PAT management is session-only, and the /v1/tokens rows say so" do
+    # The router's own comment above these routes states it outright ("Managing
+    # PATs is SESSION-ONLY … the mint route 401s a PAT bearer"), while all three
+    # rows advertised `user(s)`. `normalize_tier("user" <> _)` folded the cell to
+    # `user` and the census agreed with a table that contradicted its own prose.
+    for {m, p} <- [{"GET", "/v1/tokens"}, {"POST", "/v1/tokens"}, {"DELETE", "/v1/tokens/:id"}] do
+      assert base_guard(raw_route_guard(m, p)) == "require_user",
+             "#{m} #{p} enforces session-only Auth.require_user"
+
+      assert documented_tier(m, p) == "user",
+             "#{m} #{p} must document `user` (session-only). `user(s)` tells a PAT " <>
+               "holder they may manage tokens with a PAT — the exact escalation the " <>
+               "route exists to refuse."
+    end
+
+    # The contrast that proves `(s)` is not decoration: the SAME token on
+    # /v1/deliveries sits over a guard that genuinely does accept a PAT.
+    assert raw_route_guard("GET", "/v1/deliveries") == "require_user_or_pat"
+    assert documented_tier("GET", "/v1/deliveries") == "user(s)"
   end
 
   test "every moduledoc route-table row still maps to a declared route" do
