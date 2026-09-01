@@ -116,6 +116,15 @@ func run(args []string) int {
 			ConsumerRoots:      resolvedConsumerRoots,
 			ConsumerRootExists: agent.NewConsumerRootExists(),
 			ConsumerRootProbe:  agent.NewConsumerRootProbe(),
+			// The residual's mount guard. `du -x` refuses to cross INTO a
+			// mount, so a root that SITS ON one is measured in full while its
+			// parent's walk stopped at the boundary — subtracting both from a
+			// root-filesystem total is bytes that are not in the denominator,
+			// and the residual goes negative. Only st_dev can tell those apart.
+			DeviceProbe: agent.NewDeviceProbe(),
+			// Where PGDATA is, so a du root covering it and PGSizeBytes are
+			// never BOTH subtracted. Nothing walks this path.
+			PGDataDir: agent.DefaultPGDataDir,
 		},
 		ReportProbes: agent.ReportConfig{
 			Checkout:  *checkout,
