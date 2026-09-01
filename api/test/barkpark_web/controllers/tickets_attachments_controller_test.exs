@@ -34,12 +34,13 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
   Shared test DB: every workspace slug, ticket id and key is unique per test
   (`System.unique_integer/1`), and nothing counts whole tables.
 
-  ## One assertion records a DEFECT, not a contract
+  ## Not covered here, on purpose: the response-header baseline
 
-  The final `describe` block pins the `:ticket_key` bucket's missing
-  `ApiSecurityHeaders` baseline (filed as **task-5bf037daa116ea70**). Those three
-  tests assert what the router does today and are expected to RED when the gap
-  closes — flip them to assert presence at that point rather than deleting them.
+  The `:ticket_key` bucket's `x-content-type-options` / `referrer-policy`
+  contract is NOT asserted in this file. It has one owner —
+  `test/barkpark_web/ticket_key_security_headers_test.exs` — and a second copy
+  here would be the copy that later goes stale and disagrees with it. See the
+  pointer comment below the last `describe` block.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -341,56 +342,27 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
     end
   end
 
-  # ══════════════════ response-header baseline (NEW FINDING) ════════════════
-
-  describe "the :ticket_key bucket's response-header baseline" do
-    setup :with_stored_attachment
-
-    # ── NEW FINDING — task-5bf037daa116ea70 ──────────────────────────────────
-    # These three assertions record what the code does TODAY, and today is
-    # wrong. The `:ticket_key` pipeline (router.ex:716) is
-    # `[:accepts json, RequireTicketKey, TicketRateLimit]` — it does NOT mount
-    # `ApiSecurityHeaders`, so the LOWEST-trust bucket in the system (outsider
-    # -held keys, outsider-supplied bytes) has a WEAKER baseline than its own
-    # sibling `:session_token_root`, which serves the SAME attachment bytes to a
-    # higher-trust operator and deliberately keeps the plug.
-    #
-    # The byte stream escapes with `nosniff` only because
-    # `TicketsAttachmentsController.stream_file/2` hand-sets it — the exact
-    # "an author remembering to copy a controller check" pattern the sibling
-    # bucket's own comment (router.ex:800-806) says deny-by-default at the mount
-    # exists to prevent.
-    #
-    # WHEN THIS IS FIXED these tests SHOULD red. Flip them to assert PRESENCE;
-    # do not delete them — the tripwire is the point.
-    test "TODAY: the JSON success envelope carries NO referrer-policy and NO nosniff", ctx do
-      conn =
-        signed(ctx.owner_raw)
-        |> post(att_path(ctx.ticket), %{"file" => upload(@pdf, "second.pdf")})
-
-      assert conn.status == 201
-      assert get_resp_header(conn, "referrer-policy") == []
-      assert get_resp_header(conn, "x-content-type-options") == []
-    end
-
-    test "TODAY: the JSON error envelope carries neither header either", ctx do
-      conn = get(signed(ctx.owner_raw), show_path(ctx.ticket, "garbage"))
-
-      assert conn.status == 404
-      assert get_resp_header(conn, "referrer-policy") == []
-      assert get_resp_header(conn, "x-content-type-options") == []
-    end
-
-    test "TODAY: the byte stream has nosniff (controller-set) but still NO referrer-policy",
-         ctx do
-      conn = get(signed(ctx.owner_raw), show_path(ctx.ticket, ctx.asset_id))
-
-      assert conn.status == 200
-      # Hand-set in stream_file/2 — this is the copied check, not the mount.
-      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
-      assert get_resp_header(conn, "referrer-policy") == []
-    end
-  end
+  # ═════════════════ response-header baseline — NOT OURS ════════════════════
+  #
+  # The `:ticket_key` pipeline's baseline response headers
+  # (`x-content-type-options: nosniff` + `referrer-policy`) are deliberately NOT
+  # asserted in this file. That contract has ONE owner:
+  #
+  #     test/barkpark_web/ticket_key_security_headers_test.exs
+  #
+  # It was written for task-5bf037daa116ea70 — the finding that `:ticket_key`
+  # was the one browser-reachable /v1 bucket with no `ApiSecurityHeaders`, i.e.
+  # the LOWEST-trust bucket (outsider-held keys, outsider-supplied bytes) with a
+  # weaker baseline than the `:session_token_root` sibling serving the same
+  # attachment bytes to an operator — and it covers the 201 envelope, the 404
+  # envelope and the byte stream, mutation-proven against the mount.
+  #
+  # This file asserts `nosniff` on the byte stream in exactly one place (see
+  # "the response pins the server-derived type and forbids sniffing" above), and
+  # it asserts it as part of the STREAMING contract that
+  # `TicketsAttachmentsController.stream_file/2` owns — not as the pipeline's
+  # baseline. Add header-baseline assertions to the file named above, never
+  # here: two copies of one contract is how a green test starts lying.
 
   # ─────────────────────────────── helpers ──────────────────────────────────
 
