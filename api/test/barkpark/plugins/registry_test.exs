@@ -48,8 +48,10 @@ defmodule Barkpark.Plugins.RegistryTest do
       # The stub must be absent after reset. Under the old lazy capture this
       # would have PASSED only if another reset had already run before this one;
       # with the lazy baseline it would sometimes fail (stub reappears after reset).
-      assert :error = Registry.lookup(stub_name),
-             "stub #{stub_name} survived reset() — baseline was poisoned at capture time"
+      lookup = Registry.lookup(stub_name)
+
+      assert lookup == :error,
+             "stub #{stub_name} survived reset() — baseline was poisoned at capture time (#{inspect(lookup)})"
 
       # Sanity: the well-known bundled plugin (onixedit / book schema) must
       # survive the reset, confirming the baseline holds the real boot set.
@@ -78,8 +80,10 @@ defmodule Barkpark.Plugins.RegistryTest do
       # Reset must NOT include the stub.
       Registry.reset()
 
-      assert :error = Registry.lookup(stub_name),
-             "stub survived after idempotent capture_baseline() + reset() — second capture overwrote frozen baseline"
+      lookup = Registry.lookup(stub_name)
+
+      assert lookup == :error,
+             "stub survived after idempotent capture_baseline() + reset() — second capture overwrote frozen baseline (#{inspect(lookup)})"
     end
   end
 

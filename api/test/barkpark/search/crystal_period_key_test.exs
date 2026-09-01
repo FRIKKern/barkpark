@@ -120,9 +120,13 @@ defmodule Barkpark.Search.CrystalPeriodKeyTest do
     test "the default period_start is the crystallizer's key, not seven days ago" do
       merge_pattern!(Crystallizer.period_start_for(:week))
 
-      assert [candidate | _] = Synonyms.candidates(@surface, @scope),
+      candidates = Synonyms.candidates(@surface, @scope)
+
+      assert match?([_ | _], candidates),
              "candidates/3 with no explicit window found nothing at the key the " <>
                "crystallizer writes — the default is not the writer's key"
+
+      [candidate | _] = candidates
 
       assert candidate.from == "hero"
       assert candidate.to == "phoenix"
