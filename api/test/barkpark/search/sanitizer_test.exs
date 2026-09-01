@@ -31,7 +31,10 @@ defmodule Barkpark.Search.SanitizerTest do
           "delete scene",
           "insert coin"
         ] do
-      assert {:ok, _} = Sanitizer.sanitize(q), "expected #{inspect(q)} to be accepted"
+      result = Sanitizer.sanitize(q)
+
+      assert match?({:ok, _}, result),
+             "expected #{inspect(q)} to be accepted, got #{inspect(result)}"
     end
   end
 

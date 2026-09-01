@@ -81,12 +81,15 @@ defmodule Barkpark.Sites.DeployRunnerStageNamesTest do
     test "is exactly the six stages the engines fold, in order" do
       source = read!(@runner_ex)
 
-      assert [[line, names]] =
-               Regex.scan(~r/^\s*@stage_names\s+~w\(([^)]*)\)\s*$/m, source),
+      scan = Regex.scan(~r/^\s*@stage_names\s+~w\(([^)]*)\)\s*$/m, source)
+
+      assert match?([[_, _]], scan),
              "expected exactly ONE `@stage_names ~w(...)` line in #{@runner_ex}; " <>
                "if the attribute was renamed or reshaped, this pin (and the two " <>
                "deploy engines' self-test rows that grep the same line) must be " <>
-               "updated deliberately, not deleted"
+               "updated deliberately, not deleted (got #{inspect(scan)})"
+
+      [[line, names]] = scan
 
       assert String.split(names) == ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE),
              """

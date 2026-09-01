@@ -445,8 +445,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
       ]
 
       for {fun, codes} <- cases, code <- codes do
-        assert {:ok, ^code} = apply(Codelists, fun, [code]),
-               "expected Codelists.#{fun}/1 to resolve #{inspect(code)}"
+        result = apply(Codelists, fun, [code])
+
+        assert match?({:ok, ^code}, result),
+               "expected Codelists.#{fun}/1 to resolve #{inspect(code)}, got #{inspect(result)}"
       end
     end
 

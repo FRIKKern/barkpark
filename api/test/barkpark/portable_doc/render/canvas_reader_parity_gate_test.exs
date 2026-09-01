@@ -333,8 +333,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     for {label, block, emitter, _sig} <- painted_fleet() do
       composed = Compose.compose_block(block, :article)
 
-      assert %{"kind" => "_raw", "html" => html} = composed,
+      assert match?(%{"kind" => "_raw", "html" => _}, composed),
              "#{label}: expected a `_raw` compose node (the single-producer escape hatch), got: #{inspect(composed)}"
+
+      %{"html" => html} = composed
 
       assert html == emitter.(block),
              "#{label}: the composed `_raw` html is not the emitter output verbatim — a second producer has crept into compose"

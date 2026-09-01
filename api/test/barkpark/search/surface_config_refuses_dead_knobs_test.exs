@@ -146,20 +146,22 @@ defmodule Barkpark.Search.SurfaceConfigRefusesDeadKnobsTest do
         surface = unquote(surface)
         served = SurfaceConfigs.get(surface, @scope, ws.id)
 
-        assert {:ok, _echo} =
-                 SurfaceConfigs.upsert(
-                   surface,
-                   @scope,
-                   %{
-                     "searchableFields" => served["searchable_fields"],
-                     "typoPolicy" => served["typo_policy"],
-                     "zeroHitStrategy" => served["zero_hit_strategy"],
-                     "highlightFields" => served["highlight_fields"]
-                   },
-                   ws.id
-                 ),
+        result =
+          SurfaceConfigs.upsert(
+            surface,
+            @scope,
+            %{
+              "searchableFields" => served["searchable_fields"],
+              "typoPolicy" => served["typo_policy"],
+              "zeroHitStrategy" => served["zero_hit_strategy"],
+              "highlightFields" => served["highlight_fields"]
+            },
+            ws.id
+          )
+
+        assert match?({:ok, _}, result),
                "GET → PUT must round-trip: a default carrying a key the PUT " <>
-                 "refuses would 422 an admin on their first save"
+                 "refuses would 422 an admin on their first save (got #{inspect(result)})"
       end
     end
   end
