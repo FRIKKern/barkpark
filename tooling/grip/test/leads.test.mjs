@@ -62,6 +62,18 @@ function tempStore(rows, { run_id = "grip-20260721T000000Z" } = {}) {
   return dir;
 }
 
+// ── THE ARMING THESE FIXTURES ARE FOLDED UNDER ──────────────────────────────
+//
+// `foldLedger` DEFAULTS its screen on (see its ARMING header): a library read
+// and the `fold` CLI read of one store now return the same counts. leads is a
+// FILTER OVER entries[], and three fixtures below deliberately carry commands
+// screenCommand refuses — `go build` (it writes artifacts) and `git grep -c …`
+// (the screen reads git's `-c` as its config flag and refuses what it cannot
+// bound). Neither refusal is what those tests measure, so they fold under the
+// EXPLICIT opt-out and say so, rather than being quietly re-specimened to dodge
+// the screen. `UNSCREENED` is that opt-out with a name on it.
+const UNSCREENED = { screen: null };
+
 function row(subject, quantity, rerun, extra = {}) {
   return {
     subject, quantity, rerun,
@@ -134,7 +146,7 @@ test("the rerun substring narrows a multi-row bucket UNDER --cmd — real number
     row("internal/cli", "grep:-n", "grep -n 'bp task' internal/cli/task_cmd.go"),
     row("internal/cli", "wc:-l", "wc -l internal/cli/task_cmd.go"),
   ];
-  const folded = foldLedger(tempStore(bucket));
+  const folded = foldLedger(tempStore(bucket), UNSCREENED);
   const cmd = { cmd: true };
   const all = selectLeads(folded, "internal/cli");
   const narrowed = selectLeads(folded, "grep", cmd);
@@ -213,7 +225,7 @@ test("THE MEASURED SPECIMEN — `origin/main` returns ZERO by default, and --cmd
     row("api/lib/barkpark.ex", "wc:-l", "git show origin/main:api/lib/barkpark.ex | wc -l"),
     row("internal/cli", "grep:-c", "git grep -c 'func ' origin/main -- internal/cli"),
     row("js/packages/core", "ls-tree", "git ls-tree origin/main js/packages/core"),
-  ]));
+  ]), UNSCREENED);
 
   // FAIL-FIRST: the OLD concatenated haystack, re-implemented here, over the
   // same corpus. It returns all four — that is the behaviour being fixed, and
@@ -244,7 +256,7 @@ test("THE HONEST EMPTY CARRIES THE NUMBER — how many --cmd would return, and t
     row("tooling/grip/leads.mjs", "wc:-l", "git show origin/main:tooling/grip/leads.mjs | wc -l"),
     row("api/lib/barkpark.ex", "wc:-l", "git show origin/main:api/lib/barkpark.ex | wc -l"),
     row("internal/cli", "grep:-c", "git grep -c 'func ' origin/main -- internal/cli"),
-  ]));
+  ]), UNSCREENED);
   const rendered = renderLeads(selectLeads(folded, "origin/main"));
 
   assert.ok(rendered.includes("HONEST EMPTY"), "still an ANSWER, not a blank");
@@ -536,7 +548,11 @@ test("a deliberately STALE stored derived_level is contradicted, not printed", (
   const dir = tempStore([row("cmd-free/subject.mjs", "curl:-s", rerun, { derived_level: "L3" })]);
   // `curl` is a command-text query against this subject, so --cmd is how it is
   // reached — the re-derivation under test is unaffected by the haystack width.
-  const result = selectLeads(foldLedger(dir), "curl", { cmd: true });
+  // UNSCREENED for the same reason the arming note above gives: the L1 command
+  // that makes this test meaningful (it reaches a running system) is exactly
+  // what the screen's host bound refuses, so a screened fold would reject the
+  // row before leads ever saw it. The subject here is the LEVEL, not admission.
+  const result = selectLeads(foldLedger(dir, UNSCREENED), "curl", { cmd: true });
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].stored_level, "L3", "the stored value is carried, so the disagreement is visible");
   assert.notEqual(result.rows[0].derived_level, "L3", "…and it is NOT what gets rendered as the level");
