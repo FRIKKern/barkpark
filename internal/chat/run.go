@@ -100,7 +100,7 @@ func Run(cfg Config) error {
 	// dark. An empty/unknown cfg.Theme falls back to evergreen inside ThemeFor.
 	chatRegistry = pdrender.DefaultRegistry(pdrender.ThemeFor(cfg.Theme, "dark"))
 
-	tr := NewHTTPTransport(cfg.BaseURL, cfg.Token)
+	tr := NewHTTPTransport(cfg)
 	stream := &streamer{tr: tr}
 	m := newModel(tr, stream, cfg)
 

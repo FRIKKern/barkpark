@@ -50,6 +50,16 @@ type Model struct {
 	stream *streamer
 	cfg    Config
 
+	// ctxid is the full context identity the launch screen paints (context.go):
+	// which LOCAL host and repo root this process runs in, and which server,
+	// workspace, project and dataset the wire client is actually pointed at.
+	// Resolved ONCE in newModel — the connection is asked what it dials, and the
+	// local probes run one exec between them — so the paint stays pure and the
+	// answer cannot drift mid-session. The zero value renders NO band at all
+	// (a bare Model literal in a unit test has resolved nothing); every path
+	// that reaches a terminal goes through newModel.
+	ctxid ContextIdentity
+
 	width, height int
 	screen        screen
 
@@ -123,9 +133,13 @@ type Model struct {
 // the picker — launch always lists sessions first (charter).
 func newModel(tr Transport, stream *streamer, cfg Config) Model {
 	return Model{
-		tr:      tr,
-		stream:  stream,
-		cfg:     cfg,
+		tr:     tr,
+		stream: stream,
+		cfg:    cfg,
+		// The identity is resolved from the LIVE transport (what it dials), not
+		// from cfg alone — that asymmetry is what lets the surface report a
+		// disagreement instead of echoing the config back at the operator.
+		ctxid:   ResolveContextIdentity(cfg, connectionOf(tr), localProbe),
 		screen:  screenPicker,
 		scroll:  -1,
 		loading: true,
