@@ -24,13 +24,13 @@ describe('resolveConfig — workspace/project must be both-or-neither', () => {
 
   it('rejects when only workspace is set', async () => {
     await expect(resolveConfig({ ...base, workspace: 'a' })).rejects.toThrow(
-      'workspace and project must be provided together',
+      'workspace and project must be set together',
     )
   })
 
   it('rejects when only project is set', async () => {
     await expect(resolveConfig({ ...base, project: 'p' })).rejects.toThrow(
-      'workspace and project must be provided together',
+      'workspace and project must be set together',
     )
   })
 
@@ -61,7 +61,7 @@ describe('schema-path — workspace/project must be both-or-neither', () => {
       exec('node', [cliPath, 'schema-path', 'production', '--workspace', 'acme']),
     ).rejects.toMatchObject({
       code: 1,
-      stderr: expect.stringContaining('workspace and project must be provided together'),
+      stderr: expect.stringContaining('workspace and project must be set together'),
     })
   })
 
