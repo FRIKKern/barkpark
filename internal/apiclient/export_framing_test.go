@@ -138,4 +138,3 @@ func TestExportCompleteChunkedSucceeds(t *testing.T) {
 		t.Fatalf("delivered %d documents, want 3", len(lines))
 	}
 }
-
