@@ -237,7 +237,9 @@ var hzResDispositions = map[string]hzResDisposition{
 		"paid: hzResObservedResponse observes the created Network under an EMPTY-ID COLLAPSE; hzObserveNetworkCreated " +
 			"advises on the normalised ip_range"},
 	"firewall/create": {hzClassCreate,
-		"paid: hzResObservedResponse observes result.Firewall; hzObserveFirewallCreated reports an OBSERVED rule_count, graded COUNT"},
+		"paid: hzResObservedResponse observes result.Firewall under an EMPTY-ID COLLAPSE (the generated converter makes " +
+			"nil unreachable, so an id-less firewall is collapsed to nil); hzObserveFirewallCreated reports an " +
+			"OBSERVED rule_count, graded COUNT"},
 	"zone/create": {hzClassCreate,
 		"paid: hzResObservedResponse observes result.Zone; hzObserveZoneCreated advises on the RAW --mode token"},
 	"record/create": {hzClassCreate,
