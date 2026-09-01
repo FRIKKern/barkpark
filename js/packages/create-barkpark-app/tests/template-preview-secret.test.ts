@@ -15,8 +15,8 @@ import { constantTimeEqual } from '../templates/blog-starter/lib/constant-time-e
  * both the secret's length and the position of the first wrong byte are
  * observable in the comparison's duration. Everywhere ELSE in this repo that
  * compares a secret already uses `node:crypto`'s `timingSafeEqual`:
- * `@barkpark/nextjs`'s `createDraftModeRoutes` (draft-mode/index.ts:24),
- * `@barkpark/core`'s webhook verifier (webhook.ts:73), and web/'s webhook route.
+ * `@barkpark/nextjs`'s `createDraftModeRoutes` (src/draft-mode/index.ts),
+ * `@barkpark/core`'s `timingSafeEqual` (src/webhook.ts), and web/'s webhook route.
  * This route was the one holdout — and it is a TEMPLATE, copied into every
  * generated project, including ones that will run on a long-lived server rather
  * than behind a serverless edge.
