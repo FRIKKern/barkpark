@@ -13,7 +13,7 @@ defmodule BarkparkCloud.NotificationsTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Notifications
-  alias BarkparkCloud.Notifications.{Delivery, EmailSettings}
+  alias BarkparkCloud.Notifications.{Delivery, EmailSettings, Transactional}
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Repo
 
@@ -625,6 +625,103 @@ defmodule BarkparkCloud.NotificationsTest do
       |> Repo.update!()
 
       assert {:ok, _} = Notifications.deliver_test(team, email)
+    end
+  end
+
+  ## cch-w40-bl — the test send stops asserting a success it cannot know.
+  ##
+  ## The mail rides `Mailer.deliver/1` with NO override, so it can only ever
+  ## exercise the PLATFORM transport. It nevertheless said "your notification
+  ## email is working": a team on `transport: "smtp"` pointing at a dead relay
+  ## passed 100% of the time, and every real alert then silently fell back to
+  ## the platform transport too (`deliver_alert/2` branches; the test send did
+  ## not). The remedy is DISCLOSURE, not routing.
+
+  describe "test-send honesty (cch-w40-bl)" do
+    test "the body names the transport it exercised instead of an unqualified success" do
+      body = Transactional.test_email("someone@example.com").text_body
+
+      assert body =~ "sent over the Barkpark platform mail transport",
+             "the mail must name the carrier the send actually used"
+
+      refute body =~ "your notification email is working",
+             "the unqualified claim IS the defect — this send never touches a team relay"
+    end
+
+    test "a team on smtp is told, in the same breath, that its own relay was not proved" do
+      body =
+        Transactional.test_email("someone@example.com", selected_transport: "smtp").text_body
+
+      assert body =~ "sent over the Barkpark platform mail transport"
+      assert body =~ "own SMTP relay"
+
+      assert body =~ "did NOT use your relay",
+             "silence here is exactly what let a dead relay pass this test"
+
+      assert body =~ "it does not prove your SMTP settings",
+             "the consequence is stated, not left to be inferred"
+    end
+
+    test "the disclosure can LOSE — an instance team has nothing outstanding" do
+      inst =
+        Transactional.test_email("someone@example.com", selected_transport: "instance").text_body
+
+      # "instance" IS the platform transport: the team's own selection was
+      # exercised. A caveat that fires here is noise, and noise is how a real
+      # one stops being read.
+      refute inst =~ "SMTP"
+      refute inst =~ "did NOT use your relay"
+
+      # An absent selection is UNKNOWN, and unknown is not a mismatch —
+      # inventing one is the same crime pointing the other way.
+      refute Transactional.test_email("someone@example.com").text_body =~ "did NOT use your relay"
+    end
+
+    test "deliver_test/1 is UNCHANGED in arity and still rides the platform Mailer" do
+      Code.ensure_loaded!(Transactional)
+
+      assert function_exported?(Transactional, :deliver_test, 1),
+             "the probe is deliberately NOT routed over an unverified team relay: " <>
+               "that can hang the request path. Arity 1 — build, then Mailer.deliver/1 " <>
+               "with no override — must survive."
+
+      assert {:ok, _} = Transactional.deliver_test("someone@example.com")
+      assert_email_sent(subject: "Barkpark Cloud test email")
+    end
+
+    test "the mail Notifications.deliver_test/2 actually sends carries the disclosure" do
+      {team, [email]} = team_with_members(1)
+      {:ok, settings} = Notifications.ensure_settings(team)
+
+      {:ok, _} =
+        settings |> EmailSettings.changeset(%{transport: "smtp"}) |> Repo.update()
+
+      assert {:ok, _} = Notifications.deliver_test(team, email)
+
+      assert_email_sent(fn sent ->
+        assert sent.text_body =~ "sent over the Barkpark platform mail transport"
+
+        assert sent.text_body =~ "did NOT use your relay",
+               "the context must hand the SELECTED transport through, or the " <>
+                 "honest body never reaches the person who pressed the button"
+      end)
+    end
+
+    test "an instance team's real send stays clean of a caveat it does not need" do
+      {team, [email]} = team_with_members(1)
+      {:ok, settings} = Notifications.ensure_settings(team)
+      assert settings.transport == "instance", "the default selection is the platform transport"
+
+      assert {:ok, _} = Notifications.deliver_test(team, email)
+
+      assert_email_sent(fn sent ->
+        assert sent.text_body =~ "sent over the Barkpark platform mail transport"
+        refute sent.text_body =~ "did NOT use your relay"
+        # `assert_email_sent/1` asserts on the fun's RETURN value, and `refute`
+        # returns false — so the clean case must hand back a truthy value or the
+        # assertion that the caveat is ABSENT reads as a failed send.
+        true
+      end)
     end
   end
 

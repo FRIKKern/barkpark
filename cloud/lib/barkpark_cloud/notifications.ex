@@ -293,6 +293,11 @@ defmodule BarkparkCloud.Notifications do
   `#{@test_rate_limit_seconds}`s per team (Coolify `Email.php`'s 10s guard,
   enforced here via `last_test_sent_at`).
 
+  The send ALWAYS rides the platform transport — it never consults the team's
+  own relay — so the mail it builds names that carrier, and discloses when the
+  team's SELECTED transport is a different one (cch-w40-bl). Contrast
+  `deliver_alert/2`, which DOES branch on `transport`.
+
   `to` defaults to nil → the first team member's email. A caller-supplied `to`
   MUST be a team member — the platform mailer is not an authenticated open relay
   to arbitrary internet addresses (Coolify's `EmailChannel` data-exfiltration
@@ -322,7 +327,17 @@ defmodule BarkparkCloud.Notifications do
             {:error, :recipient_not_member}
 
           true ->
-            result = Transactional.deliver_test(recipient)
+            # cch-w40-bl: the send itself is UNCHANGED — `Transactional` rides
+            # the platform `Mailer` with no override, exactly as it did, and
+            # deliberately so (probing an unverified team relay inside a request
+            # can hang it). What changed is that the mail now SAYS which carrier
+            # it exercised, and `settings.transport` is handed over purely so the
+            # body can add that the team's SELECTED carrier is not that one. This
+            # is the only place in this clause that reads `transport`, and it is
+            # read for copy, never for routing.
+            result =
+              Transactional.deliver_test(recipient, selected_transport: settings.transport)
+
             _ = stamp_test_sent(settings)
             record_delivery(settings.team_id, recipient, "test", "transactional", result)
             result
