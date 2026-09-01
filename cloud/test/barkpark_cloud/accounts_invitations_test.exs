@@ -46,6 +46,36 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
     {user, team}
   end
 
+  # Put an OFF-LADDER role string straight into `team_memberships.role`.
+  # `TeamMembership.changeset/2` refuses it (`validate_inclusion` against
+  # `@roles`); the DATABASE does not — no migration puts a CHECK on that column,
+  # proven independently by `Accounts.RoleAgreementCensusTest`'s "an off-ladder
+  # role string really persists". Writing it HERE, past the changeset, is what
+  # makes the assertions that use it independent of `validate_inclusion` ever
+  # having run: the guard under test must hold on a row the changeset would
+  # never have produced.
+  defp off_ladder!(team, user, role) do
+    refute role in TeamMembership.roles(),
+           "off_ladder!/3 was handed #{inspect(role)}, which the changeset ACCEPTS — " <>
+             "the caller would no longer be measuring the off-ladder branch"
+
+    {1, _} =
+      Repo.update_all(
+        from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
+        set: [role: role]
+      )
+
+    # Non-vacuity: if a CHECK constraint ever guards the column, the write stops
+    # landing and every off-ladder assertion below would pass for the wrong
+    # reason. Asserted through `match?/2` so the message is live — a bare
+    # `assert pattern = expr, msg` raises MatchError before assert/2 can speak.
+    assert match?(%TeamMembership{role: ^role}, Accounts.get_membership(team, user)),
+           "the off-ladder write did not survive — `team_memberships.role` now refuses " <>
+             "#{inspect(role)}, so this test is vacuous and must be re-cut"
+
+    :ok
+  end
+
   describe "team_role/2 + team_admin?/2" do
     test "reports the held role and admin status; nil/false for a non-member" do
       {owner, team} = owned_team()
@@ -341,6 +371,78 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
 
       assert {:ok, :removed} = Accounts.remove_member_as("owner", team, owner2)
       assert {:error, :last_owner} = Accounts.remove_member_as("owner", team, owner1)
+    end
+  end
+
+  describe "remove_member_as/3 carries its OWN actor tier (cch-w44)" do
+    # WHAT WAS WRONG, said as a mechanism rather than a diff: the guard was
+    # `actor_role == "owner" or outranks?(actor_role, target_role)`, and
+    # `TeamMembership.rank/1` answers 0 for a role it does not know. So an
+    # off-ladder TARGET sits BELOW everyone, `outranks?("member", "superadmin")`
+    # is `1 > 0` = true, and a plain MEMBER was accepted as the remover. Nothing
+    # in `remove_member_as/3` refused them — the only thing that did was
+    # `with_team_role(conn, "admin", …)` at the single call site
+    # (`Web.Router`'s `delete "/v1/teams/:id/members/:user_id"`). The safety held
+    # only in COMPOSITION, so the context function was not safe to call from
+    # anywhere else, and the two tests above never saw it: both act as an
+    # {admin, owner} actor on an ON-LADDER target, so the off-ladder branch was
+    # unreachable from their fixtures — vacuous-by-fixture, not by assertion.
+    #
+    # The remedy is on the ACTOR side (`TeamMembership.admin?/1`), NOT a
+    # fail-closed `rank/1`. Fail-closing the ladder would have flipped
+    # (admin, off-ladder) to a REFUSAL and broken two callers that rely on
+    # off-ladder ranking 0 to fail CLOSED already — `Web.Auth.require_team_role/3`
+    # and `Authz.can_grant?/3`, both of which compare an actor rank UPWARD
+    # against a threshold. This mirrors the tier floor `update_member_role_as/4`
+    # already has via `Authz.can_grant?/3`; it restores symmetry between the two
+    # member verbs rather than inventing a rule.
+
+    test "a MEMBER cannot remove an off-ladder target — and this holds with NO route in front" do
+      {_owner, team} = owned_team()
+      stray = user_fixture()
+      {:ok, _} = Accounts.add_member(team, stray, "member")
+      off_ladder!(team, stray, "superadmin")
+
+      # COMPOSITION-INDEPENDENCE, proven directly: no Plug, no Router, no
+      # `with_team_role/3`, no changeset. The context function is called on its
+      # own, which is the whole point of the row — if this refusal ever depends
+      # again on a gate that ran earlier, this assertion reds.
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, stray)
+
+      # THE GUARD ON THE GUARD — do not delete this line. The refusal above must
+      # be bought on the ACTOR side only. cch-w42-s3 pins the console mirror's
+      # "admin acting on an OFF-LADDER row" cell to Remove-OFFERED
+      # (`cloud/priv/static/__app.test.mjs`, `MEMBER_AUTHORITY_MATRIX`), because
+      # hiding a control the server accepts is a FALSE REFUSAL — this epic's
+      # failure class running backwards. If someone "hardens" `rank/1` or
+      # `outranks?/2` to fail closed on an unknown role, THIS line reds and the
+      # mirror cell stops being a lie by accident.
+      assert {:ok, :removed} = Accounts.remove_member_as("admin", team, stray)
+    end
+
+    test "the owner escape hatch survives the new tier floor (D462)" do
+      # D462 forbids collapsing this verb onto the rank ladder. `admin?/1` is a
+      # CONJUNCT in front of the existing disjunction, never a replacement for
+      # the hatch: an owner still removes a peer owner, which strict `>` alone
+      # would refuse.
+      {_owner1, team} = owned_team()
+      owner2 = user_fixture()
+      {:ok, _} = Accounts.add_member(team, owner2, "owner")
+
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, owner2)
+    end
+
+    test "an OFF-LADDER ACTOR is refused on every target" do
+      # Green before the fix as well as after — a PIN, not a red. It states the
+      # half of the ladder's softness that was always correct: an unknown actor
+      # role ranks 0, so it outranks nobody and matches no hatch. `admin?/1`
+      # keeps it that way instead of relying on `>` to.
+      {owner, team} = owned_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:error, :forbidden} = Accounts.remove_member_as("superadmin", team, member)
+      assert {:error, :forbidden} = Accounts.remove_member_as("superadmin", team, owner)
     end
   end
 

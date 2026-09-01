@@ -1795,11 +1795,28 @@ defmodule BarkparkCloud.Accounts do
 
   @doc """
   Remove `target` from `team`, AUTHORIZED by an actor holding `actor_role`. The
-  anti-escalation sibling of `remove_member/2`: an OWNER may remove any peer
-  (including another owner, while `owner_count > 1`); an ADMIN may remove only
-  someone they strictly OUTRANK (i.e. a member, never an admin/owner). An
-  authority miss is `{:error, :forbidden}`. Last-owner + not-found are preserved
-  (delegated to `remove_member/2`). The route threads `current_team_role` here.
+  anti-escalation sibling of `remove_member/2`, and it is SELF-SUFFICIENT — it
+  does not assume a route gate ran first:
+
+    * the actor must hold an admin-or-higher grant (`TeamMembership.admin?/1`),
+      AND
+    * an OWNER may then remove any peer (including another owner, while
+      `owner_count > 1`), while an ADMIN may remove only someone they strictly
+      OUTRANK (a member, never an admin/owner).
+
+  The first clause is not redundant with the second. `TeamMembership.rank/1`
+  returns 0 for a role it does not know, and `team_memberships.role` has NO
+  CHECK constraint, so an off-ladder string in that column ranks BELOW everyone
+  — which made `outranks?("member", "superadmin")` true and let a plain member
+  remove such a row. Before cch-w44 the only thing refusing that was
+  `with_team_role(conn, "admin", …)` at the single call site, i.e. the safety
+  held only in composition. The floor is on the ACTOR side on purpose: an
+  off-ladder TARGET is still removable by an admin, which
+  `cloud/priv/static/__app.test.mjs` (cch-w42-s3) pins the console to offer.
+
+  An authority miss is `{:error, :forbidden}`. Last-owner + not-found are
+  preserved (delegated to `remove_member/2`). The route threads
+  `current_team_role` here.
   """
   @spec remove_member_as(String.t(), Team.t(), User.t()) ::
           {:ok, :removed} | {:error, :forbidden | :not_found | :last_owner}
@@ -1810,7 +1827,25 @@ defmodule BarkparkCloud.Accounts do
         {:error, :not_found}
 
       %TeamMembership{role: target_role} ->
-        if actor_role == "owner" or TeamMembership.outranks?(actor_role, target_role) do
+        # THE ACTOR TIER IS A CONJUNCT, and it has to be one: the rank ladder
+        # answers 0 for a role it does not know, so an OFF-LADDER target sits
+        # below everyone and `outranks?("member", "superadmin")` is `1 > 0` —
+        # true. Without `admin?/1` a plain MEMBER was accepted as the remover,
+        # and the only thing refusing them was `with_team_role(conn, "admin", …)`
+        # at the single call site. That made the safety a property of the
+        # COMPOSITION, not of this function, so calling it from anywhere else
+        # was unsafe. `update_member_role_as/4` has had this floor all along via
+        # `Authz.can_grant?/3` (its `not team_admin?` arm); this restores the
+        # symmetry between the two member verbs rather than inventing a rule.
+        #
+        # DELIBERATELY NOT a fail-closed `rank/1`. Hardening the ladder would
+        # flip (admin, off-ladder) from accept to refuse — a FALSE REFUSAL that
+        # `cloud/priv/static/__app.test.mjs`'s `MEMBER_AUTHORITY_MATRIX` pins
+        # against (cch-w42-s3) — and would break `Web.Auth.require_team_role/3`
+        # and `Authz.can_grant?/3`, both of which are fail-closed TODAY precisely
+        # because an unknown ACTOR role ranks 0. The floor belongs on the actor.
+        if TeamMembership.admin?(actor_role) and
+             (actor_role == "owner" or TeamMembership.outranks?(actor_role, target_role)) do
           remove_member(team, target)
         else
           {:error, :forbidden}
