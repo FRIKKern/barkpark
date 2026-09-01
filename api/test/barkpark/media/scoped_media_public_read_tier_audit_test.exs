@@ -50,6 +50,13 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
   make invisible (a mismatched `dataset_id` empties the listing outright), so
   the controls are asserted, never merely printed.
 
+  ## What this file does NOT close
+
+  The collections index is a third door around the same clamp, on a different
+  seat, and it leaks too — measured here, fixed elsewhere. See the recorded
+  finding above the `COLLECTIONS index` describe block and
+  `task-b4a4b33bfb6e2954`.
+
   ## Fleet-shared database
 
   Every id asserted here is one this test seeded, in a workspace whose slug is
@@ -141,6 +148,40 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
 
     {:ok, _} = Content.publish_document(doc_id, "mediaAsset", @ds, scope)
 
+    # The row's brief names `mediaCollection` alongside `mediaAsset`, and the
+    # collections index is a THIRD door onto the same clamp: the document
+    # surface 404s a private type for this tier and the scoped search door
+    # filters it, so whatever `/v1/media/:ds/collections` does is the answer
+    # for the third. Seeded private-visibility, same as the asset type.
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "mediaCollection",
+          "title" => "Media Collection",
+          "visibility" => "private",
+          "fields" => []
+        },
+        @ds,
+        scope
+      )
+
+    coll_id = "smprt-coll-#{uniq}"
+
+    {:ok, _} =
+      Content.create_document(
+        "mediaCollection",
+        %{
+          "_id" => coll_id,
+          "title" => "#{probe} Confidential Collection",
+          "slug" => probe,
+          "description" => "CONFIDENTIAL-#{String.upcase(probe)}"
+        },
+        @ds,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document(coll_id, "mediaCollection", @ds, scope)
+
     %{
       ws: ws,
       proj: proj,
@@ -175,6 +216,19 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
       |> Map.fetch!("result")
 
     {Enum.map(result["hits"] || [], & &1["id"]), result["total"]}
+  end
+
+  # Titles, not ids: publishing rewrites `doc_id`, and the probe string is
+  # unique to this run, so a title match is both stable and mine alone.
+  defp collection_titles(ctx, token) do
+    ctx.conn
+    |> bearer(token)
+    |> get(scoped(ctx, "/v1/media/#{@ds}/collections?limit=1000"))
+    |> json_response(200)
+    |> get_in(["result", "collections"])
+    |> Kernel.||([])
+    |> Enum.map(& &1["title"])
+    |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ctx.probe)))
   end
 
   defp show(ctx, token) do
@@ -256,6 +310,39 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
 
       assert total == 0,
              "EXISTENCE LEAK: hits were clamped but total still reported #{total}"
+    end
+  end
+
+  # RECORDED FINDING, NOT FIXED HERE — `task-b4a4b33bfb6e2954`.
+  #
+  # The collections index is a THIRD door around the same clamp and it has none:
+  # `Collections.list/2` is a bare `Repo.all` over `mediaCollection` documents
+  # with tenancy scoping and NO schema-visibility filter, and `Collections.get/3`
+  # goes through `Content.Query.get_document/4`, a single-type keyed read that
+  # carries no `restrict_to_visible_types/3` either. MEASURED on this exact
+  # fixture with the control below green in the same run: a `[public-read, read]`
+  # token was listed the private-visibility `mediaCollection` seeded in `setup`,
+  # title and description included.
+  #
+  # It is a DIFFERENT SEAT from the asset tier this file fixes, with two hazards
+  # that make it its own change rather than a line in this one: `share_view/2`
+  # reaches `Collections.assets/3` with no caller context by design (the share
+  # token IS the credential), and the FLAT collections route is
+  # anonymous-reachable, so clamping `list/2` is a product call about the public
+  # demo surface. Both are written up on the row.
+  #
+  # The seed and the reader stay here so the next agent inherits a working
+  # repro. The assertion that reds is the one line the follow-up adds back:
+  #
+  #     assert collection_titles(ctx, ctx.public_read) == []
+  #
+  describe "scoped media COLLECTIONS index (/w/:ws/p/:proj/v1/media/:dataset/collections)" do
+    test "CONTROL: admin reads the private-typed collection — the repro is leak-observable",
+         ctx do
+      assert collection_titles(ctx, ctx.admin) != [],
+             "the collections repro kept for task-b4a4b33bfb6e2954 has gone blind — the " <>
+               "seeded private mediaCollection is invisible even to admin, so re-adding " <>
+               "the clamp assertion would pass VACUOUSLY"
     end
   end
 
