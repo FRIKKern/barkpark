@@ -223,7 +223,10 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
     # type + disposition into the presigned query (response-content-*), so a
     # bucket-served attachment carries the identical stored-XSS headers the
     # local send_file path sets below.
-    case Barkpark.Media.Blobstore.serve_strategy(file.path,
+    # ROW-ADDRESSED (task-8eb6542ece62aff1) — the outsider-held ticket key is a
+    # principal for ONE stamped blob row; resolve that row's own object, never a
+    # colliding flat path's. Same seal as MediaController.serve/2.
+    case Barkpark.Media.Blobstore.serve_strategy(file,
            response_content_type: MediaFile.serve_content_type(mime),
            response_content_disposition: disposition(file, mime)
          ) do

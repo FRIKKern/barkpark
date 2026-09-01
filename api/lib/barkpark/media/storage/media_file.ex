@@ -8,6 +8,16 @@ defmodule Barkpark.Media.Storage.MediaFile do
     field :filename, :string
     field :original_name, :string
     field :path, :string
+
+    # THE OBJECT ADDRESS (task-8eb6542ece62aff1). `path` is the PUBLISHED
+    # REFERENCE — the literal string documents persist as `/media/files/<path>`
+    # — while this is where THIS ROW's bytes actually live. They are equal for
+    # every uncontested row; they diverge only when another tenant already held
+    # the flat path, which is exactly the cross-tenant read substitution.
+    # Stamped once by `put_object_key/1` below, never recomputed. Owner:
+    # `Barkpark.Media.Storage.ObjectKey`.
+    field :object_key, :string
+
     field :mime_type, :string
     field :size, :integer
     field :dataset, :string, default: "production"
@@ -39,6 +49,7 @@ defmodule Barkpark.Media.Storage.MediaFile do
     ])
     |> validate_required([:filename, :original_name, :path])
     |> neutralize_dangerous_mime()
+    |> put_object_key()
     # W2 uniqueness flip: blob identity is now (path, dataset_id). The `dataset`
     # STRING constraint is dropped at the DB level; the string stays as a mirror.
     |> unique_constraint([:path, :dataset_id],
@@ -53,6 +64,36 @@ defmodule Barkpark.Media.Storage.MediaFile do
     |> foreign_key_constraint(:workspace_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:dataset_id)
+  end
+
+  # THE OBJECT ADDRESS IS DECIDED ONCE, AT INSERT (task-8eb6542ece62aff1).
+  #
+  # `object_key` is deliberately NOT in the `cast/3` list: no caller may name
+  # the object another row's bytes live in. It is derived server-side from the
+  # row's own `(path, dataset_id)` by `ObjectKey.derive/3`.
+  #
+  # `prepare_changes/2` rather than a plain step, because the derivation needs a
+  # Repo (it asks whether any row already holds this flat path) and must see the
+  # row set INSIDE the insert's own transaction. Insert-only: `path` is a
+  # published reference and is never updated, so an UPDATE keeps whatever
+  # address the row was born with — re-deriving on update is exactly the
+  # set-dependent move the moduledoc of `ObjectKey` rules out.
+  defp put_object_key(changeset) do
+    prepare_changes(changeset, fn prepared ->
+      if prepared.action == :insert and is_nil(get_field(prepared, :object_key)) do
+        put_change(
+          prepared,
+          :object_key,
+          Barkpark.Media.Storage.ObjectKey.derive(
+            prepared.repo,
+            get_field(prepared, :path),
+            get_field(prepared, :dataset_id)
+          )
+        )
+      else
+        prepared
+      end
+    end)
   end
 
   # MIME types the browser will execute (script) if it navigates to the blob on

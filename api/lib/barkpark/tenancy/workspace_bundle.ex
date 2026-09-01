@@ -1460,16 +1460,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   # ── Cross-tenant blob-path refusal (task-918106d49c62563e) ──────────────────
   #
-  # THE FAILURE MODE. The blob keyspace is FLAT: `Blobstore` resolves an object
-  # by the very string `media_files.path` holds (`Media.serve/2` →
-  # `Blobstore.serve_strategy(file.path)`), while `media_files` uniqueness is
-  # `(path, dataset_id)` — NOT path alone. Two workspaces can therefore hold a
-  # row at ONE path, and the loser's OWN scoped
-  # `GET /w/:ws/p/:proj/media/files/*path` answers 200 carrying the winner's
-  # bytes: a silent, cross-tenant, read-side substitution. `Media`'s
-  # `authorize_blob_key/2` is a WRITE-side predicate and structurally cannot
-  # close it — worse, it is what makes the state UNREPAIRABLE, because the
-  # loser's push to its own row's path is refused `:blob_key_not_owned`.
+  # THE FAILURE MODE, AS IT WAS. The blob keyspace was FLAT: `Blobstore`
+  # resolved an object by the very string `media_files.path` holds
+  # (`Media.serve/2` → `Blobstore.serve_strategy(file.path)`), while
+  # `media_files` uniqueness is `(path, dataset_id)` — NOT path alone. Two
+  # workspaces could therefore hold a row at ONE path, and the loser's OWN
+  # scoped `GET /w/:ws/p/:proj/media/files/*path` answered 200 carrying the
+  # winner's bytes: a silent, cross-tenant, read-side substitution.
+  #
+  # THE READ IS NOW SEALED (task-8eb6542ece62aff1) — read this refusal as
+  # defence in depth, not as the only wall. `media_files.object_key` holds each
+  # row's own object address and every byte-resolving consumer goes through
+  # `Barkpark.Media.Storage.ObjectKey.for_row/1`, so a flat path resolves only
+  # within the tenant whose row matched. `authorize_blob_key/2` also stopped
+  # being a wedge: a second claimant's push now lands at its OWN address instead
+  # of being refused `:blob_key_not_owned`. Refusing the COPY here is still
+  # right — it keeps the contested state from being constructed at all, which is
+  # cheaper than resolving it — but it is no longer load-bearing for the read.
   #
   # WHY THE IMPORT. Import paths are copied VERBATIM from the source instance,
   # so a bundle whose media paths already belong to a resident workspace
