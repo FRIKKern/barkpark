@@ -80,37 +80,72 @@ defmodule Barkpark.StudioChat.StreamSegments do
   deliberately absent: the text and block terms are off-heap refc binaries, so a
   holder of 2,354,954 B reports 2,648 B on-heap.
 
-  ### The byte cap is ALSO a LATENCY bound, not only a memory policy
+  ### The byte cap is a LATENCY bound, and it sits BELOW the converter's knee
 
   `settle/2` parses the whole turn in ONE `handle_info`, so the cap is what
-  bounds how long the Recorder — the hottest persistence process — can block:
+  bounds how long the Recorder — the hottest persistence process — can block.
+  That parse is SUPERLINEAR, so the cap cannot be chosen as a memory number and
+  read as a latency one; the two disagree by an order of magnitude:
 
-      turn size    settle/2 blocks for
-      ---------    -------------------
-      12 KiB       6.0 ms      (a realistic reply)
-      64 KiB       49.0 ms
-      256 KiB      1478.6 ms   (AT the cap)
+      turn size    settle/2 blocks for   ms per KiB
+      ---------    -------------------   ----------
+       16 KiB        38 ms                 2.4
+       32 KiB        63 ms                 2.0
+       64 KiB       116 ms                 1.8
+      128 KiB       298 ms                 2.3   <- the cap
+      192 KiB       881 ms                 4.6
+      256 KiB      1604 ms                 6.3   <- the old cap
 
-  Measured on this tree; an independent reviewer measured 320.7 ms at the cap on
-  different hardware, so treat the cap-case figure as machine-dependent and
-  O(100 ms)-to-O(1 s), not as a single constant. Either way it is bounded, it
-  happens once per assistant frame, and realistic replies stay in single-digit
-  to tens of milliseconds. It also confirms `stable_snapshot_timeout_ms` (250 ms)
-  is correctly sized: a mid-turn attach landing during a cap-sized settle times
-  out and degrades to the plain floor rather than queueing behind it.
+  Single-shot on a LOADED shared box (load average 58). Min-of-5 on the same
+  box reads 157 ms at 128 KiB and 1565 ms at 256 KiB — the same 10x, and the
+  numbers `stream_segments_test.exs` asserts the ratio of.
+
+  Roughly linear to 128 KiB, then a KNEE: 2x the input past it costs ~5x the
+  time. Do NOT restate this as a single constant or as hardware variance — both
+  were tried and both were wrong (mobile charter D64). The numbers above were
+  taken on a LOADED shared box, so read the RATIOS, not the milliseconds; on an
+  idle box the same curve reads ~0.93 ms/KiB flat to 64 KiB and 1025 ms at
+  192 KiB. Either box shows the same knee in the same place.
+
+  ROOT CAUSE, and why it is not fixed here. It is not our code and not
+  `FromMarkdown` — the mapping over the AST is linear, and D61's
+  `List.starts_with?` self-check over 3,639 blocks costs 0.1 ms. It is
+  `EarmarkParser.Context._prepend/2`, which does
+  `List.flatten([block | accumulated])` ONCE PER TOP-LEVEL BLOCK: quadratic in
+  block count, and `lists:do_flatten/2` is 56% of the profile (6,292,361 calls
+  for a 7,085-block document). Still present in earmark_parser 1.4.46, the
+  latest release. Removing it means forking a markdown parser, so this module
+  does the thing it CAN do: keep the cap on the near side of the knee.
+
+  So the cap is 131,072 (128 KiB), set by LATENCY and not by memory — the memory
+  argument alone would have allowed 256 KiB. Halving the cap cuts the worst-case
+  Recorder stall ~5x rather than 2x, exactly because the curve is superlinear,
+  and 128 KiB still sits an order of magnitude above every realistic reply
+  (4-12 KB, i.e. single-digit to tens of ms).
+
+  ONE CONSEQUENCE, named rather than discovered. At the old cap a cap-sized
+  settle (~1.1-1.6 s) far exceeded `stable_snapshot_timeout_ms` (250 ms), so a
+  mid-turn attach during one reliably timed out and degraded to the plain floor.
+  At 128 KiB it is 157 ms — UNDER that timeout — so such an attach now queues
+  and succeeds instead. That is better for the client (it gets its snapshot) but
+  it IS a behaviour change, and it is why the timeout stays at 250 ms rather
+  than being tightened alongside the cap: tightening both would re-open the
+  degrade this closes.
   """
 
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.StudioChat.StreamTail
 
-  # (a) MEMORY policy, not a liveness device: a 1 MiB turn measures 2,354,954 B
-  # resident server-side and 2,203,964 B of segment JSON per client, so 256 KiB
-  # prices one in-flight turn at ~617 KiB server / ~460 KB device — above every
-  # realistic reply. This is a SEPARATE key from StreamTail's
-  # `:max_streaming_display_bytes` (1 MiB) ON PURPOSE: that one governs the
-  # LiveView bubble, which this wave must not change (D63 "two holders, one
-  # law"). Ours is strictly tighter, so it always fires first.
-  @default_max_stream_display_bytes 262_144
+  # (a) A LATENCY policy first and a memory policy second — the binding number is
+  # the settle knee documented above, not the footprint. Memory alone would have
+  # allowed 256 KiB (a 1 MiB turn measures 2,354,954 B resident server-side and
+  # 2,203,964 B of segment JSON per client, so 128 KiB prices one in-flight turn
+  # at ~308 KiB server / ~230 KB device); latency does not, because the
+  # converter's cost per KiB triples between 128 and 256 KiB. This is a SEPARATE
+  # key from StreamTail's `:max_streaming_display_bytes` (1 MiB) ON PURPOSE:
+  # that one governs the LiveView bubble, which this wave must not change (D63
+  # "two holders, one law"). Ours is strictly tighter, so it always fires first.
+  @default_max_stream_display_bytes 131_072
 
   # (b) Taste-free at the measured real rate of 2.11 text_delta frames/s: it
   # only bites under burst. A min-BYTES knob was rejected — the p50 segment
@@ -258,6 +293,22 @@ defmodule Barkpark.StudioChat.StreamSegments do
 
   def settle(state, durable_text) when is_binary(durable_text) do
     whole = normalize_newlines(durable_text)
+
+    # The latency bound lives on the PARSE, and `durable_text` is the one input
+    # to it `advance/3` never saw — its byte cap is checked against the
+    # ACCUMULATED DELTAS. The two are the same text in every lane today, so this
+    # arm is a backstop, not a live path; but a provider that persists more than
+    # it streamed would otherwise buy an UNBOUNDED parse inside the Recorder,
+    # which is the exact thing the cap exists to stop. Freeze the way `advance/3`
+    # freezes rather than parsing it to find out how big it was.
+    if byte_size(whole) > max_stream_display_bytes() do
+      terminate(state, "capped")
+    else
+      settle_within_bound(state, whole)
+    end
+  end
+
+  defp settle_within_bound(state, whole) do
     emitted = Enum.reverse(state.blocks)
 
     case whole_blocks(state, whole) do
