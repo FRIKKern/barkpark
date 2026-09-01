@@ -10,7 +10,7 @@ rollups: `Barkpark.Search.Crystallizer`.
 
 ## Design principles (do not break)
 
-1. **Intelligence stays in Postgres** — events, crystals, synonyms, merge patterns. No analytics in Typesense/Algolia even if an external retriever lands later (Phase 10).
+1. **Intelligence stays in Postgres** — events, crystals, synonyms, merge patterns. No analytics in the external retriever. Phase 10 landed (Indx) and this held: `Indx.Retriever` returns documents and records no events.
 2. **Surfaces stay thin** — adapters translate params; core owns rollups and improvement signals.
 3. **Search never blocks on analytics** — the record path must remain async-safe (Phase 9 makes this strict).
 4. **Every ranking change is measurable** — golden-query harness before/after (`mix search.eval`).
@@ -32,8 +32,9 @@ rollups: `Barkpark.Search.Crystallizer`.
 | **crystal** | Day/week/month aggregate | Popular query + filter fingerprint |
 | **merge pattern** | Refinement transition | `zero_to_hit`, `facet_add` |
 
-Schemas: `Barkpark.Search.{Event, Crystal, MergePattern, Synonyms}` (synonym map
-+ candidates, Phase 4).
+Schemas: `Barkpark.Search.{Event, Crystal, MergePattern, Synonym}` (synonym map
++ candidates, Phase 4). The plural `Barkpark.Search.Synonyms` is the CONTEXT module,
+not a schema — the Ecto schema over `search_synonyms` is the singular `Synonym`.
 
 ## Adapters
 
@@ -91,9 +92,10 @@ config :barkpark, :search_query_blocklist, ["custom", "blocked", "terms"]
 
 Phases 0–8 shipped: `QueryPipeline`, surface settings, golden eval
 (`mix search.eval`), federated `GET /w/:workspace_slug/p/:project_slug/v1/search/:dataset`
-(flat alias `GET /v1/search/:dataset`), shared `bp-search-intel.js`. Phases 9–10
-(scale + optional external retriever) are forward work — triggers in
-`ROADMAP.md`. Earlier phase-6–10 design notes were removed; recover from git history.
+(flat alias `GET /v1/search/:dataset`), shared `bp-search-intel.js`. Phase 10 also
+SHIPPED — `Barkpark.Plugins.Indx.Retriever` behind the `Barkpark.Search.Retriever`
+seam, `?engine=indx`. Only Phase 9 (Oban async record, RANGE partitions) is forward
+work — triggers in `ROADMAP.md`. Earlier phase-6–10 design notes were removed; recover from git history.
 
 ## Phase 7 admin runbook (synonym promotion)
 

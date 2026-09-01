@@ -45,7 +45,7 @@ RBAC hole and ships the invite path beta needs.
 
 Added:
 - `cloud/lib/barkpark_cloud/accounts/team_invitation.ex`
-- `cloud/priv/repo/migrations/20260629120000_create_team_invitations.exs`
+- `cloud/priv/repo/migrations/20260629120400_create_team_invitations.exs`
 - `cloud/test/barkpark_cloud/accounts_invitations_test.exs`
 - `cloud/test/barkpark_cloud/web/router_invitations_test.exs`
 
@@ -70,7 +70,7 @@ Once provisioned:
 
 ```bash
 cd cloud
-mix ecto.migrate          # applies 20260629120000_create_team_invitations
+mix ecto.migrate          # applies 20260629120400_create_team_invitations
 mix test test/barkpark_cloud/accounts_invitations_test.exs \
           test/barkpark_cloud/web/router_invitations_test.exs
 ```
@@ -91,5 +91,7 @@ with `Code.format_string!` (Ecto `locals_without_parens`).
    to team-scoped when tokens carry a `team_id`.
 4. **No expiry sweep** — expired invites are filtered out on every read (like
    Coolify), not actively purged. Rows are tiny and cascade-delete with the team.
-5. **No mailer / no SPA UI** — the accept URL is copy-paste only; the dashboard
-   Members view (consuming `/v1/me` `role`) is a documented follow-on.
+5. **No mailer / no SPA UI — both have since shipped.** The invite is emailed on
+   create (`send_invite_email/3` -> `Notifications.deliver_invite/1`), and the dashboard
+   Members panel exists in `cloud/priv/static/app.js`. The accept URL is no longer
+   copy-paste-only.

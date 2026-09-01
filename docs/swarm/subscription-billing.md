@@ -90,11 +90,13 @@ Everything runs through `StubGateway` — no network, no live Stripe keys. The
   provisioned in the worktree. Every touched file passes a pure-syntax parse;
   correctness is by-reading + the test suite above. `mix format` could not run
   (`import_deps :ecto` needs `mix deps.get`).
-- **Reconciliation sweep deferred.** Coolify's `SyncStripeSubscriptionsJob`
-  (nightly drift repair) is designed as an Oban `ReconcileWorker` but `cloud/`
-  has no Oban/cron substrate yet. Hand-rolling a GenServer timer was explicitly
-  rejected; this waits on `bp-scheduled-jobs`. Until then the webhook path is the
-  only reconciliation — the operational safety-net gap is real and flagged.
+- **Reconciliation sweep still deferred — but NOT for the reason recorded here.**
+  Coolify's `SyncStripeSubscriptionsJob` (nightly drift repair) is designed as an
+  Oban `ReconcileWorker`. `cloud/` DOES have an Oban/cron substrate now
+  (`{:oban, "~> 2.17"}`, an `{Oban, ...}` child, a live `Oban.Plugins.Cron` crontab,
+  14 workers under `cloud/lib/barkpark_cloud/workers/`); what is missing is a
+  `ReconcileWorker` written against it. Until one is, the webhook path is the only
+  reconciliation — the operational safety-net gap is real and flagged.
 - **Agent-side enforcement is advisory for beta.** Suspension is authoritative at
   the control plane (dashboard surfaces it; `entitled?/1` blocks re-launch). The
   on-box agent reading `suspended` to stop serving is a thin follow-up that
