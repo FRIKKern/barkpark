@@ -74,14 +74,21 @@ name: pr-task-gate
 #     on a conflicted PR must read as "not satisfied", not as a passing/absent
 #     check. A required context that never renders reports `is expected.`
 #     forever, which is a DEADLOCK — hence no paths filter below, ever.
-#   * The emergency lane is NOT a way past a red on a genuinely urgent PR while
-#     its write token is unprovisioned — it reds. It must still actually engage
-#     (the `labeled` trigger) and must still leave a record (the
-#     `hotfix_record` step's hard failure), because the day the token exists the
-#     record is what makes the bypass legitimate. The escape that is armed today
-#     is admin break-glass: `scripts/breakglass.sh --open/--close`, which writes
-#     an attributable record to `docs/ops/break-glass-log.md` and is watched by
-#     `breakglass-watch.yml` (BREAKGLASS_TOKEN). See merge-gates.md.
+#   * The emergency lane must still actually engage (the `labeled` trigger) and
+#     must still leave a record (the `hotfix_record` step's hard failure),
+#     because the record is what makes the bypass legitimate rather than a
+#     silent skip. THAT DAY HAS ARRIVED: this bullet used to add "while its
+#     write token is unprovisioned — it reds", and reasoned about "the day the
+#     token exists" in the future tense. The token was provisioned 2026-08-25,
+#     so the hotfix lane is ARMED and its record is now the live condition of
+#     the bypass, exactly as designed.
+#     TWO escapes are armed today, and they are not interchangeable: the
+#     `hotfix!` label (records an override task on the ledger — so it cannot
+#     complete during a LEDGER outage), and admin break-glass
+#     `scripts/breakglass.sh --open/--close` (writes an attributable record to
+#     `docs/ops/break-glass-log.md`, watched by `breakglass-watch.yml` via
+#     BREAKGLASS_TOKEN — the one that still works when the ledger is down).
+#     See merge-gates.md.
 
 on:
   pull_request:
