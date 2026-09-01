@@ -487,6 +487,21 @@ func commitCell(b cloudclient.Barkpark) string {
 	if sha == "" {
 		return commitDistanceUnmetered
 	}
+	// dr-w22-bl SINCE WHEN, appended only when the plane MEASURED it. The sha
+	// alone answers "what is it running"; the operator's next question is always
+	// "since when", and until this the only place to get that was
+	// `GET /v1/barkparks/:id/events` — require_user, 200 rows a page, about
+	// three hours of a fourteen-day history.
+	//
+	// A SUFFIX AND NOT A COLUMN, on purpose. An empty first-seen is the NORMAL
+	// reading for a box that has not changed sha since the plane grew the column,
+	// so a dedicated column would print UNMETERED down its whole length on a
+	// perfectly healthy fleet and teach the reader to ignore the word. Absent
+	// here simply means the cell is the bare sha it has always been — the older-CP
+	// render, byte-identical, which is also what a plane that omits the key gets.
+	if since := strings.TrimSpace(b.GitCommitFirstSeenAt); since != "" {
+		return sanitizeCell(shortSha(sha) + " (since " + relativeAge(since) + ")")
+	}
 	return sanitizeCell(shortSha(sha))
 }
 
@@ -956,6 +971,24 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// sitting beside one that does, would read as freshness. If it is ever
 		// wanted it ships as `agent_version`, named for what it is.
 		"git_commit": r.BP.GitCommit,
+		// dr-w22-bl: SINCE WHEN the box has served that sha, RFC3339, ALWAYS
+		// present (empty string when the plane never observed the transition) —
+		// the same honesty rule `git_commit` itself follows one line above. A
+		// script must be able to tell "the plane has no first-appearance for this
+		// box" from "this CLI never asked", and an absent key cannot say that.
+		//
+		// The number it replaces reaching for: the `(sha, first_seen)` history has
+		// existed in `agent_events` for 14 days all along (measured on prod
+		// 2026-09-01: 132,120 rows, 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z),
+		// but its only reader is `GET /v1/barkparks/:id/events` — `require_user`,
+		// 200 rows a page, ~3h of it. This key rides the fleet list every PAT
+		// holder already reads.
+		//
+		// EMPTY IS UNMEASURED, NEVER "just now". Two honest populations read
+		// empty: a box that has not changed sha since the column shipped, and a
+		// box whose stored sha was blank when a sha first arrived (that commit may
+		// have been running long before the first beat carrying it reached us).
+		"git_commit_first_seen_at": r.BP.GitCommitFirstSeenAt,
 		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
 		// rate-as-itself — the json render where the three states stay three.
 		"err_5xx":                err5xxRow(r.BP),

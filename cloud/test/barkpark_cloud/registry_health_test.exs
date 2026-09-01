@@ -186,6 +186,125 @@ defmodule BarkparkCloud.RegistryHealthTest do
     end
   end
 
+  # dr-w22-bl — SINCE WHEN this box has served the sha it serves now.
+  #
+  # THE HOLE THIS CLOSES. The `(sha, first_seen)` history already existed:
+  # every 60 s beat is inserted append-only into `agent_events` with the FULL
+  # report (`git_commit` included) and AgentRetentionWorker keeps 14 days of it.
+  # MEASURED on prod 2026-09-01 — 132,120 rows, 2026-08-18T03:30:20Z ->
+  # 2026-09-01T23:19:22Z, and 7 completed AgentRetentionWorker jobs. But its
+  # only reader is `GET /v1/barkparks/:id/events`, which is `Auth.require_user`
+  # and caps a page at 200 rows: about three hours of a fourteen-day record,
+  # handed to a NARROWER caller than the `require_user_or_pat` fleet list.
+  #
+  # The stamp is deliberately conservative in both refusals, and the two REFUSAL
+  # tests below are the load-bearing half: a "first seen" that re-stamps every
+  # 60 s is a last-seen under a false name, and one that dates an unobserved
+  # transition reports a weeks-old commit as freshly deployed.
+  describe "record_agent_report/2 — git_commit_first_seen_at" do
+    defp beat(bp, sha) do
+      Registry.record_agent_report(bp, %{
+        health_status: "up",
+        agent_status: "online",
+        git_commit: sha,
+        last_seen_at: DateTime.truncate(DateTime.utc_now(), :microsecond)
+      })
+    end
+
+    test "the first beat carrying a DIFFERENT sha stamps the first-seen" do
+      team = subscribed_team()
+      bp = barkpark_fixture(team, %{agent_status: "online", git_commit: String.duplicate("a", 40)})
+      assert bp.git_commit_first_seen_at == nil
+
+      before = DateTime.utc_now()
+      assert {:ok, stamped} = beat(bp, String.duplicate("b", 40))
+
+      assert stamped.git_commit == String.duplicate("b", 40)
+      assert stamped.git_commit_first_seen_at != nil
+      # The stamp dates THIS beat, not some other instant.
+      assert DateTime.compare(stamped.git_commit_first_seen_at, before) in [:gt, :eq]
+      assert DateTime.compare(stamped.git_commit_first_seen_at, DateTime.utc_now()) in [:lt, :eq]
+    end
+
+    test "a SAME-sha beat does NOT re-stamp — a re-stamp would be last_seen under a false name" do
+      team = subscribed_team()
+      sha = String.duplicate("c", 40)
+      bp = barkpark_fixture(team, %{agent_status: "online", git_commit: String.duplicate("d", 40)})
+
+      assert {:ok, stamped} = beat(bp, sha)
+      first = stamped.git_commit_first_seen_at
+      assert first != nil
+
+      # Three more steady beats — the shape a healthy box has every 60 s.
+      assert {:ok, again} = beat(stamped, sha)
+      assert {:ok, again} = beat(again, sha)
+      assert {:ok, again} = beat(again, sha)
+
+      assert again.git_commit_first_seen_at == first
+    end
+
+    test "a box that has never been seen CHANGING sha reads nil — nil is UNMEASURED, never now" do
+      team = subscribed_team()
+      sha = String.duplicate("e", 40)
+      bp = barkpark_fixture(team, %{agent_status: "online", git_commit: sha})
+
+      assert {:ok, unchanged} = beat(bp, sha)
+      assert unchanged.git_commit == sha
+      assert unchanged.git_commit_first_seen_at == nil
+
+      # The SECOND refusal, and the subtler one: a row whose stored sha is blank
+      # (a fresh row, an offline agent, an agent predating `git_commit` in the
+      # report). The arriving commit may have been running for days before the
+      # first beat carrying it reached us, so the transition is not DATED — it is
+      # merely noticed. Stamping `now` here would report a weeks-old commit as
+      # freshly deployed, in a brand-new column, which is the exact unearned
+      # green this contract exists to refuse.
+      blank = barkpark_fixture(team, %{agent_status: "online"})
+      assert blank.git_commit in [nil, ""]
+      assert {:ok, first_ever} = beat(blank, sha)
+      assert first_ever.git_commit == sha
+      assert first_ever.git_commit_first_seen_at == nil
+    end
+
+    test "the column is SERVER-COMPUTED: a caller-supplied stamp is dropped, both spellings" do
+      team = subscribed_team()
+      team2 = subscribed_team()
+      forged = ~U[2001-01-01 00:00:00.000000Z]
+
+      # A beat that does NOT change the sha cannot smuggle a stamp in.
+      sha = String.duplicate("f", 40)
+      bp = barkpark_fixture(team, %{agent_status: "online", git_commit: sha})
+
+      assert {:ok, atom_key} =
+               Registry.record_agent_report(bp, %{
+                 health_status: "up",
+                 agent_status: "online",
+                 git_commit: sha,
+                 git_commit_first_seen_at: forged,
+                 last_seen_at: DateTime.truncate(DateTime.utc_now(), :microsecond)
+               })
+
+      assert atom_key.git_commit_first_seen_at == nil
+
+      # And a beat that DOES change the sha stamps the SERVER's instant over the
+      # forged one, not the forged one. String spelling, the shape a raw body
+      # would arrive in.
+      bp2 = barkpark_fixture(team2, %{agent_status: "online", git_commit: sha})
+
+      assert {:ok, string_key} =
+               Registry.record_agent_report(bp2, %{
+                 "health_status" => "up",
+                 "agent_status" => "online",
+                 "git_commit" => String.duplicate("9", 40),
+                 "git_commit_first_seen_at" => forged,
+                 "last_seen_at" => DateTime.truncate(DateTime.utc_now(), :microsecond)
+               })
+
+      assert string_key.git_commit_first_seen_at != nil
+      assert DateTime.compare(string_key.git_commit_first_seen_at, forged) == :gt
+    end
+  end
+
   describe "recent_events_for_team/3" do
     test "returns the instance's events newest-first for the owning team" do
       team = subscribed_team()
