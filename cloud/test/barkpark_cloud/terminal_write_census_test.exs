@@ -35,6 +35,10 @@ defmodule BarkparkCloud.TerminalWriteCensus.EpochThiefRelay do
     * `:steal` — WHEN the lease is stolen: `:start` (before the start reply) or
       `{:poll, n}` (before the n-th poll reply), or `nil` (never)
     * `:steal_from` — the deployment id whose `claim_epoch` is bumped
+    * `:steal_status` — an OPTIONAL status written by the same theft, so the
+      lease can be stolen BY a writer that also settled the row (a reaper sweep
+      plus a competing terminal write). Without it the theft moves only the
+      epoch. This is what makes the reconcile's status guard reachable.
   """
   def program(opts) do
     Process.put(@key, %{
@@ -43,6 +47,7 @@ defmodule BarkparkCloud.TerminalWriteCensus.EpochThiefRelay do
       rollback: Keyword.get(opts, :rollback, {:ok, 200, %{"status" => "rolled_back"}}),
       steal: Keyword.get(opts, :steal),
       steal_from: Keyword.get(opts, :steal_from),
+      steal_status: Keyword.get(opts, :steal_status),
       polls_seen: 0
     })
 
@@ -77,13 +82,15 @@ defmodule BarkparkCloud.TerminalWriteCensus.EpochThiefRelay do
   # driver's view" (every fenced write now loses) and the state a row is in after
   # its lease has been swept and re-claimed to the budget — the shape the reaper's
   # over-budget pass terminates.
-  defp maybe_steal(%{steal: when_to, steal_from: id}, now)
+  defp maybe_steal(%{steal: when_to, steal_from: id} = state, now)
        when now == when_to and is_binary(id) do
-    {1, _} =
-      Repo.update_all(
-        from(d in Deployment, where: d.id == ^id),
-        set: [claim_epoch: BarkparkCloud.Registry.max_deploy_claims()]
-      )
+    sets =
+      case state[:steal_status] do
+        nil -> [claim_epoch: BarkparkCloud.Registry.max_deploy_claims()]
+        status -> [claim_epoch: BarkparkCloud.Registry.max_deploy_claims(), status: status]
+      end
+
+    {1, _} = Repo.update_all(from(d in Deployment, where: d.id == ^id), set: sets)
 
     :ok
   end
@@ -112,20 +119,38 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
   > durable state reflects the terminal outcome, or a log line NAMES the
   > deployment whose terminal write was lost.
 
-  The disjunction is deliberate. This wave does NOT change a single return shape
-  (making `fail/2` answer `{:error, _}` would route through
+  The disjunction is deliberate. W27 itself changed NOT ONE return shape (making
+  `fail/2` answer `{:error, _}` would route through
   `AutoDeployWorker.start_and_report/2`'s "could not start the driver — retrying"
-  arm: a NEW mis-report plus an Oban retry of a build that did start), and it
-  does not fabricate a durable write the fence just refused. What it refuses is
+  arm: a NEW mis-report plus an Oban retry of a build that did start), and it did
+  not fabricate a durable write the fence had just refused. What it refuses is
   SILENCE.
+
+  ONE return shape has moved since, and only on ARM B's reconciled path
+  (`dr-w27-arm-b-serving-build-durable-repair`): `settle_live/2` answers
+  `{:ok, :live}` instead of `{:error, :stale_epoch}` once the reconcile has
+  landed. That is the SAFE direction through the same worker — `{:ok, :live}` is
+  a value `start_and_report/2` already accepts (its `outcome in [:live, :failed,
+  :deferred]` arm), where `{:error, _}` was the arm that logged "could not start
+  the driver" and made Oban retry a build that had already gone live. Arms A, C
+  and D are untouched: their returns are what they were.
 
     * ARM A — `fail/2` loses its fenced CAS: the row is not `failed`,
       `failure_reason` is nil, AND no failure alert fires either, because
       `maybe_dispatch_deployment_failed/2` lives inside the WON-CAS branch
       (`registry.ex:6754-6757`). The failure had no carrier at all.
-    * ARM B — `settle_live/2` loses its CAS on a build the box IS serving. The
-      row never goes live, the site pointer never flips, and the stale reaper
-      then terminally reports that SERVING build `failed`, blaming the lease.
+    * ARM B — `settle_live/2` loses its CAS on a build the box IS serving. THE
+      ONE ARM WITH A DURABLE HALF, since
+      `dr-w27-arm-b-serving-build-durable-repair`: the driver holds the box's own
+      SUCCEEDED report, so the refused write is re-attempted OUTSIDE the fence
+      under a row lock — the status walks `building → pushing → live` and the
+      site pointer flips — and the stale reaper, whose over-budget pass only
+      matches `building`, finds nothing left to terminate. Before that repair the
+      row never went live, the site pointer never flipped, and the reaper
+      terminally reported that SERVING build `failed`, blaming the lease. The
+      SPOKEN half survives as the RESIDUAL arm: when the reconcile is itself
+      refused (someone else already settled the row), W27's original sentence is
+      logged verbatim, reaper prediction and all.
     * ARM C — `finish_rollback/4` SKIPS the site-pointer write when `now_live` is
       nil and still answers 200.
     * ARM D — `defer/3` loses the deferral row entirely: the rebuild IS enqueued,
@@ -295,7 +320,14 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
   ## ARM B — settle_live/2 (deploy.ex:1127-1150)
   ## ---------------------------------------------------------------------------
 
-  test "ARM B: a settle_live/2 whose CAS is lost says the box IS serving this build — and the reaper then reports that serving build failed" do
+  # THE NAME THIS TEST CARRIED BEFORE dr-w27-arm-b-serving-build-durable-repair,
+  # kept here because it IS the fail-before: "ARM B: a settle_live/2 whose CAS is
+  # lost says the box IS serving this build — and the reaper then reports that
+  # serving build failed". Every assertion below that flipped is marked
+  # FAIL-BEFORE with what it used to say. The arm is EXTENDED, not replaced: the
+  # fixture, the theft, the log contract and the real-reaper drive are the same
+  # ones W27 wrote; what changed is the outcome they now pin.
+  test "ARM B: a settle_live/2 whose CAS is lost says the box IS serving this build — and the row is RECONCILED live, so the reaper has nothing to fail" do
     {bp, site} = setup_site()
     {:ok, d} = Deploy.enqueue(site, bp)
 
@@ -309,27 +341,45 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
       steal_from: d.id
     )
 
-    log = capture_log(fn -> assert {:error, :stale_epoch} = Deploy.run(d.id) end)
+    # FAIL-BEFORE: `assert {:error, :stale_epoch} = Deploy.run(d.id)`. THE ONE
+    # RETURN-SHAPE CHANGE in this repair, and it moves ONTO the healthy arm of
+    # `AutoDeployWorker.start_and_report/2` rather than off it: `{:error, _}`
+    # routed through "could not start the driver — retrying" and made Oban retry
+    # a build that had already gone live; `{:ok, :live}` is the value that arm
+    # already accepts for a synchronously-driven success.
+    log = capture_log(fn -> assert {:ok, :live} = Deploy.run(d.id) end)
 
     row = reload(d)
-    refute row.status == "live"
-    assert is_nil(row.became_live_at)
-    # The site still points nowhere: visitors are being served a build the
-    # control plane does not know is live.
-    assert is_nil(reload_site(site).current_deployment_id)
+    # FAIL-BEFORE: `refute row.status == "live"` / `assert is_nil(row.became_live_at)`.
+    assert row.status == "live"
+    refute is_nil(row.became_live_at)
+    # The walk went through SWITCH (`building → pushing → live`), so the row ends
+    # on the last stage the box actually ran rather than jumping an edge
+    # `Deployment.@transitions` does not have.
+    assert row.stage == "RETIRE"
 
+    # FAIL-BEFORE: `assert is_nil(reload_site(site).current_deployment_id)` — the
+    # site pointed nowhere and visitors were served a build the control plane did
+    # not know was live. Criterion 2 of the row: the pointer NAMES the build.
+    assert reload_site(site).current_deployment_id == d.id
+
+    # The spoken half is unchanged in shape and still names the lost write.
     assert log =~ d.id
     assert log =~ "could not be recorded"
     assert log =~ "is serving"
-    assert log =~ "never went live"
-    # The line must also name what happens NEXT, because that is the mis-report
-    # the operator will actually see (asserted for real below).
+    assert log =~ "RECONCILED live outside the fence"
+    # The line must also name what happens NEXT, because that is what the
+    # operator will actually see (asserted for real below).
     assert log =~ "reaper"
+    # …and it must NOT still predict the mis-report, which is the half of W27's
+    # sentence this repair made false. That prediction survives only on the
+    # residual arm (next test).
+    refute log =~ "never went live"
 
-    # WHAT HAPPENS WITHOUT THE LINE. The row is `building` with a claim_epoch at
-    # the budget and a lease nobody is renewing, so the stale reaper's
-    # over-budget pass terminates it — a SUCCESSFUL deploy, still serving, ends
-    # as a terminal `failed` row blaming the builder lease.
+    # THE MIS-REPORT ITSELF, driven against the REAL reaper. The row is stale
+    # with a claim_epoch at the budget and a lease nobody is renewing — the exact
+    # state that used to terminate it — but it is no longer `building`, and the
+    # reaper's over-budget pass is status-guarded, so it finds nothing.
     stale_at =
       DateTime.utc_now()
       |> DateTime.add(-(Registry.deployment_stale_after_seconds() + 60), :second)
@@ -337,11 +387,52 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
 
     Repo.update_all(from(x in Deployment, where: x.id == ^d.id), set: [claimed_at: stale_at])
 
-    assert {:ok, %{failed: 1, requeued: 0}} = perform_job(StaleDeploymentReaper, %{})
+    # FAIL-BEFORE: `assert {:ok, %{failed: 1, requeued: 0}} = perform_job(...)`.
+    assert {:ok, %{failed: 0, requeued: 0}} = perform_job(StaleDeploymentReaper, %{})
 
     reaped = reload(d)
-    assert reaped.status == "failed"
-    assert reaped.failure_reason == "exceeded max deploy claim attempts (stale builder lease)"
+    # FAIL-BEFORE: `assert reaped.status == "failed"` and
+    # `assert reaped.failure_reason == "exceeded max deploy claim attempts (stale builder lease)"`.
+    assert reaped.status == "live"
+    assert is_nil(reaped.failure_reason)
+    assert reload_site(site).current_deployment_id == d.id
+  end
+
+  # THE RESIDUAL ARM. The reconcile is guarded on the row's own status, so it can
+  # be refused — and when it is, W27's original sentence is the honest one and is
+  # logged verbatim, reaper prediction and all. This is the arm that proves the
+  # guard is a guard and not decoration: a row somebody else already settled is
+  # NOT resurrected by a zombie driver holding a stale epoch.
+  test "ARM B residual: a reconcile refused by an already-settled row leaves the row alone and keeps W27's sentence" do
+    {bp, site} = setup_site()
+    {:ok, d} = Deploy.enqueue(site, bp)
+
+    # The thief steals the lease AND settles the row terminally, exactly as a
+    # reaper sweep + a competing writer would.
+    EpochThiefRelay.program(
+      polls: [walk(~w(PLAN BUILD STAGE HEALTH)), walk(~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE))],
+      steal: {:poll, 2},
+      steal_from: d.id,
+      steal_status: "failed"
+    )
+
+    log = capture_log(fn -> assert {:error, :stale_epoch} = Deploy.run(d.id) end)
+
+    row = reload(d)
+    # The zombie did NOT trample the settled row.
+    assert row.status == "failed"
+    assert is_nil(row.became_live_at)
+    assert is_nil(reload_site(site).current_deployment_id)
+
+    # W27's sentence, whole, because on this arm every word of it is still true.
+    assert log =~ d.id
+    assert log =~ "could not be recorded"
+    assert log =~ "could not be reconciled"
+    assert log =~ "is serving"
+    assert log =~ "never went live"
+    assert log =~ "reaper"
+    # The refusal names WHY, so a residual is not silent about its own cause.
+    assert log =~ "already_settled"
   end
 
   ## ---------------------------------------------------------------------------

@@ -1197,35 +1197,152 @@ defmodule BarkparkCloud.Sites.Deploy do
            current_deployment_id: ctx.id
          }) do
       {:ok, _d} ->
-        # The box is serving these bytes now; the control plane's copy has done
-        # its job (charter D91). A terminal Deployment is never re-driven, so
-        # keeping it would leak up to 32 MB per build onto cloud_pgdata.
-        :ok = drop_artifact(ctx.id)
-        BarkparkCloud.Events.broadcast(ctx.site.team_id, "deployments")
-        {:ok, :live}
+        settled_live(ctx)
 
       {:error, reason} ->
-        # THE WORST LOSS ON THIS PATH (deploy-reliability W27). SWITCH has already
-        # happened ON THE BOX — the release IS serving — and this is the write
-        # that tells the control plane so. A refused fence leaves the row
-        # non-live with the site pointer unflipped, and because the row is still
-        # `building` with a lease nobody renews, the StaleDeploymentReaper's
-        # over-budget pass then settles that SERVING build `failed`, blaming
-        # "exceeded max deploy claim attempts (stale builder lease)". Reachable
-        # in prod: `deployment_stale_after_seconds` defaults to 15 minutes and
-        # `record_stage/2` only heartbeats on a stage TRANSITION, so a long BUILD
-        # lets the reaper move the row under a driver that is still running.
-        #
-        # The return shape is unchanged — this arm already answered
-        # `{:error, reason}` and its caller discards it. The repair is speech.
+        reconcile_serving(ctx, attrs, reason)
+    end
+  end
+
+  # The cleanup + push a settled-live row earns, WHICHEVER write landed it — the
+  # fenced one above or the reconcile below. The box is serving these bytes now;
+  # the control plane's copy has done its job (charter D91). A terminal Deployment
+  # is never re-driven (`live` has no outgoing edge in `Deployment.@transitions`),
+  # so keeping the artifact would leak up to 32 MB per build onto cloud_pgdata.
+  defp settled_live(ctx) do
+    :ok = drop_artifact(ctx.id)
+    BarkparkCloud.Events.broadcast(ctx.site.team_id, "deployments")
+    {:ok, :live}
+  end
+
+  # THE DURABLE HALF OF W27 ARM B (dr-w27-arm-b-serving-build-durable-repair).
+  #
+  # THE WORST LOSS ON THIS PATH. SWITCH has already happened ON THE BOX — the
+  # release IS serving — and the fenced write above is the one that tells the
+  # control plane so. A refused fence used to leave the row non-live with the site
+  # pointer unflipped, and because the row is still `building` with a lease nobody
+  # renews, `StaleDeploymentReaper`'s over-budget pass then settled that SERVING
+  # build `failed`, blaming "exceeded max deploy claim attempts (stale builder
+  # lease)" — a terminal failure row, and a wrong cause, on a deploy serving
+  # traffic. Reachable in prod: `deployment_stale_after_seconds` defaults to 15
+  # minutes and `record_stage/2` only heartbeats on a stage TRANSITION, so a long
+  # BUILD lets the reaper move the row under a driver that is still running.
+  #
+  # W27 made that OBSERVABLE (the log line below). This is the durable repair:
+  # RE-SETTLE FROM THE BOX'S OWN REPORT. The fence was right to refuse — the
+  # epoch moved, so this driver no longer owns the row — but the fence guards
+  # AUTHORSHIP, not TRUTH, and the truth here came from the box: it answered
+  # `succeeded` for this build id and is serving those bytes. So the write is
+  # re-attempted OUTSIDE the fence, under a row lock, with three guards that keep
+  # it from being the trampling the fence exists to stop:
+  #
+  #   1. STATUS. Only `building`/`pushing` reconcile — a row someone else already
+  #      settled (`live`, `failed`, `cancelled`, `deferred`) is left exactly as it
+  #      is. This never resurrects a terminal row.
+  #   2. THE TRANSITION GRAPH. `building → live` is not an edge, so the walk goes
+  #      through `pushing` with the SWITCH stage the box really ran, rather than
+  #      taking a shortcut the fenced writers are forbidden.
+  #   3. THE POINTER. `sites.current_deployment_id` moves only when it is nil, is
+  #      already this row, or names an OLDER deployment — a zombie must never drag
+  #      a site backwards onto a release the box has since replaced.
+  #
+  # NOT a reaper change and NOT a new column: the reaper's over-budget pass is
+  # correct as written (a genuinely wedged `building` row SHOULD terminate), and
+  # after this repair the ARM B row simply is not `building` when the sweep runs.
+  # NOT a public Registry function either — an unfenced live-write is only safe in
+  # the hand of a caller holding the box's own SUCCEEDED report, and this is the
+  # one such caller.
+  defp reconcile_serving(ctx, attrs, reason) do
+    case reconcile_serving_write(ctx, attrs) do
+      {:ok, _d} ->
         Logger.error(
           "site deploy settle-live for deployment #{ctx.id} (site #{ctx.site.slug}) " <>
             "could not be recorded (fenced write #{inspect(reason)}): the box is serving this build, " <>
+            "so the row was RECONCILED live outside the fence from the box's own report — " <>
+            "the row now says live and the site's live pointer names this deployment, and the " <>
+            "stale-deployment reaper has no building row left to terminally fail"
+        )
+
+        settled_live(ctx)
+
+      {:error, why} ->
+        # THE RESIDUAL, and it keeps W27's original sentence verbatim because in
+        # this arm every word of it is still true.
+        Logger.error(
+          "site deploy settle-live for deployment #{ctx.id} (site #{ctx.site.slug}) " <>
+            "could not be recorded (fenced write #{inspect(reason)}) and could not be reconciled " <>
+            "(#{inspect(why)}): the box is serving this build, " <>
             "but the row never went live and the site's live pointer was not flipped — " <>
             "the stale-deployment reaper will terminally report this serving build as failed, blaming the builder lease"
         )
 
         {:error, reason}
+    end
+  end
+
+  # The only statuses a driver's OWN row can hold when its SWITCH landed on the
+  # box. Everything else is somebody else's settled outcome.
+  @reconcilable_statuses ~w(building pushing)
+
+  defp reconcile_serving_write(ctx, attrs) do
+    Repo.transaction(fn ->
+      case Repo.one(from d in Deployment, where: d.id == ^ctx.id, lock: "FOR UPDATE") do
+        nil ->
+          Repo.rollback(:not_found)
+
+        %Deployment{status: status} = d when status in @reconcilable_statuses ->
+          with {:ok, d} <- walk_through_switch(d),
+               {:ok, d} <- d |> Deployment.transition_changeset(attrs) |> Repo.update(),
+               :ok <- point_site_at(ctx, d) do
+            d
+          else
+            {:error, why} -> Repo.rollback(why)
+          end
+
+        %Deployment{status: status} ->
+          Repo.rollback({:already_settled, status})
+      end
+    end)
+  end
+
+  # `Deployment.@transitions` has no `building → live` edge — the pipeline goes
+  # through `pushing` — and skipping it would be exactly the shortcut the fenced
+  # writers are refused. The box really did run SWITCH, so record that edge.
+  defp walk_through_switch(%Deployment{status: "building"} = d) do
+    d
+    |> Deployment.transition_changeset(%{status: "pushing", stage: @switch_stage})
+    |> Repo.update()
+  end
+
+  defp walk_through_switch(%Deployment{} = d), do: {:ok, d}
+
+  defp point_site_at(ctx, %Deployment{} = d) do
+    case Repo.one(from s in Site, where: s.id == ^ctx.site.id, lock: "FOR UPDATE") do
+      nil ->
+        {:error, :site_not_found}
+
+      %Site{} = site ->
+        if pointer_behind?(site, d) do
+          case site |> Site.runtime_changeset(%{current_deployment_id: d.id}) |> Repo.update() do
+            {:ok, _site} -> :ok
+            {:error, cs} -> {:error, cs}
+          end
+        else
+          # A NEWER build went live after this one: the box is serving THAT, and
+          # dragging the pointer back would be this same mis-report in reverse.
+          # The deployment row is still corrected; the pointer is left alone.
+          :ok
+        end
+    end
+  end
+
+  defp pointer_behind?(%Site{current_deployment_id: nil}, _d), do: true
+  defp pointer_behind?(%Site{current_deployment_id: id}, %Deployment{id: id}), do: true
+
+  defp pointer_behind?(%Site{current_deployment_id: id}, %Deployment{} = d) do
+    case Repo.get(Deployment, id) do
+      nil -> true
+      %Deployment{inserted_at: at} -> DateTime.compare(at, d.inserted_at) != :gt
     end
   end
 
