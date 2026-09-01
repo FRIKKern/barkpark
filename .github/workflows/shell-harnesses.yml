@@ -257,6 +257,9 @@ on:
       - ".github/workflows/hundesteder.yml"
       - ".github/workflows/astro-search-finder-test.yml"
       - ".github/workflows/search-starter-smoke.yml"
+      - "scripts/compose-smoke-dispatch.test.sh"
+      - ".github/workflows/compose-smoke.yml"
+      - "scripts/env-census.py"
       # FLEET COORDINATION (task-f89c2aed221d9fdb). Three subjects and three
       # harnesses. Until now no workflow named any of the six, so all three
       # self-tests were unreachable: they could not fire and could not lose.
@@ -404,6 +407,9 @@ on:
       - ".github/workflows/hundesteder.yml"
       - ".github/workflows/astro-search-finder-test.yml"
       - ".github/workflows/search-starter-smoke.yml"
+      - "scripts/compose-smoke-dispatch.test.sh"
+      - ".github/workflows/compose-smoke.yml"
+      - "scripts/env-census.py"
       # FLEET COORDINATION (task-f89c2aed221d9fdb). Mirrored from
       # on.pull_request.paths — doc-gates-paths-parity-check.sh runs against
       # this file at the end of this workflow and reds unless the two lists are
@@ -1175,3 +1181,24 @@ jobs:
         run: bash -n scripts/pr-overlap.test.sh
       - name: a failed gh call must HOLD and print no map
         run: bash scripts/pr-overlap.test.sh
+
+  # ── COMPOSE-SMOKE DISPATCHER (task-d6c8da73955e4820) ───────────────────────
+  # compose-smoke.yml decides smoke=true|false from a hand-written grep over the
+  # changed-file set. That predicate was anchored to the repo root plus ^api/,
+  # while the job it gates runs env-census over BOTH runtime roots. So the gate
+  # censused cloud/ and no cloud/ change could start it — present, and blind to
+  # half its own subject.
+  #
+  # The harness EXTRACTS the predicate from compose-smoke.yml rather than
+  # copying it, and re-derives the census's roots from env-census.py's own
+  # --root choices, so a third root or a re-narrowed filter reds by name.
+  compose-smoke-dispatcher:
+    name: compose-smoke dispatcher covers the census roots
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: harness syntax check
+        run: bash -n scripts/compose-smoke-dispatch.test.sh
+      - name: the dispatcher can fire on every root the census reads
+        run: bash scripts/compose-smoke-dispatch.test.sh

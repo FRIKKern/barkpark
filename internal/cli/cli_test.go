@@ -3136,3 +3136,116 @@ func TestFencedOffHintNamesThePulse(t *testing.T) {
 		t.Errorf("stale_claim hint = %q, must not blame the caller's own pulse", race)
 	}
 }
+
+// --- drafts.-addressed public reads ------------------------------------------
+
+// TestBuildManifestRequestAuthenticatesDraftIDOnPublicRead pins the fix for the
+// `bp doc get <type> drafts.<id>` false not_found: a tier-`none` read that
+// ADDRESSES a draft in the id must carry the bearer, while the same command
+// addressing a published id must stay byte-for-byte public.
+func TestBuildManifestRequestAuthenticatesDraftIDOnPublicRead(t *testing.T) {
+	m, tree := loadFixtureTree(t)
+	cmd, ok := tree.Lookup("doc", "get")
+	if !ok {
+		t.Fatal("doc get missing")
+	}
+	// The LIVE manifest declares doc.get at auth_tier "none" (the fixture still
+	// carries the older "read"); the whole defect lives in that tier.
+	cmd.AuthTier = "none"
+
+	ctx := manifest.Context{
+		Server:  "https://api.barkpark.cloud",
+		Dataset: "production",
+		Token:   "draft-reader-token",
+	}
+
+	t.Run("drafts_id_carries_bearer", func(t *testing.T) {
+		req, derr := buildManifestRequest(
+			globals{}, ctx, m, *cmd,
+			[]string{"paper", "drafts.l5goc-draft-probe-2"},
+			false,
+		)
+		if derr != nil {
+			t.Fatalf("buildManifestRequest: %v", derr)
+		}
+		if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+			t.Errorf("Authorization = %q, want %q - a drafts. id read tokenless can only ever answer not_found",
+				got, "Bearer draft-reader-token")
+		}
+	})
+
+	// NEGATIVE ARM: the published read must not gain a credential. A fix that
+	// attaches the bearer unconditionally fails here.
+	t.Run("plain_id_stays_public", func(t *testing.T) {
+		req, derr := buildManifestRequest(
+			globals{}, ctx, m, *cmd,
+			[]string{"paper", "l5goc-draft-probe-2"},
+			false,
+		)
+		if derr != nil {
+			t.Fatalf("buildManifestRequest: %v", derr)
+		}
+		if got := req.headers["Authorization"]; got != "" {
+			t.Errorf("Authorization = %q, want the published read to stay byte-for-byte public", got)
+		}
+	})
+}
+
+// TestBuildManifestRequestRejectsDraftIDWithoutToken is the row's literal
+// acceptance criterion: with no token the CLI must fail with an error that NAMES
+// the addressing problem, never let the server answer a bare not_found.
+func TestBuildManifestRequestRejectsDraftIDWithoutToken(t *testing.T) {
+	m, tree := loadFixtureTree(t)
+	cmd, ok := tree.Lookup("doc", "get")
+	if !ok {
+		t.Fatal("doc get missing")
+	}
+	cmd.AuthTier = "none"
+
+	_, derr := buildManifestRequest(
+		globals{},
+		manifest.Context{Server: "https://api.barkpark.cloud", Dataset: "production"},
+		m,
+		*cmd,
+		[]string{"paper", "drafts.l5goc-draft-probe-2"},
+		false,
+	)
+	if derr == nil {
+		t.Fatal("a drafts. id without a token must fail loudly, not send an anonymous request that 404s")
+	}
+	if !strings.Contains(derr.Error(), "drafts. document id requires an API token") {
+		t.Errorf("error = %q, want it to name the drafts. addressing problem", derr)
+	}
+	if !strings.Contains(derr.Error(), "not_found") {
+		t.Errorf("error = %q, want it to explain the bare not_found it prevents", derr)
+	}
+}
+
+// TestDraftIDRequiresAuthIgnoresAuthenticatedTiers is the second negative arm:
+// every tier above "none" already attaches the bearer in authHeaders, so the
+// guard must stay out of the way there.
+func TestDraftIDRequiresAuthIgnoresAuthenticatedTiers(t *testing.T) {
+	_, tree := loadFixtureTree(t)
+	cmd, ok := tree.Lookup("doc", "get")
+	if !ok {
+		t.Fatal("doc get missing")
+	}
+	args := map[string]string{"type": "paper", "doc_id": "drafts.l5goc-draft-probe-2"}
+
+	for _, tier := range []string{"read", "write", "admin", "scoped_admin", "ingest"} {
+		c := *cmd
+		c.AuthTier = tier
+		if draftIDRequiresAuth(c, args) {
+			t.Errorf("draftIDRequiresAuth = true for tier %q, want false - authHeaders already attaches the bearer", tier)
+		}
+	}
+
+	c := *cmd
+	c.AuthTier = "none"
+	if !draftIDRequiresAuth(c, args) {
+		t.Error("draftIDRequiresAuth = false for tier none + a drafts. id, want true")
+	}
+	if draftIDRequiresAuth(c, map[string]string{"type": "paper", "doc_id": "l5goc-draft-probe-2"}) {
+		t.Error("draftIDRequiresAuth = true for a published id, want false")
+	}
+}
