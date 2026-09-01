@@ -48,7 +48,9 @@ IO.puts("tier-bearing rows: #{length(rows)}")
 by_guard = Enum.group_by(rows, fn {m, p, _} -> Lens.raw_route_guard(m, p, router) end)
 
 for {g, rs} <- Enum.sort_by(by_guard, fn {g, _} -> to_string(g) end) do
-  IO.puts("\n== guard: #{inspect(g)}  (#{length(rs)} rows)  tier=#{inspect(Lens.guard_tier()[g])}")
+  IO.puts(
+    "\n== guard: #{inspect(g)}  (#{length(rs)} rows)  tier=#{inspect(Lens.guard_tier()[g])}"
+  )
 
   for {m, p, t} <- Enum.sort(rs) do
     IO.puts("   #{String.pad_trailing(m, 7)} #{String.pad_trailing(p, 52)} doc=#{t}")

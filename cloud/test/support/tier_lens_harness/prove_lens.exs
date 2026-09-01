@@ -1,6 +1,6 @@
 # Re-prove RouterTierLens against ANY checkout, in seconds.
 #
-#     elixir cloud/test/support/tier_lens_harness/run_test.exs <repo-root>
+#     elixir cloud/test/support/tier_lens_harness/prove_lens.exs <repo-root>
 #
 # WHY THIS EXISTS. The moduledoc tier census normally runs through the full
 # cloud suite: a mix project, compiled deps, and a Postgres sandbox. None of
@@ -23,12 +23,21 @@
 #
 # Kept deliberately dependency-free. If it ever needs `mix`, it has lost the
 # property it was written for — fix the dependency, not this file.
+#
+# DO NOT RENAME THIS TO ANYTHING ENDING IN `_test.exs`. It was called
+# `run_test.exs` for exactly one commit, and `mix test` LOADED it: the default
+# test glob is `test/**/*_test.exs`, this directory is under `test/`, and the
+# file ran with no argv, printed its usage and called System.halt(2) — taking
+# the entire cloud suite down with it. `elixirc_paths(:test)` compiling only
+# `.ex` is a fact about COMPILATION and says nothing about test DISCOVERY;
+# they are separate mechanisms and only one of them cares about the extension.
+# `mix format` reaches these files too — it globs `.exs` under test/.
 
 root = System.argv() |> Enum.at(0)
 
 unless root && File.dir?(Path.join(root, "cloud")) do
   IO.puts(:stderr, """
-  usage: elixir run_test.exs <repo-root>
+  usage: elixir prove_lens.exs <repo-root>
 
   <repo-root> must be a barkpark checkout (the directory containing `cloud/`).
   """)
