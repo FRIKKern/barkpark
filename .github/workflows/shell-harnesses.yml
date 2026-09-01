@@ -329,6 +329,31 @@ on:
       # included. A lane wired on PRs only goes dark the moment a merge lands.
       - "scripts/workflow-run-shell-check.sh"
       - ".github/workflows/*.yml"
+      # AUTOSTAMP BRIDGE (the seven entries above the changelog pair) —
+      # mirrors the pull_request list above.
+      # These seven were PR-only from the day they were wired (measured
+      # 2026-09-01: the two lists were 94 vs 85, all nine one-way — the
+      # signature of PR-list edits never mirrored), so the parity tripwire and
+      # the liveness proofs went dark the moment a controller or manifest edit
+      # MERGED — the only moment that matters for "consumed events are
+      # subscribed events". Neither consuming job reads PR context: both run
+      # parity scripts against the tree, so they mean exactly the same thing on
+      # push. Adjudicated per task cgsiw-parity-guard-only-covers-doc-gates:
+      # all nine MIRRORED, none pinned — no entry here is PR-only by design.
+      - "scripts/github-webhook-subscription-parity.sh"
+      - "scripts/github-webhook-subscription-parity.test.sh"
+      - "scripts/merge-gate-autostamp-liveness.sh"
+      - "scripts/merge-gate-autostamp-liveness.test.sh"
+      - "api/lib/barkpark_web/controllers/github_webhook_controller.ex"
+      - "scripts/github-app-bootstrap.py"
+      - "docs/ops/github-sync.md"
+      # WEEKLY-CHANGELOG BACKFILL GUARD — mirrors the pull_request list above.
+      # weekly-changelog.yml itself already rides the `.github/workflows/*.yml`
+      # glob two lines up, but the literal entry is kept so the two lists stay
+      # SET-EQUAL — the parity check compares entries, not effective coverage,
+      # and an entry that is "covered anyway" still reads as drift.
+      - "scripts/weekly-changelog-backfill.test.sh"
+      - ".github/workflows/weekly-changelog.yml"
       # DEPLOY-RELIABILITY EXIT RUNNER (W35) — mirrors the pull_request list
       # above, inputs included. A lane wired on PRs only goes dark the moment a
       # merge lands.
@@ -1019,6 +1044,25 @@ jobs:
         run: |
           bash scripts/doc-gates-paths-parity-check.sh --selftest
           bash scripts/doc-gates-paths-parity-check.sh
+      # THIS FILE'S OWN twin lists, through the same guard. The 2026-09-01
+      # measurement found them drifted 94 vs 85 — nine entries wired on
+      # pull_request and missing from push, every one added by hand and never
+      # mirrored, so the autostamp-bridge and weekly-changelog lanes stopped
+      # running the moment code landed on main — the one event they exist to
+      # observe. The nine were adjudicated
+      # (all mirrored, none PR-only by design) and PINS is empty on purpose —
+      # this run is CLEAN-TREE, and a new one-sided entry reds the PR that adds
+      # it instead of going dark for weeks. The job NAME still says doc-gates;
+      # renaming a job renames its check-run context, which is wiring, not
+      # cosmetics — the step name and this comment carry the wider truth
+      # instead. Self-watching is not self-certifying: the guard parses the
+      # YAML it is defined in, and an edit that breaks that parse is a
+      # HARNESS-UNAVAILABLE exit 2, never a silent pass.
+      - name: shell-harnesses.yml push.paths == pull_request.paths (same guard, second target)
+        env:
+          DOC_GATES_PATHS_PARITY_TARGET: .github/workflows/shell-harnesses.yml
+          DOC_GATES_PATHS_PARITY_PINS: ""
+        run: bash scripts/doc-gates-paths-parity-check.sh
 
   # ── MERGE-GATE AUTOSTAMP BRIDGE (task-8fb6aa7b6d57f737) ────────────────────
   # #5742 shipped a `pull_request` consumer with five green unit tests and no
