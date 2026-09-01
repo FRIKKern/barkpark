@@ -37,8 +37,21 @@ import {
 import type { BarkparkClientConfig, RequestContext, ResponseContext } from './types'
 import { buildBaseHeaders, pickRequestId, uuidv7 } from './util/headers'
 
+/**
+ * @internal Names the HTTP verbs of a layer consumers do not address. Every
+ * supported operation is a named function (`getDoc`, `publishDoc`,
+ * `uploadAsset`, …) that picks its own verb; a consumer never chooses one. The
+ * standard `RequestInit['method']` covers anyone doing their own fetch.
+ */
 export type TransportMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
+/**
+ * @internal The option bag of `request`, which is itself internal — see the
+ * marker there. Several fields (`rawResponse`, `kind`, `retryPolicy`) are
+ * meaningful only to the layer that assembles a Barkpark call, and the ones a
+ * consumer legitimately wants are already re-exposed on the public operations
+ * as `signal`, `timeoutMs`, `retry` and `idempotencyKey`.
+ */
 export interface TransportRequestOptions {
   method?: TransportMethod
   body?: unknown
@@ -56,6 +69,14 @@ export interface TransportRequestOptions {
   timeoutMs?: number
 }
 
+/**
+ * @internal The return shape of the internal `request`. Public operations
+ * deliberately do NOT return this: they hand back the decoded payload, and
+ * where the raw `Response` genuinely matters they say so in their own type
+ * (`fetchRawDoc`, `exportDataset`). Exporting this pair would suggest every
+ * call carries a `Response` a consumer may read, which would be false — the
+ * body has already been consumed by the time `request` returns.
+ */
 export interface TransportResult<T> {
   data: T
   response: Response
@@ -327,6 +348,16 @@ function pickPolicy(opts: TransportRequestOptions): RetryPolicy {
 // Public entry point
 // ----------------------------------------------------------------------------
 
+/**
+ * @internal The unvalidated escape hatch under every public operation. It takes
+ * a raw `path` and appends it to the configured base URL, so exporting it would
+ * publish a way to call arbitrary endpoints while bypassing the scope prefixing
+ * and path-segment guards that the named operations apply — a consumer could
+ * reach a URL this package never intended to construct. It also returns a
+ * `Response` whose body is already consumed. Callers who need an unmodelled
+ * endpoint should use their own `fetch` (the client's `fetch` config option
+ * exists to keep instrumentation shared), or ask for the operation to be added.
+ */
 export async function request<T>(
   config: BarkparkClientConfig,
   path: string,

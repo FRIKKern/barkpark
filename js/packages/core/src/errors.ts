@@ -6,6 +6,15 @@
 // produce duplicate copies; `instanceof` is unreliable, `err.code === '...'`
 // is the supported fallback).
 
+/**
+ * @internal Constructor input, not catch-site output. Only this package ever
+ * builds a Barkpark error; a consumer receives one. Every field declared here
+ * is re-surfaced as a readonly property on the thrown instance (`err.requestId`,
+ * `err.serverCode`, `err.hint`, `err.details`, `err.reason`) and
+ * `BarkparkError` itself is exported — so catch-site code reads the values off
+ * the error and never needs to name this type. Publishing it would advertise a
+ * shape that is only meaningful to a thrower.
+ */
 export interface BarkparkErrorOptions {
   cause?: unknown
   requestId?: string
@@ -69,6 +78,13 @@ export abstract class BarkparkError extends Error {
   }
 }
 
+/**
+ * @internal Constructor input for {@link BarkparkAPIError}; see
+ * {@link BarkparkErrorOptions} for the reasoning that covers this whole family.
+ * The one field it adds is readable at the catch site as `err.body` on the
+ * exported error class, so a consumer never needs the options type to get at
+ * the raw response body.
+ */
 export interface BarkparkAPIErrorOptions extends BarkparkErrorOptions {
   body?: unknown
 }
@@ -88,6 +104,12 @@ export class BarkparkAuthError extends BarkparkError {}
 /** fetch() threw (DNS failure, offline, TLS). Retried only for idempotent writes. */
 export class BarkparkNetworkError extends BarkparkError {}
 
+/**
+ * @internal Constructor input for {@link BarkparkTimeoutError}; see
+ * {@link BarkparkErrorOptions}. Its one field is readable at the catch site as
+ * `err.timeoutMs` on the exported error class — which is the supported way to
+ * learn which deadline elapsed.
+ */
 export interface BarkparkTimeoutErrorOptions extends BarkparkErrorOptions {
   timeoutMs?: number
 }
@@ -101,6 +123,12 @@ export class BarkparkTimeoutError extends BarkparkError {
   }
 }
 
+/**
+ * @internal Constructor input for {@link BarkparkRateLimitError}; see
+ * {@link BarkparkErrorOptions}. A consumer backing off on a 429 reads
+ * `err.retryAfterMs` off the exported error class; note that the retry engine
+ * already caps the server's hint at its own ceiling before sleeping on it.
+ */
 export interface BarkparkRateLimitErrorOptions extends BarkparkAPIErrorOptions {
   retryAfterMs?: number
 }
@@ -117,6 +145,12 @@ export class BarkparkRateLimitError extends BarkparkAPIError {
 /** 404 (document/schema/dataset missing). `client.doc(...)` swallows this to return `null`. */
 export class BarkparkNotFoundError extends BarkparkAPIError {}
 
+/**
+ * @internal Constructor input for {@link BarkparkValidationError}; see
+ * {@link BarkparkErrorOptions}. Catch-site code reads `err.issues` (Phoenix's
+ * `{field, message}` list) and `err.field` off the exported error class, which
+ * is what a form-error mapper actually wants.
+ */
 export interface BarkparkValidationErrorOptions extends BarkparkErrorOptions {
   issues?: unknown[]
   field?: string
@@ -145,6 +179,12 @@ export class BarkparkValidationError extends BarkparkError {
 /** HMAC signature verification failed (webhook-side). Never thrown on normal client calls. */
 export class BarkparkHmacError extends BarkparkError {}
 
+/**
+ * @internal Constructor input for {@link BarkparkSchemaMismatchError}; see
+ * {@link BarkparkErrorOptions}. All five drift fields are readable at the catch
+ * site off the exported error class — which is where a consumer decides whether
+ * to re-run codegen or bump `apiVersion`.
+ */
 export interface BarkparkSchemaMismatchErrorOptions extends BarkparkErrorOptions {
   clientApiVersion?: string
   serverMinApiVersion?: string
@@ -176,6 +216,12 @@ export class BarkparkSchemaMismatchError extends BarkparkError {
 /** Operation not available in this edge runtime (e.g. `listen()` in Workerd). Thrown synchronously. */
 export class BarkparkEdgeRuntimeError extends BarkparkError {}
 
+/**
+ * @internal Constructor input for {@link BarkparkConflictError}; see
+ * {@link BarkparkErrorOptions}. A consumer writing a conflict-recovery flow
+ * reads `err.serverEtag` and `err.serverDoc` off the exported error class —
+ * that instance IS the recovery surface, and this bag never reaches them.
+ */
 export interface BarkparkConflictErrorOptions extends BarkparkAPIErrorOptions {
   serverEtag?: string
   serverDoc?: unknown
@@ -244,6 +290,13 @@ export type BarkparkErrorCode =
  *
  * `url` is threaded on the error only when the caller has one, matching what
  * each site already passed.
+ *
+ * @internal Asserts on a raw `Response` that a consumer never holds. Both
+ * streaming entry points — `listen()` and `exportDataset()` — are exported and
+ * apply this ladder before handing back a stream, so by the time a caller has
+ * anything, the guard has already run. Its precondition ("this Response came
+ * from a Barkpark streaming endpoint") is not checkable from outside, so an
+ * exported version would be a guard that cannot defend its own contract.
  */
 export function assertStreamResponse(
   response: Response,

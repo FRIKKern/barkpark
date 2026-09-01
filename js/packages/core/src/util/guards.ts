@@ -57,6 +57,15 @@ export function assertSegment(
  * True when `url` parses as an absolute http(s) URL. The package's single
  * scheme allowlist — used for webhook delivery urls and for the url `imageUrl`
  * hands back to a caller for markup.
+ *
+ * @internal Held back over a NAME COLLISION, not a doubt about the function.
+ * `web/lib/sheets.ts` already exports its own `isHttpUrl`, and it is a
+ * different rule: it is the TypeScript twin of the server's sheet-url regexp,
+ * not a URL-parser scheme check, and the two disagree on real inputs.
+ * Publishing this one under the same name would put two differently-contracted
+ * `isHttpUrl`s in reach of one import statement — the shape that produces a
+ * WRONG fix rather than a duplicated one. If a consumer needs it, export it
+ * under an unambiguous name (`isHttpOrHttpsUrl`) rather than this one.
  */
 export function isHttpUrl(url: string): boolean {
   let parsed: URL

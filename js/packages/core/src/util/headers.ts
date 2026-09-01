@@ -1,11 +1,31 @@
 // src/util/headers.ts
 // Pure helpers. Zero side effects on import. No node:* imports.
 
+/**
+ * @internal THIS SHOULD BE EXPORTED — the marker records a deferral, not a
+ * decision that it stays private. `@barkpark/nextjs` already holds a copy of
+ * this exact literal as its own `VENDOR_ACCEPT` in `server/core.ts`, so the
+ * media type this package speaks is currently written down in two places with
+ * nothing keeping them equal. A media type is the least defensible thing to
+ * duplicate: it is one string, and the copy is silently wrong the moment the
+ * vendor type is versioned. Exporting it and deleting the copy is tracked as
+ * task-296d7e0028c7e7e0, held until the correctness queue drains. Do not read
+ * this marker as "private by design".
+ */
 export const BARKPARK_VENDOR_ACCEPT = 'application/vnd.barkpark+json'
 
 /**
  * Build the default headers every Barkpark request carries.
  * Caller merges additional headers (Authorization, Idempotency-Key, If-Match).
+ *
+ * @internal THIS SHOULD BE EXPORTED — the marker records a deferral, not a
+ * decision that it stays private. `@barkpark/nextjs`'s `server/core.ts` builds
+ * the same Accept + Content-Type pair in its own local header builder rather
+ * than calling this, because this was not reachable. That is a near-mirror
+ * (theirs also sets `Barkpark-Api-Version`), so the right remedy is to export
+ * this and have the copy layer its extra header on top — not to keep two
+ * definitions of what a Barkpark request looks like. Tracked as
+ * task-296d7e0028c7e7e0, held until the correctness queue drains.
  */
 export function buildBaseHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
@@ -23,6 +43,13 @@ export function buildBaseHeaders(extra?: Record<string, string>): Record<string,
  * ONLY for environments where getRandomValues is unavailable (should never happen in Node 20+, bun, workerd, browser).
  *
  * Returns: 'xxxxxxxx-xxxx-7xxx-yxxx-xxxxxxxxxxxx' (36 chars, 5 groups, version 7, variant 10)
+ *
+ * @internal Not a Barkpark capability — it is RFC 9562, and a consumer who
+ * wants time-ordered UUIDs should take a UUID library rather than a CMS client
+ * that happens to contain one. Exporting it would make this package a permanent
+ * source of `uuidv7` for other people's code and pin the Math.random fallback
+ * as public behaviour. The Barkpark-specific use is already covered: writes
+ * accept a caller-supplied `idempotencyKey`, and generate one when absent.
  */
 export function uuidv7(): string {
   const now = BigInt(Date.now())
@@ -62,6 +89,14 @@ export function uuidv7(): string {
  * This helper lets transport.ts normalize the error body shape.
  *
  * Returns the first non-empty value of (snake, camel) or undefined.
+ *
+ * @internal THIS SHOULD BE EXPORTED — the marker records a deferral, not a
+ * decision that it stays private. `@barkpark/nextjs`'s `server/core.ts` carries
+ * a copy under THIS EXACT NAME and says nothing about being a mirror, which is
+ * the worst version of the problem: the next person to grep `pickRequestId`
+ * lands on the copy and edits that, and the two silently diverge on the
+ * snake/camel fallback. Exporting this and deleting the copy is tracked as
+ * task-296d7e0028c7e7e0, held until the correctness queue drains.
  */
 export function pickRequestId(body: unknown): string | undefined {
   if (!body || typeof body !== 'object') return undefined
