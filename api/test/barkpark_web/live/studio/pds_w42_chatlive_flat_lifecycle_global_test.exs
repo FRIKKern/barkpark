@@ -217,15 +217,18 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
     } do
       view = mount_flat!(conn)
 
-      assert %StudioChatSession{} = Repo.get(StudioChatSession, foreign.id),
-             "the foreign row vanished before the event — the refusal read-back is unsound"
+      before_row = Repo.get(StudioChatSession, foreign.id)
+
+      assert match?(%StudioChatSession{}, before_row),
+             "the foreign row vanished before the event — the refusal read-back is unsound " <>
+               "(got #{inspect(before_row)})"
 
       render_click(view, "session-delete", %{"id" => foreign.id})
 
       # REFUSED — PRESENCE: the row is still there, and still A's.
       surviving = Repo.get(StudioChatSession, foreign.id)
 
-      assert %StudioChatSession{} = surviving,
+      assert match?(%StudioChatSession{}, surviving),
              "a ws-B-bound admin token DELETED a workspace-A chat session across the tenancy line"
 
       assert surviving.owner_workspace_id == foreign.owner_workspace_id,
@@ -251,9 +254,14 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
 
       # `:scoped_admin` resolves workspace A from the URL and demands a grant
       # THERE. A ws-B-bound token has none, so the mount halts.
-      assert {:error, {kind, _}} = live(conn, scoped),
+      scoped_result = live(conn, scoped)
+
+      assert match?({:error, {_kind, _}}, scoped_result),
              "the ws-B principal MOUNTED #{scoped} — if the scoped gate also lets it " <>
-               "through, this token is effectively global and the finding needs re-framing"
+               "through, this token is effectively global and the finding needs re-framing " <>
+               "(got #{inspect(scoped_result)})"
+
+      {:error, {kind, _}} = scoped_result
 
       assert kind in [:redirect, :live_redirect],
              "expected a redirect halt from the scoped mount gate, got #{inspect(kind)}"
@@ -261,8 +269,11 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
       # The opposing direction, same conn, same test: the flat route still
       # ADMITS it. One principal, two doors, two answers — that asymmetry is why
       # the clause-level scope check above is load-bearing.
-      assert {:ok, _view, _html} = live(conn, @flat_path),
-             "the flat route refused the principal too — then there is no asymmetry to guard"
+      flat_result = live(conn, @flat_path)
+
+      assert match?({:ok, _view, _html}, flat_result),
+             "the flat route refused the principal too — then there is no asymmetry to guard " <>
+               "(got #{inspect(flat_result)})"
     end
   end
 
@@ -282,10 +293,17 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
   # the missing-runtime refusal in `ChatLive.mount/3`) must never be mistaken
   # for a quiet success — every refusal assertion would then pass for free.
   defp mount_flat!(conn) do
-    assert {:ok, view, _html} = live(conn, @flat_path),
-           "the ws-B-bound admin token failed to mount the flat #{@flat_path} — " <>
-             "every clause assertion in this test would be vacuous"
+    result = live(conn, @flat_path)
 
+    # `assert pattern = expr, msg` would make this message DEAD CODE: `assert/2`
+    # is a function, so the match runs first and a mismatch raises MatchError
+    # before the message is ever reached (scripts/unreachable-assert-message-check.sh).
+    # Assert on `match?/2`, then destructure.
+    assert match?({:ok, _view, _html}, result),
+           "the ws-B-bound admin token failed to mount the flat #{@flat_path} — " <>
+             "every clause assertion in this test would be vacuous (got #{inspect(result)})"
+
+    {:ok, view, _html} = result
     view
   end
 

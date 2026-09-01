@@ -319,10 +319,13 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
 
       enable_chat_runtime!()
 
-      assert {:ok, _view, _html} = live(as(conn, bound_raw), "/studio/chat"),
+      bound_result = live(as(conn, bound_raw), "/studio/chat")
+
+      assert match?({:ok, _view, _html}, bound_result),
              "the flat admin gate is expected to admit a workspace-bound admin token — " <>
                "if this now denies, the flat gate gained a tenancy check and the " <>
-               "clause-level scope guard should be re-examined, not silently kept"
+               "clause-level scope guard should be re-examined, not silently kept " <>
+               "(got #{inspect(bound_result)})"
     end
   end
 
