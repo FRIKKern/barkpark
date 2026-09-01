@@ -1142,9 +1142,64 @@ function linerefNeedles(raw, t) {
   for (const m of raw.matchAll(/\b([A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b/g)) needles.add(m[1]);
   // route-path segments — a comment that cites `/v1/auth/*` anchors on `auth`;
   // keep segments of length >= 3 so noise like `v1` / `id` does not leak in.
+  //
+  // A FILE PATH IS NOT A ROUTE, AND ITS SEGMENTS ARE NOT ANCHORS. This harvester
+  // was written for URL paths, where a segment really is content the cited code
+  // contains. Run over a citation it also chews the CITATION'S OWN PATH into
+  // needles: `plugins/indx/errors.ex` yields `indx` and `errors`, and the sweep
+  // then demands those words within ±3 of the cited line. Nothing about an
+  // Elixir module obliges it to spell its own directory in its own body, so the
+  // test is one the truth cannot pass and the verdict is stale-on-correct.
+  //
+  // THE PARTIAL PATH IS WHY THE EXISTING GUARDS MISS IT. `basenameStem` drops
+  // the bare-basename shape (`errors.ex` → `errors`) and `selfDerived` knows a
+  // substring of the target path is not evidence — but a citation written as
+  // `plugins/indx/errors.ex` is NEITHER an explicit repo-relative path NOR a
+  // bare basename. It falls between the two arms: the stem filter removes only
+  // `errors`, leaving the directory segments standing as though someone had
+  // written them as anchors.
+  //
+  // WORSE, THE SEGMENTS TRAVEL. Needles are harvested from `claim.srcLine` — the
+  // whole comment line — while `emitProseSpans` deliberately slices `raw` at each
+  // filename so two citations in one comment cannot cross-contaminate. Reading
+  // the full line for needles walks straight around that slicing: a line naming
+  // both `plugins/github/errors.ex` and `plugins/indx/errors.ex` hands `github`
+  // to the indx claim as an "independent" anchor — independent of the indx path,
+  // certainly, and evidence of nothing.
+  //
+  // MEASURED on main: six of the eight novel findings that reddened doc-gates had
+  // an anchor set consisting ENTIRELY of path segments — [github, errors, indx]
+  // and [provisioner, support] — i.e. the sweep reported drift while holding
+  // nothing it could have checked. The emptiness guard in `verifyLinerefAgainst`
+  // exists for exactly that case and never reached it, because path segments
+  // were counted as anchors. Excluding them lets the honest verdict
+  // (`unverifiable`, "no checkable anchor") fire where it was always meant to.
+  //
+  // FILTERED AFTER THE HARVEST, NOT INSIDE ONE HARVESTER, because the segments
+  // arrive by more than one route. The obvious producer is the rule directly
+  // below — but `lib/barkpark_cloud/verify.ex` and
+  // `components/studio_components/editor.ex` reach the same place through the
+  // SNAKE_CASE rule above, since a directory named `barkpark_cloud` is a
+  // perfectly good snake_case identifier. Fixing only the route-segment rule
+  // cleared six findings and left four of the same class standing, each of them
+  // an anchor set of exactly one directory name. One post-filter covers every
+  // producer, including any added later.
+  //
+  // A token is a FILE PATH, not a route, when it carries an extension:
+  // `/v1/auth/*` has none, so `auth` still survives as a route anchor.
+  const pathSegments = new Set();
+  for (const m of raw.matchAll(/[A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,6}\b/g)) {
+    for (const seg of m[0].split("/")) {
+      const bare = seg.replace(/\.[A-Za-z0-9]+$/, "");
+      if (bare) pathSegments.add(bare);
+    }
+  }
   for (const m of raw.matchAll(/\/([a-z][a-z0-9_]{2,})/g)) needles.add(m[1]);
-  // drop the bare filename token itself
-  const out = [...needles].filter((s) => s !== t.file && s !== t.base);
+  // drop the bare filename token itself, and every segment of any path cited on
+  // this line — its own and its neighbours'
+  const out = [...needles].filter(
+    (s) => s !== t.file && s !== t.base && !pathSegments.has(s),
+  );
   return out;
 }
 
