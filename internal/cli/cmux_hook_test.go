@@ -138,10 +138,12 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 		if so != "" {
 			t.Errorf("close-path wrote to stdout: %q (must be empty)", so)
 		}
-		if rec.gets != 2 {
-			// One read to prove acceptance, a second for the FRESH rev after the
-			// re-claim bumped it (D82: observed_rev must be current at close).
-			t.Errorf("gets = %d, want 2 (acceptance read + fresh-rev read)", rec.gets)
+		if rec.gets != 1 {
+			// ONE read, to prove acceptance. The fresh-rev read is paid only when
+			// the server's work-digest fence actually refuses the close
+			// (pds-bl-hook-observed-rev-defeats-fence) — an undrifted close never
+			// needs a rev, so it never reads one.
+			t.Errorf("gets = %d, want 1 (acceptance read only — the fresh-rev read is drift-only)", rec.gets)
 		}
 		if rec.claims != 1 {
 			t.Errorf("claims = %d, want 1 (re-claim for the live epoch)", rec.claims)
@@ -152,11 +154,14 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 		if rec.lastEp != 7 {
 			t.Errorf("close observed_epoch = %d, want the re-claimed 7", rec.lastEp)
 		}
-		// D82: the close must carry the fresh observed_rev so an agent that
-		// marked its own criteria met (a post-claim change) survives the server
-		// work-digest fence. Empty here means a regression to a plain DoClose.
-		if rec.lastRev != "r-fresh-1" {
-			t.Errorf("close observed_rev = %q, want r-fresh-1 (digest-fence bypass, D82)", rec.lastRev)
+		// The fence is ARMED on the first attempt: no observed_rev on the wire
+		// when nothing needs bypassing. D82's bypass is not gone — it is now
+		// drift-TRIGGERED, and cmux_hook_fence_test.go pins both halves (the
+		// fenced 409 is reported, then the strict-rev retry lands the close).
+		// A non-empty rev here is the regression the row named: the unattended
+		// closer becomes the one closer the work-digest fence never protects.
+		if rec.lastRev != "" {
+			t.Errorf("close observed_rev = %q, want \"\" — the fence must be armed first, not bypassed pre-emptively", rec.lastRev)
 		}
 	})
 
@@ -453,19 +458,26 @@ func TestHookStopFailSafeExitZero(t *testing.T) {
 		}
 	})
 
-	t.Run("fresh-rev read fails → plain DoClose fallback", func(t *testing.T) {
-		// getFailAt=2: acceptance GET succeeds, the post-claim fresh-rev GET 500s,
-		// so hookStopClose falls back to a rev-less close (cmux_hook.go:192-195).
+	t.Run("acceptance GET succeeds, close lands rev-less (fence armed)", func(t *testing.T) {
+		// getFailAt=2 used to model "the post-claim fresh-rev GET 500s → fall back
+		// to a rev-less close". There IS no post-claim fresh-rev GET on an
+		// undrifted close any more — the fence is armed first and the rev is read
+		// only when the server refuses (pds-bl-hook-observed-rev-defeats-fence).
+		// The fault therefore never fires; what this row still pins is that the
+		// undrifted close is rev-less and carries the re-claimed epoch. The
+		// drift-side failure (fence refuses AND the fresh rev is unreadable →
+		// NO close) is pinned in cmux_hook_fence_test.go, where the fake server
+		// can express the rev-less refusal.
 		srv, rec := newHookMatrixServer(t, hookFailCfg{met: []bool{true, true}, claimEpoch: 9, getFailAt: 2})
 		ctx := hookHarness(t, srv.URL, "task-x", "S", `{}`)
 		var so, se bytes.Buffer
 		code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"Stop"})
 		assertHookInert(t, code, so.String())
 		if rec.closes != 1 {
-			t.Fatalf("closes = %d, want 1 (fallback close still fires)", rec.closes)
+			t.Fatalf("closes = %d, want 1", rec.closes)
 		}
 		if rec.lastRev != "" {
-			t.Errorf("close observed_rev = %q, want empty (fresh-rev unreadable → plain close)", rec.lastRev)
+			t.Errorf("close observed_rev = %q, want empty (the fence is armed on the first attempt)", rec.lastRev)
 		}
 		if rec.lastEp != 9 {
 			t.Errorf("close observed_epoch = %d, want the re-claimed 9", rec.lastEp)
