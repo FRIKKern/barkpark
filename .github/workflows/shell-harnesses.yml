@@ -836,7 +836,7 @@ jobs:
         # under macOS bash 3.2 — see the header. That constraint is why its
         # embedded python block carries no apostrophes.
         run: bash -n scripts/workflow-run-shell-check.sh
-      - name: the run-body gate can still LOSE (7 arms, hermetic fixtures)
+      - name: the run-body gate can still LOSE (13 arms, hermetic fixtures)
         # THE FAIL-BEFORE PROOF. Arm (a) is the defect that motivated the gate,
         # reproduced verbatim: an apostrophe inside a single-quoted `node -e`
         # body truncates the program, node dies with SyntaxError, and the step
@@ -849,11 +849,23 @@ jobs:
         run: bash scripts/workflow-run-shell-check.sh --selftest
       # Quoted: an unquoted plain scalar cannot contain ": " — it is read as a
       # mapping and the whole workflow stops parsing. Caught by this very gate.
-      - name: "every workflow run: body parses as shell"
-        # CLEAN-TREE, not never-worse, and measured before it was written: all
-        # 444 shell bodies across the corpus parse today (2 more declare a
-        # non-shell `shell:` and are skipped by name). No debt to grandfather
-        # means no baseline, and no baseline is a baseline that cannot rot.
+      - name: "every workflow run: body parses as shell, and no piped script exits mid-write"
+        # TWO ARMS, both clean-tree and both measured before they were written.
+        #
+        # ARM A — all 447 shell bodies across the corpus parse (2 more declare a
+        # non-shell `shell:` and are skipped by name).
+        #
+        # ARM B — no script a workflow PIPES calls process.exit(). Node does not
+        # flush a pending stdout write before exit, so into a pipe that can
+        # truncate the payload silently while the exit status still looks fine.
+        # The 21 sites that existed across 5 piped scripts were adjudicated in
+        # the PR that added this arm: terminal-after-stdout ones converted to
+        # process.exitCode, guards that must abort kept as exit() with a
+        # greppable `pipe-exit-ok:` marker and a stated reason.
+        #
+        # Neither arm has a baseline, and no baseline is a baseline that cannot
+        # rot. Both fail on zero inputs rather than reporting the success any
+        # gate over nothing reports.
         run: bash scripts/workflow-run-shell-check.sh
 
   exit-runner-guard:

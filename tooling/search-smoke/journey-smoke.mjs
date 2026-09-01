@@ -1120,7 +1120,7 @@ async function withChrome(fn) {
   const chromeBin = findChrome();
   if (!chromeBin) {
     process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
-    process.exit(2);
+    process.exit(2); // pipe-exit-ok: pre-flight guard, one stderr line, must abort before anything is spawned
   }
 
   let chrome = null, cdp = null, profile = null;
@@ -1288,9 +1288,9 @@ async function main() {
     opts = parseArgs(process.argv.slice(2));
   } catch (e) {
     process.stderr.write(`!! GUARD (exit 2): ${e.message}\n\n${USAGE}`);
-    process.exit(2);
+    process.exit(2); // pipe-exit-ok: arg-parse guard, stderr only, must abort before anything is spawned
   }
-  if (opts.help) { process.stdout.write(USAGE); process.exit(0); }
+  if (opts.help) { process.stdout.write(USAGE); process.exitCode = 0; return; }
 
   // ENVIRONMENT PREFLIGHT, on the GUARD path, before anything is spawned
   // (cssom-parity.mjs D19). Capability-tested, not version-parsed: what this
@@ -1303,18 +1303,18 @@ async function main() {
         `   THIS IS AN ENVIRONMENT FAILURE, NOT A SITE DEFECT — no page was ever loaded and no\n` +
         `   claim is being made about the deployment. Fix the runtime: node-version: 22.\n`,
     );
-    process.exit(2);
+    process.exit(2); // pipe-exit-ok: environment pre-flight, stderr only, aborts before any page loads
   }
   if (!opts.selfTest && !opts.url) {
     process.stderr.write(`!! GUARD (exit 2): --url <base> is required (or --self-test).\n\n${USAGE}`);
-    process.exit(2);
+    process.exit(2); // pipe-exit-ok: arg guard, stderr only, aborts before anything is spawned
   }
   if (opts.url) {
     try { new URL(opts.url); }
-    catch { process.stderr.write(`!! GUARD (exit 2): --url ${opts.url} is not a URL.\n`); process.exit(2); }
+    catch { process.stderr.write(`!! GUARD (exit 2): --url ${opts.url} is not a URL.\n`); process.exit(2); } // pipe-exit-ok: arg guard, stderr only
   }
 
-  if (opts.selfTest) process.exit(await selfTest(opts));
+  if (opts.selfTest) { process.exitCode = await selfTest(opts); return; }
 
   const base = opts.url.endsWith("/") ? opts.url : opts.url + "/";
   const { ledger, wall } = await withChrome((cdp) => smokeOne(cdp, base, opts));
@@ -1323,7 +1323,11 @@ async function main() {
 
   if (ledger.clean) {
     process.stdout.write(`\nJOURNEY PASS — all six beats green.\n`);
-    process.exit(0);
+    // exitCode + return, never exit(): everything from report() onward is
+    // already in flight to a `| tee` pipe, and process.exit() does not wait
+    // for a pending pipe write to drain.
+    process.exitCode = 0;
+    return;
   }
   const summary =
     `\nJOURNEY ${ledger.failed.length ? "FAIL" : "UNPROVEN"} — ` +
@@ -1332,13 +1336,17 @@ async function main() {
     // PENDING is refused here too, deliberately. Strict mode is the seal
     // evidence, and "we could not prove it" is not "it works".
     process.stderr.write(summary + `Strict mode: a beat that is not PASS is not a pass.\n`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   process.stdout.write(
     summary + `Report mode: exiting 0 on purpose — this run TELLS you what is broken, it does not\n` +
       `gate on it. Re-run with --strict once the fix is deployed; that run is the evidence.\n`,
   );
-  process.exit(0);
+  // exitCode, never exit(): this follows the whole report + summary going
+  // into a `| tee` pipe, and process.exit() does not wait for a pending
+  // pipe write to drain.
+  process.exitCode = 0;
 }
 
 main();

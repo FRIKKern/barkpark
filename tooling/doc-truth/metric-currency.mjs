@@ -34,7 +34,7 @@ if (!existsSync(REPORT)) {
   const msg = "metric-currency: quality-report.json absent — run `node tooling/status/status.mjs` first. SKIP.";
   if (JSON_OUT) console.log(JSON.stringify({ status: "skip", reason: "no-report" }));
   else console.log(msg);
-  process.exit(0);
+  process.exit(0); // pipe-exit-ok: top-level early SKIP, one short line, no `return` at module scope
 }
 
 const report = JSON.parse(readFileSync(REPORT, "utf8"));
@@ -53,7 +53,7 @@ const start = md.indexOf("## Codebase grade");
 if (start < 0) {
   if (JSON_OUT) console.log(JSON.stringify({ status: "skip", reason: "no-grade-section" }));
   else console.log("metric-currency: README has no '## Codebase grade' section. SKIP.");
-  process.exit(0);
+  process.exit(0); // pipe-exit-ok: top-level early SKIP, one short line, no `return` at module scope
 }
 const rest = md.indexOf("\n## ", start + 10);
 const section = md.slice(start, rest < 0 ? md.length : rest);
@@ -95,7 +95,7 @@ const missing = Object.keys(live).filter((n) => !seen.has(n)).map((n) => live[n]
 if (FIX) {
   if (!drift.length) {
     console.log("metric-currency --fix: already FRESH — nothing to sync.");
-    process.exit(0);
+    process.exit(0); // pipe-exit-ok: --fix path, one short line, never the piped report
   }
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   let fixed = section;
@@ -117,7 +117,7 @@ if (FIX) {
   }
   writeFileSync(README, md.slice(0, start) + fixed + md.slice(rest < 0 ? md.length : rest));
   console.log(`metric-currency --fix: synced ${drift.length} number(s) in the README grade section to the live report. Re-check budgets before committing.`);
-  process.exit(0);
+  process.exit(0); // pipe-exit-ok: --fix path, one short line, never the piped report
 }
 
 if (JSON_OUT) {
@@ -138,4 +138,7 @@ if (JSON_OUT) {
   if (missing.length) console.log(`  (note: ${missing.length} live critic(s) not found in the README table: ${missing.join(", ")})`);
 }
 
-process.exit(drift.length ? 1 : 0);
+// exitCode, never exit(): this is the last statement and it follows the
+// whole report going into a `| tee` pipe. node exits on its own once
+// stdout has drained, which exit() would not wait for.
+process.exitCode = drift.length ? 1 : 0;
