@@ -39,6 +39,11 @@ absolute cap in `.size-limit.json`. It is stated rather than absorbed silently
 — the previous cap left only ~20 B of slack, so no amount of trimming fits an
 error path under it.
 
-404 and 200 behaviour is unchanged. `@barkpark/react@1.0.0-preview.1` as
-published on npm does not contain the collapse, so this corrects unreleased
-behaviour and owes no deprecation cycle.
+404 and 200 behaviour is unchanged. This is **not** a pre-release correction of
+unshipped behaviour: `npm pack @barkpark/react@1.0.0-preview.1` ships the bare
+`try { … } catch { return null }` in `dist/index.mjs` and `dist/index.cjs`, and
+`1.0.0-preview.0` ships a byte-identical `src/Reference.tsx`, so both published
+versions carry the defect and the repair reaches consumers only at
+`1.0.0-preview.2`. Blast radius, disposition and the CI deprecate path:
+`docs/ops/npm-rollback-playbook.md` § Mechanism A, and the "Published preview
+advisory" section of this package's README.

@@ -16,8 +16,11 @@
 //
 // WHY A SCREEN AT ALL. Wave 3's census wants to RE-EXECUTE historical commands
 // harvested from other agents' past runs — untrusted input by construction —
-// and `runRerun` gates on `classifySafety` (rerun.mjs:420) and then hands the
-// survivor to `spawnSync("/bin/sh", ["-c", cmd])` (rerun.mjs:337). Under a
+// and `runRerun` gates on `classifySafety` and then hands the survivor to
+// `spawnSync("/bin/sh", ["-c", cmd])` in `shell` (both rerun.mjs). Cited BY
+// LINE here until 2026-09-01, when the refs were found to have drifted 276 and
+// 41 lines — six lines below the banner demanding the gap be RE-DERIVED, NEVER
+// REMEMBERED. A remembered line number is the same bug. Under a
 // census, each false-safe is an EXECUTION, not a warning — and three live cycles
 // share this checkout while a fourth measures against the deployed build.
 //

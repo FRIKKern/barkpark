@@ -21,10 +21,12 @@ Parts 1–3 (beta-critical, zero new deps) are **built**:
    `list_user_sessions/1`.
 2. **Password change ⇒ sign out everywhere.** `User.password_changeset/2` +
    `Accounts.update_user_password/4` verify the current password timing-safe, then
-   in ONE transaction write the new hash, revoke all other user sessions, and call
-   the new `Registry.revoke_all_agent_tokens_for_user/1` (joined through the user's
-   teams' barkparks). The acting tab is re-minted a fresh token so the caller stays
-   logged in.
+   in ONE transaction write the new hash and revoke all other user sessions. The
+   acting tab is re-minted a fresh token so the caller stays logged in. It ALSO
+   called `Registry.revoke_all_agent_tokens_for_user/1` — that bulk revoker HAS
+   SINCE BEEN REMOVED (the moduledoc on `Registry.revoke_agent_token/1` records
+   why): a routine password rotation by any member of any team silently killed the
+   agent token of every box those teams owned, and protected nothing.
 3. **Account & sessions SPA panel** in `priv/static/app.{js,css}`: sessions table
    (current row badged "This device"), per-row revoke, "sign out everywhere else",
    change-password form, and a logout that calls the API.
@@ -34,9 +36,10 @@ Routes (all hang off the existing user-session block in `web/router.ex`):
 `DELETE /v1/account/sessions/:id`, `DELETE /v1/account/sessions`,
 `PUT /v1/account/password`.
 
-Parts 4 (self-service deletion) and 5 (verified email change) are **designed but
-NOT built** — they are gated on deps that don't exist yet (a `Billing.cancel/1`
-and a mailer respectively). The full design sketch was not carried into the repo.
+Part 4 (self-service deletion) is **designed but NOT built** — gated on account
+teardown plus `Billing.cancel_subscription/1`. Part 5 (verified email change) HAS
+since shipped as `POST /v1/account/email/change` and `POST /v1/account/email/confirm`.
+The full design sketch was not carried into the repo.
 
 ## Why
 
@@ -54,8 +57,8 @@ table-stakes account hygiene. This copies the already-proven
   …` hook fires it on `wasChanged('password')`. We do the same as an EXPLICIT
   context step (`update_user_password/4`), not a model hook.
 - `app/Actions/User/RevokeUserTeamTokens.php:20-23` — `forUser($id)` deletes every
-  `PersonalAccessToken` for the user. Maps to
-  `Registry.revoke_all_agent_tokens_for_user/1`.
+  `PersonalAccessToken` for the user. This mapping was DELIBERATELY UNWOUND: the
+  Barkpark side has no bulk agent-token revoker any more.
 - Coolify's `sessions` table carries `ip_address` / `user_agent` / `last_activity`
   but never surfaces them — we capture the same three (`ip_address`,
   `user_agent`, `last_used_at`) AND show them.
@@ -75,11 +78,11 @@ table-stakes account hygiene. This copies the already-proven
 
 | File | Change |
 |---|---|
-| `cloud/priv/repo/migrations/20260629120000_add_session_lifecycle_to_user_tokens.exs` | **new** — +4 cols, +index |
+| `cloud/priv/repo/migrations/20260629120100_add_session_lifecycle_to_user_tokens.exs` | **new** — +4 cols, +index |
 | `cloud/lib/barkpark_cloud/accounts/user_token.ex` | +4 fields, widen cast, moduledoc |
 | `cloud/lib/barkpark_cloud/accounts/user.ex` | +`password_changeset/2` |
 | `cloud/lib/barkpark_cloud/accounts.ex` | revoke/list/`update_user_password`; verify guard + touch; mint opts; moduledoc |
-| `cloud/lib/barkpark_cloud/registry.ex` | +`revoke_all_agent_tokens_for_user/1` |
+| `cloud/lib/barkpark_cloud/registry.ex` | +`revoke_all_agent_tokens_for_user/1` — SINCE REMOVED; `revoke_agent_token/1` is deliberately the only, and singular, agent-token revoker |
 | `cloud/lib/barkpark_cloud/web/router.ex` | +5 routes, `session_json/2`, device-capture helpers, register/4 |
 | `cloud/priv/static/app.js` + `app.css` | Account & sessions panel |
 | `cloud/test/barkpark_cloud/accounts_test.exs` | +6 describe blocks |
@@ -102,16 +105,19 @@ and `node --check` on `app.js`.
 
 ## Caveats / honest assessment
 
-- **`verify_user_session_token/1` now writes on every read** (the `last_used_at`
-  touch, a single keyed `update_all`). That is a deliberate behaviour change —
-  every authenticated request issues one extra UPDATE. Fine at beta scale; if it
-  ever shows up hot, debounce it (only touch when `last_used_at` is older than N
-  minutes) or move it off the request path.
-- **`revoke_all_agent_tokens_for_user/1` kills agent creds for EVERY team the user
-  belongs to**, not just boxes they solely own. That is the safe default for a
-  password compromise; a narrower rule is a later refinement.
+- **`verify_user_session_token/1` writes on every read — BOTH remedies suggested
+  here have since shipped.** The stamp is throttled to a window (the `:touch`
+  option), AND the plug pipeline passes `touch: false` and re-stamps from
+  `Plug.Conn.register_before_send/2` once the status is known — because an eager
+  stamp during AUTHENTICATION made a device that was later refused 403 look
+  active, which a throttle alone cannot fix.
+- **`revoke_all_agent_tokens_for_user/1` no longer exists** (removed; see above),
+  so nothing kills agent creds across a user's teams on a password change.
 - **Not run against a DB.** Logic is verified by reading + parse-checks + the test
   suite, but the migration has not been applied and the tests have not executed.
 - **`mix format` not run** (formatter needs `:ecto` from deps). Code was written to
   the project's existing formatting by hand.
-- Parts 4 + 5 are designed only — not yet built (gated on `Billing.cancel/1` + a mailer).
+- Part 4 (self-service deletion) is still unbuilt. Part 5 (verified email change)
+  SHIPPED — `POST /v1/account/email/change` + `POST /v1/account/email/confirm` — and
+  the mailer it waited on exists (`BarkparkCloud.Mailer`, `{:swoosh, "~> 1.16"}`).
+  The deletion gate is `Billing.cancel_subscription/1`; there is no `Billing.cancel/1`.

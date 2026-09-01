@@ -31,11 +31,28 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
   unrescuable-cell refusals, idempotency-of-identity) were green, proving
   the arm is type-keyed and additive, never a behavior rewrite of canonical
   shapes.
+
+  The "wave-11 header-row dialect" describe was added later, for
+  `task-9b3778f52ca05984`. That row reported the defect on 2026-07-31 against
+  a shape none of the three pins above reach — a `rows` entry that is a
+  cells-map carrying `header: true`, which `normalize_array_table/2` promotes
+  to `head` through its OWN arm. #11616 fixed it on 2026-08-12 as a side
+  effect; nothing pinned it, so the rescue could have decayed silently.
+
+  MUTATION EVIDENCE for that describe (delete the two-line
+  `normalize_wrapped_table_cell(cell) when is_binary(cell)` arm from
+  block_ops.ex and rerun): 24 tests, 6 failures — the three string-cell pins
+  above plus three of the four new ones, each naming string table cells
+  specifically ("blocks[0].head.cells[0] has no renderable inline content"),
+  never a generic structure failure. The render-preserving and idempotency
+  pins stay green under the mutation, as they must: both compare the
+  normalizer against ITSELF.
   """
 
   use ExUnit.Case, async: true
 
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.PortableDoc.Render
 
   # ── notes / cards items + pipeline nodes ────────────────────────────────────
 
@@ -312,6 +329,107 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
         assert Enum.any?(errors, &(&1 =~ "has no renderable inline content")),
                "expected the existing refusal copy for #{inspect(bad)}, got: #{inspect(errors)}"
       end
+    end
+  end
+
+  # ── the wave-11 reported shape (regression pin) ───────────────────────
+
+  describe "the wave-11 header-row dialect (task-9b3778f52ca05984)" do
+    # The shape the row reported VERBATIM: a `rows` entry that is a cells-map
+    # carrying `header: true`, whose cells are bare strings. It reaches a
+    # DIFFERENT arm of normalize_array_table than the three cases pinned above
+    # (the head-promotion arm, not normalize_wrapped_table_row), so none of them
+    # would have caught a regression in it. It writes-accepts today; before
+    # #11616 added the bare-string arm to normalize_wrapped_table_cell/1 it also
+    # write-accepted and then REFUSED at publish with invalid_paper_structure.
+    @wave11_table %{
+      "type" => "table",
+      "rows" => [%{"cells" => ["a", "b"], "header" => true}]
+    }
+
+    test "the header row is promoted to `head` with its bare strings rescued" do
+      assert [normalized_block] = normalized = BlockOps.normalize_render_shapes([@wave11_table])
+
+      assert normalized_block["head"] == [
+               [%{"type" => "text", "value" => "a"}],
+               [%{"type" => "text", "value" => "b"}]
+             ]
+
+      assert normalized_block["rows"] == []
+      refute Map.has_key?(normalized_block, "header")
+
+      assert BlockOps.validate_render_shapes(normalized) == :ok
+    end
+
+    test "a header row followed by bare-string body rows all pass the publish gate" do
+      block = %{
+        "type" => "table",
+        "rows" => [
+          %{"cells" => ["Metric", "Value"], "header" => true},
+          %{"cells" => ["publish round-trips", "25"]},
+          ["bisected block index", "22 of 74"]
+        ]
+      }
+
+      normalized = BlockOps.normalize_render_shapes([block])
+
+      assert BlockOps.validate_render_shapes(normalized) == :ok
+
+      assert [%{"rows" => [row_a, row_b]}] = normalized
+
+      # A map_size-1 cells wrapper is unwrapped to the canonical bare list.
+      assert row_a == [
+               [%{"type" => "text", "value" => "publish round-trips"}],
+               [%{"type" => "text", "value" => "25"}]
+             ]
+
+      assert row_b == [
+               [%{"type" => "text", "value" => "bisected block index"}],
+               [%{"type" => "text", "value" => "22 of 74"}]
+             ]
+    end
+
+    test "the rescue is render-PRESERVING: normalized HTML equals the raw shape's" do
+      # The asymmetry that makes normalization (not refusal) the right fix:
+      # render/inline.ex `compose_inline_children(s) when is_binary(s)` already
+      # tolerates a scalar cell, so the WRITER-then-PUBLISHER refused what the
+      # READER renders fine. Rescuing the cell must therefore change zero bytes
+      # of output.
+      raw_html = Render.render_blocks([@wave11_table])
+      normalized_html = Render.render_blocks(BlockOps.normalize_render_shapes([@wave11_table]))
+
+      assert normalized_html == raw_html
+      assert normalized_html =~ "a"
+      assert normalized_html =~ "b"
+    end
+
+    test "the gate refuses the RAW shape and names the offending cell paths" do
+      # Both halves of the row's report, in one runnable assertion:
+      #
+      #   * FAIL-FIRST — the raw authored shape is exactly what the publish gate
+      #     refuses, which is why the write landed (a rev printed) and the
+      #     publish did not. This also keeps the pins above non-vacuous: their
+      #     `:ok` is earned by the normalizer, not by a gate that accepts
+      #     everything.
+      #   * the refusal is NOT pathless. It carries a per-cell block path, so an
+      #     O(log n) publish bisect is not required to locate the offender —
+      #     the row's "names NO block path" complaint was a CLI-side loss
+      #     (fixed by #8809 / #13314), never a missing server-side path.
+      assert {:error, {:invalid_paper_structure, %{"blocks" => errors}}} =
+               BlockOps.validate_render_shapes([@wave11_table])
+
+      assert errors == [
+               "blocks[0].rows[0].cells[0] has no renderable inline content",
+               "blocks[0].rows[0].cells[1] has no renderable inline content"
+             ]
+
+      assert BlockOps.validate_render_shapes(BlockOps.normalize_render_shapes([@wave11_table])) ==
+               :ok
+    end
+
+    test "the wave-11 shape is idempotent under re-normalization" do
+      once = BlockOps.normalize_render_shapes([@wave11_table])
+      assert BlockOps.normalize_render_shapes(once) == once
     end
   end
 

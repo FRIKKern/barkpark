@@ -6,7 +6,9 @@ Integrated 7 Coolify→Barkpark swarm candidates into one foundation branch off
 isolated worktree; merged here in dependency-closure order with one `--no-ff`
 merge commit per step so history stays auditable.
 
-Final HEAD: **`162b6160`**
+Final HEAD: **`162b6160`** — note this SHA and the renumber SHA `fda80cce` below no
+longer resolve; the base `bef11206` still does. Squash-merge plus gc retired them, so
+verify this log by CONTENT, not by ref.
 
 ## Per-step summary
 
@@ -92,25 +94,29 @@ as-is.
 
 ## Caveats for the reviewer (most important first)
 
-1. **Authorization policy was softened at two gates to keep working code.**
-   - `go_live` (launch): rbac/teams wanted **session team-admin** only. That gate
-     401s a PAT bearer, which would **break personal-access-tokens' deploy-token
-     feature** (a KEEP candidate). Chose the PAT-flexible gate
-     (`require_user_or_pat |> require_ability("deploy")`). Consequence: a plain
-     **session member can now go-live**. Re-tighten by composing an admin check
-     on the session branch.
-   - `POST /v1/billing/checkout`: rbac wanted **owner-only**; softened to
-     `require_primary_team_admin` (admin) to keep the documented `422 no_team`
-     contract via an existing helper. Add a `require_primary_team_owner` if
-     owner-only billing is desired.
-   Both are flagged with `NOTE(integration):` comments at the call sites.
+1. **Authorization policy was softened at two gates — BOTH HAVE SINCE BEEN
+   RE-TIGHTENED. This item is history, not a live caveat.**
+   - `go_live` (launch): shipped PAT-flexible
+     (`require_user_or_pat |> require_ability("deploy")`), so a plain session
+     member could go-live. FIXED: the launch gate's `cond` now carries a session
+     branch requiring `Accounts.team_admin?/2` on the resolved team and otherwise
+     halting via `Auth.forbidden(conn, required: "admin", scope: "team")`.
+   - `POST /v1/billing/checkout`: shipped as `require_primary_team_admin`.
+     FIXED: `Auth.require_primary_team_owner/1` was written and the route calls
+     it, matching `@action_min billing: [owner]`. The refusal is `403`, not the
+     `422 no_team` this entry claimed.
+   Neither is flagged with a `NOTE(integration):` comment — that marker appears
+   nowhere in the repo, so do not grep for it.
 
 2. **Compiles, but never migrated or tested against a DB.** Review the combined
    `user_tokens` migration's column nullability/defaults and the new FKs before
    `mix ecto.migrate`. The two judge-flagged "revise" items in the candidates'
    own `docs/swarm/*.md` still apply.
 
-3. **rbac's `require_team_admin` / `require_team_owner` are now defined but
-   unused** at the three gates above (teams' `require_primary_team_admin` won).
-   They remain available; decide which RBAC primitive the codebase standardizes
-   on and remove the dead one (or re-point the call sites).
+3. **Half of this is stale.** `require_team_admin/2` is NOT dead — it now has 16
+   router call sites (github installations, notification settings + test,
+   push-relay, env vars, ...), so the codebase standardized on it. Only
+   `require_team_owner/2` is genuinely callerless; the primary-team variants
+   (`require_primary_team_admin/1`, `require_primary_team_owner/1`) hold the
+   billing and launch gates. Re-derive the call-site count against
+   `cloud/lib/barkpark_cloud/web/router.ex` before acting on this row.

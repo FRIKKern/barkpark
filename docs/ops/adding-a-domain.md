@@ -53,18 +53,28 @@ Auto-issued/renewed by Caddy on first HTTPS request. Watch:
 `sudo ufw delete allow 4000/tcp` so Caddy is the only ingress. Verify the
 bare `:4000` port times out and HTTPS still serves.
 
-## Step 6 — Re-enable `force_ssl`
+## Step 6 — `force_ssl` stays OFF (not a cutover step)
 
-Uncomment in `api/config/prod.exs`:
+`api/config/prod.exs` keeps `force_ssl` commented out **by standing decision** —
+Golden Rule #5 / Past Mistake #5 — and its Sobelow `Config.HTTPS` row is
+justified-baselined against `config/prod.exs` in `api/.sobelow-skips`
+(task-f76e9b7b). Caddy already redirects `:80 → :443`, so a Phoenix-side
+redirect buys nothing. **Finish the cutover at Step 5 and stop here.**
 
-```elixir
-config :barkpark, BarkparkWeb.Endpoint,
-  force_ssl: [rewrite_on: [:x_forwarded_proto]]
-```
+Turning it on is a separate, owner-sign-off change. All four must hold first:
 
-`rewrite_on` trusts Caddy's `X-Forwarded-Proto` — avoids the 301-loop burn
-(`CLAUDE.md` Past Mistakes #5): without it Phoenix sees `http` and redirects
-forever. Optional `hsts: true` (Caddy already emits HSTS, Step 2). Then
+1. `curl -sI https://your-domain.example/api/schemas` returns `200` — TLS live.
+2. `curl -sI http://your-domain.example/api/schemas` returns `30x` to
+   `https://` — Caddy, not Phoenix, owns the redirect.
+3. No bare-HTTP ingress is left. The 7-day `http://89.167.28.206` block under
+   Pitfalls is a **blocker**: `force_ssl` would 301 it to
+   `https://89.167.28.206`, which has no certificate.
+4. The Sobelow baseline row is re-fingerprinted in the same PR, or the security
+   gate reds.
+
+Only then uncomment the block `prod.exs` already carries. `rewrite_on:
+[:x_forwarded_proto]` is mandatory — without it Phoenix sees `http` and
+redirects forever. Skip `hsts: true`; Caddy emits HSTS at Step 2. Then
 `make rebuild`.
 
 ## Step 7 — Smoke test
@@ -102,5 +112,5 @@ Snapshot first — the mandatory rollback anchor:
 
 - `web/README.md` — Vercel demo; mixed-content caveat disappears after this
   TLS work.
-- `CLAUDE.md` — never enable `force_ssl` without verified
-  `X-Forwarded-Proto` trust.
+- `CLAUDE.md` Golden Rule #5 + `api/config/prod.exs` — `force_ssl` is off by
+  decision; Step 6 does not override them.

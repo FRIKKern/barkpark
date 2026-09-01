@@ -1,0 +1,185 @@
+name: deprecate
+
+# Manual `npm deprecate` remediation workflow (soft recall).
+#
+# Why this exists: docs/ops/npm-rollback-playbook.md makes `npm deprecate` the
+# DEFAULT mechanism for a buggy-but-installable version, but until this file
+# existed the repo had no execution path for it — `git grep -n 'npm deprecate'
+# -- .github` was EMPTY, and a local `npm deprecate` returns HTTP 403 for the
+# same reason a local `npm dist-tag` does: only the CI NPM_TOKEN holds
+# publish/deprecate scope on the `@barkpark` org. A documented mechanism with no
+# runnable path is a capability the repo does not actually have.
+#
+# Modelled step-for-step on retag.yml: fail-closed auth, an identity preflight
+# that MEASURES the token, a pre-state read, the mutation, a post-state VERIFY.
+#
+# Two guards that retag.yml does not need, both aimed at a green that means
+# nothing:
+#   1. A `version_range` matching ZERO published versions makes `npm deprecate`
+#      a silent no-op that exits 0. That is a workflow reporting success for
+#      deprecating nothing, so the range is resolved first and an empty match
+#      is a hard error.
+#   2. `npm deprecate` exiting 0 is not proof the registry stored the message.
+#      Every matched version is re-read afterwards and the run fails if the
+#      message did not land.
+#
+# Reference: docs/ops/npm-rollback-playbook.md § Mechanism A
+# First intended use: @barkpark/react 1.0.0-preview.0 / 1.0.0-preview.1, which
+# both ship the reference-error collapse repaired by #9601 (task-2abbac8d7975050c).
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: "Fully-qualified npm package name (e.g. @barkpark/react)"
+        required: true
+        type: string
+      version_range:
+        description: "Version or semver range to deprecate (e.g. 1.0.0-preview.1 or <1.0.0-preview.2)"
+        required: true
+        type: string
+      message:
+        description: "Deprecation message. EMPTY STRING un-deprecates the range."
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  # Serialize deprecate operations on the same package — npm applies the
+  # message per version and concurrent runs on overlapping ranges race.
+  group: deprecate-${{ github.event.inputs.package_name }}
+  cancel-in-progress: false
+
+jobs:
+  deprecate:
+    name: npm deprecate (soft recall)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Configure npm auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error title=Missing NPM_TOKEN::repository secret NPM_TOKEN is not set — deprecate cannot proceed"
+            exit 1
+          fi
+          npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
+
+      - name: npm identity preflight (MEASURES the token)
+        # Presence of NPM_TOKEN proves only that a string is set. `npm whoami`
+        # is the cheapest call that asks the registry whether the credential is
+        # still alive, and it fails closed (E401 on a bogus token).
+        #
+        # DO NOT swap in `npm publish --dry-run` or `npm access list packages
+        # @barkpark`: both exit 0 without valid credentials, so neither is
+        # evidence about the token. Same warning as retag.yml carries.
+        run: |
+          set -euo pipefail
+          if ! WHO="$(npm whoami 2>&1)"; then
+            echo "$WHO"
+            echo "::error title=NPM_TOKEN rejected by the registry::npm whoami failed — the token is missing, expired or revoked. Rotate NPM_TOKEN before deprecating."
+            exit 1
+          fi
+          echo "npm whoami -> ${WHO} (registry accepted the token)"
+
+      - name: Resolve the range (refuses a corpus of zero)
+        id: resolve
+        # `npm deprecate` on a range that matches nothing exits 0 and changes
+        # nothing. Without this step the workflow's green would be compatible
+        # with having deprecated no version at all.
+        env:
+          PACKAGE: ${{ inputs.package_name }}
+          RANGE: ${{ inputs.version_range }}
+        run: |
+          set -euo pipefail
+          VERSIONS="$(npm view "${PACKAGE}@${RANGE}" version --json 2>/dev/null || echo 'null')"
+          MATCHED="$(printf '%s' "${VERSIONS}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let v;try{v=JSON.parse(s)}catch{v=null};if(v==null)v=[];if(!Array.isArray(v))v=[v];process.stdout.write(v.join(" "))})')
+          if [ -z "${MATCHED}" ]; then
+            echo "::error title=Range matches no published version::${PACKAGE}@${RANGE} resolves to zero versions — npm deprecate would exit 0 having done nothing. Check the range."
+            exit 1
+          fi
+          echo "matched=${MATCHED}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Range resolved::${PACKAGE}@${RANGE} -> ${MATCHED}"
+
+      - name: Pre-state (informational)
+        env:
+          PACKAGE: ${{ inputs.package_name }}
+          MATCHED: ${{ steps.resolve.outputs.matched }}
+        run: |
+          set -euo pipefail
+          for V in ${MATCHED}; do
+            echo "--- ${PACKAGE}@${V}"
+            npm view "${PACKAGE}@${V}" deprecated || echo "(not deprecated)"
+          done
+
+      - name: Deprecate
+        env:
+          PACKAGE: ${{ inputs.package_name }}
+          RANGE: ${{ inputs.version_range }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MESSAGE}" ]; then
+            echo "::warning title=Un-deprecating::empty message clears the deprecation on ${PACKAGE}@${RANGE}"
+          else
+            echo "::warning title=Deprecating::${PACKAGE}@${RANGE} — immediately visible to every installer"
+          fi
+          npm deprecate "${PACKAGE}@${RANGE}" "${MESSAGE}"
+
+      - name: Verify post-state (the message actually landed)
+        # `npm deprecate` exiting 0 is not proof the registry stored anything.
+        # Re-read every matched version and fail if the observed state does not
+        # match what was asked for.
+        env:
+          PACKAGE: ${{ inputs.package_name }}
+          MATCHED: ${{ steps.resolve.outputs.matched }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          set -euo pipefail
+          FAILED=0
+          for V in ${MATCHED}; do
+            OBSERVED="$(npm view "${PACKAGE}@${V}" deprecated 2>/dev/null || true)"
+            if [ -z "${MESSAGE}" ]; then
+              if [ -n "${OBSERVED}" ]; then
+                echo "::error title=Un-deprecate did not land::${PACKAGE}@${V} still reads: ${OBSERVED}"
+                FAILED=1
+              else
+                echo "ok ${PACKAGE}@${V} -> not deprecated"
+              fi
+            else
+              if [ "${OBSERVED}" != "${MESSAGE}" ]; then
+                echo "::error title=Deprecation did not land::${PACKAGE}@${V} reads '${OBSERVED}', expected '${MESSAGE}'"
+                FAILED=1
+              else
+                echo "ok ${PACKAGE}@${V} -> ${OBSERVED}"
+              fi
+            fi
+          done
+          exit "${FAILED}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deprecate run"
+            echo ""
+            echo "- package: \`${{ inputs.package_name }}\`"
+            echo "- range: \`${{ inputs.version_range }}\`"
+            echo "- matched: \`${{ steps.resolve.outputs.matched }}\`"
+            echo "- message: \`${{ inputs.message }}\`"
+            echo ""
+            echo "\`npm deprecate\` does NOT update lockfiles — pinned consumers keep the version until they update."
+          } >> "$GITHUB_STEP_SUMMARY"
