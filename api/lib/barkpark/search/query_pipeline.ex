@@ -90,8 +90,17 @@ defmodule Barkpark.Search.QueryPipeline do
        # The canonical corrected term when a LEARNED/synonym correction fired
        # for a query term (nil otherwise). The UI shows "Showing results for …".
        corrected_to: corrected_to,
-       # Indx-only engine diagnostics (absent for Postgres): dataset-wide facet
-       # buckets and the coverage truncation boundary.
+       # `facets` comes from WHICHEVER retriever answered — it is NOT Indx-only.
+       # (An earlier version of this comment claimed it was, exactly backwards.)
+       # `DocumentsRetriever.search/4` returns `%{facets: facets}`: its
+       # `count_and_facets/1` computes all four dimensions over the caller's
+       # full, tenant-scoped match set. The Indx retriever now returns `%{}` and
+       # DROPS the engine's buckets — they were computed over an index keyed on
+       # the dataset STRING and shared across workspaces, so they leaked another
+       # tenant's author/category strings (see `Plugins.Indx.Retriever`). So
+       # `facets` is non-null only when the Postgres engine answered.
+       # `truncation` genuinely IS Indx-only, and is now always absent because
+       # that path no longer emits it.
        facets: Map.get(engine_meta, :facets),
        truncation: Map.get(engine_meta, :truncation),
        # Which retriever ACTUALLY served the returned hits — "postgres" whenever
