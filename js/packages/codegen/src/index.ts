@@ -4,7 +4,7 @@
 export type { BarkparkCodegenConfig, BarkparkSchemaJson, FieldDef, SchemaDef } from './types'
 export { schemaEnvelopeSchema } from './types'
 export type { SchemaUrlOptions } from './schema-url'
-export { buildSchemaPath } from './schema-url'
+export { assertScopedPair, buildSchemaPath } from './schema-url'
 export { fetchSchema } from './fetch-schema'
 export type { FetchSchemaOptions } from './fetch-schema'
 export { generateTypes } from './generate'

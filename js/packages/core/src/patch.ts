@@ -33,6 +33,14 @@ const ARRAY_OP_HINT =
 
 // System fields Phoenix will not allow in patch.set (content.ex rejects via
 // Ecto changesets; we catch at the client boundary for a faster + clearer error).
+/**
+ * @internal A client-side MIRROR of a server-owned rule, and the server is the
+ * authority. Phoenix's Ecto changesets reject these fields regardless; this set
+ * exists only to fail faster with a clearer message. Exporting it would invite
+ * consumers to branch on a list that can silently drift from what the server
+ * actually enforces — the wrong shape of dependency. `createPatch` (exported)
+ * already applies it and throws a self-explaining `BarkparkValidationError`.
+ */
 export const FORBIDDEN_SET_KEYS: ReadonlySet<string> = new Set([
   '_id',
   '_type',
@@ -47,7 +55,13 @@ export const FORBIDDEN_SET_KEYS: ReadonlySet<string> = new Set([
  * Assert the append/prepend payload is a list. Shared by {@link createPatch} and the
  * transaction builder's inner patch — four call sites previously carried a verbatim
  * copy of this throw.
- * @internal
+ *
+ * @internal One argument-shape check lifted out of the patch builders so the
+ * four call sites throw identically. It is a fragment of `patch.append` /
+ * `patch.prepend`, not a capability on its own — a consumer reaches it by
+ * calling those, via the exported `createPatch` or the transaction builder.
+ * Using it directly would mean hand-assembling patch ops, which the exported
+ * builders exist to prevent.
  */
 export function requireItems(op: string, items: unknown): void {
   if (!Array.isArray(items)) {
@@ -62,7 +76,12 @@ export function requireItems(op: string, items: unknown): void {
  * rejects nested/dotted paths the server can't address, and system fields.
  * Shared by {@link createPatch} and the transaction builder so a selector means
  * the same thing in either.
- * @internal
+ *
+ * @internal Translates a selector into a wire detail of the patch protocol,
+ * which is precisely what the exported builders exist to hide. Its output is
+ * only usable as input to an op this package assembles, so a consumer holding
+ * the returned field name has nowhere supported to put it — `createPatch` and
+ * the transaction builder are the supported way to address an array field.
  */
 export function selectorField(op: string, selector: string): string {
   if (typeof selector !== 'string' || selector.length === 0) {
