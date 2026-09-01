@@ -424,13 +424,24 @@ judge_broken() {
 # taken from the engine's own per-stage started_at/finished_at. A box that
 # secretly ran npm on the prebuilt deploy cannot produce that pair.
 
-# judge_prebuilt_mint <deployment_id> <build_id>
+# judge_prebuilt_mint <deployment_id> <build_id> <content_rev>
 # The mint is the only place a client can learn the build id its bytes must carry
 # (HEALTH asserts that marker by value) — and the deployment id to resume against,
 # because the mint is NONCED and a plain re-run can never converge on the same id.
+#
+# CONTENT_REV IS JUDGED HERE, NOT SHRUGGED AT. This used to be optional
+# (`[ -n "$mint_crev" ] && ok …`) and a measured live run walked straight past an
+# EMPTY one — the CLI only prints the export when the control plane actually
+# minted a content rev, so an absent line is silence, not a default. The journey
+# then fed that empty string to build #2, which baked `bp-content-rev=""`, which
+# `deploy/site-deploy.sh` HEALTH refuses by name ("bp-content-rev marker is empty
+# — the build lost its content link"). The operator would read a HEALTH failure
+# blaming their BUILD three steps after the real cause: a mint receipt that never
+# carried the value. Failing at the mint keeps the red where the fault is.
 judge_prebuilt_mint() {
-  local dep="$1" build="$2"
+  local dep="$1" build="$2" crev="${3-}"
   [ -n "$dep" ] && [ -n "$build" ] || return "$E_PB_MINT_NOT_NAMED"
+  [ -n "$crev" ] || return "$E_PB_MINT_NOT_NAMED"
   return 0
 }
 
@@ -573,9 +584,10 @@ self_check() {
     judge_broken failed HEALTH "error" b-old b-old
 
   note "prebuilt lane (the off-box build, judged by the ENGINE'S OWN WORDS)"
-  expect_pass      "the mint named a deployment and a build id"       judge_prebuilt_mint dep-1 b-abc
-  expect_code "$E_PB_MINT_NOT_NAMED" "minted with no deployment id (nothing to resume)" judge_prebuilt_mint "" b-abc
-  expect_code "$E_PB_MINT_NOT_NAMED" "minted with no build id (nothing to stamp)"       judge_prebuilt_mint dep-1 ""
+  expect_pass      "the mint named a deployment, a build id and a content rev" judge_prebuilt_mint dep-1 b-abc rev-1
+  expect_code "$E_PB_MINT_NOT_NAMED" "minted with no deployment id (nothing to resume)" judge_prebuilt_mint "" b-abc rev-1
+  expect_code "$E_PB_MINT_NOT_NAMED" "minted with no build id (nothing to stamp)"       judge_prebuilt_mint dep-1 "" rev-1
+  expect_code "$E_PB_MINT_NOT_NAMED" "minted with an EMPTY content rev (HEALTH would blame the build)" judge_prebuilt_mint dep-1 b-abc ""
   expect_pass      "the uploaded bytes reached live"                 judge_prebuilt_ship live
   expect_code "$E_PB_SHIP_NOT_LIVE" "the upload stalled at queued"   judge_prebuilt_ship queued
   expect_code "$E_PB_SHIP_NOT_LIVE" "the upload died"                judge_prebuilt_ship failed
@@ -1205,11 +1217,11 @@ prebuilt_journey() {
     dep_id="$(printf '%s\n' "$mintall" | sed -n 's/.*minted prebuilt deployment \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p' | tail -n 1)"
     mint_bid="$(printf '%s\n' "$mintall" | sed -n 's/.*minted prebuilt deployment [A-Za-z0-9-]* (build \([^)]*\)).*/\1/p' | tail -n 1)"
   fi
-  judge_prebuilt_mint "$dep_id" "$mint_bid" ||
-    fail $? "the mint named deployment='${dep_id:-none}' build_id='${mint_bid:-none}' — the journey cannot build against a build id it was never told, and cannot resume a deployment it cannot name. Output above." \
-      "a 422 prebuilt_not_enabled here means step 1 did not take; a 404 means the team does not own '$slug'"
+  judge_prebuilt_mint "$dep_id" "$mint_bid" "$mint_crev" ||
+    fail $? "the mint named deployment='${dep_id:-none}' build_id='${mint_bid:-none}' content_rev='${mint_crev:-none}' — the journey cannot build against a build id it was never told, cannot resume a deployment it cannot name, and must not build with an EMPTY content rev (the bytes would bake bp-content-rev=\"\" and die at HEALTH with 'the build lost its content link', blaming the build for a receipt that never carried the value). Output above." \
+      "a 422 prebuilt_not_enabled here means step 1 did not take; a 404 means the team does not own '$slug'. An absent BARKPARK_CONTENT_REV line means the control plane minted NO content rev — it computes that by reading the site's content ON THE BOX, so it is usually the same relay credential failing that the deploy will fail on."
   ok "minted deployment $dep_id, build id $mint_bid"
-  [ -n "$mint_crev" ] && ok "content_rev $mint_crev  (computed ON THE BOX — no client can know it before the mint)"
+  ok "content_rev $mint_crev  (computed ON THE BOX — no client can know it before the mint)"
   # THE EXPORT UNDER TEST (charter: this line used to be printed from the
   # deployment URL and therefore never printed at all — see criterion 6).
   [ -n "$mint_base" ] && ok "site base $mint_base"
