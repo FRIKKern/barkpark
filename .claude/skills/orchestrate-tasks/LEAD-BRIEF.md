@@ -63,6 +63,12 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 
 ## Fences and shared files
 
+- **Temp files are namespaced.** The session scratchpad root is SHARED by every agent in the
+  campaign. A worker wrote `scratchpad/pr-body.md`, another overwrote it seconds later, and
+  `gh pr edit --body-file` published the wrong PR body (measured 2026-09-02). Every lead and worker
+  writes temp files ONLY under `$ORCH/tmp/<lane>-<worker>/` (mkdir it first) or inside its own
+  worktree; never a bare filename at the scratchpad root. Read back anything you publish.
+
 - Edit only inside your fence. Need a change outside it? Write a `REQUEST:` line in your
   status file naming the lane and the exact change, and message `main`. Keep working.
 - Registry files (`router.ex`, `openapi*.json`, sobelow config, `CHANGELOG*`) are shared:
