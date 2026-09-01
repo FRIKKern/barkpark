@@ -18,15 +18,33 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   `:create` is submitter-only in v1 (the outsider files; the operator answers in
   text). Both read paths stream the raw bytes back to an authorized caller only.
+
+  ## What "an authorized caller" means on `:show_operator`
+
+  The operator read rides `:session_token_root` (charter Decision 12), a
+  soft-auth bucket with no halting authentication plug — so the gates that
+  bucket's Bearer-only sibling `:token_root` INHERITS from `[:api,
+  :require_token]` are stated explicitly, split across two seats
+  (task-298e4a93456b1fc3):
+
+    * TENANCY + TIER live on the pipeline — `DeriveWorkspaceFromToken` ahead of
+      `AssignDefaultScope` (so `operator_scope/1` follows the TOKEN, not the
+      seeded Default workspace) and `PublicRead` at its tail (so the public-read
+      tier, which ships embedded in client JS, never reaches these bytes).
+    * SURFACE + PARAM SHAPE live here — `require_operator/1` refuses a
+      scope-bound share token off its surface, and `operator_dataset/1` refuses
+      a non-string `?dataset`.
   """
 
   use BarkparkWeb, :controller
 
   require Logger
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Tickets.Attachments
+  alias BarkparkWeb.Plugs.RequireToken
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -87,15 +105,16 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   @doc "Stream an attachment back to an operator token holder."
   def show_operator(conn, %{"id" => id, "asset_id" => asset_id}) do
-    dataset = operator_dataset(conn)
-    scope = operator_scope(conn)
-
     with {:ok, _tok} <- require_operator(conn),
+         {:ok, dataset} <- operator_dataset(conn),
+         scope = operator_scope(conn),
          {:ok, _ticket} <- operator_ticket(id, dataset, scope),
          {:ok, file} <- Attachments.linked_asset(asset_id, id, dataset, scope) do
       stream_file(conn, file)
     else
       {:error, :unauthorized} -> respond_error(conn, :unauthorized)
+      {:error, :forbidden} -> respond_error(conn, :forbidden)
+      {:error, :malformed_dataset} -> respond_error(conn, :malformed_dataset)
       _ -> respond_error(conn, :not_found)
     end
   end
@@ -111,11 +130,40 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
     end
   end
 
-  # The `:token_root` pipeline assigns a verified operator token as `:api_token`.
+  # The `:session_token_root` pipeline assigns a verified operator token as
+  # `:api_token` (via `OptionalSessionToken` — Bearer OR the Studio session
+  # cookie). Two refusals, not one:
+  #
+  #   * nil            → 401. The pipeline has NO halting authentication plug by
+  #     design (a plain `<a href>` navigation carries no Bearer), so this stays
+  #     the fail-closed gate for an anonymous caller.
+  #   * a SHARE token  → 403. `OptionalSessionToken` resolves through bare
+  #     `Auth.verify_token/1`, which does NOT apply
+  #     `RequireToken.share_token_off_surface?/2` the way `RequireToken` and
+  #     `OptionalToken` both do — so a scope-bound `share_scope` token (opaque
+  #     `share-edit-<surface>` permissions, still `kind: "api"`) verified and
+  #     counted as an operator on this route, which carries no `workspace_slug`
+  #     path param for the share machinery to bind against. The predicate is
+  #     CALLED, never re-derived: one owner for "is this share token off its
+  #     surface?" (task-298e4a93456b1fc3). 403, not 401 — the credential
+  #     verified; the surface is wrong, exactly as `RequireToken` answers it.
+  #
+  # The TIER clamp for a `public-read` token is NOT here: `PublicRead` is
+  # mounted at the tail of `:session_token_root` and halts before this runs, so
+  # a future GET added to that bucket is clamped by default rather than by an
+  # author remembering to copy a controller check.
   defp require_operator(conn) do
     case conn.assigns[:api_token] do
-      nil -> {:error, :unauthorized}
-      tok -> {:ok, tok}
+      nil ->
+        {:error, :unauthorized}
+
+      %ApiToken{} = tok ->
+        if RequireToken.share_token_off_surface?(conn, tok),
+          do: {:error, :forbidden},
+          else: {:ok, tok}
+
+      tok ->
+        {:ok, tok}
     end
   end
 
@@ -183,7 +231,25 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   # Operator scope is resolved from the conn assigns the token pipeline set
   # (ResolveWorkspace / ResolveProject), mirroring MediaController.scope_opts/1.
-  defp operator_dataset(conn), do: Map.get(conn.params, "dataset", "production")
+  # `/v1/tickets/inbox/:id/attachments/:asset_id` declares NO `:dataset`
+  # segment, so this key can only ever come from the QUERY STRING — where a
+  # caller controls its TYPE, not just its value. `?dataset[]=x` parses to a
+  # LIST and `?dataset[k]=v` to a MAP, and either one flowed straight into
+  # `Content.get_document/4` → `scope_to_dataset` → `where(x.dataset == ^["x"])`,
+  # which `Repo.one` answers with a raised `Ecto.Query.CastError`. There is no
+  # `action_fallback` clause for a raise, so that was a 500 on a route reachable
+  # by any valid operator token (`Attachments.linked_asset/4`'s
+  # `when is_binary(dataset)` guard is a second raise site behind it).
+  #
+  # Validate the SHAPE, never the value: any binary passes through unchanged (a
+  # nonexistent dataset still resolves to an honest 404 downstream, which is the
+  # pre-existing contract), and only a non-binary is refused 400.
+  defp operator_dataset(conn) do
+    case Map.get(conn.params, "dataset", "production") do
+      dataset when is_binary(dataset) -> {:ok, dataset}
+      _ -> {:error, :malformed_dataset}
+    end
+  end
 
   defp operator_scope(conn) do
     []
@@ -304,6 +370,7 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   # (413 oversize, 422 mime/count, 400 no-file) inline in the same shape.
   defp respond_error(conn, :not_found), do: enveloped(conn, {:error, :not_found})
   defp respond_error(conn, :unauthorized), do: enveloped(conn, {:error, :unauthorized})
+  defp respond_error(conn, :forbidden), do: enveloped(conn, {:error, :forbidden})
 
   defp respond_error(conn, :storage_unavailable),
     do: enveloped(conn, {:error, :storage_unavailable})
@@ -346,6 +413,10 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   defp respond_error(conn, :malformed_no_file) do
     custom(conn, 400, "malformed", "missing 'file' field in multipart upload", %{})
+  end
+
+  defp respond_error(conn, :malformed_dataset) do
+    custom(conn, 400, "malformed", "'dataset' must be a string", %{reason: "malformed_dataset"})
   end
 
   # Fallback: any unmapped reason is a server-side surprise, not a client 4xx.

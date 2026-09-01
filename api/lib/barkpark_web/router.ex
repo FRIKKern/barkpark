@@ -725,8 +725,9 @@ defmodule BarkparkWeb.Router do
   # Session-cookie soft-auth for the OPERATOR's ROOT-mounted GET plugin routes
   # (Barkpark Tickets, charter Decision 12). The `:api` pipeline shape — same
   # AcceptBarkparkVendor / accepts json / ApiSecurityHeaders /
-  # ErrorEnvelopeNegotiation / RateLimit / AssignDefaultScope — but with
-  # `:fetch_session` FIRST and `OptionalSessionToken` in place of
+  # ErrorEnvelopeNegotiation / RateLimit / DeriveWorkspaceFromToken /
+  # AssignDefaultScope — but with `:fetch_session` FIRST and
+  # `OptionalSessionToken` in place of
   # `OptionalToken`. ApiSecurityHeaders stays: the routes that ride this bucket
   # used to ride `:token_root` (which pipes through `:api`), so every response —
   # including the 401/404 error envelopes — keeps the same nosniff +
@@ -740,10 +741,15 @@ defmodule BarkparkWeb.Router do
   # API clients unchanged) OR `session["api_token"]`, so the logged-in operator's
   # cookie authenticates the download; an anonymous conn passes through untouched.
   #
-  # NO HALTING PLUG by design: OptionalSessionToken never halts, and the
-  # controller's own `require_operator/1` is the fail-closed gate — an anonymous
-  # conn 401s there, exactly the same soft-auth + downstream-gate shape as
-  # `:shared_media_api`. We deliberately do NOT use RequireBearerOrSessionToken:
+  # NO HALTING *AUTHENTICATION* PLUG by design: OptionalSessionToken never
+  # halts, and the controller's own `require_operator/1` is the fail-closed gate
+  # for an ANONYMOUS caller — it 401s there, exactly the same soft-auth +
+  # downstream-gate shape as `:shared_media_api`. (The `PublicRead` tail below
+  # DOES halt, but only on a resolved public-read token — an AUTHORIZATION
+  # decision about a principal that already authenticated, never an
+  # authentication one. Anonymous is untouched by it: `public_read_token?/1` is
+  # false with no `:api_token` assign.)
+  # We deliberately do NOT use RequireBearerOrSessionToken:
   # its session branch demands the `x-requested-with` header (CSRF defense), which
   # a plain `href` / `target=_blank` navigation cannot send — that would re-break
   # the very click this pipeline fixes.
@@ -763,8 +769,42 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # TENANCY (task-298e4a93456b1fc3). This bucket was hand-copied from `:api`'s
+    # SHAPE and missed the ONE line that makes that shape safe. Its sibling
+    # `:token_root` is `[:api, :require_token, ...]`, so it INHERITS this plug;
+    # `:session_token_root` inlines `:api`'s plug list and inherited nothing.
+    # Without it `AssignDefaultScope`'s "nothing else set it" branch fired for
+    # EVERY caller, so `TicketsAttachmentsController.operator_scope/1` resolved
+    # the seeded Default workspace regardless of the token — a token minted into
+    # workspace B streamed a DEFAULT-workspace ticket attachment's BYTES, while
+    # the sibling read of the same ticket (`GET /v1/tickets/inbox/:id` on
+    # `:token_root`) correctly scoped to the token's own workspace.
+    #
+    # This is the identical fix, in the identical ORDER, that the `:api`
+    # pipeline carries at the top of this file (task-28c3f7f0987d6e85) and that
+    # `:flat_admin_api` / `:cycle_api` already carry: the plug is
+    # NO-OP-IF-SET, so placed AFTER AssignDefaultScope it could never fire.
+    # Nothing anonymous changes and nothing on a nil-`workspace_id` token
+    # changes — both fall straight through to the Default fallback as before.
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    # TIER (task-298e4a93456b1fc3), the second half of what `:token_root`
+    # inherits and this bucket did not: `:require_token` carries `PublicRead`.
+    # `OptionalSessionToken` resolves through bare `Auth.verify_token/1` with no
+    # tier clamp, and the controller's `require_operator/1` only asserts the
+    # assign is non-nil — so a `public-read` token (the tier `TokenController`
+    # mints for public websites, which ships EMBEDDED in a client JS bundle) was
+    # an operator here and downloaded outsider-uploaded attachment bytes.
+    #
+    # Mounted at the TAIL, exactly as `:cycle_api` mounts it, so `:api_token`
+    # and the resolved `:current_workspace`/`:current_project` are all assigned
+    # before it runs. The attachment path is not in the plug's allowlist
+    # (`GET /v1/data/query|doc`, `GET /v1/graph`), so the public tier is denied
+    # 403 and every other principal no-ops through `public_read_token?/1`
+    # byte-identically. Deny-by-default at the MOUNT is the point: a second GET
+    # added to this bucket tomorrow is clamped without anyone re-deriving it.
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
