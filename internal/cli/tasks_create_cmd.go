@@ -778,6 +778,10 @@ flags:
 	  --set <k=v>      Extra field (repeatable; k:=json for typed values, e.g.
                    --set priority:=3, --set 'labels:=["infra"]',
                    --set parent_id=my-goal). Overrides the injected defaults.
+                   Acceptance criteria are typed JSON too, and the ONE flag
+                   does both — it writes the array AND generates the brief's
+                   Criteria section from it, e.g.
+                     --set 'acceptance_criteria:=[{"criterion":"gates green","met":false,"evidence":""}]'
   --publish        Publish the new task immediately (draft → published).
                    A PUBLISHED row must clear the publish wall, so --publish
                    also requires --description (20+ chars) and 1-12 weighted
