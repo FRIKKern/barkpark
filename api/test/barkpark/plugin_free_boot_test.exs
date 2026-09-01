@@ -147,6 +147,15 @@ defmodule Barkpark.PluginFreeBootTest do
     # project_id -> a scope keyword list, no DB/network/config touch), so it is
     # identical, not merely similar, under `:plugins []`.
     {"Barkpark.Plugins.Media", "lib/barkpark_web/controllers/v1/media_controller.ex"},
+    # `V1.MediaProcessingController.callback/2` (task-51ee1a486ca8b9d4) calls
+    # the SAME pure `PluginAssets.file_scope_opts/1` as the two Media reaches
+    # above, for the same reason: confining the `mediaAsset` lookup and its
+    # write-back to the blob's own tenancy (the unscoped pair resolved the
+    # dataset STRING in the Default project and 404d every workspace-scoped
+    # asset). Two struct fields -> a scope keyword list, nils dropped; no
+    # DB/network/config touch, so it is identical under `:plugins []`.
+    {"Barkpark.Plugins.Media",
+     "lib/barkpark_web/controllers/v1/media_processing_controller.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/processing.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/checkout.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/collections.ex"},
