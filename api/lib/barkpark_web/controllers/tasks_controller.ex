@@ -8,8 +8,10 @@ defmodule BarkparkWeb.TasksController do
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label,
       flat or under the `filter[<key>]=` container; an unsupported filter key
       is a 400, never a silently unfiltered page)
-    * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
-    * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts)
+    * `GET    /v1/tasks/ready`              — `Tasks.ready/1` (filter container: `parent`/`parent_id`/`phase_id`,
+      all naming the ONE parent axis `ready_query/1` has; any other key is a 400)
+    * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts;
+      filter container: `worker` only)
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
@@ -23,6 +25,10 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
     * `POST   /v1/tasks/:doc_id/stage`      — `Tasks.stage/3` (sanctioned thought-state transition)
+
+  `GET /v1/tasks/events` (keyset replay) honours NO `filter[...]` key — `since`
+  and `limit` are its only narrowings, and a filter key is a 400 naming it. The
+  four whitelists live in one place: `TasksController.Params` `@route_filters`.
 
   ## Shape contract
 
@@ -55,11 +61,25 @@ defmodule BarkparkWeb.TasksController do
 
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
+  # task-e1b74c19174cb2c1: the `filter[...]` container is PARSED here too, and
+  # fail-CLOSED. Before this, `ready` read only its flat params — a caller who
+  # learned `filter[parent_id]` on `GET /v1/tasks` (where #12780 made it work)
+  # and carried it one route over got a 200 carrying the WHOLE ready queue.
+  # Measured on guerrilla 2026-09-01: 200 rows, 47 distinct parents, HTTP 200,
+  # against 18 rows / 1 parent for the honoured `?phase_id=` spelling. This is
+  # the queue agents CLAIM from, so that false confirmation is one step from a
+  # write against a foreign epic.
+  #
+  # `filter[parent]` / `filter[parent_id]` / `filter[phase_id]` all name the ONE
+  # parent axis `ready_query/1` has; every other key is a 400 that names it (see
+  # `Params` for why kind/lifecycle_status/type/label cannot be honoured here).
   def ready(conn, params) do
-    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+    with {:ok, filters} <- Params.parse_route_filters(params, :ready),
+         {:ok, phase_id} <- Params.ready_phase_id(params, filters),
+         {:ok, order} <- Params.parse_ready_order(params["order"]) do
       opts =
         []
-        |> Params.put_opt(:phase_id, params["phase_id"])
+        |> Params.put_opt(:phase_id, phase_id)
         |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
         |> Params.put_opt(:offset, Params.parse_offset(params["offset"]))
         |> Params.put_opt(:order, order)
@@ -71,6 +91,9 @@ defmodule BarkparkWeb.TasksController do
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
+
+      {:error, reason} ->
+        invalid_filter(conn, reason)
     end
   end
 
@@ -124,10 +147,19 @@ defmodule BarkparkWeb.TasksController do
   #     stream; prime is orientation, not replay).
   #   * `counts` — open/in_progress/blocked/done/cancelled totals for the
   #     scope, so "how big is the board?" needs no extra list call.
+  #
+  # task-e1b74c19174cb2c1: `filter[...]` is fail-CLOSED here too. `filter[worker]`
+  # is the ONE honoured key (the flat `?worker=` narrowing, in bracket spelling);
+  # everything else 400s naming the key. A parent axis is deliberately refused:
+  # prime answers with FOUR slices and only its ready head could take one, so
+  # narrowing a quarter of the response would be a NEW false confirmation of the
+  # same shape. Measured pre-fix on guerrilla 2026-09-01: `?filter[worker]=lead-cli`
+  # → 200 with `worker: null` and all 28 live claims; `?worker=lead-cli` → 4.
   def prime(conn, params) do
-    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+    with {:ok, filters} <- Params.parse_route_filters(params, :prime),
+         {:ok, worker} <- Params.prime_worker(params, filters),
+         {:ok, order} <- Params.parse_ready_order(params["order"]) do
       scope = scope_opts(conn)
-      worker = params["worker"]
       limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
       view = Params.parse_view(params["view"])
 
@@ -187,6 +219,9 @@ defmodule BarkparkWeb.TasksController do
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
+
+      {:error, reason} ->
+        invalid_filter(conn, reason)
     end
   end
 
@@ -207,7 +242,22 @@ defmodule BarkparkWeb.TasksController do
   # the caller's own `since` when the page was empty); `has_more` is true when a
   # full page came back, so the caller polls again immediately instead of
   # waiting for the next tick.
+  #
+  # task-e1b74c19174cb2c1: this feed honours NO `filter[...]` key — its rows are
+  # `mutation_events`, not tasks, so no task filter key exists on a row and
+  # reaching one would need the join to `documents` this module deliberately
+  # refuses. `since` (the keyset cursor) and `limit` are the only narrowings.
+  # A `filter[...]` is therefore a 400 that names the key, never the pre-fix 200
+  # carrying an unnarrowed page (measured on guerrilla 2026-09-01:
+  # `?filter[doc_id]=task-e1b74c19174cb2c1&limit=5` → 5 rows, 5 distinct doc_ids).
   def events(conn, params) do
+    case Params.parse_route_filters(params, :events) do
+      {:ok, _none} -> do_events(conn, params)
+      {:error, reason} -> invalid_filter(conn, reason)
+    end
+  end
+
+  defp do_events(conn, params) do
     dataset = request_dataset(conn)
     since = Params.parse_int(params["since"], 0)
 
@@ -2082,8 +2132,8 @@ defmodule BarkparkWeb.TasksController do
     |> json(%{
       ok: false,
       reason: "invalid_filter",
-      message: Params.index_filter_message(reason),
-      details: Params.index_filter_details(reason)
+      message: Params.filter_message(reason),
+      details: Params.filter_details(reason)
     })
   end
 
