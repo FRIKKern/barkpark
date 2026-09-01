@@ -23,7 +23,18 @@ defmodule BarkparkWeb.ChatHostController do
     end
   end
 
-  def enroll(conn, %{"enrollment_token" => token} = params) do
+  # POST /v1/chat-host/enroll is FULLY ANONYMOUS (router `scope "/v1/chat-host"`
+  # pipes it through `:api` alone — enrollment authenticates by POSSESSION of
+  # the token), so this clause head is the only type check standing between an
+  # unauthenticated request and `ChatHosts.enroll/2`, whose single clause guards
+  # `is_binary/1`. Matching on key PRESENCE alone let a present-but-non-binary
+  # token (`?enrollment_token[]=x`, a JSON integer/null) past this clause and
+  # blow the context guard with a FunctionClauseError — a 500 with no credential
+  # at all, undowngraded (no action_fallback here, and Phoenix only maps
+  # `Phoenix.ActionClauseError` — a clause error on the ACTION — to 400).
+  # `is_binary/1` here hands every wrong-TYPE token to the catch-all below, so it
+  # gets the same 401 an ABSENT token already got.
+  def enroll(conn, %{"enrollment_token" => token} = params) when is_binary(token) do
     case ChatHosts.enroll(token, params) do
       {:ok, result} -> conn |> put_status(:created) |> json(result)
       {:error, _reason} -> unauthorized_enrollment(conn)
