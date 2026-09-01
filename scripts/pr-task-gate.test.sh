@@ -789,10 +789,17 @@ record_case "hotfix record: filed passes"    "tok" "$REC_BASE"        0 "::notic
 # THE DEFECT THIS EXISTS FOR: this workflow's exit-2 ::error told a blocked
 # human "if it stays down, the hotfix! lane is the documented override", and
 # merge-gates.md said in two places that without BARKPARK_TASK_TOKEN "the lane
-# still passes". The token is unprovisioned and the `hotfix!` label DOES exist,
-# so following that advice engaged a lane whose only surviving step exits 1 —
-# a required context turned into a guaranteed red, at 2am, by the gate's own
-# instructions. Prose and behaviour disagreed and nothing could notice.
+# still passes". At the time the token was UNPROVISIONED while the `hotfix!`
+# label DOES exist, so following that advice engaged a lane whose only surviving
+# step exits 1 — a required context turned into a guaranteed red, at 2am, by the
+# gate's own instructions. Prose and behaviour disagreed and nothing could notice.
+#
+# STATE RE-DERIVED 2026-09-01: BARKPARK_TASK_TOKEN was provisioned 2026-08-25
+# (`gh secret list`), so the lane is now ARMED and the census below runs against
+# the OTHER direction of its own law — the lane is promisable, and the surfaces
+# must agree that it is. The law is unchanged and bidirectional by design; only
+# which side of it we are standing on has moved. That is exactly why it was
+# written in both directions rather than as a one-way assertion.
 #
 # THE LAW, in both directions:
 #   the lane REFUSES  =>  no surface may promise it as an escape (zero hits)
