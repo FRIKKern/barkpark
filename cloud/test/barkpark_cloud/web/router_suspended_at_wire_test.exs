@@ -104,10 +104,10 @@ defmodule BarkparkCloud.Web.RouterSuspendedAtWireTest do
         # `inserted_at` is the box's birthday — passes a presence check and
         # still renders the wrong day, which is the defect this row is about.
         assert row["suspended_at"],
-                 "`suspended_at` is absent from the #{reason} fleet row. It is written by " <>
-                   "Registry.suspend_barkpark/2 on every suspension; without it on the wire " <>
-                   "the console has no source for the suspension day and falls back to " <>
-                   "sub.current_period_end, a FUTURE renewal day."
+               "`suspended_at` is absent from the #{reason} fleet row. It is written by " <>
+                 "Registry.suspend_barkpark/2 on every suspension; without it on the wire " <>
+                 "the console has no source for the suspension day and falls back to " <>
+                 "sub.current_period_end, a FUTURE renewal day."
 
         assert {:ok, wire, _} = DateTime.from_iso8601(row["suspended_at"])
 
@@ -132,8 +132,10 @@ defmodule BarkparkCloud.Web.RouterSuspendedAtWireTest do
       row = fleet_row(token, bp.id)
 
       assert row["suspended"] == false
-      assert Map.has_key?(row, "suspended_at"), "the key is unconditional, so a client can " <>
-                                                  "branch on presence without an existence check"
+
+      assert Map.has_key?(row, "suspended_at"),
+             "the key is unconditional, so a client can " <>
+               "branch on presence without an existence check"
 
       assert row["suspended_at"] == nil,
              "a box that was never suspended has no suspension day; null is the only honest " <>
