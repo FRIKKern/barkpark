@@ -89,8 +89,8 @@ set -uo pipefail
 # 29804094521). A gate that reds on correct work spends the only thing it
 # produces, a reviewer's trust.
 #
-# ACCEPTED — case-insensitive, first match on its own line wins, leading
-# whitespace allowed, and surrounding backticks are stripped from the id:
+# ACCEPTED — case-insensitive, at COLUMN 0, and surrounding backticks are
+# stripped from the id:
 #     Task: cch-bl-some-slug
 #     Task: `cch-bl-some-slug`
 #     task:   `cch-bl-some-slug`
@@ -103,17 +103,59 @@ set -uo pipefail
 #   • a bare id with no `Task:` label, or a `Task:` label with no id after it
 # The id character class itself is unchanged (a-z 0-9 . _ / -), so the set of
 # ids this gate can name is exactly what it always was.
-extract_task_id() {
+#
+# ── WHY THIS NO LONGER PICKS, AND NO LONGER ALLOWS INDENTATION ───────────────
+# It used to allow arbitrary leading whitespace and then take `head -1`. Both
+# halves were wrong, and the second is the one that matters.
+#
+# INDENTATION: a fenced code block is indented, so an EXAMPLE trailer quoted
+# inside one MATCHED. This fleet's briefs, PR bodies and handoff messages quote
+# real, currently-claimed ids constantly — that is the house idiom — so the
+# realistic vector was never a crafted attack, it was a routine paste. Column 0
+# ends it, because a quoted example is not at column 0.
+#
+# PICKING: `head -1` resolved the ambiguity BY POSITION, and `tail -1` would
+# have been exactly as wrong — it does not remove the hijack, it only changes
+# WHICH quote wins. A body whose example sits BELOW the real trailer defeats
+# `tail -1` precisely as one above it defeated `head -1`.
+#
+#   A GATE THAT RESOLVES AMBIGUITY BY POSITION IS GUESSING, AND A GUESS IN A
+#   MERGE GATE IS A GUESS IN THE PERMISSIVE DIRECTION.
+#
+# So it no longer chooses: two or more DISTINCT ids is a REFUSAL. The same id
+# repeated is not ambiguity — a body may legitimately restate its own trailer —
+# so the ids are deduplicated before they are counted.
+#
+# EXIT CODES: 0 with the id on stdout · 0 with EMPTY stdout when there is no
+# trailer at all (the caller turns that into the definitive "no task reference"
+# FAIL) · 4 with the offending ids on stderr when the reference is ambiguous.
+# Ambiguity gets its own code because it must not be reported as absence: the
+# author of an ambiguous body HAS named their task, and telling them to add a
+# trailer they already wrote is the kind of wrong instruction that gets a gate
+# worked around rather than satisfied.
+extract_task_ids() { # every DISTINCT column-0 trailer id, one per line
   printf '%s' "${PR_BODY:-}" \
-    | grep -ioE '^[[:space:]]*task:[[:space:]]*`?[a-z0-9][a-z0-9._/-]*`?' \
-    | head -1 \
-    | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//' \
-    | tr -d '`'
+    | grep -ioE '^task:[[:space:]]*`?[a-z0-9][a-z0-9._/-]*`?' \
+    | sed -E 's/^[Tt][Aa][Ss][Kk]:[[:space:]]*//' \
+    | tr -d '`' \
+    | awk 'NF && !seen[$0]++'
+}
+
+extract_task_id() {
+  ids="$(extract_task_ids)"
+  n="$(printf '%s' "$ids" | grep -c . || true)"
+  case "$n" in
+    ''|0) return 0 ;;
+    1)    printf '%s' "$ids"; return 0 ;;
+  esac
+  printf 'ambiguous task reference — %s distinct `Task:` ids at column 0: %s. Exactly one is required: keep the real trailer at column 0 and indent, fence or reword every example id.\n' \
+    "$n" "$(printf '%s' "$ids" | tr '\n' ' ' | sed 's/ *$//')" >&2
+  return 4
 }
 
 if [ "${1:-}" = "--extract-task-id" ]; then
   extract_task_id
-  exit 0
+  exit $?
 fi
 
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
@@ -191,12 +233,27 @@ else
 fi
 
 # The ordering clause's own line number, quoted in the refusals below so the
-# reader can jump straight to the rule they are one keystroke from tripping. It
-# is a literal because the clause has no other name; scripts/pr-task-gate.test.sh
-# runs the gate, reads this reference back out of the message and asserts that
-# the cited line really is the released_ge_expired comparison — so an edit that
-# shifts the clause reds the harness instead of quietly misdirecting a reader.
-ORDERING_CLAUSE_REF="pr-task-gate.sh:462"
+# reader can jump straight to the rule they are one keystroke from tripping.
+#
+# DERIVED AT RUN TIME, NOT PINNED. It was a literal, and the literal was wrong
+# within one edit of this file: adding the trailer-ambiguity refusal above moved
+# the clause from :462 to :504 and the harness caught a citation that would have
+# sent a blocked author 42 lines wrong. The harness catching it is the system
+# working — but a pin that only survives because a test re-pins it by hand is a
+# chore, and a chore is a thing that gets skipped. Computing it from the clause
+# itself removes the class: the number cannot drift from the line it names.
+#
+# THE PATTERN IS ANCHORED ON THE CLAUSE'S SHAPE, NOT ON THE SYMBOL, because the
+# first draft searched for the symbol alone — and THIS LINE contains the symbol,
+# so `head -1` matched the assignment itself and the gate cited its own line
+# number. The harness passed it, because its assertion only asked whether the
+# cited line mentions `released_ge_expired`, which a line searching for that
+# string does. A self-referential search needs a pattern its own source cannot
+# satisfy: the clause opens `[ "$released_ge_expired"`, and this line cannot.
+#
+# If it ever matches nothing the reference degrades to a bare filename, which
+# fails the harness's `[0-9]+` assertion loudly rather than misdirecting quietly.
+ORDERING_CLAUSE_REF="pr-task-gate.sh:$(grep -nE '^[[:space:]]*\[ "\$released_ge_expired" = "no" \]' "$0" | head -1 | cut -d: -f1)"
 
 # The whole cure, in the order it must be performed. Every refusal that a
 # re-claim actually fixes carries this, verbatim.
