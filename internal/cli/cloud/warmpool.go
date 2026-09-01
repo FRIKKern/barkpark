@@ -172,14 +172,18 @@ type CaddyStep struct {
 	// admin-token step populates this with the token; non-secret steps leave it
 	// empty.
 	Redact []string
-	// RedactEnvSecrets, when true, runs PATTERN-based scrubbing over captured
-	// output in addition to the literal Redact substrings — for steps that source
-	// /opt/barkpark/.env (`set -a; . /opt/barkpark/.env; set +a`) and could echo a
-	// DB password / SECRET_KEY_BASE / BARKPARK_KEK / BARKPARK_CLOAK_KEY /
-	// PREVIEW_JWT_SECRET on failure. The worker NEVER knows these VALUES (they are
-	// generated on the box),
-	// so a literal Redact can't catch them; scrubEnvSecrets matches their SHAPE.
-	// Set true on the migrate step (and any other .env-sourcing step).
+	// RedactEnvSecrets marks a step that sources /opt/barkpark/.env
+	// (`set -a; . /opt/barkpark/.env; set +a`) and could therefore echo a DB
+	// password / SECRET_KEY_BASE / BARKPARK_KEK / BARKPARK_CLOAK_KEY /
+	// PREVIEW_JWT_SECRET on failure. The worker NEVER knows those VALUES (they are
+	// generated on the box), so a literal Redact can't catch them.
+	//
+	// IT NO LONGER GATES THE SCRUB. scrubStepOutput runs the pattern scrub on
+	// EVERY step unconditionally — the flag was opt-in per step and set at only 7
+	// of the 15 non-test CaddyStep literals in this package, so the flag-less
+	// majority funneled raw captured remote output into provision_jobs.error. The
+	// field is kept as DOCUMENTATION of which steps touch .env (several tests
+	// assert step authors still flag them), not as a switch. Nothing opts out.
 	RedactEnvSecrets bool
 }
 
@@ -202,51 +206,108 @@ func scrubSecrets(out string, redact []string) string {
 // ecto:// scheme deploy.sh uses and the postgres(ql):// shapes are covered.
 var ectoUserinfoRe = regexp.MustCompile(`(ecto|postgres|postgresql)://[^\s:/@]+:[^\s@]+@`)
 
-// envSecretAssignRe matches `KEY=<non-space-run>` for the secret-shaped env keys
-// the migrate/admin-token/secrets-install scripts source from /opt/barkpark/.env.
-// The worker does not know the VALUES (generated on the box), so this redacts by
-// KEY name + the value's shape (a run of non-whitespace) rather than by exact
-// match. BARKPARK_KEK_PREVIOUS is listed BEFORE BARKPARK_KEK so the longer key
-// wins the alternation (leftmost-first) and its value never leaks during a KEK
-// rotation window.
-var envSecretAssignRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_KEK_PREVIOUS|BARKPARK_KEK|BARKPARK_CLOAK_KEY|PREVIEW_JWT_SECRET|DATABASE_URL)=\S+`)
+// bearerRe scrubs an `Authorization: Bearer <token>` / bare `Bearer <token>` a
+// verbose remote command (curl -v, an HTTP client's debug log) might echo.
+// Ported from internal/builder/console.go's builderBearerRe.
+var bearerRe = regexp.MustCompile(`(?i)bearer\s+\S+`)
+
+// bpTokenRe scrubs a Barkpark-shaped bearer (bp_admin_…, bp_read_…, bp_write_…)
+// wherever it appears, not just after "Bearer" — belt-and-suspenders on top of
+// the literal Redact scrub, which only covers tokens the worker itself minted.
+// Ported from internal/builder/console.go's builderTokenRe.
+var bpTokenRe = regexp.MustCompile(`bp_[a-z]+_[A-Za-z0-9_-]+`)
+
+// envSecretAssignRe redacts the VALUE of a secret-SHAPED uppercase env
+// assignment. It REPLACES the former six-name allowlist (SECRET_KEY_BASE,
+// BARKPARK_KEK_PREVIOUS, BARKPARK_KEK, BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET,
+// DATABASE_URL), which only ever protected the keys someone remembered to add:
+// captured remote output is arbitrary — a box runs systemd units, agent
+// installers and third-party CLIs whose env the worker cannot enumerate — so
+// matching the SHAPE of a secret key name is the only posture that scales.
+// Uppercase-only so it never mangles ordinary lowercase prose.
+//
+// KEK is in the alternation on purpose and is NOT in the builder's list:
+// BARKPARK_KEK and BARKPARK_KEK_PREVIOUS contain neither SECRET nor KEY (K-E-K,
+// not K-E-Y), so porting internal/builder/console.go's builderEnvSecretRe
+// verbatim would have SILENTLY NARROWED coverage and stopped redacting the
+// key-encryption key mid-rotation. TestScrubEnvSecrets_KeepsLegacySixNameCoverage
+// pins that.
+//
+// The former list needed BARKPARK_KEK_PREVIOUS ordered before BARKPARK_KEK so
+// the longer key won the alternation; the shape match has no such hazard — the
+// trailing [A-Z0-9_]* swallows the whole key name either way.
+var envSecretAssignRe = regexp.MustCompile(`\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|APIKEY|API_KEY|PRIVATE_KEY|DATABASE_URL|KEK|KEY)[A-Z0-9_]*)=(\S+)`)
+
+// placeholderValueRe recognises a value that is an angle-bracket PLACEHOLDER
+// rather than a secret — `FOO_API_KEY=<your-key>`. The provisioner deliberately
+// narrates one such line (internal/provisioner/support.go, PDF-D88: the agent
+// provider key hand-off instruction a developer has to read and paste), and
+// redacting it would destroy the instruction rather than protect anything.
+//
+// The guard is deliberately NARROW in two ways. It only matches a leading,
+// complete `<…>` group with no whitespace or nested brackets inside; and the
+// group must be followed by end-of-value or a NON-word character — so shell
+// quoting debris (`<your-key>\n'`) still counts as a placeholder while
+// `SECRET_KEY_BASE=<x>realsecret` does NOT, and is redacted. Nothing broader
+// than an obvious placeholder is exempt.
+var placeholderValueRe = regexp.MustCompile(`^<[^<>\s]*>(?:[^0-9A-Za-z_]|$)`)
 
 // scrubEnvSecrets is the PATTERN-based companion to scrubSecrets: it redacts
 // secret-SHAPED substrings the worker can't enumerate because their values are
-// generated on the box. A step that sources /opt/barkpark/.env can echo a DB
-// password or a signing/encryption key on failure, and that captured output
-// flows raw through worker.fail() into the persisted provision_jobs.error column
-// + the worker's stderr — so a migrate failure would leak prod secrets. This is
-// applied (alongside the literal scrubSecrets) when CaddyStep.RedactEnvSecrets is
-// set. It redacts:
+// generated on the box or belong to software the worker did not install. The
+// captured output of ANY failing step flows raw through worker.fail() into the
+// persisted provision_jobs.error column + the worker's stderr, so this is the
+// boundary that keeps prod secrets out of the database. It redacts, in the same
+// order internal/builder/console.go's redactBuildLine does:
 //
 //   - ecto/postgres URL userinfo:  ecto://user:PASS@host  →  ecto://[REDACTED]@host
-//   - the secret env assignments:  SECRET_KEY_BASE=…       →  SECRET_KEY_BASE=[REDACTED]
-//     (also BARKPARK_KEK, BARKPARK_KEK_PREVIOUS, BARKPARK_CLOAK_KEY,
-//     PREVIEW_JWT_SECRET, DATABASE_URL)
+//   - bearer headers:              Bearer eyJ…            →  Bearer [REDACTED]
+//   - Barkpark tokens:             bp_admin_…             →  [REDACTED]
+//   - secret-shaped assignments:   ANY *SECRET*/*TOKEN*/*PASSWORD*/*KEY*/… =…
+//
+// KEY NAMES always survive so a failed provision stays diagnosable, and an
+// angle-bracket placeholder value is passed through untouched.
+//
+// NOT YET one owner: internal/provisioner/console.go's envSecretConsoleRe still
+// carries the old six-name allowlist and its own doc comment says it "MUST stay
+// in lockstep" with this regex — it is now BEHIND. provisioner already imports
+// this package (cloud.CaddyStep), so the dedup is for redactConsoleLine to call
+// scrubEnvSecrets; that is a follow-up, out of this change's scope fence.
 func scrubEnvSecrets(out string) string {
 	out = ectoUserinfoRe.ReplaceAllStringFunc(out, func(m string) string {
 		// m is "<scheme>://user:pass@" — keep the scheme, redact the userinfo.
 		scheme := m[:strings.Index(m, "://")]
 		return scheme + "://[REDACTED]@"
 	})
+	out = bearerRe.ReplaceAllString(out, "Bearer [REDACTED]")
+	out = bpTokenRe.ReplaceAllString(out, "[REDACTED]")
 	out = envSecretAssignRe.ReplaceAllStringFunc(out, func(m string) string {
-		key := m[:strings.IndexByte(m, '=')]
+		// The key part cannot contain '=', so the first one is the separator.
+		i := strings.IndexByte(m, '=')
+		key, value := m[:i], m[i+1:]
+		if placeholderValueRe.MatchString(value) {
+			// An instruction, not a credential — leave it readable.
+			return m
+		}
 		return key + "=[REDACTED]"
 	})
 	return out
 }
 
-// scrubStepOutput applies BOTH the literal per-step redaction (the minted admin
-// token et al.) AND, when the step sources .env, the pattern-based env-secret
-// scrub — the single place the SSH/real runners funnel captured output through
-// before it is wrapped into an error.
+// scrubStepOutput is the single place the SSH/real runners funnel captured
+// remote output through before wrapping it into an error. It applies BOTH the
+// literal per-step redaction (the minted admin token et al.) AND the
+// pattern-based scrub.
+//
+// The pattern scrub is UNCONDITIONAL and no step opts out. It used to run only
+// `if s.RedactEnvSecrets`, which was set at 7 of the 15 non-test CaddyStep
+// literals in this package — so the flag-less majority funneled RAW captured SSH
+// output into the error the worker persists in provision_jobs.error. Raw
+// captured remote output is never a place a secret is wanted, so there is no
+// legitimate opt-out to offer: an unflagged step is a step whose author did not
+// think about secrets, which is exactly the case the scrub exists for.
 func scrubStepOutput(out string, s CaddyStep) string {
-	out = scrubSecrets(out, s.Redact)
-	if s.RedactEnvSecrets {
-		out = scrubEnvSecrets(out)
-	}
-	return out
+	return scrubEnvSecrets(scrubSecrets(out, s.Redact))
 }
 
 // CaddyStepper produces the ordered Caddy/TLS steps for one server. The default
