@@ -486,14 +486,24 @@ defmodule Barkpark.Content.Schema do
 
   @doc """
   List every schema in a dataset in SDK envelope shape, plus a
-  top-level `datasetSchemaHash` mirroring `schema_hash_for_dataset/1`.
+  top-level `datasetSchemaHash` mirroring `schema_hash_for_dataset/2`.
+
+  `opts` MUST reach BOTH calls. The hash used to be taken from the arity-1
+  `schema_hash_for_dataset(dataset)` on the line right after `list_schemas/2`
+  consumed the very same `opts` (task-803991319aa64189). With empty opts,
+  `resolve_read_dataset_id/2` falls through to `read_default_project_id/1` — the
+  SEEDED DEFAULT project — so every tenant's envelope carried a digest of the
+  Default workspace's schema count and last-modified timestamp: a low-entropy
+  cross-tenant change oracle, and a hash that never moved when the caller's OWN
+  schemas changed (which is exactly what `js/packages/codegen` stamps into the
+  generated-types banner to detect staleness).
   """
   def list_schemas_for_sdk(dataset, opts \\ []) when is_binary(dataset) do
     schemas = list_schemas(dataset, opts)
 
     %{
       schemas: Enum.map(schemas, &serialize_schema_for_sdk/1),
-      datasetSchemaHash: schema_hash_for_dataset(dataset)
+      datasetSchemaHash: schema_hash_for_dataset(dataset, opts)
     }
   end
 
