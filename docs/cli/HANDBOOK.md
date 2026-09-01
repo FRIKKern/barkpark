@@ -53,25 +53,31 @@ Source: `manifest.Resolve` + `internal/cli/repofile.go`. Active context is persi
 
 ## Core verbs (summary)
 
+A **worked subset** — the tree is a pure function of the live manifest, so `bp capabilities`
+(`GET /v1/capabilities`) is the authority and this table can only lag it. Nouns not broken
+out below but carried by the manifest: `data`, `access`, `cycle`, `chat`, `github`, `fleet`
+(`roster`/`beat`), `ticket` + `ticket-key` (cards/cli.md), and the `search`/`media` synonym,
+settings and insights tuning verbs.
+
 | Command | Tier |
 |---|---|
-| `bp doc get/ls/query/backlinks/history/revision/restore-revision/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/discard-draft/delete` | none / write |
+| `bp doc get/ls/query/backlinks/related/history/revision/restore-revision/mutate/create/create-or-replace/create-if-not-exists/patch/publish/unpublish/discard-draft/delete` | none / write |
 | `bp schema get/ls/apply/delete` | none / admin |
 | `bp media ls/get/collections/collection-assets/add-member/remove-member/share-collection/revoke-share/relations/checkout/undo-checkout/search/suggest/update/upload/delete` | none / write |
 | `bp search query` | none |
 | `bp dataset stats` | read — dataset content overview (total docs, per-type published/draft, recent activity; SDK `getAnalytics`) |
 | `bp listen [type,…]` | read — SSE live change feed (one JSON event per line; `/v1/data/listen`); resumes via `Last-Event-ID` on drop |
-| `bp workspace ls/project-ls/project-create/dataset-ls` | read / scoped_admin |
-| `bp webhook ls/get/create/update/delete` | admin / write |
-| `bp token create` | scoped_admin — mints a read-only, workspace-bound API token |
+| `bp workspace ls/create/project-ls/project-create/dataset-ls/member-ls/member-add/member-rm/member-role` | read / scoped_admin |
+| `bp webhook ls/get/create/update/delete/deliveries/replay/rotate/reenable/test-send` | admin / write — `test-send`/`replay` answer 200 with the verdict INSIDE the body (error-exit-table.md) |
+| `bp token create/ls/revoke` | scoped_admin — mint, inventory and revoke workspace-bound API tokens |
 | `bp plugin ls/settings` | read / admin |
-| `bp bulldocs publish/patch/intents` | ingest |
+| `bp bulldocs publish/patch/propose/intents/intent-processed` | ingest |
 | `bp onixedit export` | admin |
-| `bp task ls/ready/prime/events/get/claim/release/stamp/pulse/close/next/move` | read (plugin:tasks) |
-| `bp share ls/add/rm` | admin |
-| `bp graph show/orphans/dangling/tasks` | read |
+| `bp task ls/ready/prime/events/get/claim/release/stamp/pulse/close/next/move/stage` | read (plugin:tasks) |
+| `bp share ls/add/rm/link-ls/link-mint/link-revoke/token-ls/token-mint/token-revoke` | admin |
+| `bp graph show/corpus/orphans/dangling/tasks` | read |
 | `bp auth login/logout/me/register/verify-email/request-reset/reset/mfa-enroll/mfa-verify/mfa-disable` | user session — `docs/auth-user-sessions.md` |
-| `bp secret ls/get/set/rm` | admin (Cloud run-secrets, encrypted) |
+| `bp secret ls/get/set/rm` + `scoped-ls/scoped-get/scoped-set/scoped-rm` | admin / scoped_admin (Cloud run-secrets, encrypted) |
 
 ## Share & graph
 
