@@ -973,11 +973,14 @@ defmodule BarkparkCloud.Sites.Deploy do
           # A TYPED 5xx is terminal — but if untyped blips were tolerated on the
           # way here, the row still says so. "Grace never hides" has to hold on
           # every terminal exit, not only the ones that run out of budget.
-          fail(ctx, with_graced_note(ctx, refusal))
+          fail(ctx, with_graced_note(ctx, after_completed_build(ctx, refusal)))
         end
 
       {:ok, status, body} ->
-        fail(ctx, with_graced_note(ctx, box_refusal(status, body, :poll)))
+        fail(
+          ctx,
+          with_graced_note(ctx, after_completed_build(ctx, box_refusal(status, body, :poll)))
+        )
 
       # A restart-shaped blip: the box was unreachable this beat. Spend GRACE (not
       # build budget) and re-poll — `left` is untouched, so a long restart never
@@ -1662,6 +1665,54 @@ defmodule BarkparkCloud.Sites.Deploy do
   end
 
   defp request_id(_), do: nil
+
+  # THE REFUSAL CAPTION ON A BUILD THAT FINISHED (dr-bl-500-caption-lie).
+  #
+  # `box_refusal/3` names WHO refused and WHEN in the poll loop — but not what
+  # the deploy had already ACHIEVED by then, and that is the half 1,322 rows
+  # needed. Row b928fb2f-65b7-45ee-ab8b-80fa44cad42c walked PLAN done → BUILD
+  # done (`npm ci && npm run build`) → STAGE done
+  # (`standalone(+static+public) -> releases/2141dca9a5d58149 (39M)`) → HEALTH
+  # running, and then the pool blip outlived the grace. The row it wrote —
+  # "the instance refused the build poll (HTTP 500)" — is the caption of a box
+  # that never took the job at all. A reader cannot tell the two apart, and they
+  # want OPPOSITE responses: a start-phase refusal sends you to the runner flag,
+  # this one sends you to the health probe on a build whose artifact really
+  # exists on the box.
+  #
+  # So the caption LEADS with what happened and where, and the box's own words
+  # follow it unchanged. It ADDS; it never replaces — the status, the code word
+  # and the `request_id` journal join all still travel, and
+  # `DeployLedger.classify/2` still reads them (its `@refusal` anchor carries
+  # this clause as an optional prefix, and `sites_deploy_test.exs` asserts the
+  # class off the row this function wrote, so a reword reds at edit time).
+  defp after_completed_build(ctx, refusal) do
+    case reached_after_stage(ctx) do
+      nil -> refusal
+      stage -> "the build completed and staged; the deploy then failed at #{stage} — #{refusal}"
+    end
+  end
+
+  # The stage a deploy was AT when it died — but ONLY once the build genuinely
+  # produced something: BUILD and STAGE both `done` is exactly "there is an
+  # artifact staged on the box". Anything short of that has no completed build to
+  # mis-report, so its refusal caption is left alone (a deploy that died during
+  # BUILD really was refused mid-build and nothing else).
+  #
+  # "Where it was" is the stage AFTER the furthest completed one, which is what
+  # the row's own `stage` column already says: the box reports HEALTH `running`
+  # while it probes, and a poll that never comes back leaves that as the last
+  # word. A fully-done walk yields nil (there is no seventh stage) — and it could
+  # not reach here anyway, since a done RETIRE settles the row live.
+  defp reached_after_stage(ctx) do
+    seen = Map.get(ctx, :seen, MapSet.new())
+
+    if MapSet.member?(seen, {"BUILD", "done"}) and MapSet.member?(seen, {"STAGE", "done"}) do
+      done = Enum.filter(@stages, &MapSet.member?(seen, {&1, "done"}))
+      idx = Enum.find_index(@stages, &(&1 == List.last(done)))
+      Enum.at(@stages, idx + 1)
+    end
+  end
 
   # Is this 5xx the box refusing, or the DOOR dying?
   #

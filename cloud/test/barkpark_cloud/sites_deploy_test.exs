@@ -1539,6 +1539,119 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert DeployLedger.refusal_phase(start_reason) == :start
     end
 
+    # THE CAPTION LIED ABOUT A BUILD THAT FINISHED (dr-bl-500-caption-lie).
+    #
+    # 1,322 rows read exactly "the instance refused the deploy/build poll
+    # (HTTP 500)" — the caption of a box that would not take the job — on deploys
+    # that had already walked PLAN -> BUILD -> STAGE. Row
+    # b928fb2f-65b7-45ee-ab8b-80fa44cad42c is the shape, verbatim: PLAN done,
+    # BUILD done ("npm ci && npm run build (next standalone)"), STAGE done
+    # ("standalone(+static+public) -> releases/2141dca9a5d58149 (39M)"), HEALTH
+    # running. A 39MB artifact really existed on the box, and the row says the
+    # instance refused the deploy.
+    #
+    # The two want OPPOSITE responses from a reader — "your box would not start a
+    # build" sends you to the runner flag, "your build finished and then the
+    # control plane lost the box at HEALTH" sends you to the health probe — so a
+    # caption that cannot tell them apart is not merely terse, it misdirects.
+    test "a refusal on a build that already completed BUILD and STAGE names the stage it died at" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # The incident's console, beat for beat.
+      staged =
+        {:ok, 200,
+         %{
+           "state" => "running",
+           "stages" => [
+             %{"name" => "PLAN", "status" => "done", "detail" => "next standalone"},
+             %{
+               "name" => "BUILD",
+               "status" => "done",
+               "detail" => "npm ci && npm run build (next standalone)"
+             },
+             %{
+               "name" => "STAGE",
+               "status" => "done",
+               "detail" => "standalone(+static+public) -> releases/2141dca9a5d58149 (39M)"
+             },
+             %{"name" => "HEALTH", "status" => "running", "detail" => nil}
+           ]
+         }}
+
+      # ...and then the pool blip answers every remaining beat until the grace
+      # runs out. This is the live path: an untyped 5xx that never clears.
+      FakeBoxRelay.program(polls: [staged, crash_500("F9-health-39mb")])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "failed"
+      assert row.stage == "HEALTH"
+      reason = row.failure_reason
+
+      # THE LIE: the row used to OPEN with the caption of a box that never took
+      # the job. It must not any more.
+      refute String.starts_with?(reason, "the instance refused")
+
+      # What the row says instead names both halves of the truth: the build got
+      # as far as a staged artifact, and the stage it actually died at.
+      assert String.starts_with?(
+               reason,
+               "the build completed and staged; the deploy then failed at HEALTH — " <>
+                 "the instance refused the build poll (HTTP 500)"
+             )
+
+      assert reason =~ "the build completed and staged"
+      assert reason =~ "HEALTH"
+
+      # The caption ADDS; it never replaces. The box's own words, its status and
+      # its request_id (the journal join) all still travel.
+      assert reason =~ "refused the build poll"
+      assert reason =~ "HTTP 500"
+      assert reason =~ "internal_error"
+      assert reason =~ "request_id: F9-health-39mb"
+      assert reason =~ "3 transient box 5xx"
+
+      # ...and the caption stays READABLE TO THE LEDGER. Both of its anchors are
+      # `^`-anchored on the refusal template, so a re-caption that forgot them
+      # would silently drop 1,322 rows into UNCLASSIFIED — a fix that trades one
+      # blind spot for another.
+      assert DeployLedger.classify(row) == "BOX_500"
+      assert DeployLedger.refusal_phase(reason) == :poll
+
+      # The site's live pointer never moved: a build that failed at HEALTH is
+      # still a build that never shipped.
+      assert is_nil(Repo.get(Site, site.id).current_deployment_id)
+    end
+
+    # The fence is the CRITERION's fence, not "any stage at all": a deploy that
+    # died before it staged an artifact has no completed build to mis-report, so
+    # its refusal caption is left exactly as it was.
+    test "a refusal before STAGE completed keeps the plain refusal caption" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      planning =
+        {:ok, 200,
+         %{
+           "state" => "running",
+           "stages" => [
+             %{"name" => "PLAN", "status" => "done", "detail" => "next standalone"},
+             %{"name" => "BUILD", "status" => "running", "detail" => "npm ci"}
+           ]
+         }}
+
+      FakeBoxRelay.program(polls: [planning, crash_500("F9-early")])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      reason = Repo.get(Deployment, d.id).failure_reason
+      assert String.starts_with?(reason, "the instance refused the build poll")
+      refute reason =~ "the build completed and staged"
+      assert DeployLedger.refusal_phase(reason) == :poll
+    end
+
     # The START arm gets the same grace — and it is safe BY CONSTRUCTION, which
     # is what this test pins. If the pool blip ate the RESPONSE but the box did
     # start the run, the retry hits a slug that is already in flight and the box

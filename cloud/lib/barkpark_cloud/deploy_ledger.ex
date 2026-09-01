@@ -757,7 +757,22 @@ defmodule BarkparkCloud.DeployLedger do
   # cloud-db-1 all-time against 14,753 start-phase refusals — so this is a
   # TRIPWIRE for the day the first one lands, not a claim that rows are
   # mis-reported today.
-  @refusal ~r/^the instance refused the (?:deploy|build poll) \((?:HTTP )?(\d{3})\)/
+  #
+  # THE CLAUSE IN FRONT (dr-bl-500-caption-lie). `Sites.Deploy.after_completed_build/2`
+  # now prefixes a refusal whose build had already STAGED an artifact with
+  # "the build completed and staged; the deploy then failed at <STAGE> — ",
+  # because the bare refusal caption is the caption of a box that never took the
+  # job and 1,322 rows wore it while a 39MB release sat staged on the instance.
+  # The prefix is carried HERE as an exact optional group rather than by
+  # unanchoring the pattern: a floating search would let a build log that prints
+  # "the instance refused the deploy (HTTP 500)" in its own output classify as a
+  # box refusal, which is the failure mode the `^` anchor exists to prevent. The
+  # producer's template and this group move together, and `sites_deploy_test.exs`
+  # asserts the class off the row the driver wrote — so a reword reds at edit
+  # time instead of dropping every post-build refusal into UNCLASSIFIED.
+  @post_build "(?:the build completed and staged; the deploy then failed at [A-Z]+ — )?"
+
+  @refusal ~r/^#{@post_build}the instance refused the (?:deploy|build poll) \((?:HTTP )?(\d{3})\)/
 
   # The phase the caption names, kept READABLE rather than folded into the class:
   # a poll 500 and a start 500 are the same cause with different blast radii (the
@@ -765,8 +780,8 @@ defmodule BarkparkCloud.DeployLedger do
   # and the taxonomy deliberately does not split on it — 0 poll rows all-time is
   # not a corpus that earns two names. This is how a reader gets the phase back.
   @refusal_phases [
-    {~r/^the instance refused the deploy \((?:HTTP )?\d{3}\)/, :start},
-    {~r/^the instance refused the build poll \((?:HTTP )?\d{3}\)/, :poll}
+    {~r/^#{@post_build}the instance refused the deploy \((?:HTTP )?\d{3}\)/, :start},
+    {~r/^#{@post_build}the instance refused the build poll \((?:HTTP )?\d{3}\)/, :poll}
   ]
 
   @doc """
