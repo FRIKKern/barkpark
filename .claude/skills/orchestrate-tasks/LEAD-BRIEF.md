@@ -12,6 +12,11 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 
 - `bp` talks to `guerrilla.barkpark.cloud`. Always run it as `env -u BARKPARK_TOKEN bp …`
   (a stale env token turns `bp task` invisible). `bp whoami` must say `auth_tier: admin`.
+- EVERY write against the prod ledger (claim, pulse, stamp, release, close, create, doc patch)
+  needs `--yes` or it aborts with "prod write needs confirmation". Add it to every write below.
+- `bp task create --publish` needs a REGISTERED tag (`bp doc ls tag --all`); never invent one.
+- `bp doc patch` writes a DRAFT; follow it with `bp doc publish <type> <id> --yes` or the
+  published row never changes.
 - The ready backlog is huge (thousands of rows). You are judged on VALUE closed, not count.
   P0 before P1. A row that names a security hole, a red main, or a lying gate outranks
   a feature.
@@ -29,8 +34,8 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    filed row is a measurement with a timestamp; many are stale within hours. If the
    premise is false, close the row honestly: `bp task close <id> <you> <epoch> cancelled
    "<what you found>"` (cancelled rows are exempt from the criteria gate).
-2. **Claim** with your worker id: `bp task claim <id> lead-<lane>` (prints epoch). Pulse
-   while it is held: `bp task pulse <id> lead-<lane> --now "<what is happening>"`.
+2. **Claim** with your worker id: `bp task claim <id> lead-<lane> --yes` (prints epoch). Pulse
+   while it is held: `bp task pulse <id> lead-<lane> --now "<what is happening>" --yes`.
 3. **Dispatch** an Opus worker: `Agent(subagent_type: "general-purpose", model: "opus",
    name: "<lane>-w<N>")`. The worker prompt must contain: the task id, "the task row IS
    the spec — do not trust my paraphrase", the worktree command below, the fence, the
@@ -53,7 +58,7 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 8. **Stamp + close** (you): `bp task stamp <id> lead-<lane> <epoch> --criterion N
    --criterion-text "<exact text>" --met --evidence "PR #… merged <sha>"` per met criterion
    (index is ZERO-based; a merge-gate criterion needs `--merge-gated`); then
-   `bp task close <id> lead-<lane> <epoch>`. A 409 `doc_changed_since_claim` means
+   `bp task close <id> lead-<lane> <epoch> --yes`. A 409 `doc_changed_since_claim` means
    re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
 
 ## Fences and shared files
