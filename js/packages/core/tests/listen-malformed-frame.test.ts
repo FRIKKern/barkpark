@@ -3,6 +3,7 @@ import { http } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createListenHandle } from '../src/listen'
+import { BarkparkAPIError } from '../src/errors'
 import type { BarkparkClientConfig, ListenEvent } from '../src/types'
 import type { ListenOptions } from '../src/index'
 
@@ -120,14 +121,15 @@ describe('listen(): a malformed frame is a reported loss, not a silent one', () 
     expect(raws).toHaveLength(8)
   })
 
-  it('a broken encoder is diagnosable ONLY through the callback — the eventual throw names the wrong cause', async () => {
-    // The pathological case: every frame is malformed. The subscription stays
-    // alive by design, so the idle watchdog eventually recycles it, and after
-    // MAX_CONSECUTIVE_CLEAN_CLOSES cycles the [clean-close-infinite-silent]
-    // escalation fires — naming an EMPTY stream, when the stream was never
-    // empty. That mis-attribution is the residual this row flagged and the
-    // follow-up escalation row will fix; it is pinned here so the follow-up has
-    // a red to turn green rather than a claim to re-derive.
+  it('a broken encoder throws naming MALFORMED FRAMES, not the transport — and the count survives the reconnect', async () => {
+    // The pathological case: every frame is malformed. This test used to pin the
+    // MIS-ATTRIBUTION — the subscription stayed alive by design, the idle
+    // watchdog recycled it, and [clean-close-infinite-silent] eventually fired
+    // naming an EMPTY stream when the stream was never empty. The
+    // consecutive-dropped-frame escalation now fires first and names the real
+    // layer. Five bad frames per connection means the throw only lands on the
+    // SECOND cycle, which is the point: droppedFrameCount survives a reconnect,
+    // because a reconnect does not re-encode anything.
     serveFrames(Array.from({ length: 5 }, (_, i) => badFrame(i)))
 
     const raws: string[] = []
@@ -153,8 +155,95 @@ describe('listen(): a malformed frame is a reported loss, not a silent one', () 
     // …every lost frame was reported, across every reconnect cycle…
     expect(raws.length).toBeGreaterThanOrEqual(5)
     expect(raws.every((r) => r.includes('TRUNCATED'))).toBe(true)
-    // …and the only error the stream raises on its own blames the transport.
-    expect((thrown as Error | undefined)?.message).toContain('repeated empty stream closes')
+    // …and the error the stream raises on its own now blames the ENCODER.
+    expect((thrown as Error | undefined)?.message).toContain('repeated malformed frames')
+    expect((thrown as Error | undefined)?.message).not.toContain('empty stream closes')
+  })
+
+  it('a caller who passes NO callback still learns: consecutive drops escalate to a throw', async () => {
+    // The residual the callback alone left open. Without a callback the only
+    // remaining channel is the throw, so this is the test that decides whether
+    // silent loss is still reachable at all.
+    serveFrames(Array.from({ length: 10 }, (_, i) => badFrame(i)))
+
+    const handle = createListenHandle(config, 'post', undefined, {})
+    const events: ListenEvent[] = []
+    let thrown: unknown
+    try {
+      for await (const evt of handle) {
+        events.push(evt)
+        break
+      }
+    } catch (err) {
+      thrown = err
+    }
+    handle.unsubscribe()
+
+    expect(events).toHaveLength(0)
+    expect(thrown).toBeInstanceOf(BarkparkAPIError)
+    expect((thrown as Error).message).toContain('malformed frames')
+  })
+
+  it('keepalives between malformed frames do NOT reset the counter — the escalation still fires', async () => {
+    // A keepalive is evidence about the SOCKET and none about the ENCODER. If it
+    // reset the drop counter, a server emitting garbage on its normal 30s
+    // keepalive cadence would pin the counter below the threshold forever and
+    // silent loss would be unbounded again — with a green, "healthy" stream.
+    const frames: string[] = []
+    for (let i = 0; i < 10; i++) {
+      frames.push(badFrame(i))
+      frames.push(': keepalive\n\n')
+    }
+    serveFrames(frames)
+
+    const raws: string[] = []
+    const handle = createListenHandle(config, 'post', undefined, {
+      onDroppedFrame: (raw) => raws.push(raw),
+    })
+    const events: ListenEvent[] = []
+    let thrown: unknown
+    try {
+      for await (const evt of handle) {
+        events.push(evt)
+        break
+      }
+    } catch (err) {
+      thrown = err
+    }
+    handle.unsubscribe()
+
+    expect(events).toHaveLength(0)
+    expect(raws).toHaveLength(10)
+    expect((thrown as Error | undefined)?.message).toContain('repeated malformed frames')
+  })
+
+  it("stays ARMED under maxReconnects:'unbounded', unlike the clean-close escalation", async () => {
+    // The asymmetry, stated: a clean close is a TRANSPORT symptom a retry can
+    // outlast, so retry-forever legitimately disarms [clean-close-infinite-silent]
+    // (it de-escalates to a 16s delay cap instead). An encoder emitting garbage
+    // is a PRODUCER defect no retry fixes — retrying forever just loses every
+    // event forever — so 'unbounded' must NOT buy silence here.
+    serveFrames(Array.from({ length: 10 }, (_, i) => badFrame(i)))
+
+    const handle = createListenHandle(config, 'post', undefined, {
+      maxReconnects: 'unbounded',
+      reconnectBaseMs: 1,
+    })
+    const events: ListenEvent[] = []
+    let thrown: unknown
+    try {
+      for await (const evt of handle) {
+        events.push(evt)
+        break
+      }
+    } catch (err) {
+      thrown = err
+    }
+    handle.unsubscribe()
+
+    expect(events).toHaveLength(0)
+    expect(thrown).toBeInstanceOf(BarkparkAPIError)
+    expect((thrown as Error).message).toContain('repeated malformed frames')
   })
 
   it('a throwing onDroppedFrame cannot take down the subscription', async () => {
