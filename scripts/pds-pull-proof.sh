@@ -140,6 +140,53 @@ info() { printf '      %s\n' "$*"; }
 rule() { printf -- '─%.0s' $(seq 1 78); printf '\n'; }
 die()  { printf '%s: %s\n' "$SELF" "$*" >&2; exit 3; }
 
+# ── numeric guards ───────────────────────────────────────────────────────────
+# A NON-INTEGER OPERAND DOES NOT STOP `[`; IT MAKES IT SAY NO. `[ "$n" -eq 0 ]`
+# on the two-line string $'0\n0' writes "integer expression expected" to stderr,
+# returns 2, and the `if` reads that as FALSE — so control takes the ELSE branch,
+# which in every guard below is the PASS branch. An unreadable count and a count
+# that is fine are then indistinguishable, and the harness reports the reassuring
+# one. That is the whole defect class (PDS-D99).
+#
+# TWO SOURCES MANUFACTURE THE BAD OPERAND, and both read as defensive:
+#
+#   `grep -c . f || echo 0`   grep -c PRINTS "0" *and* EXITS 1 on no-match, so
+#                             BOTH sides fire and the capture is $'0\n0'.
+#                             Reproduced: an EMPTY file yields a two-line value.
+#   `wc -c <f | tr -d ' ' || echo 0`
+#                             `||` binds to the LAST pipeline stage. `tr` always
+#                             succeeds, so the fallback NEVER fires; a missing
+#                             file yields the EMPTY string, not 0.
+#
+# The fix has to be at both ends, because either alone is a lie: the capture
+# sites below are corrected so they cannot manufacture a non-integer, and every
+# comparison over an externally-derived value is preceded by `int_ok` so a value
+# nobody anticipated FAILS THE STEP BY NAME instead of skipping it. An
+# unparseable count is UNKNOWN, and unknown is not zero.
+#
+# `int_ok` deliberately rejects the empty string, leading `+`/`-`, whitespace and
+# multi-line values — every count in this harness is a cardinality, so a
+# non-negative digit run is the only shape that can be true.
+int_ok() { case "${1-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
+# THE RIGHT-HAND OPERAND IS AN OPERAND TOO. FULL_BUDGET and FULL_MIN_MEM_MB are
+# the only numbers here that arrive straight from the environment, and both are
+# compared with `-lt` / `-ge` further down. `PDS_FULL_EXPORT_BUDGET=one` does not
+# stop the run: the comparison errors, evaluates FALSE, and the else branch
+# writes "FAILED — the budget is exhausted" into an append-only evidence
+# artifact. Fail-CLOSED, which is why nobody noticed — but the reason it records
+# is FABRICATED, and no reader can tell it from a real exhaustion. Refusing at
+# the door is the difference between a wrong number and a wrong story.
+int_ok "$FULL_BUDGET"     || die "PDS_FULL_EXPORT_BUDGET must be a non-negative integer, got '$FULL_BUDGET'"
+int_ok "$FULL_MIN_MEM_MB" || die "PDS_FULL_EXPORT_MIN_MEM_MB must be a non-negative integer, got '$FULL_MIN_MEM_MB'"
+
+# One integer from a counter capture, or the EMPTY string when there isn't one.
+# Never invents a zero: emptiness is what `int_ok` is for. The `head -n 1` is
+# what disarms the grep -c double-fire at the capture site rather than at the
+# comparison, so the value that reaches the evidence log is the one that was
+# measured.
+first_int() { printf '%s' "${1-}" | head -n 1 | tr -dc '0-9'; }
+
 RESULTS=""          # one "id<TAB>outcome<TAB>blocker<TAB>detail" line per step
 N_PASS=0; N_ABORT=0; N_FAIL=0
 
@@ -581,12 +628,12 @@ step_0a() {
             -D "$hdr" -o "$bundle" -w '%{http_code}' 2>/dev/null || true)"; code="$(http_code "$code")"
   t1="$(date +%s)"
   elapsed=$((t1 - t0))
-  bytes="$(wc -c <"$bundle" 2>/dev/null | tr -d ' ' || echo 0)"
+  bytes="$(first_int "$(wc -c <"$bundle" 2>/dev/null | tr -d ' ')")"
   fname="$(grep -i '^content-disposition:' "$hdr" | sed -n 's/.*filename=\"\{0,1\}\([^\";]*\).*/\1/p' | tr -d '\r' || true)"
   info "dev export      HTTP $code · $bytes bytes · ${elapsed}s · filename=${fname:-none}"
 
-  if [ "$code" != "200" ] || [ "$bytes" -lt 1024 ]; then
-    fail 0a "dev export returned HTTP $code / $bytes bytes — guerrilla is running older code than main (served sha ${DEPLOYED_SHA:-unresolved}, version $version)"
+  if [ "$code" != "200" ] || ! int_ok "$bytes" || [ "$bytes" -lt 1024 ]; then
+    fail 0a "dev export returned HTTP $code / ${bytes:-unreadable} bytes — guerrilla is running older code than main (served sha ${DEPLOYED_SHA:-unresolved}, version $version)"
     return 0
   fi
 
@@ -597,7 +644,7 @@ step_0a() {
     fail 0a "the export is not a bp-export-v1 bundle — no manifest.json member"
     return 0
   fi
-  members="$(tar -tf "$bundle" | wc -l | tr -d ' ')"
+  members="$(first_int "$(tar -tf "$bundle" | wc -l | tr -d ' ')")"
   profile="$(jqp 'd.get("profile")' <"$mdir/manifest.json" || echo None)"
   dataset="$(jqp 'd.get("dataset")' <"$mdir/manifest.json" || echo None)"
   src_ws="$(jqp 'd.get("source_workspace")' <"$mdir/manifest.json" || echo None)"
@@ -668,7 +715,7 @@ step_0b() {
   info "worktree is $ahead commit(s) ahead: $code_ahead touching code (api/internal/cloud/js/web), $docs_ahead docs-only"
   git -C "$REPO_ROOT" log --oneline "$DEPLOYED_SHA..$worktree_sha" | sed 's/^/      · /'
 
-  if [ "$code_ahead" -gt 0 ]; then
+  if int_ok "$code_ahead" && [ "$code_ahead" -gt 0 ]; then
     info "NOTE: the box is behind on CODE, not only docs. Auto-deploy has been"
     info "observed not firing (task-85eb87a30db908ec). Every source-derived number"
     info "below describes the DEPLOYED build, not main."
@@ -886,9 +933,9 @@ step_1() {
     return 0
   fi
   local bytes blobs_dir n_blobs
-  bytes="$(wc -c <"$tar" 2>/dev/null | tr -d ' ' || echo 0)"
+  bytes="$(first_int "$(wc -c <"$tar" 2>/dev/null | tr -d ' ')")"
   blobs_dir="$tar.blobs"
-  n_blobs="$(find "$blobs_dir" -type f 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+  n_blobs="$(first_int "$(find "$blobs_dir" -type f 2>/dev/null | wc -l | tr -d ' ')")"
   info "export          exit 0 · $bytes bytes · $((t1 - t0))s · $n_blobs blob(s) in $blobs_dir"
 
   # ── the GRAIN assertion, before a single byte is imported ──────────────────
@@ -1035,7 +1082,8 @@ print(c.index("type")+1, len(c))' "$d/manifest.json" 2>/dev/null || true)"
   first="$(head -n 1 "$d/tables/documents.copy" | awk -F'\t' '{print NF}')"
   # The parse IS an assertion: a non-COPY-TEXT member tab-splits into nothing
   # and every count below would come back 0, reading as a clean empty bundle.
-  [ "${first:-0}" -eq "$n_cols" ] || return 1
+  int_ok "${first:-}" && int_ok "$n_cols" || return 1
+  [ "$first" -eq "$n_cols" ] || return 1
   BUNDLE_TYPES_FILE="$d/types.tsv"
   awk -F'\t' -v it="$i_type" '{ c[$it]++ } END { for (t in c) printf "%s\t%s\n", t, c[t] }' \
     "$d/tables/documents.copy" | sort >"$BUNDLE_TYPES_FILE"
@@ -1080,6 +1128,13 @@ step_2() {
       continue
     fi
     drafts=$((raw - pub))
+    # Guarded ABOVE the arithmetic, not between it and the comparison: under
+    # `set -u` a non-integer would otherwise die in `$((raw - pub))` with a bash
+    # error instead of this harness's own named refusal.
+    if ! int_ok "$raw" || ! int_ok "$pub"; then
+      fail 2 "the source census for type '$t' read raw='${raw:-<empty>}' published='${pub:-<empty>}' — at least one is not an integer, so this run cannot say what the source holds"
+      return 0
+    fi
     [ "$raw" -eq 0 ] && [ "$pub" -eq 0 ] && continue
     printf '      %-28s %10s %10s %10s\n' "$t" "$raw" "$pub" "$drafts"
     total_raw=$((total_raw + raw))
@@ -1183,8 +1238,16 @@ step_2() {
     tr="$(tgt_total "$bt" raw)"
     sr="$(src_total "$bt" raw)"
     printf '      %-28s %10s %10s %10s\n' "$bt" "$bc" "${tr:-ERR}" "${sr:-?}"
-    if [ -z "$tr" ]; then
+    # `[ -z ]` alone cannot see this: tgt_total runs through jqp, which is
+    # print(eval(...)) over the response, so a JSON null arrives as the STRING
+    # "None" — non-empty, non-integer, and enough to make the `-lt` error into
+    # a FALSE that silently reads as "not short".
+    if ! int_ok "$tr"; then
       missing="$missing $bt(unreadable)"
+      continue
+    fi
+    if ! int_ok "$bc"; then
+      missing="$missing $bt(bundle count unreadable)"
       continue
     fi
     if [ "$tr" -lt "$bc" ]; then
@@ -1427,10 +1490,10 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   t1="$(date +%s)"
 
   if [ -n "$rss_pid" ]; then kill "$rss_pid" 2>/dev/null || true; wait "$rss_pid" 2>/dev/null || true; fi
-  peak_kb="$(awk '{ if ($1+0 > m) m = $1+0 } END { print m+0 }' "$rss_log" 2>/dev/null || echo 0)"
+  peak_kb="$(first_int "$(awk '{ if ($1+0 > m) m = $1+0 } END { print m+0 }' "$rss_log" 2>/dev/null)")"
 
-  bytes="$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ' || echo 0)"
-  if [ "$code" != "200" ] || [ "$bytes" -lt 1024 ]; then
+  bytes="$(first_int "$(wc -c <"$FULL_TAR" 2>/dev/null | tr -d ' ')")"
+  if [ "$code" != "200" ] || ! int_ok "$bytes" || [ "$bytes" -lt 1024 ]; then
     rm -f "$FULL_TAR"
     FULL_WHY="the full export returned HTTP $code / $bytes bytes and the attempt is spent ($spent_now of $FULL_BUDGET). A dead export still paid its memory peak, which is exactly why the counter moved first."
     [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
@@ -1442,7 +1505,7 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     return 1
   fi
 
-  if [ "$peak_kb" -gt 0 ]; then
+  if int_ok "$peak_kb" && [ "$peak_kb" -gt 0 ]; then
     FULL_RSS_LINE="beam.smp RSS peaked at $((peak_kb / 1024)) MB — the MAX over ${beam_n:-?} comm-anchored beam.smp slot(s), measured by a 1 Hz ps sampler over SSH across this export only (primary/oldest pid ${beam_pid:-?}, baseline ${baseline_kb:-?} KB, $(grep -c . "$rss_log" 2>/dev/null || echo 0) samples, no slot restart)"
   else
     FULL_RSS_LINE="beam.smp RSS was NOT measured this run (no sampler could be started) — no figure is quoted in its place"
@@ -1537,6 +1600,15 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/m
   i_docid="$(printf '%s' "$cols" | awk '{print $2}')"
   i_type="$(printf '%s' "$cols" | awk '{print $3}')"
   n_cols="$(printf '%s' "$cols" | awk '{print $4}')"
+  # THE OPERAND OF THE GRAMMAR ASSERTION IS ITSELF AN ASSERTION. If n_cols is
+  # not an integer the `-ne` below errors, evaluates FALSE, and the grammar
+  # check is SKIPPED — after which the tab-split scan finds no ticket rows by
+  # construction and step 3 passes. The check that exists to stop a vacuous
+  # clean is the one a non-integer disables, so it is guarded first.
+  if ! int_ok "$n_cols"; then
+    fail 3 "the manifest's documents column count read as '${n_cols:-<empty>}', not an integer — the COPY TEXT grammar assertion below cannot be evaluated, and an unevaluated grammar check makes every ticket-row zero that follows it vacuous"
+    return 0
+  fi
   info "columns         documents: id=\$$i_id doc_id=\$$i_docid type=\$$i_type of $n_cols (from the manifest, this run)"
 
   # (b0) THE PARSE ITSELF IS AN ASSERTION. The row grammar below is Postgres
@@ -1552,9 +1624,13 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/m
     fail 3 "tables/documents.copy is absent or empty in the dev bundle — a zero ticket-row count over an empty member is vacuous, not clean"
     return 0
   fi
-  docs_rows="$(grep -c . "$docs_copy" 2>/dev/null || echo 0)"
-  first_fields="$(head -n 1 "$docs_copy" | awk -F'\t' '{print NF}')"
-  if [ "${first_fields:-0}" -ne "$n_cols" ]; then
+  docs_rows="$(first_int "$(grep -c . "$docs_copy" 2>/dev/null)")"
+  first_fields="$(first_int "$(head -n 1 "$docs_copy" | awk -F'\t' '{print NF}')")"
+  if ! int_ok "$first_fields"; then
+    fail 3 "tables/documents.copy's first row yielded no field count — the member could not be read as text at all, so the COPY TEXT grammar assertion cannot be evaluated"
+    return 0
+  fi
+  if [ "$first_fields" -ne "$n_cols" ]; then
     fail 3 "tables/documents.copy is not the COPY TEXT grammar this assertion parses: its first row splits into ${first_fields:-0} tab-separated fields, the manifest declares $n_cols columns. A tab-split scan of a non-text dump silently finds nothing — refusing to report clean off an unparsed member."
     return 0
   fi
@@ -1564,8 +1640,8 @@ print(c.index("id")+1, c.index("doc_id")+1, c.index("type")+1, len(c))' "$bdir/m
             -v ii="$i_id" -v idc="$i_docid" -v it="$i_type" '
           $it == "ticket" || $idc == a || $idc == b || (u != "" && $ii == u) { n++ }
           END { print n + 0 }' "$docs_copy" 2>/dev/null || echo ERR)"
-  if [ "$rows" = "ERR" ]; then
-    fail 3 "could not read tables/documents.copy out of the dev bundle"
+  if ! int_ok "$rows"; then
+    fail 3 "could not read tables/documents.copy out of the dev bundle — the row count read as '${rows:-<empty>}', not an integer"
     return 0
   fi
   info "ticket ROWS in tables/documents.copy: $rows (asserted 0)"
@@ -1641,7 +1717,7 @@ print(c.index("doc_id")+1, c.index("type")+1)' "$fdir/manifest.json" 2>/dev/null
             $it == "ticket" || $idc == a || $idc == b { n++ } END { print n + 0 }' \
             "$fdir/tables/documents.copy" 2>/dev/null || echo ERR)"
   info "full bundle     ticket ROWS in tables/documents.copy: $f_rows (the control must be > 0)"
-  if [ "$f_rows" = "ERR" ] || [ "$f_rows" -eq 0 ]; then
+  if ! int_ok "$f_rows" || [ "$f_rows" -eq 0 ]; then
     fail 3 "THE CONTROL DID NOT FIRE: the FULL bundle carries $f_rows ticket rows too. Either the ammo (doc_id=$doc_id) is wrong or this bundle is not full fidelity — and until the assertion is shown capable of a non-zero, the dev bundle's zero above proves nothing (PDS-D20)."
     return 0
   fi
@@ -1669,8 +1745,15 @@ resolve_ammo() {
   f="$(mktmp)"
   chmod 600 "$f"
   src_psql "SELECT secret FROM webhooks WHERE secret IS NOT NULL AND secret <> ''" >"$f" || true
-  n="$(grep -c . "$f" 2>/dev/null || echo 0)"
-  if [ "$n" -eq 0 ]; then
+  n="$(first_int "$(grep -c . "$f" 2>/dev/null)")"
+  # FAIL CLOSED ON UNKNOWN. This refusal is the only thing standing between an
+  # unusable ammo file and a step 4 that prints "dev bundle: CLEAN" / "target
+  # DB: CLEAN" having fired zero values. Before this guard the capture was
+  # `grep -c . "$f" || echo 0`, which on an EMPTY file printed 0 AND exited 1 —
+  # both sides fired, the value was $'0\n0', the `-eq` errored to FALSE, and
+  # the refusal was skipped. An unreadable count is not a count of zero, but
+  # both must refuse here, so they share one branch.
+  if ! int_ok "$n" || [ "$n" -eq 0 ]; then
     return 1
   fi
   AMMO_FILE="$f"
@@ -1872,6 +1955,10 @@ step_5() {
     fail 5 "GET $TARGET_BASE/v1/media/$SOURCE_DS did not answer a media index — the assets cannot be resolved from the target's own view, and resolving them any other way would be proving something about a guess"
     return 0
   fi
+  if ! int_ok "$count"; then
+    fail 5 "the media index count read as '${count:-<empty>}', not an integer — whether the --with-blobs import landed any media at all is UNKNOWN, and unknown is not zero"
+    return 0
+  fi
   if [ "$count" -eq 0 ]; then
     fail 5 "the target's media index is EMPTY after a --with-blobs import. The source carries assets, so a zero here is an import failure, not an empty dataset."
     return 0
@@ -1929,7 +2016,9 @@ for a in d["result"]["assets"]:
     demo_size="$(printf '%s' "$demo_row" | cut -f2)"
     demo_url="$(printf '%s' "$demo_row" | cut -f3)"
     disk="$TARGET_MEDIA/$demo_path"
-    if [ "${demo_size:-0}" -le 100 ] 2>/dev/null; then
+    if ! int_ok "${demo_size:-}"; then
+      info "        skipping the size-comparator demo: the stored size read as '${demo_size:-<empty>}', not an integer — truncating a blob to prove a comparator fires against a size we could not parse would prove nothing"
+    elif [ "$demo_size" -le 100 ]; then
       info "failure demo    SKIPPED — the largest imported asset is ${demo_size:-0} bytes, so a truncate-to-100 cuts nothing. Nothing was mutated, and the pass below is weaker for it."
       disk=""
     fi
@@ -2240,7 +2329,18 @@ step_6() {
 
   # ZERO SKIPs is a different fact from a MISCOUNT, and conflating them puts a
   # roster-drift diagnosis on a boot where the guard simply never ran.
-  if [ "${skip_count:-0}" -eq 0 ]; then
+  #
+  # UNREADABLE is a THIRD fact, and it must not borrow either one's message. The
+  # capture is `grep -c … || true`, which is the SAFE spelling — grep -c prints
+  # its 0 and `|| true` only swallows the exit, so one integer arrives. That is
+  # true today and is a property of the capture, not of this comparison; the
+  # guard is what keeps it true if the capture is ever rewritten to the `|| echo 0`
+  # form that manufactured $'0\n0' three steps up this file.
+  if ! int_ok "${skip_count:-}"; then
+    fail 6 "LEG A — the Bootstrap SKIP count read as '${skip_count:-<empty>}', not an integer. Whether the guard fired is UNKNOWN, and unknown is not zero: reporting 'the guard did not fire' off an unreadable count would name a defect this run did not observe."
+    return 0
+  fi
+  if [ "$skip_count" -eq 0 ]; then
     fail 6 "LEG A — THE GUARD DID NOT FIRE: $sentinel_rows rows were sentinelled and stamped, yet the boot logged ZERO Bootstrap guard SKIPs and $register_count plugin REGISTERs. The boot-time upsert walked straight through a stamped slot. Guarded columns that moved on those rows: ${leg_a_changed:-<none, which would be stranger still>}. This is what a broken or absent provenance guard looks like from outside the engine."
     return 0
   fi
