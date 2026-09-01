@@ -238,9 +238,7 @@ defmodule Barkpark.Tasks.Dedup do
             {:error,
              {:duplicate_task,
               %{
-                message:
-                  "this task looks like an existing one — claim/extend it, or pass " <>
-                    "distinct_from: [\"<id>\"] to confirm it is different",
+                message: refusal_message(refuse),
                 similar: Enum.map(refuse, &present/1),
                 advise: Enum.map(remaining_advise, &present/1),
                 scan: scan
@@ -248,6 +246,74 @@ defmodule Barkpark.Tasks.Dedup do
         end
     end
   end
+
+  # ── the refusal must name an id the caller can actually ACT on ─────────────
+  #
+  # `"claim/extend it"` is a promise about the matched row, and against a
+  # DRAFT-ONLY match the gate could keep neither half of it. `present/1` reports
+  # the canonical (drafts-stripped) id — correct, because that is the id
+  # `distinct_from` takes — but a row that exists only as `drafts.<id>` is not a
+  # task yet: `bp task get <id>` 404s, `bp task ready` never lists it, and there
+  # is nothing to claim. The refusal named a resource that does not exist.
+  #
+  # THAT IS NOT A CORNER CASE, IT IS THE FLEET'S OWN FAILURE LOOP. `bp task
+  # create` sends no `doc_id`, so the server mints a fresh `task-<hex>` per
+  # attempt, and `Content.Writer` stores every new doc as `drafts.<id>` — its
+  # own `create_document/4` doc says "New docs are always created as drafts".
+  # Under load a create can die on a connection checkout AFTER that draft row
+  # has landed — the caller sees `unknown error
+  # (DBConnection.ConnectionError)` and the draft survives. The retry mints a
+  # DIFFERENT id, so `prev_doc` is nil, this gate runs, and `base_query/3`
+  # fetches the orphan: nothing excludes a `drafts.` row, and `DISTINCT ON`
+  # keeps it precisely because it has no published twin. A byte-identical retry
+  # scores token-Jaccard 1.0 — `0.7 · 1.0 + 0.3 · 0.0 = 0.7` with no labels,
+  # over `@refuse 0.55` — so **the caller is locked out by its own debris**, by
+  # an id it cannot see, with a remedy it cannot perform.
+  #
+  # THE FIX IS HONESTY, NOT LENIENCY. Dropping draft-only rows from the
+  # candidate set would be the other obvious move and it is the wrong one: a
+  # task that exists ONLY as a draft is still work someone filed, the moduledoc
+  # promises it is still detected, and unfetching it would re-open a real
+  # duplicate hole to paper over a reporting one. Detection is untouched here.
+  # What changes is that the payload distinguishes the two kinds of match and
+  # the message carries the recovery the draft case actually needs — publish it,
+  # discard it, or `distinct_from` it. `published` is ADDITIVE on the wire, so
+  # `internal/apierr`'s `Candidate` (which decodes id/similarity/relation/
+  # lifecycle_status) keeps parsing byte-identically and the note rides out on
+  # `message`, which the CLI already prints.
+  defp refusal_message(refuse) do
+    base =
+      "this task looks like an existing one — claim/extend it, or pass " <>
+        "distinct_from: [\"<id>\"] to confirm it is different"
+
+    case Enum.reject(refuse, fn m -> published?(Map.get(m, :id)) end) do
+      [] ->
+        base
+
+      drafts ->
+        named =
+          drafts
+          |> Enum.map(fn m -> Similarity.norm_id(Map.get(m, :id)) end)
+          |> Enum.take(5)
+          |> Enum.join(", ")
+
+        base <>
+          " · NOTE: #{length(drafts)} of these match(es) exist only as an UNPUBLISHED DRAFT " <>
+          "(#{named}) — `bp task get` will 404 on those ids and they are not on the ready " <>
+          "queue, so there is nothing there to claim or extend. A create that failed AFTER " <>
+          "writing its draft is the usual cause, and the retry then matches its own debris. " <>
+          "Inspect with `bp doc ls task --perspective drafts`, then publish the draft " <>
+          "(`bp doc publish task <id>`) or discard it and retry."
+    end
+  end
+
+  # A stored row is published unless it carries the `drafts.` prefix. The
+  # DISTINCT ON in `base_query/3` prefers the PUBLISHED row of a twin pair, so a
+  # kept row still wearing the prefix is a draft with no published counterpart —
+  # exactly the unactionable case.
+  defp published?("drafts." <> _), do: false
+  defp published?(id) when is_binary(id), do: true
+  defp published?(_), do: false
 
   # The refusal SAYS WHAT IT COULD NOT DO, in the response body, and names the
   # one action that gets the owner unstuck. Never `unknown error`.
@@ -691,7 +757,18 @@ defmodule Barkpark.Tasks.Dedup do
   defp present(%{id: id, sim: sim, structural: rel, lifecycle: lc}) do
     # Report the canonical id (strip the `drafts.` prefix) so the author sees the
     # id they'd reference — and the one they'd pass back in `distinct_from`.
-    %{id: Similarity.norm_id(id), similarity: sim, relation: to_string(rel), lifecycle_status: lc}
+    #
+    # `published` is what that stripping used to destroy: after `norm_id/1` a
+    # draft-only match and a live task are byte-identical in this payload, so
+    # the caller could not tell that "claim/extend it" was impossible for this
+    # row. See `refusal_message/1`.
+    %{
+      id: Similarity.norm_id(id),
+      similarity: sim,
+      relation: to_string(rel),
+      lifecycle_status: lc,
+      published: published?(id)
+    }
   end
 
   defp get(map, key) when is_map(map), do: Map.get(map, key) || Map.get(map, safe_atom(key))
