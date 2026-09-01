@@ -7,7 +7,9 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "( [ -f ../react/dist/index.mjs ] || ( pnpm --filter @barkpark/core build && pnpm --filter @barkpark/react build ) ) && astro build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint tests vitest.config.ts"
   },
   "dependencies": {
     "@barkpark/react": "workspace:^"

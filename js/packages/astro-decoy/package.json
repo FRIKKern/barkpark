@@ -7,7 +7,9 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "astro build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests vitest.config.ts"
   },
   "devDependencies": {
     "astro": "5.18.2",

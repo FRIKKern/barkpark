@@ -1,3 +1,28 @@
 {
-  "extends": ["//"]
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "test/**",
+        "vitest*.config.*",
+        "wrangler.toml",
+        "$TURBO_ROOT$/test-utils/**",
+        "$TURBO_ROOT$/packages/create-barkpark-app/templates/blog-starter/**"
+      ]
+    },
+    "typecheck": {
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "test/**",
+        "templates/**",
+        "tsconfig*.json",
+        "$TURBO_ROOT$/tsconfig.base.json",
+        "$TURBO_ROOT$/packages/create-barkpark-app/templates/blog-starter/**"
+      ]
+    }
+  }
 }
