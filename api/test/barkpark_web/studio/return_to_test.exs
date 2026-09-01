@@ -156,9 +156,19 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
         )
 
       encoded = URI.encode_www_form(@scoped)
-      assert html =~ ~s(href="/studio/chat?return_to=#{encoded}")
       assert html =~ ~s(href="/studio/tmux?return_to=#{encoded}")
       assert html =~ ~s(href="/studio/styleguide?return_to=#{encoded}")
+
+      # CHAT IS NO LONGER A FLAT TAB (task-58b55b015f222b51). tmux and
+      # styleguide are genuinely instance-level singletons, so their tabs stay
+      # flat and rely on return_to to get you home. ChatLive is dual-mounted and
+      # workspace-scoped in substance — it reads the workspace's registered
+      # EXECUTION HOSTS and stamps `owner_workspace_id` on the session it
+      # creates — so from a scoped surface its tab now addresses the workspace
+      # the page is on, like Settings and Connectors. It keeps return_to for the
+      # exit affordance; only the path gained the scope prefix.
+      assert html =~ ~s(href="/w/acme/p/site/studio/chat?return_to=#{encoded}")
+      refute html =~ ~s(href="/studio/chat?return_to=#{encoded}")
     end
 
     test "a flat surface (scope_prefix \"\") emits bare tabs — no return_to to build" do

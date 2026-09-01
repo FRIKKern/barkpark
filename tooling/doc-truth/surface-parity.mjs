@@ -360,12 +360,15 @@ function selftest() {
 
 function main() {
   if (process.argv.includes("--selftest")) {
-    process.exit(selftest());
+    process.exitCode = selftest();
+    return;
   }
   const json = process.argv.includes("--json");
   console.log(formatReport(buildReport(), { json }));
-  // Advisory: always exit 0.
-  process.exit(0);
+  // Advisory: always exit 0 — via exitCode, never exit(). This follows a
+  // full formatReport() write into a `| tee` pipe, and process.exit() does
+  // not wait for a pending pipe write to drain.
+  process.exitCode = 0;
 }
 
 main();

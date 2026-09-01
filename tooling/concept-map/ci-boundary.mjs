@@ -201,7 +201,12 @@ function loadBaseline() {
   if (!existsSync(BASELINE_PATH)) {
     note(`ci-boundary: FATAL — no baseline at ${BASELINE_PATH}`);
     note("ci-boundary: capture one with --write-baseline before gating.");
-    process.exit(2);
+    // GateFault, not exit(2): this file states at its single exit point that
+    // faults are THROWN so exitCode can be set and node allowed to flush.
+    // This one call was the exception to that contract — found by
+    // scripts/workflow-run-shell-check.sh arm B, on the very file whose
+    // header documents the race.
+    throw new GateFault();
   }
   return JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
 }
