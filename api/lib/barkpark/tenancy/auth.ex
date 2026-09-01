@@ -594,4 +594,35 @@ defmodule Barkpark.Tenancy.Auth do
   def workspace_admin?(principal_id, workspace_id, principal_kind) do
     membership_role(principal_id, workspace_id, principal_kind) in @admin_roles
   end
+
+  # The role that confers WORKSPACE-OWNER authority. Deliberately a SEPARATE
+  # constant from `@admin_roles` — the point of this predicate is that it is
+  # strictly narrower, and sharing a constant would make a future widening of
+  # the admin gate silently widen the owner seat too.
+  @owner_roles ~w(owner)
+
+  @doc """
+  True when the principal's membership ROLE in `workspace_id` is `owner`.
+
+  DELIBERATELY STRICTER than `workspace_admin?/2`: `owner` alone, never
+  `admin`. It is the OWNER-ONLY SEAT test — the gate for a ceremony only the
+  workspace's owner may perform, today chat-host enrollment (the Studio
+  `ChatHostsLive` `:enroll` arm and `ChatHostController.create_enrollment/2`),
+  where handing a machine a long-lived credential is an owner decision while
+  revoking one is an admin decision. The policy lives HERE, at one named
+  predicate, rather than being spelled `membership_role(p, ws) == "owner"` at
+  each call site: that literal was written TWICE, in a controller and a
+  LiveView, and a loosening applied to one and not the other is a silent
+  divergence (`arpss-w10-bl-chat-hosts-owner-literal-seat-fork`).
+
+  Because it is narrower than every other predicate here it can only DENY where
+  they admit — it is not, and must not become, a way to ADMIT anyone
+  `workspace_admin?/2` refuses. A non-member is never an owner, and the
+  fail-closed posture of `membership_role/2` (nil / malformed ids deny rather
+  than raise) is inherited unchanged.
+  """
+  @spec workspace_owner?(principal(), binary()) :: boolean()
+  def workspace_owner?(token_or_principal_id, workspace_id) do
+    membership_role(token_or_principal_id, workspace_id) in @owner_roles
+  end
 end
