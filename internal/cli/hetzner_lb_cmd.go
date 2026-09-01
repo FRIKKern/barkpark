@@ -255,11 +255,18 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 	}
 }
 
-// THE SEVEN ENROLLED CREATE PAIRS (PDS-D432) — the complete list, in one place
-// because the enrolment rule is a JUDGEMENT and each row had to earn it. A pair
-// may be enrolled only when the flag's token and the response's value are
+// THE ENROLLED CREATE PAIRS (PDS-D432) — the complete list, because the
+// enrolment rule is a JUDGEMENT and each row had to earn it. A pair may be
+// enrolled only when the flag's token and the response's value are
 // TOKEN-IDENTICAL after the flag's own normalisation; anything the client
 // rewrites before sending fires a FALSE advisory on a CORRECT create.
+//
+// This list is no longer prose-only: it is machine-checked by
+// TestHetznerAdvisoryEnrolmentTableComplete, which AST-scans every hetzner_*.go
+// for hzResAsked literals and reds if one is enrolled without a row in
+// hzAdvisoryEnrolledPairs (or a row names a pair no site emits). The population
+// spans three files — a create enrolled in hetzner_net_cmd.go or
+// hetzner_dns_cmd.go can no longer silently understate this header.
 //
 //	load-balancer create --type   → load_balancer_type  (NON-numeric token only)
 //	load-balancer create --location → location          (--location branch only)
@@ -268,6 +275,9 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 //	floating-ip create --home-location → home_location  (--home-location branch only)
 //	primary-ip create --type      → type                (always)
 //	primary-ip create --location  → location            (--location branch only)
+//	network create --ip-range     → ip_range            (PDS wave 32; the POST-hzCIDR token — hetzner_net_cmd.go)
+//	firewall create --rules-file  → rule_count          (PDS wave 32; count of loaded rules — hetzner_net_cmd.go)
+//	zone create --mode            → mode                (PDS wave 32; hetzner_dns_cmd.go)
 //
 // THE FOUR EXCLUSIONS, each with the false positive enrolling it would produce:
 //
