@@ -183,6 +183,7 @@ import { fileURLToPath } from "node:url";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
+import { selectDefects } from "./defect-selection.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -481,19 +482,29 @@ const KILL_POLL_CAP = 2000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── args ─────────────────────────────────────────────────────────────────────
+// cch-w17-bl-overflow-guard-honours-one-defect-flag. This block used to read
+// `const di = argv.indexOf("--defect")`, and `indexOf` returns the FIRST match:
+// `--defect A --defect B` measured A, dropped B without a word, and printed
+// `OVERFLOW GUARD PASS — A measured fixed in a real browser` at exit 0. A caller
+// who asked for two legs got a green covering one, with nothing in the output
+// saying so — the defect this guard exists to catch, living in the guard.
+//
+// EVERY occurrence is honoured now, and NOTHING in argv is ignored: a stray word
+// (`--defect A B`) and a valueless `--defect` are exit-2 REFUSALS rather than
+// silent drops. The reasoning for accumulating rather than refusing a repeated
+// flag, and the safety argument against every live caller, are in
+// ./defect-selection.mjs — which is a separate module so the parser can be
+// driven WITHOUT a browser, the same reason font-pin / bringup-retry /
+// ready-host-paint are siblings. The PASS line below already prints
+// `requested.join(", ")`, so an accumulated run states the leg set it covers.
 const argv = process.argv.slice(2);
-let only = null;
-const di = argv.indexOf("--defect");
-if (di !== -1) {
-  only = argv[di + 1];
-  if (!DEFECTS.includes(only)) {
-    process.stderr.write(
-      `!! GUARD (exit 2): unknown --defect "${only}". Known: ${DEFECTS.join(", ")}\n`,
-    );
-    process.exit(2);
-  }
+const selection = selectDefects(argv, DEFECTS);
+if (selection.refusal) {
+  process.stderr.write(selection.refusal);
+  process.exit(2);
 }
-const requested = only ? [only] : DEFECTS;
+for (const note of selection.notes) process.stdout.write(note);
+const requested = selection.requested;
 
 // ── chrome discovery (cssom-parity.mjs's, unchanged) ─────────────────────────
 // The accessSync check MUST cover the CHROME env branch, not only the candidate

@@ -95,9 +95,14 @@
 //   This is a vocabulary-coverage gate.
 //
 //   LIMIT 4 — AgentEvent's @types allowlist is NOT an arm and deliberately so
-//   (charter D576): it legitimately still declares backup/tls/content, because
-//   `content` has a live server consumer in accounts.ex. DECLARED is not
-//   PRODUCED, and it is PRODUCED that a title promises.
+//   (charter D576). DECLARED is not PRODUCED, and it is PRODUCED that a title
+//   promises. cch-w51-bl since dropped `backup` and `tls` from that allowlist —
+//   they had neither a producer nor a consumer — and KEPT `content`, which has
+//   no producer but does have a live server consumer in accounts.ex
+//   (published_doc?/1, the onboarding checklist). The allowlist's own both-ways
+//   guard lives in Elixir, next to the changeset it governs:
+//   cloud/test/barkpark_cloud/registry/agent_event_test.exs. This file is still
+//   the CONSOLE side and still does not read @types.
 //
 // Exit codes:
 //   0 — the three arms agree
