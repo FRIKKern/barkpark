@@ -13,8 +13,8 @@ defmodule Barkpark.Media.SharedOnlySentinelScopeTest do
     * `Barkpark.Plugins.Media.Assets.scope_asset_workspace/3` — reached from
       `Media.asset_docs_for_files/3` at `v1/media_controller.ex:34`,
       `v1/media_collections_controller.ex:57,123` and
-      `federated_search_controller.ex:143`, each passing `scope_opts(conn)`
-      verbatim.
+      `federated_search_controller.ex`'s `surface_payload/3` media clause, each
+      passing `scope_opts(conn)` verbatim.
     * `Barkpark.Media.Delivery.Retriever.join_scope_workspace/3` — reached from
       `Media.search_files/2` → `Search.maybe_filter_text/3`, which rebuilds
       `retriever_opts` with `workspace_id: Keyword.get(opts, :workspace_id)`.
