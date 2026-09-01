@@ -657,40 +657,75 @@ func validateAgentURL(name, val string) error {
 
 // agentInstallStep (charter Decision 33) is the configure sub-step that lights up
 // the monitoring beat. It builds the on-box barkpark-agent binary, writes the
-// per-instance report `token` to /etc/barkpark/agent.token (0600), writes the
+// per-instance report `token` to /etc/barkpark/agent.token (0600) and the
+// health-gate `healthToken` to /etc/barkpark/agent.health.token (0600), writes the
 // control + health URLs to /etc/barkpark/agent.env, installs the COMMITTED
 // deploy/systemd/barkpark-agent.service unit, and enables it — so the box reports
-// its health + vitals home (S12). The token rides in via $BP_AGENT_TOK (Argv only,
-// redacted) so it never lands in the narrated Title/Cmd; `controlURL`/`healthURL`
-// are validated shell-safe (validateAgentURL) and single-quoted. asdf is sourced
-// (the non-interactive SSH shell skips ~/.bashrc) so `go build` finds the toolchain
-// — the binary is built from the checkout freshen brought to origin/main. The unit
-// reads its URLs from agent.env (via EnvironmentFile), so deploy/instance-deploy.sh
-// can re-install the SAME committed unit on every self-update without knowing the
-// control URL. `umask 077` + chmod 600 keep the token file root-only.
-func agentInstallStep(token, controlURL, healthURL string) CaddyStep {
+// its health + vitals home (S12). Both tokens ride in via env ($BP_AGENT_TOK,
+// $BP_AGENT_HEALTH_TOK — Argv only, redacted) so neither lands in the narrated
+// Title/Cmd; `controlURL`/`healthURL` are validated shell-safe (validateAgentURL)
+// and single-quoted. asdf is sourced (the non-interactive SSH shell skips
+// ~/.bashrc) so `go build` finds the toolchain — the binary is built from the
+// checkout freshen brought to origin/main. The unit reads its URLs from agent.env
+// (via EnvironmentFile), so deploy/instance-deploy.sh can re-install the SAME
+// committed unit on every self-update without knowing the control URL. `umask 077`
+// + chmod 600 keep both token files root-only.
+//
+// WHY the health token is here at all: without it the agent's ReqStatsProbe sends
+// no bearer, this box's own GET /v1/instance/request-stats 401s, and req_per_s /
+// p95_ms / err_5xx_per_s report their -1 sentinels FOREVER. That was true of every
+// box in the fleet except guerrilla, which carried a hand-added systemd drop-in in
+// nobody's source control. `healthToken` is the instance's OWN admin bearer — the
+// same credential the health gate already presents to the same box (see
+// BarkparkWeb.RequestStatsController's moduledoc: "the SAME Bearer-token seam the
+// agent's health gate already probes"), so this introduces no second identity.
+//
+// An EMPTY or unsafe-shaped healthToken writes NO file and never fails the step:
+// the box goes live metering everything it metered before, and the agent's
+// resolveHealthToken reports "unset" instead of crashing. It also never DELETES an
+// existing file, so a re-run (or a resurrect that carries no admin token) cannot
+// unmeter a box that was already metered.
+func agentInstallStep(token, controlURL, healthURL, healthToken string) CaddyStep {
 	const (
-		binPath   = "/usr/local/bin/barkpark-agent"
-		tokenPath = "/etc/barkpark/agent.token"
-		envPath   = "/etc/barkpark/agent.env"
-		unitSrc   = "/opt/barkpark/deploy/systemd/barkpark-agent.service"
-		unitDst   = "/etc/systemd/system/barkpark-agent.service"
+		binPath    = "/usr/local/bin/barkpark-agent"
+		tokenPath  = "/etc/barkpark/agent.token"
+		healthPath = "/etc/barkpark/agent.health.token"
+		envPath    = "/etc/barkpark/agent.env"
+		unitSrc    = "/opt/barkpark/deploy/systemd/barkpark-agent.service"
+		unitDst    = "/etc/systemd/system/barkpark-agent.service"
 	)
+	// Assert the alphabet before the value is single-quoted into the script —
+	// mirroring the report token's guard at the call site. A rejected value is
+	// DROPPED (no file written), never interpolated: telemetry must not be able to
+	// inject a shell command, and must not be able to fail a go-live either.
+	if validateSecretValue("agent health token", healthToken) != nil {
+		healthToken = ""
+	}
 	script := `set -e; export BP_AGENT_TOK='` + token + `'; ` +
 		`. /root/.asdf/asdf.sh 2>/dev/null || true; ` +
 		`cd /opt/barkpark && go build -o ` + binPath + ` ./cmd/barkpark-agent; ` +
 		`mkdir -p /etc/barkpark; umask 077; ` +
-		`printf '%s' "$BP_AGENT_TOK" > ` + tokenPath + `; chmod 600 ` + tokenPath + `; ` +
-		`printf 'BARKPARK_CONTROL_URL=%s\nBARKPARK_HEALTH_URL=%s\n' '` + controlURL + `' '` + healthURL + `' > ` + envPath + `; ` +
+		`printf '%s' "$BP_AGENT_TOK" > ` + tokenPath + `; chmod 600 ` + tokenPath + `; `
+	if healthToken != "" {
+		script += `export BP_AGENT_HEALTH_TOK='` + healthToken + `'; ` +
+			`printf '%s' "$BP_AGENT_HEALTH_TOK" > ` + healthPath + `; chmod 600 ` + healthPath + `; `
+	}
+	script += `printf 'BARKPARK_CONTROL_URL=%s\nBARKPARK_HEALTH_URL=%s\n' '` + controlURL + `' '` + healthURL + `' > ` + envPath + `; ` +
 		`install -m 0644 ` + unitSrc + ` ` + unitDst + `; ` +
 		`systemctl daemon-reload; systemctl enable --now barkpark-agent`
+	cmd := "build barkpark-agent + write " + tokenPath + " (value redacted) + agent.env + enable barkpark-agent.service"
+	redact := []string{token}
+	if healthToken != "" {
+		cmd = "build barkpark-agent + write " + tokenPath + " + " + healthPath + " (values redacted) + agent.env + enable barkpark-agent.service"
+		redact = append(redact, healthToken)
+	}
 	return CaddyStep{
 		Title: "install + enable the on-box monitoring agent",
-		Cmd:   "build barkpark-agent + write " + tokenPath + " (value redacted) + agent.env + enable barkpark-agent.service",
+		Cmd:   cmd,
 		Argv:  []string{"bash", "-lc", script},
-		// The token rides in the Argv (base64'd over SSH); scrub it from any captured
-		// output so a step failure never surfaces the value.
-		Redact: []string{token},
+		// The tokens ride in the Argv (base64'd over SSH); scrub them from any
+		// captured output so a step failure never surfaces a value.
+		Redact: redact,
 	}
 }
 
@@ -1523,7 +1558,13 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		case validateAgentURL("control-url", spec.ControlURL) != nil:
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: agent control-url rejected on %s (box serves without the monitoring beat): %v\n", host.IP, validateAgentURL("control-url", spec.ControlURL))
 		default:
-			if err := runner.Run(ctx, agentInstallStep(spec.AgentToken, spec.ControlURL, spec.healthTarget())); err != nil {
+			// secrets.AdminToken is THE admin bearer step 7 just installed on this
+			// box, and the health gate already presents it to this same box —
+			// so handing it to the agent's request-stats probe adds no new
+			// identity and no new blast radius (the box already holds a
+			// plaintext report bearer at 0600 beside it). Empty/unsafe simply
+			// writes no file: the box ships unmetered, exactly as today.
+			if err := runner.Run(ctx, agentInstallStep(spec.AgentToken, spec.ControlURL, spec.healthTarget(), secrets.AdminToken)); err != nil {
 				fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: agent install on %s degraded (box serves without the monitoring beat): %v\n", host.IP, err)
 			}
 		}
