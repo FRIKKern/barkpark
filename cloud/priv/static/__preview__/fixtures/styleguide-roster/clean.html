@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <title>styleguide-roster fixture — clean</title>
+    <!-- The href below is DELIBERATELY a file this fixture does not ship. The gate
+         reads the inline <style> off disk and never resolves a <link>, so a broken
+         href must not change a single number here. If it ever does, the extractor
+         has started following links and the per-sheet counts have stopped being
+         per-sheet. -->
+    <link rel="stylesheet" href="does-not-exist.css" />
+    <style>
+      /* An opener that a swallow can remove — this is the mutation the sibling
+         fixture applies, and the rule it eats is the :root immediately below. */
+      :root { --fx-gap: 8px; }
+      .fx-wrap { max-width: 900px; margin: 0 auto; }
+      .fx-row, .fx-col { display: flex; gap: var(--fx-gap); }
+      .fx-card { border: 1px solid #ccc; }
+      .fx-card:hover { border-color: #999; }
+      @media (max-width: 600px) {
+        .fx-wrap { padding: 0 12px; }
+        .fx-row { flex-direction: column; }
+      }
+      @keyframes fx-pulse { 0% { opacity: 1; } 100% { opacity: 0.4; } }
+      .fx-pulse { animation: fx-pulse 1s infinite; }
+    </style>
+  </head>
+  <body>
+    <div class="fx-wrap"><div class="fx-card">markup the gate must never count</div></div>
+    <p>.fx-decoy { color: red; }</p>
+  </body>
+</html>
