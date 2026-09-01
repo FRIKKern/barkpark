@@ -2689,11 +2689,13 @@ func TestResidualNamesWhatWasNotMeasured(t *testing.T) {
 		t.Errorf("Reason = %q, want empty — a reason on a computed residual is a refusal that did not happen", r.Reason)
 	}
 
-	// Coverage on THIS box, from THIS payload: 68.9%. That is the whole point —
-	// the roots name two thirds of the disk and the residual names the third
-	// nobody was looking at.
-	if pct := float64(measured) / float64(jarlRootUsedBytes) * 100; pct < 60 || pct > 75 {
-		t.Errorf("coverage = %.2f%%, want ~68.9%% on the build-plane box's real numbers", pct)
+	// Coverage on THIS box, from THIS payload: 71.98%, leaving 28.02%
+	// unaccounted. That is the whole point — the roots name a bit under three
+	// quarters of the used disk and the residual names the quarter nobody was
+	// looking at, instead of the payload implying it had seen everything.
+	if pct := float64(measured) / float64(jarlRootUsedBytes) * 100; pct < 71.5 || pct > 72.5 {
+		t.Errorf("coverage = %.2f%%, want 71.98%% on the build-plane box's real numbers "+
+			"(27683758080 measured of 38462406656 used)", pct)
 	}
 
 	body, err := json.Marshal(s)

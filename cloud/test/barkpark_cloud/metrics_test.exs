@@ -840,17 +840,17 @@ defmodule BarkparkCloud.MetricsTest do
     test "the residual lands whole: unaccounted bytes AND the denominator that produced them" do
       # The build-plane box's real numbers, read live 2026-09-01: df -P -k /
       # gives 37560944 KiB used, and the three default roots read 13805152 +
-      # 11304220 + 1925548 KiB. Coverage is 68.9%, and the residual is the
-      # 31.1% nobody was looking at.
+      # 11304220 + 1925548 KiB = 27683758080 bytes. Coverage is 71.98%, and the
+      # residual is the 28.02% nobody was looking at.
       space =
         Telemetry.normalize_space(%{
           "root_used_bytes" => 38_462_406_656,
           "root_total_bytes" => 80_290_492_416,
           "residual" => %{
             "status" => "computed",
-            "bytes" => 11_778_648_576,
+            "bytes" => 10_778_648_576,
             "of_bytes" => 38_462_406_656,
-            "measured_bytes" => 26_683_758_080,
+            "measured_bytes" => 27_683_758_080,
             "counted_roots" => 3,
             "excluded_roots" => 0,
             "pg_source" => "none",
@@ -859,14 +859,14 @@ defmodule BarkparkCloud.MetricsTest do
         })
 
       assert space.residual.status == "computed"
-      assert space.residual.bytes == 11_778_648_576
+      assert space.residual.bytes == 10_778_648_576
 
       # THE DENOMINATOR TRAVELS. A share whose whole is missing is the number
       # this axis replaced, and df's capacity percent is a share of a DIFFERENT
       # whole (ceil(used/(used+avail)), root-reserved blocks excluded), so it
       # can never stand in for this.
       assert space.residual.of_bytes == 38_462_406_656
-      assert space.residual.measured_bytes == 26_683_758_080
+      assert space.residual.measured_bytes == 27_683_758_080
       assert space.residual.counted_roots == 3
       assert space.residual.pg_source == "none"
     end
