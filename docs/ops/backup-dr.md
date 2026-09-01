@@ -75,7 +75,7 @@ skips its destructive confirm.
    **step 4 is what proves the restore**.
 4. **Verify integrity**: table count + `schema_migrations` count match the source; run `mix ecto.migrate` (no-op if current); confirm `Audit.verify_chain/1` returns `:ok` for a sampled workspace.
 5. **Restore key material**: load the KEK from the operator secret store into the app env (without it, encrypted fields stay ciphertext — by design).
-6. **Cut over**: point the app at the restored DB, redeploy (blue/green), smoke-test `curl /status.json` + a query.
+6. **Cut over**: point the app at the restored DB, redeploy (blue/green), smoke-test `curl -fsS /status.json` + a query.
 7. **Record** the drill (below): backup size, backup + restore time, verification result.
 
 ## Restore-drill record

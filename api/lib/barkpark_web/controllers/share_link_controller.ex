@@ -185,7 +185,7 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.Content.Errors
   alias Barkpark.Content.Labels
   alias Barkpark.Media.Storage.MediaFile
-  alias Barkpark.PortableDoc.{Projection, Render}
+  alias Barkpark.PortableDoc.Render
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
   alias BarkparkWeb.ErrorResponse
@@ -231,33 +231,38 @@ defmodule BarkparkWeb.ShareLinkController do
   defp serve(conn, %ShareLink{} = link, _raw_token), do: serve(conn, link)
 
   defp serve_paper_static(conn, %ShareLink{} = link) do
-    case Content.get_paper(link.ref_id, link.dataset, scope(link)) do
-      %Content.Document{} = paper ->
-        # Social-share head (preview-contract pc-w2): a share link IS the sharing
-        # flow, so this static render must carry the og/twitter/JSON-LD too. The
-        # `:bulldocs` root layout reads `:preview` + `:page_title`.
-        preview = paper_preview(paper, link.ref_id)
+    with %Content.Document{} = paper <-
+           Content.get_paper(link.ref_id, link.dataset, scope(link)),
+         {:ok, body_html} <- paper_body_html(paper, link) do
+      # Social-share head (preview-contract pc-w2): a share link IS the sharing
+      # flow, so this static render must carry the og/twitter/JSON-LD too. The
+      # `:bulldocs` root layout reads `:preview` + `:page_title`.
+      preview = paper_preview(paper, link.ref_id)
 
-        conn
-        |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
-        |> put_layout(false)
-        |> put_view(BarkparkWeb.ScopedPaperHTML)
-        |> render(:show,
-          article?: paper_article?(paper),
-          body_html: paper_body_html(paper, link),
-          preview: preview,
-          page_title: preview["title"],
-          slug: link.ref_id,
-          # The shared ScopedPaperHTML :show template unconditionally renders
-          # @backlinks_html / @driven_tasks_html ("" ⇒ no markup). This static
-          # fallback serves the bare article — without these the render
-          # KeyErrors (charter A8's latent bug).
-          backlinks_html: "",
-          driven_tasks_html: ""
-        )
-
-      _ ->
-        not_found_html(conn)
+      conn
+      |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
+      |> put_layout(false)
+      |> put_view(BarkparkWeb.ScopedPaperHTML)
+      |> render(:show,
+        article?: paper_article?(paper),
+        body_html: body_html,
+        preview: preview,
+        page_title: preview["title"],
+        slug: link.ref_id,
+        # The shared ScopedPaperHTML :show template unconditionally renders
+        # @backlinks_html / @driven_tasks_html ("" ⇒ no markup). This static
+        # fallback serves the bare article — without these the render
+        # KeyErrors (charter A8's latent bug).
+        backlinks_html: "",
+        driven_tasks_html: ""
+      )
+    else
+      # The reader authority refused this paper. Answer with the SAME status the
+      # live reader would have — see `paper_body_html/2` below for why the
+      # anonymous surface must not soften it.
+      {:error, :not_found} -> not_found_html(conn)
+      {:error, _reason} -> unprocessable_html(conn)
+      _ -> not_found_html(conn)
     end
   end
 
@@ -538,29 +543,76 @@ defmodule BarkparkWeb.ShareLinkController do
   # or relative when no share host is detectable (caller prepends its own host).
   defp share_url(token), do: "#{Sharing.share_link_base() || ""}/s/#{token}"
 
-  # Static fallback follows the same authority rule as every live Paper reader:
-  # a readable block list wins over the cache, including historical
-  # content.body.blocks and an intentionally-empty top-level blocks list.
-  # Bind reference resolution to the LINK scope (not request/global scope).
-  defp paper_body_html(%{content: content}, %ShareLink{} = link)
-       when is_map(content) do
-    case Projection.read_blocks(content) do
-      blocks when is_list(blocks) ->
+  # Static fallback goes through the SAME authority as every live Paper reader:
+  # `Content.Papers.reader_source/3`. It used to pick the source itself —
+  # `Projection.read_blocks/1` on the RAW content, else `content["body_html"]`
+  # verbatim — which read the two inputs the authority exists to arbitrate and
+  # applied none of its rules. That bought this surface three concrete defects,
+  # and all three were ANONYMOUS-surface defects specifically:
+  #
+  #   * NO PROVENANCE CHECK. `reader_source/3` compares the cache against a
+  #     fresh render and splits the mismatch by the `content["body_html_sv"]`
+  #     renderer stamp: a lagging stamp is DRIFT (blocks are canonical — serve
+  #     and restamp), a CURRENT stamp is DIVERGENCE (the row claims this
+  #     renderer emitted these bytes from these blocks, the bytes say
+  #     otherwise, so the cache carries content the blocks do not). Divergence
+  #     is the one population the 422 was built for. This path silently served
+  #     the blocks and answered 200, picking a winner in exactly the case the
+  #     authority refuses to pick one.
+  #   * NO REDACTION. `reader_source/3` reads its blocks off `Envelope.render`
+  #     under `CallerContext.anonymous()`, so a `private` field is gone before
+  #     a block list is chosen, and a structured source that vanished at that
+  #     boundary yields `:redacted_source` rather than falling through to the
+  #     cache — because `body_html` is a derived cache of the same prose, so
+  #     falling through discloses what redaction just hid. Reading
+  #     `Projection.read_blocks/1` off raw `content` skipped that entirely. A
+  #     `/s/:token` recipient is an ANONYMOUS reader, which makes this the
+  #     surface those rules were written for, not one that may opt out.
+  #   * NO SANITIZATION. The `{:html, …}` arm returns `HtmlSanitizer`-filtered
+  #     HTML that passed a semantic-content check. The old `nil` arm handed raw
+  #     stored `body_html` to `ScopedPaperHTML`'s `raw(@body_html)`.
+  #
+  # WHY THE ANONYMOUS SURFACE KEEPS THE 422 rather than degrading to a partial
+  # render: this render is the FALLBACK for the redirect in `serve/3` above. A
+  # recipient whose link scope still resolves lands on `BulldocsLive`, which
+  # raises `InvalidSource` (`plug_status: 422`) on any `{:error, _}` from the
+  # same call. If this fallback answered 200 with a best-effort body, the
+  # public escape hatch would be a SOFTER door than the door it substitutes
+  # for — which is the whole shape of the defect. `BulldocsEmailController` and
+  # `BulldocsSourceController` refuse at 422 on the same tuple; the status is
+  # the house rule for "a paper exists but has no unambiguous readable source",
+  # and the rendered page is `ErrorHTML`'s generic card, so the refusal REASON
+  # (which would distinguish "redacted content exists here" from "this paper is
+  # empty") is never disclosed to the token holder.
+  #
+  # This deliberately does NOT copy Studio's raw read: an editor is an
+  # authenticated author looking at their own document, so it may see the
+  # unredacted, unsanitized source. This surface may not.
+  #
+  # Reference resolution stays bound to the LINK scope (not request/global
+  # scope) — `reader_schema_scope/2` only fills in the paper's own ids where
+  # the caller passed none, so the ids from `scope/1` win.
+  defp paper_body_html(%Content.Document{} = paper, %ShareLink{} = link) do
+    case Content.Papers.reader_source(paper, link.dataset, scope(link)) do
+      {:blocks, blocks} ->
         render_opts =
           Labels.paper_render_opts(
             link.dataset,
-            Map.get(content, "style"),
+            Map.get(paper.content || %{}, "style"),
             scope(link)
           )
 
-        Render.render_blocks(blocks, render_opts)
+        {:ok, Render.render_blocks(blocks, render_opts)}
 
-      nil ->
-        Map.get(content, "body_html") || ""
+      {:html, sanitized_html} ->
+        {:ok, sanitized_html}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp paper_body_html(_paper, _link), do: ""
+  defp paper_body_html(_paper, _link), do: {:error, :not_found}
 
   defp paper_article?(%{content: content}),
     do: Map.get(content || %{}, "style") in ["article", "article-wide"]
@@ -592,5 +644,16 @@ defmodule BarkparkWeb.ShareLinkController do
     |> put_status(:not_found)
     |> put_view(BarkparkWeb.ErrorHTML)
     |> render(:"404")
+  end
+
+  # The HTML twin of `unprocessable/2`: the static paper render is a browser
+  # page, so an unreadable source answers with the generic `ErrorHTML` card at
+  # the same 422 the live reader raises. The refusal reason stays server-side —
+  # the page is derived from the template name only.
+  defp unprocessable_html(conn) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(BarkparkWeb.ErrorHTML)
+    |> render(:"422")
   end
 end
