@@ -837,6 +837,131 @@ defmodule BarkparkCloud.MetricsTest do
       assert root.degraded_count == 1
     end
 
+    test "the residual lands whole: unaccounted bytes AND the denominator that produced them" do
+      # The build-plane box's real numbers, read live 2026-09-01: df -P -k /
+      # gives 37560944 KiB used, and the three default roots read 13805152 +
+      # 11304220 + 1925548 KiB. Coverage is 68.9%, and the residual is the
+      # 31.1% nobody was looking at.
+      space =
+        Telemetry.normalize_space(%{
+          "root_used_bytes" => 38_462_406_656,
+          "root_total_bytes" => 80_290_492_416,
+          "residual" => %{
+            "status" => "computed",
+            "bytes" => 11_778_648_576,
+            "of_bytes" => 38_462_406_656,
+            "measured_bytes" => 26_683_758_080,
+            "counted_roots" => 3,
+            "excluded_roots" => 0,
+            "pg_source" => "none",
+            "reason" => ""
+          }
+        })
+
+      assert space.residual.status == "computed"
+      assert space.residual.bytes == 11_778_648_576
+
+      # THE DENOMINATOR TRAVELS. A share whose whole is missing is the number
+      # this axis replaced, and df's capacity percent is a share of a DIFFERENT
+      # whole (ceil(used/(used+avail)), root-reserved blocks excluded), so it
+      # can never stand in for this.
+      assert space.residual.of_bytes == 38_462_406_656
+      assert space.residual.measured_bytes == 26_683_758_080
+      assert space.residual.counted_roots == 3
+      assert space.residual.pg_source == "none"
+    end
+
+    test "an UNDEFINED residual keeps the -1 sentinel — never a negative gigabyte, never a clamped zero" do
+      space =
+        Telemetry.normalize_space(%{
+          "root_used_bytes" => 38_462_406_656,
+          "residual" => %{
+            "status" => "undefined",
+            "bytes" => -1,
+            "of_bytes" => 38_462_406_656,
+            "measured_bytes" => 40_000_000_000,
+            "counted_roots" => 5,
+            "excluded_roots" => 0,
+            "pg_source" => "none",
+            "reason" => "roots-overlap-or-cross-a-mount"
+          }
+        })
+
+      assert space.residual.status == "undefined"
+
+      # Verbatim, sentinel included. The normalizer must not "helpfully" turn
+      # -1 into 0: "0 B unaccounted" is the claim that everything was seen, and
+      # it would be made here by the payload that just admitted its root set is
+      # wrong. Only a view is allowed to word this.
+      assert space.residual.bytes == -1
+
+      # The evidence for the refusal rides with it: measured EXCEEDS the
+      # denominator, which is what an operator needs to find the overlapping
+      # root in one step.
+      assert space.residual.measured_bytes > space.residual.of_bytes
+      assert space.residual.reason == "roots-overlap-or-cross-a-mount"
+    end
+
+    test "residual: absent, non-map, and an unknown status word all claim the least" do
+      # An agent predating the field. nil, not a zeroed envelope — "computes no
+      # residual" and "tried and refused" are different facts.
+      assert Telemetry.normalize_space(%{}).residual == nil
+      assert Telemetry.normalize_space(%{"residual" => nil}).residual == nil
+      assert Telemetry.normalize_space(%{"residual" => "nope"}).residual == nil
+      assert Telemetry.normalize_space(%{"residual" => []}).residual == nil
+
+      # An unrecognised word coerces to the state that claims the LEAST, the
+      # same direction consumer_root_status/1 takes. Passing it through would
+      # let a future agent invent a state every surface renders by falling off
+      # the end of its branch table.
+      coerced =
+        Telemetry.normalize_space(%{
+          "residual" => %{"status" => "probably-fine", "bytes" => 999, "pg_source" => "vibes"}
+        })
+
+      assert coerced.residual.status == "unmeasured"
+      assert coerced.residual.pg_source == "none"
+    end
+
+    test "an EXCLUDED root stays on the wire, measured, and says why it was not subtracted" do
+      # The overlay on the build-plane box: du -x reads it in full when ROOTED
+      # there (1506432 KiB) and sees 8 KiB of it from /var/lib/docker's side,
+      # because -x will not cross INTO a mount. The reading is correct; the
+      # bytes are simply not on the root filesystem, so they must not be
+      # subtracted from its total.
+      space =
+        Telemetry.normalize_space(%{
+          "consumer_roots" => [
+            %{
+              "path" => "/var/lib/containerd",
+              "status" => "read",
+              "bytes" => 14_136_475_648,
+              "count" => 11,
+              "excluded_reason" => nil
+            },
+            %{
+              "path" => "/var/lib/docker/rootfs/overlayfs/63036f65",
+              "status" => "read",
+              "bytes" => 1_542_586_368,
+              "count" => 1,
+              "excluded_reason" => "cross-mount"
+            }
+          ]
+        })
+
+      [containerd, overlay] = space.consumer_roots
+
+      assert containerd.excluded_reason == nil,
+             "a counted root has no exclusion; nil is the whole signal"
+
+      # Exclusion is about the SUBTRACTION, not the measurement. The row keeps
+      # its real bytes and its real status — dropping either would hide a
+      # correct 1.44 GiB reading from every surface.
+      assert overlay.status == "read"
+      assert overlay.bytes == 1_542_586_368
+      assert overlay.excluded_reason == "cross-mount"
+    end
+
     test "a malformed consumer row is dropped, never rendered nameless or sizeless" do
       space =
         Telemetry.normalize_space(%{
