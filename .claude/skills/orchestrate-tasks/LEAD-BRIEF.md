@@ -73,6 +73,11 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 
 ## Communication protocol
 
+- **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
+  routing to `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append-only, a table per date). Inbox
+  messages can lag behind a long turn; the file never does. A row you marked BLOCKED that appears
+  in that file is unblocked — update your table the same loop.
+
 - **Status file** `$ORCH/lead-<lane>/status.md` — rewrite it (whole file) at every
   milestone. Format, one row per task you have touched:
   ```

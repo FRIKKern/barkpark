@@ -64,6 +64,10 @@ Six leads run concurrently. Do not do lane work yourself while they run.
 
 ## 2. Coordinate
 
+- **Decisions file.** Every ruling, approval or routing you give a lead ALSO goes into
+  `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append a dated table row). Measured 2026-09-01: a lead in a
+  long turn showed six rows BLOCKED for two hours after eight inbox messages had answered them; the
+  file is what it reads at the top of each loop.
 - **Inbound.** Leads message you with `SendMessage(to: "main")` for anything that needs
   a decision or another lane; everything else lands in their `status.md`. Arm ONE monitor
   on the status dir so you see milestones without polling by hand:
