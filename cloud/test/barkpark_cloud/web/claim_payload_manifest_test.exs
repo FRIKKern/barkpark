@@ -341,7 +341,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   }
 
   # ---------------------------------------------------------------------------
-  # @known_open — SIX rows. A key the plane emits and the worker DISCARDS, which
+  # @known_open — FIVE rows. A key the plane emits and the worker DISCARDS, which
   # is a DEFECT, tracked at the named bp task. MapSet EQUALITY (ARM 1).
   # ---------------------------------------------------------------------------
   @known_open [
@@ -366,12 +366,6 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     },
     %{
       claim: "support",
-      key: "agent_token",
-      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
-      tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
-    },
-    %{
-      claim: "support",
       key: "kind",
       site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
       tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
@@ -386,7 +380,11 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
 
   # The RESURRECT claim's own open rows, kept as a SEPARATE pinned list because
   # the wave ruled `@known_open` at exactly six (the provision + support seam it
-  # measured). Discovered by this manifest's first run and filed the same hour;
+  # measured) — now FIVE: the support claim's `agent_token` row was deleted when
+  # the mint was removed from `support_provision_claim_json/2`
+  # (cch-w53-bl-…-a-live-agent-token). Shrinking this list is exactly the
+  # bookkeeping the equality exists to force, and it is only legal in the same
+  # diff that fixes the defect. Discovered by this manifest's first run and filed the same hour;
   # holding it in a second list rather than folding it in keeps the ruled set
   # auditable AND keeps the third claim from being silently unmeasured.
   @resurrect_known_open [
@@ -605,7 +603,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert_discarded("provision", got, want, body, src)
     end
 
-    test "the SUPPORT claim discards exactly {env, template, agent_token, kind, credentials}" do
+    test "the SUPPORT claim discards exactly {env, template, kind, credentials}" do
       src = go_sources()
       body = support_claim_body!()
       got = discarded(body, src, "support")
@@ -1104,7 +1102,14 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert body["credentials"] == @azure_creds
       assert body["env"] == %{"FOO" => "bar"}
       assert body["template"] == "blog"
+
+      # A LIVE token: minted and hash-persisted at claim time, and the provision
+      # worker HAS a field for it (provisioner.JobSpec.AgentToken → the configure
+      # step's /etc/barkpark/agent.token). This assertion used to live on the
+      # SUPPORT arm below, where it proved the opposite — a real credential
+      # recorded for a box with no install path.
       assert is_binary(body["agent_token"]) and body["agent_token"] != ""
+      assert %Barkpark{} = Registry.verify_agent_token(body["agent_token"])
     end
 
     test "the resurrect claim carries bundle_ref on top of the full provision claim" do
@@ -1115,22 +1120,31 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert body["env"] == %{"FOO" => "bar"}
     end
 
-    test "the support claim carries the nested support map AND the five discarded keys" do
+    test "the support claim carries the nested support map AND the four discarded keys" do
       body = support_claim_body!()
 
       assert is_map(body["support"])
       assert body["support"]["dataset"] == "production"
 
-      for key <- ~w(env template agent_token kind credentials) do
+      for key <- ~w(env template kind credentials) do
         assert Map.has_key?(body, key),
                "the support claim no longer emits #{key} — the @known_open row for it is " <>
                  "measuring nothing, and this arm has gone vacuous on the key that matters most"
       end
 
-      # The sharpest row of all: a LIVE agent token, minted and hash-persisted at
-      # claim time, shipped in plaintext into a payload nothing can receive.
-      assert is_binary(body["agent_token"]) and body["agent_token"] != ""
-      assert %Barkpark{} = Registry.verify_agent_token(body["agent_token"])
+      # THE SHARPEST ROW OF ALL, NOW INVERTED (cch-w53-bl-…-a-live-agent-token).
+      # This arm used to assert a LIVE agent token here and verify it back to a
+      # %Barkpark{} — which was the proof the plane held a real credential for a
+      # box with NO install path (`SupportJobSpec` declares no `agent_token`
+      # field; `claimSupport`'s tolerated dialect rescues six other flat keys).
+      # `support_provision_claim_json/2` no longer mints, so the key must be
+      # ABSENT. The ledger half — that no `agent_tokens` row is written for the
+      # support row either — is pinned in `fleet_supports_test.exs`, which has
+      # the barkpark id this body deliberately does not carry.
+      refute Map.has_key?(body, "agent_token"),
+             "the support claim ships an agent token again. If the Go worker grew the field, " <>
+               "re-add the mint AND a receipt test together; if it did not, this is the custody " <>
+               "defect recurring — a credential recorded as handed over and never delivered."
     end
   end
 
@@ -1139,15 +1153,14 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   # ---------------------------------------------------------------------------
 
   describe "the allowlists are bookkeeping, not a junk drawer" do
-    test "@known_open holds exactly six rows, each naming its decode site and bp task" do
-      assert length(@known_open) == 6
+    test "@known_open holds exactly five rows, each naming its decode site and bp task" do
+      assert length(@known_open) == 5
 
       assert MapSet.new(@known_open, &{&1.claim, &1.key}) ==
                MapSet.new([
                  {"provision", "env"},
                  {"support", "env"},
                  {"support", "template"},
-                 {"support", "agent_token"},
                  {"support", "kind"},
                  {"support", "credentials"}
                ]),

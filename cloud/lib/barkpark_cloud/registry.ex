@@ -5439,9 +5439,12 @@ defmodule BarkparkCloud.Registry do
   `autoupdate_paused` latch): REVOKING AN AGENT TOKEN IS UNRECOVERABLE WITHOUT
   RE-PROVISIONING THE BOX. Nothing in this repository clears `revoked_at` on an
   `AgentToken` — the only way a box gets a live one is `mint_agent_token/3` via
-  `put_agent_token/2` inside a provision, resurrect, or support claim, and every
-  one of those routes sits behind `Auth.require_worker` (the shared platform
-  WORKER_TOKEN). There is no rotate route and no re-mint route at any auth level.
+  `put_agent_token/2` inside a provision or resurrect claim, and both of those
+  routes sit behind `Auth.require_worker` (the shared platform WORKER_TOKEN).
+  The SUPPORT claim is deliberately NOT a minter (see
+  `Web.Router.support_provision_claim_json/2`): the support worker has no field
+  to receive the plaintext, so minting there only recorded a handover that never
+  happened. There is no rotate route and no re-mint route at any auth level.
   The recovery cannot be automated even in principle: the only channel able to
   deliver a fresh token is the provision claim, and the box's own live channel is
   authenticated by the very token being revoked. The box keeps retrying the dead
