@@ -8,8 +8,11 @@ manual Postgres, no hand-rolled secrets. Everything Barkpark-private lives under
 ## One command
 
 ```bash
+cd api && mix deps.get && cd ..   # once per fresh clone/worktree — see below
 bin/barkpark up
 ```
+
+> **First boot on a fresh worktree needs `mix deps.get` first.** `up` never runs it: step 1 shells out to `mix run --no-start -e 'Barkpark.Release.Secrets.write_env(…)'` inside `api/`, so with no `deps/` the very first step dies in a compile error rather than anything that names the real cause.
 
 That does, in order:
 
