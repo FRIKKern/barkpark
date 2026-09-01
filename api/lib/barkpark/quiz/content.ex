@@ -22,6 +22,11 @@ defmodule Barkpark.Quiz.Content do
   answer key. Players never read it directly — the Room loads it server-side
   (`load_question/2`, an internal call not gated by visibility) and broadcasts an
   answer-stripped question. Registered into a dataset at P4 (Studio authoring).
+
+  The visibility carve-out is NOT a tenancy carve-out: `load_question/2` is
+  reached only from anonymous surfaces with a client-supplied id, so it is
+  fenced to the seeded Default (public) workspace and the published perspective.
+  See its own doc (task-025f39c06543e27c).
   """
   @spec schema() :: SchemaDefinition.t()
   def schema do
@@ -86,11 +91,48 @@ defmodule Barkpark.Quiz.Content do
   @doc """
   Load a published quiz by id and parse it into a question.
   `{:ok, question}` or `{:error, :not_found}` when no such quiz exists.
+
+  ## The read is fenced to the PUBLIC tenant (task-025f39c06543e27c)
+
+  Every caller of this function sits behind an ANONYMOUS surface: the room bind
+  from `BarkparkWeb.QuizHostLive.mount/3` (`/quiz/host/:pin?quiz=<id>` — the
+  `:public_root` bucket, `:browser` pipeline, no `on_mount` gate, no token) and
+  the `Barkpark.Quiz.Bridge` re-apply of a binding that anonymous mount created.
+  `quiz_id` is therefore ALWAYS a raw, client-supplied string.
+
+  This used to call `Content.get_document(quiz_id, "quiz", dataset)` at
+  3-arity, so `opts == []` — and per that function's own contract a nil
+  `:workspace_id` there is an EXPLICIT GLOBAL read
+  (`Scope.scope_to_workspace_or_global/3`), with no perspective clamp either.
+  Two things followed:
+
+    * any workspace's quiz row whose `dataset_id` is NULL (a workspace-only
+      write, or a legacy pre-tenancy row) was addressable by id from any
+      visitor's query string — rendered on the projector and pushed into the
+      room every joined player socket reads; and
+    * a `drafts.`-prefixed id addressed the unpublished draft row directly.
+
+  Both matter more here than on an ordinary read: `schema/0` above makes `quiz`
+  PRIVATE precisely because the doc stores the correct answer inline, and the
+  carve-out in that doc exempts this load from the VISIBILITY gate — it says
+  nothing about TENANCY or perspective.
+
+  So the resolve now goes through `Content.get_public_document/3`, the shared
+  anonymous-surface resolver the sibling `:public_root` readers already use
+  (`BarkparkWeb.BulldocsLive` via `get_public_paper/2`,
+  `BarkparkWeb.SheetsReaderLive` via `get_public_document("sheet", …)`): pinned
+  to the seeded **Default** workspace, `published_only: true` hard-coded, and
+  fail-closed (no Default seeded ⇒ no public tenant ⇒ `nil`, never a widened
+  read). A quiz in any non-Default workspace is simply not bindable from the
+  anonymous host door — which is the whole point.
+
+  Note this returns the parsed question WITH `:answer`. That is the Room's
+  server-side shape; `Barkpark.Quiz.Room.public_question/1` is what strips
+  `:answer` before anything is broadcast or rendered.
   """
   @spec load_question(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
   def load_question(quiz_id, dataset \\ "production") when is_binary(quiz_id) do
-    case Content.get_document(quiz_id, "quiz", dataset) do
-      {:ok, doc} -> {:ok, to_question(doc_content(doc), doc_id(doc, quiz_id))}
+    case Content.get_public_document("quiz", quiz_id, dataset) do
       %{} = doc -> {:ok, to_question(doc_content(doc), doc_id(doc, quiz_id))}
       _ -> {:error, :not_found}
     end
