@@ -121,13 +121,15 @@ describe('<BarkparkLive /> in a browser', () => {
     document.body.appendChild(container)
     root = createRoot(container)
 
-    // live.tsx:72 — assertNotEdge() runs synchronously during render.
+    // First throw site: assertNotEdge() runs synchronously in BarkparkLive's
+    // render body, before any hook.
     act(() => {
       root!.render(<BarkparkLive client={client} devWarnMs={0} />)
     })
 
-    // live.tsx:180 — assertNotEdge() runs again inside startLiveSubscription,
-    // reached via the mount effect. If either threw, listen() never ran.
+    // Second throw site: assertNotEdge() runs again at the top of
+    // startLiveSubscription, reached here via the mount effect. If either threw,
+    // listen() never ran.
     expect(listen).toHaveBeenCalledTimes(1)
   })
 
