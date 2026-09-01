@@ -9,6 +9,14 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   hooks — `:live_scope_readonly` and `:live_scope_write_scope` — was asserted
   from `phoenix_live_view/channel.ex` source only. This file runs it.
 
+  ## ⚠ THIS SUITE CONTAINS A REPRODUCTION, NOT ONLY REGRESSION PROOF
+
+  The test named "…and the COMPONENT route WRITES" asserts that the escalated
+  bytes REACH THE STORE. It is GREEN because the bypass is REAL and OPEN. When
+  the fix lands, that assertion must be INVERTED (store stays `@orig`) — a red
+  there is the FIX arriving, not a regression. Every OTHER test in this file is
+  an ordinary standing regression proof and must stay green.
+
   ## What the run finds — three different answers, one per grade
 
     * `:share_read` (`:live_scope_readonly`) — GATED. Not by the hook (the hook
@@ -42,6 +50,17 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   returns `shared/paper.ex` only — the sheet surface has no such door, and
   `SheetGrid.Ops.send_ops/2`'s `write_capable: false` wall is the only thing
   between this principal and the Sheets session.
+
+  ## `StudioChrome`'s `:studio_chrome_nav` — the third hook the row names
+
+  Equally unreachable, and the run PROVES the mechanism: a `scope-open` event
+  routed at the component dies with `:function_clause` in
+  `SheetGrid.handle_event/3`, through
+  `Phoenix.LiveView.Channel.inner_component_handle_event/4` — the cid branch,
+  with the parent's hook list never consulted. But that hook gates NAVIGATION
+  events and NO Studio LiveComponent implements one (the whole set is
+  `SheetGrid`, `PaperFieldBlock`, `GraphView`), so there is nothing to bypass it
+  WITH. The sheet finding does NOT transfer to `:studio_chrome_nav`.
 
   ## The oracle is PERSISTED STATE, never a flash
 
@@ -356,7 +375,8 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   # ── 2. THE BYPASS: same socket, same sheet, two routes ──────────────────────
 
   describe "component-targeted write vs :live_scope_write_scope" do
-    test "SOCKET route is HALTED by the hook, and the COMPONENT route WRITES", %{
+    @tag :reproduction
+    test "REPRODUCTION: SOCKET route is HALTED by the hook, and the COMPONENT route WRITES", %{
       conn: conn,
       ws: ws,
       proj: proj
@@ -378,10 +398,6 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       # The parent's hook list is never consulted on this path; the only wall is
       # the `write_capable` prop, which is desk-granular and says `true`.
       #
-      # The prop the component actually holds, read off ITS socket — this is the
-      # value the two routes disagree about.
-      assert component_assigns(view)[:write_capable] == true
-
       component_write(view, @other_slug, @escalated)
 
       # THE ORACLE: persisted state, by value. Bound to a variable so a
@@ -390,6 +406,11 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
 
       assert after_component_event == %{"v" => 1337},
              "the component route did not write; the bypass did not reproduce"
+
+      # …and the value the two routes disagree about, read off the COMPONENT's
+      # own socket: the capability really arrived `true` here while the socket
+      # hook's own predicate on the same target is `{:error, :forbidden}`.
+      assert component_assigns(view)[:write_capable] == true
 
       # And the SOCKET route still refuses the same target on the same socket —
       # the two routes disagree, which is the finding.
@@ -417,13 +438,13 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
 
       component_write(view, @granted_slug, @escalated)
 
+      assert persisted_a1(@granted_slug) == %{"v" => 1337}
+
       # The capability really did travel in as a prop, and the write path
       # reported no error (a `notice` here is how the first run of this suite
       # surfaced the session's `:not_found`, see `null_dataset_id!/1`).
       assert component_assigns(view)[:write_capable] == true
       assert component_assigns(view)[:notice] == nil
-
-      assert persisted_a1(@granted_slug) == %{"v" => 1337}
     end
   end
 
@@ -456,10 +477,68 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       })
 
       assert component_assigns(view)[:active] == {3, 3}
-      assert component_assigns(view)[:write_capable] == false
 
       component_write(view, @other_slug, @escalated)
 
+      # THE ORACLE FIRST — persisted state, by value. Revert the capability at
+      # the SheetGrid callsite (`write_capable={true}`) and THIS line reds with
+      # `left: %{"v" => 1337}`; the mechanism assertion below reds too, but the
+      # store is the one that matters and it must be the one that speaks.
+      assert persisted_a1(@other_slug) == @orig
+
+      # …and the MECHANISM that held it: the capability the component itself
+      # received.
+      assert component_assigns(view)[:write_capable] == false
+    end
+  end
+
+  # ── 4. StudioChrome's :studio_chrome_nav — the third hook the row names ─────
+
+  describe "StudioChrome's :studio_chrome_nav on the component route" do
+    @tag :capture_log
+    test "is equally unreachable — but has NO component surface to be bypassed FROM", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      Process.flag(:trap_exit, true)
+
+      {_user, conn} = write_grantee_session(conn, ws, proj)
+      {view, _html} = open_sheet!(conn, ws, proj, @other_slug)
+
+      # `scope-open` is a `:studio_chrome_nav` event. Routed at the LiveView the
+      # hook SEES it and HALTs it — the socket survives and the menu state moves.
+      render_hook(view, "scope-open", %{})
+      assert Process.alive?(view.pid)
+
+      # Routed at the COMPONENT, the SAME event never reaches that hook. It is
+      # dispatched straight into `SheetGrid.handle_event/3`, which has no clause
+      # for it, and the LiveView dies with a `:function_clause` NAMING the
+      # component function. That crash is the run-proof for this hook: the stack
+      # is `Phoenix.LiveView.Channel.inner_component_handle_event/4`, i.e. the
+      # cid branch — the parent's hook list was never consulted.
+      target = grid_target!(view, @other_slug)
+
+      assert {{:function_clause, stack}, _} = catch_exit(render_hook(target, "scope-open", %{}))
+
+      # The dispatch target, NAMED by the runtime: the component's own
+      # `handle_event/3`…
+      assert [{BarkparkWeb.Studio.SheetGrid, :handle_event, ["scope-open" | _], _} | _] = stack
+
+      # …reached through the CID branch of the channel. This frame is the whole
+      # mechanism the row asked to see RUN rather than read.
+      assert Enum.any?(stack, fn
+               {Phoenix.LiveView.Channel, fun, _, _} ->
+                 fun |> Atom.to_string() |> String.contains?("inner_component_handle_event")
+
+               _ ->
+                 false
+             end)
+
+      # THE VERDICT FOR THIS HOOK: unreachable, yes — but `:studio_chrome_nav`
+      # gates NAVIGATION events, and no Studio LiveComponent implements one, so
+      # there is nothing to bypass it WITH. The sheet finding above does NOT
+      # transfer to `:studio_chrome_nav`; it needed a component that WRITES.
       assert persisted_a1(@other_slug) == @orig
     end
   end
@@ -505,11 +584,18 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       })
 
       assert component_assigns(view)[:active] == {3, 3}
-      assert component_assigns(view)[:write_capable] == false
 
       component_write(view, @other_slug, @escalated)
 
+      # THE ORACLE FIRST — persisted state, by value. Revert the capability at
+      # the SheetGrid callsite (`write_capable={true}`) and THIS line reds with
+      # `left: %{"v" => 1337}`; the mechanism assertion below reds too, but the
+      # store is the one that matters and it must be the one that speaks.
       assert persisted_a1(@other_slug) == @orig
+
+      # …and the MECHANISM that held it: the capability the component itself
+      # received.
+      assert component_assigns(view)[:write_capable] == false
     end
   end
 end
