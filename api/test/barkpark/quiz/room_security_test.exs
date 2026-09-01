@@ -33,13 +33,26 @@ defmodule Barkpark.Quiz.RoomSecurityTest do
     refute Map.has_key?(payload.question, :answer)
   end
 
-  test "the answer IS disclosed at :reveal (and only then)", %{pin: pin} do
+  # task-ae30cd243c2a943d NARROWED this. The answer is still disclosed at
+  # :reveal — but on the HOST-ONLY topic, never the shared events topic that
+  # every anonymous player phone also subscribes to. The old shape asserted the
+  # answer on `room_topic/1`, which was the leak.
+  test "the answer is disclosed at :reveal on the HOST topic only", %{pin: pin} do
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.host_topic(pin))
+    Quiz.join(pin, "p1", "Alice")
+    Quiz.reveal(pin)
+
+    assert_receive {:quiz, ^pin, {:reveal_answer, answer}}, 500
+    assert answer == "a"
+  end
+
+  test "the :reveal payload on the shared player topic carries NO answer", %{pin: pin} do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
     Quiz.join(pin, "p1", "Alice")
     Quiz.reveal(pin)
 
-    assert_receive {:quiz, ^pin, {:phase, :reveal, %{answer: answer}}}, 500
-    assert answer == "a"
+    assert_receive {:quiz, ^pin, {:phase, :reveal, payload}}, 500
+    refute Map.has_key?(payload, :answer)
   end
 
   test "apply_question rejects a malformed question without crashing the room", %{pin: pin} do

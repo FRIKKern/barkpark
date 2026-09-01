@@ -167,7 +167,11 @@ defmodule Barkpark.Quiz.Room do
   def start_question(pin, time_limit \\ nil),
     do: call_existing(pin, {:start_question, time_limit}, :ok)
 
-  @doc "Reveal phase — broadcasts the correct answer + final tally; answers locked."
+  @doc """
+  Reveal phase — answers locked. Broadcasts the final tally + scores on the
+  shared events topic (`topic/1`), and the correct answer on the HOST-ONLY
+  topic (`host_topic/1`) so it never reaches a player socket.
+  """
   @spec reveal(pin()) :: :ok
   def reveal(pin), do: call_existing(pin, :reveal, :ok)
 
@@ -206,6 +210,18 @@ defmodule Barkpark.Quiz.Room do
   @doc "The PubSub topic aggregate heatmap frames broadcast on (above the crossover)."
   @spec heat_topic(pin()) :: String.t()
   def heat_topic(pin), do: "quiz:heat:" <> pin
+
+  @doc """
+  The HOST-ONLY topic (distinct from `topic/1`) carrying terms a player must
+  never receive — currently `{:reveal_answer, answer}` at `:reveal`.
+
+  `topic/1` is shared: the projector AND every anonymous player phone subscribe
+  to it, with no per-role filtering. So the correct answer cannot ride it — see
+  `do_reveal/1`. Subscribe to this topic ONLY from a projector/host surface;
+  subscribing a player socket to it re-opens the leak this split closes.
+  """
+  @spec host_topic(pin()) :: String.t()
+  def host_topic(pin), do: "quiz:host:" <> pin
 
   @doc "Override the individual→heatmap crossover threshold (mainly for tests)."
   @spec set_heatmap_threshold(pin(), non_neg_integer()) :: :ok
@@ -546,23 +562,36 @@ defmodule Barkpark.Quiz.Room do
     }
   end
 
-  # Transition to :reveal + broadcast answer/tally. Shared by manual reveal and
-  # the countdown auto-expiry.
+  # Transition to :reveal + broadcast tally/scores on the SHARED events topic,
+  # and the answer on the HOST-ONLY topic. Shared by manual reveal and the
+  # countdown auto-expiry.
+  #
+  # The split is the security boundary (task-ae30cd243c2a943d). `topic/1` is
+  # subscribed by both roles with NO per-role filtering — the projector
+  # (`QuizChannel`'s `observe: true` join, `QuizHostLive.mount/3`) and every
+  # anonymous player phone (`QuizChannel`'s player join, `QuizPlayLive.mount/3`)
+  # are on the same topic. An `:answer` in this payload is therefore one
+  # `handle_info` clause away from every player socket, defeating the same
+  # property that makes the `quiz` document type PRIVATE
+  # (`Barkpark.Quiz.Content.schema/0`: the doc stores the correct answer inline).
+  # The phone is supposed to learn the answer from the projector, not the wire.
   defp do_reveal(state) do
     # Score once, only when transitioning out of :question (a re-reveal won't
     # double-count; the timer expiry is already :question-guarded).
     state = if state.phase == :question, do: score_round(state), else: state
     state = %{state | phase: :reveal}
 
+    # Player-safe: tally + scores render the whole reveal EXCEPT which choice
+    # was right. Deliberately no `:answer` key at all (not `nil`) — an explicit
+    # nil would still be a slot a future edit could refill.
     broadcast(
       state,
-      {:phase, :reveal,
-       %{
-         answer: Map.get(state.question, :answer),
-         tally: compute_tally(state),
-         scores: leaderboard_list(state)
-       }}
+      {:phase, :reveal, %{tally: compute_tally(state), scores: leaderboard_list(state)}}
     )
+
+    # Host-only: the projector legitimately needs the answer to mark the correct
+    # bar at reveal. Nothing a player join subscribes to carries this term.
+    broadcast_host(state, {:reveal_answer, Map.get(state.question, :answer)})
 
     state
   end
@@ -642,14 +671,23 @@ defmodule Barkpark.Quiz.Room do
     %{state | slots: Map.put(state.slots, player_id, slot)}
   end
 
-  # The player-facing view of a question — WITHOUT the correct answer, which is
-  # only disclosed at :reveal. Stops the answer leaking via snapshots / phase /
-  # question_updated broadcasts (a public quiz would otherwise be cheatable).
+  # The player-facing view of a question — WITHOUT the correct answer. Stops the
+  # answer leaking via snapshots / phase / question_updated broadcasts (a public
+  # quiz would otherwise be cheatable).
+  #
+  # This covers every question-shaped term. The answer is NOT disclosed to
+  # players at :reveal either: it rides `host_topic/1` as `{:reveal_answer, a}`,
+  # never the shared events topic. See `do_reveal/1`.
   defp public_question(nil), do: nil
   defp public_question(question), do: Map.delete(question, :answer)
 
   defp broadcast(state, msg),
     do: PubSub.broadcast(@pubsub, topic(state.pin), {:quiz, state.pin, msg})
+
+  # Same envelope shape as `broadcast/2`, different topic — so a host surface
+  # pattern-matches `{:quiz, pin, term}` uniformly across both subscriptions.
+  defp broadcast_host(state, msg),
+    do: PubSub.broadcast(@pubsub, host_topic(state.pin), {:quiz, state.pin, msg})
 
   # Cancel the prior idle timer before arming a new one — otherwise every
   # high-frequency mutation (move/hover) would leave a 60-min timer in the BEAM

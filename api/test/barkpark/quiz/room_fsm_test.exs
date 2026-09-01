@@ -26,7 +26,8 @@ defmodule Barkpark.Quiz.RoomFsmTest do
     Quiz.join(pin, "p1", "Alice")
 
     assert :ok = Quiz.reveal(pin)
-    assert_receive {:quiz, ^pin, {:phase, :reveal, %{answer: _, tally: _}}}
+    # No `answer:` here — it moved to the host-only topic (task-ae30cd243c2a943d).
+    assert_receive {:quiz, ^pin, {:phase, :reveal, %{tally: _, scores: _}}}
     assert Quiz.state(pin).phase == :reveal
 
     assert :ok = Quiz.leaderboard(pin)
