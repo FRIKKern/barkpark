@@ -39,6 +39,13 @@ defmodule Barkpark.Content.Errors do
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
+    # The dedup gate could not RUN. Deliberately NOT the `halted` hint above:
+    # `halted` tells the caller a policy REFUSED and to stop; this tells it
+    # nothing was decided and to come back. Registering it here is what puts
+    # `dedup_unavailable` in `known_codes/0`, the served OpenAPI `Error.code`
+    # enum, and (via errors_doc_coverage_test) docs/api-v1.md §9.
+    "dedup_unavailable" =>
+      "Transient: the duplicate scan could not complete, so nothing was written and nothing was refused on its merits. Resend the identical request. If it keeps failing the database is degraded — report it as an outage rather than editing the document. To file deliberately unchecked, set content.dedup_bypass: true.",
     "label_spine" =>
       "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix, and you can repair the SAME draft in place rather than re-filing. If a published document appears to break the same rule, it is probably GRANDFATHERED: the wall reads an exemption once at entry and lets an exempt doc past a spine failure unchanged, while a birth is never exempt — so an incumbent is not evidence that your content passes. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
     "invalid_paper_structure" =>
@@ -547,28 +554,27 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 
-  # The task dedup gate could not RUN (PDS wave 24). It carries its OWN internal
-  # tag rather than reusing `:halted`, and that distinction is load-bearing
-  # rather than cosmetic: `halted` means a policy DELIBERATELY vetoed the write,
-  # so consumers treat it as deterministic and stop retrying —
+  # The task/publish dedup gate could not RUN. It carries its OWN internal tag
+  # rather than reusing `:halted`, and that distinction is load-bearing rather
+  # than cosmetic: `halted` means a policy DELIBERATELY vetoed the write, so
+  # consumers treat it as deterministic and stop retrying —
   # `Plugins.Github.Intake` answers a clean 2xx on `{:halted, _}` on the explicit
   # reasoning that "GitHub redelivery would only hit the same veto forever". A
   # dedup outage is the opposite: TRANSIENT. Sharing the tag made a DB hiccup
   # into a permanently dropped GitHub issue, logged as a policy refusal that
   # never happened. The tag split is what lets Intake route the two apart.
   #
-  # ON THE WIRE it deliberately keeps `halted` / 409, unchanged from before this
-  # wave. A new public code must be registered in `@hints`, which puts it in
-  # `known_codes/0`, which `errors_doc_coverage_test` requires in
-  # `docs/api-v1.md` §9 — a file sitting on 3 bytes of headroom against a
-  # CI-enforced cap that PDS wave 24 spent its last cheap dedup to clear. So the
-  # honest 503 `dedup_unavailable` is deferred to a slice that can pay those
-  # bytes, and is NOT claimed here. What ships is the part that fixes the
-  # unattended data loss; the residual imperfection is that an external client
-  # still reads a transient outage as a 409 whose registered hint talks about
-  # plugin vetoes. The MESSAGE is exact either way.
+  # ON THE WIRE it is now the honest `dedup_unavailable` / 503 (PDS wave 25).
+  # PDS wave 24 had to borrow `halted` / 409 here because a new public code must
+  # be registered in `@hints`, which puts it in `known_codes/0`, which
+  # `errors_doc_coverage_test` then requires in `docs/api-v1.md` §9 — and that
+  # file was pressed against a CI-enforced byte cap. Relocating the
+  # endpoint-specific vocabulary into `docs/api/error-codes.md` bought the bytes,
+  # so the borrowed code is repaid: a client keying on `code` now reads
+  # "retry me", not a plugin veto, and 503 (not 409) is what tells an unattended
+  # caller the refusal is not a permanent policy decision.
   defp build({:error, {:dedup_unavailable, reason}}),
-    do: %{code: "halted", message: halt_message(reason), status: 409}
+    do: %{code: "dedup_unavailable", message: halt_message(reason), status: 503}
 
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the

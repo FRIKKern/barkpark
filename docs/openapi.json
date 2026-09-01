@@ -119,6 +119,7 @@
                   "cors_forbidden",
                   "create_wall",
                   "csrf_required",
+                  "dedup_unavailable",
                   "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",

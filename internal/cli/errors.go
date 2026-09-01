@@ -260,6 +260,7 @@ var codeExit = map[string]int{
 	// retry is the right reflex, and the class exit 1 made indistinguishable
 	// from a permanently-refused payload.
 	"storage_unavailable":       exitServer, // 503, errors.ex:712
+	"dedup_unavailable":         exitServer, // 503, the duplicate scan could not run — resend
 	"runtime_unavailable":       exitServer, // 503, chat_controller.ex:943
 	"runtime_capacity":          exitServer, // 503, chat_controller.ex:934
 	"chat_create_failed":        exitServer, // 503, chat_controller.ex:146

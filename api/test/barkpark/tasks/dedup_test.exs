@@ -188,15 +188,20 @@ defmodule Barkpark.Tasks.DedupTest do
 
       refute env.code == "internal_error"
       refute env.message == "unknown error"
-      # 503, not the plugin-veto 409: a dedup outage is TRANSIENT, and the code
-      # is what tells an unattended caller (Github.Intake) to come back rather
-      # than treat the refusal as a permanent policy decision and drop the row.
-      # On the wire this stays 409 `halted` for now: a new public code must be
-      # registered in known_codes/0, which docs/api-v1.md §9 must then document,
-      # and §9 has 3 bytes of headroom against a CI-enforced cap. The INTERNAL
-      # tag is what had to split; the wire upgrade to a 503 dedup_unavailable is
-      # named as next-wave work, not claimed here.
-      assert env.status == 409
+      # 503 `dedup_unavailable`, not the plugin-veto 409 `halted`: a dedup
+      # outage is TRANSIENT, and the CODE is what tells an unattended caller
+      # (Github.Intake) to come back rather than treat the refusal as a
+      # permanent policy decision and drop the row. Wave 24 had to borrow
+      # `halted`/409 because registering a new public code puts it in
+      # known_codes/0, which docs/api-v1.md §9 must then document — against a
+      # CI-enforced byte cap that had no room. Wave 25 relocated §9's
+      # endpoint-specific tail into docs/api/error-codes.md and repaid it.
+      #
+      # Both halves are asserted: a future change that reverts EITHER the code
+      # or the status back to the veto's values reds here.
+      assert env.code == "dedup_unavailable"
+      assert env.status == 503
+      refute env.code == "halted"
 
       # THE TRIPWIRE. `:halted` is the plugin-VETO tag, and consumers treat it
       # as deterministic: `Plugins.Github.Intake` answers a clean 2xx on
