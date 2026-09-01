@@ -31,6 +31,39 @@ defmodule Barkpark.Media.Storage.Collections do
   # `ResolveWorkspace` admitted a grantee), so a member's read is unchanged.
   @scope_keys [:workspace_id, :project_id, :grant_scoped, :caller_context]
 
+  # The NON-tenancy half of what the collection-assets search door accepts.
+  #
+  # The tenancy half is deliberately NOT repeated here:
+  # `collection_search_opts/3` takes `@scope_keys ++ @search_passthrough_keys`,
+  # so the search door and the collection GATE (`scope_opts/1`) read the same
+  # constant and cannot drift apart. That linkage is the point — this module's
+  # allowlists have now silently dropped a security-relevant key THREE times,
+  # each time by hand-maintaining a second list:
+  #
+  #   1. `:grant_scoped` / `:caller_context` (task-2b7cbaf8265f6b4e) — the gate
+  #      was reached with the input that disables it, so a grant-derived caller
+  #      resolved collections across the whole workspace.
+  #   2. `:visibility_clamp` — the unauthenticated read ceiling enforced nothing
+  #      on this door while enforcing on its `/v1/media/:ds` sibling.
+  #   3. `:workspace_id` / `:project_id` (task-f42f7f9c2d10f0bb) — the gate was
+  #      scoped and the PAYLOAD was not, so a `virtual` collection answered with
+  #      an unscoped media search over the dataset STRING.
+  #
+  # A `Keyword.take/2` allowlist is still the right shape for the door: the
+  # search opts are a closed vocabulary, and passing unknown keys through to
+  # `Media.search_files/2` is how the ORIGINAL leak on this module happened.
+  # What was wrong was maintaining the tenancy vocabulary TWICE. Deriving it
+  # from `@scope_keys` means the next key added for the gate reaches the search
+  # for free, which is the failure mode all three incidents share.
+  @search_passthrough_keys [
+    :limit,
+    :offset,
+    :sort,
+    :facets,
+    :facet_selections,
+    :visibility_clamp
+  ]
+
   @doc "List collection documents for a dataset (workspace-scoped via opts)."
   @spec list(String.t(), keyword()) :: [Document.t()]
   def list(dataset, opts \\ []) when is_binary(dataset) do
@@ -119,20 +152,22 @@ defmodule Barkpark.Media.Storage.Collections do
   defp collection_search_opts(%Document{content: content}, collection_id, opts) do
     base =
       opts
-      # `:visibility_clamp` is the unauthenticated read ceiling and MUST survive
-      # this take — a key absent from the list is dropped silently, so the clamp
-      # would enforce nothing on the collection-assets door while enforcing on
-      # its `/v1/media/:ds` sibling. Note it rides ALONGSIDE `:visibility` (set
-      # by a virtual collection's own filter, below) rather than replacing it:
-      # the filter narrows, the clamp bounds.
-      |> Keyword.take([
-        :limit,
-        :offset,
-        :sort,
-        :facets,
-        :facet_selections,
-        :visibility_clamp
-      ])
+      # A key absent from this take is dropped SILENTLY, which is why both
+      # halves are named constants rather than a literal list here.
+      #
+      # `@scope_keys` carries the tenancy pair the caller actually resolved.
+      # Without it `Search.build_query/2` read `nil` for `:workspace_id` and
+      # handed it to `scope_to_workspace_or_global/3`, whose nil arm returns
+      # the query UNTOUCHED — so a `virtual` collection (which sets no
+      # `:collection` filter) answered with an unscoped media search across
+      # every workspace sharing the dataset string, in its rows, its `total`,
+      # AND every facet bucket.
+      #
+      # `:visibility_clamp` is the unauthenticated read ceiling and MUST also
+      # survive: it rides ALONGSIDE `:visibility` (set by a virtual
+      # collection's own filter, below) rather than replacing it — the filter
+      # narrows, the clamp bounds.
+      |> Keyword.take(@scope_keys ++ @search_passthrough_keys)
       |> Keyword.put_new(:limit, 50)
       |> Keyword.put_new(:offset, 0)
       |> Keyword.put_new(:sort, "created-desc")
