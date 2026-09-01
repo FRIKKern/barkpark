@@ -1378,7 +1378,24 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # never independently. Measured by the 999-technique on this branch (pin set
   # to 999, refusal printed "302 json tag(s) found in internal/cloudclient"),
   # never summed.
-  @go_tag_pinned 302
+  #
+  # 302 -> 303 (ssw8-surface-the-create-binding-verdict, PR #14610): the create
+  # ENVELOPE gained a decoder. `POST /v1/sites` has always answered 201 with the
+  # control plane's own create-time read of the bound type under a TOP-LEVEL
+  # `content_binding` key beside `site`, and `CreateSpawnSite` decoded into an
+  # anonymous `struct { Site SpawnSite }` — so the verdict was thrown away at the
+  # door and an unverified create printed the same confident line as a bound one.
+  # `SpawnSiteCreated` now names it. ONE new NAME, `content_binding`, declared
+  # nowhere else in the package, so it does not cross into the SITE register
+  # below and the partition total moves by exactly 1 alongside this pin. The four
+  # fields of the new `ContentBinding` struct — `status`, `doc_type`, `count`,
+  # `detail` — are names this package ALREADY declares, so they ride free on the
+  # NAME union and move four ROWS of the register instead, crossing no class
+  # boundary. `site` does NOT move (7 both sides): the anonymous struct's
+  # `json:"site"` was REPLACED by `SpawnSiteCreated.Site`, not added to.
+  # Measured by the scanner's own expression on the MERGED tree (names 302 ->
+  # 303, sites 561 -> 566), never summed.
+  @go_tag_pinned 303
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1451,8 +1468,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "code" => 3,
     "content_rev" => 2,
     # MetricsSpaceSites.Count joined the five existing `count` declarations
-    # — the deployed-sites walk (host-space report, W6 S4).
-    "count" => 6,
+    # — the deployed-sites walk (host-space report, W6 S4). ssw8 (PR #14610)
+    # added the seventh: ContentBinding.Count, the create-time document total
+    # the control plane read through the new site's own token. It is a POINTER
+    # in Go on purpose — the producer OMITS the key when the box published no
+    # total, so absent and zero are different answers — but a `*int` field
+    # carries the same ONE tag site an `int` would.
+    "count" => 7,
     # Pressure's HOST cpu busy-percent and RunawayProc's PER-PROCESS lifetime
     # average share one name and are different measurements — exactly the
     # collision this register exists to keep visible.
@@ -1470,8 +1492,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "delivered" => 2,
     "deployment" => 3,
     "deployments" => 2,
-    "detail" => 8,
-    "doc_type" => 2,
+    # ssw8 (PR #14610): ContentBinding.Detail is the ninth — WHY an `unverified`
+    # create-time binding read could not be confirmed. The name already existed
+    # package-wide, so `@go_tag_pinned` structurally cannot see this site.
+    "detail" => 9,
+    # ssw8 (PR #14610): ContentBinding.DocType is the third — the type the
+    # control plane actually READ at create, as against the type the site ROW
+    # stores. Same name, different measurement: exactly the collision this
+    # register exists to keep visible.
+    "doc_type" => 3,
     "domains" => 3,
     "email" => 3,
     "environment" => 4,
@@ -1541,7 +1570,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "source" => 3,
     "stage" => 3,
     "stages" => 2,
-    "status" => 13,
+    # ssw8 (PR #14610): ContentBinding.Status is the fourteenth — "bound" or
+    # "unverified", the create-time verdict itself. Rides free on the NAME
+    # union, so only this row can notice the site being deleted.
+    "status" => 14,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
