@@ -73,8 +73,13 @@ function mockHangingFetch(): void {
   )
 }
 
-/** A fetch whose HEADERS arrive at once but whose BODY never finishes (slow-loris). */
-function mockStallingBodyFetch(): void {
+/**
+ * A fetch whose HEADERS arrive at once but whose BODY never finishes
+ * (slow-loris). `bodyRejectsWith: 'terminated'` reproduces undici's real shape
+ * for an abort landing mid-stream — a `TypeError: terminated` whose `cause` is
+ * the AbortError, NOT an AbortError itself.
+ */
+function mockStallingBodyFetch(bodyRejectsWith: 'abort' | 'terminated' = 'abort'): void {
   vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
     const sig = (init as RequestInit | undefined)?.signal
     const resp = {
@@ -84,10 +89,14 @@ function mockStallingBodyFetch(): void {
       text: () =>
         new Promise<string>((_resolve, reject) => {
           const fail = (): void => {
-            reject(
+            const abortErr =
               sig?.reason instanceof Error
                 ? sig.reason
-                : new DOMException('The operation was aborted.', 'AbortError'),
+                : new DOMException('The operation was aborted.', 'AbortError')
+            reject(
+              bodyRejectsWith === 'terminated'
+                ? new TypeError('terminated', { cause: abortErr })
+                : abortErr,
             )
           }
           if (sig === null || sig === undefined) return
@@ -161,6 +170,23 @@ describe('barkparkFetch — the configured fetchOptions.timeout is actually arme
         (e: unknown) => e,
       )
       expect(err).toBeInstanceOf(BarkparkTimeoutError)
+      expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
+    },
+    3000,
+  )
+
+  it(
+    "undici's real mid-body shape — a `TypeError: terminated` — is still reported as the timeout it is",
+    async () => {
+      mockStallingBodyFetch('terminated')
+      const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
+        () => {
+          throw new Error('unexpectedly resolved')
+        },
+        (e: unknown) => e,
+      )
+      expect(err).toBeInstanceOf(BarkparkTimeoutError)
+      expect(err).not.toBeInstanceOf(TypeError)
       expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
     },
     3000,

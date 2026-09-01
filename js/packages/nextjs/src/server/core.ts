@@ -564,6 +564,16 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
     return await runRequest<T>(cfg, input, deadline)
   } catch (e) {
     if (isAbortShaped(e)) throw classifyAbort(e, input, deadline)
+    // undici surfaces an abort that lands DURING the body stream as
+    // `TypeError: terminated`, carrying the AbortError only as its `cause` — so
+    // the name check above misses it and the deadline would escape as a raw
+    // TypeError. Reclassify one ONLY when our own deadline actually fired and
+    // the caller did not abort; every failure `decodeAndThrow` and the JSON
+    // decode raise is a Barkpark* error, never a bare TypeError, so this cannot
+    // swallow a real one.
+    if (e instanceof TypeError && deadline.fired() && input.signal?.aborted !== true) {
+      throw classifyAbort(e, input, deadline)
+    }
     throw e
   } finally {
     // The ONLY place the timer and the caller-signal listener are guaranteed to
