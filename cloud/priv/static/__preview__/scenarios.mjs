@@ -261,6 +261,12 @@ const suspendedInstance = bpBase({
   // the raw column. A fixture vouching for copy the plane cannot emit certifies
   // nothing.
   suspended_reason: "billing_past_due",
+  // cch-w54-bl — the stamp `Registry.suspend_barkpark/2` writes and
+  // `barkpark_json/5` now serializes. FIXED, never relative to the corpus clock:
+  // the card renders this as a calendar day, and this scenario's subscription
+  // renews at T+3d, so a stamp that drifted with T could silently land on the
+  // renewal day and make the smoke pin below vacuous. A fixed June day cannot.
+  suspended_at: "2026-06-12T12:00:00.000Z",
   provision_status: "succeeded",
 });
 

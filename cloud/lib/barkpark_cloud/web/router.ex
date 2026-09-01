@@ -10611,17 +10611,25 @@ defmodule BarkparkCloud.Web.Router do
       # but never since when.
       #
       # The absence was not rendered as absence. `suspendedCardBannerHtml` in
-      # app.js fell through to `dunningDates(sub)`, which is computed off
-      # `sub.current_period_end` — the NEXT renewal day — so a box suspended
-      # today painted a FUTURE date as a past-tense suspension day. A field
-      # with no reader is invisible; one whose absence is papered over by a
-      # wrong value is a silent-failure defect, which is why the fix is the
-      # field and not the copy.
+      # app.js fell through to a helper computed off `sub.current_period_end`
+      # — the NEXT renewal day — so a box suspended today painted a FUTURE date
+      # as a past-tense suspension day. A field with no reader is invisible; one
+      # whose absence is papered over by a wrong value is a silent-failure
+      # defect, which is why the fix is the field and not the copy.
+      #
+      # THE CONSUMER SIDE IS CLOSED TOO. `suspendedCardBannerHtml` reads this
+      # key through `suspendedDay` on both the billing and quota arms, and the
+      # helper that borrowed the renewal day was DELETED rather than left
+      # orphaned — the card has no path to a subscription date any more. Named
+      # by SYMBOL and not by line: app.js is edited constantly and a line
+      # number here would rot inside a week.
       #
       # NULL means NOT SUSPENDED, never "suspended at an unknown time":
       # `unsuspend_barkpark/1` and the bulk resume clear all three columns
       # together, so a live box never carries a stale stamp. Consumers render
-      # null as no-date and must NOT substitute a billing date for it.
+      # null as no-date and must NOT substitute a billing date for it — the
+      # console's own guard for that is the `never from current_period_end`
+      # case in `__app.test.mjs`.
       suspended_at: bp.suspended_at,
       # isu-6 self-update status — the cached mirror of the instance's OWN
       # update verdict (the UpdateStatusWorker sweep / post-trigger refresh).

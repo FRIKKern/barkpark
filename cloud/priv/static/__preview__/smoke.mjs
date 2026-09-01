@@ -1720,6 +1720,23 @@ const EXPECTATIONS = {
       // management), not a stop nothing in this plane performs. The rendered
       // DOM is the pin, so a helper that stopped being called would red here.
       assert.ok(grid.includes("Barkpark Cloud has stopped managing it"), "the suspended-card body renders verbatim");
+      // cch-w54-bl — THE DAY, IN THE RENDERED DOM. The card used to date itself
+      // from `sub.current_period_end` (this scenario's sub renews at T+3d)
+      // because `suspended_at` reached no wire. It now reads the suspension's
+      // own stamp, which the corpus box carries as a fixed 2026-06-12.
+      //
+      // The pin is the WHOLE TITLE, by equality, not a substring: a substring
+      // check passes on "Suspended <right day>" even if a second, wrong date is
+      // sitting beside it, and the failure this guards against is precisely a
+      // date arriving from the wrong source. Equality means any other day —
+      // renewal, birthday, today — reds, without this test having to enumerate
+      // which wrong day it fears.
+      const expectedDay = new Date(Date.parse("2026-06-12T12:00:00.000Z"))
+        .toLocaleDateString(undefined, { month: "long", day: "numeric" });
+      const cardTitle = (grid.match(/<div class="suspended-card-title">([\s\S]*?)<\/div>/) || [])[1];
+      assert.ok(cardTitle, "the suspended card must render a title element to pin");
+      assert.equal(cardTitle, `Suspended ${expectedDay} — payment failed`,
+        "the suspended card names the day the plane stamped, and nothing else");
       assert.ok(!grid.includes("The server is stopped"), "the console never paints a stop it does not perform");
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
       // The pill beside it moved with the copy: the WORD is Suspended, and the
