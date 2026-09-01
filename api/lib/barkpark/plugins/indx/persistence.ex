@@ -9,17 +9,9 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   SHA-256-derived key and accepted a `~2^-63` per-pair mis-target risk
   on a true hash collision plus a missing map.
 
-  This module persists `%{dataset, key_map}` to disk per index, so
-  `Recovery` can re-seat the EXACT post-restart state — `delete_target_keys`
-  then never needs the bare-hash branch in normal operation.
-
-  ## The key is an INDEX KEY, not a dataset string
-
-  Callers pass `Indexer.index_key/2`'s output (`<slugified-scope>_t<16 hex>`),
-  which is tenant-partitioned — so co-tenants sharing the dataset string
-  `production` get separate files instead of overwriting one another's
-  key_map. The parameter is still named `scope` for backwards compatibility
-  with the on-disk layout; it is opaque to this module either way.
+  Persisted per INDEX — keyed by `Indexer.index_key/2`, so co-tenants sharing
+  one dataset string never overwrite each other — so `Recovery` re-seats the
+  EXACT state and `delete_target_keys` never needs the bare-hash branch.
 
   ## File format
 

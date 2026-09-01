@@ -140,7 +140,9 @@ defmodule Barkpark.Plugins.Indx.IndexKeyTenancyTest do
     # default dir is `priv/indx_state` INSIDE the repo — a real swap in a test
     # would leave untracked `.term` files in the working tree. Point it at a
     # temp dir for the duration, exactly as `RecoveryPersistenceTest` does.
-    dir = Path.join(System.tmp_dir!(), "indx-index-key-test-#{System.unique_integer([:positive])}")
+    dir =
+      Path.join(System.tmp_dir!(), "indx-index-key-test-#{System.unique_integer([:positive])}")
+
     prev_persistence = Application.get_env(:barkpark, Persistence, [])
     Application.put_env(:barkpark, Persistence, dir: dir)
 
