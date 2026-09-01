@@ -164,7 +164,10 @@ func (m Model) transcriptBuild(width int, targetRID string) ([]string, int) {
 		push(renderLocalSend(w, ls)...)
 	}
 	if strings.TrimSpace(m.st.Tail) != "" {
-		push(renderTail(w, m.st.Tail)...)
+		// The live turn (charter D9/D81): committed segments through the settled
+		// pdrender stack, the uncommitted remainder plain. With no `stable` frames
+		// on the wire this returns renderTail's bytes unchanged.
+		push(renderLiveTail(chatRegistry, width, m.st)...)
 	}
 	if len(lines) == 0 {
 		lines = []string{dimStyle.Render("No messages yet — type below and press Enter.")}
@@ -281,11 +284,13 @@ func renderLocalSend(w int, ls LocalSend) []string {
 
 // renderTail paints the live streaming tail (charter D9): plain-text delta
 // truth, word-wrapped, under a dim streaming marker. It NEVER goes through
-// pdrender — it settles into blocks at the turn boundary.
+// pdrender — it settles into blocks at the turn boundary. It is also the
+// improvement-only FLOOR (D76): renderLiveTail returns exactly these bytes
+// whenever the server sends no `stable` frames, or stops sending them.
 func renderTail(w int, tail string) []string {
 	body := wrap(strings.TrimRight(tail, " "), w)
 	out := make([]string, 0, len(body)+1)
-	out = append(out, dimStyle.Render("assistant · streaming…"))
+	out = append(out, dimStyle.Render(streamingMarker))
 	out = append(out, body...)
 	return out
 }
