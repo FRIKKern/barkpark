@@ -60,14 +60,21 @@ page() {
 # the live `row()` shape has never carried one, and clause 4(a)'s anchor reads it
 # ONLY for rows that are already live-and-bare, so every pre-existing fixture is
 # untouched by its absence. An anchored fixture must supply it or fail closed.
+# The EIGHTH is `wave_paper`, the field the epic ROOT row uses to name its own
+# wave Paper, and it is omitted when empty for the same reason: a root that does
+# not declare one binds nothing, which is the shape every pre-existing fixture
+# here has and must keep having.
 row() {
-  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 trigger=${6:-} created=${7:-}
+  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 trigger=${6:-} created=${7:-} wave=${8:-}
   local extra=''
   if [[ -n $trigger ]]; then
     extra=$(printf ',"reopen_trigger":"%s"' "$trigger")
   fi
   if [[ -n $created ]]; then
     extra+=$(printf ',"_createdAt":"%s"' "$created")
+  fi
+  if [[ -n $wave ]]; then
+    extra+=$(printf ',"wave_paper":"%s"' "$wave")
   fi
   printf '{"_id":"%s","_type":"task","_updatedAt":"2020-01-01T00:00:00.000000Z","parent_id":%s,"lifecycle_status":"%s","disposition":"%s","disposition_reason":"%s"%s}' \
     "$id" "$parent" "$lifecycle" "$disposition" "$reason" "$extra"
@@ -118,6 +125,26 @@ build_healthy() {
   p1="$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),"
   p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
   p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
+  page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
+  page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+}
+
+# THE BOUND CORPUS. The healthy board, except that the ROOT ROW DECLARES ITS OWN
+# WAVE PAPER (`wave_paper`, exactly as the live epic root does -- /v1/data/query
+# flattens content.* to the top level), and `deep-a` is the LIVE BARE row born in
+# 2030: residue of any round anchored before then. The declared slug is a
+# PARAMETER so the same builder makes the bound fixture and the one whose
+# declared Paper the source cannot serve.
+build_bound() {
+  local dir=$1 wave=$2
+  local p0 p1
+  p0="$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never' '' '' "$wave"),"
+  p0+="$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),"
+  p0+="$(row kid-b "\"$ROOT_SLUG\"" done closed 'kid b reason two. REACTIVATE: bravo'),"
+  p0+="$(row kid-c "\"$ROOT_SLUG\"" blocked parked 'kid c reason three. REOPEN: charlie' 'TRIGGER: charlie ships')"
+  p1="$(row deep-a '"kid-a"' open '' 'deep a reason four. REOPEN: delta' '' '2030-01-01T00:00:00.000000Z'),"
+  p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
+  p1+="$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')"
   page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
   page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
 }
@@ -1136,6 +1163,109 @@ expect_status_matching "a cleanly-parsing failure envelope is not an anchor" 2 "
 expect_status_matching "a Paper the source does not serve at all fails closed" 2 "unresolvable anchor is never a default" \
   run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
 
+# =============================================================================
+# CLAUSE 4(a) — THE ANCHOR IS BOUND TO THE ROUND IT CERTIFIES (wave 26's own
+# named residual, paid in wave 28).
+#
+# Deriving the instant from a Paper closed only half the hole: NOTHING checked
+# that the Paper IS this round's. Passing an EARLIER wave's slug yields an
+# EARLIER anchor, so MORE rows fall after it and are DEFERRED as residue -- a
+# greener 4(a) bought by MOVING THE BOUNDARY instead of adjudicating the rows.
+#
+# THE MUTATION IS THE PROOF, AND IT IS THE SAME ROW TWICE. `$BOUND` is one
+# fixture whose ROOT declares `wave_paper: $WAVE_SLUG`. Anchored on that slug it
+# certifies; anchored on `$OLD_SLUG` -- an older Paper the same fixture serves,
+# under which `deep-a` is residue just the same, so the OLD census exits 0 on
+# this exact invocation -- it must now be REFUSED. A binding that only printed
+# the slug it used would pass the first and fail the second.
+# =============================================================================
+echo
+echo "clause 4(a) — the anchor is BOUND to the round being certified"
+OLD_SLUG="pds-wave-25-fixture"
+OLD_ANCHOR_TS="2024-01-01T00:00:00.000000Z"
+
+BOUND="$TMP/anchor-bound"
+build_bound "$BOUND" "$WAVE_SLUG"
+paper "$BOUND" "$WAVE_SLUG" 200 "$(printf '{"result":{"_id":"%s","_type":"paper","_createdAt":"%s"}}' "$WAVE_SLUG" "$ANCHOR_TS")"
+paper "$BOUND" "$OLD_SLUG" 200 "$(printf '{"result":{"_id":"%s","_type":"paper","_createdAt":"%s"}}' "$OLD_SLUG" "$OLD_ANCHOR_TS")"
+
+# THE DEFAULT IS THE BINDING. No anchor flag at all: the round names its own
+# Paper, so the census reads it and certifies -- and the SAME fixture without a
+# declared wave_paper ($ANCHORED, above) reds 4(a), which is what proves the
+# anchor came from the field and not from the flag.
+expect_status "the anchor is DERIVED from the root's wave_paper with no flag at all" 0 \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done
+expect_output_contains "and the derivation names the FIELD it came from" \
+  "epic $ROOT_SLUG wave_paper=$WAVE_SLUG" \
+  run --page-limit 4 --fixture-dir "$BOUND"
+expect_output_contains "the binding is STATED, never left to be assumed" \
+  "BOUND to the round" \
+  run --page-limit 4 --fixture-dir "$BOUND"
+expect_output_contains "the resolved slug is machine-readable in --json" \
+  "\"round_anchor_slug\": \"$WAVE_SLUG\"" \
+  run --page-limit 4 --fixture-dir "$BOUND" --json
+expect_output_contains "and so is the binding verdict" \
+  '"round_anchor_binding": "bound"' \
+  run --page-limit 4 --fixture-dir "$BOUND" --json
+
+# THE DEFECT, RED. This invocation exits 0 against the census as it stood before
+# this change -- the older Paper resolves, deep-a is deferred, the round
+# certifies -- which is exactly the silent boundary move.
+expect_status_matching "an EARLIER wave's Paper is REFUSED, not silently honoured" 3 \
+  "does not match the round being certified" \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done --anchor-from-paper "$OLD_SLUG"
+expect_status_matching "and the refusal NAMES the slug the round declares" 3 \
+  "declares \`wave_paper: $WAVE_SLUG\`" \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done --anchor-from-paper "$OLD_SLUG"
+expect_status_matching "and it says what the older anchor would have bought" 3 \
+  "MOVING THE BOUNDARY" \
+  run --page-limit 4 --fixture-dir "$BOUND" --anchor-from-paper "$OLD_SLUG"
+# The round's OWN Paper on argv is still accepted: the refusal is keyed on
+# DISAGREEMENT, not on the flag being present.
+expect_status "the round's OWN Paper is accepted on argv too" 0 \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+
+# THE OVERRIDE EXISTS AND IT IS LOUD. An escape hatch that did not print would
+# be the original hole with one more flag in front of it.
+expect_status "--anchor-unbound accepts the divergence" 0 \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done --anchor-from-paper "$OLD_SLUG" --anchor-unbound
+expect_output_contains "and it SAYS SO in the human render" "ANCHOR UNBOUND" \
+  run --page-limit 4 --fixture-dir "$BOUND" --anchor-from-paper "$OLD_SLUG" --anchor-unbound
+expect_output_contains "and in the payload, as an override" '"round_anchor_binding": "override"' \
+  run --page-limit 4 --fixture-dir "$BOUND" --anchor-from-paper "$OLD_SLUG" --anchor-unbound --json
+expect_status_matching "a flag that overrides nothing is refused" 3 "overrides nothing" \
+  run --page-limit 4 --fixture-dir "$BOUND" --anchor-unbound
+
+# A ROOT THAT DECLARES NOTHING BINDS NOTHING -- and that is REPORTED, never read
+# as agreement. This is the shape every pre-existing fixture in this file has,
+# so it is also the check that says why none of them changed.
+expect_output_contains "a root with no wave_paper binds nothing, and says that too" \
+  '"round_anchor_binding": "unverifiable"' \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --anchor-from-paper "$WAVE_SLUG" --json
+
+# THE OPT-OUT GOES ONE WAY ONLY: --no-anchor is the UNANCHORED clause, which
+# defers nothing, so it can never seal a round.
+expect_status_matching "--no-anchor opts back INTO the stricter clause" 1 \
+  "LIVE row(s) carry NO disposition" \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done --no-anchor
+expect_status_matching "--no-anchor with an anchor flag is a usage error" 3 "mutually exclusive" \
+  run --page-limit 4 --fixture-dir "$BOUND" --no-anchor --anchor-from-paper "$WAVE_SLUG"
+
+# THE DEFAULT FAILS CLOSED TOO. A root that declares a Paper the source cannot
+# serve is an UNRESOLVABLE anchor, and an unresolvable anchor is never a default
+# -- least of all now that the default is the one nobody types.
+BOUND404="$TMP/anchor-bound-unserved"
+build_bound "$BOUND404" "$WAVE_SLUG"
+expect_status_matching "a declared wave_paper the source cannot serve fails closed" 2 \
+  "unresolvable anchor is never a default" \
+  run --page-limit 4 --fixture-dir "$BOUND404"
+
+# ...AND IT STILL TERMINATES. The deferred row is IN SCOPE for the next round,
+# bound anchor or not.
+expect_status_matching "the residue is IN SCOPE for the NEXT round, bound too" 1 \
+  "LIVE row(s) carry NO disposition" \
+  run --page-limit 4 --fixture-dir "$BOUND" --assert-round-done --anchor 2031-01-01T00:00:00Z
+
 # CLAUSE 5 IS ORTHOGONAL. The anchor is the ROUND window; clause 5 asserts the
 # census's own READ window. Widening clause 5 to the round window would trip on
 # every residue write and make a certifying run impossible — so the racing
@@ -1428,6 +1558,16 @@ NAMED list, 4(a) still scores against the WHOLE live board, and it TERMINATES:
 the same row is deferred by round N and IN SCOPE for round N+1, and adjudicating
 it greens the round anchored or not, filing no new rows. Clause 5 stays
 orthogonal -- the racing corpus exits 4 identically with and without an anchor.
+
+THE ANCHOR IS ALSO BOUND TO THE ROUND IT CERTIFIES. The slug is DERIVED from the
+epic root's own `wave_paper` with no flag at all; an --anchor-from-paper slug that
+DISAGREES with it is REFUSED (exit 3, naming both slugs and what the older anchor
+would have bought), and accepted only under --anchor-unbound, which prints
+ANCHOR UNBOUND and rides in --json as round_anchor_binding=override. A root that
+declares no wave_paper is reported `unverifiable` rather than passed -- which is
+every pre-existing fixture here, and the reason none of them changed. --no-anchor
+opts back into the UNANCHORED clause, which defers nothing and so cannot seal a
+round, and a declared Paper the source cannot serve still fails closed.
 
 CLAUSE 6 is the CLAIMABLE-AND-CLOSED contradiction (PDS-D372/D373), and it is
 CLOSED-ONLY and CASE-EXACT. It reds on a live+closed row on `open` and on
