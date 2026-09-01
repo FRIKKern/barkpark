@@ -68,6 +68,52 @@ function resolveTagPrefix(cfg: BarkparkServerConfig): string {
   )
 }
 
+/**
+ * Assert `value` is usable as ONE URL path segment.
+ *
+ * A local mirror of @barkpark/core's `assertSegment` (its `util/guards.ts`),
+ * which is not on core's public export surface — the same precedent
+ * {@link normalizeFieldList} below already set for a core helper this package
+ * needs but cannot import. Keep the RULE identical; if core's ever lands on the
+ * export surface, delete this mirror and import it.
+ *
+ * `encodeURIComponent` escapes `/` and `\` but NOT `.`, so an id or type of
+ * `'..'` reached `fetch` intact and the WHATWG URL parser resolved it BEFORE the
+ * request left: `/v1/data/doc/production/post/..` went out as
+ * `/v1/data/doc/production/`, and `type: '..'` retargeted at
+ * `/v1/data/doc/<id>`. Escaping harder cannot fix that — the honest rule is that
+ * a path segment may not be a relative-path operator. Bounded (the api router
+ * declares only `/doc/:dataset/:type/:doc_id`, so the retarget 404s — not an
+ * over-broad read), but it produced a `BarkparkNotFoundError` naming a URL the
+ * caller never asked for and a Next data-cache entry tagged `<prefix>:doc:..`
+ * that no `revalidateTag` can ever match.
+ *
+ * Percent-encoded forms (`%2e%2e`) are deliberately NOT rejected, exactly as in
+ * core: every value here is wrapped in `encodeURIComponent`, which escapes the
+ * `%` itself (`%252e%252e`), so they can never decode back to `..` at the URL
+ * parser. `/` and `\` are rejected as defence in depth — no id or type in this
+ * API legitimately contains one, and the ban holds even if a future path builder
+ * forgets `encodeURIComponent`.
+ *
+ * Takes `unknown`, not `string`: this package ships CJS/ESM to plain JS
+ * consumers where no type exists, so the parameter's declared type closes
+ * nothing.
+ */
+function assertPathSegment(value: unknown, field: string): void {
+  if (
+    typeof value !== 'string' ||
+    !value.trim() ||
+    value === '.' ||
+    value === '..' ||
+    /[/\\]/.test(value)
+  ) {
+    throw new BarkparkValidationError(
+      `barkparkFetch: ${field} must be one non-empty path segment (not '.', '..', '/' or '\\')`,
+      { field },
+    )
+  }
+}
+
 function buildUrl(
   cfg: BarkparkServerConfig,
   opts: BarkparkFetchOptions,
@@ -81,6 +127,10 @@ function buildUrl(
     if (opts.type === undefined || opts.type.length === 0) {
       throw new BarkparkValidationError('barkparkFetch: id requires type', { field: 'type' })
     }
+    // Both segments, before either is interpolated: a `..` in EITHER retargets
+    // the fetch at an endpoint the caller never named. See assertPathSegment.
+    assertPathSegment(opts.type, 'type')
+    assertPathSegment(opts.id, 'id')
     const path = `/v1/data/doc/${encodeURIComponent(dataset)}/${encodeURIComponent(opts.type)}/${encodeURIComponent(opts.id)}`
     // Single-doc fetch supports expand (inline refs) + fields (projection), same as
     // `bp.doc(id, { expand, fields })` — the /doc endpoint honors both.
@@ -102,6 +152,7 @@ function buildUrl(
       field: 'type',
     })
   }
+  assertPathSegment(opts.type, 'type')
   const filterQs = opts.query !== undefined ? buildQueryString(opts.query) : ''
   const parts: string[] = []
   if (filterQs.length > 0) parts.push(filterQs)
@@ -126,6 +177,126 @@ function defaultHeaders(
 
 function strOrUndefined(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+/**
+ * Resolve the configured request deadline in milliseconds, or `undefined` for
+ * "no deadline".
+ *
+ * Only a finite positive number arms a timer. `0` and negatives disable it (the
+ * same escape hatch @barkpark/core's transport documents), and a NON-number is
+ * refused rather than handed to `setTimeout` — this package ships CJS/ESM to
+ * plain JS consumers, so `fetchOptions.timeout` is whatever the config object
+ * actually held, and `setTimeout` coerces `'5s'` to `0`, which would abort every
+ * request instantly.
+ *
+ * Deliberately NO invented default. Core's transport had a documented 30s/60s
+ * default its code did not apply, so filling it in was a bug fix; this package
+ * never documented one, and a Server Component render already has the hosting
+ * platform's own limit behind it. Defaulting here would newly abort long reads
+ * that work today.
+ */
+function resolveTimeoutMs(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : undefined
+}
+
+/** An armed request deadline, composed with any caller-supplied signal. */
+interface Deadline {
+  /** The signal to hand to `fetch` — the composed one, the caller's, or none. */
+  readonly signal: AbortSignal | undefined
+  /** True once OUR timer fired, as opposed to the caller's signal aborting. */
+  fired: () => boolean
+  /** Clear the timer and drop the caller-signal listener. Idempotent. */
+  dispose: () => void
+}
+
+/**
+ * Arm the configured deadline and compose it with a caller-supplied signal so
+ * BOTH can abort the request and the winner stays attributable.
+ *
+ * Composition is hand-rolled on an `AbortController` — the idiom
+ * @barkpark/core's transport uses — and NOT `AbortSignal.any`. Two reasons.
+ * `AbortSignal.any` is declared in TypeScript's DOM lib, so `tsc --strict` would
+ * not have caught its absence, while this package's `engines` field admits Node
+ * 20.0.x, which predates it. And the hand-rolled form is what lets us FORWARD
+ * the caller's abort `reason` onto our controller, which is precisely how
+ * {@link classifyAbort} tells their deadline from ours.
+ *
+ * [signal-listener-leak] `{ once: true }` only self-removes if the signal
+ * actually FIRES. A caller's signal routinely outlives one read — one
+ * AbortController held for a whole render or job is the normal way to use this
+ * API — so every request that ended any OTHER way (success, HTTP error, our own
+ * timeout, a throwing decode) would leave a dead handler bound to it, and Node's
+ * EventTarget starts warning past 10. {@link Deadline.dispose} runs from a
+ * `finally` that every exit path unwinds through, and `removeEventListener` is
+ * idempotent, so it is safe after the signal fired.
+ */
+function armDeadline(timeoutMs: number | undefined, caller: AbortSignal | undefined): Deadline {
+  if (timeoutMs === undefined) {
+    return { signal: caller, fired: () => false, dispose: () => undefined }
+  }
+  const ctrl = new AbortController()
+  let didFire = false
+  const timer = setTimeout(() => {
+    didFire = true
+    ctrl.abort()
+  }, timeoutMs)
+  let removeCallerListener: (() => void) | undefined
+  if (caller !== undefined) {
+    if (caller.aborted) {
+      ctrl.abort(caller.reason)
+    } else {
+      const onCallerAbort = (): void => ctrl.abort(caller.reason)
+      caller.addEventListener('abort', onCallerAbort, { once: true })
+      removeCallerListener = (): void => caller.removeEventListener('abort', onCallerAbort)
+    }
+  }
+  return {
+    signal: ctrl.signal,
+    fired: () => didFire,
+    dispose: () => {
+      clearTimeout(timer)
+      removeCallerListener?.()
+    },
+  }
+}
+
+/**
+ * Decide what an abort-shaped failure MEANS — once, for the whole request, so
+ * `fetch()` rejecting and the body read rejecting get identical treatment.
+ *
+ * The order IS the attribution rule: report the deadline that actually fired,
+ * or report none.
+ *  1. OUR timer fired (and the caller's signal did not) — a
+ *     {@link BarkparkTimeoutError} carrying the window that elapsed.
+ *  2. The caller aborted with a plain `AbortError` — a CANCELLATION, not a
+ *     timeout. Re-thrown untouched so `err.name === 'AbortError'` detection
+ *     works exactly as with a bare fetch, mirroring core transport's contract.
+ *     Before this, an unmount or route change cancelling a read was reported as
+ *     "barkparkFetch: timeout", indistinguishable from a genuinely slow origin.
+ *  3. Any other `TimeoutError`/`AbortError` — chiefly an `AbortSignal.timeout`
+ *     the caller passed — IS a deadline, but THEIRS. It maps to
+ *     `BarkparkTimeoutError` with NO `timeoutMs`: the configured window never
+ *     elapsed, and stamping it here (as this code used to, via
+ *     `cfg.fetchOptions?.timeout ?? 0`) reports a number with no relationship to
+ *     the deadline that fired.
+ */
+function classifyAbort(e: Error, input: RunFetchInput, deadline: Deadline): Error {
+  if (deadline.fired() && input.signal?.aborted !== true) {
+    const opts: { url: string; cause: unknown; timeoutMs?: number } = { url: input.url, cause: e }
+    if (input.timeoutMs !== undefined) opts.timeoutMs = input.timeoutMs
+    return new BarkparkTimeoutError(`barkparkFetch: timeout ${input.url}`, opts)
+  }
+  if (input.signal?.aborted === true && e.name === 'AbortError') return e
+  return new BarkparkTimeoutError(`barkparkFetch: timeout ${input.url}`, {
+    url: input.url,
+    cause: e,
+  })
+}
+
+/** True for the two error names that mean "this request was aborted". */
+function isAbortShaped(e: unknown): e is Error {
+  return e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError')
 }
 
 /**
@@ -357,6 +528,7 @@ export async function barkparkFetchInner<T = unknown>(
     knownSyncTags,
     revalidate: opts.revalidate,
     signal: opts.signal ?? cfg.fetchOptions?.signal,
+    timeoutMs: resolveTimeoutMs(cfg.fetchOptions?.timeout),
   })
 }
 
@@ -369,16 +541,50 @@ interface RunFetchInput {
   knownSyncTags: readonly string[]
   revalidate: number | false | undefined
   signal: AbortSignal | undefined
+  /** Configured `fetchOptions.timeout`, normalized; `undefined` = no deadline. */
+  timeoutMs: number | undefined
 }
 
+/**
+ * Arm the deadline, run the request, and classify every abort-shaped failure in
+ * one place.
+ *
+ * ONE deadline covers the WHOLE call — both attempts of the draft 401-reissue
+ * retry AND the body read. Core arms per-attempt because its retry policy puts
+ * backoff between many attempts; here the single bounded reissue makes the
+ * wall-clock reading the honest one for a Server Component render: "this read
+ * will not hold the render longer than `timeout`". Keeping it armed through the
+ * body is core's own scar — clearing the timer once headers arrive let a server
+ * that streamed headers and then stalled the body (slow-loris) hang forever,
+ * with the documented timeout never firing.
+ */
 async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Promise<T> {
+  const deadline = armDeadline(input.timeoutMs, input.signal)
+  try {
+    return await runRequest<T>(cfg, input, deadline)
+  } catch (e) {
+    if (isAbortShaped(e)) throw classifyAbort(e, input, deadline)
+    throw e
+  } finally {
+    // The ONLY place the timer and the caller-signal listener are guaranteed to
+    // be dropped — every exit above unwinds through here.
+    deadline.dispose()
+  }
+}
+
+async function runRequest<T>(
+  cfg: BarkparkServerConfig,
+  input: RunFetchInput,
+  deadline: Deadline,
+): Promise<T> {
   const attempt = async (token: string | undefined): Promise<Response> => {
     const headers = defaultHeaders(
       cfg,
       token !== undefined ? { Authorization: `Bearer ${token}` } : undefined,
     )
     const init: BuiltRequest['init'] = { method: 'GET', headers }
-    if (input.signal !== undefined) init.signal = input.signal
+    // The COMPOSED signal: the configured deadline, the caller's signal, or both.
+    if (deadline.signal !== undefined) init.signal = deadline.signal
     if (input.isDraft) {
       // MUST NOT set next.tags alongside cache:'no-store': Next 15.5.15 silently
       // ignores tags on no-store, breaking revalidateTag(). See docs/decisions/0003-sync-tags.md.
@@ -403,23 +609,11 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
     try {
       return await fetch(input.url, init)
     } catch (e) {
-      // A caller-initiated abort is a CANCELLATION, not a timeout: re-throw the
-      // AbortError untouched so callers detect it via `err.name === 'AbortError'`
-      // exactly as with a bare fetch — mirroring core transport's contract
-      // (js/packages/core/src/transport.ts). Before this guard, an unmount or
-      // route change cancelling a read was reported as "barkparkFetch: timeout",
-      // indistinguishable from a genuinely slow origin. A TimeoutError (e.g.
-      // from an AbortSignal.timeout the caller passed) IS a deadline and still
-      // maps to BarkparkTimeoutError below.
-      if (input.signal?.aborted === true && e instanceof Error && e.name === 'AbortError') {
-        throw e
-      }
-      if (e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
-        throw new BarkparkTimeoutError(`barkparkFetch: timeout ${input.url}`, {
-          url: input.url,
-          timeoutMs: cfg.fetchOptions?.timeout ?? 0,
-        })
-      }
+      // Abort-shaped failures are classified ONCE, in runFetch's catch — so an
+      // abort that lands during the BODY read below gets the identical
+      // treatment, which matters because the deadline stays armed through it.
+      // Everything else is a genuine fetch-level failure (DNS/offline/TLS).
+      if (isAbortShaped(e)) throw e
       throw new BarkparkNetworkError(`barkparkFetch: network ${input.url}`, {
         url: input.url,
         cause: e,

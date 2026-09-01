@@ -33,8 +33,25 @@ export interface BarkparkServerConfig<C extends BarkparkClient = BarkparkClient>
   browserToken?: string
   /** Per-call defaults applied by barkparkFetch. */
   fetchOptions?: {
+    /**
+     * Request deadline in milliseconds. Bounds the WHOLE read — the draft
+     * 401-reissue retry and the response-body read included — after which the
+     * request is aborted and `barkparkFetch` rejects with a
+     * {@link BarkparkTimeoutError} whose `timeoutMs` is this value.
+     *
+     * Omit it (or pass `0`) for no deadline; there is no default, so an
+     * un-configured read is bounded only by the hosting platform's own limit.
+     * Composes with a caller's `signal`: whichever aborts first wins, and a
+     * caller cancellation still surfaces as a plain `AbortError`, never as a
+     * timeout.
+     *
+     * This was DECLARED-ONLY until the deadline was actually armed: nothing
+     * read it except the timeout error's own constructor, so a consumer who set
+     * it got no timeout at all while believing they had one.
+     */
     timeout?: number
     headers?: Record<string, string>
+    /** Default AbortSignal for every read; a per-call `signal` overrides it. */
     signal?: AbortSignal
   }
   /**
