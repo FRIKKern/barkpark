@@ -108,6 +108,17 @@
 //       WH_DEL_BASE_TONES names the tones the neutral base pill really does paint
 //       (`muted`, the withheld alert) — and a STALE entry there reds too, because
 //       a consent that absolves nothing is the blind spot rebuilt inside the fix.
+//   E16 an unpainted FRESHNESS DOT, and a deriver that went blind. Third in the
+//       E13/E15 family: `fresh-badge fresh-badge--` is an E3 allowlist entry, so
+//       the dot half was unmeasured and `.fresh-badge--unknown` — the dot the
+//       `cancelled` arm and the unknown-status else arm both emit — shipped with
+//       ZERO rules. It did not merely paint nothing: siteFreshnessSeg emits a
+//       BARE `.fresh-badge` for "Not deployed to production", so a cancelled
+//       deploy wore the never-deployed costume. The dot set is DERIVED from
+//       freshnessModel's arms in app.js and diffed against FRESH_DOTS both ways.
+//       DELIBERATELY NO CONSENT LIST, unlike E15's WH_DEL_BASE_TONES: the bare
+//       base is a distinct SHIPPED state here, so "falls through to the base" is
+//       never a treatment, it is an impersonation. Arm (d) pins that premise.
 //   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
 //
 //         A rule whose selector is WRAPPER-SCOPED onto the pill
@@ -328,7 +339,7 @@ const ALLOW_PREFIXES = [
   // never missing CSS — every composed class below has had a rule all along; the
   // `var cls = …` form simply hid the site from the static walker.
   "set-matrix-cell",               // notifMatrixCellHtml(): + (isDefault ? " set-matrix-cell--default" : "")
-  "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot (up | down | deploy | rebuild) + optional " is-rebuilding"
+  "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot — the value space is NOT this comment's; it is FRESH_DOTS below, and E16 checks it (+ optional " is-rebuilding")
   "usage-bar-quota",               // usageMeterHtml(): + (tone === "ok" ? " dim" : "") (.usage-bar-quota / .dim)
   // cch-w26-s5: promoted OUT of KNOWN_GAPS. The demotion's stated reason —
   // "the suffix set comes from fixture text" — is REFUTED by the emitter.
@@ -422,6 +433,56 @@ function emittedDeliveryTones(js) {
   const tones = new Set();
   for (const m of body.matchAll(/return\s+"([a-z][a-z0-9-]*)"/g)) tones.add(m[1]);
   return tones;
+}
+
+// ── E16: the .fresh-badge-- DOT SET, derived instead of described ───────────
+// `"fresh-badge fresh-badge--"` in ALLOW_PREFIXES waives the dynamic head, and
+// until now the only statement about what the head composes was that entry's own
+// trailing comment — which named FOUR dots (up | down | deploy | rebuild) while
+// freshnessModel has always had a fifth arm. `cancelled` emits dot "unknown", the
+// generic else emits "unknown" for any status this client has not learned, and
+// `.fresh-badge--unknown` had no rule at all. An instrument that reports green
+// over its own subject is the shape this list exists to end, so the set below is
+// only a DECLARATION: emittedFreshnessDots() reads the arms and E16 reds if the
+// two disagree in EITHER direction.
+//
+// NO CONSENT LIST — and that is a decision, not an omission. E15's
+// WH_DEL_BASE_TONES lets a tone name the neutral base pill as its real treatment.
+// That option is unavailable here: siteFreshnessSeg (grep -n "function
+// siteFreshnessSeg" app.js) deliberately emits a BARE `class="fresh-badge"` for a
+// site that has NEVER deployed, so the base look is already spoken for. A dot
+// that falls through to it does not read as neutral, it reads as "never deployed"
+// — the same impersonation .dep-cancelled committed against .dep-queued, which is
+// why E13 exists. E16 arm (d) asserts that premise still holds, so the day the
+// bare-base badge is removed this reasoning is re-opened instead of rotting.
+const FRESH_DOTS = ["up", "down", "deploy", "rebuild", "unknown"];
+
+// The dots freshnessModel actually assigns. Derived, never enumerated. Returns
+// null when the function cannot be located or brace-matched, and reports the
+// assignment COUNT alongside the literals so a `dot = someVar` arm this reader
+// cannot follow is a hard error rather than a silently shorter set — an empty
+// scan is not a clean scan.
+function emittedFreshnessDots(js) {
+  const start = js.indexOf("function freshnessModel(");
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  if (i === -1) return null;
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open, i);
+  const dots = new Set();
+  let literal = 0;
+  for (const m of body.matchAll(/\bdot\s*=\s*"([a-z][a-z0-9-]*)"/g)) {
+    dots.add(m[1]);
+    literal++;
+  }
+  const assigns = [...body.matchAll(/\bdot\s*=(?!=)/g)].length;
+  return { dots, literal, assigns };
 }
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -1759,6 +1820,72 @@ for (const st of DEPLOY_STATUSES) {
           `WH_DEL_TONES — a consent row that matches no branch consents to nothing.`,
       );
     }
+  }
+}
+
+// E16 — every freshness dot is painted. Four ways to fail: the deriver cannot
+// read the arms, the deriver read them but could not follow one, the declared set
+// drifted from the arms, or a dot has no rule. No consent arm by design (see
+// FRESH_DOTS above); arm (d) is what keeps that design honest.
+{
+  const derived = emittedFreshnessDots(jsRaw);
+  if (derived === null) {
+    errors.push(
+      "E16 app.js  freshnessModel() could not be located or brace-matched — the " +
+        "fresh-badge-- dot set is DERIVED from its arms, so a rename or a rewrite " +
+        "must come with an update here, never a silently skipped check.",
+    );
+  } else {
+    // (a) DERIVER BLINDNESS: every `dot =` in the body must be a string literal,
+    //     or this reader is returning a set narrower than the code's.
+    if (derived.assigns !== derived.literal) {
+      errors.push(
+        `E16 app.js  freshnessModel() has ${derived.assigns} \`dot =\` assignment(s) but only ` +
+          `${derived.literal} are string literals — emittedFreshnessDots reads literals ONLY, so ` +
+          `the derived set would be short by ${derived.assigns - derived.literal}. Keep the arms ` +
+          `literal, or teach the deriver the new form; do not let it report a set it cannot see.`,
+      );
+    }
+    // (b) DRIFT, both directions: FRESH_DOTS and the arms must name one set.
+    for (const d of derived.dots) {
+      if (FRESH_DOTS.includes(d)) continue;
+      errors.push(
+        `E16 __css_check.mjs  freshnessModel() assigns dot "${d}", which is not in FRESH_DOTS — ` +
+          `add it there, then paint .fresh-badge--${d}. There is no consent to the base pill on ` +
+          `this family: the bare .fresh-badge is the "Not deployed" badge.`,
+      );
+    }
+    for (const d of FRESH_DOTS) {
+      if (derived.dots.has(d)) continue;
+      errors.push(
+        `E16 __css_check.mjs  FRESH_DOTS names "${d}", which freshnessModel() no longer assigns — ` +
+          `a value space wider than reality trains the reader to ignore this list. Remove it.`,
+      );
+    }
+  }
+
+  // (c) UNPAINTED: `css` is comment-stripped, so a selector surviving only inside
+  //     a comment does not count.
+  for (const d of FRESH_DOTS) {
+    if (cssClasses.has(`fresh-badge--${d}`)) continue;
+    errors.push(
+      `E16 app.css  freshness dot "${d}" has no .fresh-badge--${d} rule — the ` +
+        `fresh-badge fresh-badge-- head emits it, so the badge falls through to the ` +
+        `BARE .fresh-badge, which siteFreshnessSeg already ships as the "Not deployed ` +
+        `to production" badge. Add a rule beside the other .fresh-badge--* rules.`,
+    );
+  }
+
+  // (d) PREMISE: (c)'s wording, and the decision to ship no consent list at all,
+  //     both rest on the bare .fresh-badge being a real shipped state. If that
+  //     emission goes, re-open the decision instead of leaving stale prose.
+  if (!/class="fresh-badge"/.test(jsRaw)) {
+    errors.push(
+      "E16 app.js  no bare `class=\"fresh-badge\"` emission remains, but E16 ships NO consent " +
+        "list on the strength of that badge existing (the never-deployed state the base look " +
+        "belongs to). Re-decide: either restore the emission, or add a named consent list here " +
+        "the way WH_DEL_BASE_TONES does for E15.",
+    );
   }
 }
 
