@@ -25,6 +25,12 @@
     },
     { "verb": "site.env_changed", "label": "replaced a site's environment" },
     { "verb": "site.domain_added", "label": "added a domain" },
+    {
+      "verb": "site.domain_removed",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "The inverse of site.domain_added, which IS labelled — the same asymmetry site.github_disconnected carries. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
     { "verb": "site.github_connected", "label": "connected a repo" },
     {
       "verb": "site.github_disconnected",

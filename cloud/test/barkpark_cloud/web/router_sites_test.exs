@@ -717,6 +717,188 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     end
   end
 
+  ## The hostname namespace — BOTH claim doors, and the route that frees a name
+  ##
+  ## `custom_host → site domain` was guarded from day one; `site domain →
+  ## custom_host` was not, and the CREATE door ran no collision test at all
+  ## (`POST /v1/sites` writes `domains` straight into `create_site/2` and never
+  ## calls `add_site_domain/2`). Testing ONE door proves nothing about the other,
+  ## so both are driven here over HTTP, plus the DELETE that makes a wrongly
+  ## claimed name recoverable — before it existed, nothing short of deleting the
+  ## whole site could free one.
+
+  describe "site domains vs. an instance custom_host (both doors)" do
+    test "ATTACH door: POST /v1/sites/:id/domains with another team's custom_host → 409" do
+      # Team A attaches its own hostname to its own instance.
+      {_owner, victim_team} = user_with_team()
+      victim_bp = barkpark_fixture(victim_team)
+      {:ok, _} = Registry.set_custom_host(victim_bp, "barkpark.jarl.no")
+
+      # Team B points one of its sites at team A's live hostname.
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Grab", slug: "grab-attach"})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/domains", %{domain: "barkpark.jarl.no"}, token)
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "domain_taken"
+
+      # Nothing was written, so the UNAUTHENTICATED ask-gate still resolves the
+      # name to no site at all — which is the reachable half of the takeover.
+      assert BarkparkCloud.Repo.get!(Registry.Site, site.id).domains == []
+      assert Registry.domain_owner_site("barkpark.jarl.no") == nil
+    end
+
+    test "CREATE door: POST /v1/sites with the same hostname in `domains` → 409, and NO site row" do
+      {_owner, victim_team} = user_with_team()
+      victim_bp = barkpark_fixture(victim_team)
+      {:ok, _} = Registry.set_custom_host(victim_bp, "barkpark.jarl.no")
+
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      token = login_token(user)
+      before = BarkparkCloud.Repo.aggregate(Registry.Site, :count)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "Grab", domains: ["barkpark.jarl.no"]},
+          token
+        )
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "domain_taken"
+
+      # Fixing only the attach door would be theatre: the grabber would just
+      # create the site with the name instead of attaching it afterwards.
+      assert BarkparkCloud.Repo.aggregate(Registry.Site, :count) == before
+      assert Registry.domain_owner_site("barkpark.jarl.no") == nil
+    end
+
+    test "CREATE door: a site-held hostname is refused too, and a FREE one still creates" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      token = login_token(user)
+
+      {:ok, holder} = Registry.create_site(bp, %{name: "Holder", slug: "holder-cd"})
+      {:ok, _} = Registry.add_site_domain(holder, "held.example.com")
+
+      taken =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "Dup", domains: ["held.example.com"]},
+          token
+        )
+
+      assert taken.status == 409
+
+      free =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "Fresh", domains: ["FRESH.example.com"]},
+          token
+        )
+
+      assert free.status == 201
+      assert json_body(free)["site"]["domains"] == ["fresh.example.com"]
+    end
+
+    test "DELETE /v1/sites/:id/domains frees the name — and only then can another team claim it" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Holder", slug: "holder-del"})
+      token = login_token(user)
+
+      add = call(:post, "/v1/sites/#{site.id}/domains", %{domain: "release.example.com"}, token)
+      assert add.status == 200
+      assert "release.example.com" in json_body(add)["site"]["domains"]
+      assert call(:get, "/v1/tls/ask?domain=release.example.com").status == 200
+
+      # A second team cannot take it while it is held.
+      {other_user, other_team} = user_with_team()
+      other_bp = barkpark_fixture(other_team)
+      {:ok, other_site} = Registry.create_site(other_bp, %{name: "Next", slug: "next-del"})
+      other_token = login_token(other_user)
+
+      blocked =
+        call(
+          :post,
+          "/v1/sites/#{other_site.id}/domains",
+          %{domain: "release.example.com"},
+          other_token
+        )
+
+      assert blocked.status == 409
+
+      # The holder releases it over HTTP. Before this route there was no way to:
+      # PATCH /v1/sites/:id touches only theme/doc_type/prebuilt_enabled and
+      # Registry.remove_site_domain/2 had zero router callers. The mixed-case
+      # spelling proves the release runs the SAME normalization the claim does.
+      del =
+        call(:delete, "/v1/sites/#{site.id}/domains", %{domain: "RELEASE.example.com"}, token)
+
+      assert del.status == 200
+      refute "release.example.com" in json_body(del)["site"]["domains"]
+      assert call(:get, "/v1/tls/ask?domain=release.example.com").status == 404
+
+      # A 200 also proves `site.domain_removed` is a declared audit verb: the
+      # event and the update share one transaction, so an unknown verb would have
+      # rolled the removal back into a 422.
+      assert Enum.any?(
+               Accounts.list_audit_events(team),
+               &(&1.action == "site.domain_removed")
+             )
+
+      # …and now the name is genuinely free.
+      freed =
+        call(
+          :post,
+          "/v1/sites/#{other_site.id}/domains",
+          %{domain: "release.example.com"},
+          other_token
+        )
+
+      assert freed.status == 200
+    end
+
+    test "DELETE /v1/sites/:id/domains is team-scoped (a stranger gets 404, never 403)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Holder", slug: "holder-scope"})
+      token = login_token(user)
+
+      assert call(:post, "/v1/sites/#{site.id}/domains", %{domain: "scoped.example.com"}, token).status ==
+               200
+
+      {stranger, _stranger_team} = user_with_team()
+
+      conn =
+        call(
+          :delete,
+          "/v1/sites/#{site.id}/domains",
+          %{domain: "scoped.example.com"},
+          login_token(stranger)
+        )
+
+      assert conn.status == 404
+      assert "scoped.example.com" in BarkparkCloud.Repo.get!(Registry.Site, site.id).domains
+    end
+
+    test "DELETE /v1/sites/:id/domains without a domain → 422" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Holder", slug: "holder-422"})
+
+      conn = call(:delete, "/v1/sites/#{site.id}/domains", %{}, login_token(user))
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "domain_required"
+    end
+  end
+
   ## POST /v1/sites/:id/artifact — RETIRED (site-spawner W10).
   ##
   ## The site-scoped upload route is GONE, and this describe block is what keeps it
