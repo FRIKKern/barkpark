@@ -2,7 +2,6 @@
 # ExUnit can never print (assert/2 is a function; the match raises first).
 # RATCHET: counts may only FALL. Regenerate with --baseline after fixing.
 # Counts, NOT file:line — a line pin slides on any insertion above it.
-5 api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs
 2 api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs
 1 api/test/barkpark_web/controllers/chat_controller_test.exs
 2 api/test/barkpark_web/controllers/graph_corpus_slot_ttl_test.exs
@@ -19,7 +18,6 @@
 1 api/test/barkpark/content/task_birth_fence_test.exs
 1 api/test/barkpark/content/tombstone_fence_test.exs
 1 api/test/barkpark/content/writer_transition_gate_test.exs
-3 api/test/barkpark/media/share_scope_test.exs
 1 api/test/barkpark/plugins/bulldocs_patch_verbs_manifest_test.exs
 1 api/test/barkpark/plugins/onixedit_test.exs
 1 api/test/barkpark/plugins/onixedit/export/validator_test.exs

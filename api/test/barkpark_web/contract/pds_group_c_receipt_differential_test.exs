@@ -107,8 +107,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
       assert resp.status == 404, "media surface deleted a documents-surface synonym"
       refute json_response(resp, 404)["ok"] == true
 
-      assert %Synonym{surface: "documents"} = stored(id),
-             "404 receipt, but the documents row was destroyed anyway"
+      row = stored(id)
+
+      assert match?(%Synonym{surface: "documents"}, row),
+             "404 receipt, but the documents row was destroyed anyway (#{inspect(row)})"
     end
 
     test "cross-surface, reversed: search route must NOT delete a media row",
@@ -123,8 +125,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       assert resp.status == 404, "search surface deleted a media-surface synonym"
 
-      assert %Synonym{surface: "media"} = stored(id),
-             "404 receipt, but the media row was destroyed anyway"
+      row = stored(id)
+
+      assert match?(%Synonym{surface: "media"}, row),
+             "404 receipt, but the media row was destroyed anyway (#{inspect(row)})"
     end
   end
 
@@ -204,8 +208,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       assert body["ok"] == true
 
-      assert {:ok, "gc-put-value-2222"} = stored_secret_plaintext(name),
-             "receipt said ok:true but no secrets row holds that value"
+      stored_value = stored_secret_plaintext(name)
+
+      assert stored_value == {:ok, "gc-put-value-2222"},
+             "receipt said ok:true but no secrets row holds that value (#{inspect(stored_value)})"
 
       assert "set" in audit_actions(name),
              "receipt said ok:true but no set audit row was written inside the txn"
@@ -230,8 +236,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       assert body["ok"] == true
 
-      assert {:ok, "second-4444"} = stored_secret_plaintext(name),
-             "receipt said ok:true but the overwrite never reached the row"
+      stored_value = stored_secret_plaintext(name)
+
+      assert stored_value == {:ok, "second-4444"},
+             "receipt said ok:true but the overwrite never reached the row (#{inspect(stored_value)})"
 
       # One row per name in the global tier — an overwrite must not fork it.
       assert Repo.aggregate(
@@ -262,8 +270,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       assert body["ok"] == true
 
-      assert %SettingsRecord{settings: ^settings} = settings_row(name),
-             "receipt said ok:true but the plugin_settings row does not hold that map"
+      row = settings_row(name)
+
+      assert match?(%SettingsRecord{settings: ^settings}, row),
+             "receipt said ok:true but the plugin_settings row does not hold that map (#{inspect(row)})"
 
       assert "write" in settings_audit_actions(name),
              "receipt said ok:true but no write audit row was written inside the txn"
