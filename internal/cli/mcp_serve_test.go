@@ -580,7 +580,14 @@ func TestMCPTaskCreateSurfacesWarnings(t *testing.T) {
 	res, err := cs.CallTool(bg, &mcp.CallToolParams{
 		Name: "task_create",
 		Arguments: map[string]any{
-			"title":   "warned task",
+			"title": "warned task",
+			// A wall-passing body: task_create now runs the same client-side
+			// publish-wall pre-flight the CLI does, so a bare title + publish:true
+			// is a REFUSAL, not a create.
+			"description": wallPassingDescription,
+			"tags": []any{
+				map[string]any{"tag": "cli", "strength": 80, "rationale": "the tool under test is the bp CLI's MCP task surface"},
+			},
 			"publish": true, // exercise the create + publish exchange
 		},
 	})
