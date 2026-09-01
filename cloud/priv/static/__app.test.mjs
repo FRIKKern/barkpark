@@ -16637,6 +16637,94 @@ test("cch-w32-s1 notifChatTestToast: a non-2xx is still an honest error", () => 
   assert.match(legacy.body, /Sent to slack\./);
 });
 
+// ── cch-w40-bl: the EMAIL test button stops answering yes when it cannot know ─
+//
+// `sendTestNotification` posts a literal `{}`, which the router's `chat_test?/1`
+// reads as the EMAIL branch → `Notifications.deliver_test/2` →
+// `Transactional.deliver_test/1` → `Mailer.deliver/1` with NO override. The send
+// can therefore only ever exercise the PLATFORM transport, whatever the team
+// selected — yet the toast said "Test email sent" and the mail said "your
+// notification email is working". A team on `smtp` with a dead relay passed
+// every time. The fix is the disclosure shape `notifChatTestToast` already
+// ships for the mute: name what was proved, and name what was NOT.
+test("cch-w40-bl notifEmailTestToast: a success names the transport it actually exercised", () => {
+  const t = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, "instance");
+  assert.equal(t.kind, "success");
+  assert.match(t.body, /Sent over the Barkpark platform transport\./,
+    "the toast must say which carrier the test rode — an unqualified 'sent' is the defect");
+  assert.doesNotMatch(t.title + " " + t.body, /notification email is working/i,
+    "the unqualified claim must not migrate from the email body into the toast");
+});
+
+test("cch-w40-bl notifEmailTestToast: a SELECTED transport the test did not use is disclosed", () => {
+  const smtp = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, "smtp");
+  assert.equal(smtp.kind, "success", "the test really did fire — the platform leg is a real probe");
+  assert.match(smtp.body, /Sent over the Barkpark platform transport\./);
+  assert.match(smtp.body, /set to send alerts over SMTP/,
+    "…and the team's own relay, which this send never touched, is named in the same breath");
+  assert.match(smtp.body, /does not prove that transport works/,
+    "the consequence is stated, not left for the reader to infer");
+});
+
+test("cch-w40-bl notifEmailTestToast: the disclosure can LOSE — it is not boilerplate", () => {
+  // `instance` IS the platform transport: the team's own selection was exercised
+  // and there is nothing outstanding. A disclosure that fires here would be
+  // noise, and noise is how a real one stops being read.
+  const inst = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, "instance");
+  assert.doesNotMatch(inst.body, /did not use/,
+    "an instance team had exactly its selection proved — nothing to disclose");
+  assert.doesNotMatch(inst.body, /SMTP/i, "and no relay it does not have is named");
+
+  // An absent/unknown selection is UNKNOWN, not a mismatch — inventing one is
+  // the same crime pointing the other way.
+  for (const unknown of [undefined, null, ""]) {
+    const t = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, unknown);
+    assert.equal(t.kind, "success");
+    assert.doesNotMatch(t.body, /did not use/,
+      `selectedTransport=${JSON.stringify(unknown)} is unknown, and unknown is not a mismatch`);
+  }
+});
+
+test("cch-w40-bl notifEmailTestToast: every failure arm survives the extraction", () => {
+  const rl = hooks.notifEmailTestToast({ ok: false, status: 429, data: { error: "rate_limited", retry_after: 7 } }, "smtp");
+  assert.equal(rl.kind, "error");
+  assert.match(rl.title, /Test not sent/);
+  assert.match(rl.body, /wait 7s/);
+  // A rate-limited request sent NOTHING, so it must not carry the success
+  // disclosure either — there is no probe to qualify.
+  assert.doesNotMatch(rl.body, /platform transport/);
+
+  const none = hooks.notifEmailTestToast({ ok: false, status: 422, data: { error: "no_recipient" } }, "instance");
+  assert.match(none.body, /No team member has a confirmed email/);
+
+  const generic = hooks.notifEmailTestToast({ ok: false, status: 500, data: {} }, "instance");
+  assert.equal(generic.kind, "error");
+  assert.ok(generic.body.length > 0, "the generic arm still says something");
+});
+
+test("cch-w40-bl: the always-send `test` row stops claiming a fan-out it cannot fire", () => {
+  const s = { channels: [], event_routes: {}, chat_default_on: [] };
+  const html = hooks.notifMatrixSectionHtml(s);
+  // The row itself STAYS — `test` is on the server's @always_send and hiding it
+  // would be the D342(d) lie pointing the other way. Only the false sentence goes.
+  assert.match(html, />Test</, "the always-send test row is still disclosed");
+  assert.doesNotMatch(html, /fire one with/,
+    "the sentence named the header button and described the CHAT fan-out — " +
+    "that button mails ONE member over the platform transport");
+  assert.match(html, /only the test buttons on this page emit it/,
+    "the corrected line names the real (and only) producer");
+  assert.match(html, /mails one team member over the Barkpark platform transport/,
+    "…and what the button it names actually does");
+
+  // charter D359 / cch-w32-s1: the OTHER always-send row's sentence is TRUE and
+  // is pinned above. This test asserts the corrected `test` row did not take it
+  // down with it — a copy edit next door is exactly how a true pin dies.
+  assert.match(html, /Always sent to every enabled channel — email and chat alike/,
+    "trial_expiring's line is true and must survive an edit to the row beside it");
+  assert.match(html, /silenced only by the master alerts switch above/,
+    "…including the clause D359 pins by exact string");
+});
+
 test("G-04 notifPageHtml: admin composes every section; member gets read-only + honest notice", () => {
   const s = { transport: "instance", channels: [], event_routes: {}, chat_default_on: [] };
   const admin = hooks.notifPageHtml(s, { canManage: true });

@@ -3664,8 +3664,16 @@
   // column: the per-event route write is refused for always-send events, and
   // rendering a checkbox the server ignores is the exact lie D342(d) forbids.
   var NOTIF_ALWAYS_SEND = [
+    // cch-w40-bl: this line was false on BOTH halves. “Send test” (the header
+    // button it named) posts `{}` — the EMAIL branch — which mails ONE team
+    // member over the platform transport, never “every enabled channel”; the
+    // chat fan-out is the separate per-channel button. And “always sent”
+    // described an event with no producer at all: `test` is only ever emitted by
+    // these two buttons. The row stays (it IS an always-send event server-side,
+    // and hiding it would be the D342(d) lie in the other direction) — it now
+    // says what actually fires it.
     ["test", "Test",
-     "Always sent to every enabled channel — fire one with “Send test”."],
+     "No producer — only the test buttons on this page emit it: “Send test email” mails one team member over the Barkpark platform transport, and each channel’s own “Send test” fires that channel."],
     ["trial_expiring", "Trial ending",
      "Always sent to every enabled channel — email and chat alike; no per-event toggle, silenced only by the master alerts switch above."]
   ];
@@ -4550,6 +4558,50 @@
     return { kind: "success", title: "Test queued", body: "Sent to " + where + "." + muted };
   }
 
+  // cch-w40-bl — the EMAIL test's toast, pulled out of its fetch callback for the
+  // same reason `notifChatTestToast` above was: so the claim the button makes is
+  // pinnable at all.
+  //
+  // What it used to claim was a bare "Test email sent", over an email whose body
+  // read "your notification email is working". Neither is a fact this request
+  // can know. `Notifications.deliver_test/2` hands the mail to `Mailer.deliver/1`
+  // with NO override, so the send ALWAYS rides the platform transport whatever
+  // the team selected — a team on `smtp` with a dead relay passed this test
+  // 100% of the time, and then every real alert fell back to the platform
+  // transport too. `deliver_alert/2`, 400 lines away in the same module, DOES
+  // branch on transport; the test send's silence was a divergence, not a design.
+  //
+  // The honest minimum is DISCLOSURE, not routing (probing an unverified relay
+  // inside the request path can hang it, and is a second unrelated risk): name
+  // the transport the test ACTUALLY exercised, and when the team's SELECTED
+  // transport is not that one, say so in the same breath — the exact shape
+  // `notifChatTestToast` already ships for the mute. `selectedTransport` comes
+  // from the settings the page already holds (`notifCache.transport`), never
+  // invented here; the email body carries the same disclosure server-side.
+  function notifEmailTestToast(r, selectedTransport) {
+    if (!(r && r.ok)) {
+      var msg;
+      var d = r && r.data;
+      if (d && d.error === "rate_limited") msg = "Please wait " + (d.retry_after || 10) + "s before another test.";
+      else if (d && d.error === "no_recipient") msg = "No team member has a confirmed email to send to.";
+      else msg = friendly(d, "Couldn't send a test.");
+      return { kind: "error", title: "Test not sent", body: msg };
+    }
+    // "instance" IS the platform transport, so a team on it had exactly its own
+    // selection exercised and there is nothing left to disclose — the sentence
+    // can LOSE. An absent/unknown value discloses nothing either: unknown is not
+    // a mismatch, and inventing one would be the same crime in reverse.
+    var unproved = selectedTransport && selectedTransport !== "instance"
+      ? " Your team is set to send alerts over " + notifTransportLabel(selectedTransport) +
+        ", which this test did not use — it does not prove that transport works."
+      : "";
+    return {
+      kind: "success",
+      title: "Test email sent",
+      body: "Sent over the Barkpark platform transport." + unproved
+    };
+  }
+
   function sendChatTest(type) {
     var alertsEnabled = notifCache ? notifCache.alerts_enabled : undefined;
     api("POST", "/v1/notifications/test", { channel: type }).then(function (r) {
@@ -4562,13 +4614,9 @@
   // transport, rate-limited server-side to one per 10s; every failure mode gets an
   // honest toast (rate_limited retry_after, no_recipient, generic).
   function sendTestNotification() {
+    var selected = notifCache ? notifCache.transport : undefined;
     api("POST", "/v1/notifications/test", {}).then(function (r) {
-      if (r.ok) { toast({ kind: "success", title: "Test email sent" }); return; }
-      var msg;
-      if (r.data && r.data.error === "rate_limited") msg = "Please wait " + (r.data.retry_after || 10) + "s before another test.";
-      else if (r.data && r.data.error === "no_recipient") msg = "No team member has a confirmed email to send to.";
-      else msg = friendly(r.data, "Couldn't send a test.");
-      toast({ kind: "error", title: "Test not sent", body: msg });
+      toast(notifEmailTestToast(r, selected));
     });
   }
 
@@ -25707,6 +25755,10 @@
       // zero-reach case is pinnable. `sendChatTest` was the surface that said
       // "Sent to slack." over a fan-out that reached nobody.
       notifChatTestToast: notifChatTestToast,
+      // cch-w40-bl: the EMAIL leg's toast, for the same reason — "Test email
+      // sent" was an unqualified yes over a send that can only ever prove the
+      // platform transport.
+      notifEmailTestToast: notifEmailTestToast,
       // MVP-0 Personal Dev Fleet (PDF-D84/D87/D88/D92): the fleet card, the
       // add-support flow, the SUPPORT step vocabulary (additive — the SERVER
       // tables above stay byte-locked), presence chips off the main's roster,
