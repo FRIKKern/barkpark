@@ -100,7 +100,7 @@ function writeBaseline(findings) {
 }
 
 // ── selftest ─────────────────────────────────────────────────────────────────
-// Eleven arms. The gate must be provably able to RED, provably able to stay
+// Thirteen arms. The gate must be provably able to RED, provably able to stay
 // SILENT, provably able to tell known from novel, provably still reading files
 // that plain `grep` goes blind on, and provably able to see a cited window that
 // is one line TOO NARROW — plus the control proving that last arm reds on
@@ -384,6 +384,46 @@ function deriveEnclosingDefTarget() {
         return { rel, base, name, head: h, line: n };
       }
     }
+  }
+  return null;
+}
+
+// A tracked file whose BASENAME carries a date — the shape that made a target's
+// own filename donate line numbers. Needs enough lines that a modest citation
+// into it is IN range, so the arm reds on the DATE and on nothing else.
+// Returns {rel, lines} or null.
+function deriveDatedFileTarget() {
+  let tracked = [];
+  try {
+    const out = execFileSync("git", ["ls-files"], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).toString();
+    tracked = out.split("\n").filter(Boolean);
+  } catch { return null; }
+  for (const rel of tracked) {
+    const base = rel.split("/").pop();
+    if (!/\d{4}-\d{2}-\d{2}/.test(base)) continue;
+    if (!/\.[A-Za-z0-9]{1,6}$/.test(base)) continue;
+    let n;
+    try { n = readFileSync(join(ROOT, rel), "utf8").split("\n").length; } catch { continue; }
+    if (n < 30 || n > 1500) continue;   // in range for :12, and far below the year
+    return { rel, lines: n };
+  }
+  return null;
+}
+
+// A corpus file to cite PAST ITS END with no harvestable anchor whatsoever: the
+// citation supplies an explicit path, whose every segment the needle harvest
+// then discards as a path segment, leaving the anchor set EMPTY. That is the
+// state in which the old ordering exited `unverifiable` without ever comparing
+// the number to the file. Returns {rel, beyond} or null.
+function derivePastEofTarget() {
+  const { present } = codeCommentCorpus();
+  for (const rel of present) {
+    if (!rel.endsWith(".ex") || rel.includes("/test/")) continue;
+    if (rel.split("/").length < 3) continue;
+    let n;
+    try { n = readFileSync(join(ROOT, rel), "utf8").split("\n").length; } catch { continue; }
+    if (n < 20 || n > 60000) continue;      // beyond must stay within the grammar's 5 digits
+    return { rel, beyond: n + 10000 };
   }
   return null;
 }
@@ -681,6 +721,123 @@ function selftest() {
         );
       }
     }
+
+    // (l) PROSE IS NOT A CITATION. The grammar used to accept numbers that were
+    //     never lines, and each escape route needs its OWN probe — a probe that
+    //     trips two rules at once passes under either one's mutation and proves
+    //     neither. THREE probes, one per rule:
+    //
+    //       l1  a number carrying a UNIT, written right after the filename
+    //       l2  a number adrift in the SENTENCE, a clause away from the filename
+    //       l3  a DATE inside the target's own filename
+    //
+    //     MEASURED on main, the two live instances this closes:
+    //       "the ONE canonical consumer AGENTS.md teach block (the ~23-tool
+    //        convergence standard)"   -> read as AGENTS.md, line 23
+    //       "`…-guerrilla-live-writes-2026-08-17.md`): 119"
+    //                                 -> read as lines 2026, 8, 17 and 119
+    //
+    //     All three are SILENT today only because an empty anchor set exits
+    //     `unverifiable` before the range check — and every one of them becomes a
+    //     loud false red the moment that check is hoisted, as arm (m) hoists it.
+    //     That is the whole reason the grammar closes first in this change.
+    if (!plant) {
+      fails.push("(l) SETUP: shares the plant target and it was unavailable");
+    } else {
+      // l1 — UNIT. The cue is properly adjacent, so only the unit filter can
+      //      reject it: a measurement, not a line.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The clamp is ${plant.base}:${plant.beyond}ms per page.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const unitFindings = linerefFindings([probeRel]);
+      if (unitFindings.length !== 0) {
+        fails.push(
+          `(l1) UNIT: "${plant.beyond}ms", a duration written right after ${plant.base}, was read as ` +
+            "a line number — a measurement now reports drift: " + (unitFindings[0].evidence || ""),
+        );
+      }
+      // l2 — ADRIFT. No unit anywhere, so only the adjacency rule can reject it:
+      //      the number sits a whole clause away from the filename.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The ${plant.base} teach block covers the ~${plant.beyond} known cases.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const adriftFindings = linerefFindings([probeRel]);
+      if (adriftFindings.length !== 0) {
+        fails.push(
+          `(l2) ADRIFT: a count written a clause away from ${plant.base}, with no cue touching the ` +
+            "filename, was read as a citation of it — a sentence that cites nothing now reports " +
+            "drift: " + (adriftFindings[0].evidence || ""),
+        );
+      }
+    }
+    // l3 — FILENAME DATE. The cue is adjacent and carries no unit, so only the
+    //      blanking of the file token can keep the date out of the line numbers.
+    const dated = deriveDatedFileTarget();
+    if (!dated) {
+      fails.push("(l3) SETUP: no date-bearing tracked filename of a workable size — the arm would be vacuous");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The recipe is recorded in \`${dated.rel}\`:12 for reference.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const dateFindings = linerefFindings([probeRel]);
+      if (dateFindings.length !== 0) {
+        fails.push(
+          `(l3) FILENAME DATE: citing line 12 of ${dated.rel} (${dated.lines} lines) reported drift — ` +
+            "the DATE in the target's own basename is being harvested as line numbers, so every " +
+            "citation of a dated file is stale on a year it never cited: " + (dateFindings[0].evidence || ""),
+        );
+      }
+    }
+
+    // (m) PAST EOF WITH NO ANCHOR AT ALL. The most mechanically checkable
+    //     property a lineref has is whether the line is even IN the file — and
+    //     that check used to run LAST, behind the anchor requirement, so a
+    //     citation whose anchor set came back empty exited `unverifiable`
+    //     without anyone comparing the number to the file. An empty anchor set
+    //     is the COMMON case for a bare `dir/file.ex:N` citation now that path
+    //     segments are no longer counted as anchors.
+    //
+    //     THE PROBE MUST HAVE NO ANCHOR, which is the whole point: it supplies
+    //     an explicit path and nothing else, so every needle harvested is a
+    //     segment of that path and every one is discarded. If this arm ever
+    //     starts passing because the probe grew a symbol, it is testing the ±3
+    //     scan instead and proves nothing about the ordering. It is the mirror
+    //     of arm (j), which pins the same anchor-free shape IN range and
+    //     requires silence.
+    const eof = derivePastEofTarget();
+    if (!eof) {
+      fails.push("(m) SETUP: could not derive a past-EOF target from the corpus — the arm would be vacuous");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The behaviour is described at (${eof.rel}:${eof.beyond}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const eofFindings = linerefFindings([probeRel]);
+      if (!eofFindings.some((f) => /exceed file length/.test(f.evidence || ""))) {
+        fails.push(
+          `(m) PAST EOF: a citation of ${eof.rel}:${eof.beyond}, past the end of a file with no ` +
+            "harvestable anchor anywhere in the comment, produced no out-of-range finding — the " +
+            "range check is still sitting behind the anchor requirement, so the one property that " +
+            "needs no anchor is the one property the guard skips" +
+            (eofFindings.length ? ": " + (eofFindings[0].evidence || "") : " (no finding at all)"),
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -704,6 +861,8 @@ function selftest() {
   process.stdout.write("  ok: (i) an EXPLICIT path binds to the file it names, never to a basename twin\n");
   process.stdout.write("  ok: (j) silent on a CORRECT PARTIAL path — directory segments are not anchors\n");
   process.stdout.write("  ok: (k) silent on a CORRECT citation INSIDE a definition whose head is outside ±3\n");
+  process.stdout.write("  ok: (l) silent on PROSE — a number glued to a word, and a date inside the target's filename\n");
+  process.stdout.write("  ok: (m) bites on a citation PAST EOF carrying no harvestable anchor at all\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
