@@ -198,5 +198,88 @@ else
   check "reland_check.test.sh" 0 1
 fi
 
+
+echo "== 8. the task-id extractor cannot kill the step (mode 4) =="
+# THE FOURTH SILENT MODE. Modes 1-3 above are "0 findings" meaning three
+# different realities. This one is worse: the step DIED, the job rendered RED,
+# and nothing was checked — a red that reads as "overlap detected" when it means
+# "I could not parse the body". Measured on a real PR body: the ONLY difference
+# between exit 0 and exit 1 was a pair of backticks around the task id.
+#
+# The step body is EXTRACTED FROM THE WORKFLOW and executed, never copied here.
+# A copy would keep passing after someone re-tightens the regex — which is the
+# regression this section exists to stop.
+WF="../../.github/workflows/reland-check.yml"
+check "reland-check.yml is readable"          1  "$([ -r "$WF" ] && echo 1 || echo 0)"
+
+# Pull the `run:` body of the step whose id is `ref`, dedent it, and run it the
+# way GitHub does: `bash -e`, with PR_BODY in the environment.
+extract_step() {
+  python3 - "$WF" <<'PY'
+import sys, re
+src = open(sys.argv[1]).read()
+# the step is identified by `id: ref`; take the run: block that follows it
+m = re.search(r'\n( +)- name: Extract the PR.s task id.*?\n\1  id: ref\n(.*?)(?=\n\1- name: )', src, re.S)
+if not m:
+    sys.stderr.write("EXTRACT_FAILED: could not locate the `id: ref` step\n"); sys.exit(3)
+block = m.group(2)
+run = re.search(r'\n( +)run: \|\n(.*)$', block, re.S)
+if not run:
+    sys.stderr.write("EXTRACT_FAILED: step has no `run: |` body\n"); sys.exit(3)
+indent, body = run.group(1) + '  ', run.group(2)
+out = []
+for line in body.split('\n'):
+    if line.strip() == '': out.append(''); continue
+    if not line.startswith(indent):
+        break
+    out.append(line[len(indent):])
+sys.stdout.write('\n'.join(out))
+PY
+}
+
+STEP="$tmp/ref-step.sh"
+if extract_step > "$STEP" 2>"$tmp/extract.err"; then
+  check "extracted the id:ref step body"      1  "$([ -s "$STEP" ] && echo 1 || echo 0)"
+  # NON-VACUITY: the extracted text must actually be the extractor, or every
+  # assertion below passes against an empty file.
+  check "extracted body sets task_id"         1  "$(grep -c 'task_id=' "$STEP" | head -1 | awk '{print ($1>0)?1:0}')"
+
+  # Run it exactly as CI does. GITHUB_OUTPUT is a file the step appends to.
+  run_step() { # run_step <pr-body> -> prints "rc=<n> id=<parsed>"
+    local body="$1" rc
+    : > "$tmp/gh_output"
+    PR_BODY="$body" GITHUB_OUTPUT="$tmp/gh_output" bash -e "$STEP" >"$tmp/step.out" 2>&1
+    rc=$?
+    printf 'rc=%s id=%s' "$rc" "$(sed -n 's/^task_id=//p' "$tmp/gh_output" | head -1)"
+  }
+
+  ID='task-2abbac8d7975050c'
+
+  # THE REGRESSION. Backticks are the natural markdown for an id; on the
+  # pre-fix extractor this exited 1 and killed the step.
+  check "backticked id: step survives"        "rc=0 id=$ID"  "$(run_step "Task: \`$ID\` (PDS-D700, wave 49)")"
+  check "bare id: step survives"              "rc=0 id=$ID"  "$(run_step "Task: $ID (wave 49)")"
+  check "bold id: step survives"              "rc=0 id=$ID"  "$(run_step "Task: **$ID**")"
+  check "linked id: step survives"            "rc=0 id=$ID"  "$(run_step "Task: [$ID](https://example/x)")"
+  check "quoted id: step survives"            "rc=0 id=$ID"  "$(run_step "Task: \"$ID\"")"
+  check "slug id: step survives"              "rc=0 id=tgw10-bl-screencommand-bypass-census" \
+                                                             "$(run_step "Task: \`tgw10-bl-screencommand-bypass-census\`")"
+
+  # AN UNPARSEABLE BODY MUST NOT KILL THE STEP EITHER — it must yield an empty
+  # id and say so. "I could not parse" and "this PR re-lands landed work" were
+  # the same red; they must now be different lines.
+  check "no task line: step survives"         "rc=0 id="     "$(run_step "a body with no task marker at all")"
+  check "empty body: step survives"           "rc=0 id="     "$(run_step "")"
+
+  run_step "a body with no task marker at all" >/dev/null
+  check "unparsed body prints PARSED=0"       1  "$(grep -c 'RELAND_TASK_ID_PARSED=0' "$tmp/step.out" | awk '{print ($1>0)?1:0}')"
+  check "unparsed body disclaims an overlap"  1  "$(grep -c 'NOT AN OVERLAP FINDING' "$tmp/step.out" | awk '{print ($1>0)?1:0}')"
+  run_step "Task: \`$ID\`" >/dev/null
+  check "parsed body prints PARSED=1"         1  "$(grep -c 'RELAND_TASK_ID_PARSED=1' "$tmp/step.out" | awk '{print ($1>0)?1:0}')"
+  check "parsed body emits no false disclaim" 0  "$(grep -c 'NOT AN OVERLAP FINDING' "$tmp/step.out" | awk '{print ($1>0)?1:0}')"
+else
+  check "extract the id:ref step from the workflow" 0 1
+  cat "$tmp/extract.err" >&2
+fi
 echo "---"; echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]
