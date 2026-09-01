@@ -96,8 +96,8 @@ curl -XPOST localhost:4100/v1/tokens -H "authorization: Bearer $S" \
   -H 'content-type: application/json' \
   -d '{"name":"ci-key","abilities":["write"],"expires_in_days":30}'   # → 201 {token: bpc_pat_…, pat:{…}}
 PAT=bpc_pat_…
-curl localhost:4100/v1/barkparks -H "authorization: Bearer $PAT"       # read → 200
-curl -XPOST localhost:4100/v1/sites/$ID/deploy -H "authorization: Bearer $PAT"  # write → 201
+curl -fsS localhost:4100/v1/barkparks -H "authorization: Bearer $PAT"   # read → 200
+curl -fsS -XPOST localhost:4100/v1/sites/$ID/deploy -H "authorization: Bearer $PAT"  # write → 201
 ```
 
 ## Adaptation deltas + honest caveats
