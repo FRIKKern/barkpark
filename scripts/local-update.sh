@@ -28,8 +28,75 @@ if [ -n "${SINCE:-}" ]; then
   echo ">> Skipping pull (SINCE=$SINCE) — refreshing for $SINCE..HEAD"
 else
   OLD="$(git rev-parse HEAD)"
-  echo ">> Pulling..."
-  git pull --rebase --autostash
+
+  # ── BIND THE PULL TO A BRANCH BEFORE TOUCHING THE INDEX ───────────────────
+  # This is Golden Rule 8's prescribed recovery, and until 2026-09-01 it could
+  # not detect the condition it exists to recover from.
+  #
+  # THE HAZARD. This repo is worked by a large concurrent fleet, and a peer can
+  # move a worktree onto ITS branch while you hold the directory. Measured on
+  # this machine: 436 registered worktrees, and of the 425 carrying a branch,
+  # only 40 have a directory basename matching that branch. 385 do not. Thirteen
+  # separate worktrees are all named `wt`.
+  #
+  #   So a directory named for your branch is 9% evidence, not identity.
+  #
+  # Run bare, this used to `git pull --rebase --autostash` whatever branch it
+  # found. Two ways that hurts:
+  #   1. it rebases onto the WRONG upstream, silently, and reports success;
+  #   2. `--autostash` pockets uncommitted work into the stash stack, which is
+  #      SHARED across every worktree of this repo. Another session's `stash
+  #      pop` can take it, and the loss is silent in both directions.
+  #
+  # The invariant is not "am I in the right directory" but "is this directory
+  # still bound to the branch I was given." A path check cannot see the
+  # difference; only the branch can.
+  BRANCH="$(git branch --show-current)"
+  if [ -z "$BRANCH" ]; then
+    echo "REFUSING: detached HEAD — there is no branch to pull into." >&2
+    echo "  This checkout is not on a branch, so 'pull --rebase' has no upstream" >&2
+    echo "  to bind to. Check out a branch first, or pass SINCE=<rev> to skip the pull." >&2
+    exit 2
+  fi
+
+  # Callers that KNOW which branch they handed you can bind it. A mismatch here
+  # is the peer-takeover case, and it is a refusal rather than a warning: the
+  # next line rewrites history.
+  if [ -n "${BP_EXPECT_BRANCH:-}" ] && [ "$BRANCH" != "$BP_EXPECT_BRANCH" ]; then
+    echo "REFUSING: this checkout is on '$BRANCH', not the expected '$BP_EXPECT_BRANCH'." >&2
+    echo "  $(pwd)" >&2
+    echo "  A peer has moved this worktree onto another branch, or you are not where" >&2
+    echo "  you think you are. Pulling would rebase the WRONG branch onto the wrong" >&2
+    echo "  upstream. Nothing has been changed." >&2
+    exit 2
+  fi
+
+  # NEVER autostash silently. The stash stack is shared repo-wide, so a stash
+  # created here can be popped by another session — work lost with no error on
+  # either side. Refuse and let the operator decide.
+  # TRACKED changes only (-uno). `--autostash` stashes tracked modifications and
+  # leaves untracked files alone, so untracked files were never at risk — and
+  # refusing on them would block `make update` for anyone holding a build
+  # artifact or a scratch file. In this fleet a peer's `??` file can appear in
+  # your tree unbidden, so a bare `git status --porcelain` here would refuse
+  # constantly and teach everyone to work around the guard.
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "REFUSING: '$BRANCH' has uncommitted TRACKED changes." >&2
+    git status --short --untracked-files=no >&2
+    echo "" >&2
+    echo "  This used to '--autostash' silently. The stash stack is SHARED across" >&2
+    echo "  every worktree of this repo, so that stash is reachable — and poppable —" >&2
+    echo "  by another session. Commit first (a branch ref outlives a directory), or" >&2
+    echo "  stash it yourself with a unique tag you can find again:" >&2
+    echo "      git stash push -u -m \"<your-tag>\"" >&2
+    exit 2
+  fi
+
+  UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || echo '<none>')"
+  echo ">> Pulling ${BRANCH} from ${UPSTREAM}..."
+  # No --autostash: the refusal above already guarantees a clean tree, and the
+  # flag's only remaining effect would be to hide a race that appeared since.
+  git pull --rebase
 fi
 NEW="$(git rev-parse HEAD)"
 
