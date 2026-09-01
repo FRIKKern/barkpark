@@ -55,6 +55,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
 
   use BarkparkWeb, :controller
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
+  alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session
 
   @default_dataset "production"
@@ -67,6 +70,8 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
       end
 
     with {:ok, request_id} <- fetch_request_id(params),
+         :ok <- check_batch_size(ops),
+         :ok <- authorize_sheet(conn, slug, dataset),
          {:ok, result} <- Session.apply_ops(slug, dataset, ops, request_id) do
       json(conn, %{
         ok: true,
@@ -99,6 +104,52 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
     conn
     |> put_status(:unprocessable_entity)
     |> json(%{error: %{code: "malformed_ops", message: "the body must carry an \"ops\" list"}})
+  end
+
+  # The whole-request SHAPE rejections (`malformed_ops` via the second
+  # `apply_ops/2` clause, `invalid_request_id`, `batch_too_large`) stay AHEAD of
+  # the tenant gate below, so their contract is byte-identical to before it
+  # existed — an oversized batch is still 422, never a 404 that hides why.
+  # The cap constant is NOT forked: it is read from `Session.max_ops_per_call/0`,
+  # the one owner, which re-checks it anyway inside `apply_ops/4`.
+  defp check_batch_size(ops) do
+    max = Session.max_ops_per_call()
+
+    case length(ops) do
+      n when n > max -> {:error, :batch_too_large, n}
+      _ -> :ok
+    end
+  end
+
+  # The sheet must exist IN THE CALLER'S TENANT before the session is touched
+  # (task-ef3eb91bf7f87d4c). `Session.apply_ops/4` addresses a sheet by
+  # `{dataset, published-id}` alone and loads it with an UNSCOPED
+  # `Content.get_document/3`, so without this gate an ingest token bound to
+  # workspace B could drive structural ops against workspace A's sheet purely
+  # by naming its slug. The check is the same scoped draft-first/published
+  # -fallback lookup the export door does, and reuses the existing
+  # `{:error, :not_found}` → 404 arm, so an in-scope caller's behaviour is
+  # byte-identical and a cross-tenant caller gets the same 404 an unknown slug
+  # has always produced.
+  #
+  # RESIDUAL, declared rather than papered over: the session REGISTRY key is
+  # `{dataset, published-id}` with no workspace in it, so two tenants holding
+  # the SAME slug in the same dataset still share one session process (today
+  # that surfaces as an `Ecto.MultipleResultsError` inside the session's own
+  # unscoped load, not as a silent cross-tenant write). Re-keying the registry
+  # reaches the session, its supervisor, the delta topics and the LiveView
+  # reader — a separate change with its own proof.
+  defp authorize_sheet(conn, slug, dataset) do
+    scope = scope_opts(conn)
+
+    with {:error, :not_found} <-
+           Content.get_document(Content.draft_id(slug), "sheet", dataset, scope),
+         {:error, :not_found} <-
+           Content.get_document(Content.published_id(slug), "sheet", dataset, scope) do
+      {:error, :not_found}
+    else
+      {:ok, _doc} -> :ok
+    end
   end
 
   # Absent (or JSON null) → nil, byte-identical to the pre-feature path. A

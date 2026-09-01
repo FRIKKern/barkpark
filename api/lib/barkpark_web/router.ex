@@ -961,6 +961,19 @@ defmodule BarkparkWeb.Router do
   pipeline :ingest do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireIngestToken)
+    # Resolve ONE tenant for the whole bucket (task-ef3eb91bf7f87d4c). This
+    # pipeline mounted no workspace producer at all, so every `auth: :ingest`
+    # controller ran with `:current_workspace` nil — the sheets export read
+    # every tenant's sheet by slug while the sheets import wrote through
+    # WriteScope's seeded-Default fallback. Same two plugs, same order, same
+    # reasoning as :media_mutate above: RequireIngestToken's ADMIN arm assigns
+    # :api_token, DeriveWorkspaceFromToken turns that into the token's OWN
+    # workspace, and AssignDefaultScope catches the SHARED-SECRET arm (an
+    # instance-wide `:global` secret, no workspace binding) on the seeded
+    # Default — which is exactly the workspace WriteScope already stamps, so
+    # sheets imported before this change stay exportable.
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
   # Anonymous, CORS-open JSON for the `:public_api` plugin bucket (Pulse /

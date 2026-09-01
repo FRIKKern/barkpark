@@ -18,9 +18,28 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   whose persist fails is a 503 (`flush_failed`, `retry-after: 2`) — the
   persisted row is stale and must not be served as fresh; the session's
   debounce retry stays armed, so a retry shortly succeeds.
+
+  ## The read is TENANT-SCOPED (task-ef3eb91bf7f87d4c)
+
+  `fetch_sheet/3` threads `BarkparkWeb.ScopeHelpers.scope_opts/1` into both
+  `Content.get_document/4` calls. Without it the lookup passed no
+  `:workspace_id`, `Content.Scope.scope_to_workspace_or_global/3` took its
+  nil→global arm, and ANY ingest-token holder exported ANY tenant's sheet by
+  slug — with a same-slug collision across two tenants raising
+  `Ecto.MultipleResultsError` (a 500) instead of picking one.
+
+  The scope is real because the `:ingest` pipeline now resolves one:
+  `DeriveWorkspaceFromToken` for the admin-token arm, `AssignDefaultScope` for
+  the shared-secret arm (see `BarkparkWeb.Plugs.RequireIngestToken`). A
+  resolved workspace takes `scope_to_workspace/3`'s strict `workspace_id = ?`
+  clause; an unresolved REQUEST gets `ScopeHelpers`' `:shared_only` sentinel,
+  which reads the shared layer only. Neither path can reach the permissive
+  nil arm, so a forgotten scope here fails CLOSED (404), never open.
   """
 
   use BarkparkWeb, :controller
+
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.{Csv, Html, Markdown, XlsxExport}
@@ -34,7 +53,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   # HTML/script-executable response body.
   # sobelow_skip ["XSS.SendResp"]
   def export_xlsx(conn, %{"slug" => slug} = params) do
-    with {:ok, doc} <- fetch_sheet(slug, params),
+    with {:ok, doc} <- fetch_sheet(conn, slug, params),
          {:ok, binary} <- build_xlsx(doc, slug) do
       conn
       |> put_resp_content_type(@xlsx_mime, nil)
@@ -51,7 +70,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
     do: delimited(conn, params, "\t", "tsv", "text/tab-separated-values")
 
   def export_md(conn, %{"slug" => slug} = params) do
-    case fetch_sheet(slug, params) do
+    case fetch_sheet(conn, slug, params) do
       {:ok, doc} ->
         conn
         |> put_resp_content_type("text/markdown")
@@ -73,7 +92,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   # invariant is pinned by `HtmlTest` "cell value with HTML/script is escaped".
   # sobelow_skip ["XSS.SendResp"]
   def export_html(conn, %{"slug" => slug} = params) do
-    case fetch_sheet(slug, params) do
+    case fetch_sheet(conn, slug, params) do
       {:ok, doc} ->
         conn
         |> put_resp_content_type("text/html")
@@ -92,7 +111,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   # download, not an HTML/script response body.
   # sobelow_skip ["XSS.ContentType", "XSS.SendResp"]
   defp delimited(conn, %{"slug" => slug} = params, sep, ext, mime) do
-    with {:ok, doc} <- fetch_sheet(slug, params),
+    with {:ok, doc} <- fetch_sheet(conn, slug, params),
          {:ok, tab_index} <- tab_index(params),
          {:ok, text} <- export_tab(doc, tab_index, sep) do
       conn
@@ -106,7 +125,12 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
 
   # Draft first (the working copy the import path writes), published
   # fallback — both ids resolve via the Content draft/published helpers.
-  defp fetch_sheet(slug, params) do
+  # BOTH reads carry the caller's tenancy scope (see the moduledoc): the
+  # `conn` is the only source of it, which is why it is threaded here rather
+  # than the slug/params pair alone.
+  defp fetch_sheet(conn, slug, params) do
+    scope = scope_opts(conn)
+
     dataset =
       case params["dataset"] do
         d when is_binary(d) and d != "" -> d
@@ -121,9 +145,9 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
     case Barkpark.Plugins.Sheets.Session.flush(slug, dataset) do
       :ok ->
         with {:error, :not_found} <-
-               Content.get_document(Content.draft_id(slug), "sheet", dataset),
+               Content.get_document(Content.draft_id(slug), "sheet", dataset, scope),
              {:error, :not_found} <-
-               Content.get_document(Content.published_id(slug), "sheet", dataset) do
+               Content.get_document(Content.published_id(slug), "sheet", dataset, scope) do
           {:error, :not_found, "not_found",
            "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
         else
