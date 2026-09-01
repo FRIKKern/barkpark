@@ -781,7 +781,7 @@ defmodule PDS.Census do
   # collides in exactly 3 buckets WITHIN a {path, module.name/arity} group, and 0 times
   # within the 75 site-owning groups. Only ONE of the three is a benign bodiless
   # declaration head; the other TWO are DISTINCT functions inside two `defimpl Inspect,
-  # for: ...` blocks (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137)
+  # for: ...` blocks — Github.AuthError/NotFound and Indx.IndexError/SearchError —
   # that this walker cannot tell apart. Corpus-wide — ignoring path and mfa — it is 912
   # groups over 2,543 defs under this normaliser (the wave brief recorded 913/2,544 under
   # another spelling; that figure does not survive a spelling change and is not quotable
@@ -2560,7 +2560,7 @@ defmodule PDS.Census do
   # ONE of the three is the benign bodiless header (plugins/capabilities.ex visible?/2
   # :144/:155, where :144 is the header and :155 the last clause); the other TWO are two
   # DISTINCT functions inside two `defimpl Inspect, for: ...` blocks
-  # (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137) that this walker
+  # — Github.AuthError/NotFound and Indx.IndexError/SearchError — that this walker
   # cannot tell apart, because it reads the head and defimpl reuses it verbatim.
   #
   # CORPUS-WIDE — ignoring path and mfa — it is 912 groups over 2,543 defs (`def all()` is
