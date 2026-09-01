@@ -681,6 +681,30 @@ defmodule BarkparkWeb.Router do
     # open SSE stream before this line). No-op for read/write/admin/ops tokens by
     # the plug's own construction, so every other principal is byte-identical.
     plug(BarkparkWeb.Plugs.PublicRead)
+
+    # The `read`-tier half of that same clamp (task-a85afbbc0c4b1be3). PublicRead
+    # stops the tier BELOW this one; this stops a token minted
+    # `permissions: ["read"]` from MUTATING anything on the pipeline. Gating by
+    # METHOD at the MOUNT is the whole point: five routes here
+    # (POST /api/workspaces, POST /api/workspaces/:slug/projects,
+    # POST /v1/data/search/:dataset/reindex, POST /v1/access,
+    # DELETE /v1/access/:id) were writable by a read-only token purely because
+    # nobody wrote `:require_write` after `:require_token` — so a per-route fix
+    # would leave the SIXTH ungated by omission, which is how this class was
+    # born. GET/HEAD/OPTIONS pass through untouched, so every read on this
+    # pipeline is byte-identical.
+    #
+    # The exceptions are the `/v1/auth` token-lifecycle surface and nothing
+    # else, enumerated in `RequireWriteForMutation.exempt_routes/0` — an
+    # explicit, reviewed list, not an implicit hole. Two are SELF-SERVICE
+    # (`DELETE /v1/auth/app-tokens/current`, `POST /v1/auth/login-tickets`:
+    # possession IS the authorization); three are fenced HARDER in the
+    # controller by `Auth.has_permission?(token, "admin")` and answer a
+    # non-admin bearer the same generic 401 an invalid one gets — a 403 from
+    # this gate would arrive first and turn that deliberate silence into a tier
+    # oracle. A mutating route added to this pipeline tomorrow is denied to a
+    # read token BY DEFAULT.
+    plug(BarkparkWeb.Plugs.RequireWriteForMutation)
   end
 
   # The low-trust TICKET-KEY tier (Barkpark Tickets, charter Decision 1 + 7).

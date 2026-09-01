@@ -204,9 +204,14 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if framework == "" {
 		framework = "astro"
 	}
+	// --kind FOLLOWS --framework when omitted. The dashboard's create form
+	// derives it (cloud/priv/static/app.js siteKindFor) and the CLI used to
+	// hard-default to "static", so `--framework nextjs` alone built a kind=static
+	// request the server rejected with a bare enum — a mistake the console cannot
+	// even express. An explicit --kind still wins: the flag is not advisory.
 	kind := strings.TrimSpace(a.val("kind"))
 	if kind == "" {
-		kind = "static"
+		kind = siteKindForFramework(framework)
 	}
 
 	cfg, ok := siteCloudConfig(out, "spawn a site")
@@ -1340,6 +1345,19 @@ func siteRollbackMechanismLine(runtimeTarget string) string {
 
 // siteIsNode reports whether a spawned site runs on the node-slot SSR runtime
 // target (charter D62) — the container-framework path (Next.js/Nuxt/SvelteKit).
+// siteKindForFramework is the runtime kind a framework deploys as when the
+// caller does not pin one. It MIRRORS the dashboard's create form
+// (cloud/priv/static/app.js `siteKindFor`): astro is the static
+// symlink-swap flagship, every other framework rides the node slot. Keep the two
+// in step â a divergence means the same inputs build different sites depending
+// on which surface the user reached for.
+func siteKindForFramework(framework string) string {
+	if strings.TrimSpace(strings.ToLower(framework)) == "astro" {
+		return "static"
+	}
+	return "node"
+}
+
 // The truth is the server's runtime_target when present; absent that, the `kind`
 // discriminator ("node" is the user-facing verb, "container" the server enum) is
 // the fallback so a node site still renders as node before its first deploy has
@@ -3039,9 +3057,10 @@ func printCloudSiteHelp(out *writer) {
 
 USAGE
   bp cloud site ls                                  list your team's sites (alias of 'bp sites')
-  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--deploy]
+  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro|nextjs] [--kind static|node] [--doc-type <type>] [--template <starter>] [--theme <palette>] [--deploy]
   bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--wait-for-live <deadline>]  (alias: build)
   bp cloud site rollback  <site>
+  bp cloud site delete    <site> [--yes]                            tear the site down  (alias: rm)
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]
@@ -3050,11 +3069,19 @@ USAGE
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
 
-  --kind static (default) builds a dist/ tree served as files (Astro). --kind node
+  --kind FOLLOWS --framework when you omit it (astro â static, every container
+  framework â node), the same derivation the dashboard's create form uses â pass it
+  only to override.
+  --kind static builds a dist/ tree served as files (Astro). --kind node
   runs a container framework (Next.js first, then nuxt/sveltekit) as a long-running
   SSR process on its own slot port, health-gated behind Caddy.
   --doc-type binds the content type the build reads (default 'post'); pass it
   when your dataset serves another type (e.g. 'paper').
+  --template picks a shipped starter tree instead of the framework default:
+  astro-starter, next-starter, search-starter (the flagship: finder + corpus
+  graph + PortableDoc pages), astro-search-starter. --theme pins the palette
+  (evergreen|ember|fjord|charple) â both are also settable later with
+  'bp cloud site settings'.
   --wait-for-live <deadline> (e.g. 10m) keeps watching past a DEFERRAL until a
   live deployment for the same site+environment appears, then exits 0; when the
   deadline expires first it exits non-zero, naming the deadline and the last

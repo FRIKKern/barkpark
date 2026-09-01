@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ready-host floor fixture — the hole hidden one level up</title>
+<!--
+  THE HOLE AT ITS MOST DANGEROUS ANGLE (task-e72560e947dba4e6, the residual).
+
+  The settle's second reason to wait is "this host has no layout box YET". The
+  shape that most resembles it, and must NEVER be excused by it, is a host whose
+  ANCESTOR is display:none:
+
+      the host's own computed display is its SPECIFIED value ("block") —
+      getComputedStyle does not report "none" for a descendant of a hidden
+      subtree — and it has NO layout box, exactly like a host the browser has
+      not reached yet.
+
+  The one fact that separates them is the DOCUMENT: here it has finished
+  loading, so a missing box is a verdict layout already reached, not a moment
+  layout has not. That is what `docReady !== "complete"` is for, and this
+  fixture is the only committed case that reds when that clause is dropped —
+  without it the floor would spend its whole cap on a screen it should refuse
+  instantly, and during any slow load would excuse it outright.
+-->
+<style>
+  .hidden-shell { display: none; }
+  .deploy-detail { width: 300px; height: 40px; background: #333; }
+</style>
+<div class="hidden-shell">
+  <div class="deploy-detail">a screen a person cannot see, hidden one level up</div>
+</div>

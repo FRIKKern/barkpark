@@ -81,7 +81,7 @@ redirects forever. Skip `hsts: true`; Caddy emits HSTS at Step 2. Then
 
 ```bash
 curl -I https://your-domain.example/api/schemas    # expect 200 (public)
-curl -sL "https://your-domain.example/v1/data/query/production/post?perspective=published"
+curl -fsSL "https://your-domain.example/v1/data/query/production/post?perspective=published"
 ```
 
 ## Pitfalls (from the 2026 `api.barkpark.cloud` cutover)

@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSIONS="$(npm view "${PACKAGE}@${RANGE}" version --json 2>/dev/null || echo 'null')"
-          MATCHED="$(printf '%s' "${VERSIONS}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let v;try{v=JSON.parse(s)}catch{v=null};if(v==null)v=[];if(!Array.isArray(v))v=[v];process.stdout.write(v.join(" "))})')
+          MATCHED="$(printf '%s' "${VERSIONS}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let v;try{v=JSON.parse(s)}catch{v=null};if(v==null)v=[];if(!Array.isArray(v))v=[v];process.stdout.write(v.join(" "))})')"
           if [ -z "${MATCHED}" ]; then
             echo "::error title=Range matches no published version::${PACKAGE}@${RANGE} resolves to zero versions — npm deprecate would exit 0 having done nothing. Check the range."
             exit 1

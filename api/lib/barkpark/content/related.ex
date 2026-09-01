@@ -31,18 +31,47 @@ defmodule Barkpark.Content.Related do
   can render WHY. A source with zero weighted tags degrades honestly to
   backlink-only related (the ~35% untagged corpus) — never empty-by-crash.
 
-  Scope mirrors the graph reads (MEDIUM-5 posture — this emits title + type +
-  existence only): tenancy via `Scope.scope_to_workspace_or_global/3`,
-  ownership via `Scope.scope_to_owner/2` (nil caller fails closed to
-  unowned-only), grant narrowing via `Scope.maybe_scope_to_grants/2`, dataset
-  via the resolved-`dataset_id`-else-string discriminator, published
-  perspective only, self excluded, and (tag leg only — task-b69106868a235768)
-  the schema-visibility clamp (`Schema.bypasses_visibility_gate?/1` +
-  `Schema.public_type_names/2`, the same pair `Query.restrict_to_visible_types/3`
-  applies) so a private-visibility candidate type never surfaces to a caller
-  who hasn't earned the unclamped view. The reference leg stays on
-  `Graph.reverse_referencers/2`'s own clamp — out of scope here, tracked as
-  backlog `wb-bl-graph-scope-query-visibility-clamp`.
+  ## The clamp set — ONE definition, BOTH legs (task-0e2bb63990e505fa)
+
+  This is a FUSED read door: two legs, one emitted list. A clamp that only one
+  leg applies is not a clamp — the hardened leg merely makes the open one read
+  as covered. So the whole clamp set lives in `apply_read_clamps/3` and BOTH
+  legs pass through it (MEDIUM-5 posture — this emits doc_id + type + title +
+  existence only):
+
+    * published perspective — `status == "published"` AND the `drafts.`-prefix
+      conjunct (belt-and-braces),
+    * dataset via the resolved-`dataset_id`-else-string discriminator,
+    * tenancy via `Scope.scope_to_workspace_or_global/3`,
+    * ownership via `Scope.scope_to_owner/2` (nil caller fails closed to
+      unowned-only),
+    * grant narrowing via `Scope.maybe_scope_to_grants/2`,
+    * the schema-visibility clamp `restrict_to_visible_types/3`
+      (`Schema.bypasses_visibility_gate?/1` + `Schema.public_type_names/2` —
+      the same pair `Query.restrict_to_visible_types/3` applies), so a
+      private-visibility type never surfaces to a caller who hasn't earned the
+      unclamped view.
+
+  The TAG leg applies the set inside its own candidate query. The REFERENCE
+  leg cannot: `Graph.reverse_referencers/2` is the SOLE owner of the inbound
+  read and its hydration (`Graph.docs_by_id/2` → `scope_query/2`) carries
+  tenancy + owner + grants ONLY — no published perspective, no dataset, no
+  visibility. Clamping the shared graph engine is forbidden here: the same
+  `scope_query/2` feeds `hydrate_nodes`/`fetch_doc` and
+  `Edges.disconnect_references`, the Studio UNPUBLISH GUARD, which must see
+  EVERY referencer including private and unpublished ones (that widening is
+  filed separately as `wb-bl-graph-scope-query-visibility-clamp`, GH #14196 —
+  DO NOT EDIT graph.ex from here). Instead the DOOR admits the leg's OUTPUT:
+  `admit_reference_hits/3` runs one keyed `doc_id IN (…)` read through the very
+  same `apply_read_clamps/3` and keeps only the hits that survive it. Fail
+  closed — a referrer that does not come back is dropped, never stubbed.
+
+  Concretely this closes a live leak, not a theoretical one:
+  `Content.Papers.Proposals.add_provenance_edge/4` deliberately pins a
+  `proposal-source` edge to the DRAFT row's PK ("so the publish-gated projector
+  never wipes it"), so every unapproved AI paper proposal was a draft title
+  emitted through `related` — to exactly the caller the tag leg withheld it
+  from.
 
   Prod cost reference (D69, EXPLAIN on guerrilla): 54.5ms @ 242-candidate
   fan-out, 106ms @ 1004, all buffer-cache hits — shipped index-free.
@@ -139,7 +168,13 @@ defmodule Barkpark.Content.Related do
         # Over-fetch the tag leg (~2N) so the Elixir fusion can still fill N
         # slots after reference bonuses reshuffle the tail.
         tag_hits = tag_candidates(source, dataset, opts, limit * 2)
-        ref_hits = Graph.reverse_referencers(id_or_slug, [dataset: dataset] ++ opts)
+
+        # BOTH legs through the SAME clamp set — the graph engine's hydration
+        # carries tenancy/owner/grants only, so the door admits its output.
+        ref_hits =
+          id_or_slug
+          |> Graph.reverse_referencers([dataset: dataset] ++ opts)
+          |> admit_reference_hits(dataset, opts)
 
         fuse(tag_hits, ref_hits, Content.published_id(source.doc_id), limit)
     end
@@ -155,10 +190,6 @@ defmodule Barkpark.Content.Related do
         []
 
       src_tags ->
-        workspace_id = Keyword.get(opts, :workspace_id)
-        project_id = Keyword.get(opts, :project_id)
-        prefix = DraftId.drafts_prefix() <> "%"
-
         Document
         |> join(
           :inner_lateral,
@@ -170,16 +201,11 @@ defmodule Barkpark.Content.Related do
         # The lateral aggregate always yields one row; NULL tag_score means
         # zero shared tag names — not a candidate.
         |> where([score: sc], not is_nil(sc.tag_score))
-        # Published perspective only (the maybe_published_only idiom: status
-        # AND the drafts.-prefix conjunct, belt-and-braces).
-        |> where([d], d.status == "published" and not like(d.doc_id, ^prefix))
         |> where([d], d.id != ^source.id)
-        |> scope_to_dataset(dataset, opts)
-        # global-read: related-read mirrors docs_with_tag/backlinks — route callers always thread a real workspace via scope_opts; nil workspace is the documented single-tenant/direct-caller bridge.
-        |> Scope.scope_to_workspace_or_global(workspace_id, project_id)
-        |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
-        |> Scope.maybe_scope_to_grants(opts)
-        |> restrict_to_visible_types(dataset, opts)
+        # The SHARED clamp set — identical to the one admitting the reference
+        # leg. Every `where` here binds `[d]`, the first binding, so applying
+        # it after the lateral join is byte-equivalent to applying it before.
+        |> apply_read_clamps(dataset, opts)
         |> order_by([d, score: sc],
           desc:
             fragment(
@@ -257,6 +283,64 @@ defmodule Barkpark.Content.Related do
     |> Map.put(:sources, [:tags])
   end
 
+  # ── Reference leg admission (task-0e2bb63990e505fa) ────────────────────────
+
+  # `Graph.reverse_referencers/2` is the SOLE owner of the inbound-edge read
+  # and is deliberately NOT narrowed here — `Graph.scope_query/2` is shared
+  # with `Edges.disconnect_references`, the Studio unpublish guard, which MUST
+  # see private and unpublished referrers (widening it is GH #14196,
+  # `wb-bl-graph-scope-query-visibility-clamp` — DO NOT EDIT graph.ex from
+  # here). So the DOOR admits the leg's OUTPUT instead: ONE keyed
+  # `doc_id IN (…)` read through the SAME `apply_read_clamps/3` the tag leg
+  # uses, keeping only hits that survive it.
+  #
+  # FAIL CLOSED, by construction: admission is membership in what the clamped
+  # read RETURNED, so anything the clamps hide — a `drafts.`-prefixed or
+  # `status: "draft"` referrer, a private-visibility type, another dataset,
+  # another tenant, another owner, an uncovered grant — is simply absent from
+  # the set and dropped. A draft referrer is never re-admitted under its
+  # published sibling's slug: `reverse_referencers` reports the row it actually
+  # hydrated, and that row is the one that must clear the clamps.
+  defp admit_reference_hits([], _dataset, _opts), do: []
+
+  defp admit_reference_hits(ref_hits, dataset, opts) do
+    doc_ids = ref_hits |> Enum.map(& &1.from_doc_id) |> Enum.uniq()
+
+    admitted =
+      Document
+      |> where([d], d.doc_id in ^doc_ids)
+      |> apply_read_clamps(dataset, opts)
+      |> select([d], d.doc_id)
+      |> Repo.all()
+      |> MapSet.new()
+
+    Enum.filter(ref_hits, &MapSet.member?(admitted, &1.from_doc_id))
+  end
+
+  # ── The clamp set — ONE definition, applied to BOTH legs ───────────────────
+
+  # Every clamp this read door owes its caller, in one place, so a leg can
+  # never be hardened while its sibling stays open (the fused-read trap this
+  # module was filed for). Binds only `[d]`/`[x]` — the first binding — so it
+  # composes onto a query that already carries the tag leg's lateral join.
+  defp apply_read_clamps(query, dataset, opts) do
+    prefix = DraftId.drafts_prefix() <> "%"
+
+    query
+    # Published perspective only (the maybe_published_only idiom: status AND
+    # the drafts.-prefix conjunct, belt-and-braces).
+    |> where([d], d.status == "published" and not like(d.doc_id, ^prefix))
+    |> scope_to_dataset(dataset, opts)
+    # global-read: related-read mirrors docs_with_tag/backlinks — route callers always thread a real workspace via scope_opts; nil workspace is the documented single-tenant/direct-caller bridge.
+    |> Scope.scope_to_workspace_or_global(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+    |> Scope.maybe_scope_to_grants(opts)
+    |> restrict_to_visible_types(dataset, opts)
+  end
+
   # ── Fusion (D70 — Elixir, by doc identity) ─────────────────────────────────
 
   defp fuse(tag_hits, ref_hits, source_pub_id, limit) do
@@ -303,7 +387,10 @@ defmodule Barkpark.Content.Related do
   defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_limit)
   defp clamp_limit(_), do: @default_limit
 
-  # The read-time schema-visibility clamp for the tag leg (task-b69106868a235768).
+  # The read-time schema-visibility clamp (task-b69106868a235768). It is one
+  # member of `apply_read_clamps/3`, so it now governs BOTH legs — the tag
+  # leg's candidate query and the reference leg's admission read
+  # (task-0e2bb63990e505fa closed the leg-asymmetry that used to live here).
   # ONE PREDICATE, not a third copy: the tier test is
   # `Schema.bypasses_visibility_gate?/1` and the allowlist is
   # `Schema.public_type_names/2` — the exact pair `Content.Query`'s
@@ -314,9 +401,10 @@ defmodule Barkpark.Content.Related do
   # A caller `bypasses_visibility_gate?/1` accepts (Studio/authoring tier) pays
   # no schema read at all — inert for every route caller today, since
   # `QueryController.related/2` only ever reaches here through `authed?/1`,
-  # which excludes the public-read tier but admits any other real token. The
-  # reference leg (`Graph.reverse_referencers/2`, fused in at
-  # `related_documents/3` above) is NOT clamped here — see the moduledoc.
+  # which excludes the public-read tier but admits any other real token.
+  # NOTE the published-perspective clamp beside it in `apply_read_clamps/3` is
+  # caller-INDEPENDENT: a bypassing token gets private types back but never a
+  # draft, on either leg.
   defp restrict_to_visible_types(query, dataset, opts) do
     cond do
       Schema.bypasses_visibility_gate?(Keyword.get(opts, :caller_context)) ->

@@ -12384,6 +12384,17 @@ defmodule BarkparkCloud.Web.Router do
 
   defp parse_expiry(_), do: UserToken.pat_default_validity_days()
 
+  # The provision + resurrect claim: the flat payload PLUS the per-instance agent
+  # token minted at claim time. `put_agent_token/2` is deliberately HERE and not
+  # in `base_claim_json/2` — the SUPPORT claim reuses the flat payload but must
+  # NOT mint, because minting is what writes the false custody record. See
+  # `support_provision_claim_json/2`.
+  defp claim_json(job, barkpark) do
+    base_claim_json(job, barkpark)
+    |> put_agent_token(barkpark)
+    |> add_provider_claim_fields(barkpark)
+  end
+
   # The claim payload the Go warm-pool provisioner decodes into a go-live spec:
   # the job id to report back against, the Barkpark's name + subdomain label, and
   # the region / server_type (warm-pool defaults — nbg1/cax11 — since the Barkpark
@@ -12394,8 +12405,8 @@ defmodule BarkparkCloud.Web.Router do
   # (`<label>.barkpark.cloud`) and the Hetzner box name, both of which MUST be
   # globally unique or two tenants collide. This is the SAME value stored in the
   # Barkpark's `:url`, so the provisioned FQDN == the customer-facing FQDN.
-  defp claim_json(job, barkpark) do
-    base = %{
+  defp base_claim_json(job, barkpark) do
+    %{
       job_id: job.id,
       # claim-fence (bp-c55): the token stamped on this claim. The worker echoes it
       # back on succeed/fail/release so the server can fence a swept-and-re-claimed
@@ -12440,10 +12451,6 @@ defmodule BarkparkCloud.Web.Router do
       # no bootstrap; an OLD worker ignores the key.
       template: barkpark.template
     }
-
-    base
-    |> put_agent_token(barkpark)
-    |> add_provider_claim_fields(barkpark)
   end
 
   # azh-w6 (S14c): the resurrect worker's claim payload = the FULL provision claim
@@ -12456,10 +12463,10 @@ defmodule BarkparkCloud.Web.Router do
     |> Map.put(:bundle_ref, job.bundle_ref)
   end
 
-  # PDF-D83/D89/D93: the support provisioner's claim payload = the FULL provision
-  # claim (region/size off the support row, env/agent-token as usual) PLUS the
-  # PINNED `support` map. The Go slice binds the box + joins the fleet from these
-  # exact keys — DO NOT rename them:
+  # PDF-D83/D89/D93: the support provisioner's claim payload = the flat provision
+  # claim MINUS the agent-token mint (region/size off the support row, env as
+  # usual) PLUS the PINNED `support` map. The Go slice binds the box + joins the
+  # fleet from these exact keys — DO NOT rename them:
   #   parent_url         — the parent MAIN's public url (the box beats/rosters home)
   #   parent_admin_token — the main's DECRYPTED admin token (roster is :token_root;
   #                        the credential spine, minted-once server-to-box crossing)
@@ -12472,8 +12479,31 @@ defmodule BarkparkCloud.Web.Router do
   # or a stripped admin token degrades to nil (the enqueue-time 409 guard makes
   # that path near-impossible; the worker then fails the job honestly rather than
   # the CP crashing).
+  #
+  # NO AGENT TOKEN (cch-w53-bl-…-a-live-agent-token). This used to call
+  # `claim_json/2`, which mints a per-instance "report" token and PERSISTS ITS
+  # SHA-256 HASH before shipping the plaintext. On this claim the plaintext
+  # landed nowhere: `SupportJobSpec` (internal/provisioner/support.go) declares
+  # no `agent_token` field, and `claimSupport`'s tolerated-dialect fallback
+  # rescues only job_id/claim_token/name/slug/region/server_type — a
+  # `grep -i 'agent.token' internal/provisioner/support.go` is one comment and
+  # no code. So every support provision left the plane holding a LIVE
+  # credential row asserting an install that never happened, and
+  # `Registry.revoke_agent_token/1`'s own ruling says that state is
+  # unrecoverable without a re-provision.
+  #
+  # A support box never runs barkpark-agent.service — it reports through the
+  # PARENT MAIN's fleet roster beat (PDF-D89), which the `support` map above
+  # already wires. Under the custody type gate (`claim_payload_manifest_test`'s
+  # @custody_ineligible) agent_token must be CONSUMED or REMOVED, never
+  # reserved; with no consumer on this seam the answer is REMOVE, and removing
+  # the MINT — not just the key — is what stops the record from being false.
+  # Byte-safe for a deployed worker: no support decode site ever read the key.
+  # A future Go slice that installs the agent on support boxes re-adds the mint
+  # HERE, together with the field.
   defp support_provision_claim_json(job, barkpark) do
-    claim_json(job, barkpark)
+    base_claim_json(job, barkpark)
+    |> add_provider_claim_fields(barkpark)
     |> Map.put(:support, support_claim_map(barkpark))
   end
 
@@ -12516,6 +12546,14 @@ defmodule BarkparkCloud.Web.Router do
   # Fail-OPEN: a mint error omits the key and logs — a monitoring hiccup must never
   # strand a provision (an old worker ignores the key too). The box then serves
   # without the beat rather than never coming up.
+  #
+  # CALLED FROM `claim_json/2` ONLY — i.e. the provision and resurrect claims,
+  # the two whose worker decodes (`provisioner.JobSpec`, `resurrectClaimSpec`)
+  # declare an `agent_token` field and install it to /etc/barkpark/agent.token.
+  # `support_provision_claim_json/2` builds off `base_claim_json/2` and does NOT
+  # call this: minting for a box with no install path records a credential
+  # handover that never happened. Read that function's comment before wiring a
+  # fourth claim through here.
   defp put_agent_token(base, barkpark) do
     case Registry.mint_agent_token(barkpark, "report") do
       {:ok, plaintext, _token} ->

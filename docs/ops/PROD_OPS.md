@@ -61,21 +61,22 @@ Exit code 0 = healthy. Non-zero = unhealthy; the script writes a tail of
   `journalctl -u barkpark -n 200 --no-pager`. Do not retry the same
   `systemctl` invocation blindly.
 
-## Prod migrations — validated live 2026-06-10 (95-commit deploy, 5 migrations)
+## Prod migrations — validated live 2026-06-10 (95 commits, 5 migrations)
 
-The post-merge hook compiles and restarts but does **NOT** run migrations.
-Additive migrations (the normal case): migrate FIRST — old code ignores new
-columns, but new code selecting an unmigrated column 500s on every request:
+The hook DOES migrate: `deploy-rebuild.sh` runs `ecto.migrate` on new code
+while the old build serves, aborting the swap on failure (exit 13; its
+header names the box it bricked). By hand keep that order — new code
+selecting an unmigrated column 500s every request:
 
 ```bash
 ssh root@89.167.28.206   # then ON THE BOX — never `&&`, that cd's on your laptop
 cd /opt/barkpark
 set -a; . ./.env; set +a                    # backup: ecto:// -> postgresql://
 pg_dump "${DATABASE_URL/ecto:/postgresql:}" | gzip > /root/pre-deploy.sql.gz
-git checkout -- bin/barkpark bin/barkpark-pg go.sum  # build-dirtied artifacts abort the pull
-git -c core.hooksPath=/dev/null pull --ff-only   # NO hook — old code keeps serving
-make migrate                                # bash start.sh mix ecto.migrate (ASDF + .env)
-bash .githooks/post-merge                   # rebuild + restart — SEE WARNING BELOW
+git checkout -- bin/barkpark bin/barkpark-pg go.sum  # dirtied artifacts abort the pull
+git -c core.hooksPath=/dev/null pull --ff-only  # NO hook — old code keeps serving
+make migrate               # start.sh mix ecto.migrate (ASDF + .env)
+bash .githooks/post-merge  # rebuild + migrate + restart — SEE WARNING BELOW
 ./api/scripts/prod-postcheck.sh
 ```
 
