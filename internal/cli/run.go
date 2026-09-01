@@ -88,10 +88,17 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	}
 
 	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
+	needsDraftIDAuth := draftIDRequiresAuth(cmd, argMap)
 	if needsPerspectiveAuth && ctx.Token == "" {
 		perspective := cmdFlags["perspective"][len(cmdFlags["perspective"])-1]
 		return nil, &dispatchError{
 			msg:       fmt.Sprintf("--perspective %s requires an API token", perspective),
+			withUsage: false,
+		}
+	}
+	if needsDraftIDAuth && ctx.Token == "" {
+		return nil, &dispatchError{
+			msg:       "a " + draftIDPrefix + " document id requires an API token — an unpublished document is invisible to an anonymous read, which can only ever answer not_found",
 			withUsage: false,
 		}
 	}
@@ -118,7 +125,7 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
-	if needsPerspectiveAuth {
+	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
 		// identity-sensitive, however: OptionalToken intentionally pins an
@@ -182,6 +189,62 @@ func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string]
 	default:
 		return false
 	}
+}
+
+// draftIDPrefix is the id prefix every unpublished (draft) row carries. Named
+// here rather than spelled inline so the guard, its refusal message and any
+// future caller cannot drift apart. (internal/taskboard has its own unexported
+// `draftsPrefix` for the same string; it is not importable from this package,
+// and exporting it would widen a taskboard-private detail into an API.)
+const draftIDPrefix = "drafts."
+
+// draftIDRequiresAuth reports whether this invocation is a PUBLIC-tier read
+// ADDRESSING a `drafts.`-prefixed document id — the second way a tier-`none`
+// command becomes identity-sensitive, and the one
+// nonPublishedPerspectiveRequiresAuth structurally cannot see, because the
+// caller names the draft in the ID rather than in a flag.
+//
+// Measured against guerrilla on 2026-09-01, same id, same server, seconds apart:
+//
+//	bp doc get paper drafts.l5goc-draft-probe-2
+//	  -> {"error":{"code":"not_found","message":"not found: document not found"},"ok":false}
+//	bp doc get paper drafts.l5goc-draft-probe-2 --perspective drafts
+//	  -> the full document, all 120 content blocks
+//
+// The document existed for both calls. The only difference was whether the
+// bearer went out: the live manifest declares `doc get` at `auth_tier: "none"`,
+// authHeaders sends no credential for that tier (correct, and it stays), and
+// server-side BarkparkWeb.QueryController.show/2 answers `{:error, :not_found}`
+// for an anonymous caller naming a `drafts.` id — the
+// `AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.")`
+// clause (api/lib/barkpark_web/controllers/query_controller.ex). That 404 is
+// correct existence-hiding for a caller with no identity, and it is the WRONG
+// answer to give a caller who was holding a token the CLI declined to send. The
+// CLI turned "you sent no credential" into "the document does not exist" — a
+// reader that fails silently at exit 0's cousin, a confident not_found.
+//
+// Like its sibling the gate is keyed on what the MANIFEST DECLARES, never on a
+// literal command-id set: `auth_tier: "none"` plus a declared arg whose bound
+// value carries the prefix. An id list would have to re-enumerate every public
+// read that takes a document id — including a plugin's own — and would get the
+// census wrong the same way the `switch cmd.ID` before it did.
+//
+// This never widens a published read. A `drafts.`-prefixed id can only ever
+// address an unpublished row (publish is the act that produces the bare id), so
+// attaching the bearer changes no request that a published id could have made:
+// the public path stays byte-for-byte public, and the only requests that gain a
+// credential are the ones that could otherwise only have returned not_found.
+func draftIDRequiresAuth(cmd manifest.Command, argMap map[string]string) bool {
+	if cmd.AuthTier != "none" {
+		// Every other tier already attaches the bearer in authHeaders.
+		return false
+	}
+	for _, arg := range cmd.Args {
+		if strings.HasPrefix(argMap[arg.Name], draftIDPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // sendManifestRequest is the send half of the dispatch seam: it performs the

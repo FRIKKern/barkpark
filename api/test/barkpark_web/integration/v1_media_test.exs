@@ -245,13 +245,30 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
       id = created["result"]["id"]
       [_, relative] = String.split(created["result"]["url"], "/media/files/", parts: 2)
 
+      # The store's own row, read BEFORE the delete. `filename` is generated at
+      # upload; the DELETE request carries nothing but `:dataset` and `:id`.
+      stored = Barkpark.Repo.get(Barkpark.Media.Storage.MediaFile, id)
+      assert %Barkpark.Media.Storage.MediaFile{} = stored
+      refute stored.filename == id
+
       resp =
         conn
         |> authed()
         |> delete(~p"/v1/media/production/#{id}")
 
       assert resp.status == 200
-      assert json_response(resp, 200)["result"]["deleted"] == id
+      body = json_response(resp, 200)
+      assert body["result"]["deleted"] == id
+
+      # RECEIPT LAW (pds w40, task-aa1194c2c4aac214): `deleted == id` alone is
+      # VACUOUS for the request-echo species — the path param and the row id are
+      # the same value in the happy path, so it stays green over BOTH the
+      # repaired shape and the old `%{deleted: id}` echo. `filename` is the
+      # differential: the request cannot produce it, so reverting the emitter to
+      # the path-param echo drops the key and reds this line.
+      assert body["result"]["filename"] == stored.filename,
+             "receipt did not descend from the write return — it echoed the :id path param"
+
       refute File.exists?(Path.join(Media.upload_dir(), relative))
     end
   end
