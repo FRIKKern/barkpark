@@ -22,7 +22,9 @@ defmodule BarkparkWeb.Studio.StudioLivePluginPaneGranteeAuditTest do
       `Content.get_paper` (:185), `Content.fetch_doc_with_draft`
       (:201, :335), `resolve_graph_doc` (:152).
     * Each of those routes through `Content.Query.base_query/4`
-      (content/query.ex:91-102) → `maybe_scope_to_grants/2` (:128-135) →
+      (content/query.ex:Query.base_query/4) → `maybe_scope_to_grants/2`
+      (content/scope.ex:Scope.maybe_scope_to_grants/2, imported by
+      `Content.Query`) →
       `Content.Scope.scope_to_grants/3`, which restricts the read to the
       caller's grant ladder and FAILS CLOSED (`where: false`) for any type/
       doc/project/dataset OUTSIDE the grant. Both perspectives
