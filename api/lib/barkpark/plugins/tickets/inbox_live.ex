@@ -387,7 +387,10 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   # arm below — mint included — operated on the wrong tenant while the fence
   # rubber-stamped it. The fix is upstream, in `StudioChrome`'s
   # `derive_scope_from_principal/1`, which binds the principal's own workspace
-  # BEFORE that fallback. Do not restate tenant confinement here as if this
+  # BEFORE that fallback; task-e9386e19bd7bb376 then made the fallback itself
+  # authority-checked, so a principal with no membership anywhere now reaches
+  # this module with `:current_workspace` nil instead of Default. Do not
+  # restate tenant confinement here as if this
   # module enforced it: the guarantee is the mount's, and any new flat mount of
   # this LiveView inherits the obligation.
   defp apply_key_action(socket, :rotate, id),
@@ -419,8 +422,13 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   # ScopeHelpers.scope_opts/1, which accepts a LiveView Socket directly).
   defp dataset(socket), do: socket.assigns[:dataset] || @default_dataset
 
-  # The workspace the operator's Studio session is scoped to — `Keys.list/1`
-  # accepts the struct (or nil = every ticket key); mint needs the bare id.
+  # The workspace the operator's Studio session is scoped to. `Keys.list/1`
+  # accepts the struct or nil, and nil is FAIL-CLOSED there — it names the
+  # un-bound tenant, NOT every tenant (`keys.ex`'s `scope_workspace/2`). Mint
+  # needs the bare id, and a nil id mints an un-bound key rather than one inside
+  # somebody else's tenant. Both matter now that `StudioChrome`'s
+  # authority-checked fallback (task-e9386e19bd7bb376) genuinely CAN leave this
+  # assign nil on a flat mount, where it used to always be the seeded Default.
   defp workspace(socket), do: socket.assigns[:current_workspace]
 
   defp workspace_id(socket) do
