@@ -151,8 +151,9 @@ defmodule Sig do
   # same value everywhere inside one module, so `:persistent_term/@snapshot_key`
   # is an exact key and matches its restore exactly. Without this the whole
   # `:persistent_term` family collapsed to one app-wide wildcard and two tests
-  # that genuinely never restore (registry_cache_test.exs:148 and :167) were
-  # pardoned by a sibling test's restore — a measured false NEGATIVE.
+  # that genuinely never restore (the two tests under `describe "register/2
+  # invalidates the cache"` in registry_cache_test.exs) were pardoned by a
+  # sibling test's restore — a measured false NEGATIVE.
   def literal?(x) when is_atom(x) or is_binary(x) or is_integer(x), do: true
   def literal?({:__aliases__, _, parts}), do: Enum.all?(parts, &is_atom/1)
   def literal?({:__block__, _, [v]}), do: literal?(v)
@@ -260,9 +261,10 @@ defmodule Walk do
   #
   # It is deliberately NOT module-wide, unlike on_exit: an `after:` clause runs
   # for its own block only. Measured — scoping it module-wide silently pardoned
-  # registry_cache_test.exs:148 and :167, which poison `@snapshot_key` and never
-  # put it back, because three OTHER tests in the file each restore it in their
-  # own try/after. Pardoning a leak because a NEIGHBOUR cleans up is precisely
+  # both tests under `describe "register/2 invalidates the cache"` in
+  # registry_cache_test.exs, which poison `@snapshot_key` and never put it back,
+  # because three OTHER tests in the file each restore it in their own
+  # try/after. Pardoning a leak because a NEIGHBOUR cleans up is precisely
   # the cross-test coupling this gate exists to catch.
   defp after_sigs(node) do
     {_n, acc} =
