@@ -3,7 +3,7 @@ name: twoslash
 on:
   pull_request:
     paths:
-      - "apps/docs/**"
+      - "js/docs/**"
       - "tooling/twoslash-mocks/**"
       - "js/packages/**"
       - ".github/workflows/twoslash.yml"

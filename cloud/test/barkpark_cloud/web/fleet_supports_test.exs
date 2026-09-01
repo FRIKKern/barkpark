@@ -20,7 +20,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
-  alias BarkparkCloud.Registry.{Barkpark, ProvisionJob, Vault}
+  alias BarkparkCloud.Registry.{AgentToken, Barkpark, ProvisionJob, Vault}
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -1056,6 +1056,98 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       {_u, _team, token} = user_with_role("owner")
       conn = call(:post, "/v1/internal/support-jobs/claim", %{}, token)
       assert conn.status == 401
+    end
+  end
+
+  ## THE SUPPORT CLAIM MUST NOT MINT AN AGENT TOKEN
+  ## (cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token)
+  ##
+  ## `put_agent_token/2` mints a per-instance "report" token and PERSISTS ITS
+  ## SHA-256 HASH server-side before the plaintext is shipped. On the support
+  ## claim the plaintext lands nowhere: `SupportJobSpec`
+  ## (internal/provisioner/support.go) declares no `agent_token` field, and
+  ## `claimSupport`'s tolerated-dialect fallback rescues only
+  ## job_id/claim_token/name/slug/region/server_type — `grep -i "agent.token"
+  ## internal/provisioner/support.go` is ONE COMMENT AND NO CODE. So every
+  ## support provision left the plane holding a LIVE credential row asserting an
+  ## install that never happened, and `revoke_agent_token/1`'s own ruling says
+  ## that state is unrecoverable without a re-provision.
+  ##
+  ## A support box does not run barkpark-agent.service at all — it reports
+  ## through the PARENT MAIN's fleet roster beat (PDF-D89), which the `support`
+  ## map already wires. So the custody gate's "consume or remove" resolves to
+  ## REMOVE here: the mint is what makes the record false, not just the key.
+
+  # One claimed support provision job → {support barkpark id, decoded claim body}.
+  #
+  # NON-VACUITY LIVES HERE so BOTH arms below inherit it: this IS the real
+  # support claim, still built off the flat claim_json, so neither green can
+  # come from an empty or aborted payload.
+  defp claimed_support_body! do
+    {_u, team, token} = user_with_role("owner")
+    main = live_main_fixture(team)
+
+    created =
+      call(
+        :post,
+        "/v1/fleet/supports",
+        %{name: "Custody Box", barkpark_id: main.id, mode: "provision"},
+        token
+      )
+
+    assert created.status == 202
+    support_id = decode(created)["barkpark"]["id"]
+
+    conn = call(:post, "/v1/internal/support-jobs/claim", %{}, @worker_token)
+    assert conn.status == 200
+    body = decode(conn)
+
+    assert body["job_id"]
+    assert body["slug"] == "custody-box"
+    assert is_map(body["support"])
+    assert Map.has_key?(body, "template")
+
+    {support_id, body}
+  end
+
+  describe "POST /v1/internal/support-jobs/claim — agent-token custody" do
+    test "the claim body ships NO agent_token key" do
+      {_support_id, body} = claimed_support_body!()
+
+      refute Map.has_key?(body, "agent_token"),
+             "the support claim still ships a plaintext agent token into a payload the support " <>
+               "worker has no field to receive (SupportJobSpec declares none, and the " <>
+               "tolerated-dialect fallback rescues six OTHER flat keys)"
+    end
+
+    test "NO agent_tokens row is written for the support box" do
+      {support_id, _body} = claimed_support_body!()
+
+      # The sharper half: the plane must not RECORD the handover either. Scoped
+      # to this fixture's barkpark id — the test database is shared across
+      # agents.
+      assert Repo.all(from t in AgentToken, where: t.barkpark_id == ^support_id) == [],
+             "the support claim minted and hash-persisted an agent token for a box with no " <>
+               "install path — the control plane now holds a row asserting a credential " <>
+               "handover that never happened"
+    end
+
+    test "the MAIN provision claim is untouched — it still mints and ships one" do
+      {_u, team, _token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(main)
+
+      conn = call(:post, "/v1/internal/provision-jobs/claim", %{}, @worker_token)
+      assert conn.status == 200
+      body = decode(conn)
+
+      assert is_binary(body["agent_token"]) and body["agent_token"] != "",
+             "removing the support claim's mint must not touch the provision claim — " <>
+               "internal/provisioner consumes JobSpec.AgentToken at provision.go and installs " <>
+               "it to /etc/barkpark/agent.token"
+
+      assert [%AgentToken{scope: "report"}] =
+               Repo.all(from t in AgentToken, where: t.barkpark_id == ^main.id)
     end
   end
 

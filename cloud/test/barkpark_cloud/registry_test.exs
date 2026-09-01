@@ -365,16 +365,21 @@ defmodule BarkparkCloud.RegistryTest do
       team = team_fixture()
       bp = barkpark_fixture(team)
 
+      # Three DIFFERENT real types, so this proves ordering across the mixed
+      # stream and not just within one kind. It used to write "backup" and
+      # "tls", which no producer has ever written and which @types no longer
+      # declares (cch-w51-bl) — a fixture manufacturing traffic the plane
+      # cannot produce is how a dead branch comes to look exercised.
       assert {:ok, %AgentEvent{}} = Registry.record_event(bp, "health", %{"cpu" => 0.2})
-      assert {:ok, _} = Registry.record_event(bp, "backup", %{"size" => 1024})
-      assert {:ok, last} = Registry.record_event(bp, "tls", %{"renewed" => true})
+      assert {:ok, _} = Registry.record_event(bp, "space", %{"root_used_bytes" => 1024})
+      assert {:ok, last} = Registry.record_event(bp, "verify", %{"reachable" => true})
 
       events = Registry.recent_events(bp, 10)
       assert length(events) == 3
       # Newest first.
       assert hd(events).id == last.id
-      assert hd(events).type == "tls"
-      assert hd(events).payload == %{"renewed" => true}
+      assert hd(events).type == "verify"
+      assert hd(events).payload == %{"reachable" => true}
     end
 
     test "honors the limit" do

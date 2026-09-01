@@ -135,17 +135,55 @@ func remoteCommand(s CaddyStep) string {
 
 // shJoinArgv renders an argv as one shell-safe line — the package-local twin of
 // setup.shJoin (kept here so the cloud seam carries no dependency on setup's
-// unexported helper). Tokens with whitespace or quotes are single-quoted.
+// unexported helper), and byte-for-byte the same rule. The joined line is fed to
+// a remote `bash -l`, so the contract is a ROUND TRIP: whatever argv goes in,
+// the shell on the far side must word-split back to exactly that argv.
 func shJoinArgv(argv []string) string {
 	parts := make([]string, len(argv))
 	for i, a := range argv {
-		if strings.ContainsAny(a, " \t\"'") {
-			parts[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-		} else {
-			parts[i] = a
-		}
+		parts[i] = shQuoteWord(a)
 	}
 	return strings.Join(parts, " ")
+}
+
+// shQuoteWord renders one argv element as a single POSIX shell word.
+//
+// It quotes by ALLOWLIST, not denylist: a token is left bare only when every
+// byte is an ordinary shell-word character, and everything else — including the
+// empty string, which must become an empty quoted pair or it vanishes from the
+// line entirely — is single-quoted, with the standard POSIX close-escape-reopen
+// dance for any single quote inside it.
+//
+// The predicate this replaced was a denylist (` \t"'`), which let $, backtick,
+// ;, &, |, <, >, *, ?, [, (, {, \, ~, #, a newline and every non-ASCII byte
+// through UNQUOTED into the remote shell. A denylist can only ever exclude the
+// metacharacters its author thought of; the allowlist is closed by construction,
+// so a rune nobody anticipated is quoted rather than executed. Every argv the
+// current callers build is already made of allowlisted words, so their rendered
+// lines are byte-unchanged.
+func shQuoteWord(s string) string {
+	if !shWordIsBare(s) {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	return s
+}
+
+// shWordIsBare reports whether s survives a POSIX shell unquoted and unchanged.
+// The safe set is [A-Za-z0-9_./:=@%+-]; the empty string is never bare.
+func shWordIsBare(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '_', c == '.', c == '/', c == ':', c == '=', c == '@', c == '%', c == '+', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // sshRunPrefix is the shell invocation that runs the decoded temp-file script on

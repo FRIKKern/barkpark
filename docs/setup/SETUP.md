@@ -121,9 +121,13 @@ Details worth knowing:
 There is **no `/health` endpoint**. The token-free liveness probe is `/api/schemas` — deliberately not token-gated, and the same probe the blue/green deploy health gate and the uptime monitor use. It carries legacy headers (`Deprecation: true` / `Sunset: Wed, 31 Dec 2026 23:59:59 GMT`) and 404s after that sunset; it lists **public** schemas only:
 
 ```bash
-curl -s localhost:4000/api/schemas | head -c 200
+curl -fsS localhost:4000/api/schemas | head -c 200
 # → [{"name":"author",...}]
 ```
+
+**Keep the `-f`.** Without it `curl` exits `0` on any error status and `head`
+prints a truncated error body — so after the sunset above, this probe would go
+quiet rather than red. `-f` makes a dead route exit `22`.
 
 **`/v1/schemas/production` is not a liveness probe.** It is the canonical *schema-management* route, on the `:flat_admin_api` pipeline — it needs an **admin** token, so an unauthenticated `curl` returns `401`, not the list (and `curl -s` still exits 0, so the failure looks like a dead server):
 

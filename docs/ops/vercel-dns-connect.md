@@ -124,7 +124,7 @@ echo | openssl s_client -connect barkpark.cloud:443 -servername barkpark.cloud 2
 # Expected: issuer includes "Let's Encrypt", notAfter within 90 days
 
 # The site actually talks to Phoenix
-curl -sS "https://barkpark.cloud/api/find?q=test" | head -c 200
+curl -fsS "https://barkpark.cloud/api/find?q=test" | head -c 200
 # /api/find is the server-only proxy that authenticates with BARKPARK_TOKEN.
 # (There is no /api/barkpark/schemas route — web/app/api/barkpark/ holds only
 #  webhook/. The routes that exist are find, find-event and search-seed.)

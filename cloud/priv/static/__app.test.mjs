@@ -17451,6 +17451,66 @@ test("cch-w25-s2: the <=720 theater block escapes min-content AND pays the step-
     "the cruel-host page number is 320/320 now and is ASSERTED; the reported-not-asserted block must be gone");
 });
 
+// ── cch-w17-bl-overflow-guard-honours-one-defect-flag ────────────────────────
+//
+// `overflow-guard.mjs` resolved its leg selection with
+// `argv.indexOf("--defect")`, and indexOf returns the FIRST match. So
+// `--defect A --defect B` measured A, dropped B WITHOUT A WORD, and printed
+// `OVERFLOW GUARD PASS` at exit 0 — a green covering one of the two legs the
+// caller asked for, with nothing in the output saying so. Measured live on
+// origin/main at 4d223c151a: `W13-detail-route-band — … (108 cells)` printed,
+// `W15-fleet-row-text-bounded` absent from the run entirely, exit 0.
+//
+// WHY THE ASSERTION LIVES HERE and not only beside the module it tests: this
+// file is the `console-unit` step of the REQUIRED `Console gate`, and the
+// parser's own suite (__preview__/defect-selection.test.mjs, 13 cases) is not
+// enumerated in console-harness.yml — `.github/` was outside the fixing row's
+// edit scope, and that workflow names each `node --test` file by hand. A test
+// nothing runs is the class of code this epic exists to empty, so the
+// load-bearing case is mirrored here, where it is live on the merge path today.
+// Wiring the full suite is one `- run:` line beside the other four
+// `__preview__` suites in the `console-unit` job.
+test("cch-w17-bl: overflow-guard honours EVERY --defect flag — a repeated flag is not silently dropped", async () => {
+  const { selectDefects } = await import("./__preview__/defect-selection.mjs");
+  const known = ["alpha-leg", "beta-leg", "gamma-leg"];
+
+  const two = selectDefects(["--defect", "alpha-leg", "--defect", "gamma-leg"], known);
+  assert.equal(two.refusal, undefined,
+    "a repeated --defect is a well-formed request, not an environment fault: this guard's exit 2 " +
+    "makes NO claim about the CSS and must not be spent on an invocation it can read");
+  assert.deepEqual(two.requested, ["alpha-leg", "gamma-leg"],
+    "the SECOND --defect must be measured too — dropping it produces a PASS covering one of the " +
+    "two legs the operator asked for, which is this guard's own failure mode turned inward");
+
+  // The callers that exist today, unmoved: console-harness.yml passes no flag at
+  // all, seal-predicate.mjs spawns exactly one.
+  assert.deepEqual(selectDefects([], known).requested, known,
+    "no flag still means every defect — the only invocation the required gate makes");
+  assert.deepEqual(selectDefects(["--defect", "beta-leg"], known).requested, ["beta-leg"],
+    "one flag still means one leg — seal-predicate.mjs's spawn shape");
+
+  // THE REFUSAL THIS GUARD ALREADY HAD, byte for byte. seal-predicate.mjs's
+  // doctrine block cites this sentence by name; a reader of the guard's log must
+  // see no change in it.
+  assert.equal(
+    selectDefects(["--defect", "delta-leg"], known).refusal,
+    `!! GUARD (exit 2): unknown --defect "delta-leg". Known: alpha-leg, beta-leg, gamma-leg\n`);
+
+  // …and the guard must actually ROUTE through the parser. A fixed parser
+  // nothing calls is not a fix. Line comments are stripped first because the
+  // guard's new comment QUOTES the deleted expression on purpose — that is the
+  // search vocabulary for this row and it has to survive.
+  const guard = fs.readFileSync(new URL("./__preview__/overflow-guard.mjs", import.meta.url), "utf8");
+  const code = guard.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  assert.ok(!/argv\.indexOf\("--defect"\)/.test(code),
+    "indexOf returns the FIRST match — that expression IS the defect this row closed");
+  assert.match(code, /const selection = selectDefects\(argv, DEFECTS\);/,
+    "the guard must resolve its legs through the parser these assertions drive");
+  assert.match(code, /if \(selection\.refusal\) \{\s*\n\s*process\.stderr\.write\(selection\.refusal\);\s*\n\s*process\.exit\(2\);/,
+    "a malformed selection stays a REFUSAL at exit 2 — downgrading it to a warning would trade " +
+    "a loud usage error for a silent partial measurement, the same defect one level down");
+});
+
 // ── cch-w28-bl-overflow-guard-clipper-blames-the-wrong-panel ─────────────────
 //
 // The two clipper legs (W26-deploy-fail-clip, W27-deploy-ref-branch-bounded)

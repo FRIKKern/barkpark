@@ -25,9 +25,28 @@
 //   4. HOLE STAYS SHUT     display-none.html must still REFUSE, with the shipped
 //                          cap, and its refusal must name display:none.
 //   5. NO BUDGET WASTED    that refusal must arrive without spending the settle
-//                          cap — proving the settle is CONDITIONAL on a running
-//                          animation and not a blanket wait that greens
-//                          everything eventually.
+//                          cap — proving the settle is CONDITIONAL and not a
+//                          blanket wait that greens everything eventually.
+//   7. THE HOLE ONE LEVEL UP  ancestor-display-none.html must ALSO refuse, on
+//                          the first pass. It is the shape that most resembles
+//                          the settle's second reason to wait (no layout box,
+//                          own computed display "block"), and only the DOCUMENT
+//                          state separates them — see below.
+//
+// WHAT THIS FILE CANNOT ARM, STATED RATHER THAN FAKED. The settle's second
+// reason to wait — a host the browser has not LAID OUT yet (box 0x0,
+// getClientRects() empty, display "flex", document "loading") — is the shape
+// console-harness 33474373014 died on, and it is reproducible only by racing a
+// real page's load. It was measured on the real preview page (15 refusals in 20
+// navigations with the settle defeated, 0 in 20 with the shipped cap, at load
+// 6.45 on 10 cpus), but it has NO committed fixture here, because there is no
+// way to hold a document in "loading" with its host un-laid-out on demand:
+// MEASURED — a render-blocking stylesheet held open on an ephemeral port does
+// NOT do it (Chrome lays the host out under UA styles anyway: box 740x18,
+// getClientRects() 1, readyState "interactive", 4/4 runs). Rather than ship a
+// direction that races a clock — the exact defect the header above describes —
+// that half is proven by ready-host-paint.test.mjs against a virtual clock, and
+// direction 7 pins the fixture that keeps it from over-reaching.
 //
 // Direction 1 is why this file exists rather than a screenshot: a fix whose
 // proof cannot reproduce the defect is a story about the pixels.
@@ -348,6 +367,8 @@ const nested = await quoteProbe("nested-modal.html", "#a2f-error");
 process.stdout.write(`  nested-modal.html #a2f-error -> ${JSON.stringify(nested)}\n`);
 const zeroBox = await quoteProbe("zero-box.html", ".deploy-detail");
 process.stdout.write(`  zero-box.html .deploy-detail -> ${JSON.stringify(zeroBox)}\n`);
+const ancestor = await quoteProbe("ancestor-display-none.html", ".deploy-detail");
+process.stdout.write(`  ancestor-display-none.html .deploy-detail -> ${JSON.stringify(ancestor)}\n`);
 
 process.stdout.write("\n=== 1. DEFECT REPRODUCED: settle defeated (cap 0) on a screen that renders ===\n");
 // THE PRECONDITION IS ESTABLISHED, NOT HOPED FOR.
@@ -431,6 +452,24 @@ EXPECT("and checkVisibility would have called it visible — so the box test is 
 process.stdout.write("\n=== 6. THE SETTLE IS CONDITIONAL, NOT A BLANKET WAIT ===\n");
 EXPECT("the display:none refusal spent no settle budget", !d4.ok && d4.ms < SETTLE_CAP_MS / 2, `refused in ${d4.ms}ms against a ${SETTLE_CAP_MS}ms cap`);
 EXPECT("and printed no settle line — nothing was animating to wait for", d4.lines.length === 0, `${d4.lines.length} line(s) printed`);
+
+process.stdout.write("\n=== 7. THE HOLE ONE LEVEL UP, and the clause that keeps it shut ===\n");
+// WHY THIS FIXTURE EXISTS. The settle's second reason to wait is "this host has
+// no layout box YET". The shape that most resembles it is a host whose ANCESTOR
+// is display:none: getComputedStyle does not report "none" for a descendant of a
+// hidden subtree, so the host reads display "block" with no layout box —
+// character for character what a host the browser has not reached yet reports.
+// The ONLY thing separating them is the document state, which is what
+// `docReady !== "complete"` is for. Drop that clause and this is the single
+// direction — and the single unit test — that reds.
+const d7 = await runFloor("ancestor-display-none.html", "document.querySelector('.deploy-detail')");
+EXPECT("a host hidden by an ANCESTOR still REFUSES", !d7.ok, d7.ok ? "it PASSED — the un-laid-out excuse reached the hole one level up" : d7.message.slice(0, 160));
+EXPECT("and it spends no settle budget — the excuse expired when the document did", !d7.ok && d7.ms < SETTLE_CAP_MS / 2, `refused in ${d7.ms}ms against a ${SETTLE_CAP_MS}ms cap`);
+EXPECT(
+  "measured: NO layout box, own display \"block\", document complete — indistinguishable from the bug except by the document",
+  ancestor.laidOut === false && ancestor.display === "block" && ancestor.docReady === "complete",
+  `measured ${JSON.stringify(ancestor)}`,
+);
 
 const failed = results.filter((r) => !r.pass);
 process.stdout.write(`\n${results.length - failed.length}/${results.length} checks passed\n`);
