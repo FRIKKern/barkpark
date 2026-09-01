@@ -299,6 +299,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		failOnFailedDelivery, tail = extractFailOnFailedDeliveryFlag(tail)
 	}
 
+	// `bp doc discard-draft --delete-unpublished`: the SECOND additive, opt-in
+	// flag the manifest never declares, stripped here for the same reason — it
+	// must never reach splitArgs. See discard_draft_guard.go for what it opts
+	// into; the guard itself runs below, beside the other write gates.
+	var discardDeleteUnpublished bool
+	if cmd.ID == discardDraftCommandID {
+		discardDeleteUnpublished, tail = extractDiscardDraftDeleteFlag(tail)
+	}
+
 	// Resolve the request-side view HERE, with the writer in hand — never
 	// inside buildManifestRequest, which is pure/writer-less and shared by the
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
@@ -352,6 +361,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			out.errf("aborted: destroy not confirmed")
 			return exitUsage
 		}
+	}
+
+	// Published-twin guard (discard_draft_guard.go): `bp doc discard-draft` on a
+	// document that was NEVER published is a delete, not a revert — the server
+	// deletes the draft row unconditionally and there is nothing to fall back
+	// to. Neither gate above can catch it: the prod guard is keyed on the target
+	// being prod, and the destroy registry is keyed on the OPERATION alone,
+	// while this one is only destructive for SOME documents. So it probes, and
+	// refuses only when it has to. Runs last, immediately before the send.
+	if code, refused := guardDiscardDraft(out, g, ctx, m, cmd, tail, discardDeleteUnpublished); refused {
+		return code
 	}
 
 	// Paginated reads with --all loop over offset pages.
