@@ -250,32 +250,37 @@ defmodule BarkparkWeb.TasksController do
   # A `filter[...]` is therefore a 400 that names the key, never the pre-fix 200
   # carrying an unnarrowed page (measured on guerrilla 2026-09-01:
   # `?filter[doc_id]=task-e1b74c19174cb2c1&limit=5` → 5 rows, 5 distinct doc_ids).
+  #
+  # The filter gate is folded INTO this function rather than wrapping an
+  # extracted private body: the PDS receipt census keys its register on the
+  # function that emits each success receipt, so moving the `json/2` call into a
+  # helper would orphan this action's register row and leave the new emitter
+  # unjudged. (The prose here deliberately does not spell the two-word literal
+  # that census greps for — a comment is not a receipt, and spelling it would
+  # move the phantom count.)
   def events(conn, params) do
-    case Params.parse_route_filters(params, :events) do
-      {:ok, _none} -> do_events(conn, params)
+    with {:ok, _no_filters} <- Params.parse_route_filters(params, :events) do
+      dataset = request_dataset(conn)
+      since = Params.parse_int(params["since"], 0)
+
+      limit =
+        Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
+
+      workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
+
+      rows =
+        Tasks.Events.replay_since(dataset, since, limit: limit, workspace_id: workspace_id)
+
+      cursor =
+        case rows do
+          [] -> max(since, 0)
+          _ -> List.last(rows).id
+        end
+
+      json(conn, %{ok: true, events: rows, cursor: cursor, has_more: length(rows) == limit})
+    else
       {:error, reason} -> invalid_filter(conn, reason)
     end
-  end
-
-  defp do_events(conn, params) do
-    dataset = request_dataset(conn)
-    since = Params.parse_int(params["since"], 0)
-
-    limit =
-      Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
-
-    workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
-
-    rows =
-      Tasks.Events.replay_since(dataset, since, limit: limit, workspace_id: workspace_id)
-
-    cursor =
-      case rows do
-        [] -> max(since, 0)
-        _ -> List.last(rows).id
-      end
-
-    json(conn, %{ok: true, events: rows, cursor: cursor, has_more: length(rows) == limit})
   end
 
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
