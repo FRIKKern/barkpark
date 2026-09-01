@@ -44,7 +44,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/auth/resend-verification user  re-send the confirm mail (always 200)
       POST    /v1/account/email/change     user  {new_email} → stage + email a 6-digit code
       POST    /v1/account/email/confirm    user  {code} → swap email + Stripe sync
-      GET     /v1/me               user      {user{id,email,confirmed,two_factor_enabled,platform_operator}, team{id,name,slug}, teams[], role, team_authority{team_id,role,admin,owner}, onboarding}
+      GET     /v1/me               user(s)   {user{id,email,confirmed,two_factor_enabled,platform_operator}, team{id,name,slug}, teams[], role, team_authority{team_id,role,admin,owner}, onboarding}
       GET     /v1/onboarding       user      the team's onboarding checklist state
       POST    /v1/onboarding       admin     advance/dismiss an onboarding step
       GET     /v1/archives         user      the team's archived (torn-down) instances, restorable
@@ -132,9 +132,9 @@ defmodule BarkparkCloud.Web.Router do
       PUT     /v1/notifications/events admin  update per-event notification toggles
       POST    /v1/notifications/test      admin  send a rate-limited test email
       GET     /v1/notifications/deliveries user  the durable notification delivery log (newest first; ?channel/?status/?event/?before narrow it). owner/admin sees the whole team's; any other member sees only sends addressed to them
-      GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
-      POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
-      DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
+      GET     /v1/tokens           user      list the caller's Personal Access Tokens (session-only: PAT management is never PAT-reachable)
+      POST    /v1/tokens           user      mint a PAT → {token: <plaintext ONCE>, pat} (session-only — the escalation firewall)
+      DELETE  /v1/tokens/:id       user      revoke a PAT (own only) → {ok:true} | 404 (session-only)
       GET     /v1/teams/:id/members user     list a team's members (member+)
       POST    /v1/teams/:id/invitations admin  invite a member {email,role?} → {invitation, accept_url}
       GET     /v1/teams/:id/invitations admin  list a team's live invitations
@@ -182,18 +182,18 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/internal/warm-servers/:name worker  drop a warm server
       POST    /v1/internal/platform-deliveries worker  record a BATCH of platform delivery rows for one delivering run (idempotent on sha+run+target; 503 unavailable when the migration has not landed)
       POST    /v1/sites            user      create a hosted Site under a Barkpark
-      GET     /v1/sites            user      list the team's sites (across all boxes)
+      GET     /v1/sites            user(s)   list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
-      PATCH   /v1/sites/:id        user      update a site's settings (write ability)
-      DELETE  /v1/sites/:id        user      delete a site — tear it down on the box + deregister (write ability)
+      PATCH   /v1/sites/:id        user(s)   update a site's settings (write ability)
+      DELETE  /v1/sites/:id        user(s)   delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
-      POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
+      POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
-      GET     /v1/sites/:id/deployments/:dep_id user  one deployment (read ability)
-      POST    /v1/sites/:id/rollback user    roll a site back to a prior deployment (write ability)
-      POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
+      GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
+      POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
+      POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
-      POST    /v1/sites/:id/deployments/:dep_id/artifact user  upload a PREBUILT dist for a minted deployment, then start it (write ability)
+      POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
       POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret (manual)
@@ -216,8 +216,14 @@ defmodule BarkparkCloud.Web.Router do
 
   Every `/v1/*` response is JSON; errors are `{"error": "<reason>"}`. The bare-path
   routes (`/`, `/dashboard`, `/new`, `/activate`) instead serve the SPA HTML shell.
-  The AUTH column: `—` public · `user` a USER session token · `admin`/`owner` that
-  session plus a team-admin/owner role · `admin(d)` EITHER of two credentials — a
+  The AUTH column: `—` public · `user` a USER session token, and ONLY a session —
+  a PAT bearer is turned away · `user(s)` EITHER a session OR a Personal Access
+  Token; where the route also demands an ability the DESCRIPTION names it
+  (`(write ability)`, `(read ability)`), because this column states the credential
+  KIND and never the ability · `user*` a session presented either as a Bearer
+  token or as a single-use `?ticket=` (the SSE stream, which no `Auth.require_*`
+  guards) · `admin`/`owner` that session plus a team-admin/owner role ·
+  `admin(d)` EITHER of two credentials — a
   session with the team-admin role, OR a Personal Access Token carrying the `deploy`
   ability (a deploy-PAT needs no role, so `admin` on these rows would be its own
   lie) · `agent` an AGENT token · `worker` the shared WORKER token · `—*` a
