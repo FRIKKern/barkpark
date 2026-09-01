@@ -53,13 +53,7 @@ defmodule BarkparkWeb.StudioRedirectController do
           "dataset" => dataset
         } = params
       ) do
-    tail =
-      case Map.get(params, "path", []) do
-        [] -> ""
-        segments -> "/" <> Enum.join(segments, "/")
-      end
-
-    target = "/w/#{ws}/p/#{proj}/d/#{dataset}/studio#{tail}"
+    target = "/w/#{ws}/p/#{proj}/d/#{dataset}/studio#{path_tail(Map.get(params, "path", []))}"
     redirect(conn, to: with_query(target, conn.query_string))
   end
 
@@ -77,18 +71,39 @@ defmodule BarkparkWeb.StudioRedirectController do
       {:ok, ws, project} ->
         ds = ScopeResolver.resolve_dataset(project, dataset)
 
-        tail =
-          case path_segments do
-            [] -> ""
-            segments -> "/" <> Enum.join(segments, "/")
-          end
-
-        {:ok, "/w/#{ws.slug}/p/#{project.slug}/d/#{ds}/studio#{tail}"}
+        {:ok, "/w/#{ws.slug}/p/#{project.slug}/d/#{ds}/studio#{path_tail(path_segments)}"}
 
       :error ->
         :error
     end
   end
+
+  # The `/*path` tail, rebuilt from the router glob — and ONLY from a shape the
+  # glob can actually produce.
+  #
+  # Both actions are mounted twice: on `/*path`, where `"path"` is a
+  # path_param and is always a list of binaries, and on the scope's bare `/`,
+  # where the router binds no `"path"` at all. Phoenix merges path_params OVER
+  # the query params, so on the bare-slash route there is no key to override an
+  # attacker-chosen `?path=` and it reaches `params` verbatim. `Enum.join/2`
+  # then raises for anything that is not a list of binaries — a bare string
+  # (`Enumerable` for `BitString`), a map (`String.Chars` for `Tuple`), a
+  # nested list — and the crash is reachable with NO credential on either arm:
+  # `:browser` and `:soft_token` (OptionalSessionToken) coerce nothing, and
+  # `protect_from_forgery` does not gate GET.
+  #
+  # A caller-forged `?path=` is not a path segment list, so it contributes no
+  # tail. The raw value is still visible to the target — `with_query/2`
+  # preserves the query string untouched — it just no longer decides the
+  # redirect's shape. Matches the guard `AdminStudioRedirectController`'s
+  # `plugin_tail/1` already carries for its own optional URL tail.
+  defp path_tail([]), do: ""
+
+  defp path_tail(segments) when is_list(segments) do
+    if Enum.all?(segments, &is_binary/1), do: "/" <> Enum.join(segments, "/"), else: ""
+  end
+
+  defp path_tail(_not_a_path), do: ""
 
   defp with_query(target, ""), do: target
   defp with_query(target, nil), do: target
