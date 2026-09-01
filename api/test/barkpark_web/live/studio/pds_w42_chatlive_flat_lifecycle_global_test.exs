@@ -178,6 +178,33 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
                "(that is the defect); archived_at is still nil"
     end
 
+    test "session-unarchive CLEARS archived_at on a foreign workspace's session", %{
+      conn: conn,
+      victim: victim
+    } do
+      # Put the foreign row on the archived shelf OUT OF BAND, so the clause has
+      # something to clear and the probe is not just re-observing the archive
+      # test's effect.
+      assert {:ok, _} = StudioChat.archive_session(victim.id, :global)
+
+      assert Repo.get(StudioChatSession, victim.id).archived_at,
+             "the fixture row is not archived — `unarchive` would have nothing to clear " <>
+               "and a nil read afterwards would prove nothing"
+
+      view = mount_flat!(conn)
+      render_click(view, "session-unarchive", %{"id" => victim.id})
+
+      after_row = Repo.get(StudioChatSession, victim.id)
+
+      assert %StudioChatSession{} = after_row
+
+      # PRESENCE of the state CHANGE: the stamp that was demonstrably there one
+      # statement ago is gone, so this is a witnessed transition, not an absence.
+      refute after_row.archived_at,
+             "expected the ws-B principal's unarchive to LAND on ws-A's session " <>
+               "(that is the defect); archived_at is still #{inspect(after_row.archived_at)}"
+    end
+
     test "session-delete REMOVES a foreign workspace's session outright", %{
       conn: conn,
       victim: victim
