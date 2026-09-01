@@ -315,6 +315,160 @@ func TestRunCloudSiteCreateDocTypeOmitted(t *testing.T) {
 	}
 }
 
+// --- the create-time content-binding verdict (ssw8) --------------------------
+//
+// POST /v1/sites answers 201 with the row under `site` AND the control plane's own
+// create-time read of the bound type under a TOP-LEVEL `content_binding` key. The
+// CLI decoded `{site}` alone, so the verdict was discarded before any render could
+// see it: a create that came back UNVERIFIED printed the same confident line as one
+// the control plane had actually read.
+//
+// The producer's shape, which these fixtures mirror EXACTLY (cloud router
+// binding_note/1):
+//
+//	{"status":"bound","doc_type":"post","count":12}   bound, with the box's total
+//	{"status":"bound","doc_type":"post"}              bound, box published NO total
+//	{"status":"unverified","detail":"…"}              the key is `detail`, not `reason`
+//	(no content_binding key at all)                   the kind was never probed
+//
+// siteCreated201 runs one create against a 201 whose body is the caller's, and
+// returns the human receipt. The row is held IDENTICAL across every case here so
+// the only thing that can move the printed bytes is the verdict.
+func siteCreated201(t *testing.T, contentBinding string) (string, string, int) {
+	t.Helper()
+	cp := newSiteCP(t)
+	body := `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro",` +
+		`"workspace":"acme","project":"blog","dataset":"production","doc_type":"post"}`
+	if contentBinding != "" {
+		body += `,"content_binding":` + contentBinding
+	}
+	cp.createResp = fakeResp{201, body + `}`}
+	cp.serve()
+	return runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--doc-type", "post")
+}
+
+// UNVERIFIED is the case this whole change exists for: the control plane could NOT
+// confirm the site can read its type, and the operator was told nothing.
+func TestRunCloudSiteCreateSurfacesUnverifiedBinding(t *testing.T) {
+	stdout, stderr, code := siteCreated201(t, `{"status":"unverified","detail":"blog-box has no URL yet — the site's content could not be read"}`)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// The verdict must be NAMED as not-confirmed. Lowercase "not" would pass on a
+	// sentence that says the opposite, so the shouted token is the assertion.
+	if !strings.Contains(stdout, "NOT confirm") {
+		t.Fatalf("an unverified create must say the binding could NOT be confirmed:\n%s", stdout)
+	}
+	// And the server's REASON must be relayed — the whole value of the key.
+	if !strings.Contains(stdout, "blog-box has no URL yet") {
+		t.Fatalf("an unverified create must relay the control plane's detail:\n%s", stdout)
+	}
+	// The stale claim the old line carried must be gone: this envelope DOES carry
+	// the verdict now.
+	if strings.Contains(stdout, "not in this envelope") {
+		t.Fatalf("the receipt still says the verdict is not in the envelope — it is:\n%s", stdout)
+	}
+}
+
+// BOUND WITH A COUNT: name the type and the magnitude the control plane read.
+func TestRunCloudSiteCreateSurfacesBoundBindingWithCount(t *testing.T) {
+	stdout, stderr, code := siteCreated201(t, `{"status":"bound","doc_type":"post","count":12}`)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "12") {
+		t.Fatalf("a bound create with a count must print the count:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "post") {
+		t.Fatalf("a bound create must name the doc type the control plane read:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "NOT confirm") {
+		t.Fatalf("a bound create must not narrate a failed verification:\n%s", stdout)
+	}
+}
+
+// BOUND WITHOUT A COUNT: the producer OMITS `count` when the box published no
+// total, so the receipt must say bound and invent NO number. The "0" assertion is
+// the one that reds a `Count int` decode, where absent and zero are the same value.
+func TestRunCloudSiteCreateBoundWithoutCountInventsNoNumber(t *testing.T) {
+	stdout, stderr, code := siteCreated201(t, `{"status":"bound","doc_type":"post"}`)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "no total") {
+		t.Fatalf("a bound create with no count must say the box published no total:\n%s", stdout)
+	}
+	// No digit may appear on the content line at all — "0 documents" about a site
+	// nobody counted is exactly the lie the pointer exists to prevent.
+	for _, line := range strings.Split(stdout, "\n") {
+		if !strings.Contains(line, "content:") {
+			continue
+		}
+		if strings.ContainsAny(line, "0123456789") {
+			t.Fatalf("a count-less bound verdict must carry NO number, got %q", line)
+		}
+	}
+}
+
+// NO content_binding KEY AT ALL (the control plane did not probe this kind): the
+// receipt renders exactly as it did before this change — the stored-row line, no
+// verdict sentence, and above all NOT an "unverified" one.
+func TestRunCloudSiteCreateWithoutBindingKeyRendersNoVerdict(t *testing.T) {
+	stdout, stderr, code := siteCreated201(t, "")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "NOT confirm") || strings.Contains(stdout, "unverified") {
+		t.Fatalf("an absent content_binding is NO verdict, not a bad one:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "read") && strings.Contains(stdout, "documents") {
+		t.Fatalf("an absent content_binding must claim no read:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "content: post") {
+		t.Fatalf("the stored-row content line must survive unchanged:\n%s", stdout)
+	}
+}
+
+// The MACHINE surface carries the verdict too: a script branching on the create
+// envelope gets the same fact the human line does.
+func TestRunCloudSiteCreateJSONCarriesTheBindingVerdict(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{201, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static"},` +
+		`"content_binding":{"status":"unverified","detail":"blog-box could not be reached"}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stdout)
+	}
+	var env struct {
+		ContentBinding struct {
+			Status string `json:"status"`
+			Detail string `json:"detail"`
+		} `json:"content_binding"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json output not parseable: %v\n%s", err, stdout)
+	}
+	if env.ContentBinding.Status != "unverified" || env.ContentBinding.Detail != "blog-box could not be reached" {
+		t.Fatalf("the machine envelope must carry the verdict, got %+v\n%s", env.ContentBinding, stdout)
+	}
+}
+
+// ...and an envelope with NO verdict must carry no key, so a script can tell "not
+// probed" from "unverified" without reading prose.
+func TestRunCloudSiteCreateJSONOmitsAnAbsentBindingVerdict(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{201, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static"}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stdout)
+	}
+	if strings.Contains(stdout, "content_binding") {
+		t.Fatalf("an absent verdict must not materialise as a key in the envelope:\n%s", stdout)
+	}
+}
+
 // TestRunCloudSiteCreateNode is the D62 node-slot surface proof: `--kind node
 // --framework nextjs` threads kind=node + framework=nextjs to the wire, and the
 // created-site verdict narrates the node-slot SSR runtime (a long-running process
@@ -2369,11 +2523,17 @@ func TestSiteCreateWillNotClaimAnUnechoedDocTypeBinding(t *testing.T) {
 }
 
 // TestSiteCreateNamesAnEchoedDocTypeBinding is the other half: when the control
-// plane DID store the binding the receipt says so — and still refuses to claim the
-// dataset serves that type, which nothing in THIS envelope has read. (The control
-// plane does read it, at create, per charter D73 — but that verdict rides a
-// top-level content_binding key SpawnSite does not carry, so this receipt names
-// the check without narrating a result it was never shown.)
+// plane DID store the binding the receipt says so — and, on an envelope carrying
+// NO content_binding key (this fixture), still refuses to claim the dataset serves
+// that type, because nothing in THIS envelope has read it.
+//
+// ssw8 narrowed what that means. The verdict is no longer invisible to the CLI —
+// CreateSpawnSite decodes the top-level content_binding key and renderSiteCreated
+// prints it — so the receipt can no longer say the verdict "is not in this
+// envelope" as a standing fact. What it must still do is tell an ABSENT verdict
+// apart from a bad one: this create was answered without one, so the line reports
+// the stored row and says no create-time verdict came with it, and the loop below
+// still refuses any bound/unverified narration.
 func TestSiteCreateNamesAnEchoedDocTypeBinding(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","doc_type":"paper"}}`}
@@ -2389,11 +2549,11 @@ func TestSiteCreateNamesAnEchoedDocTypeBinding(t *testing.T) {
 	if strings.Contains(stdout, "UNCONFIRMED") {
 		t.Fatalf("an echoed doc type is not unconfirmed:\n%s", stdout)
 	}
-	// The receipt must not narrate the create-time binding check's RESULT: this
-	// envelope does not carry it. Naming that the check happens is honest; saying
-	// how it came out would be quoting a read this process never made.
-	if !strings.Contains(stdout, "not in this envelope") {
-		t.Fatalf("the receipt must name the verdict it is not being shown:\n%s", stdout)
+	// The receipt must not narrate the create-time binding check's RESULT: THIS
+	// envelope carried none. Saying so is honest; reporting how it came out would
+	// be quoting a read this process was never shown.
+	if !strings.Contains(stdout, "no create-time verdict") {
+		t.Fatalf("the receipt must say this envelope carried no verdict:\n%s", stdout)
 	}
 	for _, verdict := range []string{"bound:", "unverified", "content_binding_empty"} {
 		if strings.Contains(stdout, verdict) {

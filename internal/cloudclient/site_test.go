@@ -203,3 +203,82 @@ func TestListSpawnSiteDeploymentsDecodesDeferralChain(t *testing.T) {
 		t.Fatalf("a row with no chain must decode nil, got %+v", none)
 	}
 }
+
+// --- the create-time content-binding verdict (ssw8) --------------------------
+//
+// POST /v1/sites answers with the row under `site` and the control plane's
+// create-time read of the bound type under a TOP-LEVEL `content_binding` key.
+// CreateSpawnSite decoded `{site}` alone and threw the verdict away, so a caller
+// whose binding came back UNVERIFIED was handed a row that looked exactly like a
+// confirmed one.
+//
+// The count pointer is the subtle half: the producer OMITS `count` when the box
+// published no total, so ABSENT and ZERO are different answers and a `Count int`
+// would render them identically.
+func TestCreateSpawnSiteDecodesTheBindingVerdict(t *testing.T) {
+	intp := func(i int) *int { return &i }
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantStatus string
+		wantType   string
+		wantDetail string
+		wantCount  *int
+	}{
+		{
+			name:       "bound with the box's total",
+			body:       `{"site":{"id":"site_1"},"content_binding":{"status":"bound","doc_type":"post","count":12}}`,
+			wantStatus: "bound", wantType: "post", wantCount: intp(12),
+		},
+		{
+			// The key is absent — not null, not 0. nil is the ONLY honest decode.
+			name:       "bound with NO count key",
+			body:       `{"site":{"id":"site_1"},"content_binding":{"status":"bound","doc_type":"post"}}`,
+			wantStatus: "bound", wantType: "post", wantCount: nil,
+		},
+		{
+			// ...and a real zero is a real answer, distinguishable from the above.
+			name:       "bound with an explicit zero total",
+			body:       `{"site":{"id":"site_1"},"content_binding":{"status":"bound","doc_type":"post","count":0}}`,
+			wantStatus: "bound", wantType: "post", wantCount: intp(0),
+		},
+		{
+			// `detail`, not `reason` — and no doc_type on this arm at all.
+			name:       "unverified carries detail",
+			body:       `{"site":{"id":"site_1"},"content_binding":{"status":"unverified","detail":"blog-box has no URL yet"}}`,
+			wantStatus: "unverified", wantDetail: "blog-box has no URL yet",
+		},
+		{
+			// The :not_applicable case — no key at all, so no verdict, which must
+			// NOT decode into anything a renderer could mistake for "unverified".
+			name: "absent content_binding is the zero verdict",
+			body: `{"site":{"id":"site_1"}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newFake(t, "sess", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			got, err := c.CreateSpawnSite(context.Background(), SpawnSiteCreate{Name: "blog"})
+			if err != nil {
+				t.Fatalf("CreateSpawnSite: %v", err)
+			}
+			if got.Site.ID != "site_1" {
+				t.Fatalf("site row lost: %+v", got.Site)
+			}
+			b := got.ContentBinding
+			if b.Status != tc.wantStatus || b.DocType != tc.wantType || b.Detail != tc.wantDetail {
+				t.Fatalf("verdict = %+v, want status=%q doc_type=%q detail=%q", b, tc.wantStatus, tc.wantType, tc.wantDetail)
+			}
+			switch {
+			case tc.wantCount == nil && b.Count != nil:
+				t.Fatalf("count = %d, want ABSENT — an omitted count must stay nil, or the receipt can print a total nobody published", *b.Count)
+			case tc.wantCount != nil && b.Count == nil:
+				t.Fatalf("count = nil, want %d", *tc.wantCount)
+			case tc.wantCount != nil && *b.Count != *tc.wantCount:
+				t.Fatalf("count = %d, want %d", *b.Count, *tc.wantCount)
+			}
+		})
+	}
+}
