@@ -1,8 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*"],
+  // `tests/**/*` is here, not just `src/**/*`: eslint runs with
+  // `projectService: true`, so a file outside every tsconfig `include` is a
+  // PARSING ERROR, not a lint pass — the 9 test files could not be linted at
+  // all while this said `["src/**/*"]`. `rootDir` widens to "." to match;
+  // tsup pins its output names via an explicit `entry` map, so dist/ is
+  // unaffected.
+  //
+  // This config is the ESLINT + editor project. `pnpm typecheck` runs
+  // `tsconfig.typecheck.json`, which is this file minus one quarantined test.
+  "include": ["src/**/*", "tests/**/*", "tsup.config.ts", "vitest.config.ts"],
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": ".",
     "types": ["node"]
   }
 }

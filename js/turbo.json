@@ -4,27 +4,49 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsup.config.ts", "package.json", "tsconfig.json"],
+      "inputs": [
+        "src/**",
+        "tsup.config.ts",
+        "package.json",
+        "tsconfig.json",
+        "$TURBO_ROOT$/scripts/post-build-dts.mjs"
+      ],
       "outputs": ["dist/**"]
     },
     "typecheck": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tests/**", "tsconfig.json", "../../tsconfig.base.json"]
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "test/**",
+        "templates/**",
+        "tsconfig*.json",
+        "$TURBO_ROOT$/tsconfig.base.json"
+      ]
     },
     "test": {
       "dependsOn": ["^build"],
       "inputs": [
         "src/**",
         "tests/**",
-        "vitest.config.ts",
-        "vitest.browser.config.ts",
-        "vitest.workerd.config.ts",
-        "wrangler.toml"
+        "test/**",
+        "templates/**",
+        "vitest*.config.*",
+        "wrangler.toml",
+        "$TURBO_ROOT$/test-utils/**"
       ],
       "outputs": ["coverage/**"]
     },
     "lint": {
-      "inputs": ["src/**", "tests/**", "../../eslint.config.js"]
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "test/**",
+        "templates/**",
+        "package.json",
+        "tsconfig*.json",
+        "$TURBO_ROOT$/eslint.config.js"
+      ]
     },
     "size": {
       "dependsOn": ["build"],
