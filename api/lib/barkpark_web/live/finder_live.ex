@@ -18,6 +18,11 @@ defmodule BarkparkWeb.FinderLive do
 
   Tenancy: mounted FLAT on the public root, exactly like the flat `/papers`
   reader — reads resolve the Default workspace, published perspective only.
+  That is threaded, not assumed: `mount/3` resolves
+  `Tenancy.get_default_workspace()` once and every list read below carries its
+  id, failing CLOSED (empty page) when no Default is seeded — the same posture
+  `Content.get_public_document/3` takes on the by-id twin. See
+  `BarkparkWeb.FinderWorkspaceScopeTest`.
   Hits link into the native PortableDoc reader (`/papers/<slug>`), which is the
   Phoenix PortableDoc mastery surface already in production.
   """
@@ -39,6 +44,36 @@ defmodule BarkparkWeb.FinderLive do
   def mount(params, _session, socket) do
     dataset = sanitize_dataset(params["dataset"])
 
+    # THE PUBLIC TENANT, resolved ONCE (task-f9c30aa28c64f24a). This LiveView is
+    # mounted FLAT on the public root — `pipe_through [:browser,
+    # :paper_reader_csp]`, `live_session :finder` with no `on_mount`, no token,
+    # no LiveScope — so NOTHING upstream resolves a tenant and there is no
+    # `AssignDefaultScope`-populated conn to lift one off, which is why the flat
+    # HTTP twin of the same derivation (`TasksController.derive_graph_corpus/2`,
+    # built from `scope_opts(conn)`) carried a workspace and the hand-copied
+    # LiveView version did not.
+    #
+    # The right answer for a PUBLIC surface is NOT "some member's workspace" and
+    # NOT "whatever the caller asks for" — it is the same pinned public tenant
+    # the by-id twin every hit links into already uses:
+    # `Content.get_public_document/3` resolves `Tenancy.get_default_workspace()`
+    # and fails CLOSED when there is none ("if no Default workspace is seeded
+    # there is no public tenant"). This module's moduledoc already CLAIMED that
+    # fence; the five list reads below just never carried it.
+    #
+    # `nil` is a real state (no seeded Default), and it is handled by rendering
+    # an EMPTY page — never by omitting the key. Passing `workspace_id: nil`
+    # would be strictly WORSE than today: `Content.resolve_read_dataset_id/2`
+    # branches on the PRESENCE of the key, so a nil value drops the dataset_id
+    # leg (the only thing fencing this surface today) AND
+    # `scope_to_workspace_or_global/3` reads nil as the all-tenants global — no
+    # fence of any kind on any of the five reads.
+    workspace_id =
+      case Barkpark.Tenancy.get_default_workspace() do
+        %{id: id} when is_binary(id) -> id
+        _ -> nil
+      end
+
     # The corpus derivation walks every schema x up-to-1000 docs + edges — on a
     # loaded box that is SECONDS, and doing it inline here made the whole page
     # time out under a concurrent site build (live-caught). Mount renders the
@@ -50,6 +85,11 @@ defmodule BarkparkWeb.FinderLive do
       |> assign(
         page_title: "Search — Barkpark",
         dataset: dataset,
+        # The pinned public tenant every read below threads (or `nil` → empty
+        # page). Assigned, not re-resolved per event: it cannot change within a
+        # mount, and re-reading it on every keystroke is a DB round-trip per
+        # debounce window.
+        workspace_id: workspace_id,
         # `q`/`hits`/`hit_count` are seeded empty and then OWNED by
         # `handle_params/3`, which runs immediately after mount on both the dead
         # and the connected render. That is what makes `/finder?q=foo` a real
@@ -82,7 +122,9 @@ defmodule BarkparkWeb.FinderLive do
 
     socket =
       if connected?(socket) do
-        start_async(socket, :graph_corpus, fn -> graph_payload(dataset, caller_context) end)
+        start_async(socket, :graph_corpus, fn ->
+          graph_payload(dataset, caller_context, workspace_id)
+        end)
       else
         socket
       end
@@ -157,11 +199,17 @@ defmodule BarkparkWeb.FinderLive do
   end
 
   defp run_search(socket, raw) do
-    case String.trim(to_string(raw || "")) do
-      "" ->
+    case {String.trim(to_string(raw || "")), socket.assigns.workspace_id} do
+      {"", _} ->
         assign(socket, q: "", hits: [], hit_count: 0)
 
-      query ->
+      # FAIL CLOSED, exactly as `Content.get_public_document/3` does: with no
+      # seeded Default workspace there is no public tenant, so there is nothing
+      # this surface is entitled to search. Zero hits — never an unscoped read.
+      {query, nil} ->
+        assign(socket, q: query, hits: [], hit_count: 0)
+
+      {query, workspace_id} ->
         # Thread the socket's REAL caller context (search-template W10 / D62)
         # so the retriever's schema-visibility gate sees who is asking instead
         # of a nil it must fail closed on. This finder mounts on the PUBLIC
@@ -175,11 +223,26 @@ defmodule BarkparkWeb.FinderLive do
         # `:caller_context`/`:api_token` flows through here unchanged.
         caller_context = CallerContext.from_conn(socket)
 
+        # ENGINE PINNED TO POSTGRES, DELIBERATELY — and it must stay pinned in
+        # the same breath as the `workspace_id:` below. This call used to ask
+        # for `engine: "indx"` and never got it: `QueryPipeline`'s D3-b gate
+        # substitutes the scoped Postgres retriever for any non-postgres engine
+        # WITHOUT a binary `:workspace_id`, which is exactly what this call was.
+        # So the requested engine was decorative and the served engine was
+        # Postgres. Adding the workspace key LIFTS that gate — leaving `"indx"`
+        # here would have flipped the public finder onto Indx as a silent side
+        # effect of a tenancy fix, onto a candidate pool `Indx.Retriever`'s own
+        # comment calls "NOT tenant-scoped" and that
+        # `Content.get_documents_by_ids/3` hydrates with NO perspective filter.
+        # Pinning `"postgres"` keeps the SERVED engine byte-identical to before
+        # this fix; changing it is a separate decision with its own evidence.
+        # See `BarkparkWeb.FinderWorkspaceScopeTest` "search engine".
         {docs, count, _meta} =
           Content.search_documents(query, socket.assigns.dataset,
             perspective: :published,
             limit: @hit_limit,
-            engine: "indx",
+            engine: "postgres",
+            workspace_id: workspace_id,
             caller_context: caller_context
           )
 
@@ -305,13 +368,26 @@ defmodule BarkparkWeb.FinderLive do
   # confirming COUNT — and node_budget), edges are re-filtered to the surviving
   # node set, and the {truncated, reason} pair rides the payload so /finder
   # never claims a complete corpus it didn't derive.
-  defp graph_payload(dataset, caller_context) do
+  # FAIL CLOSED with no public tenant — the empty payload the mount already
+  # renders, so the page degrades to "no corpus" rather than to an unscoped
+  # walk of every workspace on the box. Same posture as `run_search/2` above and
+  # as `Content.get_public_document/3`.
+  defp graph_payload(_dataset, _caller_context, nil), do: {"[]", "[]", "", 0, 0, false, nil}
+
+  defp graph_payload(dataset, caller_context, workspace_id) do
     per_type_limit =
       Application.get_env(:barkpark, :graph_corpus_per_type_limit, @graph_node_per_type_limit)
 
     node_budget = Application.get_env(:barkpark, :graph_corpus_node_budget, @graph_node_budget)
 
-    opts = [dataset: dataset, limit: per_type_limit]
+    # `workspace_id` rides in `opts`, so it reaches ALL FOUR corpus reads at
+    # once: `list_schemas/2`, `list_documents/3`, `count_documents/3` (which
+    # derives `list_opts` from it) and `corpus_edges/3` (which forwards `opts`
+    # into its own `list_documents/3`). This is the shape the flat `/v1/graph`
+    # twin builds from `scope_opts(conn)`; the LiveView copy was written
+    # `[dataset:, limit:]` and lost the tenant. It is only ever a BINARY here —
+    # the nil clause above returns before this line.
+    opts = [dataset: dataset, limit: per_type_limit, workspace_id: workspace_id]
     list_opts = Keyword.put(opts, :perspective, :published)
 
     # Schema visibility, keyed on the PRINCIPAL — `Content.Schema.
