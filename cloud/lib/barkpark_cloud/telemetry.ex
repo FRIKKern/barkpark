@@ -272,7 +272,18 @@ defmodule BarkparkCloud.Telemetry do
             # never "helpfully" zeroes an unmeasured tree.
             bytes: num_or_nil(Map.get(row, "bytes")),
             top: relation_sizes(Map.get(row, "top")),
-            count: num_or_nil(Map.get(row, "count"))
+            count: num_or_nil(Map.get(row, "count")),
+            # The subtrees a `degraded` walk could not descend into, BY PATH —
+            # the string an operator's next `ls`/`chmod`/`sudo du` takes — and
+            # how many it hit, so a capped list can say it is capped. Carried
+            # verbatim like every other value here: a non-list is nil (the same
+            # NOT-MEASURED sentinel the numbers use), and only a `degraded`
+            # status ever fills them. Dropping them would collapse a walk that
+            # finished and NAMED what it could not read back into a bare number,
+            # which is the exact information loss the fourth status word exists
+            # to end.
+            degraded: path_list(Map.get(row, "degraded")),
+            degraded_count: num_or_nil(Map.get(row, "degraded_count"))
           }
         ]
     end
@@ -280,8 +291,25 @@ defmodule BarkparkCloud.Telemetry do
 
   defp consumer_root(_), do: []
 
-  defp consumer_root_status(status) when status in ["read", "absent", "unmeasured"], do: status
+  # The closed set of root statuses this control plane knows how to render.
+  # `degraded` is the fourth member: the walk finished and printed a total, but
+  # du could not descend into one or more subtrees, so the number is a FLOOR
+  # (measured on guerrilla: 212K against a true 712K) and the surface words it
+  # as "or more", never as a size. An UNRECOGNISED word still degrades to
+  # "unmeasured" — the only safe direction — because passing an unknown word
+  # through would let a future agent word invent a state every surface renders
+  # by falling off the end of its branch table, and coercing toward "read",
+  # "absent" or "degraded" would assert a measurement nobody made.
+  defp consumer_root_status(status) when status in ["read", "absent", "degraded", "unmeasured"],
+    do: status
+
   defp consumer_root_status(_), do: "unmeasured"
+
+  # A list of PATHS — the degraded subtree names. Only binary members survive
+  # (a corrupt row cannot name a place); a non-list is nil, the same
+  # NOT-MEASURED sentinel every other value in a root uses.
+  defp path_list(list) when is_list(list), do: Enum.filter(list, &is_binary/1)
+  defp path_list(_), do: nil
 
   # Roll the health-gate array up to {pass, skipped, total, failing}. A non-list
   # (absent / malformed) yields the zero roll-up — never nil arithmetic

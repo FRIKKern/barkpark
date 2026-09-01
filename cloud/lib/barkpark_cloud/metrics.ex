@@ -68,9 +68,14 @@ defmodule BarkparkCloud.Metrics do
           top_relations: [...] | nil,
           sites: %{dir: ..., bytes: ..., top: [...] | nil, count: number | nil},
           # The build plane's roots. Each carries a status of "read" | "absent"
-          # | "unmeasured" — a root that is not on this box says ABSENT and
-          # keeps the -1 sentinel, never 0 bytes.
-          consumer_roots: [%{path: ..., status: ..., bytes: ..., top: [...] | nil, count: ...}] | nil,
+          # | "degraded" | "unmeasured" — a root that is not on this box says
+          # ABSENT and keeps the -1 sentinel, never 0 bytes; a "degraded" walk
+          # finished but could not descend into every subtree, so its bytes are
+          # a FLOOR and it names the paths (`degraded`/`degraded_count`) it
+          # could not read.
+          consumer_roots:
+            [%{path: ..., status: ..., bytes: ..., top: [...] | nil, count: ..., degraded: [...] | nil, degraded_count: ... | nil}]
+            | nil,
           reported_at: String.t() | nil
         } | nil,
         service_health: %{
