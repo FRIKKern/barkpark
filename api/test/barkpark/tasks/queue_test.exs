@@ -360,8 +360,13 @@ defmodule Barkpark.Tasks.QueueTest do
       assert task.doc_id == "drafts." <> base_id,
              "create_document must birth the task as a draft for this test to mean anything"
 
-      assert {:error, :not_found} =
-               Content.get_document(base_id, "task", @dataset, scope),
+      # Bound first, then asserted on a boolean: `assert/2` is a function, so
+      # `assert pattern = expr, msg` would raise MatchError before the message
+      # is ever reached — the explanation would be dead on the only path that
+      # needs it. Same assertion, still reachable.
+      published_twin = Content.get_document(base_id, "task", @dataset, scope)
+
+      assert published_twin == {:error, :not_found},
              "an unpaired draft must have NO published twin"
 
       # (a) it is offered as ready — the behaviour a `drafts.` exclusion breaks.
