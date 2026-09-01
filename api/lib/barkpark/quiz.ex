@@ -83,6 +83,13 @@ defmodule Barkpark.Quiz do
   @doc "The PubSub topic aggregate heatmap frames broadcast on (P5 crowd scale)."
   defdelegate heat_topic(pin), to: Room
 
+  @doc """
+  The HOST-ONLY topic carrying `{:reveal_answer, answer}` — terms a player must
+  never receive. Subscribe from a projector/host surface only; a player socket
+  on this topic re-opens the answer-key leak (`Room.host_topic/1`).
+  """
+  defdelegate host_topic(pin), to: Room
+
   @doc "Override a room's individual→heatmap crossover threshold (tests)."
   defdelegate set_heatmap_threshold(pin, n), to: Room
 
