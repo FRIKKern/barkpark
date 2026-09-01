@@ -24,7 +24,7 @@ DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:295
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/epic_fleet/benchmark.ex:233,7E9FD64
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/indx/persistence.ex:81,ABE21C
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/plugins/indx/persistence.ex:71,14F913C
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:827,4814A96
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:861,50D59A0
 RCE.CodeModule: Code Execution in `Code.eval_file`,lib/barkpark/release.ex:23,5B901F4
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:758,1726B05
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github.ex:192,15B2898
