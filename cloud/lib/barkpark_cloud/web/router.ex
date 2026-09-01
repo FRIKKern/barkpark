@@ -8540,30 +8540,32 @@ defmodule BarkparkCloud.Web.Router do
   # Link a GitHub repo + branch to this Site so pushes to <branch> of <repo>
   # auto-create a Deployment (verified via HMAC-SHA256 against the stored
   # secret). `repo` is the "owner/repo" form GitHub uses. `branch` defaults to
-  # "main" on the server. `webhook_secret` is the value the user will paste
-  # into GitHub's webhook "Secret" field — when omitted, the server generates a
-  # cryptographically random one and returns it ONCE in this response (it is
-  # Vault-encrypted at rest and never returned again).
+  # "main" on the server. The webhook secret is the value the user will paste
+  # into GitHub's webhook "Secret" field. The SERVER always mints it — a
+  # `webhook_secret` in the request body is ignored — and returns it ONCE in
+  # this response (it is Vault-encrypted at rest and never returned again).
+  #
+  # The caller does not choose it because the secret is the HMAC key for
+  # POST /v1/webhooks/github/:site_id, a route with no bearer auth by design
+  # where the HMAC + the opaque site UUID are the only gates. A caller-chosen
+  # key is a durable deploy trigger that is not team-scoped, not session-tied,
+  # not revoked when the actor loses access, and not visible in the audit log.
+  # This matches /github/connect, which has always minted unconditionally.
   post "/v1/sites/:id/github" do
     with_team_site(conn, fn conn, site ->
       repo = conn.body_params["repo"]
       branch = conn.body_params["branch"]
-      provided = conn.body_params["webhook_secret"]
 
       cond do
         not (is_binary(repo) and repo != "") ->
           json(conn, 422, %{error: "repo_required"})
 
         true ->
-          # Generate a secret when the user didn't pass one. Always echo BACK
-          # the plaintext secret in the success response (this is the ONLY
-          # moment plaintext leaves the server) so the user can paste it into
-          # GitHub's webhook form.
-          plaintext_secret =
-            cond do
-              is_binary(provided) and provided != "" -> provided
-              true -> generate_webhook_secret()
-            end
+          # The server mints the secret, always — a caller-supplied
+          # `webhook_secret` is ignored. Echo the plaintext BACK in the success
+          # response (this is the ONLY moment plaintext leaves the server) so
+          # the user can paste it into GitHub's webhook form.
+          plaintext_secret = generate_webhook_secret()
 
           # activity-audit-log: the repo/branch/secret link update + a
           # `site.github_connected` audit event commit atomically. Detail carries
