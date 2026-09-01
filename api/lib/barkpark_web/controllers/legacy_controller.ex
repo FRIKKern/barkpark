@@ -9,6 +9,7 @@ defmodule BarkparkWeb.LegacyController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, Schema}
   alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -20,6 +21,11 @@ defmodule BarkparkWeb.LegacyController do
   # honestly reached and honestly reported.
   @list_page_size 1000
   @list_max_pages 10
+
+  # The 400 message for a list/map-shaped `id`/`doc_id` on create/2 — see the
+  # NON-BINARY ID GUARD comment there.
+  @non_binary_id_message "id/doc_id must be a string; a list or map value " <>
+                           "(e.g. ?id[]=a or ?id[k]=v) is not a document id"
 
   def index(conn, %{"type" => type} = params) do
     # `bin/1` collapses a non-binary `?filter[]=x` / `?filter[k]=v` to nil
@@ -129,6 +135,37 @@ defmodule BarkparkWeb.LegacyController do
     # Map legacy format to internal format
     doc_id = Map.get(attrs, "id") || Map.get(attrs, "doc_id")
 
+    # NON-BINARY ID GUARD (task-0fba128e04ab8aee). `POST /api/documents/:type`
+    # has NO `:id` path segment, so "id"/"doc_id" are caller-controlled query
+    # params with nothing to override them — and `Plug.Conn.Query` parses
+    # `?id[]=a` to a LIST and `?id[k]=v` to a MAP, both TRUTHY, so the `||`
+    # above picks them up. The value then rode three frames down:
+    # `Content.upsert_document/4` does `raw_id && DraftId.draft_id(raw_id)`
+    # (content/writer.ex), and `DraftId.draft_id/1` calls
+    # `String.starts_with?(["a"], "drafts.")` — every clause of which guards
+    # `is_binary/1` on its first argument. FunctionClauseError AFTER dispatch,
+    # i.e. a 500 reachable by any holder of a write-tier token (the bar is a
+    # disposable 48h playground token: `["read", "write"]`). `action_fallback`
+    # maps RETURNED `{:error, _}` tuples, never a raise, so nothing downstream
+    # could have caught it. `?doc_id[]=a` / `?doc_id[k]=v` take the same path.
+    #
+    # Refuse at the door with the canonical 400 envelope rather than coercing
+    # to nil through `bin/1` (the read-side seam this module already uses for
+    # `filter`): on a WRITE, silently collapsing a supplied id to "absent"
+    # would persist the document under a server-chosen id while the caller
+    # believes it named one — a fail-open the read path cannot produce.
+    if non_binary_id?(doc_id) do
+      ErrorResponse.emit(conn, {:error, :malformed}, @non_binary_id_message)
+    else
+      do_create(conn, type, attrs, doc_id)
+    end
+  end
+
+  defp non_binary_id?(nil), do: false
+  defp non_binary_id?(value) when is_binary(value), do: false
+  defp non_binary_id?(_value), do: true
+
+  defp do_create(conn, type, attrs, doc_id) do
     internal_attrs = %{
       "doc_id" => doc_id,
       "title" => Map.get(attrs, "title"),

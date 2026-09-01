@@ -42,9 +42,51 @@ defmodule BarkparkWeb.GithubAdoptController do
 
   use BarkparkWeb, :controller
 
+  alias BarkparkWeb.ErrorResponse
+
+  # The 400 messages for a list/map-shaped param — see the NON-BINARY PARAM
+  # GUARD comment on the guard clauses below.
+  @non_binary_dataset_message "dataset must be a string; a list or map value " <>
+                                "(e.g. ?dataset[]=x or ?dataset[k]=v) is not a dataset name"
+  @non_binary_id_message "id must be a string; a list or map value is not a task id"
+
   @doc """
   Adopt the `:id` intake task. See the moduledoc for the status mapping.
   """
+  # NON-BINARY PARAM GUARD (task-0fba128e04ab8aee). Neither mount — the flat
+  # `/v1/plugins/github/adopt/:id` nor the scoped `/w/:ws/p/:proj/v1/plugins/…`
+  # mirror — carries a `:dataset` path segment, so `dataset` is a
+  # caller-controlled query param: `?dataset[]=x` parses to a LIST and
+  # `?dataset[k]=v` to a MAP, and `Map.get/3`'s default never fires for a key
+  # that IS present. Both shapes then reached
+  # `Barkpark.Plugins.Github.Adopt.adopt/3`, whose only head is
+  # `when is_binary(doc_id) and is_binary(dataset)` — FunctionClauseError after
+  # dispatch, i.e. a 500 reachable by any write-tier bearer (this bucket's
+  # `RequireWriteForMutation` gate is the only rung above `read`). This
+  # controller has no `action_fallback`, so the raise went straight to the
+  # endpoint's 500.
+  #
+  # The refusal is TWO CLAUSES ABOVE the real one, not a branch inside it, on
+  # purpose: `scripts/pds-elixir-receipt-census.exs` fingerprints the `{head,
+  # body}` of the def that ENCLOSES each success-receipt literal, so editing the
+  # body of the clause that renders the adopt receipts — or moving them into a
+  # helper — orphans the census register rows for
+  # `GithubAdoptController.adopt/2` and leaves both routed arrivals undisposed.
+  # Guarding at the head keeps that clause byte-identical and the register
+  # honest. Do not spell the receipt literal in prose here either: the census
+  # counts it textually, and a mention in a comment is a phantom that drifts the
+  # baseline.
+  #
+  # `:id` is bound by the path segment and so is always a binary through today's
+  # mounts; it is guarded anyway (Adopt.adopt/3 requires BOTH args to be
+  # binaries) so the action is total for its own contract rather than resting on
+  # a router invariant a future mount could change.
+  def adopt(conn, %{"dataset" => dataset}) when not is_binary(dataset),
+    do: ErrorResponse.emit(conn, {:error, :malformed}, @non_binary_dataset_message)
+
+  def adopt(conn, %{"id" => id}) when not is_binary(id),
+    do: ErrorResponse.emit(conn, {:error, :malformed}, @non_binary_id_message)
+
   def adopt(conn, %{"id" => id} = params) do
     dataset = Map.get(params, "dataset", "production")
 
