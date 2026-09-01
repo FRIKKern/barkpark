@@ -1084,6 +1084,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
                             non-drillable `:document` node because it has no
                             installed schema.
 
+  Deliberately SUPPRESSED, not named: a walk that stopped on a `:plugin_link`
+  child. The node is a terminal outbound link, so no document was ever named
+  and none is missing — it takes the calm `:nothing_selected` state rather
+  than one of the four reasons above (task-554a33ca42c0c45a; the shape and
+  both lies it used to produce are pinned in
+  `studio_plugin_link_empty_state_test.exs`).
+
   Deliberately NOT a reason: `unrenderable_content`. A document that RESOLVES
   and cannot render is the OTHER arm, owned by
   `StudioLive.Components.unrenderable_document_notice/1` (#7897). Also deliberately absent:
@@ -1101,6 +1108,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     cond do
       nav_path == [] ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+
+      # The walk terminated on a `:plugin_link` CHILD of the last pane —
+      # PaneBuilder's `%{type: :plugin_link}` branch returns `{panes, nil}`
+      # because the node is a terminal outbound link, not a document that
+      # failed to resolve. Nothing is missing, so nothing may shout: without
+      # this arm the very next clause names a reason for a document that was
+      # never named. Two lies, both observed and pinned in
+      # `studio_plugin_link_empty_state_test.exs`:
+      #
+      #   * link nested in a group (`/studio/media-desk/media-library`) → the
+      #     last pane is `role: :list` with no `type_name`, so `:no_schema`
+      #     fires: "No schema for media-library is installed in this dataset."
+      #   * link sitting at the desk root → the last pane is `role: :nav` with
+      #     a selection, so `:unknown_node` fires: "This desk has no section
+      #     named …" — about the section the human just clicked.
+      #
+      # It is NOT a one-frame flash. The desk LiveView issues no
+      # `push_navigate` for a `:plugin_link` nav_path (the anchors navigate by
+      # plain href), so the frame is the DEAD render AND every connected
+      # render, and `assert_redirect` on that mount times out. The shape is
+      # distinguishable from `(panes, nav_path)` alone: the terminal pane's
+      # own `items` carry `%{type: :plugin_link, id: …}` (PaneBuilder
+      # `list_items/2`) and one of them is what `:selected` names.
+      terminated_on_plugin_link?(last) ->
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
 
       match?(%{role: :nav}, last) and Map.get(last, :selected) != nil ->
@@ -1135,6 +1167,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
     end
   end
+
+  # Did the desk walk stop on an outbound `:plugin_link` row? Keyed on the
+  # terminal pane's OWN items rather than on the node type (the node is gone
+  # by the time the panes reach here), which is why this works for both the
+  # root `:nav` pane and any nested `:list` pane — both build their items with
+  # `PaneBuilder.list_items/2`, and only that function emits `type:
+  # :plugin_link`.
+  defp terminated_on_plugin_link?(%{} = pane) do
+    case Map.get(pane, :selected) do
+      nil ->
+        false
+
+      selected ->
+        pane
+        |> Map.get(:items)
+        |> List.wrap()
+        |> Enum.any?(fn item ->
+          is_map(item) and Map.get(item, :type) == :plugin_link and
+            Map.get(item, :id) == selected
+        end)
+    end
+  end
+
+  defp terminated_on_plugin_link?(_), do: false
 
   # The secondary (split-view) pane belongs to the PRIMARY document it was
   # opened beside, so it clears on an ACTUAL primary-document identity change
