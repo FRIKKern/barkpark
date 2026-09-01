@@ -4222,3 +4222,334 @@ func TestSiteFailureClassRowStripsANSILocally(t *testing.T) {
 		t.Errorf("stripping the ESC bytes must not eat the surrounding readable text:\n%s", stdout)
 	}
 }
+
+// --- typed deploy refusals (cch-w71, D866) -----------------------------------
+//
+// `bp cloud site deploy` and its --prebuilt sub-steps used to hand EVERY refusal
+// to the bare cloudFail(out, "deploy site", derr) — a seam that branches only on
+// a dead session (HTTP 401). So a 422 the user can fix, a 409 the plane refused,
+// a 404 that named a deployment id from a shell history and a 503 that started
+// no build ALL printed "failed" and exited 1, and `-o json` carried "failed" for
+// each. A script could not tell "your input is wrong" from "retry in a minute".
+// They now exit by the #11784 family ladder via siteRefusalFail, the same one
+// rollback / delete / create ride.
+//
+// THE TABLE BELOW IS DERIVED FROM THE LIVE ROUTE ARMS, not invented. The deploy
+// plane is one Plug.Router — cloud/lib/barkpark_cloud/web/router.ex, module
+// BarkparkCloud.Web.Router — and every fixture here is a status+code pair that
+// module actually emits:
+//
+//	401 unauthorized ........ Auth.require_user/2, Auth.require_user_or_pat/2
+//	403 forbidden ........... Auth.require_ability/2 (required/scope, NO reason)
+//	404 not_found ........... Router.with_team_site/3, and each route body's own
+//	                          deployment-miss arm
+//	409 ..................... upload_deployment_artifact/3 (deployment_not_queued),
+//	                          settle_deployment_artifact/5 (artifact_conflict),
+//	                          do_bind_cloudflare/5 (instance_not_live)
+//	413 artifact_too_large .. receive_deployment_artifact/3
+//	422 ..................... deploy_static_site/2 (no_content_binding,
+//	                          prebuilt_not_enabled, unknown_source,
+//	                          instance_not_live), receive_deployment_artifact/3
+//	                          (artifact_digest_mismatch, not_prebuilt), the list
+//	                          arm (invalid_cursor)
+//	5xx ..................... 503 deploy_not_started (deploy_static_site/2 and
+//	                          start_prebuilt_deploy/5), 500 upload_failed
+//	                          (receive_deployment_artifact/3), 502
+//	                          cloudflare_bind_failed (do_bind_cloudflare/5),
+//	                          500 server_error (Router.handle_errors/2 crash slug)
+//
+// Two arms are deliberately ABSENT because the plane does not emit them here: a
+// teamless caller is answered 404 by with_team_site/3 (never 403 no_team), and
+// identity_refused is minted only by Sites.Deploy.rollback/2 and .teardown/2 — a
+// box that refuses a DEPLOY surfaces as 503 deploy_not_started instead.
+//
+// RED BEFORE (reproducible by reverting cloud_site_cmd.go alone — the seven
+// deploy-chain arms back to their bare cloudFail calls): every non-401 row below
+// exited 1. 403 wanted 3, 404 wanted 4, every 409 wanted 6, and 500/502/503
+// wanted 8 — four families collapsed onto exitGeneric. VACUITY GUARD: these
+// assert the EXIT CODE per status, never a detail substring — cloudError already
+// folds `detail` into Error(), so a substring check passes on pre-fix bytes too.
+// The 401 rows are the INVARIANT half: they were exit 3 before and must stay 3,
+// because siteRefusalFail deliberately routes 401 back through cloudFail so the
+// "session expired? run `bp login` again" sentence stays the one every cloud verb
+// prints.
+
+// siteExitName renders an exit code as the family it names, so a failure message
+// reads "want 6 (conflict), got 1 (generic)" instead of two bare integers.
+func siteExitName(code int) string {
+	switch code {
+	case exitOK:
+		return "ok"
+	case exitGeneric:
+		return "generic"
+	case exitUsage:
+		return "usage"
+	case exitAuth:
+		return "auth"
+	case exitNotFound:
+		return "not-found"
+	case exitConflict:
+		return "conflict"
+	case exitServer:
+		return "server"
+	default:
+		return "?"
+	}
+}
+
+// siteRefusalCase is one row of a per-status exit table.
+type siteRefusalCase struct {
+	name string
+	resp fakeResp
+	want int
+}
+
+// deployRefused drives `bp cloud site deploy <uuid>` against a control plane that
+// answers the deploy POST with the given fixture. The ref is a UUID, so
+// resolveOpenSiteID passes it through and the POST is the only request that fires.
+func deployRefused(t *testing.T, resp fakeResp) (string, int) {
+	t.Helper()
+	cp := newSiteCP(t)
+	cp.deployResp = resp
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	return stderr, code
+}
+
+// POST /v1/sites/:id/deploy — the deploy verb itself.
+func TestRunCloudSiteDeployExitsByStatusFamily(t *testing.T) {
+	for _, tc := range []siteRefusalCase{
+		// The invariant: 401 keeps the shared dead-session seam and its `bp login`
+		// sentence. Not red before — it is here so a future edit cannot quietly
+		// pull 401 onto the ladder and lose that copy.
+		{"401 unauthorized", fakeResp{401, `{"error":"unauthorized"}`}, exitAuth},
+		// Auth.require_ability/2 — the caller's token lacks `write` on this team.
+		{"403 forbidden", fakeResp{403, `{"error":"forbidden","required":"write","scope":"token"}`}, exitAuth},
+		// Router.with_team_site/3 — wrong team, missing site, or a teamless login.
+		{"404 not_found", fakeResp{404, `{"error":"not_found"}`}, exitNotFound},
+		// do_bind_cloudflare/5 — the box was deprovisioned mid-bind.
+		{"409 instance_not_live", fakeResp{409, `{"error":"instance_not_live","detail":"deprovisioned while this request was in flight"}`}, exitConflict},
+		{"409 no_cloudflare_provider", fakeResp{409, `{"error":"no_cloudflare_provider","detail":"no cloudflare credential on this team"}`}, exitConflict},
+		// deploy_static_site/2's 422 family — all user-fixable, all exit 1.
+		{"422 no_content_binding", fakeResp{422, `{"error":"no_content_binding","detail":"this site has no bootstrap dataset"}`}, exitGeneric},
+		{"422 prebuilt_not_enabled", fakeResp{422, `{"error":"prebuilt_not_enabled","detail":"enable it with bp cloud site settings"}`}, exitGeneric},
+		{"422 unknown_source", fakeResp{422, `{"error":"unknown_source","detail":"sources: box, prebuilt"}`}, exitGeneric},
+		{"422 instance_not_live", fakeResp{422, `{"error":"instance_not_live","detail":"the instance has no URL yet"}`}, exitGeneric},
+		{"422 invalid", fakeResp{422, `{"error":"invalid","details":{"source":["is invalid"]}}`}, exitGeneric},
+		// The 5xx family — transient, retryable, exit 8.
+		{"503 deploy_not_started", fakeResp{503, `{"error":"deploy_not_started","detail":"the deployment row was created but the build driver could not be started — nothing is building.","reason":"the deploy could not be started — the box is busy; retry shortly"}`}, exitServer},
+		{"502 cloudflare_bind_failed", fakeResp{502, `{"error":"cloudflare_bind_failed","detail":"the zone write failed"}`}, exitServer},
+		{"500 server_error", fakeResp{500, `{"error":"server_error","request_id":"req-1"}`}, exitServer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stderr, code := deployRefused(t, tc.resp)
+			if code != tc.want {
+				t.Fatalf("a %s deploy refusal must exit %d (%s), got %d (%s)\n%s",
+					tc.name, tc.want, siteExitName(tc.want), code, siteExitName(code), stderr)
+			}
+		})
+	}
+}
+
+// A refused deploy must say NO BUILD WAS STARTED. The bare cloudFail said only
+// "deploy site: <slug>", which leaves a reader unable to tell whether a build is
+// now running against bytes they did not mean to ship.
+func TestRunCloudSiteDeployRefusalSaysNoBuildStarted(t *testing.T) {
+	stderr, code := deployRefused(t, fakeResp{422, `{"error":"no_content_binding","detail":"this site has no bootstrap dataset"}`})
+	if code != exitGeneric {
+		t.Fatalf("exit=%d want %d\n%s", code, exitGeneric, stderr)
+	}
+	if !strings.Contains(stderr, "No build was started") {
+		t.Fatalf("a refused deploy must say no build was started:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "no bootstrap dataset") {
+		t.Fatalf("the default arm must relay the plane's own detail:\n%s", stderr)
+	}
+}
+
+// deploy_not_started is the ONE deploy refusal where something WAS written: the
+// deployment row exists and is audited, but no build driver started. The plane
+// splits that into `detail` (what is not running, what to do) and `reason` (why,
+// in one retry-actionable clause from Router.transport_reason/1). The bare
+// cloudFail exited 1, which reads to a script as "your input is wrong"; it is 8.
+func TestRunCloudSiteDeployNotStartedIsServerFamilyAndCarriesBothHalves(t *testing.T) {
+	stderr, code := deployRefused(t, fakeResp{503, `{"error":"deploy_not_started","detail":"the deployment row was created but the build driver could not be started — nothing is building.","reason":"the deploy could not be started — the box is busy; retry shortly"}`})
+	if code != exitServer {
+		t.Fatalf("a 503 deploy_not_started must exit %d (server), got %d (%s)\n%s",
+			exitServer, code, siteExitName(code), stderr)
+	}
+	if !strings.Contains(stderr, "nothing is building") {
+		t.Fatalf("the receipt must relay the plane's detail half:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "the box is busy") {
+		t.Fatalf("the receipt must relay the plane's reason half — it is the retry-actionable clause:\n%s", stderr)
+	}
+}
+
+// POST /v1/sites/:id/deploy {"source":"prebuilt"} — the MINT sub-step. Same route
+// as the deploy verb, so the same families land; the sentences differ because a
+// refused mint leaves no deployment to ship bytes to.
+func TestRunCloudSitePrebuiltMintExitsByStatusFamily(t *testing.T) {
+	for _, tc := range []siteRefusalCase{
+		{"403 forbidden", fakeResp{403, `{"error":"forbidden","required":"write","scope":"token"}`}, exitAuth},
+		{"404 not_found", fakeResp{404, `{"error":"not_found"}`}, exitNotFound},
+		{"422 prebuilt_not_enabled", fakeResp{422, `{"error":"prebuilt_not_enabled","detail":"enable it with bp cloud site settings"}`}, exitGeneric},
+		{"503 deploy_not_started", fakeResp{503, `{"error":"deploy_not_started","detail":"nothing is building"}`}, exitServer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeDistFixture(t, "b0b0b0b0b0b0b0b0")
+			cp := newSiteCP(t)
+			cp.deployResp = tc.resp
+			cp.serve()
+			_, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+			if code != tc.want {
+				t.Fatalf("a %s mint refusal must exit %d (%s), got %d (%s)\n%s",
+					tc.name, tc.want, siteExitName(tc.want), code, siteExitName(code), stderr)
+			}
+			if !strings.Contains(stderr, "No deployment was minted") {
+				t.Fatalf("a refused mint must say no deployment was minted:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// POST /v1/sites/:id/deployments/:dep_id/artifact — the UPLOAD sub-step. The mint
+// succeeds first, so a refusal here leaves a deployment that IS minted and still
+// queued; that is the state the copy must name.
+func TestRunCloudSiteArtifactUploadExitsByStatusFamily(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	for _, tc := range []siteRefusalCase{
+		{"404 not_found", fakeResp{404, `{"error":"not_found"}`}, exitNotFound},
+		// upload_deployment_artifact/3 and settle_deployment_artifact/5.
+		{"409 deployment_not_queued", fakeResp{409, `{"error":"deployment_not_queued","detail":"this deployment is already building"}`}, exitConflict},
+		{"409 artifact_conflict", fakeResp{409, `{"error":"artifact_conflict","detail":"a different sha is already stored"}`}, exitConflict},
+		// receive_deployment_artifact/3. An oversize artifact is USER-FIXABLE (ship
+		// fewer bytes), so 413 belongs on the generic family, never the transient one.
+		{"413 artifact_too_large", fakeResp{413, `{"error":"artifact_too_large","max_bytes":33554432}`}, exitGeneric},
+		{"422 artifact_digest_mismatch", fakeResp{422, `{"error":"artifact_digest_mismatch","detail":"declared sha does not match the bytes"}`}, exitGeneric},
+		{"422 not_prebuilt", fakeResp{422, `{"error":"not_prebuilt","detail":"this is a box-build row"}`}, exitGeneric},
+		{"500 upload_failed", fakeResp{500, `{"error":"upload_failed","reason":"the request could not be completed"}`}, exitServer},
+		{"503 deploy_not_started", fakeResp{503, `{"error":"deploy_not_started","detail":"the artifact was stored but the build driver could not be started"}`}, exitServer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeDistFixture(t, buildID)
+			cp := newSiteCP(t)
+			cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"` + buildID + `","content_rev":"cr-42","source":"prebuilt"}}`}
+			cp.artifactResp = tc.resp
+			cp.serve()
+			_, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+			if cp.artifactHits != 1 {
+				t.Fatalf("the artifact route was hit %d times — the fixture never reached the arm under test\n%s", cp.artifactHits, stderr)
+			}
+			if code != tc.want {
+				t.Fatalf("a %s upload refusal must exit %d (%s), got %d (%s)\n%s",
+					tc.name, tc.want, siteExitName(tc.want), code, siteExitName(code), stderr)
+			}
+			// The state-after that only this kind can state: the row survives, and
+			// --deployment resumes it rather than minting a fresh (nonced) build id.
+			if !strings.Contains(stderr, "--deployment") {
+				t.Fatalf("a refused upload must point at --deployment — the deployment is still queued:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// GET /v1/sites/:id/deployments/:dep_id — the POLL sub-step, mid-stream. A refused
+// READ must never read as a refused DEPLOY: the build is still running on the box.
+func TestRunCloudSiteDeployPollExitsByStatusFamily(t *testing.T) {
+	for _, tc := range []siteRefusalCase{
+		{"401 unauthorized", fakeResp{401, `{"error":"unauthorized"}`}, exitAuth},
+		{"404 not_found", fakeResp{404, `{"error":"not_found"}`}, exitNotFound},
+		{"500 server_error", fakeResp{500, `{"error":"server_error","request_id":"req-1"}`}, exitServer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := newSiteCP(t)
+			cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+			cp.pollResp = tc.resp
+			cp.serve()
+			_, stderr, code := runSite(t, "table", "deploy", testSiteID)
+			if cp.pollHits == 0 {
+				t.Fatalf("the poll route was never hit — the fixture never reached the arm under test\n%s", stderr)
+			}
+			if code != tc.want {
+				t.Fatalf("a %s poll refusal must exit %d (%s), got %d (%s)\n%s",
+					tc.name, tc.want, siteExitName(tc.want), code, siteExitName(code), stderr)
+			}
+		})
+	}
+}
+
+// The honesty half of the poll conversion: a lost poll is not a lost deploy.
+func TestRunCloudSiteDeployPollRefusalSaysTheBuildIsStillRunning(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+	cp.pollResp = fakeResp{500, `{"error":"server_error","request_id":"req-1"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitServer {
+		t.Fatalf("exit=%d want %d\n%s", code, exitServer, stderr)
+	}
+	if !strings.Contains(stderr, "still running on the box") {
+		t.Fatalf("a refused poll must say the build is untouched and still running:\n%s", stderr)
+	}
+}
+
+// GET /v1/sites/:id/deployments/:dep_id — the pre-flight READ of a `--deployment`
+// id. A stale id pasted from a shell history is a 404, and it now exits 4: the
+// bare cloudFail exited 1, which is what a bad flag value exits, so a script
+// could not tell a typo'd id from a broken deploy.
+func TestRunCloudSiteReadNamedDeploymentExitsByStatusFamily(t *testing.T) {
+	for _, tc := range []siteRefusalCase{
+		{"404 not_found", fakeResp{404, `{"error":"not_found"}`}, exitNotFound},
+		{"500 server_error", fakeResp{500, `{"error":"server_error","request_id":"req-1"}`}, exitServer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeDistFixture(t, "b0b0b0b0b0b0b0b0")
+			cp := newSiteCP(t)
+			cp.pollResp = tc.resp
+			cp.serve()
+			_, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir, "--deployment", "dep-404")
+			if cp.deployHits != 0 {
+				t.Fatalf("--deployment must not mint: the deploy route was hit %d times\n%s", cp.deployHits, stderr)
+			}
+			if code != tc.want {
+				t.Fatalf("a %s named-deployment read must exit %d (%s), got %d (%s)\n%s",
+					tc.name, tc.want, siteExitName(tc.want), code, siteExitName(code), stderr)
+			}
+			// The refusal names the DEPLOYMENT id, not the site: that is the thing
+			// that was not found, and the id is the only value the user can fix.
+			if !strings.Contains(stderr, "dep-404") {
+				t.Fatalf("the refusal must name the deployment id it could not read:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// GET /v1/sites/:id/deployments — the LIST read --wait-for-live loops on. A
+// refusal here loses the WATCH, never the deploy: the re-queued rebuild is still
+// queued.
+func TestRunCloudSiteWaitForLiveListRefusalExitsByStatusFamily(t *testing.T) {
+	const deferred = `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","environment":"production","inserted_at":"2026-08-23T10:00:00Z","stages":[]}}`
+	for _, tc := range []siteRefusalCase{
+		{"401 unauthorized", fakeResp{401, `{"error":"unauthorized"}`}, exitAuth},
+		{"404 not_found", fakeResp{404, `{"error":"not_found"}`}, exitNotFound},
+		{"422 invalid_cursor", fakeResp{422, `{"error":"invalid_cursor","detail":"that cursor is not decodable"}`}, exitGeneric},
+		{"500 server_error", fakeResp{500, `{"error":"server_error","request_id":"req-1"}`}, exitServer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := newSiteCP(t)
+			cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+			cp.pollResp = fakeResp{200, deferred}
+			cp.listResp = tc.resp
+			cp.serve()
+			_, stderr, code := runSite(t, "table", "deploy", testSiteID, "--wait-for-live", "5m")
+			if cp.listHits == 0 {
+				t.Fatalf("the list route was never hit — the fixture never reached the arm under test\n%s", stderr)
+			}
+			if code != tc.want {
+				t.Fatalf("a %s wait-for-live list refusal must exit %d (%s), got %d (%s)\n%s",
+					tc.name, tc.want, siteExitName(tc.want), code, siteExitName(code), stderr)
+			}
+		})
+	}
+}

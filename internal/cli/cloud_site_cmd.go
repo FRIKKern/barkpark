@@ -363,7 +363,9 @@ func siteDatasetClaim(s cloudclient.SpawnSite, req cloudclient.SpawnSiteCreate) 
 // instance-not-live is handled honestly: a box that is still provisioning answers
 // the deploy with a 422 instance_not_live, and the site IS created — so the CLI says
 // exactly that and points at `bp cloud site deploy <ref>` to retry, never a crash or
-// a bare error slug. Every other deploy error rides the shared cloudFail contract.
+// a bare error slug. That check stays FIRST and keeps its create-chain-specific
+// sentence (the site exists — a generic deploy refusal would not say so); every
+// other deploy error now rides the shared siteRefusalFail ladder.
 func chainSiteDeploy(out *writer, cfg *Config, ref string, site cloudclient.SpawnSite) int {
 	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), site.ID, false, "", "")
 	if derr != nil {
@@ -371,7 +373,7 @@ func chainSiteDeploy(out *writer, cfg *Config, ref string, site cloudclient.Spaw
 			out.userErr("site %s created, but its instance is still provisioning — deploy it in a moment with `bp cloud site deploy %s`", ref, ref)
 			return exitGeneric
 		}
-		return cloudFail(out, "deploy site", derr)
+		return siteRefusalFail(out, siteRefusedDeploy, ref, derr)
 	}
 	code, _ := streamSiteDeploy(out, cfg, ref, site.ID, dep, true)
 	return code
@@ -465,7 +467,7 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	}
 	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id, a.bools["force"], via, domain)
 	if derr != nil {
-		return cloudFail(out, "deploy site", derr)
+		return siteRefusalFail(out, siteRefusedDeploy, ref, derr)
 	}
 	code, final := streamSiteDeploy(out, cfg, ref, id, dep, !a.bools["no-follow"])
 	if waitForLive <= 0 {
@@ -538,7 +540,7 @@ func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloud
 		time.Sleep(siteDeployPoll)
 		page, err := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, waitSiteDeployWatchLimit, "")
 		if err != nil {
-			return cloudFail(out, "poll for a live deployment", err)
+			return siteRefusalFail(out, siteRefusedWaitLive, ref, err)
 		}
 		for _, d := range page.Deployments {
 			if st := strings.ToLower(strings.TrimSpace(d.Status)); st != "" && d.ID != deferred.ID {
@@ -594,7 +596,7 @@ func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloud
 // refusal names the deployment it minted, and the second run passes it back with
 // `--deployment <id>`: no new mint, the same build id, the upload lands.
 func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
-	dep, code := resolvePrebuiltDeployment(out, cfg, id, deploymentID, force)
+	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
 		return code
 	}
@@ -642,7 +644,7 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	defer f.Close()
 	up, uerr := cfg.CloudClient().UploadDeploymentArtifact(cloudCtx(), id, dep.ID, f, art.WireBytes, art.SHA256)
 	if uerr != nil {
-		return cloudFail(out, "upload artifact", uerr)
+		return siteRefusalFail(out, siteRefusedArtifact, ref, uerr)
 	}
 	if n := up.Bytes; n > 0 && n != art.WireBytes {
 		out.progressf("  control plane recorded %d bytes (client sent %d)", n, art.WireBytes)
@@ -701,11 +703,16 @@ func prebuiltSiteBase(cfg *Config, id, ref string) (string, bool) {
 // only two states that can accept an upload are "prebuilt" and "queued" — and a
 // stale id from a shell history is otherwise a 409 several seconds later, after
 // the pack.
-func resolvePrebuiltDeployment(out *writer, cfg *Config, id, deploymentID string, force bool) (cloudclient.SiteDeployment, int) {
+//
+// `ref` is the site as the CALLER typed it and is carried only so the two
+// refusals here can name it: the mint's ladder sentences are about the site, and
+// the read's are about the deployment id, which is why that one passes
+// deploymentID as its ref instead.
+func resolvePrebuiltDeployment(out *writer, cfg *Config, ref, id, deploymentID string, force bool) (cloudclient.SiteDeployment, int) {
 	if deploymentID == "" {
 		dep, derr := cfg.CloudClient().MintPrebuiltDeployment(cloudCtx(), id, force)
 		if derr != nil {
-			return dep, cloudFail(out, "mint prebuilt deployment", derr)
+			return dep, siteRefusalFail(out, siteRefusedMint, ref, derr)
 		}
 		out.progressf("→ minted prebuilt deployment %s (build %s) — no build started on the box", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID))
 		return dep, exitOK
@@ -713,7 +720,10 @@ func resolvePrebuiltDeployment(out *writer, cfg *Config, id, deploymentID string
 
 	dep, gerr := cfg.CloudClient().SpawnSiteDeployment(cloudCtx(), id, deploymentID)
 	if gerr != nil {
-		return dep, cloudFail(out, "read deployment "+deploymentID, gerr)
+		// The ref here is the DEPLOYMENT id, not the site: a 404 on this read is
+		// about the id the user pasted from a shell history (the site was already
+		// resolved to get this far), and it now exits 4 instead of the old 1.
+		return dep, siteRefusalFail(out, siteRefusedReadDeployment, deploymentID, gerr)
 	}
 	if src := strings.TrimSpace(dep.Source); src != "" && src != "prebuilt" {
 		return dep, useError(out, "failed", fmt.Sprintf("deployment %s is a %s deploy — it will never read an uploaded artifact; drop --deployment to mint a prebuilt one", deploymentID, src), exitGeneric)
@@ -822,7 +832,7 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 		time.Sleep(siteDeployPoll)
 		fresh, ferr := cfg.CloudClient().SpawnSiteDeployment(cloudCtx(), id, d.ID)
 		if ferr != nil {
-			return cloudFail(out, "poll deployment", ferr), d
+			return siteRefusalFail(out, siteRefusedPoll, ref, ferr), d
 		}
 		d = fresh
 		render(d)
@@ -1447,11 +1457,12 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 	out.outf("  the box teardown ran first (the control plane refuses to deregister a site whose teardown errored), but this envelope carries no measured box state — nothing here read the route, the slots or the tree, so the teardown itself is UNVERIFIED by this receipt.")
 }
 
-// siteRefusalKind names WHICH site verb was refused. The three share the exit
-// ladder and the label, but not their sentences: a refused rollback flipped
-// nothing, a refused teardown leaves a site that is BOTH still registered and
-// still serving, and a refused create never wrote a row at all — copy that blurs
-// them tells the reader the wrong thing about what state their site is now in.
+// siteRefusalKind names WHICH site verb was refused. They share the exit ladder
+// and the label, but not their sentences: a refused rollback flipped nothing, a
+// refused teardown leaves a site that is BOTH still registered and still serving,
+// a refused create never wrote a row at all, and a refused artifact upload leaves
+// a deployment that IS minted and still queued — copy that blurs them tells the
+// reader the wrong thing about what state their site is now in.
 type siteRefusalKind int
 
 const (
@@ -1463,17 +1474,102 @@ const (
 	// status-family exit map (401 → cloudFail, no_team → 1, 404 → 4, 422 → 1,
 	// 5xx → 8) — only its sentences differ, because a refused create wrote nothing.
 	siteRefusedCreate
+
+	// The DEPLOY plane's kinds (cch-w71, D866). `bp cloud site deploy` and its
+	// --prebuilt sub-steps used to hand EVERY refusal to the bare `cloudFail`,
+	// which branches only on a dead session: a 422 the user can fix, a 409 the
+	// plane refused and a 503 that started no build all printed "failed" and
+	// exited 1, so a script could not tell "your input is wrong" from "retry in a
+	// minute". They join the SAME ladder rather than minting a second dialect;
+	// only their sentences differ, because what is left behind differs at every
+	// step of the chain:
+	//
+	//	deploy   — no deployment row was minted, so nothing is building.
+	//	mint     — no deployment exists, so there is nothing to ship bytes to.
+	//	artifact — the deployment IS minted and still queued; only the bytes failed
+	//	           to land, and `--deployment <id>` resumes that exact row.
+	//	read     — a pre-flight READ of a named deployment; nothing was packed and
+	//	           no bytes moved.
+	//	poll     — a READ failed mid-stream. The build is untouched and still
+	//	           running on the box; the CLI only lost sight of it.
+	//	waitlive — a READ failed during --wait-for-live. The re-queued rebuild is
+	//	           still queued; losing the watch does not lose the deploy.
+	//
+	// THE EXIT TABLE IS DERIVED FROM THE LIVE ROUTE ARMS, not invented here. The
+	// deploy plane is one Plug.Router — cloud/lib/barkpark_cloud/web/router.ex,
+	// module BarkparkCloud.Web.Router — and the four routes these kinds call
+	// (POST /v1/sites/:id/deploy, POST /v1/sites/:id/deployments/:dep_id/artifact,
+	// GET /v1/sites/:id/deployments, GET /v1/sites/:id/deployments/:dep_id) emit
+	// exactly these families:
+	//
+	//	401 unauthorized ......... Auth.require_user/2, Auth.require_user_or_pat/2
+	//	403 forbidden ............ Auth.require_ability/2 (required/scope, NOT reason)
+	//	404 not_found ............ Router.with_team_site/3 (teamless OR site-miss),
+	//	                           and each route body's own deployment-miss arm
+	//	409 ...................... upload_deployment_artifact/3 (deployment_not_queued),
+	//	                           settle_deployment_artifact/5 (artifact_conflict),
+	//	                           bind_cloudflare/3, do_bind_cloudflare/5
+	//	413 artifact_too_large ... receive_deployment_artifact/3
+	//	422 ...................... deploy_static_site/2 (instance_not_live,
+	//	                           no_content_binding, prebuilt_not_enabled,
+	//	                           unknown_source), the container arm (no_build_source,
+	//	                           invalid), receive_deployment_artifact/3 (not_prebuilt,
+	//	                           empty_artifact, artifact_digest_mismatch), the list
+	//	                           arm (invalid_cursor)
+	//	5xx ...................... 503 deploy_not_started (deploy_static_site/2 and
+	//	                           start_prebuilt_deploy/5), 500 upload_failed
+	//	                           (receive_deployment_artifact/3), 502
+	//	                           cloudflare_bind_failed / cloudflare_orphan_cleanup_failed
+	//	                           (do_bind_cloudflare/5), 500 server_error
+	//	                           (Router.handle_errors/2 crash slug)
+	//
+	// which the SHARED status-family ladder in siteRefusalExit already codes
+	// correctly with no per-code CLI knowledge: 401 → 3 (via the cloudFail
+	// fallthrough), 403 → 3, 404 → 4, 409 → 6, 413 and 422 → 1, 5xx → 8. Note 413
+	// landing on 1 is the right answer, not an oversight: an oversize artifact is
+	// user-fixable (ship fewer bytes), never transient.
+	//
+	// TWO ladder branches are INERT on this plane and are deliberately NOT
+	// special-cased. `no_team` never appears — with_team_site/3 answers a teamless
+	// caller a bare 404 rather than the 403 {"reason":"no_team"} the team routes
+	// use. And `identity_refused` is minted only by Sites.Deploy.rollback/2 and
+	// Sites.Deploy.teardown/2, so a box that refuses a DEPLOY surfaces as 503
+	// deploy_not_started instead.
+	siteRefusedDeploy
+	siteRefusedMint
+	siteRefusedArtifact
+	siteRefusedReadDeployment
+	siteRefusedPoll
+	siteRefusedWaitLive
 )
 
 // what is the cloudFail fallthrough label — byte-unchanged from the strings these
 // verbs have always printed ("roll site back: …", "delete site: …", "create
-// site: …"), so the shared auth seam reads identically before and after this slice.
+// site: …", "deploy site: …", "upload artifact: …"), so the shared auth seam
+// reads identically before and after this slice.
+//
+// ONE label moved on purpose: the named-deployment pre-flight read used to build
+// its label per call ("read deployment <id>: …"). A label cannot be per-call here
+// — that is the second dialect this type exists to prevent — so the id moved into
+// the `ref` argument, where every ladder arm names it in the sentence itself.
 func (k siteRefusalKind) what() string {
 	switch k {
 	case siteRefusedDelete:
 		return "delete site"
 	case siteRefusedCreate:
 		return "create site"
+	case siteRefusedDeploy:
+		return "deploy site"
+	case siteRefusedMint:
+		return "mint prebuilt deployment"
+	case siteRefusedArtifact:
+		return "upload artifact"
+	case siteRefusedReadDeployment:
+		return "read deployment"
+	case siteRefusedPoll:
+		return "poll deployment"
+	case siteRefusedWaitLive:
+		return "poll for a live deployment"
 	default:
 		return "roll site back"
 	}
@@ -1486,6 +1582,18 @@ func (k siteRefusalKind) noun() string {
 		return "the deletion of"
 	case siteRefusedCreate:
 		return "the creation of"
+	case siteRefusedDeploy:
+		return "the deploy of"
+	case siteRefusedMint:
+		return "the prebuilt mint for"
+	case siteRefusedArtifact:
+		return "the artifact upload for"
+	case siteRefusedReadDeployment:
+		return "the read of deployment"
+	case siteRefusedPoll:
+		return "the deploy poll for"
+	case siteRefusedWaitLive:
+		return "the live-deploy watch on"
 	default:
 		return "the rollback of"
 	}
@@ -1499,29 +1607,76 @@ func (k siteRefusalKind) verb() string {
 		return "delete"
 	case siteRefusedCreate:
 		return "create"
+	case siteRefusedDeploy:
+		return "deploy"
+	case siteRefusedMint:
+		return "mint a prebuilt deployment for"
+	case siteRefusedArtifact:
+		return "upload an artifact for"
+	case siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
+		return "read the deploys of"
 	default:
 		return "roll back"
 	}
 }
 
 // nothingClause is the honesty tail: what did NOT happen, stated positively so a
-// deny path never reads like a partial action.
+// deny path never reads like a partial action. For the three READ kinds it says
+// the same thing from the other side — the deploy is untouched, only the CLI's
+// view of it was lost — because a failed poll that reads like a failed deploy
+// sends the user chasing a build that is running fine.
 func (k siteRefusalKind) nothingClause() string {
 	switch k {
 	case siteRefusedDelete:
 		return "Nothing was torn down and the site is still registered."
 	case siteRefusedCreate:
 		return "No site was created."
+	case siteRefusedDeploy:
+		return "No build was started."
+	case siteRefusedMint:
+		return "No deployment was minted and nothing was uploaded."
+	case siteRefusedArtifact:
+		return "The bytes were not staged, and the deployment is still queued — re-run with `--deployment` to ship to that same row rather than minting a new build id."
+	case siteRefusedReadDeployment:
+		return "Nothing was packed and no bytes were uploaded."
+	case siteRefusedPoll:
+		return "The deploy itself is untouched — this lost sight of a build that is still running on the box."
+	case siteRefusedWaitLive:
+		return "The deploy itself is untouched — the re-queued rebuild is still queued."
 	default:
 		return "Nothing was flipped."
 	}
 }
 
-// siteRefusalFail maps a refused site rollback / delete onto the unified `bp:`
-// error seam — the rollbackFail idiom (cloud_rollback_cmd.go), retargeted at the
-// TYPED refusal both site verbs already carry.
+// nothingTail is nothingClause as a sentence tail, appended by the RELAY arms of
+// siteRefusalMessage (`not_found` and the `default` catch-all) — but only for the
+// deploy-plane kinds.
 //
-// Both verbs used to hand the error to the bare `cloudFail`, which branches only
+// The scoping is deliberate, not timidity. For rollback / delete / create the
+// relay arm is a rare fallthrough: their common refusals each have a dedicated
+// arm that already states what did not happen, and their relay copy has been
+// byte-frozen since #11784. On the deploy plane the relay arm is the COMMON path
+// — most codes deploy_static_site/2 and receive_deployment_artifact/3 emit
+// (unknown_source, deployment_not_queued, artifact_conflict, artifact_too_large,
+// artifact_digest_mismatch, not_prebuilt, invalid_cursor …) have no dedicated arm
+// — so without this tail the MOST FREQUENT deploy refusals would be exactly the
+// ones that never say what state the site is now in, which is the failure this
+// type exists to prevent.
+func (k siteRefusalKind) nothingTail() string {
+	switch k {
+	case siteRefusedDeploy, siteRefusedMint, siteRefusedArtifact,
+		siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
+		return " " + k.nothingClause()
+	}
+	return ""
+}
+
+// siteRefusalFail maps a refused site verb — rollback, delete, create, and (as of
+// cch-w71) deploy plus its mint / upload / read / poll sub-steps — onto the
+// unified `bp:` error seam: the rollbackFail idiom (cloud_rollback_cmd.go),
+// retargeted at the TYPED refusal every one of them already carries.
+//
+// These verbs used to hand the error to the bare `cloudFail`, which branches only
 // on the substring "unauthorized": a 409 the box refused, a 404 that is not our
 // site and a 500 the plane crashed on all printed the label "failed" and exited 1,
 // and `-o json` named none of them. The refusal has been typed since #11711 —
@@ -1680,7 +1835,44 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 		return fmt.Sprintf("the instance could not tear site %q down: %s The site is still registered and may still be serving — the control plane refuses to deregister a site whose teardown errored, so retry once the box is healthy.",
 			ref, siteRefusalDetail(detail, "the box reported no reason."))
 	case "not_found":
+		switch kind {
+		case siteRefusedArtifact, siteRefusedReadDeployment, siteRefusedPoll:
+			// The deploy plane answers a missing SITE and a missing DEPLOYMENT with the
+			// SAME bare {"error":"not_found"} — with_team_site/3 for the site (and for a
+			// teamless caller), each route body's own fallthrough for the deployment id
+			// — deliberately indistinguishable so neither existence leaks. Naming only
+			// the site would send a reader hunting one that is sitting right there.
+			return fmt.Sprintf("no such deployment, or no such site %q (or neither is in your team). %s", ref, kind.nothingClause())
+		case siteRefusedDeploy, siteRefusedMint, siteRefusedWaitLive:
+			// POST /v1/sites/:id/deploy and GET /v1/sites/:id/deployments carry NO
+			// deployment id, so a 404 on them can only be with_team_site/3's — it is
+			// about the site (or the login's team), never a deployment.
+			return fmt.Sprintf("no such site %q (or it is not in your team). %s", ref, kind.nothingClause())
+		}
 		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
+	case "instance_not_live":
+		// The box the site is bound to is not serving yet. deploy_static_site/2 emits
+		// it 422 ("no URL yet"); do_bind_cloudflare/5 emits it 409 when the instance
+		// is deprovisioned mid-bind. Either way the fix is the INSTANCE, not the
+		// deploy the user typed, and nothing about the site or its content changed.
+		return fmt.Sprintf("the control plane refused %s %q — the instance hosting it is not live yet: %s Check the box with `bp cloud status` and retry once it is serving. %s",
+			kind.noun(), ref, siteRefusalDetail(detail, "it has no URL yet."), kind.nothingClause())
+	case "deploy_not_started":
+		// 503, from deploy_static_site/2's box-build arm and from
+		// start_prebuilt_deploy/5. The deployment ROW exists and is audited, but no
+		// build driver started — so this is the one deploy refusal where something
+		// WAS written and nothing is running. The plane splits the fact in two:
+		// `detail` says what is (not) running and what to do about it, `reason` says
+		// why in one retry-actionable clause (Router.transport_reason/1 — prose, not
+		// a slug, so it is relayed and never matched on). The bare cloudFail exited
+		// 1 here, which reads to a script as "your input is wrong"; the ladder's 5xx
+		// family exits 8, which is the truth: retry.
+		msg := fmt.Sprintf("the control plane could not start a build for %q: %s",
+			ref, siteRefusalDetail(detail, "the deployment row was created but nothing is building."))
+		if r := strings.TrimSpace(re.Reason); r != "" {
+			msg += " (" + sanitizeCell(r) + ")"
+		}
+		return msg + kind.nothingTail()
 	case "barkpark_not_found":
 		// create-only: the 404 is about the INSTANCE named to host the site, never
 		// the site (which does not exist yet). Point the reader at --instance, not
@@ -1706,6 +1898,19 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 			// pipeline succeeds, so a crash leaves no site.
 			return fmt.Sprintf("the control plane errored while creating %q: %s %s",
 				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedDeploy, siteRefusedMint:
+			// On the deploy plane a bare `server_error` is only ever the crash slug
+			// (Router.handle_errors/2) — every deliberate 5xx carries its own code. So
+			// the honest thing is that the request died partway, and the row may or may
+			// not exist; the nothingClause per kind says which way to look.
+			return fmt.Sprintf("the control plane errored while starting a deploy for %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedArtifact:
+			return fmt.Sprintf("the control plane errored while receiving the artifact for %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
+			return fmt.Sprintf("the control plane errored while reading the deploys of %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		default:
 			return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
 				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
@@ -1715,10 +1920,11 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 		// twins' detail, `not_rollbackable`, and `registration_not_removed` when it
 		// lands — relays the plane's sentence rather than flattening it to a slug.
 		if detail != "" {
-			return fmt.Sprintf("the control plane refused %s %q (%s): %s",
-				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail))
+			return fmt.Sprintf("the control plane refused %s %q (%s): %s%s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingTail())
 		}
-		return fmt.Sprintf("the control plane refused %s %q (%s)", kind.noun(), ref, sanitizeCell(siteRefusalLabel(re.Code)))
+		return fmt.Sprintf("the control plane refused %s %q (%s)%s",
+			kind.noun(), ref, sanitizeCell(siteRefusalLabel(re.Code)), kind.nothingTail())
 	}
 }
 
