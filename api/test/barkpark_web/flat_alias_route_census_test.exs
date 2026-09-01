@@ -234,14 +234,16 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # AppTokenController.index
     {"GET", "/v1/auth/app-tokens"} =>
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # AppTokenController.create
     {"POST", "/v1/auth/app-tokens"} =>
@@ -256,14 +258,16 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # AppTokenController.delete_current
     {"DELETE", "/v1/auth/app-tokens/current"} =>
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # LoginTicketController.create
     {"POST", "/v1/auth/login-tickets"} =>
