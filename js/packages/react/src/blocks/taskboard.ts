@@ -14,6 +14,7 @@ import {
   str,
   asList,
   isMap,
+  capitalize,
   roleOf,
   glyphHtml,
   glyphChar,
@@ -38,9 +39,6 @@ type Emit = (block: Block) => string
 // (placement) while keeping their dim-neutral glyph (styling) — the two decouple.
 const BOARD_ROLES = ['open', 'ready', 'progress', 'blocked', 'done', 'considering', 'researching']
 
-function capitalize(s: string): string {
-  return s === '' ? s : s.charAt(0).toUpperCase() + s.slice(1)
-}
 function boardLabel(role: string): string {
   return capitalize(labelForRole(role))
 }
