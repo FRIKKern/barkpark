@@ -3083,9 +3083,9 @@ func TestResidualCountsTheSitesTreeToo(t *testing.T) {
 
 	t.Run("a consumer root covering the sites dir counts it once", func(t *testing.T) {
 		s := gatherSpace(SpaceConfig{
-			RootProbe:  func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
-			SitesDir:   "/opt/barkpark/sites",
-			SitesProbe: func() (int64, []SiteSize, error) { return sitesBytes, nil, nil },
+			RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+			SitesDir:           "/opt/barkpark/sites",
+			SitesProbe:         func() (int64, []SiteSize, error) { return sitesBytes, nil, nil },
 			ConsumerRoots:      []string{"/opt/barkpark"},
 			ConsumerRootExists: func(string) bool { return true },
 			ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {

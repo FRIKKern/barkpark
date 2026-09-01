@@ -237,12 +237,12 @@ func jarlSpace() *cloudclient.MetricsSpace {
 			{
 				Path: "/var/lib/barkpark-builder", Status: sptr("read"),
 				Bytes: fp(11575521280), Count: fp(2),
-				Top:   []cloudclient.RelationSize{{Name: "images", Bytes: 11573633024}},
+				Top: []cloudclient.RelationSize{{Name: "images", Bytes: 11573633024}},
 			},
 			{
 				Path: "/var/log/journal", Status: sptr("read"),
 				Bytes: fp(1971761152), Count: fp(2),
-				Top:   []cloudclient.RelationSize{{Name: "e82ca0d33eb64f0f84e134be7b72c656", Bytes: 1963364352}},
+				Top: []cloudclient.RelationSize{{Name: "e82ca0d33eb64f0f84e134be7b72c656", Bytes: 1963364352}},
 			},
 		},
 		Residual: &cloudclient.MetricsSpaceResidual{
