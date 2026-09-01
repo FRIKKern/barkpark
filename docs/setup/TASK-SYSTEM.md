@@ -67,9 +67,10 @@ bp task claim t1 agent-1            # <doc_id> <worker_id>
 # Voluntary walk-away (fenced)
 bp task release t1 agent-1 1        # <doc_id> <worker> <epoch>
 
-# Mid-claim: stamp a criterion — met or honestly missed (--criterion N is ZERO-based: 0 = the first)
+# Mid-claim: stamp a criterion — met, honestly missed, or WITHDRAWN (--criterion N is ZERO-based: 0 = the first)
 bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --met --evidence "gate green"
 bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
+bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --withdraw --note "review: the gate ran on the wrong branch"
 
 # ... pulse the now-line as you work (renews the lease)
 bp task pulse t1 agent-1 --now "warm-up pinned, rerunning" --criterion 2
@@ -80,6 +81,26 @@ bp task close t1 agent-1 1          # <doc_id> <worker> <epoch> [status] [reason
 # Close with evidence: flips ride the same rev-CAS — but a flip made HERE is not proof of itself.
 bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"PR #123","criterion":"gate passes"}]'
 ```
+
+**Withdrawing a proof.** `--withdraw` is the only verb that LOWERS a met flag,
+and it exists because review usually refutes a proof *after* the close: before
+it, a reviewer could only write "[WITHDRAWN BY WAVE REVIEW …]" into the
+criterion's own evidence, and every board went on counting the criterion met. A
+withdrawal sets `met: false` so `criteria_progress` drops, **leaves the original
+evidence exactly where it was** (append-only is kept by adding, never by
+clearing), and appends a `{note, ts, worker, superseded_evidence}` record to the
+criterion's `withdrawals` list — so the correction is signed and the superseded
+proof stays readable. It needs `--criterion-text` for the same reason `--met`
+does (lowering the wrong neighbour is as much a lie as raising it), refuses an
+already-unmet criterion (`409 criterion_not_met`), and needs no `--merge-gated`
+on a merge gate (lowering a lock cannot fabricate a done). It is also the one
+stamp outcome allowed on a **sealed** row: on an `in_progress` row it is
+holder-only and epoch-fenced like any stamp, and on a done/cancelled/open row it
+takes `--observed-rev <the rev you read>` instead (`409 observed_rev_required`).
+A bare `met:true → met:false` patch is still refused everywhere — an un-flip that
+leaves no trace is the silent rewrite the append-only rule exists to prevent.
+`python3 scripts/withdrawn_but_met.py --live` finds criteria still flagged met
+whose evidence retracts itself in prose (the pre-verb convention).
 
 The full contract — what each verb fences on, and every refusal it can emit —
 is [the claim-lifecycle contract](../contracts/task-claim-lifecycle.md); how to

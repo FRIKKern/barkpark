@@ -24,7 +24,7 @@ defmodule Barkpark.Tasks.StampTest do
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.{Document, MutationEvent}
-  alias Barkpark.Tasks.{Close, Internal, Stamp}
+  alias Barkpark.Tasks.{Close, Criteria, Internal, Stamp}
 
   import Ecto.Query, only: [from: 2]
 
@@ -770,6 +770,437 @@ defmodule Barkpark.Tasks.StampTest do
                  criterion_text: "not the stored wording",
                  outcome: {:met, "e"}
                )
+    end
+  end
+
+  # ─── (7) THE WITHDRAWAL (D745, wave 62) ──────────────────────────────────
+  #
+  # The scar: a met flag that review later refutes had NO verb. `--met` only
+  # raises and `--miss` only pins, so a reviewer who found a stamped proof false
+  # wrote the correction into the criterion's own evidence prose —
+  # "[WITHDRAWN BY WAVE REVIEW … the ledger refuses a met:true -> met:false
+  # patch, so read this evidence, not the flag]" — and every board went on
+  # counting the criterion MET. Twelve criteria across two live rows carry
+  # exactly that today.
+  #
+  # These tests pin the verb AND its refusals, and each one can lose:
+  #   * clear the evidence on withdrawal and the append-only test reds;
+  #   * skip the withdrawals record and the signature test reds;
+  #   * drop the criterion-text CAS on the lowering direction and the
+  #     fail-closed test reds;
+  #   * make --withdraw in_progress-only and the sealed-row test reds — which
+  #     is the case that matters, because BOTH real instances are sealed rows.
+
+  defp withdrawal_of(task_id, index) do
+    task_id |> criteria_of() |> Enum.at(index) |> Map.get("withdrawals")
+  end
+
+  # A row whose criterion 0 is already stamped MET with real evidence — the
+  # state every withdrawal starts from.
+  defp stamped_task!(scope, worker \\ "w") do
+    doc_id = uniq("stamp-withdraw")
+    task = mk_task!(doc_id, scope)
+    {_claimed, epoch} = claim!(doc_id, worker, scope)
+
+    {:ok, _} =
+      Stamp.stamp(task.id, worker,
+        observed_epoch: epoch,
+        criterion: 0,
+        criterion_text: "gate passes",
+        outcome: {:met, "42 tests green: stamp_test.exs"}
+      )
+
+    {task, epoch}
+  end
+
+  describe "stamp/3 — --withdraw lowers the lock and signs the correction" do
+    test "met drops to false, criteria_progress drops, and the record names who/why/when",
+         %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      # THE PRE-WITHDRAWAL READ (criterion 1 of the filing: quote both).
+      before = Enum.at(criteria_of(task.id), 0)
+      assert before["met"] == true
+      assert before["evidence"] == "42 tests green: stamp_test.exs"
+      assert Map.get(before, "withdrawals") == nil
+      assert Criteria.progress(%{"acceptance_criteria" => criteria_of(task.id)}) ==
+               %{met: 1, total: 2}
+
+      assert {:ok, withdrawn} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 outcome: {:withdraw, "review: the gate ran on the wrong branch"}
+               )
+
+      # THE POST-WITHDRAWAL READ.
+      after_row = Enum.at(withdrawn.content["acceptance_criteria"], 0)
+      assert after_row["met"] == false, "the lock is LOWERED — this is the whole point"
+
+      # THE APPEND-ONLY GUARANTEE: the original stamp is still exactly where it
+      # was written, still readable. A withdrawal ADDS; it never clears.
+      assert after_row["evidence"] == "42 tests green: stamp_test.exs"
+      assert after_row["criterion"] == "gate passes"
+
+      assert [record] = after_row["withdrawals"]
+      assert record["worker"] == "w"
+      assert record["note"] == "review: the gate ran on the wrong branch"
+      assert {:ok, _, _} = DateTime.from_iso8601(record["ts"])
+
+      # The superseded proof is snapshotted ON the record too, so it stays
+      # legible even if the criterion is later re-stamped over.
+      assert record["superseded_evidence"] == "42 tests green: stamp_test.exs"
+
+      # Progress DROPPED — the board stops lying without anybody reading prose.
+      assert Criteria.progress(%{"acceptance_criteria" => criteria_of(task.id)}) ==
+               %{met: 0, total: 2}
+
+      # Neighbours and the claim are untouched.
+      assert Enum.at(withdrawn.content["acceptance_criteria"], 1) ==
+               %{"criterion" => "docs updated", "met" => false, "evidence" => ""}
+
+      assert withdrawn.content["claim"]["epoch"] == epoch
+    end
+
+    test "a re-stamp after a withdrawal keeps the withdrawal readable, and a second withdrawal appends",
+         %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "w",
+          observed_epoch: epoch,
+          criterion: 0,
+          criterion_text: "gate passes",
+          outcome: {:withdraw, "first: wrong branch"}
+        )
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "w",
+          observed_epoch: epoch,
+          criterion: 0,
+          criterion_text: "gate passes",
+          outcome: {:met, "re-run on the right branch: 42 green"}
+        )
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "w",
+          observed_epoch: epoch,
+          criterion: 0,
+          criterion_text: "gate passes",
+          outcome: {:withdraw, "second: the re-run was vacuous"}
+        )
+
+      # UNBOUNDED and ORDERED. `attempts` is capped at 5 because it is chatter;
+      # a withdrawal is a correction, and silently dropping a correction is the
+      # defect this verb exists to end.
+      assert [first, second] = withdrawal_of(task.id, 0)
+      assert first["note"] == "first: wrong branch"
+      assert second["note"] == "second: the re-run was vacuous"
+
+      # Each record snapshots the evidence IT superseded — not the latest one.
+      assert first["superseded_evidence"] == "42 tests green: stamp_test.exs"
+      assert second["superseded_evidence"] == "re-run on the right branch: 42 green"
+      assert Enum.at(criteria_of(task.id), 0)["met"] == false
+    end
+
+    test "the event is emitted with result=withdrawn and a withdrawn marker", %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      {:ok, _} =
+        Stamp.stamp(task.id, "w",
+          observed_epoch: epoch,
+          criterion: 0,
+          criterion_text: "gate passes",
+          outcome: {:withdraw, "review refuted it"}
+        )
+
+      payload =
+        task.doc_id
+        |> criterion_events()
+        |> List.last()
+        |> Map.get(:document)
+        |> Map.get("criterion_stamp")
+
+      assert payload["result"] == "withdrawn"
+      assert payload["withdrawn"] == true
+      assert payload["index"] == 0
+      assert payload["worker"] == "w"
+    end
+  end
+
+  describe "stamp/3 — --withdraw refusals (each one writes NOTHING)" do
+    test "no criterion text → :criterion_text_required, exactly as a met-flip",
+         %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      assert {:error, :criterion_text_required} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 outcome: {:withdraw, "no text passed"}
+               )
+
+      # Lowering the WRONG neighbour is as much a lie as raising it, so the
+      # guard is symmetric — and nothing moved.
+      assert Enum.at(criteria_of(task.id), 0)["met"] == true
+      assert withdrawal_of(task.id, 0) == nil
+    end
+
+    test "a text that does not match the row at N → :criteria_mismatch", %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      assert {:error, :criteria_mismatch} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 criterion_text: "docs updated",
+                 outcome: {:withdraw, "wrong index"}
+               )
+
+      assert Enum.at(criteria_of(task.id), 0)["met"] == true
+    end
+
+    test "an empty note → :note_required (a withdrawal without a why is a silent un-flip)",
+         %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      assert {:error, :note_required} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 outcome: {:withdraw, ""}
+               )
+
+      assert Enum.at(criteria_of(task.id), 0)["met"] == true
+    end
+
+    test "withdrawing an already-unmet criterion → :criterion_not_met", %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      assert {:error, :criterion_not_met} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 criterion_text: "docs updated",
+                 outcome: {:withdraw, "there is nothing here to withdraw"}
+               )
+
+      assert withdrawal_of(task.id, 1) == nil,
+             "a retraction of nothing would only mislead the next reader"
+    end
+
+    test "a live claim still fences a withdrawal: wrong worker and wrong epoch both refuse",
+         %{scope: scope} do
+      {task, epoch} = stamped_task!(scope)
+
+      assert {:error, :not_holder} =
+               Stamp.stamp(task.id, "someone-else",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 outcome: {:withdraw, "not mine to withdraw"}
+               )
+
+      assert {:error, :fenced_off} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch + 7,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 outcome: {:withdraw, "stale epoch"}
+               )
+
+      assert Enum.at(criteria_of(task.id), 0)["met"] == true
+    end
+  end
+
+  # ─── (7b) THE SEALED ROW — the case the whole verb exists for ────────────
+  #
+  # Both live instances of the class are CLOSED rows: cch-w58-s2 (done) and
+  # arpss-share-link-object-authz-close (cancelled). A withdrawal that
+  # inherited stamp's `in_progress`-and-holder-only fence could not correct a
+  # single one of them, so off the in_progress arm the fence is the rev the
+  # caller read instead. These tests red if that path is removed.
+
+  describe "stamp/3 — --withdraw on a SEALED row (no claim to fence against)" do
+    defp sealed_task!(scope) do
+      {task, epoch} = stamped_task!(scope)
+
+      {:ok, closed} =
+        Close.close(task.id, "w",
+          observed_epoch: epoch,
+          lifecycle_status: "done",
+          criteria_override: "closing with criterion 1 unmet on purpose"
+        )
+
+      # THE PREMISE these tests rest on, asserted rather than assumed: a closed
+      # row still CARRIES its claim, but as a RECEIPT (`closed_at` stamped on
+      # it), not as a live lease. So "does a claim exist" is the wrong question
+      # — branching on it would make a reviewer impersonate the departed holder
+      # to withdraw that holder's own refuted proof. Liveness is the question,
+      # and the lifecycle answers it.
+      assert closed.content["claim"]["closed_at"] != nil
+      assert closed.content["claim"]["worker"] == "w"
+      assert closed.content["lifecycle_status"] == "done"
+      {task, closed}
+    end
+
+    test "without --observed-rev it is refused, naming the read it needs", %{scope: scope} do
+      {task, _closed} = sealed_task!(scope)
+
+      assert {:error, :observed_rev_required} =
+               Stamp.stamp(task.id, "reviewer",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 outcome: {:withdraw, "review refuted the proof"}
+               )
+
+      assert Enum.at(criteria_of(task.id), 0)["met"] == true
+    end
+
+    test "a stale rev is refused — you cannot correct a row you did not read", %{scope: scope} do
+      {task, _closed} = sealed_task!(scope)
+
+      assert {:error, :stale_claim} =
+               Stamp.stamp(task.id, "reviewer",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 observed_rev: "not-the-rev-you-read",
+                 outcome: {:withdraw, "review refuted the proof"}
+               )
+
+      assert Enum.at(criteria_of(task.id), 0)["met"] == true
+    end
+
+    test "with the rev it read, the withdrawal lands and the SEAL is untouched",
+         %{scope: scope} do
+      {task, closed} = sealed_task!(scope)
+
+      assert {:error, {:not_in_progress, "done"}} =
+               Stamp.stamp(task.id, "reviewer",
+                 observed_epoch: 0,
+                 criterion: 1,
+                 criterion_text: "docs updated",
+                 outcome: {:met, "a --met on a sealed row is still refused"}
+               ),
+             "the seal still refuses a RAISE — only the lowering verb is exempt"
+
+      assert {:ok, doc} =
+               Stamp.stamp(task.id, "reviewer",
+                 observed_epoch: 0,
+                 criterion: 0,
+                 criterion_text: "gate passes",
+                 observed_rev: closed.rev,
+                 outcome: {:withdraw, "WITHDRAWN BY REVIEW: the gate ran on the wrong branch"}
+               )
+
+      row = Enum.at(doc.content["acceptance_criteria"], 0)
+      assert row["met"] == false
+      assert row["evidence"] == "42 tests green: stamp_test.exs", "append-only, still"
+      assert [%{"worker" => "reviewer"} = rec] = row["withdrawals"]
+      assert rec["note"] =~ "WITHDRAWN BY REVIEW"
+
+      # And note WHO: "reviewer", not the holder "w" whose proof this refutes.
+      # A correction is signed by the person making it.
+      assert closed.content["claim"]["worker"] == "w"
+
+      # The seal itself is NOT rewritten: lifecycle, close_reason and the
+      # closed-ness of the row all survive a post-hoc correction.
+      assert doc.content["lifecycle_status"] == "done"
+      assert doc.content["close_reason"] == closed.content["close_reason"]
+      assert doc.content["claim"] == closed.content["claim"],
+             "the close receipt is not rewritten by a later correction"
+    end
+  end
+
+  # ─── (7c) A MERGE GATE can be withdrawn without the lead-only override ────
+
+  describe "stamp/3 — --withdraw and the merge gate" do
+    test "a merge-gated criterion is withdrawable with no --merge-gated", %{scope: scope} do
+      {task, epoch} = mg_task!(scope)
+      text = "[MERGE-GATED — the lead closes this] PR merged to main"
+
+      # Raise it as the lead would, then let a reviewer refute it.
+      {:ok, _} =
+        Stamp.stamp(task.id, "builder",
+          observed_epoch: epoch,
+          criterion: 1,
+          criterion_text: text,
+          merge_gated: true,
+          outcome: {:met, "PR #123 merged"}
+        )
+
+      assert {:ok, doc} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 criterion_text: text,
+                 outcome: {:withdraw, "the PR was closed, not merged"}
+               )
+
+      row = Enum.at(doc.content["acceptance_criteria"], 1)
+      assert row["met"] == false
+      assert [%{"note" => "the PR was closed, not merged"}] = row["withdrawals"]
+    end
+  end
+
+  # ─── (7d) THE SILENT UN-FLIP IS STILL REFUSED ────────────────────────────
+  #
+  # The withdrawal is NOT a licence to un-flip. The write surface still offers
+  # no way to send a bare met:true -> met:false patch: `parse_stamp` accepts
+  # exactly one of --met / --miss / --withdraw, and a body carrying met=false
+  # names no verb at all. This test is what keeps the fix from becoming the
+  # hole it was built to close.
+
+  describe "the wire surface still refuses a bare met:true -> met:false patch" do
+    alias BarkparkWeb.TasksController.Params
+
+    test "a body with met=false names no verb and is a 400, not an un-flip" do
+      assert {:error, :invalid_stamp, msg} =
+               Params.parse_stamp(%{"criterion" => "0", "met" => "false"})
+
+      assert msg =~ "--withdraw"
+      assert msg =~ "met:true -> met:false"
+    end
+
+    test "met=false with evidence is still refused — evidence does not buy a lower" do
+      assert {:error, :invalid_stamp, _} =
+               Params.parse_stamp(%{
+                 "criterion" => "0",
+                 "met" => false,
+                 "evidence" => "[WITHDRAWN BY WAVE REVIEW]"
+               })
+    end
+
+    test "--withdraw parses to the withdraw outcome and requires a note" do
+      assert {:ok, 0, {:withdraw, "why"}, "the text"} =
+               Params.parse_stamp(%{
+                 "criterion" => "0",
+                 "withdraw" => "true",
+                 "note" => "why",
+                 "criterion-text" => "the text"
+               })
+
+      assert {:error, :invalid_stamp, msg} =
+               Params.parse_stamp(%{"criterion" => "0", "withdraw" => "true"})
+
+      assert msg =~ "--withdraw requires non-empty --note"
+    end
+
+    test "two verbs at once are refused" do
+      assert {:error, :invalid_stamp, msg} =
+               Params.parse_stamp(%{
+                 "criterion" => "0",
+                 "met" => "true",
+                 "withdraw" => "true",
+                 "evidence" => "e",
+                 "note" => "n"
+               })
+
+      assert msg =~ "not two"
     end
   end
 end
