@@ -2002,16 +2002,50 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 // doRequestCT is doRequest plus the response Content-Type — the discriminator
 // screenUnpaginatedRead needs to tell a plaintext gateway banner from an
 // honest non-JSON payload like onixedit.export's ONIX 3.0 XML.
+//
+// It sends through retryingDispatchClient (dispatch_retry.go) rather than a
+// bare per-call client, which is the whole of this function's change: a GET or
+// HEAD that meets a transient internal_error 500 is now retried on the SAME
+// bounded policy the /v1/capabilities fetch has always used — same 3-attempt
+// cap, same 250ms/1s backoff, same deadline-budget check, same stderr line per
+// retry. That closes the defect: `bp` printed "transient internal_error …
+// retrying" for its capabilities call and then hard-failed the actual command
+// on the very next 500, because the manifest dispatch shared none of that
+// machinery.
+//
+// A non-GET/HEAD request through here is NOT retried and never was: the
+// transport's method gate hands it straight back, so all ~30 non-manifest
+// callers of doRequest/doRequestCT keep byte-identical single-shot behaviour.
+// The one class of write that DOES get repeated is the task ledger write, and
+// it does not come through here at all — it takes sendLedgerWrite, whose retry
+// RE-READS the store before every attempt (tasks_write_retry.go). One request,
+// one retry policy.
 func doRequestCT(method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, error) {
-	status, respBody, ct, _, err := doRequestFull(method, rawURL, headers, body)
+	status, respBody, ct, _, err := doRequestUsing(retryingDispatchClient(), method, rawURL, headers, body)
 	return status, respBody, ct, err
 }
 
-// doRequestFull is doRequestCT plus the response HEADERS. Only the ledger-write
-// retry reads them, and only for one field: Retry-After, which a server uses to
-// name its own recovery window. Added alongside rather than replacing
-// doRequestCT so none of its call sites had to change.
+// doRequestFull is doRequestCT plus the response HEADERS, sent on a SINGLE-SHOT
+// client. Only the ledger-write path calls it — for the write itself and for
+// the read-backs that confirm whether the write landed — and it reads the
+// headers for one field: Retry-After, which a server uses to name its own
+// recovery window.
+//
+// It deliberately does NOT ride retryingDispatchClient. A ledger write already
+// carries a retry (sendLedgerWrite), and that one is safe precisely because it
+// re-reads the store between attempts; stacking the transport's blind repeat
+// underneath it would multiply the attempts and re-send a POST the read-back
+// never got to vet. Two retry policies on one request is not twice as robust,
+// it is one policy nobody owns.
 func doRequestFull(method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, http.Header, error) {
+	return doRequestUsing(&http.Client{Timeout: dispatchClientTimeout, CheckRedirect: checkRedirect}, method, rawURL, headers, body)
+}
+
+// doRequestUsing is the send both of the above share, parameterised on the ONE
+// thing that differs between them: the client (and so the retry policy). Split
+// out rather than duplicated so a change to header handling, redirect policy or
+// the response cap cannot apply to one path and miss the other.
+func doRequestUsing(client *http.Client, method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, http.Header, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -2023,7 +2057,6 @@ func doRequestFull(method, rawURL string, headers map[string]string, body []byte
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, "", nil, err
