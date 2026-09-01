@@ -1940,7 +1940,7 @@ func TestLogoutIdempotentWhenLoggedOut(t *testing.T) {
 // The fixture below is the control plane's OWN 502: router.ex 7741 answers a
 // site create whose read-token mint failed with
 // {"error":"read_token_mint_failed","detail":<mint_failure_copy>}, and
-// mint_failure_copy/mint_failure_detail (router.ex 13711-13763) RELAY THE BOX'S
+// mint_failure_copy/mint_failure_detail (router.ex 13775-13805) RELAY THE BOX'S
 // OWN REFUSAL VERBATIM — "…: <code> — <message>". A box whose stored admin token
 // is dead answers with its canonical auth slug, the literal string
 // "unauthorized" (api/lib/barkpark/content/errors.ex builds
