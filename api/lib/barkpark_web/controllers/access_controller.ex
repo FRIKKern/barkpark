@@ -18,6 +18,51 @@ defmodule BarkparkWeb.AccessController do
       (`[:user_auth, :require_user]`): an authenticated user binds a grant
       addressed to their email.
 
+  ## Denial shape for `:id`-addressed grants (SECURITY)
+
+  `show/2` and `revoke/2` answer on a THREE-rung ladder, so a grant id the
+  caller cannot see is indistinguishable from one that does not exist:
+
+    * grant missing ......................................... 404 `not_found`
+    * grant exists, caller not authorized in its workspace
+      AT ALL (a FOREIGN tenant) ............................. 404 `not_found`
+    * grant exists, caller may read the workspace but is
+      neither grantor nor admin (IN-TENANT) ................. 403 `forbidden`
+
+  The two 404 rungs return through the SAME `not_found/1`, so they are
+  byte-identical by construction. Before this, a foreign-tenant id answered
+  403 while a missing one answered 404 — an existence oracle letting one
+  tenant enumerate another's opaque grant ids, and the one genuine
+  counter-example to the denial-shape law stated in
+  `BarkparkWeb.ShareLinkController`'s moduledoc. The in-tenant 403 is
+  deliberately KEPT: it is a real authorization signal about a grant the
+  caller can already see.
+
+  KNOWN REMAINING EXPOSURE (not closed here): the LiveView twin
+  `BarkparkWeb.Studio.StudioLive.Handlers.AccessPanel.access_revoke/2` branches
+  `{:error, :forbidden}` (an inline error) apart from `{:error, :not_found}` (a
+  "no longer active" flash) off the same `Access.revoke/2` result, so the same
+  distinction survives there. It is a narrower surface — an authenticated
+  Studio session driving a crafted `phx` event rather than an open HTTP verb —
+  and lives outside this file. Closing it means giving that handler the same
+  three-rung ladder.
+
+  ## Malformed `workspace_id` → 403, not a crash (CONTRACT)
+
+  A non-UUID `workspace_id` on `GET /v1/access?workspace_id=` or in the
+  `POST /v1/access` mint body once bound a non-UUID string to a `:binary_id`
+  column and raised `Ecto.Query.CastError`. `Barkpark.Tenancy.Auth.authorize/3`
+  is now TOTAL for malformed ids (totality inherited from its `membership/2`
+  seam), so both endpoints answer **403 `forbidden`** — the same answer a
+  well-formed but unauthorized or nonexistent `workspace_id` gets. Clients that
+  keyed on the old crash status must treat it as a denial.
+
+  403 is deliberate rather than a 422 "malformed" body: splitting malformed
+  from unauthorized would re-open the very information channel the ladder above
+  closes. Every unusable `workspace_id` — malformed, nonexistent, or merely not
+  yours — answers alike. `index/2` authorizing without first resolving the
+  workspace is the SAME accepted shape, not an oversight.
+
   ## Field hygiene (SECURITY)
 
   Every grant rendered to JSON is field-WHITELISTED by `render_grant/1`; the
@@ -103,7 +148,12 @@ defmodule BarkparkWeb.AccessController do
         if authorized_manager?(principal, grant) do
           json(conn, %{grant: render_grant(grant)})
         else
-          forbidden(conn, "only the grantor or a workspace admin may read this grant")
+          deny_visible_or_missing(
+            conn,
+            principal,
+            grant,
+            "only the grantor or a workspace admin may read this grant"
+          )
         end
     end
   end
@@ -114,9 +164,29 @@ defmodule BarkparkWeb.AccessController do
     principal = conn.assigns[:api_token]
 
     case Access.revoke(id, principal) do
-      {:ok, grant} -> json(conn, %{grant: render_grant(grant)})
-      {:error, :forbidden} -> forbidden(conn, "only the grantor or a workspace admin may revoke")
-      {:error, :not_found} -> not_found(conn)
+      {:ok, grant} ->
+        json(conn, %{grant: render_grant(grant)})
+
+      {:error, :not_found} ->
+        not_found(conn)
+
+      {:error, :forbidden} ->
+        # Re-resolve to pick WHICH denial. `Access.revoke/2` collapses "foreign
+        # tenant" and "in-tenant non-manager" into one `:forbidden`; the ladder
+        # in the moduledoc needs them apart, and only the grant's workspace can
+        # tell them apart.
+        case Access.get_grant(id) do
+          %Access.Grant{} = grant ->
+            deny_visible_or_missing(
+              conn,
+              principal,
+              grant,
+              "only the grantor or a workspace admin may revoke"
+            )
+
+          nil ->
+            not_found(conn)
+        end
     end
   end
 
@@ -166,6 +236,20 @@ defmodule BarkparkWeb.AccessController do
     grant
     |> Map.from_struct()
     |> Map.take(@public_fields)
+  end
+
+  # The ONE denial decision for an `:id`-addressed grant the caller may not
+  # manage — see the "Denial shape" moduledoc section for the ladder. A caller
+  # that cannot even `:read` the grant's workspace is a FOREIGN tenant and must
+  # get the missing-grant answer verbatim; anyone who can see the workspace
+  # keeps the real 403. Both callers of this route through `not_found/1`, so
+  # the foreign and missing responses cannot drift apart.
+  defp deny_visible_or_missing(conn, principal, %Access.Grant{} = grant, message) do
+    if Auth.authorize(principal, grant.workspace_id, :read) == :ok do
+      forbidden(conn, message)
+    else
+      not_found(conn)
+    end
   end
 
   # Grantor-or-workspace-admin — the same authority Access.revoke enforces.

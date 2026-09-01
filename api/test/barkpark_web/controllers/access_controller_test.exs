@@ -7,9 +7,11 @@ defmodule BarkparkWeb.AccessControllerTest do
       lacks the conferred capability.
     * `GET /v1/access` is grantor/workspace-scoped — one workspace's grants
       never bleed into another's; no `link_token_hash` in output.
-    * `GET /v1/access/:id` is grantor-or-admin; a stranger is 403; a non-UUID is
-      a clean 404 (never a 500).
-    * `DELETE /v1/access/:id` revokes, is idempotent, and 403s a stranger.
+    * `GET /v1/access/:id` is grantor-or-admin; a stranger — who can see no
+      workspace at all — gets the missing-grant 404, never a 403 confirming the
+      id is real; a non-UUID is a clean 404 (never a 500).
+    * `DELETE /v1/access/:id` revokes, is idempotent, and gives a stranger the
+      same missing-grant 404.
     * `POST /v1/access/claim` funnels every failure (wrong account / nonexistent
       / expired / used) through ONE byte-identical JSON error; success binds
       `grantee_user_id`.
@@ -215,13 +217,17 @@ defmodule BarkparkWeb.AccessControllerTest do
       refute Map.has_key?(body, "link_token_hash")
     end
 
-    test "a stranger (non-grantor, non-admin) is denied", %{conn: conn} do
+    # A stranger is a member of NO workspace, so it cannot see this grant's
+    # workspace at all — it gets the missing-grant answer, not a 403 that would
+    # confirm the id is real. The in-tenant 403 is pinned separately in
+    # `access_controller_oracle_crash_test.exs`.
+    test "a stranger (non-grantor, non-admin) gets the missing-grant 404", %{conn: conn} do
       ws = create_workspace!()
       {grant, _} = mint_grant(ws, "g@example.com")
       stranger = stranger_token()
 
       conn = conn |> bearer(stranger) |> get("/v1/access/#{grant.id}")
-      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+      assert json_response(conn, 404)["error"]["code"] == "not_found"
     end
 
     test "a non-UUID id is a clean 404 (never a 500)", %{conn: conn} do
@@ -249,13 +255,14 @@ defmodule BarkparkWeb.AccessControllerTest do
       assert json_response(second, 200)["grant"]["id"] == grant.id
     end
 
-    test "a stranger cannot revoke → 403", %{conn: conn} do
+    # Same denial-shape reason as `show`: a stranger must not learn the id is real.
+    test "a stranger cannot revoke → the missing-grant 404", %{conn: conn} do
       ws = create_workspace!()
       {grant, _} = mint_grant(ws, "g@example.com")
       stranger = stranger_token()
 
       conn = conn |> bearer(stranger) |> delete("/v1/access/#{grant.id}")
-      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+      assert json_response(conn, 404)["error"]["code"] == "not_found"
     end
   end
 
