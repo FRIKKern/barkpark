@@ -326,7 +326,7 @@ defmodule BarkparkCloud.MetricsTest do
   describe "build/3 — window filtering + totality" do
     test "non-health events are excluded from the window" do
       events = [
-        %AgentEvent{type: "backup", payload: %{"ok" => true}, inserted_at: @now},
+        %AgentEvent{type: "status", payload: %{"transition" => "online"}, inserted_at: @now},
         health(20, full_vitals(%{"cpu_percent" => 42})),
         %AgentEvent{type: "verify", payload: %{}, inserted_at: @now}
       ]

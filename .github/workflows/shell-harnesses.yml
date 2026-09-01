@@ -257,6 +257,20 @@ on:
       - ".github/workflows/hundesteder.yml"
       - ".github/workflows/astro-search-finder-test.yml"
       - ".github/workflows/search-starter-smoke.yml"
+      - "scripts/compose-smoke-dispatch.test.sh"
+      - ".github/workflows/compose-smoke.yml"
+      - "scripts/env-census.py"
+      - "scripts/workflow-trigger-coverage.sh"
+      - "scripts/workflow-trigger-coverage.test.sh"
+      # FLEET COORDINATION (task-f89c2aed221d9fdb). Three subjects and three
+      # harnesses. Until now no workflow named any of the six, so all three
+      # self-tests were unreachable: they could not fire and could not lose.
+      - "scripts/already-fixed.sh"
+      - "scripts/already-fixed.test.sh"
+      - "scripts/branch-owner.sh"
+      - "scripts/branch-owner.test.sh"
+      - "scripts/pr-overlap.sh"
+      - "scripts/pr-overlap.test.sh"
   push:
     branches: [main]
     paths:
@@ -395,6 +409,21 @@ on:
       - ".github/workflows/hundesteder.yml"
       - ".github/workflows/astro-search-finder-test.yml"
       - ".github/workflows/search-starter-smoke.yml"
+      - "scripts/compose-smoke-dispatch.test.sh"
+      - ".github/workflows/compose-smoke.yml"
+      - "scripts/env-census.py"
+      - "scripts/workflow-trigger-coverage.sh"
+      - "scripts/workflow-trigger-coverage.test.sh"
+      # FLEET COORDINATION (task-f89c2aed221d9fdb). Mirrored from
+      # on.pull_request.paths — doc-gates-paths-parity-check.sh runs against
+      # this file at the end of this workflow and reds unless the two lists are
+      # set-equal, so an entry added to one list only is a red on this PR.
+      - "scripts/already-fixed.sh"
+      - "scripts/already-fixed.test.sh"
+      - "scripts/branch-owner.sh"
+      - "scripts/branch-owner.test.sh"
+      - "scripts/pr-overlap.sh"
+      - "scripts/pr-overlap.test.sh"
 
 permissions:
   contents: read
@@ -1094,3 +1123,105 @@ jobs:
         # plus the named open human gate (see the script header and
         # docs/ops/github-sync.md §1).
         run: bash scripts/merge-gate-autostamp-liveness.test.sh
+
+  # ── FLEET COORDINATION HARNESSES (task-f89c2aed221d9fdb) ───────────────────
+  # Three subjects and three harnesses that no workflow named until now. Every
+  # one of the six was absent from this file, from .githooks/, from the Makefile
+  # and from docs/, so each self-test was unreachable: it could not fire and it
+  # could not lose. The logic underneath is live fleet tooling, not a prototype.
+  #
+  # already-fixed.sh answers "is this on origin/main?" by CONTENT — git show,
+  # git grep, git log -S — and structurally refuses to read a PR's `merged`
+  # flag in any mode, using `gh` only as an enumerator. That refusal is the
+  # whole point: a squash rewrites the commit, so `--is-ancestor` on a PR head
+  # is always false, and a stacked PR reports merged:true while its code sits
+  # in the parent branch, absent from main. Harness case 13 pins exactly that.
+  #
+  # branch-owner.sh reads a bp claim FLAT at `.claim` and carries a measured
+  # BSD-date fix: `date -j` accepted a trailing Z, reinterpreted the stamp as
+  # local time, exited 0 silently, and on a CEST host aged every claim by 120
+  # minutes — turning a live owner into POSSIBLY-STALE.
+  #
+  # pr-overlap.sh exits 2 HOLD and prints no map when any `gh` call fails,
+  # because an empty overlap map is indistinguishable from "none found".
+  #
+  # All three harnesses stub git, gh and bp; nothing reaches the network, a
+  # credential, or the real repo. python3 is the sole unstubbed dependency.
+  fleet-coordination-harnesses:
+    name: already-fixed / branch-owner / pr-overlap harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (two subjects exit 2 without it)
+        # pr-overlap.sh:105 hard-refuses without python3, and branch-owner.sh
+        # uses it for iso_to_epoch and claim_fields. Both turn absence into a
+        # correct but illegible exit 2. ubuntu-latest ships python3; this step
+        # makes the dependency fail BY NAME if an image change removes it.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — pr-overlap and branch-owner parse timestamps with it" >&2
+            exit 1
+          }
+          python3 --version
+      - name: already-fixed.sh syntax check
+        run: bash -n scripts/already-fixed.sh
+      - name: already-fixed.test.sh syntax check
+        run: bash -n scripts/already-fixed.test.sh
+      - name: content beats a merged flag (hermetic, git and gh stubbed)
+        # NO `continue-on-error` here or anywhere in this file. It launders a
+        # red into a green job conclusion, which is the one signal the fleet
+        # and branch protection actually read.
+        run: bash scripts/already-fixed.test.sh
+      - name: branch-owner.sh syntax check
+        run: bash -n scripts/branch-owner.sh
+      - name: branch-owner.test.sh syntax check
+        run: bash -n scripts/branch-owner.test.sh
+      - name: claim-freshness matrix (hermetic, git and gh and bp stubbed)
+        run: bash scripts/branch-owner.test.sh
+      - name: pr-overlap.sh syntax check
+        run: bash -n scripts/pr-overlap.sh
+      - name: pr-overlap.test.sh syntax check
+        run: bash -n scripts/pr-overlap.test.sh
+      - name: a failed gh call must HOLD and print no map
+        run: bash scripts/pr-overlap.test.sh
+
+  # ── COMPOSE-SMOKE DISPATCHER (task-d6c8da73955e4820) ───────────────────────
+  # compose-smoke.yml decides smoke=true|false from a hand-written grep over the
+  # changed-file set. That predicate was anchored to the repo root plus ^api/,
+  # while the job it gates runs env-census over BOTH runtime roots. So the gate
+  # censused cloud/ and no cloud/ change could start it — present, and blind to
+  # half its own subject.
+  #
+  # The harness EXTRACTS the predicate from compose-smoke.yml rather than
+  # copying it, and re-derives the census's roots from env-census.py's own
+  # --root choices, so a third root or a re-narrowed filter reds by name.
+  compose-smoke-dispatcher:
+    name: compose-smoke dispatcher covers the census roots
+  # ── WORKFLOW TRIGGER COVERAGE (task-8556d43c305b2747) ──────────────────────
+  # A path filter alternative that matches nothing can never fire, and the
+  # workflow still reads as gated. twoslash.yml gated on apps/docs/** — zero of
+  # 10,490 files — while the docs app is js/docs/. The repo already recorded
+  # that the path was fictional and nobody changed the filter.
+  #
+  # Clean-tree, not never-worse: this was the ONLY dead alternative across 630
+  # globs in 58 workflows, so there is no debt to grandfather and no baseline
+  # that can rot. If it ever reds, a filter really is pointing at nothing.
+  workflow-trigger-coverage:
+    name: every workflow path filter matches something
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: harness syntax check
+        run: bash -n scripts/compose-smoke-dispatch.test.sh
+      - name: the dispatcher can fire on every root the census reads
+        run: bash scripts/compose-smoke-dispatch.test.sh
+      - name: subject syntax check
+        run: bash -n scripts/workflow-trigger-coverage.sh
+      - name: harness syntax check
+        run: bash -n scripts/workflow-trigger-coverage.test.sh
+      - name: prove the check can lose (hermetic, synthetic trees)
+        run: bash scripts/workflow-trigger-coverage.test.sh
+      - name: no declared path alternative is dead
+        run: bash scripts/workflow-trigger-coverage.sh

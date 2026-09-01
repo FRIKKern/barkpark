@@ -57,12 +57,17 @@ defmodule Barkpark.Content.ErrorsTest do
     assert is_binary(env.hint) and env.hint != ""
   end
 
+  # The catch-all's CODE is the stable half — `BarkparkCloud.Sites.Deploy.
+  # transient_refusal?/1` keys its retry grace on it. The MESSAGE now names the
+  # unmatched term's SHAPE (never its values) and the term is logged; both are
+  # pinned in full, with the leak guards, in errors_unmatched_reason_test.exs.
   test "catch-all unknown reason maps to internal_error with a hint" do
     Logger.metadata(request_id: nil)
 
-    env = Errors.to_envelope(:totally_unexpected)
+    {env, _log} = ExUnit.CaptureLog.with_log(fn -> Errors.to_envelope(:totally_unexpected) end)
+
     assert env.code == "internal_error"
-    assert env.message == "unknown error"
+    assert env.message == "unknown error (:totally_unexpected)"
     assert env.status == 500
     assert is_binary(env.hint) and env.hint != ""
   end

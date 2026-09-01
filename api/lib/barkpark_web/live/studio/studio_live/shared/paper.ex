@@ -94,13 +94,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # socket, because `write_capable?/2` returns TRUE there BY DESIGN (the
   # intentionally-open public-demo posture). Nobody may read this as
   # "anonymous is now denied".
+  # pds-w42-bl-handle-info-write-seam-audit — PUBLIC, because the paper ops are
+  # not the only hook-invisible write door. The `handle_info` sweep found a
+  # second one: `{:autosave_form, form}` → `Shared.do_autosave/2` →
+  # `Content.upsert_draft`, which reached persisted state with no principal
+  # check of its own. That seam calls THESE two functions rather than
+  # re-deriving the rule, so the two doors cannot drift into two answers to
+  # "may this principal write" — the acceptance criterion is explicitly "no
+  # forked predicate".
   @write_denied_notice "You don't have access to do that."
 
-  defp write_denied?(socket) do
+  @doc """
+  Is this socket's principal denied `:write`? The negation of
+  `Caps.write_capable?/2` — THE single copy of the `:write` tier — fed FRESH
+  caps, so a mid-session grant expiry denies immediately.
+
+  Shared by every hook-invisible write seam (`paper_pane_op/2`, `paper_ops/2`,
+  the block-op branch, and `Shared.do_autosave/2`). Do not re-derive it.
+  """
+  def write_denied?(socket) do
     not Caps.write_capable?(socket.assigns, Caps.derive(socket))
   end
 
-  defp refuse_write_denied(socket) do
+  @doc """
+  The refusal a write-denied seam returns: the deny-gate's own flash wording,
+  plus a `save_status` that says "Read-only" instead of lying about a save.
+  """
+  def refuse_write_denied(socket) do
     socket
     |> put_flash(:error, @write_denied_notice)
     |> assign(save_status: "Read-only")

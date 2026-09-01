@@ -21,10 +21,16 @@ A PR targeting `main` must clear:
    `continue-on-error: true` and is deliberately absent from every required
    aggregator's `needs:` (see §"Blocking, required, and the difference" below).
 3. **`mix-prod-compile` CI job** — same workflow, gated only by the `changes`
-   dispatcher (`needs: [changes]` at elixir.yml:510 — there is **no** edge to
-   `mix-test`; the in-file comment at :515 records why it was removed, and a
-   reader who plans around a test→compile ordering is planning around an edge
-   that no longer exists). Cleans `api/_build/prod`, force-recompiles deps,
+   dispatcher (`needs: [changes]` under the `mix-prod-compile:` job key in
+   elixir.yml — there is **no** edge to `mix-test`; the "NO needs: mix-test"
+   comment directly beneath it records why it was removed, and a reader who
+   plans around a test→compile ordering is planning around an edge that no
+   longer exists. Cited by JOB KEY, not by line, and the reason is measured:
+   this sentence read "elixir.yml:510 … at :515" until 2026-09-01, by which
+   time the job had moved past line 760 — and it moved AGAIN during the very
+   session that fixed it, when an unrelated merge landed in the same workflow.
+   A line number in a doc is correct exactly once; `grep -n '^  mix-prod-compile:'`
+   is correct always). Cleans `api/_build/prod`, force-recompiles deps,
    then runs `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the
    gate** — and it stops a merge transitively, as an upstream `needs:` of the
    required `Elixir gate`.
@@ -81,19 +87,26 @@ A PR targeting `main` must clear:
    **unresolvable = a loud red**, never grandfathered. A guard that cannot tell
    must fail, not wave the PR through: the two-state version reported SUCCESS
    having skipped every downstream step;
-   **hotfix lane — DISARMED, and applying the label makes things WORSE** — a
-   `hotfix!` label was designed to pass the gate AND auto-file an override task,
-   because the record is the CONDITION of the bypass. `BARKPARK_TASK_TOKEN` is
-   **not provisioned** (repo secrets are `BREAKGLASS_TOKEN CP_HOST
-   DEPLOY_SSH_KEY GUERRILLA_HOST HETZNER_DNS_TOKEN NPM_TOKEN`), so
-   `hotfix_record` **exits 1** — and it is the only step that still runs once
-   the lane engages, since every evaluating step carries `if: … hotfix != '1'`.
-   The label itself **does exist**, so applying it today converts a
-   merge-blocking required context from "evaluate the PR" into a guaranteed
-   red. It **reds**; it does not pass. `scripts/pr-task-gate.test.sh` pins that
-   red (`ok hotfix record: no token REDS (exit 1)`), and even with the token the
-   lane is circular during a guerrilla outage: it files its record on the same
-   ledger that is down. **The armed override is break-glass** — see
+   **hotfix lane — ARMED SINCE 2026-08-25, and nothing on this page said so
+   until 2026-09-01** — a `hotfix!` label waives the gate AND auto-files an
+   override task, because the record is the CONDITION of the bypass. This item
+   read "DISARMED … it **reds**; it does not pass" on the ground that
+   `BARKPARK_TASK_TOKEN` was **not provisioned**. That ground is GONE:
+   `gh secret list` shows the secret created **2026-08-25T11:00:10Z**. With it
+   set, `hotfix_record` skips its empty-token `exit 1` arm, POSTs the override
+   task, and **exits 0 on a 200/201** — every evaluating step then skips
+   (`if: … hotfix != '1'`), the job succeeds, and the required context
+   `PR references an active task` goes GREEN. `scripts/pr-task-gate.test.sh`
+   pins exactly that arm (`record_case "hotfix record: filed passes" "tok"
+   "$REC_BASE" 0`). So the label is a real bypass of a merge-blocking required
+   context, gated only on the ledger accepting the write — treat applying it as
+   a merge-authority decision, not a retry. Two things did NOT change: the lane
+   is circular during a guerrilla outage (it files its record on the ledger that
+   is down), and fork PRs get no secret, so there the empty-token red stands.
+   **WHY NO GATE CAUGHT THIS**: the census in `pr-task-gate.test.sh` runs the
+   `hotfix_record` body with a hard-coded `TASK_TOKEN=""`, so it measures a
+   synthetic no-token refusal and is blind to the repo's real secret state — it
+   cannot notice provisioning. **The other armed override is break-glass** — see
    [Break-glass](#break-glass-the-armed-override), below;
    **lapsed-claim rule — "live when this PR opened"** (charter D58; the
    `LAPSE_GRACE_SECONDS` wall-clock grace it replaced is GONE, and there is no
@@ -239,7 +252,7 @@ is harmless:
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
   `gofmt drift ceiling (blocking)` (`.github/workflows/go-format.yml`) is a real,
   working guard: it reds by name on any new off-roster gofmt drift and fails
-  closed on a vacuous scan (`OK: 739 Go files scanned; 0 off-roster drift`). It
+  closed on a vacuous scan (`OK: 838 Go files scanned; 0 off-roster drift`). It
   is not required, not `needs:`-ed by any required aggregator, and — because
   go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
   is structurally ineligible to be required, since an absent context reports
@@ -311,28 +324,32 @@ merge was correct by the rule the automation applies. The rule is the gap.
 
 **The mechanism is the trigger block, not the required list.** A workflow with a
 `push:` arm re-runs against the merge commit, so a red one on the PR is a red one
-on main — required or not. Measured 2026-08-24 over the 55 workflows carrying an
-`on:` block:
+on main — required or not. **RE-DERIVE these counts; do not quote them.** They
+were measured 2026-08-24 over 55 workflows and were stale within a day — three
+workflows landed 2026-08-24/25 (`research-coverage-suite`, `hundesteder`,
+`chronicle-paper`) and this block still read "41 of 55" on 2026-09-01. The
+figures below are the 2026-09-01 re-derivation:
 
 ```bash
-# workflows that re-run on main after a merge — 41 of 55
+# workflows that re-run on main after a merge — 42 of 57 on 2026-09-01
 for f in .github/workflows/*.yml; do
   awk '/^on:/{f=1} f{print} f&&/^[a-z]/&&!/^on:/{exit}' "$f" \
     | grep -q '^  push:' && echo "$f"
 done | wc -l
 ```
 
-- **41 carry a `push:` arm** (38 of them scoped to `branches: [main]`) — every one
+- **42 carry a `push:` arm** (40 of them scoped to `branches: [main]`) — every one
   runs again on the merge commit.
-- **36 of those 41 also run on `pull_request`.** These are the ones the incident
+- **37 of those 42 also run on `pull_request`.** These are the ones the incident
   is about: you saw the red before merging, it had no merge authority, and it
   moved onto main anyway.
 - **5 are push-only** — `cli-release`, `deploy`, `release-artifact`, `release`,
   `scaffy-catalog-drift`. They can red main with **no pre-merge signal at all**,
   because they never appear on a PR to be read.
-- **8 are `pull_request`-only and never run on main**: `pr-task-gate`,
+- **9 are `pull_request`-only and never run on main**: `pr-task-gate`,
   `reland-check`, `architecture`, `twoslash`, `search-template-gates`,
-  `deploy-harnesses`, `weekly-changelog`, and `main-gate-watch` itself. A red
+  `deploy-harnesses`, `weekly-changelog`, `chronicle-paper`, and
+  `main-gate-watch` itself. A red
   there **cannot** red main, because nothing re-runs it there.
 
 So the question to ask of a red check is never "is it required?" but
@@ -587,30 +604,38 @@ Elixir security gates, path-triggered on `api/**`:
    baseline emptied — taking it to **57**. Which is why the paragraph above
    says derive, not quote.
 
-   **Amended precondition — the floor is 10, not 0.** The flip is gated on the
+   **Amended precondition — the floor is 9, not 0.** The flip is gated on the
    baseline holding **ONLY entries that provably cannot carry an inline
    `# sobelow_skip` annotation**, enumerated by type and count. The floor is a
    property of sobelow 0.14.1's architecture, not of the baseline's size: it is
-   **10** today (so 79 of the 89 rows above are annotatable), in two mechanical
-   classes. Derive the denominator with the command above rather than quoting
-   this paragraph's:
+   **9** today, out of a baseline of 41 rows
+   (`grep -c '^[A-Za-z]' api/.sobelow-skips`), in two mechanical classes.
+   Derive both numbers rather than quoting this paragraph — it said **10** and
+   **8** until 2026-09-01, having predicted its own decay two paragraphs down
+   and never been re-derived after the fix landed:
 
    | Class | Count | Entries | Why no annotation can ever reach it |
    |---|---|---|---|
-   | `Sobelow.Config.*` | **8** | 6 `Config.CSRF` + 1 `Config.Headers` (`router.ex`) + 1 `Config.HTTPS` (`config/prod.exs:0`) | `sobelow.ex` calls `Config.fetch(project_root, routers, endpoints)` and only *then* does `allowed = allowed -- [Config, Vuln]`. Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted. `config/prod.exs:0` has no function to annotate at all. |
-   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:67`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` builds the template AST with `EEx.compile_string(File.read!(filepath))`. It bypasses `Parse.read_file/1`, the reader that rewrites `# sobelow_skip [...]` into `@sobelow_skip [...]` when `--skip` is set, so a template's source never sees the substitution. |
+   | `Sobelow.Config.*` | **7** | 6 `Config.CSRF` + 1 `Config.HTTPS` (`config/prod.exs:0`) | `sobelow.ex` calls `Config.fetch(project_root, routers, endpoints)` and only *then* does `allowed = allowed -- [Config, Vuln]`. Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted. `config/prod.exs:0` has no function to annotate at all. |
+   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:95`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` builds the template AST with `EEx.compile_string(File.read!(filepath))`. It bypasses `Parse.read_file/1`, the reader that rewrites `# sobelow_skip [...]` into `@sobelow_skip [...]` when `--skip` is set, so a template's source never sees the substitution. |
+
+   The `Config.Headers` row in `router.ex` that made this class 8 is **gone** —
+   wave 24 slice S2 fixed the underlying code, exactly as the paragraph below
+   said it would. The `.heex` line numbers are part of each row's fingerprint,
+   so read them off `api/.sobelow-skips`, never from memory: this table carried
+   `bulldocs.html.heex:67` for the row that is really at `:95`.
 
    The third `XSS.Raw` entry (`controllers/error_html.ex:25`) is a normal `.ex`
    function and **is** annotatable — it is not part of the floor. Re-evaluate
-   the flip when the baseline contains nothing but those 10; do not re-evaluate
+   the flip when the baseline contains nothing but those 9; do not re-evaluate
    on "reaches 0", which cannot happen.
 
-   **The floor is 10 only while the findings still exist.** It is a count of
+   **The floor holds only while the findings still exist.** It is a count of
    *unannotatable* findings, not of *unfixable* ones — fixing the underlying
-   code removes a row from the floor. Wave 24 slice S2 does exactly that to the
-   single `Config.Headers` finding in `router.ex`, taking the floor **10 → 9**.
-   Re-derive the floor from the table above after any such fix; do not treat 10
-   as a constant.
+   code removes a row from the floor. Wave 24 slice S2 did exactly that to the
+   single `Config.Headers` finding in `router.ex`, taking the floor **10 → 9**;
+   the table above lagged that landing by weeks. Re-derive the floor from
+   `api/.sobelow-skips` after any such fix; it is never a constant.
 
    **Topology: the S4 objection is DEAD as of wave 10 — one blocker remains.**
    This entry used to conclude "no `security.yml` check can be required", on two
@@ -638,11 +663,22 @@ Elixir security gates, path-triggered on `api/**`:
      has. `scripts/security-gate-shape.test.sh` forces this shape (deriving the
      continue-on-error set FROM the workflow, so it self-corrects the day Sobelow
      becomes blocking), and the unfiltered `gate-shape` job runs it on every head.
-   - **The remaining blocker is not topology — it is that `mix-audit` is red on
-     main.** Registering `Security gate` today would install a permanently
-     CORRECT red. The dep bump that clears it is open as #8222. Once it merges
-     and the name has rendered on qualifying heads (`scripts/registration-sample.sh`
-     is the instrument), `Security gate` is registrable.
+   - **The remaining blocker is not topology, and it is no longer a live red
+     either — it is that `mix-audit` reads a LIVE advisory database.** This
+     bullet said "`mix-audit` is red on main … the dep bump that clears it is
+     open as #8222" until 2026-09-01. Both halves are dead: 95ace3150 landed the
+     req bump 2026-07-31 from outside that epic, `Security gate` and its
+     `Dependency CVE audit` leaf both conclude **success** on main head today,
+     and #8222 is **CLOSED with `mergedAt: null`** (`gh pr view 8222 --json
+     state,mergedAt`) — so "once it merges" was a trigger that could never fire.
+     `.github/required-checks.json` re-grounded this on 2026-07-31 and this page
+     never followed. The standing ground is forward-looking: a CVE published
+     tomorrow reds `Security gate` on every open PR with no change to this repo,
+     a permanently correct red no PR can clear, which is what branch protection
+     must never pin. Registering it needs its own wave — a written policy for
+     who clears a fleet-wide advisory red, plus a fresh
+     `scripts/registration-deadlock-sweep.sh` — not a silent promotion by the
+     next regeneration.
 
    So flipping `continue-on-error: true` → `false` on `sobelow` now DOES change
    the picture: the shape ratchet immediately demands it be added to the
@@ -656,7 +692,7 @@ Elixir security gates, path-triggered on `api/**`:
    only honest one.
 
    **Provenance: D75 is a dangling citation.** "D75" has no defining charter
-   entry. It is cited at `bp-felix-pristine-charter.md:904` and `:2165` and at
+   entry. It is cited at `bp-felix-pristine-charter.md:904` and `:2158` and at
    this file's flip verdict, but the felix charter's own **D75** (`:1163`,
    "Fresh-eyes last corner honestly clean") is a different subject entirely.
    This paragraph — introduced by `34b9b25d3` (#5474) — is D75's only extant
@@ -788,24 +824,31 @@ gh api repos/:owner/:repo/branches/main/protection/required_status_checks \
 gh api repos/:owner/:repo/branches/main/protection --jq '.enforce_admins.enabled'
 ```
 
-Two human-provisioned prerequisites before flipping it on:
+Two human-provisioned prerequisites, both settled — the flip itself happened
+2026-07-28:
 - **`BARKPARK_TASK_TOKEN`** repo secret — a guerrilla write token, so the
-  `hotfix!` lane can auto-file its override task. It is **not provisioned**, and
-  without it the lane **reds**: `hotfix_record` exits 1, and because every
-  evaluating step carries `if: … hotfix != '1'` that failing step is the only
-  one left, so the label turns a required context into a guaranteed red. The
-  token is not a record-keeping nicety — it is what the lane needs to exist at
-  all. Provisioning it is a lead call (a guerrilla WRITE credential in CI), and
-  even then the lane cannot rescue a guerrilla outage, because it writes its
-  record to guerrilla.
+  `hotfix!` lane can auto-file its override task. **PROVISIONED 2026-08-25**
+  (`gh secret list`). This bullet said "It is **not provisioned**, and without
+  it the lane **reds**" until 2026-09-01; with the secret set that is inverted —
+  the label now WAIVES a merge-blocking required context, see the hotfix-lane
+  item under *Pre-merge gates*. The token was never a record-keeping nicety —
+  it is what the lane needs to exist at all — so provisioning it armed the
+  bypass, and that is a lead-level merge-authority fact, not a CI detail. Two
+  limits survive: the lane cannot rescue a guerrilla outage (it writes its
+  record to guerrilla), and fork PRs receive no secret.
 - Optionally `BARKPARK_LEDGER_BASE` repo **variable** to point the gate at a
   different ledger instance (defaults to `https://guerrilla.barkpark.cloud`).
 
 ## Break-glass — the armed override
 
-When a required context must be lowered, the mechanism that actually works is
-**not** the `hotfix!` lane (see above: it reds). It is `scripts/breakglass.sh`,
-run by a repo admin from a checkout:
+When a required context must be lowered, the mechanism with an enforced record
+is `scripts/breakglass.sh`, run by a repo admin from a checkout. (This sentence
+read "the mechanism that actually works is **not** the `hotfix!` lane (see
+above: it reds)" until 2026-09-01. The lane has been armed since 2026-08-25 and
+does waive the gate; it is the *unreviewed* override — its record is filed by
+CI onto the very ledger an outage would have taken down. Break-glass refuses
+without `--reason` and `--task` and reads its record back off disk first, which
+is why it stays the one to reach for.)
 
 ```
 scripts/breakglass.sh --open  --reason "…" --task <task-id> [--total]
@@ -974,7 +1017,7 @@ nothing.
 The deciding structure, not the naming: `.github/workflows/doc-gates.yml`
 publishes exactly ONE check-run context — the job name `Doc budgets + anchors`
 — and `.github/required-checks.json` files that context as an **S4
-PATHS-FILTERED** exclusion row, one of 25, not one of the four required
+PATHS-FILTERED** exclusion row, one of 26, not one of the four required
 contexts (`Cloud gate`, `Console gate`, `Elixir gate`, `PR references an active
 task`). The workflow also carries a workflow-level `on: … paths:` filter, so on
 a PR touching none of those paths the check is simply ABSENT. Said negatively,
@@ -1020,7 +1063,7 @@ so its verdict is unaffected.) In workflow order:
 | 13 | Studio link/path | `scripts/studio-link-lint.sh` (+ `--selftest`) |
 | 14 | Web literal-color | `scripts/web-literal-check.sh` |
 | 15 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
-| 16 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
+| 16 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` · `lineref-sweep.mjs` (`--selftest`, then the sweep) |
 | 17 | New file:line citations in comments | `scripts/new-lineref-check.sh` (+ `--selftest`) |
 | 18 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
 | 19 | Nil-polarity fail-closed gate | `scripts/nil-polarity-check.sh` (+ `--selftest`) |
@@ -1035,7 +1078,7 @@ retired; it was fixed in #4473).
 
 ### What step 1 covers under `docs/ops/` — and what this page's own header means
 
-`scripts/check-doc-budgets.sh` gates a fixed 28-row byte table (pinned by
+`scripts/check-doc-budgets.sh` gates a fixed 29-row byte table (pinned by
 `CAPS_ROWS_EXPECTED`), the 7 `docs/cards/*.md`, and the pinned
 `docs/setup/CODEX.md` onramp span — nothing else. Under `docs/ops/` that table
 names exactly **one** file of the twenty: `docs/ops/PROD_OPS.md` (6000B). Every
@@ -1046,9 +1089,17 @@ This page's own header claimed `budget: 800tok` until 2026-08-23 while the file
 was ~59KB (~15k tok) — a 50x-false figure nothing could red, precisely because
 the page is outside the CAPS table (filed as
 `cch-w49-bl-merge-gates-budget-header-enforces-nothing`). Decision, written
-down here: the header now states a ceiling the file actually lives under
-(`16000tok` ≈ 64,000B at the repo's ~4B/tok convention; the file measures
-~61KB) and remains **unenforced**. Dropping the figure instead was not an option — G1 in
+down here: the header states `16000tok` (≈ 64,000B at the repo's ~4B/tok
+convention) and remains **unenforced** — so it is a stated intent, not a
+ceiling the file is held to. It said the file "actually lives under" that
+number until 2026-09-01, when the page was measured past its own declared
+budget and, being outside the CAPS table, nothing reded. Measure with `wc -c`,
+never from this paragraph — a byte figure typed here has no producer and goes
+stale in its own commit. That is not hypothetical: this sentence has now
+carried three of them ("~61KB", then a byte count that was already wrong by
+~3.6KB the moment the commit correcting it landed, because writing the
+correction grew the file). It carries none now, which is the only version that
+cannot rot. Dropping the figure instead was not an option — G1 in
 `scripts/docs-anchors-check.sh` requires `budget: [0-9]+tok` on every active
 doc — and enforcing the old 800tok would mean splitting the canonical
 merge-authority page. Adding this page to the CAPS table is a deliberate

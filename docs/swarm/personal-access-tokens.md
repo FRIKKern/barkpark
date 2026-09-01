@@ -53,7 +53,9 @@ gap analysis flagged.
 - `lib/barkpark_cloud/accounts.ex` — `create/list/revoke/verify_personal_access_token`,
   throttled `last_used_at` stamp, session verify honours `revoked_at`/`context`.
 - `lib/barkpark_cloud/web/auth.ex` — `require_user_or_pat/2`, `require_ability/2`,
-  `forbidden/1` (a session implies `["root"]`, so the browser is never gated).
+  `forbidden/2` (a session implies `["root"]`, so the browser is never gated). Arity
+  1 is refused on purpose — a default `evidence \\ []` reds the Cloud gate, which
+  compiles with `--warnings-as-errors`.
 - `lib/barkpark_cloud/web/router.ex` — session-only `GET/POST/DELETE /v1/tokens`,
   `pat_json/1`, `parse_expiry/1`; opted `GET /v1/me`, `GET /v1/barkparks`,
   `GET /v1/sites` (read), `POST /v1/sites/:id/deploy` (write), and go-live (deploy)
@@ -84,15 +86,18 @@ cd cloud && mix deps.get && mix ecto.migrate && mix test \
 cd api && mix deps.get && mix ecto.migrate && mix test test/barkpark/auth_test.exs
 ```
 
-Manual smoke (cloud, logged-in session token `$S`):
+Manual smoke (cloud, logged-in session token `$S`). NOTE THE PORT: the cloud control
+plane listens on **4100** (`config :barkpark_cloud, BarkparkCloud.Web.Endpoint, ... port: 4100`,
+and `runtime.exs` defaults `PORT` to the same); 4000 is `api/`'s Phoenix endpoint, so the
+older spelling of these commands hit the wrong app.
 
 ```bash
-curl -XPOST localhost:4000/v1/tokens -H "authorization: Bearer $S" \
+curl -XPOST localhost:4100/v1/tokens -H "authorization: Bearer $S" \
   -H 'content-type: application/json' \
   -d '{"name":"ci-key","abilities":["write"],"expires_in_days":30}'   # → 201 {token: bpc_pat_…, pat:{…}}
 PAT=bpc_pat_…
-curl localhost:4000/v1/barkparks -H "authorization: Bearer $PAT"       # read → 200
-curl -XPOST localhost:4000/v1/sites/$ID/deploy -H "authorization: Bearer $PAT"  # write → 201
+curl -fsS localhost:4100/v1/barkparks -H "authorization: Bearer $PAT"   # read → 200
+curl -fsS -XPOST localhost:4100/v1/sites/$ID/deploy -H "authorization: Bearer $PAT"  # write → 201
 ```
 
 ## Adaptation deltas + honest caveats

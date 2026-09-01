@@ -23,7 +23,7 @@ SDK read path (introduced in `@barkpark/core@1.0.0-preview.1`):
 
 ## Code anchors
 
-- `js/packages/core/src/docs.ts` — query envelope read path (`data.result?.documents ?? data.documents ?? []`, line 61)
-- `js/packages/core/src/doc.ts` — single-doc envelope read path (result-key conditional, lines 57–60)
+- `js/packages/core/src/docs.ts` — query envelope read path — the list executor inside `createDocsOperation` (`data.result?.documents ?? data.documents ?? []`)
+- `js/packages/core/src/doc.ts` — single-doc envelope read path — the `'result' in data` conditional inside `getDoc`
 - `js/packages/core/src/client.ts` — public client constructor; delegates to doc.ts and docs.ts
 - `api/lib/barkpark_web/controllers/query_controller.ex` — envelope producer

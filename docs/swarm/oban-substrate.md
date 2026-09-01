@@ -50,9 +50,9 @@ free-text shell `command`s inside containers; this substrate only ever runs
 
 ## Barkpark port source (the precedent copied)
 
-- `api/mix.exs:60` — `{:oban, "~> 2.17"}`.
-- `api/config/config.exs:81-118` — queues + Pruner + Cron.
-- `api/config/test.exs:43` — `testing: :manual`.
+- `api/mix.exs` — the `{:oban, "~> 2.17"}` dep.
+- `api/config/config.exs` — the `config :barkpark, Oban` block: queues + `Oban.Plugins.Pruner` + `Oban.Plugins.Cron`.
+- `api/config/test.exs` — `config :barkpark, Oban, testing: :manual`.
 - `api/lib/barkpark/application.ex` — `{Oban, oban_config}` child after Repo.
 - `api/priv/repo/migrations/20260426100001_create_oban_jobs.exs` — `Oban.Migrations.up()`.
 - `api/lib/barkpark/workers/smoke.ex` — the trivial-worker shape (the offered fallback).

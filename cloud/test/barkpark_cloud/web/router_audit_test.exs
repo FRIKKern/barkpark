@@ -18,6 +18,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   import ExUnit.CaptureLog, only: [with_log: 1]
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.Accounts.AuditEvent
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.StubGateway
   alias BarkparkCloud.GitHub
@@ -109,6 +110,23 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
   defp events(team, action),
     do: team |> Accounts.list_audit_events() |> Enum.filter(&(&1.action == action))
+
+  # ROW-COUNT WITNESSES (cch-w54). `events/2` and `actions/1` both read through
+  # `Accounts.list_audit_events/2`, which is `where: e.team_id == ^tid` — so
+  # neither can be asked "was a row written AT ALL?". That is the exact blind
+  # spot of `audit_account_security/2` in the cloud router, whose TWO
+  # fail-open arms — the `nil` `current_team` skip and the `record_audit`
+  # `{:error, cs}` branch — each log and then fall through to a bare `:ok`
+  # produced OUTSIDE the `case`. Neither caller inspects it, so a 200 plus a
+  # log line is exactly what a SUCCESSFUL write also produces. Only a count
+  # can tell them apart.
+  defp audit_count, do: Repo.aggregate(AuditEvent, :count)
+
+  # Rows attributable to `user` on ANY team. For a team-less user this is the
+  # platform-level question the console cannot answer, and unlike the bare
+  # global count it is immune to rows this test did not create.
+  defp audit_count_for(user),
+    do: Repo.aggregate(from(e in AuditEvent, where: e.actor_user_id == ^user.id), :count)
 
   ## Request helpers
 
@@ -1385,6 +1403,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
     test "POST /v1/account/two-factor/confirm writes twofa.enabled" do
       {user, team, token} = logged_in()
       secret = enroll_two_factor(user)
+      before_count = audit_count()
 
       conn =
         call(
@@ -1395,6 +1414,12 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         )
 
       assert conn.status == 200
+
+      # FAIL-OPEN ARM 2 (`record_audit` -> `{:error, cs}`) is invisible to a
+      # team+action-scoped read of a DIFFERENT verb, so pin the global delta:
+      # exactly one row entered the table, not zero and not two.
+      assert audit_count() == before_count + 1
+      assert audit_count_for(user) == 1
 
       assert [ev] = events(team, "twofa.enabled")
       assert ev.team_id == team.id
@@ -1442,8 +1467,12 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
           totp_code_stable!(secret)
         )
 
+      before_count = audit_count()
       conn = call(:delete, "/v1/account/two-factor", nil, token)
       assert conn.status == 200
+
+      # Same witness for the disable verb: the row reached the table.
+      assert audit_count() == before_count + 1
 
       assert [ev] = events(team, "twofa.disabled")
       assert ev.team_id == team.id
@@ -1475,6 +1504,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
     test "confirm answers 200 and logs the skip", %{user: user, token: token} do
       secret = enroll_two_factor(user)
+      before_count = audit_count()
 
       {conn, log} =
         with_log(fn ->
@@ -1492,6 +1522,18 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       # 2FA is genuinely ON — the missing audit row cost the user nothing.
       assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
 
+      # FAIL-OPEN ARM 1 (`current_team` is nil). NO ROW IS WRITTEN ANYWHERE —
+      # not to this user's (non-existent) team and not to any other. This is
+      # the honest severity: the team trail is not FALSIFIED (the console says
+      # "Who did what on your team", and a team-less user's 2FA change is not
+      # an act on any team) — it is that NO platform-level record of the act
+      # exists at all, and no surface would say so. Without these two lines the
+      # block passes identically whether the row was written or skipped: the
+      # 200, the recovery codes, the two_factor_enabled? flag and the SKIPPED
+      # log are all produced on BOTH sides of the `case`.
+      assert audit_count() == before_count
+      assert audit_count_for(user) == 0
+
       # Skipped AND LOGGED, never silently discarded.
       assert log =~ "audit twofa.enabled SKIPPED"
       assert log =~ user.id
@@ -1506,11 +1548,19 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
           totp_code_stable!(secret)
         )
 
+      before_count = audit_count()
+
       {conn, log} = with_log(fn -> call(:delete, "/v1/account/two-factor", nil, token) end)
 
       assert conn.status == 200
       assert json_body(conn) == %{"ok" => true}
       refute Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+
+      # FAIL-OPEN ARM 1 again, on the disable verb. Same reasoning as the
+      # enable arm above: 200 + SKIPPED log is what a WRITE would look like too.
+      assert audit_count() == before_count
+      assert audit_count_for(user) == 0
+
       assert log =~ "audit twofa.disabled SKIPPED"
     end
   end

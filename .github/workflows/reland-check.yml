@@ -94,9 +94,47 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -uo pipefail
-          task_id="$(printf '%s' "${PR_BODY:-}" \
-            | grep -ioE '^[[:space:]]*task:[[:space:]]*[a-z0-9][a-z0-9._/-]*' \
-            | head -1 | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//')"
+          # A FOURTH SILENT MODE, same family as the three in this file's header.
+          # Those three were "0 findings" meaning three different realities. This
+          # one is worse: the job renders RED while NOTHING WAS CHECKED.
+          #
+          # The old pattern demanded [a-z0-9] IMMEDIATELY after `task:`, so any
+          # markdown wrapper made grep exit 1. GitHub runs `run:` bodies under
+          # `bash -e`, so the failing command substitution killed the STEP —
+          # before the overlap check ever ran. And backticking a task id is the
+          # NATURAL way to write it, so the failure rate approached 100% on
+          # fleet output. Measured on the real specimen:
+          #   Task: `task-2abbac8d7975050c` (wave 49)  -> exit 1, no output
+          #   Task: task-2abbac8d7975050c   (wave 49)  -> exit 0, extracted
+          # The backtick was the only difference.
+          #
+          # TWO independent hardenings, because either alone still lies:
+          #   1. tolerate wrappers — backtick, quote, bold, emphasis, link,
+          #      angle, paren. Widening for the backtick ALONE would just move
+          #      the bug to whoever writes a link next.
+          #   2. never let a parse miss end the step. `|| true` on both halves,
+          #      so an unparseable body yields an EMPTY id, not a dead job.
+          #
+          # Suppression is an OPTIMISATION here (it hides self/dependency
+          # findings). Losing it degrades the advisory to slightly noisier —
+          # it must never degrade it to silent.
+          raw="$(printf '%s' "${PR_BODY:-}" \
+            | grep -iE '^[[:space:]]*task:' | head -1 || true)"
+          task_id="$(printf '%s' "${raw#*:}" \
+            | sed -E 's/^[[:space:]]*[`"'"'"'*_~<([]*//' \
+            | grep -oE '^[A-Za-z0-9][A-Za-z0-9._/-]*' \
+            | sed -E 's/[`*_~]+$//' || true)"
+          if [ -z "$task_id" ]; then
+            # THE DISTINCTION THIS STEP EXISTS TO MAKE. "I could not parse the
+            # body" and "this PR re-lands landed work" were the same red, which
+            # is how a parse failure got read as a real overlap finding and sent
+            # someone chasing a phantom. They are now different lines.
+            echo "RELAND_TASK_ID_PARSED=0"
+            echo "::notice title=reland-check: no task id parsed::No line matching '^Task: <id>' could be parsed from this PR body. Self/edge suppression is OFF for this run and the overlap scan still runs below. THIS IS NOT AN OVERLAP FINDING and says nothing about whether this PR re-lands landed work."
+          else
+            echo "RELAND_TASK_ID_PARSED=1"
+            echo "Task id: ${task_id}"
+          fi
           echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
 
       - name: Fetch the ledger + run the re-land check

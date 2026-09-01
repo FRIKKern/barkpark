@@ -88,7 +88,14 @@ defmodule BarkparkWeb.AccessControllerTest do
   describe "POST /v1/access (mint)" do
     test "a grantor mints a grant; raw token returned once; NO link_token_hash", %{conn: conn} do
       ws = create_workspace!()
-      {grantor_raw, _} = token_principal(ws, ["read"])
+      # `["read", "write"]`, not `["read"]` (task-a85afbbc0c4b1be3). `POST
+      # /v1/access` rides `:require_token`, which now carries
+      # `Plugs.RequireWriteForMutation` — a read-only token WRITING a grant row
+      # was the defect that row closed, so a read-only grantor here would be
+      # asserting the hole. `write` is what a real grantor holds; `read` is kept
+      # alongside it because the read ladder is `~w(read admin public-read)` and
+      # the grant below confers `read`.
+      {grantor_raw, _} = token_principal(ws, ["read", "write"])
 
       conn =
         conn
@@ -106,7 +113,33 @@ defmodule BarkparkWeb.AccessControllerTest do
       assert grant["capabilities"] == ["read"]
     end
 
-    test "no-escalation: a read-only token cannot mint a write grant → 403", %{conn: conn} do
+    # The no-escalation gate lives INSIDE `Access.mint/2` and must keep speaking
+    # over HTTP. It is deliberately probed with a WRITE-capable grantor asking
+    # for `admin` (task-a85afbbc0c4b1be3): a read-only grantor is now refused
+    # upstream by `Plugs.RequireWriteForMutation`, so the old `["read"]` →
+    # `["write"]` shape would answer 403 without `Access.mint/2` ever running —
+    # a green that no longer proves the thing it names.
+    test "no-escalation: a write token cannot mint an admin grant → 403", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "grantee@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["admin"]
+        })
+
+      assert json_response(conn, 403)["error"]["message"] =~
+               "capabilities you do not hold"
+    end
+
+    # The upstream half of the same refusal, kept separate so the two reasons
+    # never collapse into one assertion: a read-only token never reaches
+    # `Access.mint/2` at all.
+    test "a read-only token is refused by the pipeline write gate → 403", %{conn: conn} do
       ws = create_workspace!()
       {grantor_raw, _} = token_principal(ws, ["read"])
 
@@ -116,7 +149,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         |> post("/v1/access", %{
           "grantee_email" => "grantee@example.com",
           "workspace_id" => ws.id,
-          "capabilities" => ["write"]
+          "capabilities" => ["read"]
         })
 
       assert json_response(conn, 403)["error"]["code"] == "forbidden"

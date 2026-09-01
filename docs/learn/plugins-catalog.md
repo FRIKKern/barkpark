@@ -24,6 +24,9 @@ above. Architecture: [../cards/search-media.md](../cards/search-media.md).
 
 ---
 
-<sup>Not listed: **frt** (Frickin Real Time) is a registered plugin but an author-first production
-content model whose schema set mirrors a real Godot game's data structures, not a first-party
-tool — its omission here is intentional.</sup>
+<sup>Eleven modules carry `use Barkpark.Plugin`; this table curates five. Not listed, and why:
+**frt** (Frickin Real Time) is an author-first production content model mirroring a real Godot
+game's data structures, not a first-party tool. **github**, **pulse**, **quiz**, **scaffy** and
+**tickets** are registered first-party plugins that landed after this table was written and have
+no curated row yet. Re-derive the roster rather than trusting this list:
+`grep -l 'use Barkpark.Plugin' api/lib/barkpark/plugins/*.ex`.</sup>

@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: studio-web-components | budget: 600tok -->
 # Studio Web Components — decision record
 
-> v1 prototype. First widget: `bp-rich-text-editor` (Task #11 WI4). Field-bridge picker set shipped: `bp-media-picker`, `bp-reference-picker`, `bp-document-preview`. All live in `api/priv/static/assets/`. Further `bp-*` widgets (e.g. `bp-asset-browser`, `bp-asset-explorer`, `bp-overflow-menu`, `bp-search-intel`) don't all use the field-bridge pattern below.
+> v1 prototype. First widget: `bp-rich-text-editor` (Task #11 WI4). Field-bridge picker set shipped: `bp-media-picker`, `bp-reference-picker`. `bp-document-preview` ships alongside them but is READ-ONLY — it emits no `bp-change` and has no `BarkparkFieldBridge` dependency, because it never writes back. All live in `api/priv/static/assets/`. Further `bp-*` widgets (e.g. `bp-asset-browser`, `bp-asset-explorer`, `bp-overflow-menu`, `bp-search-intel`) don't all use the field-bridge pattern below.
 
 ## Key decisions
 

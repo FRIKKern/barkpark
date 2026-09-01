@@ -1,11 +1,11 @@
 <!-- doc-tier: agent | canonical-for: js-sdk-consumption | budget: 500tok -->
 # JS SDK (js/ monorepo)
 
-Disambiguation first: **`sdk/` at repo root is the Bulldocs ingest SDK, NOT the general JS SDK** — that is the `js/` monorepo (`@barkpark/*`). Root `packages/client/` is the deprecated predecessor (pin v0.0.1; its README).
+Disambiguation first: **`sdk/` at repo root is the Bulldocs ingest SDK, NOT the general JS SDK** — that is the `js/` monorepo (`@barkpark/*`). Root `packages/client/` is the deprecated predecessor (pin v0.0.1).
 
 Consumption path:
 - `@barkpark/core` — `createClient(config)` → typed client: query builder (filter ops, ordering, `expand`, projection, paging), `search()`, reads (`doc`/`getDocuments`, backlinks, history, graph), mutations (`create`/`patch`/`publish`/`unpublish`/`delete`/`discardDraft` + patch ops, `transaction`), media (`uploadAsset`/`imageUrl`, asset CRUD, collections, `searchAssets`), schema CRUD, webhook mgmt (CRUD + `verifyWebhookSignature`), `listen()`, tenancy, draft perspectives. Framework-free; server + edge.
-- `@barkpark/nextjs` — App Router integration via subpath exports (`.`, `./server`, `./client`, `./actions`, `./webhook`, `./draft-mode`, `./revalidate`, `./preload`). **Root-export trap:** `revalidateBarkpark` from the root is a throw-only Phase-3 stub — import from `./revalidate` for the working one.
+- `@barkpark/nextjs` — App Router integration via subpath exports (`.`, `./server`, `./client`, `./actions`, `./webhook`, `./draft-mode`, `./revalidate`, `./preload`, `./csp`). **Root-export trap:** `revalidateBarkpark` from the root is a throw-only Phase-3 stub — import from `./revalidate` for the working one.
 - `web/` demo uses `@barkpark/core` for all reads. `@barkpark/nextjs` is also installed (`1.0.0-preview.3`) and wired for live updates via `<BarkparkLive/>`, but gated behind `NEXT_PUBLIC_BARKPARK_LIVE=1` plus a listen-capable token — inert unless both are set. Rollback + Next.js-version notes: web/README.md, web/AGENTS.md.
 
 Living example: `js/packages/create-barkpark-app/templates/blog-starter/` — full consuming app: queries, webhook revalidation, draft mode.

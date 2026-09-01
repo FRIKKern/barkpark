@@ -61,6 +61,19 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	}
 	ensureTaskPortableBrief(body)
 
+	// THE PUBLISH WALL, MOVED IN FRONT OF THE WRITE. `--publish` is
+	// create-then-publish, and the server's wall runs on the SECOND mutation — so
+	// a row that cannot clear it used to land the DRAFT anyway and exit non-zero,
+	// leaving the unclaimable `drafts.task-N` phantom the caller had just been
+	// told was "created". The pure half (label_spine) runs here, above the
+	// --dry-run branch so a dry run validates too; the registry half (unknown_tag)
+	// needs one read and runs below, still before anything is created.
+	if publish {
+		if ref := checkLabelSpineLocal(body); ref != nil {
+			return renderPublishWallRefusal(out, ref)
+		}
+	}
+
 	// The create mutation the server's mutate contract accepts. `_type` names the
 	// schema; the required task fields + title/description/any --set overrides ride
 	// flat at top level (the task write contract: fields are top-level, never
@@ -82,6 +95,23 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if isProdServer(ctx.Server) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		out.userErr("prod write to %s needs confirmation — re-run with --yes", ctx.Server)
 		return exitGeneric
+	}
+
+	// E3, the half that needs a read: every weighted tag must ALREADY be a
+	// published type:tag doc. This is the wall that turns a well-meaning retry
+	// ("plausible tag names") into a SECOND phantom, so it is checked here — the
+	// last point at which refusing still costs the server nothing.
+	if publish {
+		ref, blind := checkTagRegistry(ctx, body)
+		if ref != nil {
+			return renderPublishWallRefusal(out, ref)
+		}
+		if blind {
+			// Never imply a clearance we did not earn. The create proceeds (a
+			// client that cannot read the registry must not veto a legitimate
+			// publish), but the caller is told the check did not run.
+			out.errf("note: the tag registry could not be read, so these tags were NOT checked before creating — an unregistered tag will still refuse the publish (%s)", tagRegistryCommand)
+		}
 	}
 
 	httpStatus, respBody, err := sendCreateTaskMutations(ctx, mutations)
@@ -133,16 +163,23 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if publish {
 		// Publish is a second mutation over the same scoped-mutate endpoint; the
 		// server's Content.publish_document derives the drafts. twin from the bare
-		// id. A publish failure leaves the draft in place, so surface the id for a
-		// retry rather than losing the created task.
+		// id. A publish failure still leaves the draft in place — the pre-flight
+		// above pre-empts the two walls a client can know about, and what reaches
+		// here is the residue (duplicate_of, a registry we could not read, a rule
+		// this binary predates). The draft is NOT deleted: it holds the caller's
+		// authored title/description/criteria and the refusal is usually one edit
+		// from clearing. It is NAMED instead — renderOrphanedDraftRemedy prints the
+		// `drafts.` id, the consequence, and both exits.
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
 		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
 		if pErr != nil {
-			out.userErr("task create: created %s but publish failed: %v", bareID, pErr)
+			out.userErr("task create: created %s but publish failed: %v", draftID, pErr)
+			renderOrphanedDraftRemedy(out, draftID, bareID)
 			return exitGeneric
 		}
 		if pStatus < 200 || pStatus >= 300 {
-			out.userErr("task create: created %s but publish failed: %s", bareID, mutateErrorMessage(pStatus, pBody))
+			out.userErr("task create: created %s but publish failed: %s", draftID, mutateErrorMessage(pStatus, pBody))
+			renderOrphanedDraftRemedy(out, draftID, bareID)
 			return exitGeneric
 		}
 		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
@@ -462,6 +499,24 @@ func mutateErrorMessage(status int, body []byte) string {
 		if len(lines) > 0 {
 			msg += "\n  " + strings.Join(lines, "\n  ")
 		}
+		// SERVER FAULT (5xx): print the request_id. The registered hint for
+		// `internal_error` is "Retry shortly; if it persists, report the
+		// request_id to the API operator" — a remedy that names an identifier
+		// this renderer used to drop, which is the SAME unappealable shape the
+		// dedup 409 above was fixed for, reproduced on the fault arm. It matters
+		// most in the worst case: when the server declines to name the fault at
+		// all (a bare `unknown error`, which MutateController still renders via
+		// Errors.build/1's catch-all), the request_id is the ONLY handle the
+		// caller has, and a create failure with no handle reports on its exit
+		// code alone.
+		//
+		// Deliberately 5xx-only. A 4xx refusal already names WHICH field, WHICH
+		// row, WHICH id (validation_failed, duplicate_task), so the caller can
+		// act without an operator; adding the id there would be noise on every
+		// well-named refusal.
+		if status >= 500 && env.RequestID != "" {
+			msg += "\n  request_id: " + env.RequestID
+		}
 		return msg
 	}
 	// Unknown shape. Do NOT truncate: the body is the only diagnosis left, and
@@ -724,6 +779,16 @@ flags:
                    --set priority:=3, --set 'labels:=["infra"]',
                    --set parent_id=my-goal). Overrides the injected defaults.
   --publish        Publish the new task immediately (draft → published).
+                   A PUBLISHED row must clear the publish wall, so --publish
+                   also requires --description (20+ chars) and 1-12 weighted
+                   tags, e.g.
+                     --set 'tags:=[{"tag":"cli","strength":80,"rationale":"20+ chars saying why"}]'
+                   Strengths are integers 1-100 and must all be DISTINCT, and
+                   every tag must ALREADY be a registered (published) type:tag
+                   document — you cannot invent one here. List the vocabulary
+                   with: bp doc ls tag --all . A row that cannot clear the wall
+                   is refused BEFORE anything is created, so a failed --publish
+                   never leaves a draft behind.
 
 write globals: --dry-run (print the request, don't send) · --yes (skip the
 prod confirmation) · -o json (structured receipt)

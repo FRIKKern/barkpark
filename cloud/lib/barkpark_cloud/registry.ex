@@ -5439,9 +5439,12 @@ defmodule BarkparkCloud.Registry do
   `autoupdate_paused` latch): REVOKING AN AGENT TOKEN IS UNRECOVERABLE WITHOUT
   RE-PROVISIONING THE BOX. Nothing in this repository clears `revoked_at` on an
   `AgentToken` — the only way a box gets a live one is `mint_agent_token/3` via
-  `put_agent_token/2` inside a provision, resurrect, or support claim, and every
-  one of those routes sits behind `Auth.require_worker` (the shared platform
-  WORKER_TOKEN). There is no rotate route and no re-mint route at any auth level.
+  `put_agent_token/2` inside a provision or resurrect claim, and both of those
+  routes sit behind `Auth.require_worker` (the shared platform WORKER_TOKEN).
+  The SUPPORT claim is deliberately NOT a minter (see
+  `Web.Router.support_provision_claim_json/2`): the support worker has no field
+  to receive the plaintext, so minting there only recorded a handover that never
+  happened. There is no rotate route and no re-mint route at any auth level.
   The recovery cannot be automated even in principle: the only channel able to
   deliver a fresh token is the provision claim, and the box's own live channel is
   authenticated by the very token being revoked. The box keeps retrying the dead
@@ -6611,9 +6614,27 @@ defmodule BarkparkCloud.Registry do
       sampler only writes for instances it actually reaches out to; a sample is
       proof of an in-flight platform→instance transmission. HARD BLOCK,
       independent of `last_seen_at`.
-    * `:active_subscription` — the owning team has a live subscription
-      (`active` or `past_due`; a past_due row is still a billed customer). We
-      do not release the name of something a customer is paying for.
+    * `:active_subscription` — the owning team is ENTITLED right now:
+      `Billing.entitled?/1` over its live (`active` or `past_due`)
+      subscription. We do not release the name of something a customer is
+      paying for; a past_due row inside its grace window is still a billed
+      customer.
+
+      The entitlement call is deliberate and the SQL flag alone is NOT enough.
+      `subscriptions.status` is only `active | canceled | past_due`, and
+      nothing ever moves a lapsed row off `active`: every signup grants a
+      `trial` subscription (`Billing.grant_trial/1`, from BOTH signup paths),
+      and `TrialExpiryWorker` expires it by enqueueing deprovision jobs while
+      writing no status at all — expiry is read at CALL TIME off
+      `current_period_end`. `plan: "free"` is likewise a permanent `active`
+      row for a team paying nothing. So a raw `status IN ('active','past_due')`
+      read is true, forever, for essentially every team that ever signed up:
+      it would swallow the entire carve-out and hand back the
+      unreleasable-name bug this whole carve-out exists to fix (the June-29
+      gyldendal squat above). `Billing.entitled?/1` is the platform's own
+      answer to "are we still serving this team" — the same predicate the
+      managed-launch gate reads — so this leg asks IT rather than keeping a
+      second copy of the rule here to drift.
 
   Widening the carve-out means deleting a leg here, and the refusal names which
   leg refused so that cost is visible before anyone does.
@@ -6681,6 +6702,7 @@ defmodule BarkparkCloud.Registry do
     |> exclude_self_claim(self_id)
     |> select([b], %{
       id: b.id,
+      team_id: b.team_id,
       last_seen_at: b.last_seen_at,
       inserted_at: b.inserted_at,
       has_admin_token: not is_nil(b.admin_token_encrypted),
@@ -6742,9 +6764,18 @@ defmodule BarkparkCloud.Registry do
         {:held, :recent_usage_sample,
          "row #{row.id} was sampled by the usage worker within the last #{@recent_sample_window_hours}h — the platform is still transmitting to this host"}
 
-      row.live_subscription ->
+      # TWO reads, and both are load-bearing. `row.live_subscription` is the SQL
+      # prefilter — the NECESSARY condition, since `Billing.entitled?/1` is false
+      # for any team with no live row — so the common case (no subscription at
+      # all) costs no extra query. `Billing.entitled?/1` is the SUFFICIENT one,
+      # and it is the only place the rule lives: a live `active` row is NOT the
+      # same as a paying customer (an expired `trial` and the `free` tier are
+      # both permanently `active`), so reading the flag alone would hold every
+      # signed-up team's name forever. See the leg's entry in
+      # `provisioning_fqdn_claim/2`'s doc for why nothing writes that status.
+      row.live_subscription and Billing.entitled?(row.team_id) ->
         {:held, :active_subscription,
-         "row #{row.id} belongs to a team with a live subscription (active or past_due) — a billed name is never released"}
+         "row #{row.id} belongs to a team with a live subscription that is still ENTITLED (active, or past_due inside its grace window; not an expired trial) — a billed name is never released"}
 
       not is_nil(row.last_seen_at) ->
         {:held, :agent_reporting, "row #{row.id} phoned home at #{row.last_seen_at}"}
@@ -6979,7 +7010,14 @@ defmodule BarkparkCloud.Registry do
                |> Repo.insert(),
              {:ok, failed} <-
                queued
-               |> Deployment.transition_changeset(%{status: "failed", failure_reason: reason})
+               # `detail` rides the SAME write, not a follow-up: a born-failed
+               # row has no earlier caption to inherit, so omitting it filed a
+               # terminal failure whose caption was NULL from birth.
+               |> Deployment.transition_changeset(%{
+                 status: "failed",
+                 failure_reason: reason,
+                 detail: failure_detail(reason)
+               })
                |> Repo.update() do
           failed
         else
@@ -8365,6 +8403,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @no_build_source_reason,
+          detail: failure_detail(@no_build_source_reason),
           updated_at: now
         ]
       )
@@ -8387,6 +8426,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @no_content_binding_reason,
+          detail: failure_detail(@no_content_binding_reason),
           updated_at: now
         ]
       )
@@ -8406,6 +8446,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @stale_builder_reason,
+          detail: failure_detail(@stale_builder_reason),
           claim_worker: nil,
           claimed_at: nil,
           updated_at: now
@@ -8440,6 +8481,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @instance_unreachable_reason,
+          detail: failure_detail(@instance_unreachable_reason),
           claim_worker: nil,
           claimed_at: nil,
           updated_at: now
@@ -8490,6 +8532,36 @@ defmodule BarkparkCloud.Registry do
   end
 
   ## Helpers
+
+  # A FAILED DEPLOYMENT'S CAPTION IS A CAUSE (deploy-reliability,
+  # task-fb4fb869490b4213 criterion 5). `deployments.detail` is the LATEST-WINS
+  # string the site page renders under the status pill: the off-box builder
+  # writes a progress caption into it on every beat ("Fetching your source…",
+  # "Building your site…", "Handing off to release…") through
+  # `set_deployment_detail/2`. Every terminal writer therefore owes it a rewrite
+  # — a terminal write that touches only `failure_reason` leaves the row wearing
+  # whatever the UI was saying when the build died, and files a failure whose
+  # only human-readable text is a caption.
+  #
+  # The epic measured the consequence on the live control plane: 24 failed rows
+  # carrying a progress caption where a cause belongs, and 7 carrying nothing at
+  # all. `Sites.Deploy.fail/3` already did this (`detail: short_detail(reason)`);
+  # the reaper's four `Repo.update_all` passes and `create_failed_deployment/3`
+  # did not, and those are exactly the two writers that produce those rows.
+  #
+  # THE CLAMP IS THE CAPTION'S, NOT THE COLUMN'S. `detail` was widened to `:text`
+  # (20260806110000), so nothing here can raise 22001 — but the column is still
+  # the one-line caption under a status pill, and `failure_reason` (`:text`) is
+  # where the whole story lives untruncated. 255 mirrors
+  # `Sites.Deploy.short_detail/1` deliberately: the two terminal paths must not
+  # render the same failure at two different lengths. Knowingly duplicated rather
+  # than shared, to keep this change inside one module; folding both onto one
+  # `FailureCopy` helper is a follow-up, not a silent fork.
+  defp failure_detail(reason) when is_binary(reason) do
+    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
+  end
+
+  defp failure_detail(reason), do: reason
 
   # notifications (wave 28 S6): fire `:deployment_failed` only on the EDGE into
   # `failed`. `Sites.Deploy.record_stage/2` re-drives the fenced writer on every

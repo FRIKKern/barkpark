@@ -7,6 +7,33 @@ Framework-free renderers for Barkpark content. **Zero `next/*` imports** — use
 npm install @barkpark/react
 ```
 
+## Published preview advisory
+
+**Every version of this package that exists on npm resolves a failed reference
+fetch as "this document does not exist."** The repair is on `main` (#9601) and
+is not in any release yet. Measured from the artifact itself —
+`npm pack @barkpark/react@1.0.0-preview.1`, then `package/dist/index.mjs`
+(unminified, lines 25–29):
+
+```js
+      try {
+        return await fetchRaw(`/v1/data/doc/production/${id}`);
+      } catch {
+        return null;
+      }
+```
+
+Eleven lines later the same shipped file renders that `null` as the miss:
+`if (doc == null) return createElement(Fragment, null, notFound)`. So a 401, a
+429 and a 500 are all indistinguishable from a genuine 404. `dist/index.cjs`
+carries the same code, and `1.0.0-preview.0` ships a byte-identical
+`src/Reference.tsx` (6094 B, sha1 `b7ba6f1d…`) — **no published version is free
+of it**, and `1.0.0-preview.2` is where the fix lands.
+
+Until then, pass your own `fetcher` prop and decide there what a non-404 failure
+should render; the fetcher derived from `client={bp}` cannot tell you. Disposition
+and remediation mechanism: `docs/ops/npm-rollback-playbook.md` § Mechanism A.
+
 ## PortableText
 
 Renders block content to React elements, with per-type component overrides. Newlines in a span become `<br/>` (configurable via `components.hardBreak`, or `false` to disable). Unknown styles/marks/types fall back to sensible HTML or your `unknown*` components.

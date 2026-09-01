@@ -1115,37 +1115,43 @@ if config_env() == :prod do
 
   config :barkpark, Barkpark.Sites.Provisioner, site_provisioner_env
 
-  # ## SSL Support
+  # ## SSL Support — TLS terminates UPSTREAM, not in Phoenix
   #
-  # To get SSL working, you will need to add the `https` key
-  # to your endpoint configuration:
+  # Barkpark does not hold a certificate. A reverse proxy (Caddy in prod, the
+  # platform edge on the Cloud hosts) terminates TLS and forwards plain HTTP to
+  # the app, so the endpoint has no `https:` listener and MUST NOT try to force
+  # one. HTTPS-awareness in this file is driven by PHX_SCHEME — see the
+  # `:session_secure` / `:capabilities_base_url` block earlier — and HSTS is
+  # emitted by the proxy (docs/ops/adding-a-domain.md), never by Plug.SSL.
+  #
+  # ### Do NOT set `force_ssl` (CLAUDE.md Golden Rule #5 / Past Mistake #5)
+  #
+  # Stock Phoenix boilerplate recommends enabling `force_ssl` with `hsts` in
+  # config/prod.exs. That recommendation is wrong for this deployment and it
+  # already caused a real outage. Behind a terminating proxy Phoenix only ever
+  # sees `http` on the wire, so `force_ssl` 301-redirects the request to https,
+  # the proxy re-forwards it as http, and it redirects again — an infinite loop
+  # in which every API call returned empty. Turning on `hsts` without a
+  # `rewrite_on` is the worst form of it: the loop is guaranteed, and the HSTS
+  # header pins browsers to https for a year while the loop is live. That form
+  # is deliberately absent from api/config/prod.exs, and a test enforces it —
+  # test/barkpark/config_force_ssl_guard_test.exs fails if it reappears in
+  # config/**, comment included, because a comment is what taught it here.
+  #
+  # If TLS ever terminates at the app tier, the only safe form is the one
+  # api/config/prod.exs already carries commented out — it trusts the proxy's
+  # X-Forwarded-Proto so a proxied request is not mistaken for plaintext:
   #
   #     config :barkpark, BarkparkWeb.Endpoint,
-  #       https: [
-  #         ...,
-  #         port: 443,
-  #         cipher_suite: :strong,
-  #         keyfile: System.get_env("SOME_APP_SSL_KEY_PATH"),
-  #         certfile: System.get_env("SOME_APP_SSL_CERT_PATH")
-  #       ]
+  #       force_ssl: [rewrite_on: [:x_forwarded_proto]]
   #
-  # The `cipher_suite` is set to `:strong` to support only the
-  # latest and more secure SSL ciphers. This means old browsers
-  # and clients may not be supported. You can set it to
-  # `:compatible` for wider support.
+  # ### If the app tier ever does terminate TLS
   #
-  # `:keyfile` and `:certfile` expect an absolute path to the key
-  # and cert in disk or a relative path inside priv, for example
-  # "priv/ssl/server.key". For all supported SSL configuration
-  # options, see https://hexdocs.pm/plug/Plug.SSL.html#configure/1
-  #
-  # We also recommend setting `force_ssl` in your config/prod.exs,
-  # ensuring no data is ever sent via http, always redirecting to https:
-  #
-  #     config :barkpark, BarkparkWeb.Endpoint,
-  #       force_ssl: [hsts: true]
-  #
-  # Check `Plug.SSL` for all available options in `force_ssl`.
+  # Add the `https` key to the endpoint config (port 443, `cipher_suite:
+  # :strong` for modern clients only or `:compatible` for wider support, plus
+  # `keyfile`/`certfile` as absolute paths or paths relative to priv). Options:
+  # https://hexdocs.pm/plug/Plug.SSL.html#configure/1 — and only then revisit
+  # the `rewrite_on` form above.
 end
 
 # Ephemeral dev database override (CREATE-quickstart smoke, agent-onramps D24).

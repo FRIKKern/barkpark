@@ -88,8 +88,11 @@ export function stands(verdict) {
 //
 // THE HOLE THIS CLOSES. The cli → adjudicate → runRerun path re-EXECUTES a
 // fact's `rerun` command by default (execute: true, no injected runner). Left
-// to itself, `runRerun` gates only on `classifySafety` (rerun.mjs:676) before
-// `spawnSync("/bin/sh", ["-c", cmd])` at :337 — and `classifySafety` is a
+// to itself, `runRerun` gates only on `classifySafety` before handing the
+// survivor to `spawnSync("/bin/sh", ["-c", cmd])` in `shell` (rerun.mjs).
+// Both were cited BY LINE here until 2026-09-01, and both had drifted — by 20
+// and 41 lines — while still reading plausibly. Symbols now: grep the name.
+// And `classifySafety` is a
 // denylist that admits 22 of 22 named outage probes (systemctl stop, reboot,
 // `mix ecto.drop`, `kill -9`, `pkill`, a bare `cp` into api/lib/, …) and 51 of
 // the 53-command DANGER_SET, versus `screenCommand`'s 0. So a facts.json whose

@@ -32,6 +32,6 @@ curl -H "Authorization: Bearer $TOKEN" -F "file=@photo.jpg" \
 
 Draft model: create writes `drafts.{id}`; publish copies it to `{id}` and deletes the draft; perspectives gate what reads see. Anonymous reads are pinned to `published` — `drafts`/`raw` need a token.
 
-Workspace roster (`:scoped_admin` — the membership ROLE, not global perms): `GET|POST /v1/members`, `PATCH|DELETE /v1/members/{ref}` (`ref` = e-mail or principal id), plus `GET /v1/tokens` and `DELETE /v1/tokens/{id}` for the workspace token inventory. Rails: the last `owner` cannot be demoted/removed; revoke needs the token to hold a seat here. Code + rationale: `Barkpark.Tenancy.Members`.
+Workspace roster (`:scoped_admin` — the membership ROLE, not global perms). SCOPED-ONLY: these six have **no flat mount**, so `/v1/members` on its own 404s. `GET|POST $S/v1/members`, `PATCH|DELETE $S/v1/members/{ref}` (`ref` = e-mail or principal id), plus `GET $S/v1/tokens` and `DELETE $S/v1/tokens/{id}` for the workspace token inventory. Rails: the last `owner` cannot be demoted/removed; revoke needs the token to hold a seat here. Code + rationale: `Barkpark.Tenancy.Members`.
 
 Canon: [`../api-v1.md`](../api-v1.md).

@@ -89,12 +89,14 @@ maintenance 503 rather than a raw 502.
 | `CONNECTORS_HTTP_ADDR` | `127.0.0.1:4020` |
 | `CONNECTORS_PATH_PREFIX` | `/connectors` (must match the Caddy matcher) |
 | `CONNECTORS_CREDENTIAL_KEY` | cipher key for each install's stored credentials |
+| `CONNECTORS_CONNECT_SECRET` | shared HMAC secret for Studio→bridge connect tickets (D50) — the same value the BEAM signs with. Absent ⇒ connect routes are not mounted (a supported state, logged loudly at boot). |
 
 **There is deliberately no `BARKPARK_CHAT_TOKEN`.** One ambient operator token
 would serve *every* tenant — the exact multi-tenant hole this wave closes. Each
 install authenticates with its **own** workspace-bound `chat` ApiToken, stored
 ciphered in the bridge's `connector_installs` rows. `mcp.env` is `0644` because
-it deliberately holds no secret; `connectors.env` holds two, hence `0600`.
+it deliberately holds no secret; `connectors.env` holds three (`DATABASE_URL`, `CONNECTORS_CREDENTIAL_KEY`,
+`CONNECTORS_CONNECT_SECRET`), hence `0600`.
 
 `CONNECTORS_CREDENTIAL_KEY` is the **KEK**: every install's secrets are sealed
 under an HKDF-derived **per-workspace subkey**, never the KEK directly, so a
@@ -102,24 +104,48 @@ single leaked row-key compromises one workspace rather than the instance. It is
 generated **once** and persisted in `/opt/barkpark/.env` (same mechanism as
 `BARKPARK_KEK`), then copied into `connectors.env` on every deploy.
 
-## Rotating the credential key (a deliberate, safe rotation — not a flag day)
+## Rotating the credential key (safe by design — but the deploy does not do it for you)
 
 Rotating the key does **not** make stored credentials undecryptable — that old
 claim was wrong. The cipher opens a row under the **current key OR**
 `CONNECTORS_CREDENTIAL_KEY_PREVIOUS`, and a sweep re-seals every row under the
 new one:
 
-1. Move the current value to `CONNECTORS_CREDENTIAL_KEY_PREVIOUS=<old>` and set a
-   fresh `CONNECTORS_CREDENTIAL_KEY=<new>` in `/opt/barkpark/.env`, then deploy
-   (both land in `connectors.env`). Installs keep working through the window —
-   rows still open under the previous key.
-2. Run the sweep: `cd /opt/barkpark/connectors && npm run rewrap`. It re-seals
+> **The deploy does not carry `CONNECTORS_CREDENTIAL_KEY_PREVIOUS`.** The
+> `connectors.env` writer in `deploy/instance-deploy.sh` emits exactly the six
+> keys in the table above, and the unit reads *only* that file
+> (`EnvironmentFile=/etc/barkpark/connectors.env`). Setting `_PREVIOUS` in
+> `/opt/barkpark/.env` and deploying therefore leaves the bridge with an empty
+> previous-key list — a flag day, not a rotation, and every already-sealed
+> install blob becomes unopenable. Until the writer emits the key, step 1 below
+> must be done by hand on the box. Filed as a follow-up; fixing the writer is
+> the durable repair.
+
+1. Set a fresh `CONNECTORS_CREDENTIAL_KEY=<new>` in `/opt/barkpark/.env` and
+   deploy. **Then, before touching any install,** append the old value to
+   `/etc/barkpark/connectors.env` by hand as
+   `CONNECTORS_CREDENTIAL_KEY_PREVIOUS=<old>` and
+   `systemctl restart barkpark-connectors`. Installs keep working through the
+   window — rows still open under the previous key.
+2. Run the sweep with the bridge's own environment (a bare
+   `npm run rewrap` fails closed: `loadConfig` reads `DATABASE_URL`,
+   `BARKPARK_API_URL` and `CONNECTORS_CREDENTIAL_KEY` from `process.env`, and
+   nothing puts them in an operator's login shell):
+
+   ```bash
+   cd /opt/barkpark/connectors
+   set -a; . /etc/barkpark/connectors.env; set +a
+   npm run rewrap
+   ```
+
+   It re-seals
    **both** sealed columns of **every** install (all providers) under the new
    per-workspace key. It is idempotent and safe against a live bridge (it pins
    each row's old bytes, so a connect landing mid-sweep is kept, never rolled
    back — re-run to finish any `raced` row).
 3. When it reports `raced=0` and no `unopenable` rows, delete the
-   `CONNECTORS_CREDENTIAL_KEY_PREVIOUS` line. The old key is now retired.
+   `CONNECTORS_CREDENTIAL_KEY_PREVIOUS` line from `/etc/barkpark/connectors.env`
+   and `systemctl restart barkpark-connectors`. The old key is now retired.
 
 **Custody.** The key is backed up only in `/opt/barkpark/.env` (`0600`) — the
 box owns it. For disaster recovery, copy that line to a secret manager off-box;

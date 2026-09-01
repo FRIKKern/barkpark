@@ -45,6 +45,7 @@ studio-scope-resolution	resolve_scope
 task-chip-resolve	resolve_wikilink
 task-claimable-statuses	claimable_statuses
 task-criteria-progress	progress
+task-publish-wall-preflight	checkLabelSpineLocal
 taskboard-render	Render
 teams-tenant-id	teamsTenantId
 template-manifest	Load
