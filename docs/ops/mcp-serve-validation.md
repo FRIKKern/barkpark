@@ -17,19 +17,21 @@ artifact here is an **exec'd JSON-RPC transcript**, not a driven GUI.
 Wave 1 shipped strong protocol coverage — but all of it is hermetic, against a
 committed fixture manifest and a stub URL that never dials the network:
 
-- `internal/cli/mcp_stdio_smoke_test.go:212` (`TestMCPServeStdioSmoke`) execs the
+- `TestMCPServeStdioSmoke` (`internal/cli/mcp_stdio_smoke_test.go`) execs the
   **built binary** over real stdio, drives `initialize → notifications/initialized
   → tools/list`, and asserts **byte-pure ndjson JSON-RPC on stdout** plus exactly
   the curated tool set. But its manifest is the committed fixture
   (`docs/cli/fixtures/full-manifest.json`) and `BARKPARK_API_URL=http://127.0.0.1:0`
   — a stub it never dials; the session **stops at `tools/list`** (which needs no
-  API). `TestMCPStdoutBytePurityHarness:331` proves that tripwire is non-vacuous.
-- `internal/cli/mcp_serve_test.go:128` (`TestMCPServeToolsLiveOverInMemory`) drives
+  API). `TestMCPStdoutBytePurityHarness` (same file) proves that tripwire is
+  non-vacuous.
+- `TestMCPServeToolsLiveOverInMemory` (`internal/cli/mcp_serve_test.go`) drives
   `tools/call task_show` / `task_next` / `task_close` over the SDK's in-memory
-  transport — but against an `httptest` stub HTTP server (`:64`), asserting the
-  POSTed close body shape, not a real round-trip.
-- `internal/cli/mcp_bridge_test.go:259` (`TestBridgeRoundTrip_ArgPlacement`) proves
-  a `tools/call` reaches the CLI's arg-placement path — again vs `httptest` (`:223`).
+  transport — but against an `httptest` stub HTTP server it starts itself,
+  asserting the POSTed close body shape, not a real round-trip.
+- `TestBridgeRoundTrip_ArgPlacement` (`internal/cli/mcp_bridge_test.go`) proves
+  a `tools/call` reaches the CLI's arg-placement path — again vs its own
+  `httptest` stub.
 
 So byte-purity, the curated `tools/list`, clean EOF exit, and in-memory
 `tools/call` shape are **already proven**. This doc adds only the missing rung:
@@ -172,8 +174,9 @@ Claude.ai — bearer/header auth for Claude.ai custom connectors is still
 invite-gated. Live bearer targets today: ChatGPT Developer Mode (Plus/Pro
 read), Perplexity (Pro+), Grok (SuperGrok), Mistral Vibe (all plans).
 
-Live smoke, run AFTER both the transport slice and the deploy slice are on the
-box (transcript to be appended here, redacted, same rules as above):
+Live smoke recipe, to be run once both the transport slice and the deploy slice
+are on the box. **This has been run** — the redacted transcript is recorded
+below under "Live smoke — guerrilla remote, 2026-07-11".
 
 ```bash
 # TOKEN from ~/.config/barkpark/config.json known_servers[guerrilla] — never echo it

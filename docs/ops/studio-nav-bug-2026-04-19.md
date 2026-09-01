@@ -2,8 +2,8 @@
 title: Studio navigation bug — root cause analysis
 date: 2026-04-19
 author: Worker W4.1 (Task #9 / Subtask 1)
-status: diagnosed, fix not applied (research-only scope)
-severity: P0 — Studio is interactively unusable in production
+status: RESOLVED — diagnosed 2026-04-19 under a research-only scope; both fixes landed post-incident (see the note in §5)
+severity: was P0 — Studio was interactively unusable in production
 ---
 <!-- doc-tier: human | canonical-for: studio-nav-incident-2026-04-19 | budget: 4400tok -->
 
@@ -193,9 +193,9 @@ Edit `/opt/barkpark/.env`:
 
 That step was *skipped or deferred*. Relevant files:
 
-- `api/config/runtime.exs:56` — `host = System.get_env("PHX_HOST") || "example.com"` _(pre-fix line numbers; post-fix, PHX_HOST is handled at lines 288–312 and raises on nil/empty rather than defaulting to "example.com")_
-- `api/config/runtime.exs:61` — `url: [host: host, port: PORT, scheme: System.get_env("PHX_SCHEME", "http")]` _(pre-fix; url: config is now at line 356)_
-- `deploy.sh:115` — on fresh install writes `PHX_HOST=$IP` (the host's first IPv4), and does **not** write `PHX_SCHEME`. On re-runs, `deploy.sh:119–124` (the else branch that preserves `.env`) keeps everything except `DATABASE_URL`, so the stale `PHX_HOST=89.167.28.206` survives forever.
+- `api/config/runtime.exs:56` — `host = System.get_env("PHX_HOST") || "example.com"` _(pre-fix line numbers; post-fix, the `case System.get_env("PHX_HOST")` block raises on nil/empty rather than defaulting to "example.com")_
+- `api/config/runtime.exs:61` — `url: [host: host, port: PORT, scheme: System.get_env("PHX_SCHEME", "http")]` _(pre-fix; the `url: [host: host, …]` line moved — grep for it rather than trusting a line number)_
+- `deploy.sh` — on fresh install **wrote** `PHX_HOST=$IP` (the host's first IPv4) and did **not** write `PHX_SCHEME` _(pre-fix; the heredoc now writes `PHX_HOST=$DOMAIN` and `PHX_SCHEME=$PHX_SCHEME`, which defaults to `https`)_. On re-runs the else branch that preserves `.env` still re-aligns only `DATABASE_URL` — that half is **unchanged**, so a stale `PHX_HOST=89.167.28.206` still survives forever (see the open follow-up below).
 - `docs/ops/caddy-api-tls.md:196` _(file archived and deleted since this doc was written; see commit 8170d6da then b5cc21f5)_ — explicitly called out this risk as a "1.0.1 ticket if it bites." It bit.
 
 Suspect commit chain (none of these *caused* the regression in code, but the
@@ -226,19 +226,22 @@ WebSocket from ever connecting.
    and **400** when `Origin: http://89.167.28.206[:port]` (§2.4). Only
    `check_origin` mismatch produces that 403/400 asymmetry in Phoenix.
 2. The accepted-origin set (`http://89.167.28.206`) matches byte-for-byte
-   what `deploy.sh:115` writes on a fresh install (`PHX_HOST=$IP`, no
-   `PHX_SCHEME`, defaults in `runtime.exs:61` _(pre-fix; now line 356)_ → scheme `"http"`).
+   what `deploy.sh` wrote on a fresh install at the time (`PHX_HOST=$IP`, no
+   `PHX_SCHEME`, so the `runtime.exs` default → scheme `"http"`) _(pre-fix; see
+   the file list in §4 for what it writes today)_.
 3. The page's initial HTML, script inventory, mount payload, CSRF meta,
    and JS globals are all correct (§2.1–§2.3) — there is no client-side
    regression.
 4. `root.html.heex` wires scripts in `<body>` (not `<head>`), so past
    regression pattern #8 (and its partner #4) is ruled out.
 5. `handle_event("select", …)`, `handle_event("show-profile", …)`, and
-   every other Studio event are present in `studio_live.ex:189–509` _(pre-refactor; file is now 291 lines after commit c99adc6a, handle\_event heads at 101–255)_ — no
+   every other Studio event are present in `studio_live.ex` _(pre-refactor line span removed; both named handlers are still defined there today)_ — no
    server-side handler was accidentally removed.
 6. The hosted-TLS task explicitly flagged this as a follow-up
-   (`docs/ops/caddy-api-tls.md:196`) and nothing has been committed since
-   that updates the runtime env on the server.
+   (`docs/ops/caddy-api-tls.md:196` _(file archived and deleted since this doc
+   was written; see commit 8170d6da then b5cc21f5)_) and, **at time of
+   diagnosis**, nothing had been committed that updates the runtime env on the
+   server. Both fixes have since landed — see the post-incident note in §5.
 
 Alternative hypotheses (ruled out, ranked by how long I spent chasing them):
 
@@ -343,6 +346,12 @@ If, during fix-forward, someone also touched `api/config/runtime.exs` to add
 an explicit `check_origin` list (the belt-and-braces alternative in §5),
 revert that commit cleanly:
 
+> **Do NOT do this today.** The explicit `check_origin` list (commit e975d541)
+> shipped and is load-bearing production code — reverting it takes the Vercel
+> apex demo and every preview URL offline. See the post-incident note in §5 and
+> the cross-link comment beside the allowlist in `api/config/runtime.exs`. This
+> step applied only while the list was still hypothetical.
+
 ```bash
 # on a branch — a direct push to main is refused by branch protection
 git revert <sha-of-the-check_origin-commit>
@@ -416,8 +425,8 @@ curl -sI https://api.barkpark.cloud/v1/data/query/production/post
 ## Follow-ups to file (out of scope for this report)
 
 - **`deploy.sh` hardening:** when `.env` exists, re-align `PHX_HOST`/`PHX_SCHEME` the same way it re-aligns `DATABASE_URL`, so re-running `deploy.sh` on a host that has since been put behind a domain self-corrects.
-- **Post-domain runbook checklist:** promote `docs/ops/adding-a-domain.md` Step 3 to a `Makefile` target (`make domain-cutover DOMAIN=foo`) so it cannot be skipped.
-- **Add a boot-time self-check:** in `Barkpark.Application.start/2`, log a warning if `PHX_HOST` resolves to a literal IPv4 address while `PHX_SCHEME == "https"` — an early signal that origin config is mis-shaped.
+- ~~**Post-domain runbook checklist:** promote `docs/ops/adding-a-domain.md` Step 3 to a `Makefile` target so it cannot be skipped.~~ **DONE** — `make domain-cutover DOMAIN=…` exists and backlinks to this doc; `adding-a-domain.md` Step 3 routes readers to it.
+- ~~**Add a boot-time self-check:** log a warning if `PHX_HOST` resolves to a literal IPv4 address while `PHX_SCHEME == "https"`.~~ **DONE, and hardened** — `api/config/runtime.exs` **raises** (not warns) on that combination, and the message cites this doc. It landed in `runtime.exs`, not `Barkpark.Application.start/2`.
 - **CI smoke:** after deploy, hit `/live/websocket` with a real browser `Origin` header and fail the job on 403. A single `curl` assertion would have caught this within a minute of the Phase 7 Track D cutover.
 
 ROOT_CAUSE: production `/opt/barkpark/.env` still has `PHX_HOST=89.167.28.206` and no `PHX_SCHEME=https`, so Phoenix `check_origin` 403-rejects the LiveView WebSocket from `https://api.barkpark.cloud`, leaving every `phx-click` silently dead.

@@ -72,7 +72,9 @@ These are the click paths as of 2026-04. Vercel UI changes periodically; if navi
   | `BARKPARK_DATASET` | `docs` | Dataset the web app queries and cache-busts against. Must match the dataset name in the live Barkpark instance — the webhook emits `dataset:"docs"` so this value and the webhook must stay in sync. |
 
 - Optional feature flags (if referenced by the `web/` app):
-  - `BARKPARK_PREVIEW_TTL_SECONDS` — cap preview-mode cookies per slice 8.6 R-S5a. Default 14400 (4h).
+  - `BARKPARK_FETCH_TIMEOUT_MS` — per-request timeout for the server-side
+    Barkpark fetches. (An earlier revision listed `BARKPARK_PREVIEW_TTL_SECONDS`
+    here; nothing in `web/` has ever read it — setting it is a no-op.)
   - `NEXT_TELEMETRY_DISABLED=1` — cosmetic, opt out of Next.js anonymized telemetry on build.
 
 - Save. Do **not** trigger a redeploy yet — wait for DNS to propagate (step 4) so the first production hit after cutover uses the new config.
@@ -122,10 +124,12 @@ echo | openssl s_client -connect barkpark.cloud:443 -servername barkpark.cloud 2
 # Expected: issuer includes "Let's Encrypt", notAfter within 90 days
 
 # The site actually talks to Phoenix
-curl -sS https://barkpark.cloud/api/barkpark/schemas | head -c 200
-# (path depends on the web/ app's proxy route, if any; otherwise the app
-#  fetches https://api.barkpark.cloud directly per NEXT_PUBLIC_BARKPARK_API_URL)
-# Expected: JSON response from Phoenix
+curl -sS "https://barkpark.cloud/api/find?q=test" | head -c 200
+# /api/find is the server-only proxy that authenticates with BARKPARK_TOKEN.
+# (There is no /api/barkpark/schemas route — web/app/api/barkpark/ holds only
+#  webhook/. The routes that exist are find, find-event and search-seed.)
+# Expected: JSON from Phoenix, proving BARKPARK_TOKEN and
+#           NEXT_PUBLIC_BARKPARK_API_URL are both live.
 
 # Multi-geo DNS check — confirm propagation reached major resolvers
 for ns in 1.1.1.1 8.8.8.8 9.9.9.9 208.67.222.222; do
