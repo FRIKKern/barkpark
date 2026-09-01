@@ -1065,6 +1065,27 @@ defmodule BarkparkCloud.Sites.Deploy do
     attrs = %{
       stage: stage.name,
       detail: stage.detail || stage_line(stage),
+      # cch-w33-bl, NAMED CONSENT — this is the ONE console writer that does not
+      # go through `Registry.cap_console/1`; the other three do
+      # (`append_deployment_console/2`, `cancel_preview/2`, and the provision
+      # twin). The bound holds by ARITHMETIC, not by enforcement: `apply_stages/2`
+      # records a stage at most once per {name, status} pair (`recorded?/2`), and
+      # six stages over three terminal statuses ceilings this at eighteen entries
+      # against `@max_console_lines` 300.
+      #
+      # Latent is not harmless. Nothing here would notice the cap being lowered,
+      # and if this writer ever appends onto a console another path already
+      # capped, the row silently exceeds the cap and loses `cap_console/1`'s
+      # `dropped_before` disclosure — a console that dropped its head would then
+      # be indistinguishable from a complete one, which is the exact defect class
+      # this epic exists to remove.
+      #
+      # CONSENTED RATHER THAN FIXED, deliberately: capping here means either
+      # promoting `cap_console/1` to public in `registry.ex`, or re-deriving the
+      # ring locally — and a local `Enum.take/2` would drop the head SILENTLY,
+      # buying the bound by committing the very defect above. The honest fix is
+      # to promote the one canonical implementation, which is a `registry.ex`
+      # change and belongs with whoever holds that file.
       console: (deployment.console || []) ++ [entry],
       status: status_for_stage(deployment.status, stage),
       # Heartbeat: every stage CAS refreshes the lease so the reaper doesn't
