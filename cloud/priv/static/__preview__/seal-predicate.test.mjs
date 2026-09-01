@@ -2157,3 +2157,139 @@ test('wave 66: a cross-check that CANNOT BE READ refuses — an unverified popul
   assert.match(unreadable.out, /no numeric child_count/);
   assert.doesNotMatch(unreadable.out, /VERDICT: SEAL/);
 });
+
+// ─── WAVE 67 — THE REFUSAL THAT WAS HOLDING ITS OWN ANSWER ───────────────────────────
+//
+// Wave 66 taught the walk to NOTICE a draft child by comparing two numbers from two
+// endpoints. It then refused, and told the reader to go run `bp task get <parent>` BY HAND
+// to find out WHICH rows were in the gap. The response that produced the count ALREADY
+// CARRIES THAT LIST: `/v1/tasks/:id` answers `{child_count, children:[{doc_id,
+// lifecycle_status, title, criteria_progress, …}]}`, and `qTasks` was reading exactly one
+// field off it and throwing the rest away one line above the refusal.
+//
+// Measured live against the epic this instrument exists to certify, 2026-09-01:
+//
+//   the walk read 921 published rows; /v1/tasks/cloud-console-hardening-epic said 925.
+//   The four in the gap, straight out of the SAME response's `.children`:
+//     drafts.task-c64f2a37d7f97bd8                                        cancelled
+//     drafts.cch-w40-bl-probe-packet-audit-x1                             cancelled
+//     drafts.cch-w40-s5-followup-reason-only-refusals-invisible-…-lens    cancelled
+//     drafts.cch-w64-s5-law-0-repayment-twelve-closes-three-integers      OPEN
+//   None of the four had a published twin in the walk — all four are draft-ONLY children.
+//
+// So the one epic Standing Law 0 is scored against had been UNMEASURABLE since wave 66 for
+// want of a field read, while the answer sat in a variable the throw could see. A refusal
+// that the program's own payload can discharge is not honesty; it is an unread response.
+//
+// THE FIX RESOLVES, IT DOES NOT SOFTEN. Draft-only children are ADMITTED into the roster
+// carrying the lifecycle_status the task layer reports, so clause (a) counts a live draft
+// as residue instead of never seeing it. Every case the walk CANNOT resolve from that list
+// still refuses under the same `ROSTER-DRAFT-BLIND` code: no list at all, a list that does
+// not account for the gap, a gap row with no lifecycle_status, or a `drafts.<id>` TWIN of a
+// row already walked — whose remedy is destructive and stays a human's call.
+const withChildren = (kids) => (s) => must(s,
+  'return { doc: { child_count: ',
+  'return { children: ' + JSON.stringify(kids) + ', doc: { child_count: ');
+const pubKids = (n, status) => {
+  const out = [];
+  for (let i = 0; i < n; i += 1) out.push({ doc_id: 'row-' + i, lifecycle_status: status || 'done' });
+  return out;
+};
+
+test('wave 67 THE GAP RESOLVES FROM THE RESPONSE ALREADY IN HAND: a draft-only child is ADMITTED, not refused', () => {
+  // Seven published rows, a ledger that says eight children, and the eighth NAMED in the
+  // same response: a draft-only row that is `done`. Pre-fix this refused ROSTER-DRAFT-BLIND
+  // and asserted nothing whatever about clause (a).
+  const resolved = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 8 }),
+    withChildren([...pubKids(7), { doc_id: 'drafts.d-dead', lifecycle_status: 'done' }]),
+    withPageLimit(3)));
+  assert.notEqual(resolved.status, INFRA,
+    `a gap the program can resolve from its own payload is not an infra fault: ${token(resolved.out)}`);
+  assert.doesNotMatch(token(resolved.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(token(resolved.out), /\ba=PASS\b/);
+  // THE DENOMINATOR IS THE WHOLE POPULATION, not the published half of it.
+  assert.match(token(resolved.out), /\broster=8\b/, 'the admitted draft is counted in the roster');
+  assert.match(token(resolved.out), /\bdrafts=1\b/,
+    'and the token DISCLOSES how many rows came from the task layer rather than the published query');
+});
+
+test('wave 67 THE ADMITTED ROW CAN FAIL THE CLAUSE IT WAS INVISIBLE TO: an OPEN draft is residue', () => {
+  // The whole point. All seven published rows are `done`, so the ONLY live row in this
+  // parent is the one the published query cannot see. Admitting it must make it COUNT —
+  // the refutation below is the previously-invisible row doing the work.
+  const live = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 8 }),
+    withChildren([...pubKids(7), { doc_id: 'drafts.d-open', lifecycle_status: 'open' }]),
+    withPageLimit(3)));
+  assert.equal(live.status, REFUSED, `TERMINAL is refuted by the admitted draft: ${token(live.out)}`);
+  assert.match(token(live.out), /reason=TERMINAL-CLAIM-REFUTED/);
+  assert.match(live.out, /drafts\.d-open/, 'the row that refutes TERMINAL is NAMED, and it is the draft');
+
+  // NON-VACUOUS, PROVED BY MUTATION — and the mutant is WORSE than wave 66, not equal to
+  // it. Resolve the gap and then DROP the admission (the one-line push) and the identical
+  // run does not go back to refusing: it stops refusing AND never sees the open row, so it
+  // certifies clause (a) CLEAN over a population it just finished proving was partial.
+  // That is the false seal this arm exists to stop, and it is reachable by deleting one
+  // line — so the assertion above is reading the admitted row, not reading past it.
+  const notAdmitted = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 8 }),
+    withChildren([...pubKids(7), { doc_id: 'drafts.d-open', lifecycle_status: 'open' }]),
+    withPageLimit(3),
+    (s) => must(s, 'for (const a of admitted) rows.push(a);', '')));
+  assert.notEqual(notAdmitted.status, REFUSED, 'TERMINAL is no longer refuted — the row that refuted it is gone');
+  assert.match(token(notAdmitted.out), /\ba=PASS\b/, 'and clause (a) passes over the seven it could see');
+  assert.match(token(notAdmitted.out), /\broster=7\b/, 'the denominator silently loses the eighth row');
+  assert.doesNotMatch(notAdmitted.out, /drafts\.d-open/, 'the live draft is invisible again');
+});
+
+test('wave 67 THE REFUSAL SURVIVES (no list): a gap with no `children` to resolve it still REFUSES', () => {
+  // A cross-check endpoint that answers a count and no ids is exactly wave 66's world, and
+  // it must still refuse there. `children` absent stands for every shape the list can fail
+  // to arrive in.
+  const blind = rosterRun(chain(withLedger({ rows: 7, total: 7, childCount: 8 }), withPageLimit(3)));
+  assert.equal(blind.status, INFRA, 'an unresolvable gap is still a population this program could not read whole');
+  assert.match(token(blind.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(blind.out, /carried no `children` list/);
+  assert.doesNotMatch(blind.out, /VERDICT: SEAL/);
+});
+
+test('wave 67 THE REFUSAL SURVIVES (twin): a `drafts.<id>` TWIN of a walked row is NOT admitted', () => {
+  // The destructive case, and the reason wave 66 refused to guess at all. A twin is the
+  // SAME row twice, so admitting it would double-count the population, and publishing it
+  // over its parent can un-stamp a met criterion. It stays a human's call, by name.
+  const twin = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 8 }),
+    withChildren([...pubKids(7), { doc_id: 'drafts.row-0', lifecycle_status: 'open' }]),
+    withPageLimit(3)));
+  assert.equal(twin.status, INFRA, 'a twin is not a row this program may resolve on its own');
+  assert.match(token(twin.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(twin.out, /drafts\.row-0/, 'and the twin is NAMED rather than described');
+  assert.match(twin.out, /published-wins/);
+});
+
+test('wave 67 THE REFUSAL SURVIVES (short list): a `children` list that does not account for the gap REFUSES', () => {
+  // A list that is itself truncated resolves nothing, and a PARTIAL resolution is the exact
+  // fail-open this file is written against: nine children claimed, eight named.
+  const short = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 9 }),
+    withChildren([...pubKids(7), { doc_id: 'drafts.d-dead', lifecycle_status: 'done' }]),
+    withPageLimit(3)));
+  assert.equal(short.status, INFRA, 'a list that cannot account for the gap has not resolved it');
+  assert.match(token(short.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(short.out, /accounts for only 1 of the 2/);
+});
+
+test('wave 67 THE REFUSAL SURVIVES (no status): a gap row with no lifecycle_status REFUSES', () => {
+  // An admitted row is admitted BECAUSE of its lifecycle_status — that is the single field
+  // clause (a) reads off it. A row carrying none cannot be placed live or dead, and a row
+  // this program cannot place must never be counted as clean.
+  const noStatus = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 8 }),
+    withChildren([...pubKids(7), { doc_id: 'drafts.d-mute' }]),
+    withPageLimit(3)));
+  assert.equal(noStatus.status, INFRA, 'a row with no lifecycle_status cannot be placed');
+  assert.match(token(noStatus.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(noStatus.out, /drafts\.d-mute/);
+  assert.match(noStatus.out, /no lifecycle_status/);
+});

@@ -551,10 +551,17 @@ jobs:
       # it runs BEFORE deps/compile: it needs neither, so a new leak reds in
       # seconds instead of after a full compile + DB setup.
       #
-      # The HARNESS runs FIRST, and it is not decoration: its case 12 gutts the
+      # The HARNESS runs FIRST, and it is not decoration: its case 12 guts the
       # detector in a copy of the gate and requires that copy to come back GREEN
-      # on the leak fixture. Without that, all eighteen other cases could pass
+      # on the leak fixture. Without that, all 22 other cases could pass
       # over a gate that had been deleted.
+      #
+      # THE 22 IS RE-DERIVABLE, so re-derive it rather than trusting this line:
+      #   grep -cE '^[[:space:]]*ok "'   scripts/test-env-leak-gate.test.sh  # 25 arms total
+      #   grep -cE '^[[:space:]]*ok "12' scripts/test-env-leak-gate.test.sh  #  3 are case 12
+      # 25 - 3 = 22. Count ARMS, not case numbers: there are 15 numbered cases
+      # but 25 assertion arms, because 12 splits into 12a/12b/12c and it is the
+      # arms the harness tallies in its own "PASSED: n of n cases" line.
       - name: The test-env-leak guard must be able to fail
         working-directory: .
         run: bash scripts/test-env-leak-gate.test.sh
