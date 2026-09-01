@@ -715,6 +715,24 @@ defmodule BarkparkWeb.Router do
   # key's own workspace binding.
   pipeline :ticket_key do
     plug(:accepts, ["json"])
+    # Baseline JSON security headers (nosniff + referrer-policy), the SAME line
+    # and the SAME position `:api` and `:session_token_root` carry right after
+    # `accepts` (task-5bf037daa116ea70). This was the one browser-reachable /v1
+    # bucket without it, and it is the LOWEST-trust one: outsider-held keys
+    # uploading and downloading outsider-supplied bytes. Before this line the
+    # only response on the bucket carrying `nosniff` was the attachment stream,
+    # and it carried it because `TicketsAttachmentsController.stream_file/2`
+    # hand-sets it — so a second byte-serving GET added here tomorrow shipped
+    # with NO nosniff unless its author remembered to copy that controller
+    # check. Deny-by-default belongs at the MOUNT. Mounted BEFORE
+    # RequireTicketKey so the halting 401/403 envelopes get the headers too
+    # (the plug is `register_before_send`, and it never overwrites a header a
+    # controller already set — so the stream's own nosniff still wins).
+    #
+    # NOT adding ErrorEnvelopeNegotiation here: it changes the ERROR ENVELOPE
+    # SHAPE this surface emits, which is a client-visible contract change and
+    # not what this security-header fix is scoped to. Left as a known gap.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.RequireTicketKey)
     # Per-key abuse rails on the WRITE surface (charter Decision 9). Mounted
     # AFTER RequireTicketKey so the bucket key can read the resolved
