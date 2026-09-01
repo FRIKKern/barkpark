@@ -4,22 +4,26 @@
 //   node --test tooling/grip/test/rerun-import-boundary.test.mjs
 //
 // WHY THIS FILE EXISTS. charter D88 moved the safety gate to the CALLER:
-// `screenedRerun` (adjudicate.mjs:122) runs `screenCommand` first and calls
-// `runRerun` only on admission, and it is the default runner (adjudicate.mjs:164).
-// That closed a real hole — a facts.json whose rerun was `cp /etc/hosts /tmp/x`
-// materialised the file under no flags.
+// `screenedRerun` in adjudicate.mjs runs `screenCommand` first and calls
+// `runRerun` only on admission, and it is the DEFAULT runner. That closed a
+// real hole — a facts.json whose rerun was `cp /etc/hosts /tmp/x` materialised
+// the file under no flags.
 //
 // But it closed it by CONVENTION. `runRerun` still reaches
-// `spawnSync("/bin/sh", ["-c", cmd])` (rerun.mjs:378) gated only by
-// `classifySafety` (rerun.mjs:696), and `classifySafety` is a denylist that
-// admits anything with no write SHAPE — measured on the frozen specimens it
-// admits 6 of 6, including `ssh root@<ip> …` and a bare `node <file>.mjs`,
-// where screenCommand admits 3 of 6. So the guarantee on main today is
-// "every current caller happens to be screened", NOT "no caller can be
-// unscreened". A new module importing `runRerun` directly would reopen the
-// hole, and before this file NOTHING in the suite would have gone red:
-// census.test.mjs asserts `doesNotMatch(CODE, /runRerun/)` for census.mjs
-// ALONE, one file out of seventeen.
+// `spawnSync("/bin/sh", ["-c", cmd])` — see `shell` in rerun.mjs — gated only
+// by `classifySafety`, and `classifySafety` is a denylist that admits anything
+// with no write SHAPE. Measured on the frozen specimens in
+// fixtures/level-skip-specimens.json it admits 6 of 6, including
+// `ssh root@<ip> …` and a bare `node <file>.mjs`, where `screenCommand` admits
+// 3 of 6. So the guarantee on main today is "every current caller happens to be
+// screened", NOT "no caller can be unscreened". A new module importing
+// `runRerun` directly would reopen the hole, and before this file NOTHING in
+// the suite would have gone red: census.test.mjs asserts
+// `doesNotMatch(CODE, /runRerun/)` for census.mjs ALONE, one file of seventeen.
+//
+// NO LINE NUMBERS ABOVE, deliberately. The three refs this file was written
+// from had ALL drifted — by 20, 41 and 276 lines — while still reading
+// perfectly plausibly. Grep the symbol; a symbol survives an insertion.
 //
 // This test makes the boundary an invariant of the tree rather than a habit.
 //
