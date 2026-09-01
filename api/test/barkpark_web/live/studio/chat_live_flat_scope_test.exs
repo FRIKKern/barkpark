@@ -31,7 +31,6 @@ defmodule BarkparkWeb.Studio.ChatLiveFlatScopeTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
-  alias Barkpark.Auth.ApiToken
   alias Barkpark.ChatHosts
   alias Barkpark.Repo
   alias Barkpark.StudioChat.Session, as: StudioChatSession
@@ -125,52 +124,6 @@ defmodule BarkparkWeb.Studio.ChatLiveFlatScopeTest do
 
       refute created.owner_workspace_id == default_ws.id,
              "flat /studio/chat wrote a chat_sessions row owned by the Default workspace"
-    end
-  end
-
-  describe "POPULATION 2 — an instance-wide admin token (no workspace of its own)" do
-    setup %{conn: conn} do
-      raw = "chatflat-instance-#{System.unique_integer([:positive])}"
-
-      {:ok, _} =
-        %ApiToken{}
-        |> ApiToken.changeset(%{
-          token_hash: ApiToken.hash_token(raw),
-          label: "instance-wide chat operator",
-          dataset: "production",
-          permissions: ["read", "write", "admin"]
-        })
-        |> Repo.insert()
-
-      %{conn: init_test_session(conn, %{"api_token" => raw})}
-    end
-
-    # CHARACTERIZATION, not an endorsement. This principal carries `workspace_id
-    # = nil` and NO membership row anywhere, so `derive_scope_from_principal/1`
-    # has nothing to bind and `default_scope_fallback/1` pins Default — and it
-    # then reads Default's registered execution hosts despite holding no
-    # authority there (`Tenancy.Auth.authorize/3` is `member?/2 and permits?/2`,
-    # so a membership-less token is authorized in NO workspace, Default
-    # included).
-    #
-    # This is deliberately NOT fixed here. It is not a ChatLive defect: the
-    # producer is `StudioChrome.default_scope_fallback/1`, which every
-    # resolver-less flat live_session shares, so patching it inside this one
-    # LiveView would be exactly the sideways-carry that produced this defect
-    # class. Tracked as its own row against the fallback itself.
-    #
-    # The test is here so the gap is VISIBLE and cannot rot silently: if a
-    # future change starts refusing this principal, this test reds and whoever
-    # made it must come back and delete it on purpose.
-    test "CHARACTERIZED GAP: still mounts and reads Default's hosts", %{conn: conn} do
-      html = open_host_picker(conn)
-
-      assert html =~ "DEFAULT-TENANT-HOST",
-             "a membership-less instance token still reads Default's execution hosts — " <>
-               "if this now refuses, the fallback row landed and this test should be retired"
-
-      refute html =~ "WSB-OWN-HOST",
-             "it must never reach a workspace it has no relationship to"
     end
   end
 

@@ -102,11 +102,21 @@ defmodule BarkparkWeb.PluginPublicMountTest do
 
       mounted = mount_plugin_public(%{"api_token" => raw})
 
-      # The token IS globally admin-permissioned and the chrome DID label it
-      # with the Default workspace — that part is unchanged, and is its own
-      # (smaller) open lie, tracked with the parent task.
+      # SUPERSEDED (task-e9386e19bd7bb376). This assertion used to read
+      # `mounted.assigns.current_workspace.slug == "default"`, over a comment
+      # calling that label "its own (smaller) open lie, tracked with the parent
+      # task". That lie is now CLOSED: `Tenancy.Auth.authorize/3` is
+      # `member?(token, ws) and permits?(token, action)` with no global bypass,
+      # so this seatless token is authorized in NO workspace — Default included
+      # — and `StudioChrome.default_scope_fallback/1` no longer hands it one.
+      #
+      # `:plugin_public` is one of the six resolver-less live_sessions that
+      # share that single producer, so it inherits the narrowing without a line
+      # of its own. The arpss-w10 point this test exists to pin is UNCHANGED and
+      # is asserted below: the seat-scoped affordance stays false, the
+      # host-level oracle stays true.
       assert Auth.has_permission?(mounted.assigns.api_token, "admin")
-      assert mounted.assigns.current_workspace.slug == "default"
+      assert mounted.assigns.current_workspace == nil
 
       # But it holds no seat there, so the workspace-scoped affordance is gone.
       # Pre-fix this was `true` — the phantom Share button for a non-member.

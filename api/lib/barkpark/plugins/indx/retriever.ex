@@ -17,8 +17,10 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   `Barkpark.Search.DocumentsRetriever.search/4` returns
   `{[%Barkpark.Content.Document{}, ...], total, meta}`. This retriever returns
   the SAME shape: a list of `%Document{}` structs (hydrated from Postgres via
-  `Barkpark.Content.get_document/4`, tenant-scoped), an integer total, and an
-  engine-diagnostics `meta` map (defaults to `%{}`).
+  `Barkpark.Content.get_document/4`, tenant-scoped), an integer total, and a
+  `meta` map — which on this path is ALWAYS `%{}`. The engine's `facets` and
+  `truncationIndex` are deliberately dropped; see "Why this retriever returns
+  no `facets` and no `truncation`" below for the ruling.
 
   ## Pipeline
 
@@ -60,9 +62,9 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     # workspace A last swapped in (`Indexer` moduledoc, "Index identity").
     dataset = Indexer.current_dataset(Indexer.index_key(scope, opts))
 
-    # An empty `text` is NOT short-circuited: Indx's empty-query + enableFacets
-    # is the browse-with-facets mode (the finder's landing). Only a missing live
-    # dataset degrades to empty.
+    # An empty `text` is NOT short-circuited: Indx's empty-query mode is the
+    # browse listing (the finder's landing), which still returns records. Only a
+    # missing live dataset degrades to empty.
     cond do
       is_nil(dataset) ->
         {[], 0, %{}}
@@ -87,7 +89,10 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     pool = display_limit |> max(@candidate_pool) |> min(@candidate_pool)
     client_opts = client_opts(opts)
 
-    with {:ok, %{records: records, facets: facets, truncation_index: tindex}} <-
+    # The engine's reply also carries `facets` and `truncation_index`. Neither is
+    # bound: both describe the SHARED, dataset-keyed index rather than this
+    # caller's tenant-scoped match set. See the ruling below.
+    with {:ok, %{records: records}} <-
            client.search_full(dataset, text, [max: pool] ++ client_opts),
          keys = Enum.map(records, &record_key/1) |> Enum.reject(&is_nil/1),
          {:ok, indx_docs} <- hydrate(client, dataset, keys, client_opts) do
@@ -106,7 +111,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
       Barkpark.Plugins.Indx.Monitor.record_success(scope, %{dataset: dataset})
 
-      {hits, total_for(ranked, scope, opts), engine_meta(facets, tindex)}
+      {hits, total_for(ranked, scope, opts), %{}}
     else
       {:error, err} ->
         # P4b Hardening A: turn silent fallback into a queryable signal.
@@ -118,38 +123,49 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     end
   end
 
-  # Engine diagnostics surfaced to the pipeline → HTTP response: Indx-computed
-  # dataset-wide facet buckets and the coverage `truncation` boundary. Both are
-  # genuinely Indx (the API gateway exposes neither for Postgres).
-  defp engine_meta(facets, tindex) do
-    %{}
-    |> maybe_put(:facets, normalize_facets(facets))
-    |> maybe_put(:truncation, if(is_integer(tindex), do: %{index: tindex}))
-  end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, _key, v) when v == %{}, do: map
-  defp maybe_put(map, key, v), do: Map.put(map, key, v)
-
-  # Indx returns `%{"type" => [%{"key" => "post", "value" => 2}], ...}` (key =
-  # bucket value, value = count). Re-shape to `%{"type" => [%{"label","count"}]}`
-  # and drop the empty-string bucket (docs that lack the field).
-  defp normalize_facets(facets) when is_map(facets) do
-    facets
-    |> Enum.map(fn {field, buckets} ->
-      {field,
-       buckets
-       |> List.wrap()
-       |> Enum.map(fn b ->
-         %{"label" => to_string(Map.get(b, "key", "")), "count" => Map.get(b, "value", 0)}
-       end)
-       |> Enum.reject(&(&1["label"] in ["", nil]))}
-    end)
-    |> Enum.reject(fn {_field, buckets} -> buckets == [] end)
-    |> Map.new()
-  end
-
-  defp normalize_facets(_), do: %{}
+  # ---------------------------------------------------------------------------
+  # Why this retriever returns no `facets` and no `truncation`
+  # ---------------------------------------------------------------------------
+  #
+  # It used to. A private `engine_meta/2` re-shaped the engine's `facets`
+  # payload onto the pipeline's `facets:` key and its `truncationIndex` onto
+  # `truncation:`.
+  #
+  # The facet buckets were computed BY THE ENGINE over an index keyed on the
+  # Barkpark dataset STRING alone (`Indexer.current_dataset/1`), so every
+  # workspace sharing a dataset name shares ONE index — the same shared pool
+  # `total_for/3` below is written for. The rows beside those buckets are
+  # re-read from Postgres under full tenant scope; the buckets were not re-read
+  # at all. `author` and `category` are tenant-authored FREE TEXT (`Indexer`'s
+  # `field_proxies/1` marks them facetable), so workspace A received workspace
+  # B's author names and category names VERBATIM — not merely counts. Measured:
+  # A could read 1 document while the bucket beside it said 2.
+  #
+  # Reachable with no credentials. `engine` is a raw caller-supplied query param
+  # (`SearchController`), not an admin surface, and a tokenless flat request is
+  # still stamped with a real binary `workspace_id` by `Plugs.AssignDefaultScope`
+  # — so both halves of the D3-b gate in `QueryPipeline` are satisfiable
+  # anonymously. The `search:*` channel DEFAULTS `engine` to `"indx"`, so every
+  # WS query took this path with no param at all: the default, not an odd URL.
+  #
+  # There is a prior ruling and dropping these restores compliance with it.
+  # `DocumentsRetriever` (at `count_and_facets/1`): "Facets + count stay on the
+  # FULL match set (not the ranking pool): the user wants 'this query matched
+  # 1.2k items across these facets', not 'the top 500 break down this way'."
+  # Barkpark already decided that a facet number means a count over the CALLER'S
+  # full, tenant-scoped match set. Indx never implemented that — it reported the
+  # index's own counts. With the buckets dropped, `facets` means exactly one
+  # thing everywhere it is non-null: a Postgres count over rows the caller could
+  # have reached one by one. `truncation` goes with it — it is a coverage
+  # boundary over that same dataset-wide pool, describing a set the caller
+  # cannot see either.
+  #
+  # DO NOT "restore the facet rail" here. Tenant-scoped facets over an Indx
+  # result would require the ENGINE to narrow by workspace at query time (a
+  # `filterable` proxy `Client.search_full/3` does not currently send);
+  # recomputing them from the shared index reopens an anonymous cross-tenant
+  # read of another workspace's author and category strings.
+  # `Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest` reds if it comes back.
 
   # Indx has no native negation in this path: query_text/1 builds only the
   # POSITIVE query for the engine. The parsed `:excludes` are honored here as a
