@@ -326,6 +326,67 @@ defmodule Barkpark.Tasks.QueueTest do
       results = Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id])
       assert ids_of(results) == [draft.id]
     end
+
+    # TRIPWIRE for the recurring "the ready queue emits phantom drafts" report.
+    #
+    # An UNPAIRED `drafts.<id>` row is NOT a phantom. It is how EVERY task is
+    # born: `Content.create_document/4` forces `doc_id` through
+    # `DraftId.draft_id/1`, so a task is a draft until something publishes it,
+    # and `bp task create` / `bp doc create task` both default to leaving it
+    # there. Excluding unpaired drafts from `ready_query/1` would therefore hide
+    # the whole mutate-created population from `bp task ready` and `bp task
+    # next` — see the same ruling stated at `Tasks.Query.collapse_twins/1` and
+    # in `TasksController.list/2` ("why this is NOT a blanket `drafts.`
+    # exclusion").
+    #
+    # The report that motivates the exclusion always rests on one claim: that a
+    # claimed draft is "a row that can never be closed". This test is the
+    # standing refutation — it drives the FULL round trip (born draft-only ->
+    # ready -> claim -> close -> done) and proves the close lands. If someone
+    # adds a `not like(doc_id, "drafts.%")` filter to the resolver, this reds at
+    # the `ready` step; if a close path regresses for drafts, it reds at the
+    # close step. Both halves are load-bearing.
+    test "an UNPAIRED draft is real work: born draft-only -> ready -> claim -> close",
+         %{scope: scope} do
+      phase_id = "phase-draft-roundtrip-#{System.unique_integer([:positive])}"
+      base_id = "roundtrip-#{System.unique_integer([:positive])}"
+
+      task = mk_task!(base_id, scope, @dataset, %{"parent_id" => phase_id})
+
+      # Non-vacuity on the FIXTURE: this must genuinely be an unpaired draft,
+      # or every assertion below is about some other shape. Both halves matter —
+      # the row IS `drafts.<id>`, and no published twin exists to stand in for
+      # it (that twinned case is the test directly above).
+      assert task.doc_id == "drafts." <> base_id,
+             "create_document must birth the task as a draft for this test to mean anything"
+
+      assert {:error, :not_found} =
+               Content.get_document(base_id, "task", @dataset, scope),
+             "an unpaired draft must have NO published twin"
+
+      # (a) it is offered as ready — the behaviour a `drafts.` exclusion breaks.
+      assert ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id])) == [task.id]
+
+      # (b) it is claimable off the queue — the same `ready_query/1` that
+      # `bp task next` rides (Claim.claim/2 composes it directly).
+      assert {:ok, claimed} =
+               Tasks.claim("roundtrip-worker", scope ++ [dataset: @dataset, phase_id: phase_id])
+
+      assert claimed.id == task.id
+      assert claimed.doc_id == "drafts." <> base_id
+      epoch = get_in(claimed.content, ["claim", "epoch"])
+      assert epoch == 1
+
+      # (c) and it CLOSES. This is the half that refutes "can never be closed".
+      assert {:ok, closed} =
+               Tasks.close(
+                 claimed.id,
+                 "roundtrip-worker",
+                 scope ++ [dataset: @dataset, observed_epoch: epoch]
+               )
+
+      assert get_in(closed.content, ["lifecycle_status"]) == "done"
+    end
   end
 
   # ─── (6) phase filter normalizes the drafts. prefix on either side ───────
