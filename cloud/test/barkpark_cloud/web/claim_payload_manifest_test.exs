@@ -380,13 +380,16 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
 
   # The RESURRECT claim's own open rows, kept as a SEPARATE pinned list because
   # the wave ruled `@known_open` at exactly six (the provision + support seam it
-  # measured) — now FIVE: the support claim's `agent_token` row was deleted when
-  # the mint was removed from `support_provision_claim_json/2`
-  # (cch-w53-bl-…-a-live-agent-token). Shrinking this list is exactly the
-  # bookkeeping the equality exists to force, and it is only legal in the same
-  # diff that fixes the defect. Discovered by this manifest's first run and filed the same hour;
-  # holding it in a second list rather than folding it in keeps the ruled set
-  # auditable AND keeps the third claim from being silently unmeasured.
+  # measured) — now FIVE, see below. Discovered by this manifest's first run and
+  # filed the same hour; holding it in a second list rather than folding it in
+  # keeps the ruled set auditable AND keeps the third claim from being silently
+  # unmeasured.
+  #
+  # SIX → FIVE (cch-w53-bl-…-a-live-agent-token): the support claim's
+  # `agent_token` row was deleted when the mint was removed from
+  # `support_provision_claim_json/2`. Shrinking `@known_open` is exactly the
+  # bookkeeping the equality exists to force, and it is only ever legal in the
+  # same diff that fixes the defect it tracked.
   @resurrect_known_open [
     %{
       claim: "resurrect",
