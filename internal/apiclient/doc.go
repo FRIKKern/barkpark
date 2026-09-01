@@ -85,9 +85,9 @@ type Doc struct {
 // returns (nil, DocReadUnreachable) and Query discards the outcome, so the pane
 // spells "the read failed" exactly like "this type holds nothing".
 //
-// The SEVEN fields whose json names are also reachable content-field names —
-// id, status, category, author, updatedAt, values, body_html — are therefore
-// held as raw JSON during the struct decode (the shadow fields below) and
+// The EIGHT fields whose json names are also reachable content-field names —
+// id, title, status, category, author, updatedAt, values, body_html — are
+// therefore held as raw JSON during the struct decode (the shadow fields) and
 // coerced afterwards in normalizeEnvelope, through the same tolerant
 // scalarString the file already used to derive Values. A well-shaped document
 // decodes to exactly the values it decoded to before, pinned field-by-field
@@ -103,6 +103,16 @@ type Doc struct {
 // below), and the coerced fill runs BEFORE that gap-fill, so a legacy "id"
 // still beats "_id" exactly as it did — see TestLegacyEnvelopeKeysWin.
 //
+// "title" was the last one left typed, and its exemption was a REMOTE
+// invariant rather than a client one: envelope.ex does Map.put("title",
+// doc.title) from the typed DB column AFTER the content merge, so through the
+// /v1/data/query producer a content field named "title" is overwritten before
+// it reaches the wire. But Doc is also decoded from bodies that producer never
+// shaped — paper.go's PaperDoc callers decode raw envelopes, and RevisionDoc
+// builds a Doc by hand from a revision body — and on those paths an object-,
+// array- or number-shaped "title" aborted the WHOLE []Doc decode. A client
+// hardened against ONE producer's invariant is hardened against nothing.
+//
 // The exported fields and their json tags are unchanged — this is a DECODE
 // change, not an API change.
 func (d *Doc) UnmarshalJSON(b []byte) error {
@@ -117,6 +127,7 @@ func (d *Doc) UnmarshalJSON(b []byte) error {
 	var a struct {
 		docAlias
 		ID        json.RawMessage `json:"id"`
+		Title     json.RawMessage `json:"title"`
 		Status    json.RawMessage `json:"status"`
 		Category  json.RawMessage `json:"category"`
 		Author    json.RawMessage `json:"author"`
@@ -132,7 +143,7 @@ func (d *Doc) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &raw); err == nil {
 		d.Extra = raw
 	}
-	// Unconditional: the seven shadowed fields are filled HERE now, so skipping
+	// Unconditional: the eight shadowed fields are filled HERE now, so skipping
 	// this call would drop them rather than merely skip the gap-fills.
 	d.normalizeEnvelope()
 	return nil
@@ -151,8 +162,8 @@ var envelopeMetaKeys = map[string]bool{
 
 // normalizeEnvelope does two jobs, in this order.
 //
-// FIRST it fills the seven fields UnmarshalJSON deliberately does NOT decode
-// from the wire (id / status / category / author / updatedAt / values /
+// FIRST it fills the eight fields UnmarshalJSON deliberately does NOT decode
+// from the wire (id / title / status / category / author / updatedAt / values /
 // body_html), coercing each from its raw Extra value. This is the same work the
 // typed struct decode used to do, minus the failure mode: scalarString and
 // rfc3339Time report failure instead of erroring, so a reference-shaped
@@ -175,6 +186,9 @@ func (d *Doc) normalizeEnvelope() {
 	// exactly as the typed decode made it win.
 	if v, ok := scalarString(d.Extra["id"]); ok {
 		d.ID = v
+	}
+	if v, ok := scalarString(d.Extra["title"]); ok {
+		d.Title = v
 	}
 	if v, ok := scalarString(d.Extra["status"]); ok {
 		d.Status = v

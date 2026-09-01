@@ -245,6 +245,12 @@ var collisionCases = []struct {
 			if d.ID != "post-3" {
 				t.Errorf("CONTROL ID = %q, want \"post-3\" (from _id)", d.ID)
 			}
+			// Title joins the presence proof: a well-shaped string title must
+			// still decode to exactly the value it decoded to before it was
+			// moved off the typed struct decode.
+			if d.Title != "Title of post-3" {
+				t.Errorf("CONTROL Title = %q, want \"Title of post-3\"", d.Title)
+			}
 		},
 	},
 	{
@@ -359,6 +365,56 @@ var collisionCases = []struct {
 			// _draft is absent on this page, so Status simply degrades to "".
 			if d.Status != "" {
 				t.Errorf("Status = %q, want \"\"", d.Status)
+			}
+			if d.Author != "Ada" || d.Category != "news" {
+				t.Errorf("colliding doc lost sibling fields: author=%q category=%q", d.Author, d.Category)
+			}
+		},
+	},
+	{
+		// The EIGHTH field, and the one #14487 deliberately left typed. Through
+		// /v1/data/query it cannot collide: envelope.ex does Map.put("title",
+		// doc.title) from the typed DB column AFTER the content merge, so the
+		// producer overwrites a content field named "title" before it reaches
+		// the wire. But Doc is decoded from bodies that producer never shaped —
+		// paper.go's PaperDoc callers decode raw envelopes and RevisionDoc
+		// builds a Doc from a revision body — and on those paths a
+		// reference-shaped title used to abort the WHOLE slice. A client
+		// hardened against ONE producer's invariant is hardened against nothing.
+		name:     "title is a reference object",
+		override: `"title": {"_ref": "title-block-1", "_type": "title"}`,
+		check: func(t *testing.T, d Doc) {
+			if d.Title != "" {
+				t.Errorf("Title = %q, want \"\" (an object has no flat rendering)", d.Title)
+			}
+			if d.Author != "Ada" || d.Category != "news" || d.Status != "published" || d.ID != "post-3" {
+				t.Errorf("colliding doc lost sibling fields: author=%q category=%q status=%q id=%q", d.Author, d.Category, d.Status, d.ID)
+			}
+			if _, ok := d.Extra["title"]; !ok {
+				t.Errorf("Extra must still carry the raw title value for a caller that can read it")
+			}
+		},
+	},
+	{
+		name:     "title is an array",
+		override: `"title": ["Hello", "World"]`,
+		check: func(t *testing.T, d Doc) {
+			if d.Title != "" {
+				t.Errorf("Title = %q, want \"\" (an array has no flat rendering)", d.Title)
+			}
+			if d.Author != "Ada" || d.Status != "published" {
+				t.Errorf("colliding doc lost sibling fields: author=%q status=%q", d.Author, d.Status)
+			}
+		},
+	},
+	{
+		name:     "title is a number",
+		override: `"title": 2026`,
+		check: func(t *testing.T, d Doc) {
+			// scalarString renders a JSON number via its literal representation,
+			// exactly as it does for every other coerced field.
+			if d.Title != "2026" {
+				t.Errorf("Title = %q, want \"2026\" (a number renders via its literal)", d.Title)
 			}
 			if d.Author != "Ada" || d.Category != "news" {
 				t.Errorf("colliding doc lost sibling fields: author=%q category=%q", d.Author, d.Category)
