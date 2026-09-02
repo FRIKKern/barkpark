@@ -20,7 +20,7 @@ bp [globals] <noun> <verb> [args] [flags]
 | `bp workspace create/ls` | sandbox workspace | `bp workspace create Spike` |
 | `bp search query <q>` | full-text search | `bp search query norway` |
 | `bp paper view <slug>` | render a paper | `bp paper view welcome` |
-| `bp task ls` / `ready` | all / unblocked tasks | `bp task ready --limit 5` |
+| `bp task ls` / `ready` | all / claimable tasks | `bp task ready --limit 5` |
 | `bp task prime` | agent rehydration, one call | `bp task prime --worker a1` |
 | `bp task next <worker>` | claim the NEXT ready task | `bp task next a1` |
 | `bp task get <id>` | task + child rail | `bp task get task-101` |

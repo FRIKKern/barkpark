@@ -2401,7 +2401,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List executable, unblocked tasks (priority order by default).",
+        "summary": "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row — priority order by default.",
         "tags": [
           "task"
         ],

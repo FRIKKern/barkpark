@@ -20,6 +20,21 @@ defmodule Barkpark.Tasks.Queue do
   #   4. queue_gate — only a missing/null legacy gate or the exact executable-v1
   #      shape is admitted. Non-executable and malformed persisted gates fail closed.
   #
+  # WHAT IS **NOT** AN AXIS — `documents.status` (tgw10-bl-drafts-in-ready-pool).
+  # There is no `d.status == "published"` predicate anywhere below, and that is a
+  # DECISION, not an omission. `bp task create` lands a DRAFT by default, so a
+  # status filter here would hide every unpublished task from the queue agents
+  # claim from. An UNPAIRED `drafts.<id>` row is therefore admitted AS ITSELF;
+  # only a draft with a same-scope published twin is suppressed, by axis 3 above.
+  # This matches the LISTING rule (`tasks_controller.do_index/3` carries no status
+  # predicate either — docs/setup/TASK-SYSTEM.md, "Draft prefix"), so `ready` and
+  # `ls` agree on which twin is the one row. Two consequences a caller must own:
+  # a pool census over `ready` must dedupe on the `drafts.`-stripped doc_id, and
+  # lifecycle `blocked` rows ARE in the queue (see @ready_lifecycle_statuses).
+  # The manifest summary for `task.ready` says all of this in one sentence
+  # (Barkpark.Plugins.Tasks, pinned by cli_commands_manifest_test.exs) — if this
+  # comment and that sentence ever disagree, the query is the truth.
+  #
   # Phase scoping (`maybe_filter_phase`) normalizes the `drafts.` prefix on BOTH
   # sides of the `parent_id` match, the SAME edge `Tasks.Rail` uses, so a child
   # parented at `drafts.phase-x` is still found by a phase-scoped ready for
