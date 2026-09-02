@@ -164,9 +164,25 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
   defp assert_readonly_article!(rendered, slug) do
     articles = rendered |> then(&Regex.scan(~r/<article[^>]*>/, &1)) |> List.flatten()
 
-    assert Enum.any?(articles, &(&1 =~ ~r/^<article id="paper-body-#{slug}" data-rev="\d+">$/)),
+    # KEYED ON THE ARM, NOT ON THE ID. CI run 33608550208 red this while the arm
+    # was RIGHT: the page carried
+    # `<article id="paper-body-legacy-anon-share-poisoned-1529570" data-rev="1">`
+    # — the clamp had rendered the read-only raw arm with the sanitized body and
+    # every security `refute` passed, but the document the pane opened had been
+    # written under a `legacy-` PREFIXED doc_id that no lib/ code mints (nothing
+    # in the tree interpolates "legacy-" into an id) and that this fixture never
+    # asks for. So the id is ambient and the ARM is the claim: an `<article>`
+    # whose tag CLOSES right after `data-rev` is the read-only raw arm — the
+    # streamed block arm carries `phx-update="stream"` and the never-blank arm
+    # carries the `paper-body-unrenderable-` id, and neither can match. Callers
+    # pass the id of the document they actually wrote, so a rename cannot make
+    # this vacuous either.
+    assert Enum.any?(
+             articles,
+             &(&1 =~ ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+">$/)
+           ),
            """
-           expected the READ-ONLY raw arm for #{slug}.
+           expected the READ-ONLY raw arm (the fixture's document is #{slug}).
            A red here names the arm that rendered instead, so the next failure
            does not need a bisect: `paper-body-unrenderable-…` is the clamp
            refusing (the reader answered {:error, _}), a tag carrying
@@ -182,6 +198,8 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
          %{conn: conn, ws: ws, proj: proj} do
       slug = "anon-share-poisoned-#{System.unique_integer([:positive])}"
       paper = create_html_paper!(ws, proj, slug, @poisoned)
+      # The id the write actually produced — see `assert_readonly_article!/2`.
+      slug = paper.doc_id
 
       # The verdict this surface OWES the viewer, computed by the one reader.
       assert {:html, sanitized} =
@@ -209,6 +227,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
          %{conn: conn, ws: ws, proj: proj} do
       slug = "anon-share-refeed-#{System.unique_integer([:positive])}"
       paper = create_html_paper!(ws, proj, slug, @poisoned)
+      slug = paper.doc_id
 
       {view, _html} = open_paper!(conn, ws, proj, slug)
       pid_before = view.pid
@@ -241,6 +260,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
       # Script-only: `reader_source/3` calls this body semantically empty, so
       # there is nothing a reader may be shown — and certainly not the script.
       paper = create_html_paper!(ws, proj, slug, "<script>steal()</script>")
+      slug = paper.doc_id
 
       assert {:error, :semantic_empty} =
                Content.Papers.reader_source(paper, @dataset,

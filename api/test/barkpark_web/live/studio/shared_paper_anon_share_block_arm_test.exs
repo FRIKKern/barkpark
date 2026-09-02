@@ -155,6 +155,9 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareBlockArmTest do
          %{conn: conn, ws: ws, proj: proj} do
       slug = "anon-block-public-#{System.unique_integer([:positive])}"
       paper = create_block_paper!(ws, proj, slug)
+      # Open the id the write produced, not the one asked for (sibling file's
+      # CI lesson: the doc_id can come back ambient).
+      slug = paper.doc_id
 
       assert {:blocks, _} =
                Content.Papers.reader_source(paper, @dataset,
@@ -181,6 +184,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareBlockArmTest do
       seed_paper_schema!(ws, proj, true)
       slug = "anon-block-redacted-#{System.unique_integer([:positive])}"
       paper = create_block_paper!(ws, proj, slug)
+      slug = paper.doc_id
 
       # The verdict this surface OWES the viewer: the reader refuses to name a
       # source, because a structured body existed and visibility removed it.
@@ -211,6 +215,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareBlockArmTest do
 
       slug = "anon-block-delta-#{System.unique_integer([:positive])}"
       paper = create_block_paper!(ws, proj, slug)
+      slug = paper.doc_id
 
       {:ok, view, html} =
         live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/paper/#{slug}")
@@ -241,7 +246,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareBlockArmTest do
          %{conn: conn, ws: ws, proj: proj} do
       seed_paper_schema!(ws, proj, true)
       slug = "anon-block-notice-#{System.unique_integer([:positive])}"
-      _paper = create_block_paper!(ws, proj, slug)
+      slug = create_block_paper!(ws, proj, slug).doc_id
 
       html = open_paper!(conn, ws, proj, slug)
 
