@@ -140,3 +140,8 @@ Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one mi
   leases lapsed; stamp + close what the sweep merged; continue).
 - **Notify the owner once** (PushNotification): quota is theirs (`cswap`); relaunch on their word or at
   the reset time. Do not spend the outage idle: sweeps, triage reads, and the resume plan are free.
+- **Stand the originals down when you relaunch.** A lead that died on quota is only *paused*: when the
+  limit resets, its queued inbox messages and its own background loops wake it, and now two leads
+  drive one lane (measured 2026-09-02: the original deploy lead re-instructed a worker 90 min after its
+  successor took over). At relaunch, send every original a one-line stand-down (stop loops, no ledger
+  writes, no worker instructions, note it in status.md, end turn) in the same message as the launches.
