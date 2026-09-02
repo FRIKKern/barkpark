@@ -72,6 +72,12 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # #15202 landed this arm on 2026-09-02 without a row, so the non-vacuity
+      # count below read 48 clauses vs 47 rows and main went red. It reuses the
+      # public `malformed` code at the SAME 400 the bare atom uses — one code,
+      # one status — and adds `details.blocks` naming each offending path.
+      {"malformed_blocks", {:error, {:malformed_blocks, %{blocks: ["content.blocks[0]"]}}},
+       "malformed", 400, [:details]},
       # Same registered `malformed` code, one step narrower: a block list whose
       # element is not an object. It rides `malformed` on purpose (a request-body
       # SHAPE error, not a schema validation failure), so known_codes/0 and the
