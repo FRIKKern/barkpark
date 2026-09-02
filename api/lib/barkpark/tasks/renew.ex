@@ -50,6 +50,38 @@ defmodule Barkpark.Tasks.Renew do
   `@default_max_seconds` is a hard ceiling on TOTAL extension for one claim, so
   a PR left open for a week buys hours, not days.
 
+  ## THE WIRE CONTRACT — FROZEN (do not drift)
+
+  The CI half (`gates/lease-renew-workflow`) was built against this exact
+  shape, read off this branch. It is stated here VERBATIM so the two halves
+  cannot drift apart; changing any line below is a change to a shipped
+  contract and needs the gates lane in the room.
+
+      POST /v1/tasks/:doc_id/renew
+      body  {"pr": n, "state": "open"|"closed"|"merged", "reason": "..."}
+
+        * `pr`     REQUIRED, positive integer. Absent or non-positive is a 400.
+        * `state`  OPTIONAL, defaults to "open". Anything else is a 400.
+        * `reason` OPTIONAL free-text label, defaults to "open_pr".
+
+      There is NO separate clear verb. The clear is the SAME POST with
+      `state` "closed" or "merged", and it is PR-MATCHED: it removes only the
+      extension that same `pr` bought, so closing PR #2 cannot cancel the
+      grace PR #1 is still paying for. A clear with nothing (or someone
+      else's thing) to clear is an idempotent 200, not an error.
+
+      409 reasons (the wire tokens, exactly these three):
+        not_claimed            the row is not in_progress with a live claim.worker
+        extension_cap_reached  the cap below is spent
+        stale_claim            the rev-CAS lost under the advisory lock
+      (404 `task not found` is the only other refusal, from scope resolution.)
+
+      Window  2700 s of grace per renewal.
+      Cap     21600 s of TOTAL extension for one claim, from the FIRST grant.
+      Both ENFORCED SERVER-SIDE — a caller cannot ask for more, and a caller
+      that stops asking gets no more. Overridable only by the operator, via
+      `:task_lease_extension_window_seconds` / `:task_lease_extension_max_seconds`.
+
   ## What it writes, and what it deliberately does not
 
   ONE key: `content.claim.lease_extension`.
