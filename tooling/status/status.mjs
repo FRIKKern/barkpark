@@ -14,6 +14,8 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readCoverageReport, coverageMeasured, coverageLabel, coveragePending,
+         readQualityReport, qualityMeasured, qualityLabel, findingsLabel, qualityOrEmpty } from "./measured.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -46,15 +48,25 @@ run("consistency", "tooling/consistency/consistency.mjs", ["scan"]);
 run("aesthetics", "tooling/aesthetics/aesthetics.mjs");
 run("coverage", "tooling/research-coverage/coverage.mjs", ["scan"]);
 run("consistency-batches", "tooling/consistency/consistency.mjs", ["batches"]);
-const cov = rd("tooling/research-coverage/coverage-report.json", { pct: 0, stale: 0, new: 0, lastFullResearch: null });
-const covPending = (cov.stale || 0) + (cov.new || 0);
+// coverage-report.json is DERIVED and gitignored — absent on any clean checkout
+// and in CI. Read as report-or-null, never defaulted to a number: the old
+// { pct: 0, … } default printed "coverage 0%" as if a scan had produced it, the
+// same silent zero coverage.mjs stopped printing (LEDGER_ABSENT, exit 3, #14996).
+const cov = readCoverageReport(ROOT);
+const covMissing = !coverageMeasured(cov);
+const covPending = coveragePending(cov); // number, or null when nothing measured it
 const staleGroups = +txt("tooling/consistency/batch-count.txt", "0");
 const issuesStale = txt("tooling/consistency/issues-stale.txt", "0") === "1";
 run("consistency-merge", "tooling/consistency/consistency.mjs", ["merge"]);
 run("combined", "tooling/combined/combine.mjs");
 run("quality", "tooling/quality/quality.mjs");
 run("report", "tooling/status/report.mjs");
-const q = rd("tooling/quality/quality-report.json", { grade: "?", overall: 0, dimensions: [], totalFindings: 0, composites: { config: {}, worklists: {} } });
+// Same disease, same file family: quality-report.json is derived + gitignored, and
+// its old { overall: 0, totalFindings: 0 } default rendered an assessment that never
+// ran as "0/100 · 0 findings". Empty collections stay (an empty table is honest);
+// the numbers become N/A.
+const qRep = readQualityReport(ROOT);
+const q = qualityOrEmpty(qRep);
 
 // ════════════════ ARC 2 — ENRICH (programmatic merges + assemble) ════════════════
 run("usefulness-merge", "tooling/usefulness/usefulness.mjs", ["merge"]);
@@ -99,7 +111,7 @@ e("");
 e(`${C.b}═══ STATUS QUO — three arcs (v2: reach·churn·complexity·defects·tests·conventions·ownership·relationships) ═══${C.x}`);
 e("");
 const cfgSrc = q.composites?.config?.source || "defaults";
-e(`${C.b}ASSESS${C.x}   quality ${C.b}${q.grade} (${q.overall}/100)${C.x} · ${q.totalFindings} findings · coverage ${cov.pct}% · composites: ${cfgSrc}`);
+e(`${C.b}ASSESS${C.x}   quality ${C.b}${qualityLabel(qRep)}${C.x} · ${findingsLabel(qRep)} · coverage ${coverageLabel(cov)} · composites: ${cfgSrc}`);
 for (const d of q.dimensions) e(`         ${d.name.padEnd(12)} ${String(d.score).padStart(3)}${d.root ? `  ${C.y}[${d.root}]${C.x}` : ""}`);
 const wl = q.composites?.worklists || {};
 const wlTop = (k) => (wl[k] || []).slice(0, 4).map((x) => x.path.split("/").pop() + " " + x.score).join(" · ") || "—";
@@ -109,8 +121,10 @@ if (q.dimensions.length) {
   e(`     🔥 hotspot map (churn×complexity):       ${wlTop("hotspot")}`);
   e(`     ⚠ critical-untested (reach×¬coverage):  ${wlTop("criticalUntested")}`);
 }
-if (covPending || staleGroups || issuesStale) {
+if (covMissing || !qualityMeasured(qRep) || covPending || staleGroups || issuesStale) {
   e(`  ${C.y}⟳ pending:${C.x}`);
+  if (!qualityMeasured(qRep)) e(`     • quality NOT MEASURED (no quality-report.json) → node tooling/quality/quality.mjs`);
+  if (covMissing) e(`     • research coverage NOT MEASURED (no coverage-report.json) → node tooling/research-coverage/coverage.mjs scan`);
   if (covPending) e(`     • ${covPending} file(s) need research → coverage.mjs batches → dispatch → record`);
   if (staleGroups) e(`     • ${staleGroups} consistency group(s) changed → dispatch consistency/batches/* → record`);
   if (issuesStale) e(`     • layering/dup changed → 2 issue agents → consistency.mjs record`);
@@ -129,7 +143,7 @@ else if (!up) e(`  ${C.y}· start Barkpark (make dev) then re-run with --publish
 else if (publishNeeded) e(`  ${C.y}⟳ ${PUBLISH ? "" : "data changed — "}run with --publish to ship into Barkpark${C.x}`);
 else e(`  ${C.g}✓ in sync${C.x}`);
 e("");
-const allFresh = !covPending && !staleGroups && !issuesStale && !enrichPending && (!up || !publishNeeded || published);
+const allFresh = qualityMeasured(qRep) && !covMissing && !covPending && !staleGroups && !issuesStale && !enrichPending && (!up || !publishNeeded || published);
 e(allFresh ? `  ${C.g}${C.b}✓ FRESH across all arcs.${C.x}` : `  ${C.b}→ do the pending agent work, re-run status${C.x}`);
 e(`  → tooling/quality/quality-report.html (quality) · codebase-graph.html (graph)`);
 e(`  → DELIVERY: node tooling/scope/scope.mjs <intention|task>  (scoped context pack — exploration→lookup; --list)`);
