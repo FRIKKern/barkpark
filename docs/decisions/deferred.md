@@ -23,3 +23,5 @@
 - `internal/manifest/url.go` — scoped_prefix hint
 - `api/lib/barkpark_web/router.ex` — `scope "/v1/paperflow"`
 - `api/lib/barkpark/search/intelligence.ex` — `@retention_days`
+
+<!-- fan-out diet 2 proof: OUT-OF-PATH probe commit. Reverted with the branch. -->
