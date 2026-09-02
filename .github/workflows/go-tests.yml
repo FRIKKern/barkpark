@@ -1,5 +1,64 @@
 name: go-tests
 
+# ADVISORY, NOT REQUIRED (recorded 2026-09-02, row pds-bl-go-tests-not-required).
+# No context this file publishes is in .github/required-checks.json's required
+# set or in its exclusions list, so a red here is a signal a human must read —
+# it does not stop anything from landing. Registration is deliberately
+# sequenced (orchestrator ruling 2026-09-02), never skipped outright:
+#   1. DONE — the PR-workflow fan-out diet (pr-meta.yml) landed, so the runner
+#      pool has headroom for a fifth context on every PR.
+#   2. DONE, THIS COMMIT — the pull_request path filter moved OFF the workflow
+#      trigger and down to a job-level `if:` behind an always-running
+#      dispatcher, and a new `Go gate` aggregator now renders on EVERY
+#      pull_request. A PR that touches no Go reports `Go gate` green in seconds
+#      with `go vet + test` skipped: no `go test -race` runner is spent.
+#   3. NEXT — ONE atomic PR registers `Go gate` (never the leaf `go vet + test`
+#      — see THE SKIP SHIM below for why the leaf is the unsafe name) with the
+#      required-checks-drift guard updated in the same commit. Nothing here is
+#      registered until that PR lands.
+# Until step 3 lands, any doc or fixture that calls a context here blocking is
+# wrong; scripts/required-checks-generate.sh is the authority on the set.
+#
+# ── THE SKIP SHIM (ported from elixir.yml / cloud.yml, D18/D19/D31) ──────────
+#
+# THIS WORKFLOW MUST NEVER REGAIN A `pull_request: … paths:` KEY.
+#
+# Measured on live GitHub: a paths-filtered workflow emits NO workflow run and
+# NO check run at all on a PR that misses the paths. A protection rule pinning a
+# name from such a workflow leaves the PR `BLOCKED` forever, and the refusal is
+# not the one a red produces:
+#     Required status check "X" is expected.   <- never reported: deadlock
+#     Required status check "X" is failing.    <- an actual red
+# A docs-only PR would deadlock the repo permanently. So the path decision is
+# made at JOB level, behind the always-running `changes` dispatcher, and the
+# `push:` trigger keeps its filter (main never needs a shim: nothing pins a
+# context on a push).
+#
+# A job skipped by a job-level `if:` DOES publish a check run, with conclusion
+# `skipped`, and GitHub counts `skipped` as passing. That is what makes the shim
+# work — and it is also the trap: a job whose `needs` dependency FAILED reports
+# `skipped` too, so pinning the LEAF `go vet + test` would convert an upstream
+# failure into a green context. `if: always()` alone does not save you either; a
+# probe aggregator ran with a failed dependency and reported `success` because
+# it merely echoed the result instead of asserting on it. `if: always()` buys
+# the RIGHT TO DECIDE; it does not decide. Hence `go-gate` below, which
+# enumerates every upstream result and reds on anything outside an allow-set.
+#
+# ── ONE DECLARATION OF THE PATH SET ─────────────────────────────────────────
+#
+# The dispatcher does NOT carry its own copy of the path list. It PARSES
+# `on.push.paths` out of this very file (at the PR head) and matches the changed
+# files against it. The repo has a controlled comparison on this exact choice —
+# scripts/workflow-trigger-coverage.sh records that the three dispatchers which
+# read their set from a single declaration are all correct while the two with a
+# hand-written second copy BOTH drifted — and the failure mode of a drifted copy
+# here is the worst one available: a Go PR whose carve-out was added to the
+# trigger but not to the dispatcher skips the suite under a green aggregator.
+# Deriving the filter makes that class unrepresentable. The parse is guarded by
+# two sentinels (`**/*.go` and `go.mod` must both come back) and a floor, so a
+# parser that silently returns nothing FAILS the dispatcher instead of emitting
+# `go=false` for everything.
+#
 # The Go test suite — the `bp` CLI + TUI, manifest, apiclient, pdrender, cloud
 # clients, provisioner/runtime, … (170+ *_test.go files). Before this,
 # `go test ./...` ran ONLY in cli-release.yml (on cli-v* tags), so a broken Go
@@ -85,28 +144,9 @@ on:
       - "docs/setup/CODEX.md"
       - "docs/setup/AGENTS-MD.md"
   pull_request:
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - ".github/workflows/go-tests.yml"
-      - "templates/**"
-      - "internal/pdrender/testdata/**"
-      - "internal/taskboard/testdata/**"
-      # Hetzner live-proof fixtures (mirrors the push list): the byte-count,
-      # sha256_chunked and --selftest-offline pins are unreachable on a
-      # fixture-only PR without it.
-      - "internal/cli/testdata/**"
-      - "docs/cli/fixtures/**"
-      - "cloud/priv/static/__fixtures__/**"
-      # Scaffy census trap (mirrors the push list): catalog + testdata fixtures
-      # gate the Go suite though scaffy/** PRs otherwise skip it. seed/** is now
-      # INCLUDED — it has Go tests as of scaffy/seed/main_test.go.
-      - "scaffy/commands/**"
-      - "scaffy/seed/**"
-      - "internal/scaffy/testdata/**"
-      - "docs/setup/CODEX.md"
-      - "docs/setup/AGENTS-MD.md"
+    # NO `paths:` KEY, EVER — see THE SKIP SHIM above. The path decision for a
+    # pull_request is made by the `changes` job below, which derives it from the
+    # `push:` list directly overhead.
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
@@ -115,8 +155,222 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the job behind it always has a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, an unparseable path list or an
+    # uninterpretable verdict it FAILS; on an empty diff — rare but legal — it
+    # dispatches TRUE. That polarity is the whole point: a dispatcher that
+    # "couldn't tell" and emitted false would skip the Go suite and publish a
+    # green aggregator. Never a silent false: fail, or run everything.
+    name: Dispatch (Go paths)
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.sets.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base, and a one-file PR dispatches as if it touched ten
+          # (D34). Pinning the head sha makes the diff describe THIS PR — and it
+          # also means the path list parsed below is the list THIS PR proposes,
+          # so a PR that adds a carve-out is dispatched on its own new carve-out.
+          #
+          # This job ONLY. `test` deliberately keeps the merge ref: it must vet
+          # the merged result, not the head in isolation. `github.sha` is the
+          # fallback for `push` events, which have no PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff below. A shallow checkout makes `git cat-file -e`
+          # miss it, which this step treats as a hard failure.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip here. The `push:`
+            # trigger already decided whether this run exists at all, and a
+            # partial main is worse than a slow one — there is no reviewer left
+            # to notice.
+            echo "event '$event' is not a pull_request — the path set is true."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          wf=".github/workflows/go-tests.yml"
+          if [ ! -f "$wf" ]; then
+            echo "::error::dispatcher: $wf is not in this checkout, so the path set cannot be read from its single declaration. Refusing to guess."
+            exit 1
+          fi
+
+          # ── the ONE declaration: on.push.paths, parsed out of this file ────
+          # Comment lines inside the list are skipped; a `paths-ignore:` under
+          # `push:` would change the semantics silently, so it is named instead.
+          globs="$(awk '
+            /^on:[ \t]*$/               { inon = 1; next }
+            inon && /^[^ \t#]/          { inon = 0; inpush = 0; inp = 0 }
+            inon && /^  push:[ \t]*$/   { inpush = 1; inp = 0; next }
+            inon && /^  [^ \t#]/        { inpush = 0; inp = 0 }
+            inpush && /^    paths-ignore:/ { print "__PATHS_IGNORE__" }
+            inpush && /^    paths:[ \t]*$/ { inp = 1; next }
+            inpush && inp && /^    [^ \t#]/ { inp = 0 }
+            inp && /^[ \t]*#/           { next }
+            inp && /^[ \t]*- / {
+              s = $0
+              sub(/^[ \t]*-[ \t]*/, "", s)
+              gsub(/"/, "", s)
+              if (s != "") print s
+            }
+          ' "$wf")"
+
+          echo "path set parsed from ${wf} on.push.paths:"
+          printf '%s\n' "$globs"
+
+          if grep -qxF -- "__PATHS_IGNORE__" <<<"$globs"; then
+            echo "::error::dispatcher: ${wf} grew a paths-ignore: under push:. This parser reads paths: only, so the two would disagree about what runs. Teach the parser first."
+            exit 1
+          fi
+
+          n="$(printf '%s\n' "$globs" | awk 'NF { c = c + 1 } END { print c + 0 }')"
+          # NON-VACUITY. A parser that silently returns nothing would emit
+          # go=false for every PR and leave the suite dark under a green
+          # aggregator. Two sentinels that can never legitimately leave the
+          # list, plus a floor well under the current 15.
+          if ! grep -qxF -- "**/*.go" <<<"$globs"; then
+            echo "::error::dispatcher: the parsed path set does not contain the sentinel '**/*.go'. Either the parser broke or the trigger lost the glob that dispatches on Go source. Refusing to emit a verdict."
+            exit 1
+          fi
+          if ! grep -qxF -- "go.mod" <<<"$globs"; then
+            echo "::error::dispatcher: the parsed path set does not contain the sentinel 'go.mod'. Either the parser broke or the trigger lost it. Refusing to emit a verdict."
+            exit 1
+          fi
+          if [ "$n" -lt 10 ]; then
+            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list has been 15 since #15007. A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
+            exit 1
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the suite and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # The base commit can be absent from this checkout during burst
+            # merges. Try to fetch it once, then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # A base with NO common ancestor makes the three-dot diff below exit
+          # 128 with a raw `fatal: … no merge base` and ZERO annotation: under
+          # `set -euo pipefail` the assignment dies and the author sees a red
+          # dispatcher with no guidance. Name the condition instead. There is
+          # deliberately NO two-dot fallback — measured, `base HEAD` sweeps in
+          # the base's ENTIRE content and dispatches true for the wrong reason,
+          # which is exactly the "verdict from an unknown base" this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies
+          # a hole (measured, wave 10):
+          #   * plain `--name-only` QUOTES and octal-escapes any path holding a
+          #     non-ASCII byte, and keeps quoting `"`, `\` and newline even under
+          #     core.quotepath=false — `internal/cli/we"ird.go` prints as
+          #     `"internal/cli/we\"ird.go"`, the anchored ERE below misses it,
+          #     and the whole suite is skipped under a green aggregator. `-z`
+          #     emits the raw bytes, which cannot be quoted; `tr` restores the
+          #     line format the matcher reads.
+          #   * rename detection (default-on since git 2.9) prints only the
+          #     DESTINATION, so `git mv internal/cli/a.go docs/a.txt` yields
+          #     go=false while compiled code just left the tree. `--no-renames`
+          #     prints both sides.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. Run everything instead:
+            # expensive, never wrong. Never `false`, which is the only truly
+            # unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching go=true and running the WHOLE suite rather than skipping it — a skip here would green an aggregator nothing measured. Cost, and it is real: go vet plus go test -race, measured 2m30s on PR #8647."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # GitHub path globs -> one anchored alternation ERE. `**/` spans
+          # separators, `*` does not — the same translation
+          # scripts/workflow-trigger-coverage.sh performs, which is why
+          # fnmatch is not used: it cannot tell the two apart, and that
+          # difference is the whole filter.
+          ere="$(printf '%s\n' "$globs" | awk '
+            function g2e(p,   rx, i, c, n) {
+              rx = ""; i = 1; n = length(p)
+              while (i <= n) {
+                c = substr(p, i, 1)
+                if (c == "*") {
+                  if (substr(p, i, 3) == "**/") { rx = rx "(.*/)?"; i = i + 3; continue }
+                  if (substr(p, i, 2) == "**")  { rx = rx ".*";     i = i + 2; continue }
+                  rx = rx "[^/]*"; i = i + 1; continue
+                }
+                if (c == "?") { rx = rx "[^/]" }
+                else if (index(".+()[]{}^$|\\", c) > 0) { rx = rx "\\" c }
+                else { rx = rx c }
+                i = i + 1
+              }
+              return "^" rx "$"
+            }
+            NF { if (out != "") out = out "|"; out = out g2e($0) }
+            END { print out }
+          ')"
+
+          # Belt and braces: an EMPTY ERE matches every line, which would flip
+          # this dispatcher to a permanent true and quietly undo the shim.
+          if [ -z "$ere" ]; then
+            echo "::error::dispatcher: the path set translated to an EMPTY pattern. An empty ERE matches everything; refusing to emit a verdict built on it."
+            exit 1
+          fi
+          echo "match ERE: ${ere}"
+
+          # HERE-STRING, not `printf … | grep -Eq` (D37). `grep -q` exits on the
+          # first match; under `set -o pipefail` the write side then takes
+          # SIGPIPE, the pipeline returns 141, and the `if` falls to its FALSE
+          # branch — a Go PR dispatched as go=false. Only the 64 KiB pipe buffer
+          # kept that quiet elsewhere: luck, not correctness.
+          if grep -Eq -- "$ere" <<<"$changed"; then
+            go=true
+          else
+            go=false
+          fi
+
+          echo "verdict: go=${go}"
+          echo "go=${go}" >> "$GITHUB_OUTPUT"
+
   test:
+    # The expensive leaf. Gated on the dispatcher, so on a PR that touches no Go
+    # it publishes conclusion `skipped` in a couple of seconds and no runner
+    # boots a toolchain. Its name is UNCHANGED — `go vet + test` is what the
+    # fixtures in scripts/main-gate-watch.test.sh and every existing run URL
+    # call it — but it is NOT the name step 3 registers: see THE SKIP SHIM.
     name: go vet + test
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,3 +384,158 @@ jobs:
 
       - name: go test (race detector)
         run: go test -race ./...
+
+  go-gate:
+    # ── THE AGGREGATOR — the one name step 3 should pin ─────────────────────
+    #
+    # Deliberate shape, ported from elixir.yml / cloud.yml because the hazards
+    # are identical:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below. A matrixed job's name either gains the matrix
+    #     tuple or, if it never STARTED, publishes the literal uninterpolated
+    #     `${{ matrix.x }}` — neither is usable as a pinned context (D20). This
+    #     name is a constant.
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING context out of a failed run.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide. A probe
+    #     aggregator that merely printed `needs.will-fail.result` reported
+    #     `success`, and a PR was not stopped by it (D19).
+    #
+    #   * EVERY job in this workflow is in `needs`, and no job here carries
+    #     `continue-on-error`, so none can launder a failure into
+    #     `needs.<job>.result == success`. If one ever gains that flag it must
+    #     come OUT of this needs set in the same commit.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Go gate
+    if: always()
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_TEST: ${{ needs.test.result }}
+          O_GO: ${{ needs.changes.outputs.go }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher output: go='${O_GO}'"
+          echo
+
+          bad=0
+
+          # `bad` SAYS THAT something is wrong, never WHICH (D770/D771). The
+          # step LOG names the offending job; the `::error::` is the only line
+          # the check-run API carries, so the set behind the bit is collected
+          # here and printed there. Appended at EVERY `bad=1` site, so it can
+          # never disagree with the verdict. Comma-joined, not space-joined:
+          # job names contain spaces.
+          reds=""
+
+          # D377 tally: did anything SUBSTANTIVE actually run? `bad` answers "is
+          # anything wrong"; it cannot answer "was anything tested". Only
+          # PATH-GATED jobs count — the dispatcher carries the gate value NEVER
+          # and runs on every head, so it can distinguish nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green this"
+                  echo "          aggregator on it."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                fi
+                ;;
+              failure)
+                echo "  FAIL    ${job}: failure"
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              cancelled)
+                # Split out of the `failure` arm (D57). Both are RED and both
+                # stay red — a cancelled upstream tested nothing, and D12 says a
+                # non-pass is a non-pass. What this arm buys is SAYING WHICH:
+                # this fleet force-pushes stacked branches daily and this
+                # workflow cancels in-progress runs on non-main refs, so a
+                # superseded head is the COMMON way an upstream ends up
+                # cancelled, and reading a diff that is fine is the wrong
+                # response.
+                echo "  FAIL    ${job}: CANCELLED — this job did not fail, it never finished."
+                echo "          Nothing was tested, so this aggregator is RED (D12): a non-pass"
+                echo "          is a non-pass and will not be laundered into green."
+                echo "          But do NOT go read the diff — a cancellation is almost always"
+                echo "          a SUPERSEDED HEAD (this workflow sets cancel-in-progress on"
+                echo "          non-main refs), not a defect in your code."
+                echo "          FIX: produce a NEW run. Push a fresh head sha. Re-running the"
+                echo "          workflow instead DELETES its check-runs, so the context reads"
+                echo "          ABSENT rather than red until the re-run finishes (D102)."
+                bad=1
+                reds="${reds:+${reds}, }${job} (cancelled, not failed)"
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # The dispatcher itself may never skip: without it there is no gate
+          # value, so nothing downstream can be judged.
+          decide "changes (dispatcher)"  "${R_CHANGES}" "NEVER"
+          decide "go vet + test"         "${R_TEST}"    "${O_GO}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Go gate: at least one upstream job is not in the allow-set (see above). NOT IN THE ALLOW-SET: ${reds}"
+            exit 1
+          fi
+
+          # D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT. A green
+          # here means one of two very different things and publishes
+          # byte-identical evidence for both: conclusion=success,
+          # annotations=0, output.summary=null. $GITHUB_STEP_SUMMARY does not
+          # reach the check-run API (0 of 32 check-runs on a sampled sha
+          # returned a non-null summary); a bare ::notice:: does, measured on
+          # probe/elixir-gate-annotation, run 31055317124. ONE notice, never one
+          # per skipped job — GitHub caps annotations at 10 per level per step
+          # and truncates the rest silently.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Go gate: green — nothing ran::NO GO JOB RAN on this head.%0AGo gate is green because this diff touched none of the path globs declared in go-tests.yml on.push.paths, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0ARead it as 'no Go job executed', never as 'the Go suite passed'."
+          fi
+          echo "Go gate: every upstream job either succeeded or was legitimately not dispatched."

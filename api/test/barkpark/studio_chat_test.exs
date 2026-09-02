@@ -1043,6 +1043,93 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # The durable half of the settle-gated tool-row gutter
+  # (task-d5083ae525902f28). `settle_tool_rows/1` is what makes the ✓/✗ survive
+  # a reopen — and what the Go TUI reads, since `message_json` ships the row's
+  # metadata verbatim. It is deliberately STATELESS (settle every unsettled tool
+  # row of the session), so a Recorder restart mid-turn cannot strand a row.
+  describe "settle_tool_rows/1 + attach_tool_result/4 (settle-gated gutter)" do
+    defp tool_row(session, tool_use_id) do
+      {:ok, m} =
+        StudioChat.append_message(session, %{
+          role: "tool",
+          source_markdown: "Bash — #{tool_use_id}",
+          metadata: %{"tool" => "Bash", "tool_use_id" => tool_use_id, "input" => %{}}
+        })
+
+      m
+    end
+
+    defp meta_for(session_id, tool_use_id) do
+      StudioChat.list_messages(session_id)
+      |> Enum.find(&(&1.metadata["tool_use_id"] == tool_use_id))
+      |> Map.fetch!(:metadata)
+    end
+
+    test "a fresh tool row is UNSETTLED — the key is absent, not false" do
+      s = new_session()
+      tool_row(s, "t-fresh")
+
+      # Absence is the honest unsettled reading: no migration, and an older row
+      # written before this seam existed replays neutral rather than lying.
+      refute Map.has_key?(meta_for(s.id, "t-fresh"), "turn_settled")
+    end
+
+    test "settle_tool_rows stamps every unsettled tool row and is idempotent" do
+      s = new_session()
+      tool_row(s, "t-a")
+      tool_row(s, "t-b")
+
+      assert 2 == StudioChat.settle_tool_rows(s.id)
+      assert meta_for(s.id, "t-a")["turn_settled"] == true
+      assert meta_for(s.id, "t-b")["turn_settled"] == true
+
+      # A second result frame writes ZERO rows — the WHERE excludes settled rows,
+      # so a long settled history costs nothing per turn.
+      assert 0 == StudioChat.settle_tool_rows(s.id)
+    end
+
+    test "the settle MERGES — it never clobbers output/tool_error/input" do
+      s = new_session()
+      tool_row(s, "t-merge")
+      {:ok, _} = StudioChat.attach_tool_result(s.id, "t-merge", "the output", true)
+
+      assert 1 == StudioChat.settle_tool_rows(s.id)
+
+      meta = meta_for(s.id, "t-merge")
+      assert meta["turn_settled"] == true
+      assert meta["output"] == "the output"
+      assert meta["tool_error"] == true
+      assert meta["tool"] == "Bash"
+      assert meta["input"] == %{}
+    end
+
+    test "attach_tool_result writes tool_error ONLY for an is_error result" do
+      s = new_session()
+      tool_row(s, "t-ok")
+      {:ok, _} = StudioChat.attach_tool_result(s.id, "t-ok", "fine")
+
+      meta = meta_for(s.id, "t-ok")
+      assert meta["output"] == "fine"
+      # a clean result leaves the row's metadata byte-identical to before the
+      # seam existed — no "tool_error" => false noise on every row in the store.
+      refute Map.has_key?(meta, "tool_error")
+    end
+
+    test "settle_tool_rows touches ONLY this session's tool rows" do
+      s = new_session()
+      other = new_session()
+      tool_row(s, "t-mine")
+      tool_row(other, "t-theirs")
+
+      {:ok, _} =
+        StudioChat.append_message(s, %{role: "assistant", source_markdown: "not a tool row"})
+
+      assert 1 == StudioChat.settle_tool_rows(s.id)
+      refute Map.has_key?(meta_for(other.id, "t-theirs"), "turn_settled")
+    end
+  end
+
   describe "set_draft/2 — sticky composer draft (charter D36c)" do
     test "persists and restores a draft on the FULL struct" do
       s = new_session()

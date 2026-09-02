@@ -717,20 +717,48 @@ defmodule Barkpark.Auth do
   @pat_max_ttl 365 * 24 * 3600
   @pat_token_prefix "bppat_"
 
-  # Roles that may mint write/admin tokens. A `member` may only mint a read
-  # token (Coolify's ApiTokenPolicy: only admin/owner mint elevated tokens —
-  # app/Policies/ApiTokenPolicy.php).
+  # Roles that may mint an ELEVATED (write-tier) token. A `member` may only
+  # mint a read token (Coolify's ApiTokenPolicy: only admin/owner mint elevated
+  # tokens — app/Policies/ApiTokenPolicy.php).
+  #
+  # THE CEILING IS `write`, NEVER `admin` (ruling 2026-09-02; orchestrator
+  # ruling A, delegated, owner informed 2026-09-01). WHY: a token's `"admin"`
+  # permission is the FLAT, INSTANCE-WIDE bit `BarkparkWeb.Plugs.RequireAdmin`
+  # reads — `Auth.has_permission?(token, "admin")`, with no workspace anywhere
+  # in the check. It is not, and never was, a workspace-role artefact. Deriving
+  # it from a workspace role (which the HTTP self-mint began doing in #14245)
+  # handed it to whoever happened to be `owner` of SOME workspace — and a
+  # workspace creator is always the owner of the one they just created. Such a
+  # token cleared every `[:api, :require_admin]` route on the INSTANCE: run
+  # secrets in cleartext (`GET /v1/secrets/:name`), `POST /v1/admin/self-update`,
+  # `/v1/admin/rollback`, secrets write/delete, `/v1/plugins/settings` CRUD,
+  # `POST /v1/shares`, bundle import.
+  #
+  # Workspace-scoped administrative authority lives on the MEMBERSHIP ROLE and
+  # is read by `Tenancy.Auth.workspace_admin?/2` — that axis is untouched by
+  # this cap, and so is `RequireAdmin`, which stays the flat instance tier by
+  # design (docs/auth.md, "Hierarchy — permission ⟂ membership"). The cap is at
+  # MINT, not at CHECK: pre-existing `["read", "write", "admin"]` rows (the
+  # instance operator's own credential, the `demo` seed's dev token) keep
+  # working untouched — no migration, no revoke, no backfill.
   @pat_admin_roles ~w(owner admin)
   @pat_allowed_member_permissions ~w(read)
-  @pat_allowed_admin_permissions ~w(read write admin)
+  @pat_allowed_elevated_permissions ~w(read write)
 
   @doc """
   Mint a self-service Personal Access Token, ROLE-GATED on the minting admin's
   workspace role. The `:role` opt is the minter's workspace role (the Studio
   pane passes the current admin's role); a `member` may mint only `["read"]`,
-  an `owner`/`admin` may mint up to `["read", "write", "admin"]`. A request to
-  mint above the role returns `{:error, :forbidden}` (the server is the
-  authority — never trust a client-supplied permission set).
+  an `owner`/`admin` may mint up to `["read", "write"]` — never `"admin"`. A
+  request to mint above the role returns `{:error, :forbidden}` (the server is
+  the authority — never trust a client-supplied permission set).
+
+  `"admin"` is UNMINTABLE here at every role (ruling 2026-09-02): it is the
+  flat, instance-wide permission `BarkparkWeb.Plugs.RequireAdmin` reads with no
+  workspace in the check, so it can never be legitimately derived from a
+  workspace membership role. `create_personal_access_token(_, ["admin"],
+  role: "owner")` is `{:error, :forbidden}`. See
+  `@pat_allowed_elevated_permissions` for the full rationale.
 
   Unlike `create_token/5`, this sets `name` (user-facing) + `created_by` (audit)
   + a bounded `expires_at`, and prefixes the raw token with `#{@pat_token_prefix}`
@@ -843,22 +871,33 @@ defmodule Barkpark.Auth do
   gates on, exposed so a caller (the session-gated self-mint) can DERIVE the
   permission set from the caller's REAL workspace role instead of a hardcoded
   literal, without duplicating the role/permission mapping. `owner`/`admin`
-  get `#{inspect(@pat_allowed_admin_permissions)}`; every other role
+  get `#{inspect(@pat_allowed_elevated_permissions)}`; every other role
   (including `nil` — no membership resolved) gets
   `#{inspect(@pat_allowed_member_permissions)}`, mirroring
   `@pat_allowed_member_permissions`'s deliberate member cap.
+
+  NO ROLE REACHES `"admin"` (ruling 2026-09-02). A workspace role is a
+  WORKSPACE fact; the `"admin"` permission is the INSTANCE-wide bit
+  `RequireAdmin` reads workspace-blind. Mapping one onto the other is the
+  escalation this cap closes — an owner of any workspace, including one they
+  created a second ago, otherwise walked out of this function holding the
+  instance. Workspace-admin authority is `Tenancy.Auth.workspace_admin?/2`
+  (the membership role), not a token permission.
   """
   @spec max_pat_permissions_for_role(String.t() | nil) :: [String.t()]
   def max_pat_permissions_for_role(role) when role in @pat_admin_roles,
-    do: @pat_allowed_admin_permissions
+    do: @pat_allowed_elevated_permissions
 
   def max_pat_permissions_for_role(_role), do: @pat_allowed_member_permissions
 
-  # Gate the requested permission set against the minter's workspace role.
+  # Gate the requested permission set against the minter's workspace role. The
+  # elevated set tops out at `write`, so an explicitly-requested `["admin"]` is
+  # `{:error, :forbidden}` at EVERY role — this is the same allowed set
+  # `max_pat_permissions_for_role/1` publishes, never a second opinion.
   defp authorize_pat_permissions(role, permissions) do
     allowed =
       if role in @pat_admin_roles,
-        do: @pat_allowed_admin_permissions,
+        do: @pat_allowed_elevated_permissions,
         else: @pat_allowed_member_permissions
 
     if Enum.all?(permissions, &(&1 in allowed)) and permissions != [] do
