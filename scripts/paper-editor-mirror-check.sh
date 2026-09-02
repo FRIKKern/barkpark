@@ -36,16 +36,34 @@
 #   lockstep, and there is exactly ONE implementation — this script and the
 #   emitter can never disagree. This part just delegates (CLI surface unchanged).
 #
+#   --write here is FENCED, exactly as `node design/emit.mjs --write` is: it refuses
+#   to replace the marked region when its SHA-256 does not match
+#   design/emit-manifest.json, names every line it would delete, and records the
+#   write in that same manifest. The fence lives in the ONE Node owner; this script
+#   only forwards the flags, so the two writers can never disagree.
+#
 # Usage:
-#   scripts/paper-editor-mirror-check.sh            # check (CI + the merge gate)
-#   scripts/paper-editor-mirror-check.sh --write    # regenerate the token layer
+#   scripts/paper-editor-mirror-check.sh                  # check (CI + the merge gate)
+#   scripts/paper-editor-mirror-check.sh --write          # fenced regenerate
+#   scripts/paper-editor-mirror-check.sh --write --force  # regenerate over the fence
+#   scripts/paper-editor-mirror-check.sh --adopt          # bless the region on disk
 set -euo pipefail
 
 MODE="check"
-if [[ "${1:-}" == "--write" ]]; then
-  MODE="write"
-elif [[ -n "${1:-}" ]]; then
-  echo "paper-editor-mirror-check: unknown argument '$1' (expected --write or none)" >&2
+MIRROR_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --write) MODE="write"; MIRROR_ARGS+=("$arg") ;;
+    --adopt) MODE="adopt"; MIRROR_ARGS+=("$arg") ;;
+    --force) MIRROR_ARGS+=("$arg") ;;
+    *)
+      echo "paper-editor-mirror-check: unknown argument '$arg' (expected --write, --force, --adopt or none)" >&2
+      exit 2
+      ;;
+  esac
+done
+if [[ "$MODE" == "check" && ${#MIRROR_ARGS[@]} -gt 0 ]]; then
+  echo "paper-editor-mirror-check: --force needs --write" >&2
   exit 2
 fi
 
@@ -59,11 +77,7 @@ SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 # so `--write` regenerates before the lockstep check verifies. `--write` passes
 # through; default is a byte-compare. The transform is the SAME code design/emit.mjs
 # drives, so this script and the emitter can never disagree.
-if [[ "$MODE" == "write" ]]; then
-  node "$ROOT/design/paper-editor-mirror.mjs" --write
-else
-  node "$ROOT/design/paper-editor-mirror.mjs"
-fi
+node "$ROOT/design/paper-editor-mirror.mjs" ${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}
 
 # ── Part 1/2: .bp-canvas-* lockstep (root.html.heex ↔ styles.css bundle) ─────
 # Intentional one-sided selectors (documented). Keep this list SMALL and justified.

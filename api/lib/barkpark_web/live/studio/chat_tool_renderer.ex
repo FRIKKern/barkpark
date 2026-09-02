@@ -406,6 +406,73 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   def format_duration(_ms), do: "0s"
 
+  # ── show-active-only, the RUNNING half (task-b66928b2958c8cfa) ──────────────
+  #
+  # U1 folded a turn once it SETTLED. This is its counterpart while the turn is
+  # still RUNNING: the transcript keeps the ACTIVE tool row on screen and folds
+  # the rows BEFORE it behind one "+N previous" control, so a long turn can no
+  # longer scroll the live row away. The Go twin (`internal/chat/render.go`
+  # runningActiveIndex/runningHiddenCount/runningFoldLabel) is a line-for-line
+  # mirror, and the SHARED fixture's `running_cases` pins BOTH the count and the
+  # label on both surfaces at once.
+  #
+  # (Search vocabulary: show active only / "+N previous" / running turn fold /
+  # collapse previous tool rows / live tool row stays visible.)
+
+  @doc """
+  The index of the ACTIVE tool row inside one RUNNING turn's consecutive rows.
+
+  The rule reads the SAME envelope fact `settle_state/1`'s provenance gate reads
+  — a row's `output` — and derives nothing else:
+
+    * the active row is the FIRST row still awaiting its `tool_result`, which is
+      the one actually executing right now; with parallel tool calls that is the
+      first of the pending siblings, and it can be the very first row of the turn;
+    * when every result already landed the turn is running WITHOUT a tool in
+      flight (the model is thinking), and the LAST row is what the reader is
+      watching.
+
+  An empty run has no active row and answers `0`.
+  """
+  @spec active_row_index([map()]) :: non_neg_integer()
+  def active_row_index([]), do: 0
+
+  def active_row_index(rows) when is_list(rows) do
+    case Enum.find_index(rows, &awaiting_result?/1) do
+      nil -> length(rows) - 1
+      index -> index
+    end
+  end
+
+  @doc """
+  N — how many of a RUNNING turn's rows the transcript hides behind its control.
+
+  THE ONE PLACE Studio counts hidden rows (`chat.runningHiddenCount` is `bp
+  chat`'s one place). It is the count of rows BEFORE the active one, which for
+  the ordinary sequential turn is exactly "the turn's tool rows minus the active
+  row"; `0` means nothing is hidden and NO control is drawn at all.
+  """
+  @spec running_hidden_count([map()]) :: non_neg_integer()
+  def running_hidden_count(rows) when is_list(rows), do: active_row_index(rows)
+
+  @doc """
+  The running fold's control text for a hidden-row count: `"+3 previous"`.
+
+  THE one place Studio builds this string (`chat.runningFoldLabel` is `bp
+  chat`'s), byte-locked to it by the shared fixture's `running_cases`. Called
+  only when `n > 0` — a zero count draws no control, so it never needs a label.
+  """
+  @spec running_fold_label(non_neg_integer()) :: String.t()
+  def running_fold_label(n) when is_integer(n), do: "+#{n} previous"
+
+  # Has this row's `tool_result` NOT arrived yet? The same non-empty-binary
+  # `output` test the settle provenance gate above makes — one reading of the
+  # envelope, two consumers.
+  defp awaiting_result?(row) when is_map(row) do
+    output = Map.get(row, :output)
+    not (is_binary(output) and output != "")
+  end
+
   @doc "The lifecycle color token for a tool row's settle state (tokens only)."
   @spec settle_color(map()) :: String.t()
   def settle_color(message) when is_map(message) do

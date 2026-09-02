@@ -1724,9 +1724,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         head_errors =
           case Map.get(block, "head") || Map.get(block, "header") do
-            nil -> []
-            [] -> []
-            head -> render_table_row_errors(head, "#{path}.head")
+            nil ->
+              []
+
+            [] ->
+              []
+
+            # `head: true` (either spelling) is the PROMOTE-ROW-0 dialect the
+            # renderer already speaks: compose.ex matches `{true, [first |
+            # rest]}` and lifts row 0 into the head row, and renders `{true,
+            # []}` as a headless table. The gate spoke neither — the flag fell
+            # through to `render_table_row_errors(true, path)`, whose catch-all
+            # refused a block its own reader composes end to end. The promoted
+            # cells are `rows[0]`, which `row_errors` above has already
+            # validated, so there is nothing left for this arm to check.
+            true ->
+              []
+
+            head ->
+              render_table_row_errors(head, "#{path}.head")
           end
 
         head_errors ++ row_errors
@@ -1931,9 +1947,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # ── inline-leaf dialect (TipTap `text` → canonical `value`) ────────────────
   #
-  # The renderer reads ONLY `value` on a text leaf (render/inline.ex — no
-  # `text` fallback), so a TipTap-dialect leaf renders as "" and a paragraph
-  # whose only leaf carries it VANISHES behind a 200. Normalize at the write
+  # The canonical text leaf carries `value`. `Render.Inline.compose_inline/2`
+  # has dual-read `value || text` since 2026-08-23 (and its Go twin through
+  # `attrStrFirst(n, "value", "text")`), so a TipTap-dialect leaf no longer
+  # renders as "" — but that tolerance is a SAFETY NET at one reader, not a
+  # contract every consumer honours, and this is the chokepoint whose job is to
+  # store ONE shape. Normalize at the write
   # chokepoint over every inline-bearing surface: block `content`, list
   # `items`, table `rows`/`head` cells, and nested `blocks`/`children`
   # containers. A leaf already carrying `value` is left byte-identical
@@ -1979,10 +1998,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
           block
       end
 
-    case Map.get(block, "head") do
-      cells when is_list(cells) -> Map.put(block, "head", normalize_table_cells_leaves(cells))
-      _ -> block
-    end
+    # BOTH head spellings. `header` is first-class at the gate
+    # (`render_block_errors/2` reads `head || header`) and at the renderer
+    # (compose.ex `declared_head` falls back to `header`), but this rescue only
+    # ever reached `head` — so a TipTap text-keyed leaf inside a `header` cell
+    # got no dialect normalization and rendered as the empty string forever,
+    # exactly the failure #11616 closed on every other inline-bearing surface.
+    Enum.reduce(["head", "header"], block, fn key, acc ->
+      case Map.get(acc, key) do
+        cells when is_list(cells) -> Map.put(acc, key, normalize_table_cells_leaves(cells))
+        _ -> acc
+      end
+    end)
   end
 
   defp normalize_table_leaves(block), do: block

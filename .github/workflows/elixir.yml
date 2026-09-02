@@ -458,10 +458,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # api/mix.exs requires `~> 1.15`. Track production server (ASDF) when
-        # bumped; update both .tool-versions (when added) and this matrix.
+        # THE PROD PIN. api/mix.exs requires `~> 1.15`, but the number that
+        # matters is what guerrilla runs: measured 2026-09-02 on the box,
+        # `asdf current` in /opt/barkpark resolves elixir 1.18.4-otp-27 +
+        # erlang 27.3.4 FROM the repo-root `.tool-versions` it checked out,
+        # and the running BEAM is erts-15.2.7 under
+        # /root/.asdf/installs/elixir/1.18.4-otp-27. This job sat at 1.18.1,
+        # one patch below both the declaration and the box, so a green here
+        # never meant "runs on the box". `.tool-versions` is NOT changed by
+        # the PR that moved this line — it already equalled prod.
+        #
+        # OTP stays "27.0" against the box's 27.3.4, matching the `format`
+        # job's ruling above: an OTP move is a wider blast radius than an
+        # Elixir move and is not settled by a CI-alignment PR. Recorded as a
+        # known residual in docs/ops/PROD_OPS.md.
         otp: ["27.0"]
-        elixir: ["1.18.1"]
+        elixir: ["1.18.4"]
     defaults:
       run:
         working-directory: api
@@ -807,8 +819,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # THE PROD PIN — this is the job whose green is supposed to mean
+        # "compiles on the box". Equal to what guerrilla runs (measured
+        # 2026-09-02: elixir 1.18.4-otp-27 / erlang 27.3.4, resolved by asdf
+        # from the repo-root `.tool-versions`). See the mix-test matrix for
+        # the measurement and for why OTP stays at "27.0".
         otp: ["27.0"]
-        elixir: ["1.18.1"]
+        elixir: ["1.18.4"]
     defaults:
       run:
         working-directory: api

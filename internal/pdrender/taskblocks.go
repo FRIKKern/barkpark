@@ -629,9 +629,10 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 
 // ── task-board ───────────────────────────────────────────────────────────────
 // {snapshot: [row]}. Group rows by roleForStatus(status) into the FIXED column
-// order open · ready · progress · blocked · done (empty columns omitted). The
-// `open` lane mirrors the web reader's white-ladder column set so a populated
-// `open` bucket is never silently dropped (bug-taskboard-drops-open-tasks). Where every
+// order open · ready · progress · blocked · done · considering · researching
+// (empty columns omitted). The `open` lane mirrors the web reader's white-ladder
+// column set so a populated `open` bucket is never silently dropped
+// (bug-taskboard-drops-open-tasks). Where every
 // lane clears MinWidth the lanes draw SIDE-BY-SIDE as bordered columns (the P9
 // standard — the internal/taskboard lane look, ported into pdrender's
 // import-disciplined world via joinColumns): a role-tinted rounded box per lane
@@ -641,10 +642,20 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 // → placeholder; empty → "No tasks yet."
 type taskBoardRenderer struct{}
 
-// boardColumns is the board's column ROLES in white-ladder order. The header
-// label is DERIVED (the canonical roleLabel, sentence-cased via boardLabel) —
-// NOT a second hardcoded copy (the fold — shares gridblocks.go's roleLabel).
-var boardColumns = []string{"open", "ready", "progress", "blocked", "done"}
+// boardColumns is the board's column ROLES in white-ladder order: the manifest
+// ladder (statusLadder) MINUS `cancel`, which is not a lane — the same seven
+// roles, in the same order, that react's BOARD_ROLES (js/packages/react/src/
+// blocks/taskboard.ts) and Elixir's board_roles/0 (portable_doc/render/
+// components.ex) carry. The header label is DERIVED (the canonical roleLabel,
+// sentence-cased via boardLabel) — NOT a second hardcoded copy (the fold —
+// shares gridblocks.go's roleLabel).
+//
+// The two thought states are load-bearing, not decoration: roleForStatus
+// resolves `considering`/`researching` to roles of their own, and Render
+// collects lanes by iterating boardColumns ALONE, so a role missing here means
+// its rows are silently DROPPED from the board (the row-loss bug tlv-s3 left
+// behind when its file list omitted this file).
+var boardColumns = []string{"open", "ready", "progress", "blocked", "done", "considering", "researching"}
 
 // boardLabel is a lane's sentence-cased column header, folded from the ONE
 // canonical lowercase label: "in progress" → "In progress".

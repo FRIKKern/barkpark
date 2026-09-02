@@ -338,6 +338,13 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// stays fully typable (the D14 law).
 		m.foldsExpanded = !m.foldsExpanded
 		return m, nil
+	case tea.KeyCtrlO:
+		// Expand/collapse the RUNNING turn's "+N previous" control
+		// (task-b66928b2958c8cfa) — the OLDER rows of the turn in flight, as
+		// opposed to ctrl+f's settled history. Non-printable, so the composer
+		// stays fully typable (the D14 law).
+		m.runningFoldExpanded = !m.runningFoldExpanded
+		return m, nil
 	case tea.KeyCtrlB:
 		return m.leaveSession()
 	case tea.KeyCtrlP:

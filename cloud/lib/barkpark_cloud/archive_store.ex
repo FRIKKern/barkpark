@@ -1,8 +1,9 @@
 defmodule BarkparkCloud.ArchiveStore do
   @moduledoc """
-  Portable-archive READ conduit (charter S14 / D38–D39) — a dependency-free,
-  GET-only S3 reader that lists a team's archived-instance bundles straight out
-  of Hetzner Object Storage.
+  Portable-archive conduit (charter S14 / D38–D39) — a dependency-free S3
+  client that lists a team's archived-instance bundles straight out of Hetzner
+  Object Storage, and (cch-w54-bl) DELETES one when the retention sweep says
+  its window has closed.
 
   ## Why a hand-rolled S3 reader
 
@@ -24,8 +25,11 @@ defmodule BarkparkCloud.ArchiveStore do
 
   ## Team scoping is the security boundary
 
-  Every list is prefixed `archives/<team_id>/`. A team can only ever see its
-  OWN bundles — the prefix is derived from the authenticated
+  Every list is prefixed `archives/<team_id>/`, and `delete_bundle/2` REFUSES
+  a `bundle_ref` that does not start with the requesting team's own prefix
+  (`{:error, :cross_team_ref}`) — the one call that can destroy data may not
+  take the caller's word for where it points. A team can only ever see, or
+  erase, its OWN bundles — the prefix is derived from the authenticated
   `conn.assigns.current_team.id`, never from client input, and the ListObjectsV2
   call carries it as the S3 `prefix` param. `list_archives/1` for team A can
   physically never return a key under `archives/<B>/`.
@@ -101,6 +105,75 @@ defmodule BarkparkCloud.ArchiveStore do
   end
 
   def list_archives(_), do: {:error, :bad_team}
+
+  @doc """
+  Delete ONE bundle — every object under its key prefix — and return how many
+  objects were removed.
+
+  This is the erasure path the control plane did not have (cch-w54-bl): a
+  decommission `Repo.delete`s the barkpark row, and until this existed the
+  bundle it left in object storage (a `pg_dump` plus a media tar — a full copy
+  of the customer's content) had no route that could remove it. The retention
+  sweep (`BarkparkCloud.Workers.ArchiveRetentionWorker`) is its only scheduled
+  caller.
+
+    * `{:ok, n}` — `n` objects deleted (0 when the prefix is already empty; a
+      re-run of a completed purge is a no-op, not an error)
+    * `{:error, :cross_team_ref}` — `bundle_ref` does not live under
+      `archives/<team_id>/`. The one verb that destroys data does NOT take the
+      caller's word for where it points; a ref outside the team's own prefix is
+      refused before a single request is signed.
+    * `{:error, :not_configured}` — no S3 credentials / bucket here
+    * `{:error, reason}` — the store was unreachable or answered non-2xx. A
+      partial delete reports the FAILURE, never `{:ok, n}` — the sweep must not
+      record a purge that did not happen.
+
+  `bundle_ref` is the prefix `list_archives/1` already hands back (e.g.
+  `"archives/<team>/<slug>/"`), so a listed row is directly erasable.
+  """
+  @spec delete_bundle(String.t(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def delete_bundle(team_id, bundle_ref)
+      when is_binary(team_id) and team_id != "" and is_binary(bundle_ref) do
+    team_prefix = "archives/" <> team_id <> "/"
+
+    if String.starts_with?(bundle_ref, team_prefix) and bundle_ref != team_prefix do
+      case store_config() do
+        {:error, :not_configured} = err ->
+          err
+
+        {:ok, cfg} ->
+          with {:ok, keys} <- list_keys(cfg, bundle_ref) do
+            delete_keys(cfg, keys)
+          end
+      end
+    else
+      {:error, :cross_team_ref}
+    end
+  end
+
+  def delete_bundle(_, _), do: {:error, :bad_team}
+
+  # Delete every key, stopping at the FIRST failure. Stopping (rather than
+  # collecting) is deliberate: a store that just refused one object will very
+  # likely refuse the rest, and a half-swept prefix that reported success would
+  # let the sweep believe a bundle is gone while its pg_dump is still there.
+  # The next daily tick re-lists and finishes the job.
+  defp delete_keys(cfg, keys) do
+    Enum.reduce_while(keys, {:ok, 0}, fn key, {:ok, n} ->
+      case signed_request(cfg, "DELETE", "/" <> encode_key_path(key), []) do
+        # S3 answers a successful DELETE with 204; a key that was already gone
+        # answers 204 as well (DELETE is idempotent), and some gateways say 200.
+        {:ok, %{status: status}} when status in 200..299 ->
+          {:cont, {:ok, n + 1}}
+
+        {:ok, %{status: status}} ->
+          {:halt, {:error, {:delete_status, status, key}}}
+
+        {:error, reason} ->
+          {:halt, {:error, {:unreachable, reason}}}
+      end
+    end)
+  end
 
   # ── configuration ──────────────────────────────────────────────────────────
 
@@ -280,15 +353,20 @@ defmodule BarkparkCloud.ArchiveStore do
 
   # ── SigV4 signed GET dispatch ───────────────────────────────────────────────
 
-  # Build a SigV4-signed GET and dispatch it through the injectable transport.
-  # `path` is a raw (already-encoded) path; `query` is a list of {k,v} the
-  # signer canonicalises identically to the URL it sends.
-  defp signed_get(cfg, path, query) do
+  defp signed_get(cfg, path, query), do: signed_request(cfg, "GET", path, query)
+
+  # Build a SigV4-signed request and dispatch it through the injectable
+  # transport. `path` is a raw (already-encoded) path; `query` is a list of
+  # {k,v} the signer canonicalises identically to the URL it sends. Every verb
+  # this module signs is bodiless, so the payload hash is always the
+  # empty-body SHA-256 — a DELETE signs exactly like a GET but for the method
+  # in the canonical request.
+  defp signed_request(cfg, method, path, query) do
     amz_datetime = amz_datetime(DateTime.utc_now())
 
     signed =
       sign_v4(%{
-        method: "GET",
+        method: method,
         host: cfg.host,
         path: path,
         query: query,
@@ -313,7 +391,12 @@ defmodule BarkparkCloud.ArchiveStore do
       {"x-amz-date", amz_datetime}
     ]
 
-    dispatch(%{method: :get, url: url, headers: headers, body: ""})
+    dispatch(%{
+      method: method |> String.downcase() |> String.to_existing_atom(),
+      url: url,
+      headers: headers,
+      body: ""
+    })
   end
 
   defp query_suffix([]), do: ""
@@ -533,7 +616,9 @@ end
 defmodule BarkparkCloud.ArchiveStore.HttpClient do
   @moduledoc """
   ArchiveStore's HTTP transport — verified-TLS `:httpc`, the same idiom as
-  `BarkparkCloud.Verify.HttpClient`, GET-only. Redirects are NOT auto-followed
+  `BarkparkCloud.Verify.HttpClient`. Bodiless verbs only (GET for the reads,
+  DELETE for the retention purge) — both ride `:httpc`'s two-tuple request
+  form, so neither ever sends a body the signature did not cover. Redirects are NOT auto-followed
   (S3 doesn't redirect a signed request; following one would drop the
   Authorization header). `request/1` takes `%{method, url, headers, body}` and
   returns `{:ok, %{status, body, headers}}` on a completed exchange (any
