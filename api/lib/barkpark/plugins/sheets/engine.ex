@@ -1095,9 +1095,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       `js/packages/react/tests/sheet-error-vocabulary.test.ts` (against the same
       fixture)
 
-  NOT yet checked: `apps/mobile/src/papers/portabledoc/blocks/sheet.tsx`
-  `ERROR_VALUES` is a SIXTH copy with no drift test of its own — update it by
-  hand until it earns one.
+    * `apps/mobile/src/papers/portabledoc/blocks/sheet.tsx` `ERROR_VALUES` —
+      the SIXTH mirror, unguarded until #15473, by which time it had already
+      DRIFTED: #15374 added `#NAME?` to the list above and no one copied it
+      into the mobile set, so a `#NAME?` cell rendered as ordinary text on
+      mobile while every other surface painted it as an error. Now
+      `apps/mobile/__tests__/sheetErrorVocabulary.test.ts` (against the same
+      fixture, asserting set equality in both directions)
+
+  Every mirror is now checked. A surface added here without a named drift test
+  is the hole #15473 closed, reopened.
   """
   # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,#NAME?,name-error,unknown-function,stale_fn,spill,sheet-err,error_values
   @spec error_values() :: [String.t()]
