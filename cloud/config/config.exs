@@ -326,6 +326,14 @@ config :barkpark_cloud, Oban,
        # Runs off-peak at 03:30 so it never stampedes the on-the-hour sweeps; a
        # missed tick is harmless (max_attempts: 1 — the next day catches up).
        {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker},
+       # cch-w54-bl: the daily archive-bundle purge — the erasure path a
+       # decommission did not have. A bundle is kept 30 days past the teardown
+       # that made it, then deleted from object storage; a still-live team
+       # NEVER loses its most recent bundle. Runs at 03:45, after the agent
+       # prune and before the 06:00 digest, so the two off-peak sweeps do not
+       # overlap. max_attempts: 1 — the window is 30 days wide, so a missed
+       # tick costs nothing.
+       {"45 3 * * *", BarkparkCloud.Workers.ArchiveRetentionWorker},
        # isu-w5: the daily fleet-update digest — one plain-text operator email
        # summarizing where every instance stands against the newest release the
        # fleet has seen (curator judgment → a human inbox). Runs at 06:00 (quiet,
