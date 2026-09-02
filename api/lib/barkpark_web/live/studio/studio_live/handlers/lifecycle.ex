@@ -115,14 +115,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   end
 
   def paper_updated(%{html: html} = msg, socket) do
-    if socket.assigns[:editor_view] == :paper do
-      {:noreply,
-       socket
-       |> assign(:paper_html, html)
-       |> assign(:paper_block_mode, false)
-       |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
-    else
-      {:noreply, socket}
+    cond do
+      socket.assigns[:editor_view] != :paper ->
+        {:noreply, socket}
+
+      # THE THIRD `:paper_html` FEED (task-fa27740cb3162dbd). The two mount-side
+      # reads are clamped in `Shared.Paper.reader_paper_html/2`; this one
+      # re-assigns AFTER mount, so an unclamped arm here would hand the raw
+      # cache back to the same anonymous `:docs`-share viewer one broadcast
+      # later. For a write-denied (non-editing) socket the frame is ADVISORY —
+      # exactly what `BulldocsLive` already does with it: re-read the store and
+      # let the reader clamp decide, rather than painting bytes off the wire.
+      # A stale `paper_doc` cannot be sanitized into the fresh body, so the
+      # refetch (not the frame's html) is what keeps the view both current and
+      # safe; `refetch_paper/1` carries the store's own rev, which is the truth
+      # the frame's `rev` was only advertising.
+      Shared.write_denied?(socket) ->
+        {:noreply, Shared.refetch_paper(socket)}
+
+      true ->
+        {:noreply,
+         socket
+         |> assign(:paper_html, html)
+         |> assign(:paper_block_mode, false)
+         |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
     end
   end
 

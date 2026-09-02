@@ -1296,6 +1296,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   defdelegate refetch_paper(socket), to: Paper
 
   @doc false
+  defdelegate reader_paper_html(socket, paper), to: Paper
+
+  @doc false
+  defdelegate write_denied?(socket), to: Paper
+
+  @doc false
   def fetch_published_twin(nil, _type, _dataset, _is_draft, _has_published, _scope_opts), do: nil
   def fetch_published_twin(_doc, nil, _dataset, _is_draft, _has_published, _scope_opts), do: nil
   def fetch_published_twin(_doc, _type, _dataset, false, _has_published, _scope_opts), do: nil
