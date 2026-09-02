@@ -116,6 +116,22 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   @reader_selector ".bp-paper-surface"
   @phone "html[data-width-bucket=\"phone\"]"
 
+  # THE PUBLIC READER'S OWN SHELL. `@reader_selector` above is a misnomer this
+  # file inherited: it names the `.bp-paper-surface` rule in root.html.heex —
+  # the STUDIO's copy of the shared surface. The page a reader actually loads is
+  # `<main class="bp-paper-shell bp-paper-surface bp-paper-article">` rendered by
+  # bulldocs_live.ex, and its column geometry is set by the `.bp-paper-article`
+  # rules in bulldocs.html.heex, which nothing in this file used to read.
+  #
+  # That blind spot had a price. The two shells stepped their gutters on
+  # DIFFERENT ladders — 40/24/16 at 767/479 in the Studio, 40 -> 24 at 720 here
+  # with a later `padding-inline: 20px` overriding the 24 below 720 — so at a
+  # 390px viewport the Studio pane held a 358px column and the reader held 350.
+  # Same type scale, same 660px clamp, lines wrapping at different words in View
+  # than in Edit. Nothing was red, because nothing was looking.
+  @bulldocs Path.expand("../../../lib/barkpark_web/layouts/bulldocs.html.heex", __DIR__)
+  @reader_shell_selector ".bp-paper-shell.bp-paper-article"
+
   # The SIX `.editor-panel` roots, by the file that renders them. Counts, not
   # anchors — identities are pinned by editor_panel_containment_test.exs; what
   # this file cares about is that each rendered root carries `data-role`.
@@ -213,6 +229,102 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   defp nested_surface_blocks do
     ~r/@media\s*\(([^)]*)\)\s*\{\s*#{Regex.escape(@reader_selector)}\s*\{([^{}]*)\}/
     |> Regex.scan(decommented(css()), capture: :all_but_first)
+    |> Enum.map(fn [header, body] -> {String.trim(header), body} end)
+  end
+
+  # ── The gutter LADDER, derived from a sheet rather than restated here ──────
+  #
+  # A ladder is the base gutter plus every `@media (max-width: N)` step that
+  # redeclares it, as `[{:base, 40}, {767, 24}, {479, 16}]`. Both shells are read
+  # with the SAME function, and the parity test compares the two results — so the
+  # numbers live in the sheets and this file only asserts they agree. Restating
+  # "40/24/16 at 767/479" here would make the test pass a sheet that matches the
+  # restatement while the OTHER sheet drifted; comparing two derivations cannot.
+  defp gutter_ladder!(src, selector, file) do
+    # The base rule is the TOP-LEVEL block that declares the token. A surface can
+    # own several top-level blocks (root.html.heex splits its paper surface across
+    # more than one); picking by position would read whichever came first, so the
+    # block is picked by the thing being read, and both "none" and "more than one"
+    # are loud — the second is how a source-order-dependent winner gets in.
+    base =
+      case top_level_blocks(src, selector) do
+        [] ->
+          flunk("`#{selector}` matches no TOP-LEVEL rule in #{file} — its column geometry is GONE")
+
+        blocks ->
+          case Enum.filter(blocks, &(&1 =~ ~r/--paper-gutter\s*:/)) do
+            [one] ->
+              gutter_px!(one, selector, file)
+
+            [] ->
+              flunk(
+                "no top-level `#{selector}` rule in #{file} declares `--paper-gutter` " <>
+                  "(#{length(blocks)} candidate blocks) — the gutter is a literal again " <>
+                  "and the two shells can drift silently"
+              )
+
+            many ->
+              flunk(
+                "#{length(many)} top-level `#{selector}` rules in #{file} declare " <>
+                  "`--paper-gutter`; the base gutter is now source-order dependent"
+              )
+          end
+      end
+
+    steps =
+      ~r/@media\s*\(\s*max-width:\s*(\d+)px\s*\)\s*\{\s*#{Regex.escape(selector)}\s*\{([^{}]*)\}/
+      |> Regex.scan(decommented(src), capture: :all_but_first)
+      |> Enum.filter(fn [_bp, body] -> body =~ ~r/--paper-gutter\s*:/ end)
+      |> Enum.map(fn [bp, body] ->
+        {String.to_integer(bp), gutter_px!(body, selector, file)}
+      end)
+      |> Enum.sort_by(fn {bp, _} -> -bp end)
+
+    [{:base, base} | steps]
+  end
+
+  # Declaration blocks for `selector` at brace depth ZERO — i.e. NOT inside an
+  # `@media`/`@container` at-rule.
+  #
+  # Depth, not a line anchor. `^[ \t]*<selector>[ \t]*\{` reads as "top level"
+  # and is not: inside a MULTI-LINE `@media { … }` the nested copy also starts
+  # its own line, so on bulldocs.html.heex (whose media blocks are written out
+  # over several lines, unlike root.html.heex's one-liners) the line-anchored
+  # form returned the base rule AND both ladder steps, and the base gutter
+  # became "whichever of the three came first". Counting braces cannot be fooled
+  # by how a sheet is formatted.
+  defp top_level_blocks(src, selector) do
+    src = decommented(src)
+    esc = Regex.escape(selector)
+
+    ~r/(?<![-\w.])#{esc}[ \t]*\{([^{}]*)\}/
+    |> Regex.scan(src, return: :index)
+    |> Enum.filter(fn [{start, _} | _] -> depth_at(src, start) == 0 end)
+    |> Enum.map(fn [_whole, {bstart, blen}] -> binary_part(src, bstart, blen) end)
+  end
+
+  defp depth_at(src, offset) do
+    prefix = binary_part(src, 0, offset)
+    length(:binary.matches(prefix, "{")) - length(:binary.matches(prefix, "}"))
+  end
+
+  defp gutter_px!(body, selector, file) do
+    case Regex.run(~r/--paper-gutter\s*:\s*(\d+)px/, body) do
+      [_, px] ->
+        String.to_integer(px)
+
+      nil ->
+        flunk(
+          "`#{selector}` in #{file} declares no `--paper-gutter: <n>px` — the " <>
+            "gutter is a literal again and the two shells can drift silently"
+        )
+    end
+  end
+
+  # Every `@media (…) { <selector> { … } }` body for a selector in a sheet.
+  defp media_bodies(src, selector) do
+    ~r/@media\s*\(([^)]*)\)\s*\{\s*#{Regex.escape(selector)}\s*\{([^{}]*)\}/
+    |> Regex.scan(decommented(src), capture: :all_but_first)
     |> Enum.map(fn [header, body] -> {String.trim(header), body} end)
   end
 
@@ -589,6 +701,123 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
       assert tag =~ ~s(data-role="content"),
              "the media explorer lost its data-role stamp — it is a full panel " <>
                "root, not a chromeless surface, and it negotiates space like the rest"
+    end
+  end
+  describe "BOTH shells step their gutters on ONE ladder (task-414967096bbe011b)" do
+    # The criterion this block exists for: "Editor and reader gutters step
+    # identically (40/24/16 at 767/479) and measure_parity_test.exs asserts both
+    # shells, red when one drifts." Everything below is derived from the two
+    # sheets, so the drift of EITHER one reds it.
+
+    test "the reader shell and the Studio surface declare the SAME ladder" do
+      studio = gutter_ladder!(css(), @reader_selector, "root.html.heex")
+      reader = gutter_ladder!(File.read!(@bulldocs), @reader_shell_selector, "bulldocs.html.heex")
+
+      assert studio == reader,
+             """
+             THE TWO SHELLS STEP DIFFERENTLY.
+
+               Studio  `#{@reader_selector}` (root.html.heex)       #{inspect(studio)}
+               reader  `#{@reader_shell_selector}` (bulldocs.html.heex)  #{inspect(reader)}
+
+             Both surfaces resolve the SAME `.bp-paper-surface` type scale against
+             the same 660px clamp, so the only thing that can make a line wrap at a
+             different word in View than in Edit is the side padding. A ladder that
+             agrees on the values but not the breakpoints is just as broken as one
+             that disagrees on the values: between the two breakpoints the surfaces
+             hold different columns.
+
+             Move BOTH sheets, or neither.
+             """
+    end
+
+    test "the ladder is the one the narrow measure was sized against" do
+      # Not a restatement of the sheets — a pin on the two numbers the reflow
+      # measurement was taken at, so a future edit that keeps the shells in step
+      # while walking the ladder somewhere else still has to come back here and
+      # say so. 390 - 2*16 = 358px of column = 41.8 characters per line, measured
+      # by Range rects on /papers/heggemsnes-act (35.4 at the old 20px gutter).
+      ladder = gutter_ladder!(File.read!(@bulldocs), @reader_shell_selector, "bulldocs.html.heex")
+
+      assert {:base, 40} == hd(ladder),
+             "the base gutter moved to #{inspect(hd(ladder))}; the 580px reading " <>
+               "column every parity number in this file rests on moved with it"
+
+      assert {479, 16} in ladder,
+             """
+             the 16px phone step is gone (ladder: #{inspect(ladder)}).
+
+             It is what puts the narrow column at 358px and the prose measure at
+             41.8 CPL, inside the 40-46 editorial band. At the 20px this reader
+             used to render, the column was 350px and the measure 35.4.
+             """
+    end
+
+    test "no reader breakpoint pads the shell with a gutter LITERAL" do
+      # THE ACTUAL BUG, as a permanent tripwire. `padding-inline: 20px` sat in a
+      # LATER `@media (max-width: 720px)` block than the ladder, so it won on
+      # source order and the reader rendered a gutter that appeared in no ladder
+      # at all — while the evidence-band literals two lines above it (`calc(100vw
+      # - 32px)`, i.e. 2 x 16) were written for a DIFFERENT gutter again. Three
+      # numbers, one edge. A literal here is how that comes back.
+      bodies = media_bodies(File.read!(@bulldocs), @reader_shell_selector)
+
+      assert bodies != [],
+             "no `@media` block restyles `#{@reader_shell_selector}` any more — " <>
+               "the reader's responsive column is GONE"
+
+      for {header, body} <- bodies,
+          decl <- Regex.scan(~r/(padding(?:-inline)?)\s*:\s*([^;}]+)/, body) do
+        [_, prop, value] = decl
+
+        assert value =~ ~r/var\(\s*--paper-gutter\s*\)/,
+               """
+               `@media #{header}` sets `#{prop}: #{String.trim(value)}` on
+               `#{@reader_shell_selector}` — a side gutter that is not the token.
+
+               Whatever it is, it is not on the ladder the Studio steps, and being
+               later in the sheet it wins. That is exactly how the reader came to
+               render 20px at a width where the Studio rendered 16.
+               """
+      end
+    end
+
+    test "every reader breakpoint that redeclares the gutter also CONSUMES it" do
+      # The mirror of the Studio-side desync guard above, on the other sheet.
+      # Redeclare without consuming and the token is dead decoration; the padding
+      # that renders is then whatever an earlier block left behind.
+      for {header, body} <- media_bodies(File.read!(@bulldocs), @reader_shell_selector),
+          body =~ ~r/--paper-gutter\s*:/ do
+        assert body =~ ~r/padding\s*:[^;}]*var\(\s*--paper-gutter\s*\)/,
+               """
+               `@media #{header}` redeclares `--paper-gutter` on
+               `#{@reader_shell_selector}` without padding with it. The token it
+               sets renders nothing.
+               """
+      end
+    end
+
+    test "the reader's evidence band reads the gutter instead of restating it" do
+      # The band's width used to be `calc(100vw - 32px)` — correct for a 16px
+      # gutter, in a block whose padding rendered 20. The band edge and the prose
+      # edge were 4px apart by construction, at every narrow width.
+      bodies = media_bodies(File.read!(@bulldocs), @reader_shell_selector)
+
+      widths =
+        for {_h, body} <- bodies,
+            [w] <- Regex.scan(~r/--bp-evidence-width\s*:\s*([^;}]+)/, body, capture: :all_but_first),
+            do: String.trim(w)
+
+      assert widths != [],
+             "no narrow `--bp-evidence-width` on the reader shell any more — the " <>
+               "band no longer collapses onto the column on a phone"
+
+      for w <- widths do
+        assert w =~ ~r/var\(\s*--paper-gutter\s*\)/,
+               "the reader's narrow evidence band is `#{w}` — a literal gutter " <>
+                 "allowance. It must read `var(--paper-gutter)`, or the band's edge " <>
+                 "and the prose's edge drift apart the moment the ladder moves."
+      end
     end
   end
 end

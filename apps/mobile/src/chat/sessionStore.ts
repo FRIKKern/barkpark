@@ -24,7 +24,7 @@ import {
   type ChatEvent,
   type ChatState,
 } from './reducer'
-import type { ChatSession } from './wire'
+import { sessionContext, type ChatSession, type ChatSessionContext } from './wire'
 
 // The wedge timer's clock (reduce.go ticks at 100ms; 500ms keeps the same 8s
 // semantics with less wakeup churn on a phone).
@@ -189,6 +189,15 @@ export interface SessionSnapshot {
   /** rides along with 'degraded'/'refused' — the refused header label needs
    * the HTTP status to say WHICH wall (signed out / gone / other). */
   streamFailure: StreamFailure | undefined
+  /** WHO IS RUNNING THIS SESSION, WHERE (chat-local-cloud-context-w3) — the
+   * server-projected facts the context band reconciles against the live
+   * connection. Refreshed by every session read: the seed GET, every
+   * turn-boundary tail refetch, and the SSE RESUME re-read below.
+   *
+   * `undefined` until the first read lands, and on a server that projects no
+   * `context` at all — which the band renders as `(unknown)` for the fields
+   * only a server can answer, never as a blank and never as a guess. */
+  context: ChatSessionContext | undefined
 }
 
 export class ChatSessionStore {
@@ -225,6 +234,7 @@ export class ChatSessionStore {
       transportError: undefined,
       streamStatus: 'connecting',
       streamFailure: undefined,
+      context: undefined,
     }
   }
 
@@ -262,12 +272,23 @@ export class ChatSessionStore {
         // and the zero this used to pass MATCHED the attach-mid-turn tail
         // (gen === tailGen === 0 until an init frame is observed) and wiped it.
         this.dispatch({ type: 'tailFetched', gen: HYDRATION_GEN, session })
-        this.set({ loading: false, choices: choicesFrom(this.snapshot.choices, session) })
+        this.set({
+          loading: false,
+          choices: choicesFrom(this.snapshot.choices, session),
+          context: contextFrom(this.snapshot.context, session),
+        })
       } catch (err) {
         if (this.stopped || gen !== this.startGen) return
         this.set({ loading: false, loadError: message(err) })
         return
       }
+      // Has this start's stream been attached BEFORE? pumpSse re-emits 'open'
+      // on every successful (re)connect of its ladder, so the second and later
+      // 'open' of a start ARE the resume path landing — and that is the moment
+      // the context band's facts may have gone stale underneath it (a lease
+      // moved to another host, a session was re-homed) with no message row to
+      // announce it.
+      let attached = false
       void streamChatEvents(this.connection, this.sessionId, {
         signal: controller.signal,
         lastEventId: String(this.snapshot.state.lastSeq),
@@ -287,7 +308,17 @@ export class ChatSessionStore {
           // the error on it would be the same claim-without-evidence in the
           // other direction.
           if (streamStatus === 'open') {
+            const reattached = attached
+            attached = true
             this.set({ streamStatus, streamFailure, transportError: undefined })
+            // THE RESUME RE-READ (chat-local-cloud-context-w3, criterion 3).
+            // The FIRST 'open' needs nothing: the seed GET that ran moments
+            // ago is the same read. Every later one follows a drop the client
+            // survived by cursor, during which nobody told it anything about
+            // the session's execution — so the band re-reads the facts and
+            // updates in place, with no reconnect the user has to perform and
+            // no transcript churn.
+            if (reattached) this.refreshContext(gen)
           } else {
             this.set({ streamStatus, streamFailure })
           }
@@ -374,6 +405,30 @@ export class ChatSessionStore {
     )
   }
 
+  /** Re-read the session's CONTEXT FACTS and nothing else.
+   *
+   * It rides the same `?since=` read the turn boundary uses — the full session
+   * struct comes back either way — but deliberately does NOT dispatch
+   * `tailFetched`: the SSE replay after `Last-Event-ID` already owns the rows,
+   * and handing the reducer a second copy of a resume would be a transcript bug
+   * bought for a chrome refresh. Fenced on the start that asked, exactly like
+   * every other async in run().
+   *
+   * A failed re-read is not news and raises nothing: the band keeps the facts
+   * it already holds, which are the last ones the server actually stated. A
+   * transportError banner here would indict the transport for a read the user
+   * never asked for. */
+  private refreshContext(gen: number): void {
+    getChatSession(this.connection, this.sessionId, this.snapshot.state.lastSeq)
+      .then((session) => {
+        if (this.stopped || gen !== this.startGen) return
+        this.set({ context: contextFrom(this.snapshot.context, session) })
+      })
+      .catch(() => {
+        // see above — deliberately silent
+      })
+  }
+
   private dispatch(ev: ChatEvent): void {
     if (this.stopped) return
     const prev = this.snapshot.state
@@ -420,7 +475,11 @@ export class ChatSessionStore {
             // Only for the start that asked: a fetch issued before a restart
             // carries the PRE-restart choices, and writing them here would
             // revert a pick made (and accepted) after it.
-            if (!superseded()) this.set({ choices: choicesFrom(this.snapshot.choices, session) })
+            if (!superseded())
+              this.set({
+                choices: choicesFrom(this.snapshot.choices, session),
+                context: contextFrom(this.snapshot.context, session),
+              })
             this.dispatch({ type: 'tailFetched', gen: eff.gen, session })
           })
           .catch((err: unknown) =>
@@ -473,6 +532,18 @@ export class ChatSessionStore {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Folds a session read into the held context facts. Absence KEEPS the held
+ * ones rather than erasing them, the same discipline `choicesFrom` runs on and
+ * for the same reason: a `?since=` read is a partial read of the same row, and
+ * a server that projects no `context` at all must leave the band saying what it
+ * last knew rather than blanking it. */
+function contextFrom(
+  held: ChatSessionContext | undefined,
+  session: ChatSession,
+): ChatSessionContext | undefined {
+  return sessionContext(session) ?? held
 }
 
 /** Folds a session read into the held choices. A blank/absent wire value KEEPS

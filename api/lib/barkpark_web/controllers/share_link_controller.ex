@@ -280,7 +280,11 @@ defmodule BarkparkWeb.ShareLinkController do
         # A public share link is an ANONYMOUS read — `from_conn` yields the
         # most-restrictive baseline, so `private` fields are dropped here too.
         schema =
-          case Content.get_schema(link.ref_type, link.dataset, scope(link)) do
+          case Content.Schema.get_schema_for_redaction(
+                 link.ref_type,
+                 link.dataset,
+                 scope(link)
+               ) do
             {:ok, s} -> s
             _ -> nil
           end
