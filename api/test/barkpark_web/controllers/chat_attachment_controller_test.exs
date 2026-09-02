@@ -11,18 +11,25 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
     * the round trip works through the chat-owned routes (upload → read);
     * the id on the wire is opaque and content-addressed, and no store path,
       bearer token, or raw byte ever rides the transcript;
-    * three token classes are refused: a plain data-plane token (403 at the
-      pipeline), another workspace's Connector (404, the not-found oracle), and
-      every media route (which never serves these bytes, not even to a global
-      admin).
+    * the refused set is pinned by name: a plain `read`/`write` data-plane
+      token and an UNBOUND `chat` token (403 at the pipeline), an anonymous
+      caller (401), another workspace's Connector (404, the not-found oracle),
+      and every media read route — which refuses these bytes even for a global
+      admin, proven against a POSITIVE control that the media routes are live
+      for a real media asset, so the refutations cannot pass vacuously.
   """
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Media
+  alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Attachments
+  alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.ClaudeChat
 
   @dataset "production"
@@ -227,6 +234,50 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
       # An anonymous caller never gets past RequireToken either.
       assert build_conn() |> get(att["url"]) |> json_response(401)
     end
+
+    test "a `chat` token with NO workspace binding is 403'd — it cannot be confined",
+         %{admin: admin, sid: sid} do
+      att = upload(admin, sid, @png) |> json_response(201) |> Map.fetch!("attachment")
+
+      unbound = "chat-att-unbound-#{System.unique_integer([:positive])}"
+
+      # Inserted DIRECTLY, not through `Auth.create_token/5`: that helper falls
+      # back to the seeded Default workspace when handed a nil `workspace_id`,
+      # so it cannot mint the input class this test is about. An unbound token
+      # is still representable (pre-tenancy back-compat, and any install with no
+      # Default), which is exactly why `RequireChatAccess` has an arm for it.
+      {:ok, unbound_token} =
+        %ApiToken{}
+        |> ApiToken.changeset(%{
+          token_hash: ApiToken.hash_token(unbound),
+          label: "att-unbound",
+          dataset: @dataset,
+          permissions: ["read", "chat"],
+          workspace_id: nil
+        })
+        |> Repo.insert()
+
+      assert is_nil(unbound_token.workspace_id),
+             "the fixture must actually be UNBOUND — otherwise this test proves nothing"
+
+      # This is the admitted-set edge that matters most, and the one the word
+      # "admin-gated" hides: `RequireChatAccess` resolves a tenant scope ONLY for
+      # a workspace-BOUND `chat` token. An UNBOUND one cannot be confined to a
+      # tenant, so it must be denied rather than silently handed the `:global`
+      # reach a real admin has. If that arm ever regressed, this route family
+      # would leak every session's bytes to a `chat` token without any change to
+      # the admin gate at all — so it is pinned here by name.
+      assert json_conn(unbound) |> get(att["url"]) |> json_response(403),
+             "an unbound `chat` token must not read chat attachment bytes"
+
+      assert json_conn(unbound)
+             |> post(
+               "/v1/chat/sessions/#{sid}/attachments",
+               Jason.encode!(%{data: Base.encode64(@png)})
+             )
+             |> json_response(403),
+             "an unbound `chat` token must not upload chat attachments"
+    end
   end
 
   describe "a token from another workspace cannot retrieve chat attachment bytes" do
@@ -291,7 +342,66 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
   end
 
   describe "no media route retrieves chat attachment bytes" do
-    test "every media read route fails on the chat store's own path — even for a global admin",
+    setup do
+      # POSITIVE CONTROL for this whole describe. Every assertion below is an
+      # ABSENCE claim, and an absence claim over a dead route family proves
+      # nothing: if `/media/...` 404'd for every input, the refutations would
+      # pass VACUOUSLY and a real leak through a live media route would still be
+      # green. So seed a genuine media asset in the DEFAULT scope — the scope an
+      # unbound admin token resolves to — and prove the media routes serve IT.
+      {ws, project} = ensure_default_scope!()
+      dataset = ensure_dataset!(project, @dataset)
+
+      suffix = System.unique_integer([:positive])
+      rel = "uploads/chat-att-control/#{suffix}.txt"
+      full = Media.file_path(rel)
+      File.mkdir_p!(Path.dirname(full))
+      File.write!(full, "MEDIA-CONTROL-BYTES")
+      on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
+
+      # dataset_id is LOAD-BEARING: `Media.Delivery.Search` filters on it
+      # authoritatively once a Dataset row resolves, so a fixture without it is
+      # invisible to the listing and the control would be the vacuous thing it
+      # exists to rule out.
+      control =
+        %MediaFile{}
+        |> MediaFile.changeset(%{
+          filename: Path.basename(rel),
+          original_name: Path.basename(rel),
+          path: rel,
+          mime_type: "text/plain",
+          size: byte_size("MEDIA-CONTROL-BYTES"),
+          dataset: @dataset,
+          workspace_id: ws.id,
+          project_id: project.id,
+          dataset_id: dataset.id
+        })
+        |> Repo.insert!()
+
+      %{control: control}
+    end
+
+    test "the media route family is LIVE for a real media asset (the control)",
+         %{admin: admin, control: control} do
+      listing = json_conn(admin) |> get("/media?limit=50")
+
+      assert listing.status == 200,
+             "media listing must answer this token — otherwise every refutation " <>
+               "below is vacuous. Got #{listing.status}."
+
+      assert control.id in Enum.map(json_response(listing, 200)["files"], & &1["id"]),
+             "the seeded media asset must be listed — the control is not in scope"
+
+      served = json_conn(admin) |> get("/media/files/#{control.path}")
+
+      assert served.status == 200,
+             "GET /media/files/* must serve a genuine media asset to this token. " <>
+               "Got #{served.status}: #{inspect(binary_part(served.resp_body, 0, min(200, byte_size(served.resp_body))))}"
+
+      assert served.resp_body == "MEDIA-CONTROL-BYTES"
+    end
+
+    test "every media read route REFUSES the chat store's own paths — even for a global admin",
          %{admin: admin, sid: sid} do
       att = upload(admin, sid, @png) |> json_response(201) |> Map.fetch!("attachment")
       id = att["id"]
@@ -299,21 +409,28 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
 
       # The exact spellings a caller would reach for if attachments HAD ridden
       # the media plugin: the store's relative pointer path, its leaf, and the
-      # opaque id, across every mounted media read route.
-      media_calls =
+      # opaque id, across every byte/metadata media read route. Structurally
+      # they cannot resolve — `MediaController.serve/2` looks the path up as a
+      # `media_files` ROW and a chat attachment never becomes one — but the
+      # STATUS is asserted so a future change that starts resolving them reds
+      # here rather than passing on an empty body.
+      byte_routes =
         for path <- ["#{sid}/#{id}", id, "chat/#{sid}/#{id}"] do
           "/media/files/#{path}"
         end ++
           [
             "/media/#{id}/meta",
-            "/media/renditions/#{id}/thumb",
-            "/media?limit=50"
+            "/media/renditions/#{id}/thumb"
           ]
 
-      for url <- media_calls do
+      for url <- byte_routes do
         conn = json_conn(admin) |> get(url)
 
-        refute conn.status == 200 and conn.resp_body == @png,
+        refute conn.status == 200,
+               "#{url} answered 200 for a chat attachment — a media route must " <>
+                 "REFUSE these, not resolve them"
+
+        refute conn.resp_body == @png,
                "#{url} served the chat attachment bytes verbatim"
 
         refute conn.resp_body =~ encoded,
@@ -323,7 +440,14 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
                "#{url} disclosed the chat attachment id — media must not know these files exist"
       end
 
-      # The chat-owned route still serves them, so the assertions above are a
+      # The collection route DOES answer 200 (that is the control above); it
+      # must simply not know the attachment exists.
+      listing = json_conn(admin) |> get("/media?limit=50")
+      assert listing.status == 200
+      refute listing.resp_body =~ id, "the media listing disclosed a chat attachment id"
+      refute listing.resp_body =~ encoded, "the media listing leaked chat attachment bytes"
+
+      # The chat-owned route still serves them, so the refutations above are a
       # boundary and not a broken fixture.
       assert json_conn(admin) |> get(att["url"]) |> json_response(200)
     end
@@ -396,6 +520,17 @@ defmodule BarkparkWeb.ChatAttachmentControllerTest do
              "a row with no attachments must not gain an empty attachments key"
 
       assert message["metadata"] == %{"origin" => "api"}
+    end
+  end
+
+  defp ensure_dataset!(project, slug) do
+    case Tenancy.get_dataset(project, slug) do
+      nil ->
+        {:ok, ds} = Tenancy.create_dataset(project, %{slug: slug, name: slug})
+        ds
+
+      ds ->
+        ds
     end
   end
 end

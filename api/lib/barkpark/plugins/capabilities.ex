@@ -3151,12 +3151,28 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
-      # The eleven non-streaming verbs behind the `/v1/chat` scope, which is
-      # `pipe_through [:api, :require_admin]` — every route needs a data-plane
-      # bearer with the global `admin` permission (D21: instance-global scope,
-      # NO tenant/workspace/project/dataset column, so NO scoped_prefix). All
-      # `auth_tier: "admin"` so the existence-hiding projection hides `chat.*`
-      # from anon/lower-tier callers exactly like the other admin nouns. The
+      # The eleven non-streaming verbs behind the `/v1/chat` scope.
+      #
+      # STALE CLAIM CORRECTED (ct-bl-chat-attachments). This comment used to say
+      # the scope is `pipe_through [:api, :require_admin]` and that "every route
+      # needs a data-plane bearer with the global `admin` permission (D21)".
+      # That stopped being true on 2026-07-13: `dbfc3d826e` (#2958) moved the
+      # whole scope onto `[:api, :require_chat_access]`, and the charter itself
+      # now records D21 as historically inaccurate post-connectors. The gate
+      # ADMITS two classes and denies everything else — a global-`admin` token
+      # (`chat_scope: :global`, instance-wide authority unchanged) and a
+      # workspace-BOUND token carrying `chat` (`{:workspace, ws}`, confined by
+      # the controller's `fetch_scoped` tenant oracle to sessions its own tenant
+      # owns). A plain `read`/`write` data-plane token, and a `chat` token with
+      # no workspace binding, are both 403'd at the pipeline. There is still NO
+      # scoped_prefix, because the PATH carries no tenant segment — the tenancy
+      # rides the token, not the URL.
+      #
+      # The declared `auth_tier: "admin"` below is UNCHANGED and is a different
+      # axis: it is the manifest's existence-hiding rank, which keeps `chat.*`
+      # out of an anon/lower-tier caller's manifest exactly like the other admin
+      # nouns. A `chat`-capability holder additionally discovers the noun through
+      # the capability grant in `command_noun/1` above. The
       # SSE route — `GET /v1/chat/sessions/:id/events` — is a builtin
       # streaming carve-out with no manifest verb (like `listen`); it is named
       # in the `chat` noun summary. `writes: true` on every non-GET verb here
