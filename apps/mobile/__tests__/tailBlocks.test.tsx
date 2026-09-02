@@ -266,11 +266,21 @@ function escapeHtml(s: string): string {
  *   • EVERY mfrac and script slot is wrapped, as the twin does — including an
  *     absent denominator, which the twin emits as an empty <mrow>.
  *
- * The twin wraps a `{…}` group AND wraps it again per slot, so it emits
- * <mrow><mrow>…</mrow></mrow> where this leg emits one level fewer. That is the
- * ONE real difference, and `collapse` normalises it on BOTH sides rather than
- * deleting the information. A collapse cannot merge two sibling slots — only a
- * row that is its parent row's sole child — so the boundary survives. */
+ * THERE IS NO RESIDUAL DIFFERENCE, and the comparison below is therefore a RAW
+ * string equality — no normalisation on either side. An earlier revision kept a
+ * `collapse` helper here (fold an <mrow> whose sole child is an <mrow>) on the
+ * stated grounds that "the twin double-wraps a `{…}` group AND wraps it again
+ * per slot, so it emits <mrow><mrow>…</mrow></mrow> where this leg emits one
+ * level fewer". MEASURED against the BUILT @barkpark/react dist, that was
+ * false: this leg double-wraps in exactly the same places, because `slot()`
+ * wraps and the nested `row` atom inside it wraps again. `\frac{a}{b}` is
+ * <mfrac><mrow><mrow><mi>a</mi></mrow></mrow>… on BOTH legs. All 21 corpus
+ * inputs and all 43 macros were byte-identical with the collapse REMOVED —
+ * 64/64 — so the helper was an identity function that could only ever start
+ * absorbing a real drift (a gained or lost <mrow> nesting level, which is
+ * precisely mob-zb-bl-react-mrow-parity's failure mode). It is deleted. Do not
+ * reintroduce a normaliser here: if the two legs disagree, that IS the finding.
+ */
 function atomsToMathMl(a: MathAtom, top = false): string {
   switch (a.kind) {
     case 'sym':
@@ -302,67 +312,6 @@ function slot(a: MathAtom): string {
   return `<mrow>${atomsToMathMl(a)}</mrow>`
 }
 
-/* ── mrow normalisation ─────────────────────────────────────────────────────
- * The twin double-wraps (group mrow + slot mrow); this leg wraps once. Collapse
- * an <mrow> whose SOLE child is an <mrow> down one level, to a fixpoint, on
- * BOTH sides. Structural, not a regex: a regex over nested identical tags
- * cannot tell an inner close tag from an outer one, and getting that wrong is
- * how a normaliser quietly starts erasing the boundary again.
- *
- * This is deliberately the WEAKEST normalisation that reconciles the two legs.
- * It never merges siblings, so `<mfrac><mrow>A</mrow><mrow>B</mrow></mfrac>` is
- * already a fixpoint and A/B stay distinguishable. */
-type MNode = { tag: string; kids: MNode[] } | { text: string }
-
-function parseMathMl(s: string): MNode[] {
-  const out: MNode[] = []
-  const stack: MNode[][] = [out]
-  const re = /<(\/?)([a-zA-Z]+)>|([^<]+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(s)) !== null) {
-    const here = stack[stack.length - 1] as MNode[]
-    if (m[3] !== undefined) {
-      here.push({ text: m[3] })
-    } else if (m[1] === '/') {
-      if (stack.length > 1) stack.pop()
-    } else {
-      const node: MNode = { tag: m[2] as string, kids: [] }
-      here.push(node)
-      stack.push(node.kids)
-    }
-  }
-  return out
-}
-
-function collapse(nodes: MNode[]): MNode[] {
-  return nodes.map((n) => {
-    if (!('tag' in n)) return n
-    let kids = collapse(n.kids)
-    while (
-      n.tag === 'mrow' &&
-      kids.length === 1 &&
-      'tag' in (kids[0] as MNode) &&
-      (kids[0] as { tag: string }).tag === 'mrow'
-    ) {
-      kids = (kids[0] as { kids: MNode[] }).kids
-    }
-    return { tag: n.tag, kids }
-  })
-}
-
-function serialize(nodes: MNode[]): string {
-  return nodes
-    .map((n) => ('tag' in n ? `<${n.tag}>${serialize(n.kids)}</${n.tag}>` : n.text))
-    .join('')
-}
-
-/** Normalise one MathML string for cross-leg comparison. Applied to BOTH sides
- * — never to one, which would make the comparison a statement about the
- * normaliser rather than about the two parsers. */
-function normMathMl(s: string): string {
-  return serialize(collapse(parseMathMl(s)))
-}
-
 describe('equation — the transliterated parser agrees with the web twin', () => {
   const CORPUS = [
     'x',
@@ -392,7 +341,10 @@ describe('equation — the transliterated parser agrees with the web twin', () =
   ]
 
   it.each(CORPUS.map((t) => [t] as const))('emits the twin’s MathML for %s', (tex) => {
-    expect(normMathMl(atomsToMathMl(texToMathAtoms(tex), true))).toBe(normMathMl(twinMathMl(tex)))
+    // BYTE-EXACT, mrow intact, against the BUILT @barkpark/react dist that
+    // apps/mobile resolves `@barkpark/react` to. No normalisation on either
+    // side — see the note above atomsToMathMl for why there is none left.
+    expect(atomsToMathMl(texToMathAtoms(tex), true)).toBe(twinMathMl(tex))
   })
 
   it('the MULTI-ATOM numerator is a real slot boundary, not a flattened run', () => {
@@ -404,7 +356,7 @@ describe('equation — the transliterated parser agrees with the web twin', () =
     // (`<mfrac><mi>a</mi><mo>+</mo><mi>b</mi><mi>c</mi></mfrac>` either way).
     //
     // The corpus CAN see it now (task-ce0b4827a6bff147: slot mrows are emitted
-    // and both sides are collapsed to a fixpoint instead of stripped). This
+    // and the two sides are compared byte-exact instead of stripped). This
     // assertion is kept anyway, and deliberately: it names the specific tree for
     // the specific input equation.go gets wrong, so a reader learns WHAT the
     // right split is, not merely that two legs agree. The corpus proves
@@ -434,7 +386,7 @@ describe('equation — the transliterated parser agrees with the web twin', () =
     for (const [name, symbol] of Object.entries(MACROS)) {
       expect(name.startsWith('\\')).toBe(true)
       // The twin resolves the same macro to the same glyph…
-      expect(normMathMl(twinMathMl(name))).toBe(`<mi>${symbol}</mi>`)
+      expect(twinMathMl(name)).toBe(`<mi>${symbol}</mi>`)
       // …and so does this leg, through the real render.
       expect(text({ type: 'equation', tex: name })).toBe(symbol)
     }
