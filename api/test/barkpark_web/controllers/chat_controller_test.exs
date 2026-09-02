@@ -16,6 +16,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Auth
+  alias Barkpark.ChatHosts
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Repo
@@ -25,6 +26,7 @@ defmodule BarkparkWeb.ChatControllerTest do
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.StudioChat.Recorder
+  alias Barkpark.Tenancy
   alias Barkpark.Webhooks
   alias BarkparkWeb.ChatController
   alias BarkparkWeb.Studio.ClaudeChat
@@ -863,6 +865,163 @@ defmodule BarkparkWeb.ChatControllerTest do
       # the wave-12 read-tracking stamp is retired (herd — no read receipts)
       refute Map.has_key?(body, "last_visited_at")
     end
+  end
+
+  # ── the session's CONNECTION IDENTITY (chat-local-cloud-context-w3) ─────────
+  #
+  # `session_context_json/1` projects the facts a remote client cannot measure
+  # for itself — the execution host, the owning workspace, the cwd and the
+  # repository root — so the chat context band on every surface (the CLI's
+  # internal/chat/context.go, Studio's ContextIdentity, apps/mobile's
+  # ContextBand) reconciles against ONE server answer instead of three guesses.
+  #
+  # The obligation is HONESTY, not completeness: every nil below is a distinct,
+  # named fact, and a projection that collapsed two of them would let "I could
+  # not look" reach a phone as "you are not in a repo".
+  describe "GET /sessions/:id — the session's connection identity (chat-local-cloud-context-w3)" do
+    test "carries a context map naming host / execution_target / cwd / workspace / repo",
+         %{admin: a1, sid: sid} do
+      ctx =
+        json_conn(a1)
+        |> get("/v1/chat/sessions/#{sid}")
+        |> json_response(200)
+        |> Map.fetch!("context")
+
+      # The shape a client may rely on — every key present, always. An absent
+      # key and a nil value are the same thing to JSON but NOT to a decoder that
+      # has to tell "the server does not do this" from "the server measured
+      # nothing", so the projection always emits all six.
+      assert Enum.sort(Map.keys(ctx)) ==
+               ~w(cwd execution_target host repo_root repo_status workspace)
+
+      # No enrolled host holds a lease on this session, so the SERVER runs it.
+      # nil is the measurement the band paints as `(server-local)`; it is not a
+      # failure and must never be confused with one.
+      assert ctx["host"] == nil
+      assert ctx["execution_target"] == "managed"
+      assert ctx["cwd"] == StudioChat.get_session(sid).cwd
+    end
+
+    test "the repo root is MEASURED for a server-local cwd: a work tree, and a directory outside one",
+         %{admin: a1, sid: sid} do
+      root = Path.join(System.tmp_dir!(), "ctx-repo-#{System.unique_integer([:positive])}")
+      nested = Path.join([root, "a", "b"])
+      File.mkdir_p!(nested)
+      File.mkdir_p!(Path.join(root, ".git"))
+      on_exit(fn -> File.rm_rf(root) end)
+
+      # Inside a work tree, from a NESTED directory: the answer is the TOP, not
+      # the cwd — a band that echoed the cwd back would agree with itself on
+      # every path in the filesystem.
+      Repo.update!(Ecto.Changeset.change(StudioChat.get_session(sid), cwd: nested))
+      ctx = show_context(a1, sid)
+      assert ctx["repo_status"] == "set"
+      assert ctx["repo_root"] == Path.expand(root)
+
+      # Outside one: MEASURED and empty, which is a real answer ("you are
+      # chatting from outside a checkout") and renders `(not a git repo)`.
+      bare = Path.join(System.tmp_dir!(), "ctx-bare-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(bare)
+      on_exit(fn -> File.rm_rf(bare) end)
+      Repo.update!(Ecto.Changeset.change(StudioChat.get_session(sid), cwd: bare))
+      bare_ctx = show_context(a1, sid)
+
+      # NOT "unknown": collapsing these two is the exact confusion the band's
+      # typed absences exist to prevent.
+      assert bare_ctx["repo_status"] in ["not_a_repo", "set"]
+
+      if bare_ctx["repo_status"] == "not_a_repo" do
+        assert bare_ctx["repo_root"] == nil
+      else
+        # /tmp itself is inside a work tree on this machine — vanishingly odd,
+        # but assert the ONLY other honest answer rather than a flaky red.
+        assert is_binary(bare_ctx["repo_root"])
+      end
+    end
+
+    test "a registered-host session's repo root is UNKNOWN — the server never probes another machine's path",
+         %{admin: a1} do
+      %{host: host, sid: sid} = host_session!()
+      # A cwd that IS a work tree ON THIS SERVER. The point is that the answer
+      # is `unknown` ANYWAY: for a host-executed session that path names a
+      # directory on someone ELSE's machine, and probing our own filesystem for
+      # it would answer confidently and wrongly. This is the arm a lazier
+      # projection passes by accident and this one passes on purpose — which is
+      # why the cwd is deliberately resolvable here.
+      here = File.cwd!()
+
+      Repo.update!(
+        Ecto.Changeset.change(StudioChat.get_session(sid),
+          cwd: here,
+          execution_target: "registered_host",
+          execution_host_id: host.id
+        )
+      )
+
+      ctx = show_context(a1, sid)
+      assert ctx["repo_status"] == "unknown"
+      assert ctx["repo_root"] == nil
+      # The cwd still rides, so the band can name WHICH directory nobody could
+      # resolve — an unknown with no subject is not actionable.
+      assert ctx["cwd"] == here
+      assert ctx["execution_target"] == "registered_host"
+    end
+
+    test "the host is the LIVE LEASE holder's NAME, and the workspace is the session's own slug",
+         %{admin: a1} do
+      %{ws: ws, host: host, credential: credential, sid: sid, suffix: suffix} =
+        host_session!("studio-mini")
+
+      # BEFORE the lease: the server runs it.
+      assert show_context(a1, sid)["host"] == nil
+      # The session's OWN owner workspace — not the caller's, not a default.
+      assert show_context(a1, sid)["workspace"] == ws.slug
+
+      {:ok, _fence} =
+        ChatHosts.lease_and_enqueue(
+          host,
+          %Barkpark.StudioChat.Runtime.Command{
+            operation: :start,
+            provider: "claude",
+            session_id: sid,
+            idempotency_key: "ctx-cmd-#{suffix}",
+            payload: %{}
+          },
+          []
+        )
+
+      # AFTER: the NAME of the host holding the live lease. A name is the only
+      # part of a registered host safe to paint — never its id, never its
+      # credential, neither of which may appear anywhere in the projection.
+      ctx = show_context(a1, sid)
+      assert ctx["host"] == "studio-mini"
+      refute host.id in Map.values(ctx)
+      refute credential in Map.values(ctx)
+    end
+  end
+
+  defp show_context(admin, sid) do
+    json_conn(admin)
+    |> get("/v1/chat/sessions/#{sid}")
+    |> json_response(200)
+    |> Map.fetch!("context")
+  end
+
+  # A REAL enrolled chat host and a session owned by its workspace — the same
+  # mint path a registered host actually rides (chat_host_report_state_test's
+  # setup), because a hand-inserted row would prove the projection reads a table
+  # rather than that it reads the FENCE.
+  defp host_session!(name \\ "ctx-host") do
+    suffix = System.unique_integer([:positive])
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "ctx-#{suffix}", name: "Ctx #{suffix}"})
+    {:ok, %{enrollment_token: t}} = ChatHosts.issue_enrollment(ws.id, %{name: name})
+    {:ok, %{credential: credential}} = ChatHosts.enroll(t)
+    {:ok, host} = ChatHosts.authenticate(credential)
+
+    sid = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: sid, mode: "plan"}, {:workspace, ws.id})
+
+    %{ws: ws, host: host, credential: credential, sid: sid, suffix: suffix}
   end
 
   # ── observed runtime telemetry readout (wb-api-chat-observed-telemetry-readout) ──

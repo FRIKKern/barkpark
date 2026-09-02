@@ -20,6 +20,43 @@ export interface ChatMessage {
   inserted_at?: string
 }
 
+/** WHO IS RUNNING THIS SESSION, WHERE — the server-side half of the context
+ * band (chat-local-cloud-context-w3, criterion 2; the CLI half is
+ * internal/chat/context.go, the Studio half is
+ * Barkpark.StudioChat.ContextIdentity). Projected by chat_controller.ex
+ * `session_context_json/1` onto the full-session read.
+ *
+ * FACTS, not renderings: every key here is something the phone CANNOT measure
+ * for itself — the execution host is a lease row, the workspace is a slug
+ * behind a UUID, and the cwd is a path on a machine this device has never
+ * seen. `src/chat/context.ts` applies the typed-absence vocabulary to them.
+ *
+ * EVERY FIELD IS OPTIONAL AND SO IS THE WHOLE OBJECT, deliberately: an older
+ * server does not send `context` at all, and the band must then say `(unknown)`
+ * for the facts only a server can supply rather than invent them or vanish. */
+export interface ChatSessionContext {
+  /** The host holding the session's LIVE execution lease, by name. `null` is a
+   * MEASUREMENT — no enrolled host holds one, so the server itself runs the
+   * session — which the band paints `(server-local)`, never blank. */
+  host?: string | null
+  /** "managed" | "registered_host" — WHOSE filesystem `cwd` names. It is what
+   * makes an absent repo root honest rather than lazy: a registered host's cwd
+   * is on another machine, so nobody can answer. */
+  execution_target?: string | null
+  /** The session's working directory, on whichever machine runs it. */
+  cwd?: string | null
+  /** The slug of the session's OWN `owner_workspace_id` — the workspace every
+   * store gate compares against, which is why it beats the workspace the app
+   * happens to be scoped to when the two disagree. */
+  workspace?: string | null
+  /** The work-tree root `cwd` sits in, when the server could measure one. */
+  repo_root?: string | null
+  /** WHICH KIND of absence `repo_root: null` is: "set" | "not_a_repo" (measured
+   * — outside a work tree) | "unknown" (nobody can answer). Collapsing the last
+   * two would let "I could not look" reach the eye as "you are not in a repo". */
+  repo_status?: string | null
+}
+
 /** The FULL GET /v1/chat/sessions/:id struct (subset) — continuity set +
  * message tail. `?since=<seq>` returns only newer rows. */
 export interface ChatSession {
@@ -50,7 +87,22 @@ export interface ChatSession {
   last_active_at?: string
   inserted_at?: string
   updated_at?: string
+  /** The connection identity of the session (see ChatSessionContext). Absent
+   * from an older server — read it through `sessionContext` below, never
+   * directly, so the absence has exactly one handler. */
+  context?: ChatSessionContext
   messages?: ChatMessage[]
+}
+
+/** The session's context facts, or undefined.
+ *
+ * The wire JSON is a plain cast (api/chat.ts getChatSession), so `context` can
+ * arrive as `null`, as a non-object, or not at all — an older server sends no
+ * such key. All three mean the SAME thing to the band ("the server told us
+ * nothing"), and this is the one place that decides it. */
+export function sessionContext(s: ChatSession): ChatSessionContext | undefined {
+  const raw: unknown = s.context
+  return typeof raw === 'object' && raw !== null ? (raw as ChatSessionContext) : undefined
 }
 
 /** The sidebar row (GET /v1/chat/sessions) — NO draft/rail/choices (the D14
