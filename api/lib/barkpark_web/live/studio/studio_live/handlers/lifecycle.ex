@@ -93,7 +93,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       Shared.write_denied?(socket) ->
         {:noreply, Shared.refetch_paper(socket)}
 
-
       Shared.paper_gap?(socket.assigns.paper_rev, frame.rev) ->
         {:noreply, Shared.refetch_paper(socket)}
 
