@@ -226,6 +226,55 @@ defmodule BarkparkWeb.SearchChannelTest do
   end
 
   # ---------------------------------------------------------------------------
+  # The pagination offset clamp — the channel twin of the media offset clamp
+  # (#15560) and the same ceiling the HTTP document routes already enforce
+  # (`QueryController.index/2` :46, `SearchController` :46/:110,
+  # `Content.Query`'s `@max_offset`): `|> max(0) |> min(100_000)`.
+  #
+  # ASSERTED ON `:last_query.opts_base`, not on the reply, deliberately: that
+  # cached keyword list IS the value handed to `Content.search_documents/3` (and
+  # re-handed on every live re-run), so it reads the clamp at the door rather
+  # than a downstream retriever's own re-clamp. MUTATION-PROOF: drop
+  # `clamp_offset(...)` from `run_query/4` and both assertions go red with the
+  # raw 5_000_000 / -5.
+  # ---------------------------------------------------------------------------
+
+  describe "the pagination offset clamp" do
+    setup %{ws: ws, proj: proj, socket: socket} do
+      topic = "search:#{ws.slug}:#{proj.slug}:test"
+      {:ok, _reply, joined} = Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
+      %{joined: joined}
+    end
+
+    defp cached_offset(joined) do
+      :sys.get_state(joined.channel_pid).assigns.last_query.opts_base[:offset]
+    end
+
+    test "an absurd offset is clamped to the 100_000 ceiling", %{joined: joined} do
+      ref = push(joined, "query", %{"q" => "needle", "seq" => 1, "offset" => 5_000_000})
+      assert_reply ref, :ok, _reply, @reply_timeout
+
+      assert cached_offset(joined) == 100_000,
+             "an unclamped offset reached Content.search_documents/3"
+    end
+
+    test "a negative offset is floored at 0", %{joined: joined} do
+      ref = push(joined, "query", %{"q" => "needle", "seq" => 2, "offset" => -5})
+      assert_reply ref, :ok, _reply, @reply_timeout
+
+      assert cached_offset(joined) == 0,
+             "a negative offset reached Content.search_documents/3 (OFFSET -5 is a Postgres error)"
+    end
+
+    test "an in-range offset is passed through untouched", %{joined: joined} do
+      ref = push(joined, "query", %{"q" => "needle", "seq" => 3, "offset" => 25})
+      assert_reply ref, :ok, _reply, @reply_timeout
+
+      assert cached_offset(joined) == 25, "the clamp must not disturb a legitimate page"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # The perspective pin — a client frame must NEVER widen the perspective.
   # `search_channel.ex` hard-codes `perspective: :published`; the word
   # `perspective` appears exactly once in the module. This test is the guard
