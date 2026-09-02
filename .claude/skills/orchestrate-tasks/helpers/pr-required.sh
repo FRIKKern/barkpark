@@ -3,7 +3,7 @@
 # `gh pr checks` renders cancelled/queued in the same column as fail; this reads check-runs for the
 # PR's current head and prints one line per required context with its real status/conclusion.
 #
-# CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …") is ALWAYS THE LAST LINE.
+# CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …" / "CONFLICTING: 4/4 … DIRTY") is ALWAYS THE LAST LINE. MERGEABLE now also means not DIRTY.
 # Callers do `| tail -1`. Anything appended after it silently swaps what every wrapper reads
 # (measured 2026-09-02: an EARLY RED section appended here made a lane's watcher report a job
 # name where the verdict should be, and would have stopped the merge sweep merging anything).
@@ -35,6 +35,9 @@ if [ -z "$SHA" ]; then
   echo "CANNOT READ: pr #$PR head sha unreadable over BOTH GraphQL and REST — this is NOT a verdict, and NOT 0/4. Check \`gh auth status\` and \`gh api rate_limit\`; GraphQL empties before REST does."
   exit 3
 fi
+# MERGE STATE: four green checks do NOT mean the PR can merge; a DIRTY branch is refused by GitHub regardless.
+# Read mergeable_state over REST (one call) so the LAST LINE never says MERGEABLE for a conflicting branch.
+MSTATE=$(gh api "repos/$REPO/pulls/$PR" --jq '.mergeable_state // "-"' 2>/dev/null || echo "-")
 if ! RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
   --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.started_at // "-")"' 2>/dev/null); then
   echo "CANNOT READ: check-runs for $REPO@${SHA:0:10} could not be fetched — this is NOT a verdict, and NOT 0/4."
@@ -56,4 +59,4 @@ printf '%s\n' "$RUNS" | awk -F'\t' '$3=="failure"{print $1}' \
   | sed 's/^/  RED non-required job (blocks the aggregate ONLY if it is in elixir.yml needs; security.yml reds do NOT): /'
 
 printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | sort -t$'\t' -k1,1 -k4,4r | awk -F'\t' '!seen[$1]++' \
-  | awk -F'\t' -v sha="$SHA" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
+  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge\n",substr(sha,1,10); else printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
