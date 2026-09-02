@@ -79,6 +79,16 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    and asserts them term-identical). A mirror is a finding only when NEITHER is present, and you
    VERIFY the lock rather than trusting a comment that says "mirrors X" — that word is the tell
    for hand-maintained.
+   **A TAUTOLOGY reads exactly like coverage.** A mirror test whose expected list is a second
+   HAND-WRITTEN copy asserts the stale set against the stale set: it stays green while the mirror
+   is already wrong in production (measured 2026-09-02 — `#NAME?` rendered as ordinary text on
+   mobile and shipped green). The expected side must be DERIVED from the source of truth, never
+   retyped beside it.
+   **Making a NAME REAL retroactively voids every test that used it as a stand-in for "unknown".**
+   Implementing NPV turned another PR's brand-new test red, because that test used `NPV` as its
+   example of an unrecognised function. Reserving distinct fixture rows prevents the DATA
+   collision and not this one. When a PR makes names real, grep for EVERY name it implements, not
+   the one the filing happens to mention.
    **The real cap is FILE saturation, not the PR count.** When the open PRs in your fence
    already touch the same handful of files, an extra PR is a guaranteed green-apart /
    red-together collision no matter how much WIP headroom you have. A lane that is saturated
