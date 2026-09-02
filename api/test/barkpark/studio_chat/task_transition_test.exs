@@ -122,13 +122,19 @@ defmodule Barkpark.StudioChat.TaskTransitionTest do
     test "bookkeeping kinds are not transitions" do
       for kind <- ~w(task.criterion task.relabeled task.referenced task.reparented
                      task.compacted task.compaction_restored) do
-        assert {:skip, _} =
-                 TaskTransition.project(
-                   msg(mutation: kind, content: claimed_by(@worker)),
-                   @worker,
-                   MapSet.new(["task-x"])
-                 ),
-               "#{kind} must not project"
+        # Bind FIRST, then assert on a boolean. `assert pattern = expr, msg` is
+        # assert/2 over a match: the match raises MatchError before assert/2 can
+        # ever reach the message, so the per-kind label would be dead on the one
+        # failure it exists to name (scripts/unreachable-assert-message-check.sh).
+        result =
+          TaskTransition.project(
+            msg(mutation: kind, content: claimed_by(@worker)),
+            @worker,
+            MapSet.new(["task-x"])
+          )
+
+        assert match?({:skip, _}, result),
+               "#{kind} must not project, got: #{inspect(result)}"
       end
     end
 
