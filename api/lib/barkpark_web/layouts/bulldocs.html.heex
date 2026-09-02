@@ -95,6 +95,15 @@
     <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>
 
     /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+    /* MOTION ladder (tokens.motion) — theme-invariant, so it sits on the
+       page root rather than inside any of the reader's palette scopes. The
+       reader's own chrome (view toggle, action bar, mail popup) is the
+       consumer; a duration does not flip with a skin. */
+    :root {
+      --dur-1: 0.15s;
+      --dur-2: 0.18s;
+      --dur-3: 0.28s;
+    }
     /* Article chrome — applied only when BulldocsLive marks the doc as
        `content["style"] == "article"` (the LiveView stamps the
        `.bp-paper-article` class on its <main>). Cool bp-theme page, a

@@ -1,9 +1,46 @@
 // scenarios.mjs — committed fixture scenarios for the Cloud SPA preview harness.
 //
-// ONE source of truth for every "LOOK AT IT" screen state (charter D63). Both
-// consumers import THIS file so a fixture never drifts:
+// ONE source of truth for every "LOOK AT IT" screen state (charter D63). The
+// two consumers that RENDER from it import THIS file so a fixture never drifts:
 //   • mock.js  — the browser dynamically import()s it and routes window.fetch.
 //   • smoke.mjs — node statically imports it and boots app.js against it.
+//
+// ── TWO-WAY CENSUS RULE — READ THIS BEFORE YOU ADD A SCENARIO ────────────────
+// Four committed instruments keep a TWO-WAY census over this file: every
+// scenario here must be accounted for over there, AND every account over there
+// must name a scenario that still exists here. Add one and teach only some of
+// them and the rest REFUSE — in the Console gate, on arrival, not in your
+// slice's own gate. That has now cost two waves (wave 20 red-lit the sweep;
+// cch-w21-s3 added `fleet-cruel-content`, taught the sweep, and was refused by
+// smoke.mjs).
+//
+// SO: if your change ADDS a scenario name, REMOVES one, or MOVES one to another
+// family (its `pathname` / `deepLink` head — see `familyOf` in
+// breakpoint-sweep.mjs), your slice's OWN gate must run all four:
+//
+//   node cloud/priv/static/__preview__/smoke.mjs
+//        → exit 1: "CENSUS: N committed scenario(s) have NO expectation and were
+//          never run". Teach EXPECTATIONS in smoke.mjs.
+//   node cloud/priv/static/__preview__/breakpoint-sweep.mjs
+//        → exit 2: UNLISTED / STALE / PROMOTED / DRIFTED. Give it a cell, or a
+//          SCENARIO_RESIDUE entry naming why not.
+//   node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs
+//        → the sweep's header-census arm recounts the prose from the derived
+//          report, so a moved corpus reds the test file too.
+//   node cloud/priv/static/__preview__/member-authority-sweep.mjs
+//        → exit 1: "the committed corpus grew to N scenario(s), pinned at M".
+//          Re-derive PIN_TOTAL_SCENARIOS by RUNNING it.
+//
+// Editing a scenario WITHOUT moving the census — a label, a fixture value —
+// requires none of them (measured: all four stay at exit 0).
+//
+// THE CENSUS THAT ENFORCES THIS RULE OVER THIS HEADER:
+//   node scripts/preview-census-gate-check.mjs --selftest
+// It reads this comment block and reds if the rule or any of the four paths
+// above is deleted from it; run with `--changed-from <base> --gate <your gate>`
+// it reds when a gate omits an instrument the census delta requires. A comment
+// cannot fail on the change it warns about — that check is what makes this one
+// falsifiable.
 //
 // The envelope shapes are derived from the real server serializers, NOT invented:
 //   • barkparks[]   ⇐ router.ex `barkpark_json/3` (id,name,slug,url,host,mode,

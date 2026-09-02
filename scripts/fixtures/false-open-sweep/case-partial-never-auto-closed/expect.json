@@ -1,0 +1,29 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [
+    {
+      "row": "cch-w11-s1-flip-behind-a-generator-that-cannot-lose",
+      "arm": "A",
+      "pr": 8394,
+      "class": "PARTIAL"
+    },
+    {
+      "row": "cch-w14-bl-site-open-phone-overflow",
+      "arm": "B",
+      "pr": 8743,
+      "class": "PARTIAL"
+    }
+  ],
+  "must_contain": [
+    "RESULT: 2 of 2 open rows carry a merge receipt  (FULL 0 · PARTIAL 2)",
+    "PARTIAL — paid in part, NOT CLOSEABLE",
+    "closing one of these on a merge receipt alone would stamp UNBUILT WORK AS DONE",
+    "NOT PAID by any merge receipt — criterion 12: THE GATE IS MUTATION-PROVEN",
+    "NOT PAID by any merge receipt — criterion 4: C3: the same clamp",
+    "THIS TOOL CLOSES NOTHING."
+  ],
+  "must_not_contain": [
+    "FULL — every unmet criterion is one a merge receipt can pay — 1"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w40-bl-still-open-row",
+    "kind": "task",
+    "type": "task",
+    "title": "a row that is still open",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "the behaviour is built.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "the harness covers it.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "MERGE-GATED: merged to main.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}
