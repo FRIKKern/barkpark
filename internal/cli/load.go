@@ -44,7 +44,15 @@ func loadManifest(g globals, ctx manifest.Context) (*manifest.Manifest, error) {
 		if FirstRun() {
 			return nil, fmt.Errorf("no server configured and %s is not answering.\n  run `bp setup` to connect to a server or bring one up,\n  or pass -s <url> / set BARKPARK_API_URL for a one-off call", ctx.Server)
 		}
-		return nil, fmt.Errorf("acquire manifest from %s%s: %w (hint: set BARKPARK_MANIFEST=<file> or pass --manifest <file> to run before /v1/capabilities is deployed)",
+		// THE HINT NAMES THE CREDENTIAL ON PURPOSE (task-154120e78138085a).
+		// The manifest is auth-tier-baked: a copy fetched without a token
+		// carries auth_tier "none" and HIDES every command the caller is
+		// entitled to, so an operator who follows the old hint by curling the
+		// URL gets a bp that reports `task` does not exist — a permanent,
+		// misdiagnosed failure traded for a transient one. The file override is
+		// for running before /v1/capabilities is deployed; it is NOT a
+		// workaround for a refusal, which is what the on-disk cache is for.
+		return nil, fmt.Errorf("acquire manifest from %s%s: %w (hint: to run before /v1/capabilities is deployed, set BARKPARK_MANIFEST=<file> or pass --manifest <file> — the file must have been fetched WITH your credential, since a manifest fetched anonymously carries auth_tier \"none\" and hides every command you are entitled to)",
 			ctx.Server, manifest.CapabilitiesPath, err)
 	}
 	return m, nil

@@ -105,14 +105,24 @@ defmodule BarkparkWeb.TokenController do
   defp fetch_label(_), do: {:error, :missing_label}
 
   # Default to ["public-read"]; reject any permission outside the read-only
-  # allowlist. A non-list `permissions` value collapses to the forbidden path.
+  # allowlist. A non-list `permissions` value collapses to the forbidden path —
+  # and so does a list holding a non-STRING element. `is_list/1` only checks the
+  # container: a list of maps (JSON `[{"a":"b"}]`, or the query form
+  # `?permissions[][a]=b`) satisfies it, and coercing such an element with
+  # `to_string/1` raised Protocol.UndefinedError — a 500 where this module
+  # promises a 422. Element shape is checked here so the element rule matches
+  # the container rule.
   defp fetch_permissions(%{"permissions" => perms}) when is_list(perms) do
-    perms = perms |> Enum.map(&to_string/1) |> Enum.uniq()
+    if Enum.all?(perms, &is_binary/1) do
+      perms = Enum.uniq(perms)
 
-    case Enum.reject(perms, &(&1 in @allowed_permissions)) do
-      [] when perms == [] -> {:ok, ["public-read"]}
-      [] -> {:ok, perms}
-      bad -> {:error, {:forbidden_permissions, bad}}
+      case Enum.reject(perms, &(&1 in @allowed_permissions)) do
+        [] when perms == [] -> {:ok, ["public-read"]}
+        [] -> {:ok, perms}
+        bad -> {:error, {:forbidden_permissions, bad}}
+      end
+    else
+      {:error, {:forbidden_permissions, [:invalid]}}
     end
   end
 

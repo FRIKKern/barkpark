@@ -3194,6 +3194,24 @@ export function runToOps(prevBlocks, nextDoc) {
     }
   }
 
+  // WHY ONE ENTER AT THE TAIL OF A RUN EMITS ~N MOVE-BLOCKS (spd-bl-enter-at-tail-
+  // block-drop). Pass 2 anchors EVERY insert at the FIRST SURVIVOR (there is no
+  // prepend / insert-before op), so a paragraph typed at the END of a 13-block run is
+  // grafted in at position 1 and this pass then walks it back down with a move for
+  // every block it jumped. The batch reads alarming — `insert-after: pp-001` plus a
+  // dozen `move-block`s for one keypress — and it is CORRECT: folded left-to-right
+  // through patch.ex it reproduces the doc exactly, and every prev block survives.
+  //
+  // THE DISCRIMINANT, if you are staring at such a batch wondering if it ate a block:
+  // look for a `remove-block` on the run's LAST id. Enter never emits one — pass 1
+  // only removes a prev id that is ABSENT from the live doc. So a remove-block here
+  // means the tail node was never IN the doc the diff read: a node type the mounted
+  // schema does not register is dropped by ProseMirror on setContent (a stale
+  // committed bundle is how that happens in the wild — .github/workflows/paper-
+  // editor.yml gates it). That is real loss, and it is a BUNDLE/SCHEMA fault, not an
+  // Enter fault. Both batches are pinned, mounted and folded, in
+  // canvas/__enter_tail.test.mjs + api/test/barkpark/portable_doc/
+  // patch_enter_at_tail_test.exs.
   // ── 3) MOVES — permute `running` (now exactly nextSeq's id SET) into order ──
   //
   // Walk nextSeq left-to-right. For each entry, the target predecessor is the

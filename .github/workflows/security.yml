@@ -313,6 +313,15 @@ jobs:
         if: always()
         run: bash scripts/sobelow-baseline-reconcile.sh "${{ runner.temp }}/sobelow-baseline-reconcile"
 
+      - name: Fresh-finding guard can lose (selftest first, like its two siblings below)
+        # The guard's --selftest plants both of its own disarm mutants (probe
+        # name grep neutered; transition assertion removed) and proves each
+        # reds the fixtures. sobelow-inline-overlap-check.sh and
+        # sobelow-baseline-staleness-check.sh already run selftest-then-bare
+        # in this file; this was the one family member wired bare only.
+        if: always()
+        run: bash scripts/sobelow-fresh-finding-guard.sh --selftest
+
       - name: Prove a fresh String.to_atom finding still reds
         if: always()
         run: bash scripts/sobelow-fresh-finding-guard.sh

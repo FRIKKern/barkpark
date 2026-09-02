@@ -22,13 +22,28 @@
 // destroyed one whole contribution with no error — and every entry was rebuilt
 // from a fixed seven-key literal, silently dropping any field a newer writer had
 // added. ledger-io.mjs carries the mutation evidence for both.
+//
+// THE LEDGER IS COMMITTED, AND NO PERCENTAGE IS. research-ledger.jsonl is
+// tracked — one line per file entry, sorted by path — so a clean checkout
+// re-derives the same coverage the laptop that recorded it sees. The pretty
+// research-ledger.json beside it is a derived cache and stays gitignored, as do
+// coverage-report.json and batch-count.txt. The only durable fact about
+// coverage anywhere in this repository is the command that recomputes it:
+//
+//   node tooling/research-coverage/coverage.mjs scan
+//
+// And when the ledger is absent, scan REFUSES (LEDGER_ABSENT, exit 3) rather
+// than reporting a flat zero that looks exactly like a measurement.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readLedger, withLedger, writeJsonAtomic, foldEntry, provenanceKeysFrom } from "./ledger-io.mjs";
+import {
+  readLedger, readCanonicalLedger, withLedger, writeJsonAtomic, writeCanonicalAtomic,
+  foldEntry, provenanceKeysFrom,
+} from "./ledger-io.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -36,10 +51,70 @@ const cfg = JSON.parse(readFileSync(join(HERE, "config.json"), "utf8"));
 // BP_RESEARCH_LEDGER relocates the ledger. Two writers pointed at one shared
 // path share one lock and one critical section, which is what lets the
 // concurrency test give each writer its OWN results/ directory instead of
-// racing to swap files in a shared one. It is also the seam the sibling
-// reproducibility row (tgw-bl-coverage-ledger-unreproducible) needs to move
-// this ledger off one laptop.
-const LEDGER = process.env.BP_RESEARCH_LEDGER || join(HERE, "research-ledger.json");
+// racing to swap files in a shared one.
+//
+// THE DEFAULT IS THE COMMITTED FILE. research-ledger.jsonl is tracked; the
+// pretty research-ledger.json beside it is a DERIVED CACHE and stays
+// gitignored. While the pretty file was the only copy, the same command at the
+// same commit measured one figure on the laptop that held it and a flat zero
+// everywhere else, so every checkout but one was reading an instrument that was
+// not there. The canonical form is what a repository can hold: one line per
+// entry, sorted by path (see serializeCanonical in ledger-io.mjs).
+//
+// THE FORMAT FOLLOWS THE EXTENSION, not a flag. `.jsonl` selects the canonical
+// codec and mirrors the pretty cache next to it; anything else keeps the plain
+// JSON codec, so an override pointed at a `.json` path behaves exactly as it
+// always did.
+const LEDGER = process.env.BP_RESEARCH_LEDGER || join(HERE, "research-ledger.jsonl");
+const CANONICAL = LEDGER.endsWith(".jsonl");
+const CACHE = CANONICAL ? LEDGER.slice(0, -1) : null;   // research-ledger.jsonl -> .json
+
+// Read the canonical ledger; fall back to the pretty cache when the canonical
+// file is not there yet, which is the one-way migration path for a checkout
+// that still holds only the old gitignored file. The canonical file wins
+// whenever both exist — a committed source of truth beats a local cache, and
+// leaving that ambiguous is the defect this row exists to close.
+const ledgerRead = (path = LEDGER) => {
+  if (!CANONICAL) return readLedger(path);
+  return existsSync(path) ? readCanonicalLedger(path) : readLedger(CACHE);
+};
+// Every mutation writes the canonical file FIRST and then refreshes the derived
+// cache from the same in-memory ledger, so the two cannot drift under this tool.
+const ledgerWrite = (path, ledger) => {
+  if (!CANONICAL) return writeJsonAtomic(path, ledger);
+  writeCanonicalAtomic(path, ledger);
+  writeJsonAtomic(CACHE, ledger);
+  return ledger;
+};
+const LEDGER_CODEC = { read: ledgerRead, write: ledgerWrite };
+const ledgerPresent = () => existsSync(LEDGER) || (CACHE ? existsSync(CACHE) : false);
+
+// AN ABSENT LEDGER IS NOT ZERO COVERAGE — IT IS NO INSTRUMENT.
+//
+// This is the row's original finding. loadLedger returned an empty default when
+// the file was missing, classify() then found every file uncovered, and scan
+// printed a flat zero with a covered/total pair beside it: the exact typography
+// of a measurement, produced by the measurement never happening. Nothing in the
+// output distinguished "nothing has been researched" from "the ledger is not on
+// this machine", and the second is what every clean checkout hit.
+//
+// So the commands that would report a percentage refuse by name instead, with a
+// non-zero exit a caller can branch on.
+const LEDGER_ABSENT_EXIT = 3;
+function refuseWithoutLedger(what) {
+  if (ledgerPresent()) return;
+  const e = (s) => process.stderr.write(s + "\n");
+  e(`research coverage: REFUSING to ${what} — LEDGER_ABSENT`);
+  e(`  no canonical ledger at ${relative(ROOT, LEDGER)}`);
+  if (CACHE) e(`  and no derived cache at ${relative(ROOT, CACHE)}`);
+  e(`  A percentage computed against a ledger that is not here would read as a`);
+  e(`  measurement and be the instrument missing. Refusing rather than printing it.`);
+  e(`  Re-derive the ledger, then re-run:`);
+  e(`    node tooling/research-coverage/coverage.mjs seed`);
+  e(`    node tooling/research-coverage/coverage.mjs scan`);
+  process.exit(LEDGER_ABSENT_EXIT);
+}
+
 const PROV = provenanceKeysFrom(cfg);
 const cmd = process.argv[2] || "scan";
 const now = () => new Date().toISOString();
@@ -63,7 +138,7 @@ function projectFiles() {
 }
 const hashOf = (rel) => { try { return createHash("sha256").update(readFileSync(join(ROOT, rel))).digest("hex").slice(0, 16); } catch { return "ERR"; } };
 
-const loadLedger = () => readLedger(LEDGER);
+const loadLedger = () => ledgerRead(LEDGER);
 
 // ---- classify current disk vs ledger ----
 function classify(ledger) {
@@ -85,6 +160,7 @@ function classify(ledger) {
 
 // ======================================================================= scan
 if (cmd === "scan") {
+  refuseWithoutLedger("print a coverage percentage");
   const ledger = loadLedger();
   const c = classify(ledger);
   const report = { at: now(), total: c.total, covered: c.covered.length, stale: c.stale.length, new: c.fresh.length, orphaned: c.orphaned.length,
@@ -112,6 +188,9 @@ if (cmd === "scan") {
 // Emit per-batch files for ONLY the stale+new set, so the agent fan-out touches
 // nothing that's already covered.
 if (cmd === "batches") {
+  // Same refusal: with no ledger every file classifies as never-researched, so
+  // this would fan the entire monorepo out to agents because a file was missing.
+  refuseWithoutLedger("emit research batches");
   const ledger = loadLedger();
   const c = classify(ledger);
   const todo = [...c.stale, ...c.fresh];
@@ -160,7 +239,7 @@ if (cmd === "record") {
     const c = classify(ledger);
     pct = c.pct;
     if (c.stale.length + c.fresh.length === 0) ledger.meta.lastFullResearch = now();
-  });
+  }, LEDGER_CODEC);
   process.stderr.write(`[record] folded ${folded} result(s); coverage now ${pct}%${bad.length?` · ${bad.length} malformed`:""}\n`);
   bad.forEach(b => process.stderr.write(`  ✗ ${b}\n`));
   process.exit(0);
@@ -173,7 +252,7 @@ if (cmd === "prune") {
     const c = classify(ledger);
     for (const f of c.orphaned) delete ledger.files[f];
     removed = c.orphaned.length;
-  });
+  }, LEDGER_CODEC);
   process.stderr.write(`[prune] removed ${removed} deleted file(s) from ledger\n`);
   process.exit(0);
 }
@@ -203,7 +282,7 @@ if (cmd === "seed") {
       n++;
     }
     ledger.meta.seededFrom = "importance-run";
-  });
+  }, LEDGER_CODEC);
   process.stderr.write(`[seed] ledger bootstrapped with ${n} files from the importance run\n`);
   process.stderr.write(`[seed] now run: coverage.mjs scan\n`);
   process.exit(0);
