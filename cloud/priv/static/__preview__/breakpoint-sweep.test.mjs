@@ -26,6 +26,8 @@ import {
   familyOf, scenarioReport,
   BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
   HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
+  RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
+  selectNames,
   SCENARIO_RESIDUE, RESIDUE_FAMILY_REASONS,
 } from "./breakpoint-sweep.mjs";
 import { SCENARIOS, SCENARIO_NAMES } from "./scenarios.mjs";
@@ -363,6 +365,116 @@ test("hiding utilities are ENUMERATED, so a class merely containing 'hidden' is 
   assert.equal(HIDING_UTILITIES.some((u) => u.includes("*")), false, "no globs — a regex is what over-skips");
 });
 
+// ── CUE_STUCK asks the CUE'S OWN AXIS ────────────────────────────────────────
+//
+// NOT A SOURCE REGEX, AND NOT A SECOND IMPLEMENTATION. cueStuckVerdict and
+// cueAxisOfMask are the very functions the probe injects with .toString(), so
+// these arms drive the code headless Chrome runs. What is asserted is the
+// DECISION, on numbers that came off a real render — the mistake GR118 records
+// is testing a story ABOUT the pixels, and the antidote is to feed the real
+// decision function the real measurements.
+//
+// THE MEASUREMENT, DRIVEN (breakpoint-sweep.mjs --render --cell operator
+// --widths 720 --theme light --height 800):
+//   aside.sidebar.is-nav-clipped 40px vertical — clipped on y
+//   (scrollHeight 503 > clientHeight 259) — the cue is telling the truth
+// The same run on origin/main printed:
+//   note CUE_STUCK operator/light@720: aside.sidebar.is-nav-clipped shows a
+//   40px edge cue while it FITS
+
+// The masks as the STYLESHEET authors them, read out of app.css rather than
+// typed here — flip a `to bottom` to a `to right` in the artifact and this
+// test moves with it.
+const MASK_DECLS = [...APP_CSS.matchAll(/(?:^|[\s;{])mask-image:\s*([^;]+);/g)].map((m) => m[1].trim());
+
+test("cueAxisOfMask reads the axis off every mask app.css actually ships", () => {
+  assert.ok(MASK_DECLS.length >= 2, `expected the shipped masks; found ${MASK_DECLS.length}`);
+  const axes = MASK_DECLS.map(cueAxisOfMask);
+  assert.ok(axes.every((a) => a === "x" || a === "y"),
+    `every shipped mask must resolve to ONE axis; got ${JSON.stringify(axes)} for ${JSON.stringify(MASK_DECLS)}`);
+  // The two shapes this sweep has to tell apart, named by the property they carry.
+  const navFade = MASK_DECLS.filter((d) => d.includes("--nav-fade"));
+  const matrixFade = MASK_DECLS.filter((d) => d.includes("--set-matrix-fade"));
+  assert.ok(navFade.length && matrixFade.length, "both cue masks must still be in app.css for this arm to mean anything");
+  for (const d of navFade) assert.equal(cueAxisOfMask(d), "y", "--nav-fade is a VERTICAL mask — this is the defect's whole point");
+  for (const d of matrixFade) assert.equal(cueAxisOfMask(d), "x", "--set-matrix-fade is a HORIZONTAL mask");
+});
+
+test("cueAxisOfMask reads the COMPUTED forms too — Chrome drops the default `to bottom`", () => {
+  assert.equal(cueAxisOfMask("linear-gradient(rgb(0, 0, 0) calc(100% - 40px), rgba(0, 0, 0, 0))"), "y",
+    "a gradient with NO direction token IS `to bottom` — reading it as unknown would make the vertical case guess");
+  assert.equal(cueAxisOfMask("linear-gradient(to right, rgb(0, 0, 0) calc(100% - 48px), rgba(0, 0, 0, 0))"), "x");
+  assert.equal(cueAxisOfMask("linear-gradient(90deg, rgb(0, 0, 0), rgba(0, 0, 0, 0))"), "x");
+  assert.equal(cueAxisOfMask("linear-gradient(180deg, rgb(0, 0, 0), rgba(0, 0, 0, 0))"), "y");
+  assert.equal(cueAxisOfMask("linear-gradient(to bottom right, rgb(0, 0, 0), rgba(0, 0, 0, 0))"), "both");
+  // Unreadable — and unreadable must mean QUIETER, never louder (the caller
+  // then asks BOTH axes, so it can never note about an axis it did not measure).
+  assert.equal(cueAxisOfMask("none"), null);
+  assert.equal(cueAxisOfMask(""), null);
+  assert.equal(cueAxisOfMask("radial-gradient(circle, rgb(0,0,0), rgba(0,0,0,0))"), null);
+});
+
+// The folded sidebar as measured at 720x800, in one object, so every arm below
+// is a MUTATION of one real render rather than four inventions.
+const FOLDED_SIDEBAR = {
+  cue: 40,
+  maskImage: "linear-gradient(to bottom, rgb(0, 0, 0) calc(100% - 40px), rgba(0, 0, 0, 0))",
+  scrollW: 720, clientW: 720,   // fits horizontally — which is ALL the old gate asked
+  scrollH: 503, clientH: 259,   // and is 244px short vertically, which is why the cue is live
+};
+
+test("THE DEFECT: a VERTICALLY clipped strip with a VERTICAL cue is not stuck", () => {
+  const v = cueStuckVerdict(FOLDED_SIDEBAR);
+  assert.equal(v.note, false, "the cue is telling the truth — 503 does not fit in 259");
+  assert.equal(v.axis, "y");
+  assert.match(v.why, /scrollHeight 503 > clientHeight 259/);
+  // THE OLD GATE, RESTATED, so this arm proves the AXIS changed the verdict and
+  // not the numbers: a horizontal-only fit test says "it fits" on these very
+  // measurements, which is the note origin/main printed 78 times.
+  const oldGateSaysStuck = FOLDED_SIDEBAR.cue > 0 && !(FOLDED_SIDEBAR.scrollW > FOLDED_SIDEBAR.clientW + 1);
+  assert.equal(oldGateSaysStuck, true,
+    "if the horizontal-only gate did NOT fire on these numbers this arm is vacuous — it would be asserting a fix for a case that never reached the old code");
+});
+
+test("MUTATION: the note still fires on a cue live over something that FITS on the cue's own axis", () => {
+  const fitsVertically = { ...FOLDED_SIDEBAR, scrollH: 259, clientH: 259 };
+  const v = cueStuckVerdict(fitsVertically);
+  assert.equal(v.note, true, "a 40px vertical fade over a strip that fits vertically IS stuck — the note must not have gone inert");
+  assert.equal(v.axis, "y");
+});
+
+test("the HORIZONTAL twin decides on x, in both directions", () => {
+  const matrix = {
+    cue: 48,
+    maskImage: "linear-gradient(to right, rgb(0, 0, 0) calc(100% - 48px), rgba(0, 0, 0, 0))",
+    scrollW: 1029, clientW: 1000, scrollH: 300, clientH: 300,
+  };
+  assert.equal(cueStuckVerdict(matrix).note, false, "clipped on x with an x cue — honest");
+  assert.equal(cueStuckVerdict({ ...matrix, scrollW: 1000 }).note, true, "fits on x with an x cue — stuck");
+  // AND THE CROSS-AXIS CASE, which is the whole bug in one line: a HORIZONTAL
+  // cue over a box clipped only VERTICALLY is stuck, and a vertical-only gate
+  // would be exactly as wrong in that direction.
+  assert.equal(cueStuckVerdict({ ...matrix, scrollW: 1000, scrollH: 900 }).note, true);
+});
+
+test("a cue the element does not OWN is not its note — the 78 descendant copies", () => {
+  // svg.nav-ico inside the folded strip: --nav-fade is registered
+  // `@property { inherits: false }`, so the child computes 0px. The 40px the
+  // old arm reported came from the probe's own ancestor walk.
+  assert.equal(cueStuckVerdict({ ...FOLDED_SIDEBAR, cue: 0, scrollW: 16, clientW: 16, scrollH: 16, clientH: 16 }).note, false);
+  assert.match(APP_CSS, /@property\s+--nav-fade\s*\{[^}]*inherits:\s*false/,
+    "this arm's premise IS the artifact: if --nav-fade ever starts inheriting, a descendant really does carry the cue and the ownership rule is wrong");
+  assert.match(APP_CSS, /@property\s+--set-matrix-fade\s*\{[^}]*inherits:\s*false/);
+});
+
+test("an UNREADABLE mask asks BOTH axes — quieter, never louder", () => {
+  const noMask = { cue: 12, maskImage: "none", scrollW: 100, clientW: 100, scrollH: 100, clientH: 100 };
+  assert.equal(cueStuckVerdict(noMask).note, true, "fits on both axes with a live cue — still a note");
+  assert.equal(cueStuckVerdict(noMask).axis, "both");
+  assert.equal(cueStuckVerdict({ ...noMask, scrollH: 400 }).note, false, "clipped on EITHER axis is enough to silence an unnamed axis");
+  assert.equal(cueStuckVerdict({ ...noMask, scrollW: 400 }).note, false);
+});
+
 // ── the HEIGHT axis, both halves ─────────────────────────────────────────────
 //
 // The derived half is VACUOUSLY GREEN on today's app.css — it refuses nothing,
@@ -422,6 +534,91 @@ test("every declared HEIGHT carries a written reason, landscape 390 among them",
   assert.ok(HEIGHTS.includes(390), "390 is the BINDING height for the fold bar — a set without it cannot see the defect it was built for");
   assert.ok(HEIGHTS.includes(RENDER_HEIGHT), "the height Leg B actually renders at must be a member of the declared axis");
   assert.equal(Object.keys(HEIGHT_REASONS).length, HEIGHTS.length, "a reason for a height that is not declared is rot");
+});
+
+// ── the height axis is DRIVEN, not merely declared ───────────────────────────
+//
+// cch-w16-bl-legb-drives-one-of-three-heights: HEIGHTS declared [390,667,800]
+// and Leg B pinned setDeviceMetricsOverride to RENDER_HEIGHT, so two thirds of
+// the declared axis was a wish. `--height a,b,c` drives them, refuses an
+// undeclared value by name, and the run reconciles what it ASKED for against
+// the window.innerHeight the cells REPORTED.
+//
+// DRIVEN (--render --cell operator --widths 720 --height 390,667,800):
+//   ✓ heights — 3/3 declared height(s) DRIVEN and read back from
+//     window.innerHeight: 390, 667, 800
+//   ✓ Q3 fold — worst .content top per height: 390px -> 152 against a 156px
+//     budget · 667px -> 262.8 against a 267px budget · 800px -> 316 / 320
+
+test("--height selects declared heights BY NAME, in the order asked", () => {
+  const r = selectNames(HEIGHTS.map(String), "800,390");
+  assert.deepEqual(r.selected, ["800", "390"]);
+  assert.deepEqual(r.unknown, []);
+});
+
+test("THE TYPO MUST NOT NARROW SILENTLY HERE EITHER: an undeclared height is REPORTED BY NAME", () => {
+  const r = selectNames(HEIGHTS.map(String), "390,500,667");
+  assert.deepEqual(r.unknown, ["500"], "the refusal has to be able to NAME 500 — 'no match' over the whole list is what lets a typo shrink a run");
+  assert.deepEqual(r.selected, ["390", "667"], "and the two that matched are known, so the refusal can say what it is refusing INSTEAD of");
+  // the MUTATION: declare 500 and the same call stops refusing — proving the
+  // arm reads HEIGHTS rather than a second literal of it
+  assert.deepEqual(selectNames([...HEIGHTS.map(String), "500"], "390,500,667").unknown, []);
+});
+
+test("the DEFAULT loop is ONE height, and the decision carries its own render counts", () => {
+  assert.deepEqual(RENDER_HEIGHTS_DEFAULT, [RENDER_HEIGHT], "the default loop is a DECISION, and it is one height");
+  assert.ok(HEIGHTS.includes(RENDER_HEIGHTS_DEFAULT[0]), "the default must be a member of the declared axis");
+  // THE COST IS RECOUNTED FROM THE TABLES, not read off the prose. This is the
+  // criterion "the default render-loop cost is stated with a number": the two
+  // numerals in HEIGHT_REASONS are the ones CELLS/THEMES/WIDTHS/HEIGHTS
+  // actually multiply out to, so a table that grows makes the sentence red
+  // instead of quietly stale.
+  const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
+  const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
+  assert.equal(one, 972);
+  assert.equal(all, 2916);
+  const reason = HEIGHT_REASONS[RENDER_HEIGHT];
+  assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
+  assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
+  assert.ok(/--height/.test(reason), "and it must name the flag that opts in, or the decision is a dead end");
+});
+
+test("heightDriveReport is clean only when every ASKED height was MEASURED", () => {
+  const ok = heightDriveReport({ asked: HEIGHTS, seen: new Set(HEIGHTS) });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.driven, [390, 667, 800]);
+  assert.deepEqual(ok.undriven, []);
+});
+
+test("MUTATION — DROP ONE HEIGHT FROM THE DRIVE AND IT REFUSES BY VALUE", () => {
+  // This IS the shipped defect, in the shape the run would now catch: the loop
+  // asks for three and the viewport only ever became 800.
+  const r = heightDriveReport({ asked: HEIGHTS, seen: new Set([800]) });
+  assert.equal(r.ok, false, "asking for three heights and measuring one must NOT be reportable as covered");
+  assert.deepEqual(r.undriven, [390, 667], "and it has to name WHICH — 390 is the binding height for the fold bar");
+  assert.deepEqual(r.driven, [800]);
+  // the origin/main shape exactly: --height 390 asked, RENDER_HEIGHT measured
+  const pinned = heightDriveReport({ asked: [390], seen: new Set([800]) });
+  assert.equal(pinned.ok, false);
+  assert.deepEqual(pinned.undriven, [390]);
+  assert.deepEqual(pinned.unasked, [800], "a viewport nobody asked for is its own refusal — the override did not take");
+});
+
+test("the Q3 fold budget is met at EVERY driven height, including landscape 390", () => {
+  // The driven numbers above, re-derived rather than retyped: the shipped
+  // `max-height: calc(40vh - 60px)` makes contentTop = 0.4H - 4 an identity,
+  // so the margin is 4px at every height and the bar is FOLD_FRACTION * H.
+  const measured = { 390: 152, 667: 262.8, 800: 316 };
+  for (const h of HEIGHTS) {
+    assert.ok(measured[h] != null, `height ${h} has no driven Q3 number quoted here`);
+    assert.ok(measured[h] <= FOLD_FRACTION * h,
+      `driven contentTop ${measured[h]} at H=${h} exceeds the ${FOLD_FRACTION} bar (${FOLD_FRACTION * h})`);
+    assert.ok(Math.abs(measured[h] - (FOLD_FRACTION * h - 4)) < 1.5,
+      `the identity contentTop = ${FOLD_FRACTION}H - 4 must hold at H=${h}: expected ~${FOLD_FRACTION * h - 4}, drove ${measured[h]}`);
+  }
+  // NOT VACUOUS: the 34vh shape this slice's predecessor replaced fails the
+  // same comparison at the same heights.
+  for (const h of HEIGHTS) assert.ok(0.34 * h + 56 > FOLD_FRACTION * h, `the old shape must still bust the bar at H=${h}`);
 });
 
 // ── the THEME axis, and the trap that would red it on day one ────────────────
