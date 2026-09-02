@@ -117,6 +117,49 @@ defmodule Barkpark.Content.Schema do
   end
 
   @doc """
+  Resolve a type's `%SchemaDefinition{}` FOR FIELD-VISIBILITY REDACTION — the
+  tenant-scoped lookup with the GLOBAL-schema fallback.
+
+  THE ONE chokepoint every Envelope render/redact site resolves its schema
+  through. `get_schema/3` with a binary `:workspace_id` filters
+  `where workspace_id == ^ws` (`Barkpark.Content.Scope.scope_to_workspace/3`), so
+  a schema declared GLOBALLY (`workspace_id: nil`) never matches a document that
+  lives in a workspace. `Barkpark.Content.Envelope` is fail-OPEN on a nil schema
+  (an undeclared field is public, for legacy parity), so a single scoped lookup
+  that misses renders every `private` / `owner_only` / `readable_by` field of
+  that type to whoever is reading. The retry — the same lookup with the tenant
+  keys DROPPED — recovers the global row so the declared visibility still binds.
+
+  TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant rows,
+  so the fallback is accepted ONLY when its `workspace_id` is nil — the genuinely
+  global schema. Any non-nil `workspace_id` would substitute a FOREIGN tenant's
+  same-named schema, turning a redaction fix into a cross-tenant schema leak (and,
+  on the write-through paths, gating this tenant's edits on another's visibility).
+
+  Returns `{:ok, schema}` or `:error` — `:error` (not `{:error, :not_found}`)
+  precisely so a caller cannot mistake it for a bare `get_schema/3` result.
+
+  A caller that wants the raw tenant-scoped read (schema CRUD, the schema
+  endpoint, reference detection — anything that is not feeding a redaction
+  boundary) still calls `get_schema/3` directly.
+  """
+  @spec get_schema_for_redaction(String.t(), String.t() | nil, keyword()) ::
+          {:ok, SchemaDefinition.t()} | :error
+  # @canonical capability:schema-resolution-for-redaction aka:get_schema fallback,global schema fallback doc:docs/cards/search-media.md
+  def get_schema_for_redaction(name, dataset, opts \\ []) do
+    case get_schema(name, dataset, opts) do
+      {:ok, schema} ->
+        {:ok, schema}
+
+      _ ->
+        case get_schema(name, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
+          {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> {:ok, schema}
+          _ -> :error
+        end
+    end
+  end
+
+  @doc """
   Resolve the full Expectation for a schema definition.
 
   An Expectation is the schema PLUS its SOFT `layout` (ordered field-refs +

@@ -134,7 +134,9 @@ defmodule BarkparkWeb.SheetsReaderLive do
   # published doc's own workspace (the seeded Default public tenant).
   defp seal(%{content: content} = doc) do
     schema =
-      case Content.get_schema("sheet", @dataset, workspace_id: doc.workspace_id) do
+      case Content.Schema.get_schema_for_redaction("sheet", @dataset,
+             workspace_id: doc.workspace_id
+           ) do
         {:ok, s} -> s
         _ -> nil
       end

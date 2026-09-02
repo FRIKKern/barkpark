@@ -1694,7 +1694,11 @@ defmodule BarkparkWeb.TasksController do
   # visibility (which needs the schema) simply has nothing to act on.
   defp seal_ctx(conn) do
     schema =
-      case Content.get_schema("task", request_dataset(conn), scope_opts(conn)) do
+      case Content.Schema.get_schema_for_redaction(
+             "task",
+             request_dataset(conn),
+             scope_opts(conn)
+           ) do
         {:ok, s} -> s
         _ -> nil
       end

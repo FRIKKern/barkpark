@@ -208,7 +208,7 @@ defmodule BarkparkWeb.SearchChannel do
     opts = scope_opts(socket)
 
     fn type ->
-      case Content.get_schema(type, dataset, opts) do
+      case Content.Schema.get_schema_for_redaction(type, dataset, opts) do
         {:ok, schema} -> schema
         _ -> nil
       end
