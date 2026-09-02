@@ -56,7 +56,29 @@ defmodule Barkpark.PubSubSingletons do
   # document change, calls `Quiz.load_question/2` (a real Ecto read) for every
   # bound pin, synchronously inside `handle_info/2`. This is the module the
   # 1,310-failure cascade named.
-  @drained [Barkpark.Quiz.Bridge]
+  # Barkpark.StudioChat.Recorder — subscribes to `documents:<task dataset>` (the
+  # ledger stream, tlv-bl-chat-live-transition-stream) and reaches `Repo` all
+  # over its own `handle_info/2`: `StudioChat.update_status/2`,
+  # `attach_tool_result/3`, `mark_exited/1`, `ChatHosts.live_report_fence/1`.
+  # The transition projection it subscribed FOR is pure, but the class is about
+  # the PROCESS, not one callback — any message already in that mailbox can be
+  # mid-read when the owner stops, which is the whole hazard.
+  @drained [Barkpark.Quiz.Bridge, Barkpark.StudioChat.Recorder]
+
+  # THE LOCATOR, and why it is not optional. `drain!/1` has to FIND a member's
+  # process, and `Process.whereis/1` answers only for a module-NAMED one. A
+  # member started under a `{:via, Registry, …}` name is structurally invisible
+  # to it: `whereis` returns nil, `quiesce/2` takes the "not running" arm, and
+  # the barrier degenerates into a silent no-op — strictly worse than leaving
+  # the module off the list, because the registry then READS as covered while
+  # covering nothing. So every Registry-named member names its registry here,
+  # and the census asserts the mapping exists for each one.
+  #
+  # Barkpark.StudioChat.Recorder is not a singleton in the literal sense — one
+  # runs per LIVE chat session under `RecorderRegistry` — but it is the same
+  # sandbox shape (a `GenServer` on a broadcast topic, unreachable through
+  # `$callers`), so every live one is drained, not just a first.
+  @registries %{Barkpark.StudioChat.Recorder => Barkpark.StudioChat.RecorderRegistry}
 
   # THE NO-REPO LIST. Singletons in the same class that are safe WITHOUT a barrier
   # because they never reach `Repo`. Listed — not omitted — so that a future edit
@@ -81,6 +103,16 @@ defmodule Barkpark.PubSubSingletons do
 
   @spec all() :: [module()]
   def all, do: @drained ++ @no_repo
+
+  @doc """
+  The `Registry` a member is named under, or `nil` when it is registered by
+  module name and `Process.whereis/1` is enough to find it.
+
+  Public so the census can assert the barrier can actually reach every
+  `drained/0` member, rather than trusting that it can.
+  """
+  @spec registry_of(module()) :: module() | nil
+  def registry_of(module), do: Map.get(@registries, module)
 
   @doc """
   Quiesce every `drained/0` singleton: block until it has processed everything
@@ -118,15 +150,30 @@ defmodule Barkpark.PubSubSingletons do
   @drain_deadlock_guard_ms 20_000
 
   defp quiesce(module, timeout) do
-    case Process.whereis(module) do
-      nil ->
-        :ok
+    Enum.each(live_pids(module), fn pid ->
+      deadline = System.monotonic_time(:millisecond) + timeout
+      guard_deadline = System.monotonic_time(:millisecond) + @drain_deadlock_guard_ms
+      await_quiesced(module, pid, deadline, guard_deadline, false)
+    end)
+  end
 
-      pid ->
-        deadline = System.monotonic_time(:millisecond) + timeout
-        guard_deadline = System.monotonic_time(:millisecond) + @drain_deadlock_guard_ms
-        await_quiesced(module, pid, deadline, guard_deadline, false)
+  # A member is either module-named (at most one process) or Registry-named (N,
+  # one per live key). Nothing running is `[]` either way, so a disabled plugin
+  # or a partly-started app still skips silently — the behaviour `whereis/1`
+  # returning nil used to give.
+  defp live_pids(module) do
+    case registry_of(module) do
+      nil -> module |> Process.whereis() |> List.wrap()
+      registry -> registry_pids(registry)
     end
+  end
+
+  # `Registry.select/2` raises when the registry itself is not started, which is
+  # the Registry-named equivalent of `whereis/1` returning nil — not an error.
+  defp registry_pids(registry) do
+    Registry.select(registry, [{{:_, :"$1", :_}, [], [:"$1"]}])
+  rescue
+    ArgumentError -> []
   end
 
   # `:sys.get_state/2` is the barrier, NOT a state read — the return value is
@@ -174,6 +221,18 @@ defmodule Barkpark.PubSubSingletons do
           warned? = warned? or maybe_warn(module, pid, now, deadline)
           await_quiesced(module, pid, deadline, guard_deadline, warned?)
       end
+
+    # ALREADY GONE when we asked — `:sys.get_state/2` on a dead pid. For a
+    # Registry-named member this is routine, not a hazard: `Registry.select/2`
+    # returns a snapshot, and an ephemeral member (the Recorder is
+    # `restart: :temporary` and reaps itself on idle) can exit inside the
+    # window before the system message lands. A process that is gone holds no
+    # in-flight query, so this is the SAME non-event as `Process.whereis/1`
+    # returning nil for a module-named member — which `live_pids/1` already
+    # treats as `[]`, silently. Warning here would fire on every chat test and
+    # bury the one exit this warning exists to surface.
+    :exit, {:noproc, _} ->
+      :ok
 
     :exit, reason ->
       Logger.warning(
