@@ -6,9 +6,8 @@ Every success claim must be backed by a post-condition READ of the state it clai
 have produced, and any claim it cannot back must say so in the same breath.
 
 **Every integer below is a READ, and each one names the command that re-reads it.**
-This doc shipped three consecutive waves of transcribed numbers — a census doc lying
-about its own census is this epic's disease on this epic's own paperwork. Re-derive,
-never transcribe; figures here were derived at `4f98108a2` unless stated otherwise.
+Re-derive, never transcribe; figures here were derived at `4f98108a2` unless stated
+otherwise.
 
 **The ruling this census classifies against (PDS-D313).** "Response-backed" is three
 classes, and the axis is the MEASUREMENT POINT — not response-vs-second-read:
@@ -33,8 +32,7 @@ prose field exists to hide behind. `TestSuccessClaimRegistryHoldsItsFloor` fails
 an entry is un-enrolled, so the registry can only grow.
 
 **The enrolment count is COUNTED, never listed here.** A transcribed inventory of row
-names goes stale the first time the registry grows, and this doc carried one for three
-waves. Count it instead:
+names goes stale the first time the registry grows. Count it instead:
 
 ```sh
 awk '/^func successClaimRegistry\(\) \[\]claimSite \{/,/^\}/' \
@@ -50,12 +48,8 @@ names the exact command it rests on so a reader can refute it:
 | …and a print-call glyph lint reaches NONE of them — every one is an argument to the `out.progressf` wrapper, not to `fmt.Print*` | `grep -cE 'fmt\.(Print\|Printf\|Println\|Fprint\|Fprintf\|Fprintln)\([^)]*✓' internal/cli/vercel_cmd.go` | 0 |
 | in `api/lib` almost every glyph is LiveView chrome, not a claim | `grep -r -o '✓' api/lib \| wc -l` and `grep -rl '✓' api/lib \| wc -l` | 49 across 17 files |
 
-(The earlier wording — "ZERO match a quoted-glyph grep" — was false as literally
-written: the glyphs ARE inside quoted strings. What is true, and now falsifiable, is
-that they never appear as an argument to a print call, so a lint keyed on `fmt.Print*`
-sees nothing.) `barkpark status` and `bp export` print success carrying no glyph at
-all. A gate keyed on the glyph would be loud where there is nothing and silent where
-the lies are.
+`barkpark status` and `bp export` print success carrying no glyph at all. A gate keyed
+on the glyph would be loud where there is nothing and silent where the lies are.
 
 **The A3 lie this shipped with the gate.** `cloud_autoupdate_cmd.go`
 `autoupdateReceipt` took the server-returned policy and, for `unpin`/`pause`/
@@ -78,7 +72,7 @@ test catches all five.
 ## Shell — NOT ENFORCED. No gate ships. Here is the measured reason.
 
 Denominator, re-derived (`grep -rn "✓" --include="*.sh" .`, excluding `.git`): **25
-glyph occurrences across 13 files.** Correcting the survey figure, which counted FILES:
+glyph occurrences across 13 files**, bucketed:
 
 | bucket | count | evidence |
 |---|---|---|
@@ -105,7 +99,7 @@ shell is covered. **It is not covered.** The two sites are filed as
 ## Elixir — NOT ENFORCED. No gate ships. And the glyph census is structurally blind here.
 
 Denominator, re-derived (`grep -r -o "✓" api/lib | wc -l`): **49 occurrences across 17
-files** (the survey said 47). Of these, **48 are LiveView/HEEx/render chrome** —
+files**. Of these, **48 are LiveView/HEEx/render chrome** —
 `panes.ex`, `chat_live.ex`, `paper_editor.ex`, `board_live.ex`, `components.ex`,
 `portable_doc/render/components.ex`, `root.html.heex` and friends. A checkmark in a
 template is a UI affordance, not a claim about a post-condition.
@@ -134,9 +128,8 @@ will ever find it. The honest fix is a post-condition read of the OBJECT
 
 ### THE POPULATION AND ITS OWNER (PDS wave 38) — `router.ex`, not the string `ok: true`
 
-**This doc used to say the population was 95 emitted `ok: true` claims. That is now the
-population of one LENS, not of the surface.** The string `ok: true` is a convention an
-author may decline; a ROUTE is not. An unrouted write is unreachable, and a routed
+**The 95 emitted `ok: true` claims are the population of one LENS, not of the
+surface.** The string `ok: true` is a convention an author may decline; a ROUTE is not. An unrouted write is unreachable, and a routed
 write is in the table by construction — so the denominator's owner is
 `api/lib/barkpark_web/router.ex`, and the 95 is a numerator measured against it.
 
@@ -167,7 +160,7 @@ belongs rather than in this sentence):
 | class | n | why |
 |---|---|---|
 | `liveview_handle_event` | 40 | a LiveView route names a MOUNT; its writes live in `handle_event/3`, which carries no routed action name for a receipt register to key on (26 distinct modules) |
-| **`status_only_receipt`** | **145** | **THE HOLE.** The routed action reaches no `ok: true` / `"ok" => true` receipt this lens can see and carries no roster anchor. SCIM's three IdP write routes land here. Wave 38 also called it "success by STATUS alone"; wave 40 MEASURED that and RETIRED the clause — most of these rows DO render the stored row, they just do not spell the key the lens greps for. The run prints the retirement and the derivation partition that replaced it. |
+| **`status_only_receipt`** | **145** | **THE HOLE.** The routed action reaches no `ok: true` / `"ok" => true` receipt this lens can see and carries no roster anchor. SCIM's three IdP write routes land here. Most of these rows DO render the stored row; they just do not spell the key the lens greps for. |
 
 The run emits exactly these TWO classes; `action_not_in_corpus` was listed here and
 occurs ZERO times in the output.
@@ -184,8 +177,7 @@ addition can never print. MEMBERS is load-bearing — 24 is also the size of a w
 **THE JUDGED FRACTION IS 75/260 = 28.8%** — printed, never thresholded. Naming the 40
 LiveView mounts while omitting the 145 would satisfy the letter of "excluded is
 disclosed" and conceal the finding: **the largest single class in this population is a
-receipt shape this lens cannot see at all.** The register's completeness claim never
-covered the 145; wave 38 made them COUNTED instead of absent.
+receipt shape this lens cannot see at all.**
 
 **LENS-CAN-MISS — the blind-shape roll, printed with a count on every run.** A
 completeness claim without a stated blind spot is the vacuous green wearing the lens
@@ -256,9 +248,7 @@ reports `write=0` with no error (now **refused** by naming missing route-bearing
 sentinels, exit 2), and the delegate facade — proven by mutation at
 `api/lib/barkpark/tasks/internal.ex`, where neutering BOTH `Repo.update_all:57` and
 `Repo.insert!:386` flips `DELEGATE-REACHES-WRITE` to FAIL at exit 1, while neutering
-only `Repo.update_all` correctly stays PASS at depth 2. (The mutation recorded here for
-two waves named `close.ex`, which holds ZERO `Repo` write verbs — the record was
-unperformable as written.)
+only `Repo.update_all` correctly stays PASS at depth 2.
 
 **Ruling: still no Elixir gate (PDS-D454).** A population now exists on both axes, but a
 gate keyed on these integers would be the number-shaped guard this epic keeps filing as

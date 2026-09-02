@@ -127,6 +127,17 @@ world() { # name
 }
 
 glass() { bash "$GLASS" --spec "$SPEC" --log "$BG_LOG" "$@"; }
+# The committed log's standing-open set, computed by the SAME awk breakglass.sh
+# uses — a hand-written retrospective row that the real parser reads as OPEN
+# would red main every 30 minutes, so it is checked with the real parser.
+open_glasses_in_doc() {
+  awk '
+    /^### BG-/       { id = $2; next }
+    /^- event: open/ { if (id != "") opens[id] = 1; next }
+    /^- closes: /    { closed[$3] = 1; next }
+    END { for (i in opens) if (!(i in closed)) print i }
+  ' "$DOC" | sort
+}
 calls() { cat "$STUB/calls.log" 2>/dev/null; }
 ncalls() { grep -c . "$STUB/calls.log" 2>/dev/null || true; }
 
@@ -432,7 +443,15 @@ else bad "7b.5 --disable does not delegate to breakglass.sh"; fi
 # removes exactly one clause and the specimen is watched turning ACCEPTED.
 section "8. every guard proven load-bearing by disarming it"
 
-MUT="$TMP/mutant.sh"
+# Mutants live in a REPO-SHAPED tree, not loose in $TMP. `breakglass.sh`
+# derives REPO_ROOT from its own dirname/.., and the stale-checkout guard reads
+# the sibling scripts/required-checks-apply.sh out of it — a mutant run from a
+# bare temp dir would be refused as a partial checkout before its disarmed
+# clause could be watched accepting, and every proof below would go vacuous.
+MUTREPO="$TMP/mutrepo"
+mkdir -p "$MUTREPO/scripts"
+cp "$APPLY" "$GLASS" "$MUTREPO/scripts/"
+MUT="$MUTREPO/scripts/mutant.sh"
 
 world m1
 sed 's@^  \[ -n "$REASON" \] || fail.*@  :@; s@^  \[ -n "$TASK" \]   || fail.*@  :@' "$GLASS" > "$MUT"
@@ -625,6 +644,125 @@ else bad "10.6 breakglass-watch.yml does not red on exit 3"; fi
 if awk '/rc" in$/{p=1} p && /^ *2\)/ && /exit 0/{found=1} END{exit !found}' "$WF"; then
   ok "10.7 …while a transport UNKNOWN (2) still exits 0, so a GitHub blip does not train the fleet to dismiss the check"
 else bad "10.7 the rc=2 branch no longer exits 0"; fi
+
+# ═══ 11. the stale-checkout guard ════════════════════════════════════════════
+# The 2026-07-31 incident: `required-checks-apply.sh --disable --confirm` run
+# from the primary checkout, 131 commits behind origin/main and therefore
+# PRE-b4ba2bdb1a (#6928). Protection was down ~74 seconds; the log gained zero
+# rows; the offline authority — the leg trusted because it needs no API — saw
+# nothing. Everything below is run from trees deliberately built stale.
+section "11. a checkout that predates the record-first apply.sh cannot mutate protection"
+
+RECORD_FIRST="b4ba2bdb1a8548fb6a3e5a13a4dea718c1cb4721"
+
+# A repo-SHAPED tree carrying the real breakglass.sh and a RECONSTRUCTION of the
+# pre-#6928 --disable block: one --confirm check, an echo, a bare DELETE. The
+# reconstruction is byte-asserted to lack both markers below, so this case
+# cannot pass for the wrong reason.
+STALE="$TMP/stale-content"; mkdir -p "$STALE/scripts"
+cp "$GLASS" "$STALE/scripts/breakglass.sh"
+cat > "$STALE/scripts/required-checks-apply.sh" <<'PRE6928'
+#!/usr/bin/env bash
+# required-checks-apply.sh — the shape that shipped before b4ba2bdb1a.
+set -euo pipefail
+main() {
+  if [ "$DISABLE" -eq 1 ]; then
+    [ "$CONFIRM" -eq 1 ] || fail "--disable needs --confirm; disabling protection is never implicit"
+    echo "BREAK-GLASS: removing protection from $repo/$branch as $(gh api user --jq .login 2>/dev/null || echo UNKNOWN)"
+    gh api -X DELETE "repos/$repo/branches/$branch/protection" >/dev/null || fail "could not remove protection"
+    return 0
+  fi
+}
+main "$@"
+PRE6928
+if ! grep -q 'exec bash "$REPO_ROOT/scripts/breakglass.sh"' "$STALE/scripts/required-checks-apply.sh" \
+   && ! grep -q -- '--disable needs --reason' "$STALE/scripts/required-checks-apply.sh"; then
+  ok "11.0 SETUP: the stale tree's apply.sh carries neither the delegation nor the --reason refusal — it is genuinely the pre-#6928 shape"
+else bad "11.0 SETUP: the 'stale' reconstruction already carries a record-first marker; every case below would be vacuous"; fi
+
+stale_glass() { bash "$STALE/scripts/breakglass.sh" --spec "$SPEC" --log "$BG_LOG" "$@"; }
+
+world s1
+out="$(stale_glass --open --reason "guerrilla is 500ing" --task cch-w11 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && [ "$(ncalls)" -eq 0 ]; then
+  ok "11.1 --open from a pre-#6928 tree REFUSES (exit $rc) and made ZERO API calls — the guard runs before the actor read, the pre-state read and the DELETE"
+else bad "11.1 a stale tree opened the glass; rc=$rc calls=$(calls)"; fi
+if grep -q "$RECORD_FIRST" <<<"$out"; then
+  ok "11.2 …and the refusal NAMES the commit ($RECORD_FIRST), not 'your checkout is old'"
+else bad "11.2 the refusal does not name the record-first commit: $out"; fi
+if grep -q "worktree add" <<<"$out" && grep -q "origin/main" <<<"$out"; then
+  ok "11.3 …and states the remedy verbatim: cut a worktree from origin/main and run it from there"
+else bad "11.3 the refusal does not state the worktree remedy: $out"; fi
+
+world s2
+out="$(stale_glass --close --reason "unstuck" --task cch-w11 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && [ "$(ncalls)" -eq 0 ] && grep -q "$RECORD_FIRST" <<<"$out"; then
+  ok "11.4 --close is guarded TOO — and it is the GUARD that refused, not the empty log: the refusal names $RECORD_FIRST (exit $rc, zero calls). A 131-commit-stale .github/required-checks.json would restore an outdated protection object and then record it as 'closed'."
+else bad "11.4 a stale tree's --close was not stopped BY THE GUARD; rc=$rc calls=$(calls): $out"; fi
+
+world s3
+out="$(stale_glass --status 2>&1)"; rc=$?
+if grep -q "LOG: no open break-glass records" <<<"$out"; then
+  ok "11.5 --status is NOT guarded — the read-only diagnostic still works from a stale tree, because refusing to LOOK during an incident helps nobody"
+else bad "11.5 --status was broken by the guard (rc $rc): $out"; fi
+
+world s4
+sed 's@^  require_record_first_checkout$@  :@' "$STALE/scripts/breakglass.sh" > "$STALE/scripts/mutant.sh"
+grep -q '^  require_record_first_checkout$' "$STALE/scripts/breakglass.sh" \
+  || bad "11.6 SETUP: the guard call site changed shape — this mutant is vacuous"
+out="$(bash "$STALE/scripts/mutant.sh" --spec "$SPEC" --log "$BG_LOG" --open --reason x --task t 2>&1)"; rc=$?
+if grep -q "DELETE" <<<"$(calls)"; then
+  ok "11.6 disarm the guard ⇒ the SAME stale tree opens the glass and DELETEs. That is main's behaviour on 2026-07-31, and the guard is what removes it."
+else bad "11.6 the mutant did not reproduce the stale open (rc $rc); 11.1 proves nothing: $(calls)"; fi
+
+# ── the ANCESTRY leg, both ways, without needing the real object ─────────────
+# A depth-1 CI clone does not carry the 2026-07-29 commit, so the leg is proven
+# on a synthetic history with the pin RE-POINTED by sed: same code path, a SHA
+# whose ancestry is known by construction. Hermetic at any clone depth.
+ANC="$TMP/anc"
+mkdir -p "$ANC/scripts"
+git -C "$ANC" init -q 2>/dev/null
+git -C "$ANC" config user.email t@t; git -C "$ANC" config user.name t
+echo one > "$ANC/a"; git -C "$ANC" add a; git -C "$ANC" commit -qm one
+SHA_OLD="$(git -C "$ANC" rev-parse HEAD)"
+echo two > "$ANC/b"; git -C "$ANC" add b; git -C "$ANC" commit -qm two
+SHA_NEW="$(git -C "$ANC" rev-parse HEAD)"
+git -C "$ANC" checkout -q "$SHA_OLD"        # HEAD is now BEHIND SHA_NEW
+cp "$APPLY" "$ANC/scripts/required-checks-apply.sh"   # content leg would PASS
+
+world a1
+sed "s@^RECORD_FIRST_COMMIT=.*@RECORD_FIRST_COMMIT=\"$SHA_NEW\"@" "$GLASS" > "$ANC/scripts/breakglass.sh"
+grep -q "^RECORD_FIRST_COMMIT=\"$SHA_NEW\"$" "$ANC/scripts/breakglass.sh" \
+  || bad "11.7 SETUP: the pin did not re-point — the ancestry proof is vacuous"
+out="$(bash "$ANC/scripts/breakglass.sh" --spec "$SPEC" --log "$BG_LOG" --open --reason x --task t 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q "does not contain $SHA_NEW" <<<"$out" && [ "$(ncalls)" -eq 0 ]; then
+  ok "11.7 ANCESTRY leg: HEAD behind the pinned commit REFUSES (exit $rc, zero calls) even though the tree's apply.sh is the CURRENT record-first one — the two legs are independent"
+else bad "11.7 the ancestry leg did not fire; rc=$rc calls=$(calls): $out"; fi
+
+world a2
+sed "s@^RECORD_FIRST_COMMIT=.*@RECORD_FIRST_COMMIT=\"$SHA_OLD\"@" "$GLASS" > "$ANC/scripts/breakglass.sh"
+out="$(bash "$ANC/scripts/breakglass.sh" --spec "$SPEC" --log "$BG_LOG" --open --reason x --task t 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q "DELETE" <<<"$(calls)"; then
+  ok "11.8 …and the SAME tree with the pin re-pointed at a commit HEAD DOES contain is ACCEPTED and opens. The leg discriminates; it does not simply always refuse."
+else bad "11.8 the ancestry leg refused a tree that contains the pin (rc $rc): $out"; fi
+
+# ── this checkout, the positive control ─────────────────────────────────────
+world p1
+out="$(glass --open --reason "the control" --task t --dry-run 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q "DRY RUN" <<<"$out"; then
+  ok "11.9 the guard PASSES from this checkout (exit $rc) — it is a staleness tripwire, not a blanket refusal"
+else bad "11.9 the guard refused the repo it ships in (rc $rc): $out"; fi
+
+# ── the incident is on the record ───────────────────────────────────────────
+if grep -q "BG-20260731-RETRO" "$DOC" && grep -q -- "- closes: BG-20260731-RETRO" "$DOC"; then
+  ok "11.10 the 2026-07-31 glass is a RETROSPECTIVE pair in $DOC — an open row AND the close that answers it, so the committed-log authority stops reading that outage as 'never happened' without reding main forever"
+else bad "11.10 the 2026-07-31 incident is still absent from the records section of $DOC"; fi
+if [ -z "$(open_glasses_in_doc)" ]; then
+  ok "11.11 …and the real log carries NO standing open record, so breakglass-watch.sh stays green on main"
+else bad "11.11 the retrospective row left an OPEN glass standing in $DOC: $(open_glasses_in_doc)"; fi
+if grep -q "hand-written" "$DOC" && grep -q "131 commits behind" "$DOC"; then
+  ok "11.12 …and the row says out loud that it was hand-written and why the script could not have written it (the tree predated breakglass.sh)"
+else bad "11.12 the retrospective row does not disclose its provenance"; fi
 
 echo
 echo "── tally ──"

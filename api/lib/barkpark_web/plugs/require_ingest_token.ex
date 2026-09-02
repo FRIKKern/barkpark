@@ -19,18 +19,44 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
 
   Rejects with 401 when the header is absent/empty, or when neither path
   authorizes.
+
+  ## The admin arm assigns `:api_token` (task-ef3eb91bf7f87d4c)
+
+  The two arms carry DIFFERENT tenant information, and until this plug said so
+  the `:ingest` pipeline threw both away: it resolved no workspace at all, so
+  every `auth: :ingest` controller read and wrote with a nil scope. The sheets
+  export door then served ANY tenant's sheet by slug (and raised
+  `Ecto.MultipleResultsError` → 500 on a same-slug collision), while the sheets
+  import door wrote through `Content.WriteScope`'s seeded-Default fallback.
+
+  So the admin arm now assigns the full `%Barkpark.Auth.ApiToken{}` the way
+  `RequireBearerOrSessionToken` / `OptionalToken` do. That assign is the ONLY
+  thing this auth plug does about tenancy — the derivation itself stays where
+  it belongs, in the pipeline: `DeriveWorkspaceFromToken` turns the assign into
+  `:current_workspace`, and `AssignDefaultScope` catches the shared-secret arm
+  (which carries NO workspace binding — `Barkpark.Secrets.ingest_token/0` is
+  the `:global` tier, an instance-wide secret) on the seeded Default Workspace.
+  Default is deliberately the shared secret's tenant: it is what `WriteScope`
+  already stamps on an unscoped write, so existing sheets stay reachable.
   """
   import Plug.Conn
+
+  alias Barkpark.Auth.ApiToken
 
   def init(opts), do: opts
 
   def call(conn, _opts) do
     case get_req_header(conn, "authorization") do
       ["Bearer " <> presented] when is_binary(presented) and presented != "" ->
-        if ingest_secret_match?(presented) or admin_token?(presented) do
+        # Shared secret first, so the constant-time compare keeps its
+        # precedence; only then the (DB-hitting) admin-token arm.
+        if ingest_secret_match?(presented) do
           conn
         else
-          reject(conn)
+          case admin_token(presented) do
+            %ApiToken{} = token -> assign(conn, :api_token, token)
+            nil -> reject(conn)
+          end
         end
 
       _ ->
@@ -52,10 +78,14 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
   end
 
   # A valid, non-revoked, non-expired api_token whose permissions satisfy admin.
-  defp admin_token?(presented) do
-    case Barkpark.Auth.verify_token(presented) do
-      {:ok, token} -> Barkpark.Tenancy.Auth.permits?(token, :admin)
-      _ -> false
+  # Returns the TOKEN (not a boolean) so the caller can assign it — the
+  # workspace binding lives on the row and is what the pipeline derives from.
+  defp admin_token(presented) do
+    with {:ok, %ApiToken{} = token} <- Barkpark.Auth.verify_token(presented),
+         true <- Barkpark.Tenancy.Auth.permits?(token, :admin) do
+      token
+    else
+      _ -> nil
     end
   end
 

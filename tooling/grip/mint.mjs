@@ -61,6 +61,15 @@
 //      test file carries a CONTROL — `wc -l F` and `cat F | wc -l` are different
 //      methods for one property and MUST still collide.
 //
+// AND ONE MORE, surfaced by the wave-11 regression floor and fixed here:
+//   9. THE `cd` MOVED THE ROOT AND THE SUBJECT DID NOT MOVE WITH IT. Defect 1
+//      strips a checkout root, which is right — but `cd <checkout>/api && mix
+//      test test/x_test.exs` moves the cwd to a SUBDIRECTORY, and the mint went
+//      on reading `test/x_test.exs` as if it were repo-rooted. In a repo-rooted
+//      store that key resolves to nothing: the row indexes a path that does not
+//      exist. See `cdRootOffset` for the one shape this reads and the two it
+//      deliberately refuses.
+//
 // Nothing in the repo already does this. record.mjs/level.mjs's findRefs and
 // classifyRef need a literal `.ext:digits` suffix and score 0 on bare rerun
 // commands; doc-truth's matchPath inspects only the FIRST whitespace token,
@@ -141,18 +150,28 @@ function wearsPathMarker(t) {
 /**
  * The repo path this token names, or null if it does not name one.
  * Exported so the defects can be tested one at a time.
+ *
+ * `cdOffset` is the repo-root-relative directory a leading `cd` moved into
+ * (see `cdRootOffset`). When it is set, a token the SHELL would resolve
+ * against that cwd is carried back to the repo root — defect 9 below.
  */
-export function pathToken(rawToken) {
+export function pathToken(rawToken, { cdOffset = null } = {}) {
   let t = unwrap(rawToken);
   if (t === "" || t.startsWith("-")) return null;
 
+  // Read BEFORE any rewriting: an absolute token is resolved by the FILESYSTEM,
+  // so no `cd` can change what it names, and stripRoots already anchors it to
+  // the repo root. Carrying an offset onto it would double the prefix.
+  const absolute = t.startsWith("/");
+
   // `git show origin/main:tooling/grip/ledger.mjs` — the ref is not the
   // subject, the path after the colon is.
+  let refQualified = false;
   const colon = t.indexOf(":");
   if (colon > 0) {
     const head = t.slice(0, colon);
     const tail = t.slice(colon + 1);
-    if (REF_SEGMENTS.has(head.split("/")[0]) && tail !== "") t = tail;
+    if (REF_SEGMENTS.has(head.split("/")[0]) && tail !== "") { t = tail; refQualified = true; }
   }
 
   const marked = wearsPathMarker(t);                          // defect 7
@@ -187,6 +206,15 @@ export function pathToken(rawToken) {
   // leads by D45, i.e. no lead at all. The bound a reader needs is that a
   // single-segment subject is a NAME, never a location.
   if (!t.includes("/") && !FILE_EXT.test(t) && !marked) return null;
+
+  // defect 9 (tgw11) — the `cd` that MOVED THE ROOT. See `cdRootOffset`. Three
+  // token shapes are exempt and each for its own reason:
+  //   • ABSOLUTE — resolved by the filesystem, already root-anchored above.
+  //   • REF-QUALIFIED — in `git show <rev>:<path>`, a `<path>` that does not
+  //     begin `./` is relative to the REPO ROOT, not to the cwd, so git itself
+  //     already answers root-relative and a carry would fabricate a directory.
+  //   • no offset — no leading `cd`, or one this mint refuses to read (below).
+  if (cdOffset && !absolute && !refQualified) return `${cdOffset}/${t}`;
   return t;
 }
 
@@ -411,6 +439,56 @@ export function quantityPhrase(rerun) {
 // handed to classifyBinding verbatim and never itself rewritten.
 const LEADING_CD = /^cd\s+('[^']*'|"[^"]*"|\S+)\s+&&\s+/;
 
+// ── the `cd` that moved the ROOT (defect 9, tgw11) ───────────────────────────
+//
+// The strip above is about the STORED RERUN. This is about the SUBJECT, and the
+// two are independent: `bindToCaller` decides whether the prefix survives into
+// the row, `cdRootOffset` decides what the prefix means for the index.
+//
+// A rerun of the form `cd <checkout>/api && mix test test/x_test.exs` names a
+// file at `api/test/x_test.exs` in a repo-rooted store. The mint read the bare
+// token and derived `test/x_test.exs` — a key that resolves to NOTHING from the
+// repo root, so the row indexes a path that does not exist and can never be a
+// lead to the file it actually measured. The `cd` moved the root; the subject
+// did not move with it.
+//
+// WHAT THIS READS AND WHAT IT REFUSES TO READ. It reads exactly one shape: an
+// ABSOLUTE target that `stripRoots` recognises as a known checkout root plus a
+// non-empty remainder. Two other shapes are deliberately left alone:
+//
+//   • a BARE RELATIVE target (`cd api && …`). A relative target means nothing
+//     without the cwd it was typed in, and a recipe does not record a cwd. This
+//     is not hypothetical: the committed corpus carries `cd barkpark && git
+//     grep … -- api/lib`, where the target is the REPOSITORY ITSELF reached
+//     from its parent. Carrying it would mint `barkpark/api/lib` — a directory
+//     that has never existed. One counter-example in the live store is enough:
+//     the mint holds no repo listing and must not guess which relative names
+//     are subdirectories (the same sentence defect 7 is built on).
+//
+//   • a FOREIGN ABSOLUTE target with no recognisable checkout root
+//     (`cd /Users/…/Documents/GitHub/barkpark/api && …`, `cd /tmp && …`). The
+//     offset is unknowable, so behaviour is UNCHANGED: `stripRoots` leaves the
+//     target absolute, `PATH_SHAPED` refuses it, the target mints nothing, and
+//     every other token mints exactly as it does today with no prefix carried.
+//
+// The residual is named rather than hidden: under those two shapes a
+// subdirectory-relative subject is still minted, exactly as before this change.
+
+/**
+ * The repo-root-relative directory a leading `cd` moved into, or null when the
+ * command has no leading `cd`, when the target IS the checkout root (nothing
+ * moved), or when the target is a path this mint cannot anchor.
+ */
+export function cdRootOffset(rerun) {
+  const m = String(rerun ?? "").match(LEADING_CD);
+  if (!m) return null;
+  const target = m[1].replace(/^['"]/, "").replace(/['"]$/, "");
+  if (!target.startsWith("/")) return null;   // relative: the cwd is not recorded
+  const offset = stripRoots(target);
+  if (offset === "" || offset.startsWith("/")) return null;  // the root itself, or foreign
+  return offset;
+}
+
 /**
  * bindToCaller(rerun) → { rerun, rebound, binding_class, reason }
  *
@@ -468,9 +546,10 @@ export function mintRecipe(fact, { observed_at } = {}) {
   if (rerun === "") return { ok: false, reason: "NO-RERUN" };
 
   const toks = tokens(rerun);
+  const cdOffset = cdRootOffset(rerun);        // defect 9
   const paths = [];
   for (const t of toks) {
-    const p = pathToken(t);
+    const p = pathToken(t, { cdOffset });
     if (p !== null && !paths.includes(p)) paths.push(p);
   }
 
@@ -482,8 +561,10 @@ export function mintRecipe(fact, { observed_at } = {}) {
   if (quantity === "") return { ok: false, reason: "NO-QUANTITY" };
 
   // subject, quantity and deps are all minted from the ORIGINAL command above.
-  // Only the STORED rerun is rebound — so re-minting a row can never move its
+  // Only the STORED rerun is rebound — so the REBIND can never move a row's
   // subject or deps, which is the provable no-op the regression floor asserts.
+  // (Defect 9 does move some rows, and does so from the original command too;
+  // the floor names that class explicitly rather than relaxing the assertion.)
   const bound = bindToCaller(rerun);
 
   const recipe = { subject, quantity, rerun: bound.rerun, deps: paths, observed_at };

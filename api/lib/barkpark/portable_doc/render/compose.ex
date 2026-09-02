@@ -523,20 +523,38 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # scroll — via the `_raw` escape hatch (the value is escaped first). Email /
   # default mode keeps the original per-line inline `<code>` chip stack,
   # byte-identical to before.
+  #
+  # SOURCELESS CODE (the asset-less-image doctrine, rule 3, applied to code —
+  # see the `image` clause below): a code block whose source normalizes to
+  # NOTHING is scaffolding, not content. Before this guard, `:article` emitted
+  # the full parchment/terracotta `<pre …></pre>` frame around "" — an empty
+  # box readers mistake for a broken callout — and the default arm emitted a
+  # PdBox holding one empty `<code>` chip, a stray blank line in email. Both now
+  # compose to the empty `_raw` node, which the walker passes through as "" so
+  # the block is SKIPPED on the public render. A block with real source is
+  # byte-UNCHANGED in both arms.
   def compose_block(%{"type" => "code"} = b, :article) do
-    value = stringish(Map.get(b, "value", ""))
-    %{"kind" => "_raw", "html" => Figures.code_block_html(value)}
+    if blank_code_source?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      value = stringish(Map.get(b, "value", ""))
+      %{"kind" => "_raw", "html" => Figures.code_block_html(value)}
+    end
   end
 
   def compose_block(%{"type" => "code"} = b, _style) do
-    children =
-      Map.get(b, "value", "")
-      |> String.split("\n")
-      |> Enum.map(fn line ->
-        %{"kind" => "PdText", "children" => [%{"kind" => "PdInlineCode", "value" => line}]}
-      end)
+    if blank_code_source?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      children =
+        Map.get(b, "value", "")
+        |> String.split("\n")
+        |> Enum.map(fn line ->
+          %{"kind" => "PdText", "children" => [%{"kind" => "PdInlineCode", "value" => line}]}
+        end)
 
-    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+      %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+    end
   end
 
   # An image block with NO asset (empty / whitespace-only / missing `src`) is editor
@@ -1876,6 +1894,23 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # `to_string/1` would 500 on (Protocol.UndefinedError) or mis-render as a
   # charlist — degrades to "" rather than crashing the public reader. Mirrors
   # the non-binary fail-soft already sealed in `Render.Util.escape_html/1`.
+  # The ONE blank check both `code` compose arms share, so the two styles can
+  # never disagree about what "sourceless" means. It reads the SAME key the
+  # emitters read (`value` — the standalone code block's source field),
+  # normalizes through `stringish/1` (so a missing key, an explicit nil, or a
+  # non-stringish value is blank) and trims: `String.trim/1` strips the whole
+  # Unicode White_Space set — NBSP U+00A0, the U+2000–200A quads, IDEOGRAPHIC
+  # SPACE U+3000, LINE/PARAGRAPH SEPARATOR U+2028/9 — not just ASCII, so a
+  # whitespace-only source is blank whatever the author pasted. Zero-width
+  # characters (U+200B, U+FEFF) are NOT White_Space and stay content — they are
+  # typed glyphs, not layout.
+  #
+  # SCOPE: source-field ALIASES (`code` / `content` / `text`) are a separate
+  # contract owned elsewhere; when they normalize into `value` upstream this
+  # check sees them for free, with no second definition of "blank".
+  defp blank_code_source?(b),
+    do: b |> Map.get("value", "") |> stringish() |> String.trim() == ""
+
   defp stringish(v) when is_binary(v), do: v
   defp stringish(nil), do: ""
   defp stringish(v) when is_number(v) or is_atom(v), do: to_string(v)

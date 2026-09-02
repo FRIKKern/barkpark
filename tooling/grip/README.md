@@ -55,6 +55,44 @@ the fact shape, the fields that are dropped, the required mint, the
 all-or-nothing rule and the `.ok`-not-`.safe` trap — is documented beside the
 write target in [`ledger/README.md`](./ledger/README.md#how-to-write-a-row).
 
+## The mint and the two things a leading `cd` does
+
+A harvested rerun almost always opens `cd <somewhere> && …`, and that prefix is
+read **twice, for two unrelated questions**. Keeping them apart is the point:
+
+| question | who answers | what it changes |
+|---|---|---|
+| does the prefix survive into the STORED row? | `bindToCaller`, delegating the invariance call to `classifyBinding` | the `rerun` string only — never subject or deps |
+| where does the prefix put the ROOT? | `cdRootOffset` | subject and path-shaped deps — never the stored `rerun` |
+
+The second is newer. `cd <checkout>/api && mix test test/x_test.exs` names a
+file that lives at `api/test/x_test.exs` in this repo-rooted store, and the mint
+used to key it as `test/x_test.exs` — a path that resolves to nothing from the
+repo root, so the row indexed a file that does not exist and could never lead to
+the one it measured. The offset is now carried onto every token the shell would
+have resolved against that cwd. Tokens the `cd` provably cannot reach are left
+alone: an **absolute** one (the filesystem resolves it, and root-stripping
+already anchored it) and a **ref-qualified** one (`git show <rev>:<path>` is
+repo-root-relative by git's own rule).
+
+`cdRootOffset` reads exactly one target shape — an absolute path that strips to
+a known checkout root **plus** a non-empty remainder. A bare relative target
+(`cd api && …`) is refused, and not for tidiness: the committed store carries
+`cd barkpark && git grep … -- api/lib`, where the target is the repository
+reached from its *parent*. Carrying that would mint `barkpark/api/lib`. A
+relative target means nothing without the cwd it was typed in, and a recipe does
+not record one. A foreign absolute target (`cd /tmp && …`) is likewise
+unanchorable and behaviour there is unchanged. Both residuals are real: under
+those two shapes a subdirectory-relative subject is still minted.
+
+**The store is append-only, so the fix has a legacy tail.** Five write-path-
+attested rows were minted before the carry and keep the subdirectory-relative
+keys the old mint derived. The regression floor does not wave them through: it
+demands that each moved key be *exactly* the one `<offset>/` prefix read off
+that row's own rerun, and caps the class at a ceiling that cannot grow — every
+row written from here on already carries the offset, so no new attested row can
+enter it.
+
 ## Reading the store back — three shapes, and the scope that is not a pin
 
 `tooling/grip/ledger/` is a **shared append-only commons**: four epics write
@@ -77,6 +115,46 @@ whose name reproduces that digest **demonstrably came out of the write path**,
 which means every row in it crossed `admitRecipe`. That is the population the
 D89 control asserts folds clean, and it grows automatically — every honestly
 written run attests itself.
+
+### The arming — every count names its reading path
+
+The same committed store used to report **two different row counts** depending on
+how you read it: `foldLedger()` called as a library returned 360 rows / 307
+subjects, while `node ledger.mjs fold` returned 354 / 302 over the same bytes.
+The CLI injected `screenCommand`; the library injected nothing, and a silently
+unscreened read is not a smaller answer — it is a **different** answer wearing
+the same field names.
+
+`screen` therefore **defaults on**. A library caller who passes nothing gets the
+same screen the CLI injects, so both paths agree. `now` does **not** default —
+this module owns no clock (D19), the CLI supplies `date -u`, and a library
+caller who wants the future bound passes one. Every fold reports which bounds
+were in force, in `arming`, top-level in the JSON and on the `[grip-fold]`
+stderr line:
+
+```json
+"arming": { "screen": "screen.mjs", "now": "2026-09-01T23:37:57Z" }
+```
+
+| `arming.screen` | what it means |
+|---|---|
+| `screen.mjs` | the default — the same predicate the `fold` CLI injects |
+| `caller` | a caller-supplied screen function |
+| `none` | the **explicit** opt-out, `foldLedger(dir, { screen: null })` — the unscreened population, said out loud |
+| `invalid` | the bound was neither: `admitRecipe` rejects every row `BAD-OPTION`. A broken read, never a population |
+
+`arming.now` is the instant in force or `null`. Two folds of one store that
+agree on `arming` agree on rows / subjects / unreadable; two that differ carry
+the reason in the same object as the counts.
+
+**Why the refusal count is not the row count.** On the store as it stands, the
+screened read reports 74 `REFUSED-COMMAND` entries but only **6** fewer rows and
+**5** fewer subjects than the unscreened one. Rejections accumulate: 68 of those
+74 rows were already rejected on other grounds (`UNKNOWN-FIELD`, `LEVEL-SKIP`,
+`VALUE-STORED`, `MALFORMED-ROW`), so the refusal costs them nothing they had not
+already lost. Of the 6 rows it does cost, 5 were the only recipe on their key
+and 1 shared a key with 21 siblings that survive — hence 6 rows but 5 subjects.
+**Never quote the refusal count as a row count.**
 
 **Why not a pinned file list.** Re-pointing the mint regression floor at
 `binding.test.mjs`'s three census files turns "307 of 631 rows moved" into
@@ -169,6 +247,39 @@ This is the epic's own disease inside the epic's own instrument, and it is kept
 here after the fix precisely because the fix is the least interesting part of
 it: one verifier read the empty result and concluded the census never screens at
 all — the exact opposite of the truth — and caught itself only by accident.
+
+## A missing binary is not a rotted recipe — read the census's tool header
+
+`census.mjs` used to map exit **127** (the shell's "command not found") to
+`PATH-GONE`, which sits in the **DECAYED** set. So the census scored the
+operator's own toolbox as decay *in the ledger*. Re-derived over one unchanged
+tree and one unchanged corpus, with nothing but `PATH` differing:
+
+| run | decisive | decayed | rate | PREDICTION 3 verdict |
+|---|---|---|---|---|
+| full `PATH` | 193 | 39 | 20.2% | **CONSISTENT** |
+| `PATH` without `bp`, `gh`, `go` | 197 | 61 | 31.0% | **CONTRARY** |
+
+37 of that second 61 were pure rc-127. The verdict flipped on which tools
+happened to be installed.
+
+Two things changed, and both are load-bearing:
+
+- **`TOOL-ABSENT`** is an outcome *outside* the DECAYED set. rc 127 lands there
+  and leaves **both** rates — the same rule `WRONG-CWD` and `REF-GONE` already
+  followed: a fault that measures **this host** never measures the ledger. A
+  genuinely gone *path* is still `PATH-GONE` and still decay.
+- **A tool-availability header** is printed on every run, naming which command
+  heads were **present** and which **ABSENT**, and **no rate is printed without
+  it** — the human banner, the rate block and the `--json` `decisive` figures are
+  all withheld when no probe ran. Availability is **probed** (a walk of the same
+  `PATH` the child shells inherit, plus the POSIX builtins) — it spawns nothing,
+  so the census's execution set stays exactly what `screenCommand` admitted.
+
+Post-fix the same three runs read 39/194 (20.1%), 24/160 (15.0%) and, with `npm`
+also stripped, 24/159 (15.1%) — all **CONSISTENT**, with `bp`, `gh`, `go` (then
+`npm`) named on the ABSENT line. **A decay rate from this census is conditional
+on that list: quote them together or not at all.**
 
 ## What this certifies — and what it does not
 

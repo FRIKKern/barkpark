@@ -364,3 +364,377 @@ func TestHetznerResourceBasisVocabPrimitives(t *testing.T) {
 		t.Error("method 'HEAD' failed to match the true HEAD wording")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// LEG 4: THE ADDITIVE EMBELLISHMENT.
+//
+// THE HOLE LEG 3 LEAVES OPEN, MEASURED. Leg 3 judges a wording by SHAPE
+// VOCABULARY — mustMethods, mustSubs, mustTokens, notMethods, notTokens, plus
+// the distinctness arm. Every one of those asks whether a word is PRESENT or
+// ABSENT. None of them asks what an ADDED clause asserts. So rewording
+// hzResBasisBucketListAfterDelete to "ListBuckets after the delete, with every
+// object in it re-checked" — a per-object re-check the code never performs —
+// satisfies mustMethods 'List', mustTokens 'delete', forbids nothing, collides
+// with no other wording, and the whole package stays GREEN. Measured on
+// origin/main before this file's leg-4 arms existed: the nine
+// TestHetznerResourceBasis* arms all PASS with that wording installed.
+//
+// WHAT LEG 4 ADDS. It is the first arm in the family that compares the wording
+// against WHAT THE BOUND READ CAN VOUCH FOR, rather than against a token list.
+// The binding is hzResBasisReads — leg 2's table, basis symbol → the read
+// primitive's token — and hzBasisReadPowers says, for each of those primitives,
+// which nouns it ENUMERATES and which it RE-READS INDIVIDUALLY. A wording may
+// quantify over a noun only if its own bound read enumerates that noun, and may
+// claim a per-member re-check only if its own bound read re-reads it.
+//
+// THIS IS NOT A TOKEN BAN, AND THE PROOF IS THAT THE SAME WORDS GO BOTH WAYS.
+// "with every object … " is REFUSED on hzResBasisBucketListAfterDelete, whose
+// bound read is ListBuckets — buckets are enumerated, objects are not. The
+// identical phrase PASSES on hzResBasisObjectKeyListAfterDelete, whose bound
+// read is ListObjects, which does enumerate objects. One vocabulary, two
+// verdicts, and the binding is the only thing that decides.
+//
+// WHAT IT DOES NOT CATCH, STATED SO NOBODY OVER-READS A GREEN:
+//
+//   - It reads QUANTIFIER-AND-NOUN structure, not meaning. An embellishment
+//     that adds an unsubstantiated clause carrying no quantifier and no
+//     re-check word ("…, and the bucket was empty") still passes. This is a
+//     vocabulary gate on the scope axis, deliberately, because the alternative
+//     is prose analysis and a gate nobody trusts.
+//   - It says nothing about TIMING ("after the delete" is unjudged here) or
+//     about WHICH resource an argument carried — leg 2 already states that
+//     second limit for itself.
+//   - hzResBasisResponse is bound to NO read, so it can substantiate NOTHING.
+//     That is the correct reading of a basis that performs no round trip, and
+//     it means any quantifier added to that wording reds.
+
+// hzBasisReadPower says what ONE read primitive can vouch for on a receipt.
+//
+// DERIVED FROM THE PRIMITIVE, NOT FROM THE PROSE. Each row was written by
+// reading the call, never by reading the constant that names it: ListBuckets
+// returns the bucket collection and nothing about any object inside one;
+// ListObjects returns the object keys under a prefix and nothing about their
+// contents; a listing NAMES its members, it does not READ them, which is why
+// every listing row has an empty reReads.
+type hzBasisReadPower struct {
+	// enumerates: singular nouns whose whole population this one call walks.
+	enumerates []string
+	// reReads: singular nouns this call fetches INDIVIDUALLY, one round trip
+	// per member. A listing has none — that is the distinction the
+	// embellishment traded on.
+	reReads []string
+	// why is quoted in the failure message, so a red explains the primitive
+	// rather than just naming it.
+	why string
+}
+
+// hzBasisReadPowers is the register, keyed by the SAME token hzResBasisReads
+// binds a basis to. TestHetznerResourceBasisReadPowersCoverEveryBoundRead keeps
+// the two tables in step in both directions.
+var hzBasisReadPowers = map[string]hzBasisReadPower{
+	"GetByID(": {
+		reReads: []string{"resource", "id", "server", "volume", "network"},
+		why:     "one hcloud single-resource GET on one id",
+	},
+	"hzS3HeadRead(": {
+		reReads: []string{"key"},
+		why:     "one HEAD request against one stored key — presence, not content",
+	},
+	"hzS3BucketRead(": {
+		enumerates: []string{"bucket", "name"},
+		why:        "one bucket listing, scanned for a name — it walks buckets, never their contents",
+	},
+	"GetRRSetByNameAndType(": {
+		reReads: []string{"record", "rrset", "key"},
+		why:     "one composite-key GET for one RRSet",
+	},
+	"ListBuckets(": {
+		enumerates: []string{"bucket", "name"},
+		why:        "one bucket listing — it names buckets and says NOTHING about any object inside one",
+	},
+	"ListObjects(": {
+		enumerates: []string{"object", "key"},
+		why:        "one prefix listing — it names the object keys under a prefix, but reads none of them",
+	},
+}
+
+// hzBasisQuantifiers widen a claim from "this read happened" to "every member
+// of what this read touched was covered".
+var hzBasisQuantifiers = []string{"every", "each", "all", "per", "any"}
+
+// hzBasisReReadWords claim members were fetched INDIVIDUALLY. They are matched
+// as whole hyphenated compounds, which is why the tokenizer keeps hyphens.
+var hzBasisReReadWords = []string{
+	"re-checked", "rechecked", "re-check", "recheck",
+	"re-read", "reread", "re-verified", "reverified",
+	"individually", "one-by-one",
+}
+
+// hzBasisNouns are the singular nouns a basis on this surface can be about.
+// Anything outside this list carries no scope claim this gate will judge.
+var hzBasisNouns = []string{
+	"object", "bucket", "key", "record", "rrset",
+	"resource", "id", "name", "zone", "server", "volume", "network",
+}
+
+// hzBasisClaimKind distinguishes the two assertions leg 4 can read.
+type hzBasisClaimKind string
+
+const (
+	hzBasisClaimEnumerated hzBasisClaimKind = "enumerated"
+	hzBasisClaimReRead     hzBasisClaimKind = "re-read individually"
+)
+
+// hzBasisClaim is ONE scope assertion recovered from a wording.
+type hzBasisClaim struct {
+	kind    hzBasisClaimKind
+	trigger string // the word that made the claim, for the message
+	noun    string // singular noun the claim is about
+}
+
+// hzBasisWordRe splits a wording into words, KEEPING hyphenated compounds whole
+// so "re-checked" and "one-by-one" survive as single tokens.
+var hzBasisWordRe = regexp.MustCompile(`[a-z]+(?:-[a-z]+)*`)
+
+// hzBasisSingular folds a plural noun onto its singular form.
+func hzBasisSingular(w string) string {
+	if len(w) > 3 && strings.HasSuffix(w, "s") && !strings.HasSuffix(w, "ss") {
+		return strings.TrimSuffix(w, "s")
+	}
+	return w
+}
+
+// hzBasisNounAt reports the singular noun at words[i], or "".
+func hzBasisNounAt(words []string, i int) string {
+	if i < 0 || i >= len(words) {
+		return ""
+	}
+	n := hzBasisSingular(words[i])
+	for _, cand := range hzBasisNouns {
+		if n == cand {
+			return n
+		}
+	}
+	return ""
+}
+
+// hzBasisScopeWindow is how far from its trigger a noun may sit and still be
+// the one the trigger governs. Four words covers "every object in it" and
+// "all of the buckets" without reaching across a clause.
+const hzBasisScopeWindow = 4
+
+// hzBasisScopeClaims reads the scope assertions out of a wording.
+//
+// STRUCTURE, NOT MEANING. A quantifier claims the read covered every member of
+// the nearest noun after it; a re-check word claims the nearest noun around it
+// was fetched member by member. Nothing here parses grammar, and the header
+// says exactly what that costs.
+func hzBasisScopeClaims(wording string) []hzBasisClaim {
+	raw := hzBasisWordRe.FindAllString(strings.ToLower(wording), -1)
+	var words []string
+	for _, r := range raw {
+		if hzBasisIsReReadWord(r) {
+			words = append(words, r) // keep the compound whole
+			continue
+		}
+		words = append(words, strings.Split(r, "-")...)
+	}
+
+	var out []hzBasisClaim
+	for i, w := range words {
+		switch {
+		case hzBasisIsQuantifier(w):
+			// A quantifier governs the first noun that follows it.
+			for j := i + 1; j < len(words) && j <= i+hzBasisScopeWindow; j++ {
+				if n := hzBasisNounAt(words, j); n != "" {
+					out = append(out, hzBasisClaim{kind: hzBasisClaimEnumerated, trigger: w, noun: n})
+					break
+				}
+			}
+		case hzBasisIsReReadWord(w):
+			// A re-check word attaches to the nearest noun, looking BACK first
+			// ("every object … re-checked") and then forward ("re-checked each
+			// object").
+			if n := hzBasisNearestNoun(words, i); n != "" {
+				out = append(out, hzBasisClaim{kind: hzBasisClaimReRead, trigger: w, noun: n})
+			}
+		}
+	}
+	return out
+}
+
+// hzBasisNearestNoun looks backward then forward from i within the window.
+func hzBasisNearestNoun(words []string, i int) string {
+	for j := i - 1; j >= 0 && j >= i-hzBasisScopeWindow; j-- {
+		if n := hzBasisNounAt(words, j); n != "" {
+			return n
+		}
+	}
+	for j := i + 1; j < len(words) && j <= i+hzBasisScopeWindow; j++ {
+		if n := hzBasisNounAt(words, j); n != "" {
+			return n
+		}
+	}
+	return ""
+}
+
+func hzBasisIsQuantifier(w string) bool { return hzBasisInList(hzBasisQuantifiers, w) }
+func hzBasisIsReReadWord(w string) bool { return hzBasisInList(hzBasisReReadWords, w) }
+
+func hzBasisInList(list []string, w string) bool {
+	for _, c := range list {
+		if c == w {
+			return true
+		}
+	}
+	return false
+}
+
+// hzBasisVouched reports whether the union of a basis's bound reads can
+// substantiate one claim, and returns the primitives it was weighed against.
+func hzBasisVouched(reads []string, c hzBasisClaim) (bool, []string) {
+	var why []string
+	for _, tok := range reads {
+		p, ok := hzBasisReadPowers[tok]
+		if !ok {
+			continue // TestHetznerResourceBasisReadPowersCoverEveryBoundRead owns this
+		}
+		why = append(why, tok+" ("+p.why+")")
+		var vouches []string
+		if c.kind == hzBasisClaimEnumerated {
+			vouches = p.enumerates
+		} else {
+			vouches = p.reReads
+		}
+		if hzBasisInList(vouches, c.noun) {
+			return true, why
+		}
+	}
+	return false, why
+}
+
+// TestHetznerResourceBasisWordingClaimsNothingTheBoundReadCannotVouchFor is LEG
+// 4: the arm that refuses an ADDITIVE embellishment.
+//
+// It is bound-read-driven by construction — the population is the DERIVED
+// wordings, the rule comes from hzResBasisReads, and there is no per-wording
+// allowlist anywhere in it. A phrase that is a lie on one basis is legal on
+// another, and only the binding decides which.
+func TestHetznerResourceBasisWordingClaimsNothingTheBoundReadCannotVouchFor(t *testing.T) {
+	wordings := hzResDerivedBasisWordings(t)
+	checked := 0
+	for name, wording := range wordings {
+		reads, bound := hzResBasisReads[name]
+		if !bound {
+			// A bare literal has no symbol, and a constant with no binding row
+			// is already red at RATCHET/BASIS-CONSTANT-UNJUDGED. Repeating it
+			// here would read like a second, independent finding.
+			continue
+		}
+		checked++
+		for _, c := range hzBasisScopeClaims(wording) {
+			ok, weighed := hzBasisVouched(reads, c)
+			if ok {
+				continue
+			}
+			against := "NO read at all — this basis claims no round trip"
+			if len(weighed) > 0 {
+				against = strings.Join(weighed, ", ")
+			}
+			t.Errorf("RATCHET/BASIS-WORDING-UNSUBSTANTIATED: %s = %q\n"+
+				"  asserts that every %s was %s (from the word %q)\n"+
+				"  but its bound read is %s, which cannot vouch for that.\n"+
+				"  THE RECEIPT CLAIMS MORE THAN THE READ PERFORMED. This is the ADDITIVE lie leg 3 cannot see: "+
+				"the added clause breaks no shape rule, collides with no other wording, and would print on a live "+
+				"receipt as a stronger guarantee than the code ever made.",
+				name, wording, c.noun, c.kind, c.trigger, against)
+		}
+	}
+	const checkedFloor = 5
+	if checked < checkedFloor {
+		t.Fatalf("only %d bases were weighed against their bound read (floor %d) — the derivation or the binding "+
+			"table stopped resolving, and a silent zero is exactly how this family failed before", checked, checkedFloor)
+	}
+	t.Logf("SCOPE-CLAIMS WEIGHED: %d bases against %d read primitives", checked, len(hzBasisReadPowers))
+}
+
+// TestHetznerResourceBasisReadPowersCoverEveryBoundRead keeps leg 4's register
+// in step with leg 2's binding table IN BOTH DIRECTIONS. A new read primitive
+// entering hzResBasisReads without a power row would make leg 4 silently vouch
+// for nothing on that basis — a green that means "unjudged", which is the shape
+// this whole family exists to refuse.
+func TestHetznerResourceBasisReadPowersCoverEveryBoundRead(t *testing.T) {
+	used := map[string]bool{}
+	for sym, reads := range hzResBasisReads {
+		for _, tok := range reads {
+			used[tok] = true
+			if _, ok := hzBasisReadPowers[tok]; !ok {
+				t.Errorf("RATCHET/READ-POWER-UNDECLARED: hzResBasisReads binds %s to the read %q, but "+
+					"hzBasisReadPowers does not say what that primitive can vouch for. Leg 4 would weigh every "+
+					"scope claim on %s against an empty power and call the silence a pass.", sym, tok, sym)
+			}
+		}
+	}
+	for tok := range hzBasisReadPowers {
+		if !used[tok] {
+			t.Errorf("hzBasisReadPowers declares powers for %q, which no row in hzResBasisReads binds any basis "+
+				"to — a stale power row makes this register look like it speaks for more of the surface than it does", tok)
+		}
+	}
+	if len(used) < 4 {
+		t.Fatalf("only %d distinct read primitives are bound — the binding table stopped resolving", len(used))
+	}
+}
+
+// TestHetznerResourceBasisScopeClaimPrimitives proves the claim reader fires on
+// the embellishment and stays silent on every wording this surface actually
+// ships — because a gate that reds an honest wording is a gate somebody
+// deletes, and a gate that reads no claim at all is a vacuous green.
+func TestHetznerResourceBasisScopeClaimPrimitives(t *testing.T) {
+	// TRUE-POSITIVE HALF: the embellishment, read as two distinct claims.
+	got := hzBasisScopeClaims("ListBuckets after the delete, with every object in it re-checked")
+	want := []hzBasisClaim{
+		{kind: hzBasisClaimEnumerated, trigger: "every", noun: "object"},
+		{kind: hzBasisClaimReRead, trigger: "re-checked", noun: "object"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("the embellishment yielded %d claims %v, want %d %v — the reader that refuses it must SEE it",
+			len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("claim %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	// The same phrase on a listing that DOES walk objects is substantiated —
+	// this is the half that proves leg 4 is not a token ban.
+	if ok, _ := hzBasisVouched([]string{"ListObjects("}, want[0]); !ok {
+		t.Error("'every object' was refused against ListObjects(, which enumerates object keys — leg 4 would be " +
+			"a blanket ban on the word rather than a check against the binding")
+	}
+	if ok, _ := hzBasisVouched([]string{"ListBuckets("}, want[0]); ok {
+		t.Error("'every object' was vouched for by ListBuckets(, which walks buckets and reads no object")
+	}
+	if ok, _ := hzBasisVouched([]string{"ListObjects("}, want[1]); ok {
+		t.Error("'re-checked' was vouched for by a LISTING — a listing names its members, it does not read them")
+	}
+
+	// FALSE-POSITIVE HALF: every wording the tree ships today must read as ZERO
+	// claims. If one of these ever carries a claim, it must be substantiated,
+	// and the arm above is where that is decided — but a claim read out of
+	// today's honest prose would mean the reader is too eager.
+	for _, w := range []string{
+		"single-resource GET on the resolved id",
+		"the create response object",
+		"existence HEAD on the stored key",
+		"ListBuckets after the create, scanned for the name",
+		"single-resource GET on the (zone, name, type) key the verb already held",
+		"ListBuckets after the delete",
+		"ListObjects on the exact key prefix after the delete",
+	} {
+		if c := hzBasisScopeClaims(w); len(c) != 0 {
+			t.Errorf("the honest wording %q was read as carrying the scope claims %v — leg 4 would red a truthful "+
+				"receipt, and a gate that reds honest prose is a gate somebody deletes", w, c)
+		}
+	}
+}

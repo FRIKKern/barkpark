@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w14-bl-site-open-phone-overflow",
+    "kind": "task",
+    "type": "task",
+    "title": "site open phone overflow",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "the overflow is reproduced at 390px.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "the fix is committed.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "the screenshot pair is attached.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "C3: the same clamp is proven on the tablet breakpoint.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "MERGE-GATED: PR #8743 merged to main.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}

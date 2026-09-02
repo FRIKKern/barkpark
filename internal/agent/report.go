@@ -493,6 +493,13 @@ type SpaceReport struct {
 	// never told where to look has not measured an empty fleet of roots, it has
 	// not measured.
 	ConsumerRoots []ConsumerRoot `json:"consumer_roots"`
+
+	// Residual is what this payload did NOT measure, in bytes, against the
+	// denominator that produced it — or a stated refusal. See SpaceResidual.
+	//
+	// nil is an agent that does not compute one at all; a computed zero and a
+	// refusal are both non-nil and say so themselves.
+	Residual *SpaceResidual `json:"residual"`
 }
 
 // The four ConsumerRoot.Status values. They are a CLOSED set and they are
@@ -522,6 +529,120 @@ const (
 	// ConsumerRootUnmeasured — no probe wired, or the walk errored/timed out.
 	// Bytes and Count keep their -1 sentinel.
 	ConsumerRootUnmeasured = "unmeasured"
+)
+
+// The three SpaceResidual.Status values, a CLOSED set, and the middle one is
+// the whole point of the field.
+const (
+	// ResidualComputed — the subtraction was performed and Bytes is real.
+	ResidualComputed = "computed"
+	// ResidualUndefined — the measured roots summed to MORE than the root
+	// filesystem's used bytes. That is arithmetically impossible for disjoint
+	// trees on one device, so it is PROOF that the root set is not what it
+	// claims to be, and the only honest output is a refusal.
+	//
+	// It is its own word rather than a clamp-to-zero because "0 B unaccounted"
+	// is the strongest possible claim this axis can make — we saw everything —
+	// and reaching it by clamping would let the worst-measured box render as
+	// the best-measured one. A negative number is not printed either: a
+	// negative gigabyte is a new dishonest number inside the fix for dishonest
+	// numbers.
+	ResidualUndefined = "undefined"
+	// ResidualUnmeasured — the subtraction could not be attempted at all
+	// (no root-filesystem denominator, or no way to verify the roots' device).
+	// Reason names which.
+	ResidualUnmeasured = "unmeasured"
+)
+
+// The SpaceResidual.PGSource values. Postgres is the one consumer this payload
+// can measure TWICE, and the field says which measurement was used so the
+// arithmetic is checkable rather than trusted.
+const (
+	// PGSourceDURoot — a configured consumer root covers PGDATA, so the du
+	// walk already counted those bytes and PGSizeBytes was NOT added.
+	PGSourceDURoot = "du-root"
+	// PGSourceSizeBytes — no du root covers PGDATA, so PGSizeBytes was added.
+	PGSourceSizeBytes = "pg-size-bytes"
+	// PGSourceNone — neither: no pg on this box, or the size probe failed.
+	PGSourceNone = "none"
+)
+
+// SpaceResidual is the answer to the question every part-of-a-whole reading
+// begs and almost none of them state: WHAT ABOUT THE REST?
+//
+// The failure it repairs is not a wrong number, it is a confident subset. The
+// shipped probe read one root, /opt/barkpark/sites, which exists on ONE of six
+// boxes and covers 14.9% of that one — and it presented that 14.9% with the
+// same voice it would have used for the whole disk. Coverage is ANTI-CORRELATED
+// with trouble: the same two roots cover 81.66% of the box at 96% disk and
+// 34.86% of another, a 47-point spread, so the reading is least complete
+// exactly where it is most needed. A probe that sees 28% of a box must SAY 28%.
+//
+// THE DENOMINATOR IS RootUsedBytes AND NOTHING ELSE. Not disk_used_percent:
+// `df`'s capacity column is ceil(used/(used+avail)) and excludes root-reserved
+// blocks, so it is a percentage of a DIFFERENT WHOLE — the build-plane box read
+// 96% capacity against 91.09% used-of-total, and a residual built from the
+// percent INVENTS 1.83 GiB there and 1.35 GiB on another box. The two numbers
+// are not the same quantity in different units.
+//
+// It is a POINTER on SpaceReport: nil is an agent that does not compute a
+// residual at all, which is a different fact from an agent that tried and
+// refused (ResidualUnmeasured) — the same nil-is-not-zero rule every other
+// field here follows.
+//
+// The shape is DeployLedger.rate/2's refusal node: a value, the denominator
+// that produced it, and a machine-readable reason — so no caller can render a
+// percentage without the volume behind it, and no caller has to parse prose to
+// learn that the number is missing.
+type SpaceResidual struct {
+	// Status is one of the three constants above. A reader branches on THIS,
+	// never on Bytes >= 0.
+	Status string `json:"status"`
+	// Bytes is RootUsedBytes - MeasuredBytes: the bytes on this box's root
+	// filesystem that no configured root accounts for. -1 unless Status is
+	// ResidualComputed — and NEVER a negative figure, which is what the
+	// ResidualUndefined arm exists to refuse.
+	Bytes int64 `json:"bytes"`
+	// OfBytes is the denominator, carried beside the value so a surface can
+	// render the share without inventing the whole. It is RootUsedBytes
+	// verbatim, -1 when that was unmeasured.
+	OfBytes int64 `json:"of_bytes"`
+	// MeasuredBytes is what was actually subtracted — the sum of the counted
+	// extents. It travels even when Status is ResidualUndefined, because a sum
+	// that EXCEEDS its denominator is the evidence for the refusal, and an
+	// operator who can see both numbers can find the overlapping root in one
+	// step instead of guessing.
+	MeasuredBytes int64 `json:"measured_bytes"`
+	// CountedRoots / ExcludedRoots are how many measured extents went into
+	// MeasuredBytes and how many were held out. Their sum is the coverage
+	// statement's denominator, and ExcludedRoots > 0 is the reader's cue to
+	// look at the per-root excluded_reason for the names.
+	CountedRoots  int `json:"counted_roots"`
+	ExcludedRoots int `json:"excluded_roots"`
+	// PGSource says which of the two Postgres measurements was used, so the
+	// arithmetic can be checked rather than trusted. See the PGSource consts:
+	// on one box `du -x -k -s /var/lib/postgresql` read 3,615,160 KiB against
+	// sum(pg_database_size) 3,528,933 KiB — 97.6% the SAME bytes, 3.37 GiB and
+	// 12.5% of that box's used total, countable twice by an axis that has both.
+	PGSource string `json:"pg_source"`
+	// Reason is machine-readable and empty exactly when Status is
+	// ResidualComputed. It is a stable slug, never prose: a surface branches on
+	// it and words it for its own reader.
+	Reason string `json:"reason"`
+}
+
+// The SpaceResidual.Reason slugs and the ConsumerRoot.ExcludedReason slugs.
+// Both are stable machine-readable tokens; every human sentence in every
+// surface is derived FROM one of these, never parsed back into one.
+const (
+	// residual reasons
+	residualReasonRootUnmeasured   = "root-used-unmeasured"
+	residualReasonDeviceUnverified = "root-device-unverified"
+	residualReasonOverlap          = "roots-overlap-or-cross-a-mount"
+	// per-root exclusion reasons
+	excludedCrossMount       = "cross-mount"
+	excludedDeviceUnverified = "device-unverified"
+	excludedUnderPrefix      = "under:"
 )
 
 // ConsumerRoot is one measured (or honestly unmeasured) disk-consumer root.
@@ -558,6 +679,22 @@ type ConsumerRoot struct {
 	// announce itself. nil / -1 unless Status is ConsumerRootDegraded.
 	Degraded      []string `json:"degraded"`
 	DegradedCount int      `json:"degraded_count"`
+
+	// ExcludedReason names why this root's bytes were NOT summed into
+	// SpaceReport.Residual, and it is empty exactly when they were.
+	//
+	// It lives on the ROW rather than in a list beside the residual because the
+	// fact is about this root, and a second list of paths is a second thing to
+	// keep in sync (and, at consumerRootsLimit, several hundred bytes of the
+	// payload budget spent restating strings already on the wire).
+	//
+	// A root can be perfectly well MEASURED and still be excluded — the two
+	// questions are independent. Status answers "did we read this tree?";
+	// ExcludedReason answers "can this tree's bytes be subtracted from the root
+	// filesystem's used total without double-counting or crossing a mount?".
+	// The overlay case is exactly that: a complete, correct 1.44 GiB reading of
+	// a tree that is not on the root filesystem at all.
+	ExcludedReason string `json:"excluded_reason"`
 }
 
 // DirSize is one named child of a consumer root and the bytes it occupies.
@@ -1224,6 +1361,27 @@ type SpaceConfig struct {
 	// printed its root but could not read everything under it, and that is a
 	// floor worth landing precisely because we can say what is missing from it.
 	ConsumerRootProbe func(path string) (totalBytes int64, all []DirSize, degraded []string, err error)
+
+	// DeviceProbe returns the st_dev of a path and whether it could be read.
+	// It is the residual's mount-boundary guard: only extents on the SAME
+	// device as `/` may be subtracted from a root-filesystem denominator.
+	//
+	// It is a separate seam from ConsumerRootExists for the reason that seam is
+	// separate from the probe: presence, device and size are three different
+	// questions, and inferring any of them from another's failure mode is how a
+	// wrong root became invisible in the first place. nil → the residual
+	// REFUSES (residualReasonDeviceUnverified) rather than summing roots it
+	// cannot place.
+	DeviceProbe func(path string) (dev uint64, ok bool)
+
+	// PGDataDir is where Postgres keeps its files, used ONLY to decide whether
+	// a configured du root already covers PGSizeBytes. Empty → DefaultPGDataDir.
+	//
+	// It is not a probe and nothing walks it: the database's own size is the
+	// better measurement (it excludes the WAL and temp files an operator cannot
+	// act on), so this path exists purely to stop the two from being added
+	// together.
+	PGDataDir string
 }
 
 // gatherSpace assembles a SpaceReport from the wired probes. Like gatherReport
@@ -1283,7 +1441,202 @@ func gatherSpace(cfg SpaceConfig) SpaceReport {
 
 	s.ConsumerRoots = gatherConsumerRoots(cfg)
 
+	// LAST, and from the assembled payload rather than from the probes: the
+	// residual is a statement ABOUT this payload, so it must be computed from
+	// exactly the numbers the payload carries. Computing it alongside the
+	// probes would let a field be adjusted afterwards (a cap applied, a sentinel
+	// substituted) while the residual still described the pre-adjustment values.
+	s.Residual = computeResidual(&s, cfg)
+
 	return s
+}
+
+// spaceExtent is one measured region of disk that the residual may subtract:
+// a path with a byte count, plus the payload row it came from so an exclusion
+// can be written back onto that row.
+type spaceExtent struct {
+	path  string
+	bytes int64
+	// root points at the ConsumerRoot this extent came from, so an exclusion
+	// lands on the row itself. nil for the sites extent, which has no row.
+	root *ConsumerRoot
+}
+
+// pathCovers reports whether parent contains child (or IS child). Both are
+// already cleaned. The separator test is what stops "/var/lib" from swallowing
+// "/var/libvirt": a prefix match on strings alone is a bug that only shows up
+// when two roots happen to share one.
+func pathCovers(parent, child string) bool {
+	if parent == child {
+		return true
+	}
+	if parent == "/" {
+		return true
+	}
+	return strings.HasPrefix(child, parent+"/")
+}
+
+// computeResidual performs the one subtraction this axis exists for, and
+// refuses in every case where the subtraction would produce a number it cannot
+// stand behind.
+//
+// THE FOUR GUARDS, in the order they are applied:
+//
+//  1. EXACT BYTES. Nothing here rounds; duTreeArgs asks du for -k and
+//     parseDuSize multiplies by 1024. This function only ever adds and
+//     subtracts int64 byte counts. (The guard lives at duTreeArgs; it is named
+//     here because it is the guard whose absence this arithmetic would amplify.)
+//  2. SAME DEVICE AS `/`. An extent on another device is bytes that are not in
+//     the denominator, so subtracting it is a phantom deficit. Excluded and
+//     named. An extent whose device cannot be READ is excluded too — "unknown"
+//     is not "same".
+//  3. DISJOINT. An extent covered by an earlier extent is already inside that
+//     extent's du total. Excluded and named, with the covering path in the
+//     reason so the operator does not have to work out which pair collided.
+//  4. PG ONCE. If a counted extent covers PGDATA, PGSizeBytes is NOT added;
+//     otherwise it is. The choice is stated in PGSource either way.
+//
+// AND THE CLAMP. If the counted extents still sum to more than the denominator,
+// the root set is not what it claims and the result is ResidualUndefined — never
+// a negative gigabyte.
+func computeResidual(s *SpaceReport, cfg SpaceConfig) *SpaceResidual {
+	r := &SpaceResidual{
+		Status:        ResidualUnmeasured,
+		Bytes:         -1,
+		OfBytes:       s.RootUsedBytes,
+		MeasuredBytes: -1,
+		PGSource:      PGSourceNone,
+	}
+
+	// GUARD 4 (the denominator). No RootUsedBytes, no residual — and in
+	// particular no substituting disk_used_percent, which is a share of a
+	// different whole.
+	if s.RootUsedBytes < 0 {
+		r.Reason = residualReasonRootUnmeasured
+		return r
+	}
+
+	// GUARD 2, first half: we need `/`'s own device to compare anything to. No
+	// device probe, or a `/` we cannot stat, means every extent is unplaceable
+	// — and a residual over unplaceable extents is exactly the confident subset
+	// this field exists to refuse.
+	if cfg.DeviceProbe == nil {
+		r.Reason = residualReasonDeviceUnverified
+		return r
+	}
+	rootDev, ok := cfg.DeviceProbe("/")
+	if !ok {
+		r.Reason = residualReasonDeviceUnverified
+		return r
+	}
+
+	// Candidate extents, in payload order: the consumer roots, then sites.
+	// Order is load-bearing for guard 3 — the FIRST extent covering a region
+	// keeps it, so the exclusion lands deterministically on the same root every
+	// run rather than on whichever one sorted first today.
+	var candidates []spaceExtent
+	for i := range s.ConsumerRoots {
+		row := &s.ConsumerRoots[i]
+		if row.Status != ConsumerRootRead && row.Status != ConsumerRootDegraded {
+			continue
+		}
+		if row.Bytes < 0 {
+			continue
+		}
+		candidates = append(candidates, spaceExtent{path: filepath.Clean(row.Path), bytes: row.Bytes, root: row})
+	}
+	if s.SitesDir != "" && s.SitesBytes >= 0 {
+		candidates = append(candidates, spaceExtent{path: filepath.Clean(s.SitesDir), bytes: s.SitesBytes})
+	}
+
+	counted := make([]spaceExtent, 0, len(candidates))
+	excluded := 0
+	exclude := func(e spaceExtent, reason string) {
+		excluded++
+		if e.root != nil {
+			e.root.ExcludedReason = reason
+		}
+	}
+
+	for _, e := range candidates {
+		// GUARD 2. A root on another device — the overlay case — is measured
+		// correctly and still must not be subtracted.
+		dev, devOK := cfg.DeviceProbe(e.path)
+		if !devOK {
+			exclude(e, excludedDeviceUnverified)
+			continue
+		}
+		if dev != rootDev {
+			exclude(e, excludedCrossMount)
+			continue
+		}
+		// GUARD 3. Covered by something already counted → its bytes are in
+		// that total. Name the covering path: "excluded" without "by what" is a
+		// fact the operator cannot act on.
+		if covering, dup := coveredBy(counted, e.path); dup {
+			exclude(e, excludedUnderPrefix+covering)
+			continue
+		}
+		counted = append(counted, e)
+	}
+
+	var measured int64
+	for _, e := range counted {
+		measured += e.bytes
+	}
+
+	// GUARD 3 (continued) and GUARD 4 (pg once). PGSizeBytes measures the same
+	// bytes a du root over PGDATA measures, so exactly one of them may be
+	// added — and the payload says which, because an unstated choice between
+	// two overlapping measurements is a 3.37 GiB error nobody can audit.
+	pgDir := filepath.Clean(cfg.PGDataDir)
+	if cfg.PGDataDir == "" {
+		pgDir = DefaultPGDataDir
+	}
+	switch {
+	case coveredByAny(counted, pgDir):
+		r.PGSource = PGSourceDURoot
+	case s.PGSizeBytes >= 0:
+		r.PGSource = PGSourceSizeBytes
+		measured += s.PGSizeBytes
+	default:
+		r.PGSource = PGSourceNone
+	}
+
+	r.MeasuredBytes = measured
+	r.CountedRoots = len(counted)
+	r.ExcludedRoots = excluded
+
+	// THE CLAMP. Disjoint trees on one device cannot sum past that device's
+	// used total, so this branch is proof the set is wrong — and a wrong set is
+	// reported as a refusal, never as a negative gigabyte.
+	if measured > s.RootUsedBytes {
+		r.Status = ResidualUndefined
+		r.Reason = residualReasonOverlap
+		return r
+	}
+
+	r.Status = ResidualComputed
+	r.Bytes = s.RootUsedBytes - measured
+	return r
+}
+
+// coveredBy returns the counted path that contains p, if any. It is the guard-3
+// test, kept as its own function so the "which one" answer is produced by the
+// same code that decides "whether" — a reason that names a path the check did
+// not actually use is worse than no reason.
+func coveredBy(counted []spaceExtent, p string) (string, bool) {
+	for _, c := range counted {
+		if pathCovers(c.path, p) {
+			return c.path, true
+		}
+	}
+	return "", false
+}
+
+func coveredByAny(counted []spaceExtent, p string) bool {
+	_, ok := coveredBy(counted, p)
+	return ok
 }
 
 // gatherConsumerRoots measures every configured consumer root, in order, and
@@ -1378,26 +1731,32 @@ const sitesTopLimit = 10
 // box that is already struggling. That is the number to lower if the beat is
 // ever seen crowding a cutover — never the honesty.
 //
-// consumerTopLimit is 3 rather than the sites axis's 10 because it multiplies:
+// consumerTopLimit is 2 rather than the sites axis's 10 because it multiplies:
 // six roots at ten children each is sixty rows on a payload the sites axis
 // already budgets ten for. TestSpacePayloadStaysBounded marshals a real
 // jarl-shaped report and pins the resulting size, so this arithmetic is a
 // measurement rather than a hope.
 //
-// It came DOWN from 5 when the degraded names were added, and that direction is
-// the rule: at full caps the payload measured 5125 bytes against a 4096-byte
-// ceiling, and the ceiling is the thing that must not move. The bytes were
-// bought from the fifth and fourth child rather than from a root slot because a
-// root nobody measures is invisible while a fourth-biggest child is a detail —
-// and Count still reports how many children the walk found, so the shorter list
-// says it is short.
+// It came DOWN from 5 when the degraded names were added, and DOWN AGAIN from 3
+// when the residual was added — that direction is the rule, and it has now been
+// applied twice. At full caps the payload measured 5125 bytes when the degraded
+// names landed and 4128 when the residual did, both against a 4096-byte
+// ceiling, and the ceiling is the thing that must not move.
+//
+// The bytes are bought from the LAST CHILD, never from a root slot, and the
+// asymmetry is deliberate: a root nobody measures is invisible — it contributes
+// nothing to the residual and cannot be missed — while a third-biggest child is
+// a detail on a tree whose total and biggest two consumers are already named.
+// Count still reports how many children the walk found, so the shorter list
+// says it is short. Measured against the build-plane box's real shape, the top
+// two children of /var/lib/containerd carry 13.15 of its 13.17 GiB.
 // consumerDegradedLimit caps the NAMES a degraded root carries. Two is enough
 // to act on — an operator fixes a permission class, not 40 individual
 // directories — and DegradedCount still reports how many the walk hit, so the
 // cap announces itself instead of quietly deciding the shortfall was small.
 const (
 	consumerRootsLimit    = 6
-	consumerTopLimit      = 3
+	consumerTopLimit      = 2
 	consumerDegradedLimit = 2
 )
 
@@ -1414,6 +1773,11 @@ const (
 //
 // Two of the three do not exist on a content box, and one does not exist on the
 // build box. That asymmetry is why they report `absent` instead of vanishing.
+// DefaultPGDataDir is where Postgres lives on the fleet's boxes. It is used
+// ONLY to decide whether a configured du root already covers the database, so
+// pg is never counted twice — nothing walks it.
+const DefaultPGDataDir = "/var/lib/postgresql"
+
 var DefaultConsumerRoots = []string{
 	"/var/lib/containerd",
 	"/var/lib/barkpark-builder",
@@ -1562,7 +1926,25 @@ const (
 // in a single edit. That mechanical coupling is the fix — TestDuArgvAndParseUnitCannotDrift
 // pins it, so a future edit that changes only one side does not compile past a test.
 func duTreeArgs(dir string) ([]string, duUnit) {
-	const unit = duUnitHuman
+	// duUnitKiB, NOT duUnitHuman, and the residual is why. `du -h` ROUNDS UP,
+	// per root and SYSTEMATICALLY POSITIVE, and a residual is a SUBTRACTION of
+	// those roots — so the rounding does not average out, it accumulates into a
+	// phantom deficit that drives the residual negative.
+	//
+	// MEASURED ON THE BUILD-PLANE BOX, from its own live payload on
+	// 2026-09-01T20:33:42Z against `du -x -k -s` on the same trees minutes later:
+	//
+	//	root                        du -h landed   du -k exact    over by
+	//	/var/lib/containerd         15032385536    14136475648    +895 MB
+	//	/var/lib/barkpark-builder   11811160064    11575521280    +236 MB
+	//	/var/log/journal             2040109466     1971761152     +68 MB
+	//
+	// Every landed figure is an exact multiple of 0.1 GiB, which is the
+	// signature of a rounded string re-inflated by parseHumanBytes: the payload
+	// was reporting a PRECISION it never had. Three roots already cost 1.2 GiB
+	// of phantom; at consumerRootsLimit the error reaches several GiB on a
+	// 39 GiB box, which is larger than every other hazard on this axis combined.
+	const unit = duUnitKiB
 	return []string{"-n", "19", "ionice", "-c3", "du", "-" + string(unit) + "x", "-d1", dir}, unit
 }
 

@@ -223,7 +223,7 @@ check "active task passes"          0 'TASK_ID=active'
 check "open task fails"             1 'TASK_ID=openone'
 check "in_progress but unclaimed"   1 'TASK_ID=claimless'
 check "nonexistent task fails"      1 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
-check "garbled json is neutral"     2 'TASK_ID=garbled'
+check "garbled json is MALFORMED"   5 'TASK_ID=garbled'
 check "no task ref fails"           1 'TASK_ID='
 check "wrong worker fails"          1 'TASK_ID=active EXPECTED_WORKER=nobody'
 check "right worker passes"         0 'TASK_ID=active EXPECTED_WORKER=fable-tob'
@@ -362,12 +362,22 @@ else
   fi
 fi
 
-# -- A 200 that carries no document is UNCHECKED, never an accusation (D59) ---
+# -- A 200 that carries no document is its OWN verdict, exit 5 (D59 + 401 slice)
 # Both shapes used to print "task does not exist on the ledger" at a PR whose
 # task is fine. A genuine nonexistent task answers 404 and stays a definitive
 # red (`ghost`, above and below), so this reroute loses zero true detection.
-check_says "200 with result:null is UNCHECKED" 2 "carried no task document" 'TASK_ID=nullresult'
-check_says "200 with a bare doc is UNCHECKED"  2 "carried no task document" 'TASK_ID=baredoc'
+#
+# THEY WERE EXIT 2 UNTIL THIS SLICE, sharing the outage code with a ledger that
+# never answered — and therefore inheriting the outage SENTENCE about a ledger
+# that answered 2xx, promptly, having authenticated the caller. Exit 5 is
+# MALFORMED ANSWER: same block, but the only true cure ("the ledger's read path
+# is wrong") instead of two false ones ("wait for it to come up", "re-mint the
+# token"). The exit code is asserted alongside the words because the words are
+# what a blocked author reads and the code is what the workflow branches on.
+check_says "200 with result:null is MALFORMED" 5 "carried no task document" 'TASK_ID=nullresult'
+check_says "200 with a bare doc is MALFORMED"  5 "carried no task document" 'TASK_ID=baredoc'
+check_says "malformed says the ledger ANSWERED" 5 "not an outage" 'TASK_ID=nullresult'
+check_says "garbled json is MALFORMED"          5 "not valid JSON" 'TASK_ID=garbled'
 # ...and the 404 keeps the accusation WHEN WE READ AS OURSELVES, because there it
 # is TRUE: an authenticated read that gets 404 means the task really is not there.
 # Assert the words: an exit code alone cannot tell "does not exist" from "could
@@ -464,6 +474,160 @@ else fail=$((fail+1)); printf 'FAIL %-40s want exit 2 under 5s, got %s in %ss\n'
 # A retry count that is not a positive integer would make the bound test error
 # out, which reads as FALSE and retries forever — a gate that hangs instead of
 # deciding. Both knobs refuse bad input instead of guessing at one.
+# ── THE 2026-09-01 CLASS: A REFUSED CREDENTIAL IS NOT AN OUTAGE ──────────────
+# THE DEFECT. BARKPARK_TASK_TOKEN held a leaked instance-admin token; it was
+# revoked at 2026-09-01T20:26Z. Every ledger read this gate made then answered
+# HTTP 401, and fetch_doc classified 401 the way it classified a 500 — retry,
+# retry, exit 2 — so the required check `PR references an active task` reported
+# "The task ledger did not answer after the gate's bounded retries". The ledger
+# had answered every single time. Run 33555718748 attempt 1, verbatim:
+#   pr-task-gate: attempt 1/3 was indecisive (ledger returned HTTP 401 for
+#     spd-b3-dead-admin-shell-css); retrying in 2s
+#   pr-task-gate: attempt 2/3 was indecisive (ledger returned HTTP 401 ...)
+#   pr-task-gate: UNCHECKED: ledger returned HTTP 401 ... after 3 attempts
+#   ##[error]The task ledger did not answer after the gate's bounded retries ...
+#
+# A stub that REFUSES on two ids, ANSWERS on a third, and COUNTS requests per
+# path. All three properties are load-bearing:
+#   • refusing proves the new class exists;
+#   • answering proves the stub is not merely an always-red server, so a green
+#     on the refusal rows cannot be bought by a broken fixture;
+#   • counting is how "401 is not retried" is proven as a FACT about requests,
+#     not inferred from elapsed time (which a fast machine can fake).
+cat > "$fixtures/auth.py" <<'PY'
+import json
+from collections import defaultdict
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+seen = defaultdict(int)
+DOC = (b'{"result":{"_id":"authok","_type":"task","lifecycle_status":"in_progress",'
+       b'"claim":{"worker":"fable-tob","epoch":1}}}')
+
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # /count/<id> reports how many GETs that task id has taken. It is not a
+        # ledger route, so it can never be confused with one.
+        if self.path.startswith("/count/"):
+            n = seen["/v1/data/doc/production/task/" + self.path[len("/count/"):]]
+            body = str(n).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        seen[self.path] += 1
+        if self.path.endswith("/deny401"):
+            code, body = 401, b'{"error":{"code":"unauthorized"}}'
+        elif self.path.endswith("/deny403"):
+            code, body = 403, b'{"error":{"code":"forbidden"}}'
+        else:
+            code, body = 200, DOC
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+srv = HTTPServer(("127.0.0.1", 0), H)
+print(srv.server_address[1], flush=True)
+srv.serve_forever()
+PY
+python3 "$fixtures/auth.py" > "$fixtures/auth.port" 2>/dev/null &
+AUTH_PID=$!
+trap 'kill "${SRV_PID:-0}" "${FLAKY_PID:-0}" "${AUTH_PID:-0}" 2>/dev/null; wait "${SRV_PID:-0}" "${FLAKY_PID:-0}" "${AUTH_PID:-0}" 2>/dev/null; rm -rf "$fixtures"' EXIT
+auth_port=""
+for _ in $(seq 1 50); do
+  auth_port="$(head -1 "$fixtures/auth.port" 2>/dev/null || true)"
+  [ -n "$auth_port" ] && break
+  sleep 0.1
+done
+[ -n "$auth_port" ] || { echo "TEST HARNESS FAIL: the auth stub never announced a port" >&2; exit 99; }
+AUTH="http://127.0.0.1:$auth_port"
+
+# NON-VACUITY FIRST. If this row ever reds, every refusal row below is measuring
+# a broken stub rather than the classifier.
+check "auth stub answers a good id"   0 "TASK_ID=authok LEDGER_BASE=$AUTH LEDGER_TOKEN=harness-token"
+
+# CLASS 401 — its own exit code, and it must NAME the secret and the fix.
+check      "401 is exit 3, not 2"     3 "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+check_says "401 names the secret"     3 "BARKPARK_TASK_TOKEN" "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+check_says "401 says least-privilege" 3 "LEAST-PRIVILEGE app token with read,write scope"   "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+check_says "401 forbids the admin token" 3 "NEVER the instance admin token"   "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+check_says "401 says re-run will not fix" 3 "RE-RUNNING THIS CHECK WILL NOT CLEAR IT"   "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+# CLASS 403 — the same class, because a scoped-too-narrow token is the same
+# configuration fault as a revoked one and neither is fixed by waiting.
+check      "403 is exit 3 too"        3 "TASK_ID=deny403 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+check_says "403 names the secret"     3 "BARKPARK_TASK_TOKEN" "TASK_ID=deny403 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+
+# THE ANTI-REGRESSION, stated as an ABSENCE. The exact sentence the gate printed
+# on 2026-09-01 must not appear on a 401 — an exit code alone would not have
+# caught that day, because the code was "right" for the branch it took.
+: > "$fixtures/says.out"
+( TASK_ID=deny401 LEDGER_BASE="$AUTH" LEDGER_TOKEN=stale-token PR_TASK_GATE_RETRIES=3 bash "$GATE" )   > "$fixtures/says.out" 2>&1
+if grep -qiF -- 'did not answer' "$fixtures/says.out" || grep -qF -- 'UNCHECKED' "$fixtures/says.out"; then
+  fail=$((fail+1)); printf 'FAIL %-40s a refused credential still tells the outage story\n' "401 never says the ledger did not answer"
+else
+  pass=$((pass+1)); printf 'ok   %-40s (no outage story on a 401)\n' "401 never says the ledger did not answer"
+fi
+
+# NO RETRIES ON 401 — counted, not timed. `PR_TASK_GATE_RETRIES=3` with a 5s
+# delay: the pre-change gate made three requests and slept ten seconds; the
+# classifier makes exactly one and returns at once. The COUNT is the assertion
+# (a slow CI box cannot forge it); the elapsed time is a second, independent
+# witness on the same run.
+#
+# The stub's counter is CUMULATIVE across every row above, so this is a DELTA
+# around this one run, never an absolute. An absolute would have to be
+# re-derived by hand every time a case is added above it, and a check that only
+# survives because someone re-pins it is a chore — the first person to skip the
+# chore reds a correct gate and teaches its readers to dismiss it.
+before401="$(curl -s -m 5 "$AUTH/count/deny401" || echo x)"
+t401=$SECONDS
+( TASK_ID=deny401 LEDGER_BASE="$AUTH" LEDGER_TOKEN=stale-token \
+  PR_TASK_GATE_RETRIES=3 PR_TASK_GATE_RETRY_DELAY=5 bash "$GATE" ) >/dev/null 2>&1
+rc401=$?; el401=$((SECONDS - t401))
+after401="$(curl -s -m 5 "$AUTH/count/deny401" || echo y)"
+# A non-numeric read (the stub did not answer) leaves the delta as "-", which
+# fails the comparison LOUDLY rather than arithmetic-erroring into a `[` that
+# quietly says no.
+delta401="-"
+case "$before401$after401" in
+  ""|*[!0-9]*) : ;;
+  *) delta401=$((after401 - before401)) ;;
+esac
+if [ "$rc401" = "3" ] && [ "$delta401" = "1" ] && [ "$el401" -lt 5 ]; then
+  pass=$((pass+1)); printf 'ok   %-40s (exactly 1 request, %ss — three 5s retries were on offer)\n' "401 is never retried" "$el401"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s want exit 3, exactly 1 new request, under 5s; got exit %s delta %s in %ss\n' "401 is never retried" "$rc401" "$delta401" "$el401"
+fi
+
+# ── 5xx / TRANSPORT: the retry path is UNCHANGED, and now backs off ──────────
+# The retry budget was a FIXED sleep of PR_TASK_GATE_RETRY_DELAY seconds between
+# every attempt (2s, 2s by default): three requests inside five seconds, which
+# is the same request three times as far as a ledger shedding load under a
+# thirty-agent fleet is concerned. It now doubles. Two attempts at a 1s base
+# sleep 1s; THREE attempts sleep 1s then 2s = 3s, which a fixed-delay
+# implementation (1+1=2s) cannot reach. That gap is the whole assertion.
+tbk=$SECONDS
+( LEDGER_BASE="http://127.0.0.1:1" TASK_ID=active PR_TASK_GATE_RETRIES=3 PR_TASK_GATE_RETRY_DELAY=1 bash "$GATE" ) >/dev/null 2>&1
+rcbk=$?; elbk=$((SECONDS - tbk))
+if [ "$rcbk" = "2" ] && [ "$elbk" -ge 3 ]; then
+  pass=$((pass+1)); printf 'ok   %-40s (3 attempts at base 1s took %ss; a fixed delay would take 2s)\n' "retry backoff is EXPONENTIAL" "$elbk"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s want exit 2 and >=3s (1s+2s); got exit %s in %ss\n' "retry backoff is EXPONENTIAL" "$rcbk" "$elbk"
+fi
+
+# TIMEOUT / UNREACHABLE ACROSS EVERY RETRY still ends in the UNCHECKED (exit 2)
+# path, and its message must still be the outage one — this slice narrows what
+# reaches that arm, it does not empty it.
+check_says "transport dead all retries is UNCHECKED" 2 "could not be checked at all"   "TASK_ID=active LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=2 PR_TASK_GATE_RETRY_DELAY=0"
+check_says "permanent 5xx is still UNCHECKED"        2 "could not be checked at all"   "TASK_ID=perma500 LEDGER_BASE=$FLAKY PR_TASK_GATE_RETRIES=2 PR_TASK_GATE_RETRY_DELAY=0"
+
 check "zero retries is refused"       1 "TASK_ID=active PR_TASK_GATE_RETRIES=0"
 check "non-numeric retries refused"   1 "TASK_ID=active PR_TASK_GATE_RETRIES=lots"
 check "non-numeric delay refused"     1 "TASK_ID=active PR_TASK_GATE_RETRY_DELAY=soon"
@@ -641,6 +805,114 @@ judge "step verify: backed PR passes" 0 $? "PASS" "$so"
 ( GITHUB_STEP_SUMMARY="$fixtures/verify.summary" TASK_ID=openone LEDGER_BASE="$BASE" \
   run_step verify ) > "$so" 2>&1
 judge "step verify: violation still reds" 1 $? "FAIL" "$so"
+
+# -- verify step: ONE ARM PER CLASS, and the SUMMARY is the assertion ----------
+# Criterion 2 of the row this slice closes: "the step summary and ::error text
+# can no longer say 'the ledger did not answer' when the attempt lines show a
+# 401". An exit code cannot carry that — the workflow reds either way. So each
+# case below asserts the TITLED ANNOTATION and, separately, the bytes actually
+# written to $GITHUB_STEP_SUMMARY, which is the surface a blocked author reads.
+vsum="$fixtures/verify.summary"
+verify_step_case() { # verify_step_case <label> <want exit> <want in output> <env...>
+  local label="$1" want="$2" sub="$3"; shift 3
+  : > "$so"; : > "$vsum"
+  ( eval "GITHUB_STEP_SUMMARY=\"$vsum\" $* run_step verify" ) > "$so" 2>&1
+  local got=$?
+  # The summary FILE, not just the log: a `tee -a` that lost its redirect would
+  # keep the log green-looking and leave the check-run summary empty, which is
+  # the exact shape of the defect this gate spent an earlier slice removing.
+  cat "$vsum" >> "$so"
+  judge "$label" "$want" "$got" "$sub" "$so"
+}
+
+verify_step_case "step verify: 401 titles the SECRET" 1 \
+  "::error title=BARKPARK_TASK_TOKEN was REFUSED" \
+  "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token PR_TASK_GATE_RETRIES=3"
+verify_step_case "step verify: 401 says re-run wont fix" 1 \
+  "Re-running this check will NOT clear it" \
+  "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token PR_TASK_GATE_RETRIES=3"
+verify_step_case "step verify: 401 quotes the attempt" 1 \
+  "Evidence: pr-task-gate: MISCONFIGURED CREDENTIAL:" \
+  "TASK_ID=deny401 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token PR_TASK_GATE_RETRIES=3"
+verify_step_case "step verify: 403 takes the same arm" 1 \
+  "::error title=BARKPARK_TASK_TOKEN was REFUSED" \
+  "TASK_ID=deny403 LEDGER_BASE=$AUTH LEDGER_TOKEN=stale-token"
+verify_step_case "step verify: bad body has its own arm" 1 \
+  "::error title=Ledger answered with a payload this gate cannot read" \
+  "TASK_ID=nullresult LEDGER_BASE=$BASE"
+
+# THE HEADLINE ABSENCE. On 2026-09-01 this exact step, on a 401, wrote
+# "The task ledger did not answer after the gate's bounded retries" into the
+# check-run summary. It must now be unreachable from a 401, in the LOG and in
+# the SUMMARY FILE alike.
+: > "$so"; : > "$vsum"
+( GITHUB_STEP_SUMMARY="$vsum" TASK_ID=deny401 LEDGER_BASE="$AUTH" LEDGER_TOKEN=stale-token \
+  PR_TASK_GATE_RETRIES=3 run_step verify ) > "$so" 2>&1
+vrc=$?
+cat "$vsum" >> "$so"
+if [ "$vrc" != "1" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s step exited %s (want 1)\n' "step verify: 401 is never an outage story" "$vrc"
+elif grep -qF -- 'The task ledger did not answer' "$so"; then
+  fail=$((fail+1)); printf 'FAIL %-40s the 401 still reaches the outage message\n' "step verify: 401 is never an outage story"
+elif grep -qF -- 'Ledger unreachable' "$so"; then
+  fail=$((fail+1)); printf 'FAIL %-40s the 401 still wears the "Ledger unreachable" title\n' "step verify: 401 is never an outage story"
+else
+  pass=$((pass+1)); printf 'ok   %-40s (no outage story, in log or summary)\n' "step verify: 401 is never an outage story"
+fi
+
+# ...and the outage arm, when it IS a real outage, may no longer state its
+# claim bare: it must carry what the ledger actually returned on each attempt.
+# "The ledger did not answer" is a CLAIM; the attempt lines are the evidence,
+# and on 2026-09-01 they contradicted it in the same log while only the claim
+# reached the summary.
+: > "$so"; : > "$vsum"
+( GITHUB_STEP_SUMMARY="$vsum" TASK_ID=active LEDGER_BASE="http://127.0.0.1:1" \
+  PR_TASK_GATE_RETRIES=2 PR_TASK_GATE_RETRY_DELAY=0 run_step verify ) > "$so" 2>&1
+orc=$?
+osum="$(cat "$vsum")"
+if [ "$orc" != "1" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s step exited %s (want 1)\n' "step verify: outage QUOTES its attempts" "$orc"
+elif ! printf '%s' "$osum" | grep -qF -- 'Evidence — what the ledger actually returned on each attempt:'; then
+  fail=$((fail+1)); printf 'FAIL %-40s the summary states the claim with no evidence behind it\n' "step verify: outage QUOTES its attempts"
+elif ! printf '%s' "$osum" | grep -qF -- 'could not reach the ledger'; then
+  fail=$((fail+1)); printf 'FAIL %-40s the evidence clause is present but empty of attempt lines\n' "step verify: outage QUOTES its attempts"
+else
+  pass=$((pass+1)); printf 'ok   %-40s (summary carries the attempt lines)\n' "step verify: outage QUOTES its attempts"
+fi
+
+# -- THE SECRET-PROVENANCE COMMENT, asserted as text --------------------------
+# Criterion 3. The comment is the only place that records WHAT the secret holds,
+# and the 2026-09-01 incident was possible because the previous derivation
+# recorded that the secret EXISTED and never what was in it. Text assertions,
+# because a comment has no runtime behaviour to observe.
+prov_ok=1
+for _needle in \
+  'ci-pr-task-gate-2026-09-01' \
+  '2026-09-01T20:40Z' \
+  'read,write' \
+  'instance admin token'
+do
+  grep -qF -- "$_needle" "$WORKFLOW_ABS" || { prov_ok=0; printf '       | missing from %s: %s\n' "$WORKFLOW" "$_needle"; }
+done
+if [ "$prov_ok" = "1" ]; then
+  pass=$((pass+1)); printf 'ok   %-40s (label, date, scope and the prohibition)\n' "secret provenance is recorded"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s the provenance comment does not say what the secret holds\n' "secret provenance is recorded"
+fi
+
+# reland-check.yml reads the SAME secret. A 401 there must not read as a generic
+# "did not run" either — it is advisory, so the remedy is a ::warning that names
+# the secret rather than a red.
+RELAND="${PR_TASK_GATE_RELAND:-.github/workflows/reland-check.yml}"
+case "$RELAND" in /*) RELAND_ABS="$RELAND" ;; *) RELAND_ABS="$PWD/$RELAND" ;; esac
+if [ ! -f "$RELAND_ABS" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s %s not found\n' "reland-check classifies a 401 too" "$RELAND"
+elif grep -qF -- 'HTTP 401 from the ledger' "$RELAND_ABS" \
+  && grep -qF -- '::warning title=BARKPARK_TASK_TOKEN was REFUSED' "$RELAND_ABS"; then
+  pass=$((pass+1)); printf 'ok   %-40s (advisory ::warning names the secret)\n' "reland-check classifies a 401 too"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s a 401 there still folds into the generic DID NOT RUN warning\n' "reland-check classifies a 401 too"
+fi
 
 # -- cutoff step: three states, and UNKNOWN is not "old" ----------------------
 # A hermetic repo with one pre-gate commit and one post-gate commit, so the

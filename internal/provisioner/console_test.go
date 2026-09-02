@@ -2,6 +2,7 @@ package provisioner
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -83,6 +84,71 @@ func TestRedactConsoleLine(t *testing.T) {
 	got3 := redactConsoleLine("DATABASE_URL=ecto://u:p@h/db failed", nil)
 	if strings.Contains(got3, "ecto://u:p@h/db") {
 		t.Errorf("DATABASE_URL value not redacted: %q", got3)
+	}
+}
+
+// TestRedactConsoleLine_GenericSecretShapes is the proven-able-to-fail arm for
+// the console redactor's move off its six-name allowlist.
+//
+// BEFORE: redactConsoleLine ran envSecretConsoleRe, the literal alternation
+// (SECRET_KEY_BASE|BARKPARK_KEK_PREVIOUS|BARKPARK_KEK|BARKPARK_CLOAK_KEY|
+// PREVIEW_JWT_SECRET|DATABASE_URL), plus adminTokenRe (bp_admin_ ONLY) — and no
+// Bearer or ecto-userinfo clause at all. Run against that code this test fails
+// on FIVE of the six values below: only the DATABASE_URL assignment was caught.
+// Every one of them lands in the persisted, rendered provision_jobs.console.
+//
+// AFTER: the redaction is secretscrub.Line, shared with the SSH step runner and
+// the builder console, and all six redact.
+//
+// Every value here is synthetic — no real credential appears in this repo.
+func TestRedactConsoleLine_GenericSecretShapes(t *testing.T) {
+	in := "bootstrap narration: ANTHROPIC_API_KEY=sk-ant-synthetic0000000000 " +
+		"FLEET_LISTENER_TOKEN=synthetictoken1111111111 " +
+		"PGPASSWORD=syntheticpassword22222222 " +
+		"handle bp_read_syntheticREADTOKEN333 " +
+		"dsn ecto://u:syntheticPASS4444@h/db " +
+		"Authorization: Bearer syntheticbearer55555555"
+	got := redactConsoleLine(in, nil)
+
+	for _, leaked := range []string{
+		"sk-ant-synthetic0000000000",
+		"synthetictoken1111111111",
+		"syntheticpassword22222222",
+		"bp_read_syntheticREADTOKEN333",
+		"syntheticPASS4444",
+		"syntheticbearer55555555",
+	} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("the console redactor leaked %q into provision_jobs.console; got:\n%s", leaked, got)
+		}
+	}
+	// The KEY NAMES survive so a failed provision stays diagnosable.
+	for _, kept := range []string{
+		"ANTHROPIC_API_KEY=[REDACTED]",
+		"FLEET_LISTENER_TOKEN=[REDACTED]",
+		"PGPASSWORD=[REDACTED]",
+		"Bearer [REDACTED]",
+		"ecto://[REDACTED]@h/db",
+	} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("the console redactor dropped expected marker %q; got:\n%s", kept, got)
+		}
+	}
+}
+
+// TestRedactConsoleLine_KeepsKeyHandoffInstruction pins the ONE named
+// non-defect against the console path specifically. (*supportRun).verifyRuntime
+// narrates the PDF-D88 provider-key hand-off one-liner THROUGH redactConsoleLine
+// — a developer has to read and paste it. The six-name allowlist never matched
+// ANTHROPIC_API_KEY, so widening to a shape match is exactly the change that
+// could have destroyed the instruction; secretscrub's placeholder guard is what
+// stops it, and this asserts it on the real emitter's format string rather than
+// a copy.
+func TestRedactConsoleLine_KeepsKeyHandoffInstruction(t *testing.T) {
+	line := fmt.Sprintf("agent provider keys are NEVER copied — hand the box its %s key yourself: ssh root@%s \"printf '%s=<your-key>\\n' >> /etc/barkpark/fleet-listener.env && systemctl restart barkpark-fleet-listener\"",
+		"claude", "203.0.113.9", "ANTHROPIC_API_KEY")
+	if got := redactConsoleLine(line, nil); got != line {
+		t.Errorf("the key hand-off instruction was mangled by the console redactor:\n want: %s\n  got: %s", line, got)
 	}
 }
 
