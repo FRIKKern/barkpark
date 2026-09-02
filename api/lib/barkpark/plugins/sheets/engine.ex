@@ -155,9 +155,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       same-shape rectangles and sums (text/booleans/blanks count `0`; a shape
       mismatch or non-range argument is `#VALUE!`). `ADDRESS(row, col, [abs],
       [a1])` is pure string construction (`"$C$2"`; abs `1..4`, falsy `a1` →
-      R1C1 style). `INDIRECT`/`OFFSET`/`TRANSPOSE` stay out: a runtime-computed
-      reference can't join the statically-collected dependency graph, and
-      spill has no home in one-value-per-cell.
+      R1C1 style). `INDIRECT`/`OFFSET` stay out: a runtime-computed reference
+      can't join the statically-collected dependency graph. (`TRANSPOSE` was in
+      that exclusion list until spill shipped — it takes a LITERAL range, so its
+      dependencies collect statically like any other; it now lives in the array
+      tier below.)
     * Statistics — `MEDIAN`, `SMALL`/`LARGE` (kth smallest/largest),
       `PERCENTILE`/`QUARTILE` (linear interpolation between order statistics),
       `MODE` (most frequent value; `#N/A` when nothing repeats, ties broken by
@@ -195,11 +197,61 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       `rows*cols` beyond the array cap is `#NUM!`.
     * `COUNTUNIQUE(args…)` — the count of distinct non-blank values across its
       arguments (ranges, arrays and scalars).
+    * `TRANSPOSE(range)` — the genuinely 2-D one: rows become columns. Where
+      `UNIQUE`/`SORT`/`FILTER` flatten their source to a vector, `TRANSPOSE`
+      reads a RECTANGULAR grid, keeps blanks, and keeps an element error IN
+      PLACE (Excel transposes an error cell like any other value). An empty
+      source is `#VALUE!` and a result past the array cap is `#NUM!`.
+    * `VSTACK(range…)` / `HSTACK(range…)` — append grids down / across. A
+      ragged edge pads with `#N/A` (Excel), and those pads are GENERATED
+      element values — distinct from a source error, which rides through in
+      place. An argument that materialises to nothing contributes nothing;
+      all-empty is `#VALUE!`, past the cap is `#NUM!`.
 
   Blanks inside the array are dropped exactly as an aggregate drops blank
   range cells; an error value anywhere in the source propagates, as it does
   from a range. Consumed by every aggregate (`SUM`/`COUNTA`/…), by `AND`/`OR`,
   and by `TEXTJOIN` with the same flatten rules those apply to a range today.
+  The 2-D tier (`TRANSPOSE`/`VSTACK`/`HSTACK`) is the deliberate exception on
+  both counts: dropping a blank or collapsing on an error would change the
+  SHAPE, which is the only thing those three exist to preserve, so they keep
+  blanks and element errors positioned and let the consumer apply its own rule.
+
+  ## Aggregate selection and range-flattened text
+
+    * `CONCAT(value…)` — `CONCATENATE`'s modern replacement: identical text
+      coercion, but a RANGE or array argument is legal and flattens ROW-MAJOR
+      (`CONCATENATE` keeps its legacy `#VALUE!`-on-a-range rule). Blank cells
+      contribute `""` rather than being skipped — there is no delimiter to
+      double up, which is precisely why `TEXTJOIN` carries an ignore-empty flag
+      and `CONCAT` does not. An error in a source propagates; a result past
+      Excel's 32,767-character cell limit is `#VALUE!`.
+    * `SUBTOTAL(function_code, ref…)` — one of eleven aggregates chosen by
+      code: `1` AVERAGE, `2` COUNT, `3` COUNTA, `4` MAX, `5` MIN, `6` PRODUCT,
+      `7` STDEV, `8` STDEVP, `9` SUM, `10` VAR, `11` VARP; `101`-`111` are the
+      same eleven. A code outside both bands is `#VALUE!`.
+
+      **Two documented gaps, both structural, neither an oversight.** (1) In
+      Excel the `101`-`111` band additionally skips MANUALLY HIDDEN rows; this
+      engine has no row-visibility input at all, so `101`-`111` evaluate
+      IDENTICALLY to `1`-`11`. (2) Excel also skips a nested `SUBTOTAL` found
+      inside the referenced range, so stacked subtotals don't double-count;
+      `ctx.formulas` carries only the COORDINATES of formula cells, never their
+      formula text, so a nested `SUBTOTAL` is invisible here and IS counted.
+      Closing either needs a new input to `recompute/1`, not a new clause.
+
+      iex> cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}, "A3" => %{"v" => 3},
+      ...>   "B1" => %{"f" => "SUBTOTAL(9, A1:A3)"}, "B2" => %{"f" => "SUBTOTAL(109, A1:A3)"}}
+      iex> cells = Barkpark.Plugins.Sheets.Engine.recompute(%{"tabs" => [%{"cells" => cells}]})
+      ...>         |> get_in(["tabs", Access.at(0), "cells"])
+      iex> {cells["B1"]["v"], cells["B2"]["v"]}
+      {6, 6}
+
+      iex> cells = %{"A1" => %{"v" => "a"}, "B1" => %{"v" => "b"}, "A2" => %{"v" => "c"}}
+      iex> content = %{"tabs" => [%{"cells" => Map.put(cells, "D1", %{"f" => "CONCAT(A1:B2)"})}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "D1", "v"])
+      "abc"
 
   **Spill.** A formula whose TOP-LEVEL result is an array spills into a
   rows×cols rectangle anchored at the formula cell: the anchor keeps its `f`
@@ -421,7 +473,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS
                 XLOOKUP SUMPRODUCT ADDRESS
                 AVERAGEA MAXA MINA GEOMEAN HARMEAN MROUND QUOTIENT JOIN
-                NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC)
+                NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC
+                TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
@@ -751,6 +804,31 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         "COUNTUNIQUE",
         [farg("value1"), frest("value2")],
         "Counts the number of unique values in a dataset."
+      ),
+      fspec(
+        "TRANSPOSE",
+        [farg("range")],
+        "Flips a range's rows and columns."
+      ),
+      fspec(
+        "VSTACK",
+        [farg("range1"), frest("range2")],
+        "Stacks ranges vertically, padding short rows with #N/A."
+      ),
+      fspec(
+        "HSTACK",
+        [farg("range1"), frest("range2")],
+        "Stacks ranges horizontally, padding short columns with #N/A."
+      ),
+      fspec(
+        "CONCAT",
+        [farg("value1"), frest("value2")],
+        "Joins the text of its arguments, ranges flattened row by row."
+      ),
+      fspec(
+        "SUBTOTAL",
+        [farg("function_code"), farg("range1"), frest("range2")],
+        "Applies one of eleven aggregates, selected by a function code."
       ),
       fspec(
         "MOD",
@@ -3037,6 +3115,27 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
+  # CONCAT(value…) — CONCATENATE's modern replacement: same text coercion, but a
+  # RANGE or an intermediate array argument is legal and flattens ROW-MAJOR
+  # (CONCATENATE's `#VALUE!`-on-a-range rule is the legacy behaviour Excel kept
+  # for back-compat). Blank cells contribute "" (they are NOT skipped — there is
+  # no delimiter to double up, which is exactly why TEXTJOIN has an ignore-empty
+  # flag and CONCAT does not). An error anywhere in a source propagates, as it
+  # does from a range. A result past Excel's 32,767-character cell limit is
+  # #VALUE!.
+  defp call("CONCAT", args, ctx) when args != [] do
+    Enum.reduce_while(args, "", fn arg, acc ->
+      case concat_texts(arg, ctx) do
+        {:error, _} = e -> {:halt, e}
+        texts -> {:cont, acc <> Enum.join(texts)}
+      end
+    end)
+    |> case do
+      {:error, _} = e -> e
+      s when is_binary(s) -> if String.length(s) > 32_767, do: err(:value), else: s
+    end
+  end
+
   defp call("TEXTJOIN", [delim_ast, ignore_ast | rest], ctx) when rest != [] do
     with delim when is_binary(delim) <- eval_text(delim_ast, ctx),
          {:ok, ignore?} <- bool_arg(ignore_ast, ctx),
@@ -3771,6 +3870,32 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # SUBTOTAL(function_code, ref1, …) — the eleven aggregates behind one code.
+  # The whole point in Excel is the 1-11 / 101-111 split (101-111 additionally
+  # skip MANUALLY HIDDEN rows) plus the rule that a nested SUBTOTAL inside a ref
+  # is not counted twice. NEITHER is implementable here and both are DOCUMENTED
+  # GAPS, not oversights (see the moduledoc): the engine has no row-visibility
+  # input at all, and `ctx.formulas` carries only the COORDINATES of formula
+  # cells — never their formula text — so a nested SUBTOTAL inside a range is
+  # invisible to this clause and IS double-counted. Codes 1-11 and 101-111 are
+  # therefore evaluated identically. A code outside both bands (or a text code)
+  # is #VALUE!, as Excel does.
+  defp call("SUBTOTAL", [code_ast | refs], ctx) when refs != [] do
+    case eval_number(code_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      n when is_number(n) ->
+        case subtotal_target(trunc(n)) do
+          nil -> err(:value)
+          name -> call(name, refs, ctx)
+        end
+
+      _ ->
+        err(:value)
+    end
+  end
+
   # SPARKLINE(range | scalar) -> a unicode block-bar string (`▁▂▃▄▅▆▇█` scaled
   # over min..max). Reads numeric cells in reading order (row-major), skipping
   # blanks and text exactly like the aggregates; any error in the range
@@ -3863,6 +3988,33 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       _ -> err(:value)
     end
   end
+
+  # TRANSPOSE(range | array) — flip rows and columns. Unlike UNIQUE/SORT/FILTER
+  # (which flatten to a vector) this is genuinely 2-D, so it reads the argument
+  # through `array_grid/2`: a rectangular, row-major grid that KEEPS blanks and
+  # keeps element errors IN PLACE (Excel transposes an error cell like any other
+  # value, and the spill writer types each element through `output/1`). An empty
+  # source — an all-blank range has no occupied cells to bound a rectangle with
+  # — is #VALUE!, and a result past the array cap is #NUM!.
+  defp call("TRANSPOSE", [ast], ctx) do
+    with {:ok, rows} <- array_grid(ast, ctx) do
+      cond do
+        rows == [] -> err(:value)
+        grid_area(rows) > @array_cap -> err(:num)
+        true -> {:array, Enum.zip_with(rows, & &1)}
+      end
+    end
+  end
+
+  # VSTACK(range…) / HSTACK(range…) — append grids along one axis. Excel pads a
+  # ragged edge with #N/A, and those pads are GENERATED element values (they ride
+  # into the spilled rectangle as error cells), distinct from a source error,
+  # which propagates in place like every other array element. An argument that
+  # materialises to nothing (an all-blank range) contributes no rows/columns;
+  # all-empty is #VALUE!, and a result past the array cap is #NUM!.
+  defp call("VSTACK", args, ctx) when args != [], do: stack(args, ctx, :vertical)
+
+  defp call("HSTACK", args, ctx) when args != [], do: stack(args, ctx, :horizontal)
 
   defp call("COUNTUNIQUE", args, ctx) when args != [] do
     Enum.reduce_while(args, [], fn ast, acc ->
@@ -4909,6 +5061,110 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp sort_key(s) when is_binary(s), do: {1, String.downcase(s)}
   defp sort_key(b) when is_boolean(b), do: {2, bool_rank(b)}
   defp sort_key(other), do: {3, other}
+
+  # ── 2-D array helpers (TRANSPOSE / HSTACK / VSTACK / CONCAT) ────────────────
+  #
+  # `array_grid/2` is the 2-D counterpart of `raw_flat`/`array_vector`: it
+  # materialises an argument as a RECTANGULAR row-major grid instead of a
+  # vector, so the shape survives (that is the whole point of TRANSPOSE and the
+  # stackers). Blanks stay as the `:blank` sentinel and element errors stay in
+  # place; only a whole-argument error (an unevaluable non-range AST) short-
+  # circuits, matching how `eval` already reports one. An empty range answers
+  # `{:ok, []}` — the caller decides whether that is #VALUE! or simply nothing
+  # to append.
+
+  defp array_grid({:range, p1, p2, _bounds}, ctx), do: array_grid({:range, p1, p2}, ctx)
+
+  defp array_grid({:range, p1, p2}, ctx), do: {:ok, range_grid(p1, p2, ctx)}
+
+  defp array_grid({:ref, pos}, ctx), do: {:ok, [[cell_at(pos, ctx)]]}
+
+  defp array_grid(ast, ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      {:array, rows} -> {:ok, rows}
+      :blank -> {:ok, [[:blank]]}
+      other -> {:ok, [[other]]}
+    end
+  end
+
+  defp grid_width([]), do: 0
+  defp grid_width([row | _]), do: length(row)
+
+  defp grid_area(rows), do: length(rows) * grid_width(rows)
+
+  # HSTACK/VSTACK's shared core. Empty grids drop out (nothing to append), a
+  # ragged edge pads with #N/A, and the assembled rectangle is cap-checked.
+  defp stack(args, ctx, axis) do
+    grids = Enum.map(args, &array_grid(&1, ctx))
+
+    case Enum.find(grids, &match?({:error, _}, &1)) do
+      {:error, _} = e ->
+        e
+
+      nil ->
+        case grids |> Enum.map(fn {:ok, g} -> g end) |> Enum.reject(&(&1 == [])) do
+          [] -> err(:value)
+          kept -> assemble(kept, axis)
+        end
+    end
+  end
+
+  defp assemble(grids, :vertical) do
+    width = grids |> Enum.map(&grid_width/1) |> Enum.max()
+    capped(Enum.flat_map(grids, fn g -> Enum.map(g, &pad_row(&1, width)) end))
+  end
+
+  defp assemble(grids, :horizontal) do
+    height = grids |> Enum.map(&length/1) |> Enum.max()
+
+    grids
+    |> Enum.map(fn g -> pad_grid(g, height) end)
+    |> Enum.zip_with(&Enum.concat/1)
+    |> capped()
+  end
+
+  defp capped(rows), do: if(grid_area(rows) > @array_cap, do: err(:num), else: {:array, rows})
+
+  defp pad_row(row, width), do: row ++ List.duplicate(err(:na), width - length(row))
+
+  defp pad_grid(grid, height) do
+    grid ++ List.duplicate(List.duplicate(err(:na), grid_width(grid)), height - length(grid))
+  end
+
+  # CONCAT's per-argument text list: the argument's grid read ROW-MAJOR, blanks
+  # rendered "" (never skipped), a source error short-circuiting the whole call.
+  defp concat_texts(ast, ctx) do
+    case array_grid(ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      {:ok, rows} ->
+        vals = List.flatten(rows)
+
+        case Enum.find(vals, &match?({:error, _}, &1)) do
+          {:error, _} = e -> e
+          nil -> Enum.map(vals, &to_text/1)
+        end
+    end
+  end
+
+  # SUBTOTAL's function-code table. 1-11 and 101-111 both land on the same
+  # aggregate: the 100-band's hidden-row exclusion needs a row-visibility input
+  # the engine does not have (documented gap, moduledoc §Aggregate selection).
+  defp subtotal_target(code) when code in 101..111, do: subtotal_target(code - 100)
+  defp subtotal_target(1), do: "AVERAGE"
+  defp subtotal_target(2), do: "COUNT"
+  defp subtotal_target(3), do: "COUNTA"
+  defp subtotal_target(4), do: "MAX"
+  defp subtotal_target(5), do: "MIN"
+  defp subtotal_target(6), do: "PRODUCT"
+  defp subtotal_target(7), do: "STDEV"
+  defp subtotal_target(8), do: "STDEVP"
+  defp subtotal_target(9), do: "SUM"
+  defp subtotal_target(10), do: "VAR"
+  defp subtotal_target(11), do: "VARP"
+  defp subtotal_target(_), do: nil
 
   # SEQUENCE's optional cols/start/step, each defaulting when absent.
   defp seq_arg(rest, idx, default, ctx) do

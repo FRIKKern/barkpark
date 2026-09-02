@@ -166,7 +166,50 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           "B11" => %{"v" => "#REF!", "t" => "e"},
           "C11" => %{"v" => "#CYCLE!", "t" => "e"},
           # A 60-char string — long-cell probe (width math / truncation seams).
-          "A12" => %{"v" => "sixty-character-wide-cell-padding-parity-lock-XYZ-0123456789"}
+          "A12" => %{"v" => "sixty-character-wide-cell-padding-parity-lock-XYZ-0123456789"},
+          # Rows 13-15 — the everyday-function batch (TRANSPOSE / CONCAT /
+          # SUBTOTAL / HSTACK / VSTACK, plus SEQUENCE's 2-D arity). Each `v` is
+          # the REAL Engine output for its `f`, so every surface renders a value
+          # the engine can actually produce. Deliberate constraints, so the
+          # additions can never disturb a pre-existing case:
+          #   * columns A..E only — the grid stays 5 wide, so every existing
+          #     row array is byte-identical after the regen;
+          #   * NO cell of type "e" — `error_refs` is asserted EXACTLY (six
+          #     entries) in golden_parity_fixture_test.exs, so an error cell here
+          #     would red a lock that has nothing to do with this batch;
+          #   * rows 13+ sit outside every cond_format range (cf-gt B2:B10,
+          #     cf-overlap B2:C8, cf-compose A4, cf-head A1:D1), so the composed
+          #     `styles` map is unchanged.
+          # A13 is CONCAT over a RANGE — the single thing CONCATENATE refuses.
+          "A13" => %{"f" => "=CONCAT(B10:D10)", "v" => "159", "t" => "s"},
+          # B13/C13 pin the DOCUMENTED SUBTOTAL gap in the fixture itself: code
+          # 9 and code 109 must render the SAME 15, because this engine has no
+          # row-visibility input to make the 101-band skip hidden rows.
+          "B13" => %{"f" => "=SUBTOTAL(9, B10:D10)", "v" => 15, "t" => "n"},
+          "C13" => %{"f" => "=SUBTOTAL(109, B10:D10)", "v" => 15, "t" => "n"},
+          # D13 vs E13: TRANSPOSE really flips (1;3;2;4) where VSTACK of the same
+          # two rows preserves reading order (1;2;3;4) — the pair is the lock.
+          "D13" => %{
+            "f" => "=TEXTJOIN(\";\", 0, TRANSPOSE(A14:B15))",
+            "v" => "1;3;2;4",
+            "t" => "s"
+          },
+          "E13" => %{
+            "f" => "=TEXTJOIN(\";\", 0, VSTACK(A14:B14, A15:B15))",
+            "v" => "1;2;3;4",
+            "t" => "s"
+          },
+          # The 2x2 source the three array cases above and C14 below read.
+          "A14" => %{"v" => 1, "t" => "n"},
+          "B14" => %{"v" => 2, "t" => "n"},
+          "C14" => %{"f" => "=SUM(HSTACK(A14:A15, B14:B15))", "v" => 10, "t" => "n"},
+          "D14" => %{
+            "f" => "=TEXTJOIN(\";\", 0, SEQUENCE(2, 3))",
+            "v" => "1;2;3;4;5;6",
+            "t" => "s"
+          },
+          "A15" => %{"v" => 3, "t" => "n"},
+          "B15" => %{"v" => 4, "t" => "n"}
         }
       },
       %{"name" => "Extra", "cells" => %{"A1" => %{"v" => "tab2"}}}
