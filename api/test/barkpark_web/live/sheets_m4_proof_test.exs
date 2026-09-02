@@ -107,6 +107,22 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
     if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
   end
 
+  # A peer's NAME is rendered in exactly one place: the `.sheet-peer-tag`
+  # span inside the presence overlay ([data-test-id="sheet-peer-layer"],
+  # sheet_grid.ex peer_layer/1), and the whole layer disappears once the
+  # last peer leaves. Refuting a short name against the WHOLE rendered
+  # document is therefore a coin flip, not a check: the document also
+  # carries LiveView's random base64url root id, and `phx-GMYBobnrrpWUuvZB`
+  # contains the literal substring "Bob" — one such draw red-flagged a PR
+  # that never touched sheets. Scope every peer-NAME refutation to this
+  # helper; class-name refutations ("sheet-peer-tag", "sheet-peer-editing")
+  # carry no collision risk and stay whole-document, which is stronger.
+  # Absent layer renders as "" so `eventually` retries instead of raising.
+  defp peer_layer(view) do
+    selector = ~s([data-test-id="sheet-peer-layer"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+  end
+
   defp peer_selection(view, range) do
     selector = ~s(.sheet-peer-sel[data-peer-range="#{range}"])
     if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
@@ -277,14 +293,14 @@ defmodule BarkparkWeb.SheetsM4ProofTest do
     refute reader_now =~ "sheet-peer-tag"
 
     # ── 7. Ola disconnects — his cursor vanishes, no ghosts ────────────────
-    eventually(fn -> assert render(kari) =~ "Ola" end)
+    eventually(fn -> assert peer_layer(kari) =~ "Ola" end)
 
     Process.flag(:trap_exit, true)
     GenServer.stop(ola.pid)
 
     eventually(fn ->
       html = render(kari)
-      refute html =~ "Ola"
+      refute peer_layer(kari) =~ "Ola"
       refute html =~ "sheet-peer-tag"
       refute html =~ "sheet-peer-sel"
     end)
