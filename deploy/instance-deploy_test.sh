@@ -154,7 +154,7 @@ exit 0
 EOF
   cat > "$dir/mix" <<'EOF'
 #!/usr/bin/env bash
-echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}]" >> "$MIXLOG"
+echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}] [BARKPARK_DB_STATEMENT_TIMEOUT=${BARKPARK_DB_STATEMENT_TIMEOUT-unset}]" >> "$MIXLOG"
 # MIX_FAIL=<subcommand> fails exactly that step (e.g. compile -> exit 12,
 # ecto.migrate -> exit 13): the build-failure half of the slot-stamp ordering.
 [ -n "${MIX_FAIL:-}" ] && [ "$1" = "${MIX_FAIL}" ] && exit 1
@@ -343,6 +343,8 @@ check "green root built"                  "[ -f '$APP/api/_build_green/prod/MARK
 check "blue root never created/touched"   "[ ! -e '$APP/api/_build_blue' ]"
 check "build used MIX_BUILD_ROOT=_build_green" "grep -q 'MIX_BUILD_ROOT=_build_green' '$MIXLOG'"
 check "exactly one clean build (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
+check "migrate runs with the statement timeout OFF" "grep -q 'ecto.migrate .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG'"
+check "the build steps do NOT inherit that export"  "! grep -E 'mix (deps.get|deps.compile|compile) .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG' >/dev/null"
 check "slot env files written"            "grep -q 'BARKPARK_PORT_OVERRIDE=4001' '$APP/.slots/green.env' && grep -q '_build_blue' '$APP/.slots/blue.env'"
 check "green slot booted"                 "grep -q 'restart barkpark-slot@green' '$SYSCTLLOG'"
 check "Caddy flipped to :4001"            "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
