@@ -1117,6 +1117,17 @@ defmodule PDS.Census do
   # body-identical RENAME. `anchor_mfa` catches the rename and is blind to a body edit
   # under a stable name. Neither alone is the arm.
   #
+  # THE ARM HAS NOW FIRED ON UNSEEN WORK, WHICH IS THE POINT (ct-bl-plan-paper-parity).
+  # It was shipped against a staleness already known; the ChatController.approval/2 row is
+  # the first it caught PROSPECTIVELY. A feature commit that touches no census file added a
+  # PlanPapers.publish_approved_plan/3 call inside that def; the LITERAL this row anchors on
+  # survived byte-for-byte, so ROSTER-ANCHORS-EXIST printed PASS exactly as it did over the
+  # two false verdicts of wave 39, and only `def_fp` moved (121603508 -> 99902146). The
+  # demotion is the whole mechanism working: the row was re-judged by hand against the new
+  # def, the verdict came back UNCHANGED, and the note now carries the third unread outcome.
+  # A CONFIRMED-UNCHANGED VERDICT IS NOT A WASTED RED — the alternative is a row that keeps
+  # asserting two reasons for a def that has three, which is the drift this arm exists for.
+  #
   # THE TWO REFUTED ROWS BELOW WERE RE-DERIVED AGAINST MERGED MAIN in the same wave that
   # shipped the arm, and both are now PROVEN: the callees were widened to report their own
   # outcome and both callers answer over it. The verdicts and notes recorded here are
@@ -1139,9 +1150,9 @@ defmodule PDS.Census do
       note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs:129 posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
-      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "121603508",
+      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "99902146",
       verdict: "UNJUDGED", basis: :unjudged_other,
-      note: "both arms of update_approval_status fold to :ok, and answer_approval's result is discarded with `_ =`."},
+      note: "RE-DERIVED on ct-bl-plan-paper-parity, which grew the enclosing approval/2 a third unread outcome and moved def_fp 121603508 -> 99902146; ROSTER-VERDICT-FRESH demoted the row to UNJUDGED and this is the re-derivation it asked for. THE VERDICT IS UNCHANGED and its basis is now THREEFOLD, not two: both arms of update_approval_status fold to :ok, answer_approval's result is discarded with `_ =`, and the newly added PlanPapers.publish_approved_plan/3 sits last in the `with` body where nothing reads its return either. The third one is DELIBERATE and does not worsen the row: the Paper projection is fire-and-forget by design (a publish miss must not fail a flip that already happened and a 204 that already stands), and it is declared as such in the clause comment above the call. What this row has always said still holds — the 204 reports the flip without reading a stored row back."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "persist_user_turn(id, content)",
       anchor_mfa: "BarkparkWeb.ChatController.create_message/2", def_fp: "83487517",

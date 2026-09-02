@@ -77,7 +77,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{Attachments, FleetHub, QuestionAnswer, Recorder, Runtime}
+  alias Barkpark.StudioChat.{Attachments, FleetHub, PlanPapers, QuestionAnswer, Recorder, Runtime}
   alias BarkparkWeb.ErrorResponse
 
   # Wire bounds (charter "Security, validation, and transport verification
@@ -332,6 +332,20 @@ defmodule BarkparkWeb.ChatController do
           {:ok, _message} -> :ok
           {:error, :not_found} -> :ok
         end
+
+        # studio-chat D49, adopted into this transport (ct-bl-plan-paper-parity):
+        # an ALLOWED plan row grows up into a published Paper. Before this, the
+        # projection was a Studio-LiveView-only defp, so a TUI-origin allow flipped
+        # the card on BOTH surfaces (update_approval_status is role-agnostic) but
+        # left the Paper — and its "→ published as Paper" link — un-created: a
+        # colleague watching in Studio saw the same approved plan with a different
+        # durable artifact depending on WHO clicked Allow. The seam is the ONE owner
+        # (the LiveView delegates to it too), it reads the server-held plan markdown
+        # itself, and it is idempotent by slug, so a re-allow updates one Paper and
+        # never mints a second. Fire-and-forget inside: the 204 below never waits on
+        # it and never fails because of it, and every non-plan / denied / blank-plan
+        # ask is a documented no-op.
+        PlanPapers.publish_approved_plan(id, request_id, decision)
       end
 
       send_resp(conn, :no_content, "")

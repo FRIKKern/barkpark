@@ -3370,10 +3370,38 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # reuses the module-level plan_ask/2 helper from the proposed-plan describe
     @d49_plan_md "# Ship the migration\n\nSteps:\n\n1. Inventory\n2. Port\n3. Delete the shim"
 
+    # In production the Recorder persists every permission ask BEFORE any surface
+    # renders it (see the `{:claude_chat_permission, _}` handler: "The Recorder
+    # already persisted the pending row"). These tests inject the ask straight
+    # into the LiveView, bypassing the Recorder — so they must seed the row it
+    # would have written. That row is not decoration: since
+    # `PlanPapers.publish_approved_plan/3` became the ONE owner of the D49 side
+    # effect (shared with `POST /v1/chat/sessions/:id/approval`), it is the
+    # SERVER-HELD source the projection reads (`metadata.input["plan"]`, D7) and
+    # the row the paper id/url is stamped onto. Reading the socket's in-memory
+    # copy instead is exactly what made a TUI-origin allow publish nothing.
+    defp persist_ask(sid, request_id, role, tool_name, input, markdown) do
+      {:ok, _} =
+        StudioChat.append_message(sid, %{
+          role: role,
+          source_markdown: markdown,
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => tool_name,
+            "input" => input,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    defp persist_plan_ask(sid, request_id, plan),
+      do: persist_ask(sid, request_id, "plan", "ExitPlanMode", %{"plan" => plan}, plan)
+
     test "approving a plan publishes a real published Paper and the card links to it",
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
+      persist_plan_ask(sid, "plan-pub", @d49_plan_md)
       send(view.pid, plan_ask("plan-pub", @d49_plan_md))
       render(view)
 
@@ -3399,6 +3427,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # card grows its "→ published as Paper" link pointing at /papers/:slug
       await(fn -> render(view) =~ "published as Paper" end)
       assert render(view) =~ ~s(href="/papers/#{slug}")
+
+      # …and the stamp lands on the SHARED row, not just this socket — the same
+      # persisted paper_id/paper_url a TUI-origin allow produces, which is what
+      # makes the two origins converge instead of diverge.
+      row = Enum.find(StudioChat.list_messages(sid), &(&1.metadata["request_id"] == "plan-pub"))
+      assert row.metadata["paper_id"] == slug
+      assert row.metadata["paper_url"] == "/papers/#{slug}"
     end
 
     test "the {:plan_paper} broadcast stamps the link on a co-viewing tab (converge)",
@@ -3428,6 +3463,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
+      # a REAL, publishable plan row exists — the ONLY thing stopping the Paper is
+      # the deny, so the "no paper" below cannot pass for want of a row
+      persist_plan_ask(sid, "plan-keep2", @d49_plan_md)
       send(view.pid, plan_ask("plan-keep2", @d49_plan_md))
       render(view)
 
@@ -3446,6 +3484,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
+
+      # the row exists and is ALLOWED — only its role (not its absence) withholds
+      # the Paper
+      persist_ask(sid, "appr-1", "approval", "Write", %{"file_path" => "/opt/x"}, "Allow Write?")
 
       send(
         view.pid,
