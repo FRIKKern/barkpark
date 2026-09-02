@@ -1369,10 +1369,26 @@ func TestBuildBodyDocCreateStdinAndUnusedPipe(t *testing.T) {
 		}
 	})
 
+	// CONTRACT CHANGED DELIBERATELY (S2 #20, task-19b7ca7ff92fb710). This arm
+	// used to assert that buildBody REFUSED here — exit 2, "piped stdin is
+	// unused; pass --file - to consume it". bp no longer aborts because of a
+	// stdin it does not read: the pipe is REPORTED on stderr by
+	// unusedStdinNotice (asserted, message and all, in
+	// TestUnusedStdinNoticeContract and TestRunCommandWarnsOnUnusedStdinAndStillSends)
+	// and the write proceeds with the body it actually had. The old refusal
+	// aborted every iteration of a `while read … done < ids.txt` loop, where
+	// the loop and bp share fd 0, while the reads around it succeeded — the
+	// silence this row exists to remove, wearing an error's clothes. What is
+	// PINNED here, and is the half that must never regress, is that the pipe is
+	// not silently swallowed INTO the body: the request carries the declared
+	// args only.
 	withPipe(`{"title":"ignored"}`, func() {
-		_, _, _, err := buildBody(cmd, map[string][]string{}, map[string]string{"type": "paper"})
-		if err == nil || !strings.Contains(err.Error(), "piped stdin is unused") || !strings.Contains(err.Error(), "--file -") {
-			t.Fatalf("unused piped stdin error = %v", err)
+		body, _, _, err := buildBody(cmd, map[string][]string{}, map[string]string{"type": "paper"})
+		if err != nil {
+			t.Fatalf("an unread piped stdin must not abort the write: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("unused piped stdin leaked into the body: %s, want %s", body, want)
 		}
 	})
 
@@ -1510,10 +1526,14 @@ func TestBuildBodyEmptyPipeStdin(t *testing.T) {
 		}
 	})
 
-	t.Run("non-empty pipe on a command without --file trips honestly", func(t *testing.T) {
-		// doc.patch's manifest declares flags [set] only — the guard must
-		// still trip on real unused data, but must NOT recommend --file,
-		// which this command's parser rightly rejects.
+	t.Run("non-empty pipe on a command without --file reports honestly", func(t *testing.T) {
+		// CONTRACT CHANGED DELIBERATELY (S2 #20, task-19b7ca7ff92fb710): this
+		// arm asserted a REFUSAL ("piped stdin is unused and doc patch does not
+		// accept --file"). It is now a NOTICE with the same two properties the
+		// refusal was bought for — it fires on real unused data, and it does
+		// NOT recommend --file, which this command's parser rightly rejects —
+		// while the mutation itself proceeds. doc.patch's manifest declares
+		// flags [set] only.
 		docPatch := manifest.Command{
 			ID: "doc.patch", Noun: "doc", Verb: "patch", Writes: true, MutationOp: "patch", SetKey: "set",
 			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
@@ -1534,12 +1554,23 @@ func TestBuildBodyEmptyPipeStdin(t *testing.T) {
 		t.Cleanup(func() { _ = r.Close() })
 		swapStdin(t, r)
 
-		_, err = runBuildBody(t, docPatch, map[string][]string{"set": {"title=x"}}, map[string]string{"type": "paper", "id": "p1"})
-		if err == nil || !strings.Contains(err.Error(), "piped stdin is unused") {
-			t.Fatalf("non-empty unused pipe must still trip the guard, got: %v", err)
+		body, err := runBuildBody(t, docPatch, map[string][]string{"set": {"title=x"}}, map[string]string{"type": "paper", "id": "p1"})
+		if err != nil {
+			t.Fatalf("an unread piped stdin must not abort the mutation: %v", err)
 		}
-		if strings.Contains(err.Error(), "--file -") {
-			t.Fatalf("guard must not recommend --file for doc patch (manifest declares no file flag): %v", err)
+		if !strings.Contains(string(body), `"title":"x"`) {
+			t.Fatalf("the --set payload did not survive the pipe: %s", body)
+		}
+		if strings.Contains(string(body), "ignored") {
+			t.Fatalf("the unused pipe was swallowed into the body: %s", body)
+		}
+
+		notice := unusedStdinNotice(docPatch, map[string][]string{"set": {"title=x"}}, map[string]string{"type": "paper", "id": "p1"})
+		if !strings.Contains(notice, "piped stdin is unused") {
+			t.Fatalf("non-empty unused pipe must still be reported, got: %q", notice)
+		}
+		if strings.Contains(notice, "--file -") {
+			t.Fatalf("notice must not recommend --file for doc patch (manifest declares no file flag): %q", notice)
 		}
 	})
 }

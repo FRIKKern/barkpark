@@ -81,12 +81,47 @@ type clientTransport struct {
 	c *apiclient.Client
 }
 
-// NewHTTPTransport builds the real Transport for baseURL + data-plane bearer
-// token (cfg.Token — NEVER the control-plane CloudToken, charter D3; apiclient
-// has no CloudToken field, so "only the data-plane token can be sent" is
-// structurally guaranteed).
-func NewHTTPTransport(baseURL, token string) Transport {
-	return &clientTransport{c: apiclient.New(apiclient.Config{BaseURL: baseURL, Token: token})}
+// NewHTTPTransport builds the real Transport for the resolved connection: the
+// base URL plus the data-plane bearer token (cfg.Token — NEVER the
+// control-plane CloudToken, charter D3; apiclient has no CloudToken field, so
+// "only the data-plane token can be sent" is structurally guaranteed).
+//
+// The SCOPE is handed to the wire client too, even though the /v1/chat routes
+// are flat and token-scoped and never read it (D3/D21). That is deliberate:
+// apiclient.New substitutes default/default/production for an empty scope, so a
+// client built without it reports "workspace default, dataset production" no
+// matter what the operator configured. Passing the resolved scope makes what
+// the client CARRIES equal to what the CLI RESOLVED, which is the only way
+// Connection below can be an honest witness instead of a constant.
+func NewHTTPTransport(cfg Config) Transport {
+	return &clientTransport{c: apiclient.New(apiclient.Config{
+		BaseURL:   cfg.BaseURL,
+		Token:     cfg.Token,
+		Workspace: cfg.Workspace,
+		Project:   cfg.Project,
+		Dataset:   cfg.Dataset,
+	})}
+}
+
+// Connection reports what this transport ACTUALLY dials — read off the live
+// apiclient.Client, never off the Config it was built from. It is the witness
+// the context band reconciles against (context.go): if the client were ever
+// built against a different server or a different scope than the config named,
+// the launch screen says so instead of echoing the config back.
+//
+// The scope it returns is the client's EFFECTIVE scope, apiclient's silent
+// default substitution included — that substitution is exactly the fact worth
+// surfacing, and hiding it here would put it back beyond reach.
+func (t *clientTransport) Connection() Connection {
+	if t == nil || t.c == nil {
+		return Connection{}
+	}
+	return Connection{
+		Endpoint:  t.c.BaseURL(),
+		Workspace: t.c.Workspace,
+		Project:   t.c.Project,
+		Dataset:   t.c.Dataset,
+	}
 }
 
 func (t *clientTransport) CreateSession() (Session, error) {

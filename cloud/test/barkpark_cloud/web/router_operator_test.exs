@@ -12,6 +12,17 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
   writes and nothing else (never a team-scoped alert row, never an identity
   email), the fleet shape, and the warm-pool shape.
 
+  §2b is the PRINCIPAL BOUNDARY (isu-backlog-operator-principal): the fleet kill
+  switch has one human principal — the platform operator — and the two doors are
+  DISJOINT. A worker token is refused on `/v1/operator/autoupdate*` (401: it is
+  not a session, so authentication fails before the allowlist is consulted), an
+  operator session is refused on `/v1/admin/autoupdate*` (401: it is not the
+  worker secret), a foreign team's OWNER passes neither, and no refused call ever
+  moves the switch. The positive side of this ruling — that `bp cloud rollout`
+  now knocks on the operator door with the caller's session — is pinned in
+  `internal/cli/cloud_autoupdate_cmd_test.go` and
+  `internal/cloudclient/autoupdate_test.go`.
+
   RETRACTED (cch-w56-s3): this moduledoc used to say the deliveries surface
   "exposes ONLY nil-team `fleet_digest` rows". It pinned a shape the writer can
   never produce — `deliver_fleet_digest/1` builds targets under an
@@ -44,6 +55,29 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     {:get, "/v1/operator/deliveries"},
     {:get, "/v1/operator/warm-pool"}
   ]
+
+  # The kill-switch trio on BOTH sides of the principal boundary. The operator
+  # trio is session-gated (`require_platform_operator`); the admin trio is the
+  # faceless WORKER's (`require_worker`) and stays that way — the off-box Go
+  # provisioner is its only caller.
+  @operator_autoupdate [
+    {:get, "/v1/operator/autoupdate"},
+    {:post, "/v1/operator/autoupdate/halt"},
+    {:post, "/v1/operator/autoupdate/resume"}
+  ]
+
+  @admin_autoupdate [
+    {:get, "/v1/admin/autoupdate"},
+    {:post, "/v1/admin/autoupdate/halt"},
+    {:post, "/v1/admin/autoupdate/resume"}
+  ]
+
+  # The value config/test.exs pins as `:worker_token` — the same constant the
+  # nine other worker-auth suites present. Using the REAL configured secret is
+  # what makes the refusals below mean something: a made-up string would 401 on
+  # `require_worker` for being wrong, and would prove nothing about the
+  # principal boundary.
+  @worker_token "worker-token-test-fixed"
 
   setup do
     # Each test owns the allowlist explicitly; restore the config default after.
@@ -179,6 +213,135 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     assert resume.status == 200
     assert json_body(resume)["halted"] == false
     assert Registry.autoupdate_halted?() == false
+  end
+
+  ## 2b. The PRINCIPAL BOUNDARY — isu-backlog-operator-principal
+  ##
+  ## The ruling: the fleet kill switch has ONE human principal, the platform
+  ## operator (a session whose email is on the `PLATFORM_ADMIN_EMAILS`
+  ## allowlist), and it is reachable from BOTH shipped human surfaces — the
+  ## console SPA and `bp cloud rollout`. The `/v1/admin/autoupdate*` trio stays
+  ## the faceless WORKER's and is NOT widened.
+  ##
+  ## The tests above prove the operator door OPENS. These prove it is a door and
+  ## not a hole: that the two credentials do not cross, in BOTH directions, and
+  ## that a refused call moves nothing. Without the negative half, "the operator
+  ## can halt the fleet" is compatible with "and so can everyone else".
+
+  test "the WORKER token opens the /v1/admin/autoupdate trio (the control for the refusals below)" do
+    # This is the non-vacuity check. Every refusal below presents @worker_token;
+    # if that constant were stale or wrong, `require_worker`'s constant-time
+    # compare would 401 it for being a BAD SECRET and the refusals would prove
+    # nothing about the principal boundary. So first: it is a real, working
+    # worker credential on the routes that are actually the worker's.
+    assert json_body(call(:get, "/v1/admin/autoupdate", @worker_token))["halted"] == false
+
+    halt = call(:post, "/v1/admin/autoupdate/halt", @worker_token)
+    assert halt.status == 200
+    assert Registry.autoupdate_halted?() == true
+
+    resume = call(:post, "/v1/admin/autoupdate/resume", @worker_token)
+    assert resume.status == 200
+    assert Registry.autoupdate_halted?() == false
+  end
+
+  test "a WORKER token is refused on every /v1/operator/autoupdate route, and moves nothing" do
+    # 401, NOT 403, and the distinction is load-bearing:
+    # `require_platform_operator/2` runs `require_user/2` FIRST, and a worker
+    # secret is not a session token — `verify_user_session_token/2` returns nil,
+    # so AUTHENTICATION fails and the allowlist check is never reached. 403 is
+    # reserved for a credential that resolved to a real human who is simply not
+    # on the list (the "plain session" test above). A machine secret is not a
+    # human, so it cannot earn the 403 wording.
+    for {method, path} <- @operator_autoupdate do
+      conn = call(method, path, @worker_token)
+
+      assert conn.status == 401,
+             "#{method} #{path} must refuse the WORKER token (got #{conn.status}) — " <>
+               "the operator seam is for human sessions, not the off-box provisioner secret"
+
+      assert json_body(conn)["error"] == "unauthorized"
+    end
+
+    assert Registry.autoupdate_halted?() == false,
+           "a refused worker call moved the fleet kill switch"
+  end
+
+  test "an OPERATOR session is refused on every /v1/admin/autoupdate route, and moves nothing" do
+    {operator, _team} = operator_fixture()
+    token = session_token(operator)
+
+    # Non-vacuity in the other direction: this exact token DOES open the
+    # operator seam, so a 401 below is about the DOOR, not a dud session.
+    assert call(:get, "/v1/operator/autoupdate", token).status == 200
+
+    for {method, path} <- @admin_autoupdate do
+      conn = call(method, path, token)
+
+      assert conn.status == 401,
+             "#{method} #{path} must refuse even an OPERATOR session (got #{conn.status}) — " <>
+               "the worker routes are not a second operator door"
+
+      assert json_body(conn)["error"] == "unauthorized"
+    end
+
+    assert Registry.autoupdate_halted?() == false
+  end
+
+  test "a FOREIGN team's OWNER session passes neither door" do
+    # The operator allowlist holds exactly one email; the foreigner owns their
+    # own team, which is the strongest team authority the product grants. Team
+    # role and platform-operator are different axes (GR46) — owning a team must
+    # buy nothing at all here.
+    {operator, _op_team} = operator_fixture()
+    foreign = session_token(elem(user_with_team("owner"), 0))
+
+    for {method, path} <- @operator_autoupdate do
+      conn = call(method, path, foreign)
+      assert conn.status == 403, "#{method} #{path} let a foreign team owner through"
+      body = json_body(conn)
+      assert body["error"] == "forbidden"
+      assert body["required"] == "platform_operator"
+      assert body["scope"] == "platform"
+    end
+
+    for {method, path} <- @admin_autoupdate do
+      assert call(method, path, foreign).status == 401,
+             "#{method} #{path} let a foreign team owner through"
+    end
+
+    assert Registry.autoupdate_halted?() == false
+
+    # …and the operator still gets in, so the refusals above are about WHO the
+    # caller is, not about a route that is dead for everyone.
+    assert call(:get, "/v1/operator/autoupdate", session_token(operator)).status == 200
+  end
+
+  test "the two doors are DISJOINT — no single credential opens both" do
+    {operator, _op_team} = operator_fixture()
+    op = session_token(operator)
+    plain = session_token(elem(user_with_team(), 0))
+
+    # One full-equality matrix rather than six independent asserts: a widening
+    # on EITHER side (an operator session accepted by require_worker, a worker
+    # token accepted by the operator seam, a plain session accepted anywhere)
+    # changes a cell and reds this test, and no cell can be satisfied by
+    # accident the way a scattered `assert status != 200` can.
+    matrix =
+      for {label, token} <- [
+            {"worker token", @worker_token},
+            {"operator session", op},
+            {"plain session", plain}
+          ] do
+        {label, call(:get, "/v1/operator/autoupdate", token).status,
+         call(:get, "/v1/admin/autoupdate", token).status}
+      end
+
+    assert matrix == [
+             {"worker token", 401, 200},
+             {"operator session", 200, 401},
+             {"plain session", 403, 401}
+           ]
   end
 
   ## 3. Fleet roll-up shape

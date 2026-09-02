@@ -1,0 +1,15 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [],
+  "ambiguous_prs": [
+    13001
+  ],
+  "must_contain": [
+    "RESULT: 0 of 1 open rows carry a merge receipt",
+    "#13001: cch-w42-bl-ambiguously-named , some-other-row"
+  ],
+  "must_not_contain": [
+    "receipt: arm A"
+  ]
+}
