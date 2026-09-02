@@ -30,7 +30,11 @@ defmodule Barkpark.Content.Schema do
   alias Barkpark.Content.{Document, SchemaDefinition}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, scope_to_workspace_including_global: 3]
+    only: [
+      scope_to_workspace_or_global: 3,
+      scope_to_workspace_including_global: 3,
+      maybe_scope_schemas_to_grants: 2
+    ]
 
   def default_dataset, do: "production"
 
@@ -89,6 +93,14 @@ defmodule Barkpark.Content.Schema do
     SchemaDefinition
     |> scope_schema_to_dataset(dataset, opts)
     |> scope_fun.(workspace_id, project_id)
+    # Grant narrowing (task-8f8a3a2e05146984). A NO-OP unless `opts[:grant_scoped]`
+    # is set — only `ResolveWorkspace` / `AssignGrantScope` / `LiveScope` set it,
+    # and only when they admit a grant-only caller, so a member's / token's /
+    # anonymous catalog read is byte-identical. For a grantee it clamps the
+    # catalog to the `type` rung of its covering grants, which is what stops the
+    # Studio desk naming a content type outside the grant. See
+    # `Content.Scope.maybe_scope_schemas_to_grants/2` for the full rung map.
+    |> maybe_scope_schemas_to_grants(opts)
     # dataset_id-bearing rows before legacy nil-dataset_id fixtures, then dedup
     # by name — one catalog entry per type even on a backfill/fixture overlap.
     |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
