@@ -63,6 +63,11 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    `bp task close <id> lead-<lane> <epoch> --yes`. A 409 `doc_changed_since_claim` means
    re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
 
+- **Hold the claim until the PR MERGES, not just until it opens.** The lease (~40 min) lapses while a PR
+  waits in a deep CI queue and the required task gate then fails "carries no claim" (measured 2026-09-02
+  on ten PRs). Pulse each held row every ~18 min until merge; re-claim before re-running a gate; a
+  pulse bumps the epoch, so re-read before stamp/close.
+
 ## Fences and shared files
 
 - **Temp files are namespaced.** The session scratchpad root is SHARED by every agent in the
