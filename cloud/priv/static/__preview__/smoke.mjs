@@ -2200,9 +2200,10 @@ const EXPECTATIONS = {
       // used to read `body.includes('data-copy="production-5b2c1e.barkpark.cloud"')`
       // — a BARE host, which the ADDRESS LINE has not emitted since cch-w18-s4
       // gave the instance fixtures their real scheme: publicUrl(bp) is now
-      // "https://production-5b2c1e.barkpark.cloud" (app.js:7858). The host emits
-      // THREE [data-copy] values, and the one that satisfied the bare literal
-      // was the rail's Platform/Host row (railRowCopy, app.js:10400, value =
+      // "https://production-5b2c1e.barkpark.cloud" (publicUrl() in app.js —
+      // grep -n 'function publicUrl'). The host emits THREE [data-copy] values,
+      // and the one that satisfied the bare literal was the rail's Platform/Host
+      // row (railRowCopy() in app.js — grep -n 'function railRowCopy'; value =
       // bp.host, still bare) — a different element in a different card. So the
       // assertion's MESSAGE named the address line while its SUBJECT was the
       // rail: deleting the address line's copy button entirely left it green.
