@@ -223,6 +223,19 @@ services:
       - postfix_queue:/var/spool/postfix
       - postfix_tls:/etc/postfix/tls
     restart: unless-stopped
+    # The relay now writes Postfix's delivery log to stdout (maillog_file in
+    # cloud/postfix/entrypoint.sh) — that log IS the server-side answer to
+    # "did this message reach the destination MX". Before that change this
+    # container emitted ~1 KB total for its whole lifetime, so the default
+    # UNCAPPED json-file driver was harmless; now it grows with every
+    # message and would fill the boot disk unbounded. Cap it explicitly.
+    # 10 MB x 5 is weeks of headroom at this volume (~3400 messages in two
+    # months) while keeping enough history for the README's lookup one-liner.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 # cch-w1-peer-ip-pin (charter D6). This block did not exist before: the network
 # was auto-created and its subnet AUTO-ALLOCATED, landing on 172.18.0.0/16 only
