@@ -190,6 +190,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          show_archived: false,
          renaming_session: nil,
          open_menu_session: nil,
+         # The Cmd/Ctrl+K session palette (T3 keybindings parity). Socket-local
+         # per-tab UI state, like open_menu_session: it holds NO list of its own
+         # — the palette renders `@sessions`, the very list the sidebar shows —
+         # so it can never disagree with the sidebar or outlive a tenant clamp.
+         palette_open: false,
          # Per-tab expand state for proposed-plan cards (charter D34): the set of
          # plan message ids the viewer has expanded. Socket-local, never
          # broadcast, reset on every session load — clones the open_menu_session
@@ -1019,6 +1024,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      socket |> assign(show_archived: show, open_menu_session: nil) |> refresh_sessions()}
+  end
+
+  # ── keyboard thread jump + session palette (T3 keybindings parity) ───────
+  #
+  # Three events, ONE navigation: every one of them ends at
+  # `activate_session/2`, which is the same `session_link_path/2` the sidebar
+  # <.link patch={…}> is built from. There is no second way to reach a session.
+  # The client half (bp-chat-palette.js) only classifies keys and pushes; it
+  # never touches history or location.
+
+  # Cmd/Ctrl+N → the Nth VISIBLE sidebar session. Past the end is a no-op: a
+  # number the sidebar does not show must not navigate anywhere, and must never
+  # crash the chat.
+  def handle_event("chat-jump", %{"n" => n}, socket) do
+    {:noreply, activate_nth_session(socket, n)}
+  end
+
+  def handle_event("chat-palette-open", _params, socket) do
+    {:noreply, assign(socket, palette_open: true, open_menu_session: nil)}
+  end
+
+  # Escape (claimed by the palette input, so it never reaches the global
+  # interrupt listener) and a backdrop click both land here. Closing is UI-only:
+  # it never touches the session, the runtime, or a running turn.
+  def handle_event("chat-palette-close", _params, socket) do
+    {:noreply, assign(socket, palette_open: false)}
+  end
+
+  # Enter on the highlighted palette row. The id is client-supplied, so it is
+  # matched against the VISIBLE list rather than trusted — an id that is not on
+  # screen closes the palette and navigates nowhere.
+  def handle_event("chat-palette-activate", %{"id" => id}, socket) do
+    socket = assign(socket, palette_open: false)
+
+    case Enum.find(socket.assigns.sessions, &(&1.id == id)) do
+      nil -> {:noreply, socket}
+      session -> {:noreply, activate_session(socket, session.id)}
+    end
   end
 
   # Stale/unknown client events must never crash the chat — mirror the other
@@ -2627,7 +2670,105 @@ defmodule BarkparkWeb.Studio.ChatLive do
         }
         .bp-chat-rail-leave-start { opacity: 1; max-height: 200px; }
         .bp-chat-rail-leave-end { opacity: 0; max-height: 0; margin: 0; }
+        /* The session palette's highlighted row. The ChatPalette hook stamps
+           data-palette-active as the arrows move; the token keeps the gate
+           green (no color literal). */
+        #chat-palette-list li[data-palette-active] { background: var(--primary-soft); }
       </style>
+      <%!-- The keyboard surface (T3 keybindings parity). An empty, hidden
+            element whose only job is to host the ChatKeys hook
+            (bp-chat-palette.js): it arms ONE document-level keydown listener
+            that turns Cmd/Ctrl+1..9 into `chat-jump` and Cmd/Ctrl+K into
+            `chat-palette-open`, and ignores every key typed inside an input,
+            textarea or contenteditable so the composer, the slash combobox and
+            the inline rename field keep their own keys. Escape is untouched —
+            it still belongs to the global interrupt (charter D42). --%>
+      <div id="chat-keys" phx-hook="ChatKeys" hidden></div>
+
+      <%!-- The Cmd/Ctrl+K session palette. The LIST is server-rendered from
+            `@sessions` — the same tenant-clamped, archived-shelf-aware list the
+            sidebar shows, so the palette can never offer a session the sidebar
+            hides. The FILTERING is client-side (subsequence fuzzy over the
+            stamped titles): a palette that round-trips per keystroke is not a
+            palette, and a server-side filter would need a second copy of the
+            visible-set rule. Enter pushes `chat-palette-activate`, which lands
+            on `session_link_path/2` — the sidebar click's own path. --%>
+      <div
+        :if={@palette_open}
+        id="chat-palette"
+        phx-hook="ChatPalette"
+        data-test-id="chat-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Jump to a chat"
+        style="position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px 16px; background: rgba(0, 0, 0, 0.38);"
+      >
+        <%!-- click-away sits on the CARD, never the full-screen overlay:
+              nothing is ever outside a full-screen element, so a backdrop click
+              would never fire there. --%>
+        <div
+          id="chat-palette-card"
+          phx-click-away="chat-palette-close"
+          style="width: min(560px, 94vw); max-height: 64vh; display: flex; flex-direction: column; background: var(--bg-popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); overflow: hidden;"
+        >
+          <input
+            id="chat-palette-input"
+            type="text"
+            autocomplete="off"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="chat-palette-list"
+            aria-label="Filter chats by title"
+            placeholder="Jump to a chat…"
+            data-test-id="chat-palette-input"
+            style="flex: none; width: 100%; box-sizing: border-box; padding: 12px 14px; border: none; border-bottom: 1px solid var(--border-muted); background: transparent; color: var(--text); font-size: 14px; outline: none;"
+          />
+
+          <ul
+            id="chat-palette-list"
+            role="listbox"
+            aria-label="Chats"
+            style="flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 6px;"
+          >
+            <li
+              :for={{s, i} <- Enum.with_index(@sessions)}
+              id={"chat-palette-opt-#{i}"}
+              role="option"
+              aria-selected={to_string(i == 0)}
+              data-palette-row
+              data-palette-id={s.id}
+              data-palette-title={s.title}
+              data-test-id={"chat-palette-row-#{s.id}"}
+              style="display: flex; align-items: baseline; gap: 8px; padding: 7px 9px; border-radius: 6px;"
+            >
+              <span
+                :if={i < 9}
+                class="text-xs text-dim"
+                style="flex: none; font-family: var(--font-mono);"
+              >
+                <%= i + 1 %>
+              </span>
+              <span
+                class="text-sm"
+                style="color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;"
+              >
+                <%= s.title %>
+              </span>
+              <span class="text-xs text-dim" style="margin-left: auto; flex: none;">
+                <%= session_stamp(s) %>
+              </span>
+            </li>
+          </ul>
+
+          <div
+            class="text-xs text-dim"
+            style="flex: none; padding: 7px 12px; border-top: 1px solid var(--border-muted);"
+          >
+            ↑↓ move · Enter open · Esc close · ⌘/Ctrl+1–9 jump
+          </div>
+        </div>
+      </div>
+
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
           <span class="h3" style="display: flex; align-items: center; gap: 8px; flex: 1;">
@@ -2757,7 +2898,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   />
                 </form>
               <% else %>
-                <.link patch={ReturnTo.with_return_to("#{@chat_base_path}/#{s.id}", @return_to)} class="bp-chat-session-link">
+                <.link patch={session_link_path(assigns, s.id)} class="bp-chat-session-link">
                   <% act = @activity[s.id] %>
                   <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
@@ -4934,6 +5075,53 @@ defmodule BarkparkWeb.Studio.ChatLive do
       socket
     end
   end
+
+  # ── ONE navigation path to a session (T3 keybindings parity) ─────────────
+  #
+  # The sidebar <.link patch={…}>, the palette's Enter, and Cmd/Ctrl+1..9 ALL
+  # build their destination here. A second copy of this URL shape is how the
+  # keyboard and the mouse drift apart (one keeps `return_to`, the other drops
+  # it); the test suite asserts the sidebar link's href and the keyboard patch
+  # are byte-identical for the same session.
+  #
+  # Takes `assigns` (not a socket) so the HEEx template and the event handlers
+  # call the SAME function.
+  defp session_link_path(assigns, session_id) do
+    ReturnTo.with_return_to("#{assigns.chat_base_path}/#{session_id}", assigns[:return_to])
+  end
+
+  defp activate_session(socket, session_id) do
+    push_patch(socket, to: session_link_path(socket.assigns, session_id))
+  end
+
+  # The Nth VISIBLE sidebar row, 1-indexed. `@sessions` IS the visible list
+  # (refresh_sessions/1 already applied the archived shelf and the tenant
+  # clamp), so "visible" needs no second definition here.
+  defp activate_nth_session(socket, n) do
+    case nth_index(n) do
+      nil ->
+        socket
+
+      i ->
+        case Enum.at(socket.assigns.sessions, i) do
+          nil -> socket
+          session -> activate_session(socket, session.id)
+        end
+    end
+  end
+
+  # 1..9 only, from either a JSON number or a string — anything else is not a
+  # jump. Returns the 0-based index.
+  defp nth_index(n) when is_integer(n) and n >= 1 and n <= 9, do: n - 1
+
+  defp nth_index(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} -> nth_index(i)
+      _ -> nil
+    end
+  end
+
+  defp nth_index(_), do: nil
 
   # Carry the validated `return_to` across a self-`push_patch` (charter D5), so
   # the flat chat surface never loses the scope it should return to as the user
