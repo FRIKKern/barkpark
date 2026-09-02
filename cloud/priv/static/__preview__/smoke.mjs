@@ -2196,7 +2196,25 @@ const EXPECTATIONS = {
       // D-02 header: H1 + the two-axis compound pill + mono address + copy.
       assert.ok(body.includes("detail-head--inst"), "the v4 header renders");
       assert.ok(body.includes("status-pill-label"), "the compound pill renders its label axis");
-      assert.ok(body.includes('data-copy="production-5b2c1e.barkpark.cloud"'), "the address carries the copy affordance");
+      // cch-w18-bl-smoke-address-copy-assertion-matches-the-rail-row: this line
+      // used to read `body.includes('data-copy="production-5b2c1e.barkpark.cloud"')`
+      // — a BARE host, which the ADDRESS LINE has not emitted since cch-w18-s4
+      // gave the instance fixtures their real scheme: publicUrl(bp) is now
+      // "https://production-5b2c1e.barkpark.cloud" (publicUrl() in app.js —
+      // grep -n 'function publicUrl'). The host emits THREE [data-copy] values,
+      // and the one that satisfied the bare literal was the rail's Platform/Host
+      // row (railRowCopy() in app.js — grep -n 'function railRowCopy'; value =
+      // bp.host, still bare) — a different element in a different card. So the
+      // assertion's MESSAGE named the address line while its SUBJECT was the
+      // rail: deleting the address line's copy button entirely left it green.
+      // Scoped to the .detail-url host and pinned to the SCHEMED value, the two
+      // elements can no longer stand in for each other.
+      const addr = (body.match(/<div class="detail-url">[\s\S]*?<\/div>/) || [])[0] || "";
+      assert.ok(addr, "the address line renders as .detail-url; got: " + body.slice(0, 400));
+      const addrCopy = (addr.match(/<button[^>]*class="copy-btn"[^>]*>/) || [])[0] || "";
+      assert.ok(addrCopy, "the ADDRESS LINE itself carries the copy affordance; got: " + addr);
+      assert.ok(addrCopy.includes('data-copy="https://production-5b2c1e.barkpark.cloud"'),
+        "the address's copy affordance carries the SCHEMED public URL the address line paints, not the rail's bare host; got: " + addrCopy);
       assert.ok(body.includes('id="inst-open-studio"'), "Open Studio is the primary action");
       assert.ok(body.includes('id="inst-cli-toggle"'), "the bp CLI disclosure renders");
       assert.ok(body.includes('aria-controls="inst-lifecycle-actions"'), "the disclosure points at the card slot");
