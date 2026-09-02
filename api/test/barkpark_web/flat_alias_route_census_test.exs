@@ -373,7 +373,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
-         "from the token before AssignDefaultScope can stamp Default."},
+         "from the token before AssignDefaultScope can stamp Default. Since " <>
+         "task-633d94b5a598c0f7 it rides [:api, :require_token, :api_grant_read] in its own " <>
+         "scope rather than bare [:api, :require_token]: workspace derivation was never the " <>
+         "gap, the ROW narrowing inside it was. Without :api_grant_read nothing assigned " <>
+         ":grant_scoped_read, so scope_opts carried no :grant_scoped and the " <>
+         "maybe_scope_to_grants/2 calls in all three aggregates were inert — an owned-token " <>
+         "grantee, narrowed on the sibling query/counts reads, read the whole Default census " <>
+         "here. Pinned by flat_analytics_grant_enforcement_test.exs."},
     # QueryController.backlinks
     {"GET", "/v1/data/backlinks/:dataset/:id"} =>
       {:workspace_derived,
