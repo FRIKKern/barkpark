@@ -1,0 +1,12 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [],
+  "must_contain": [
+    "RESULT: 0 of 2 open rows carry a merge receipt  (FULL 0 · PARTIAL 0)"
+  ],
+  "must_not_contain": [
+    "receipt: arm A",
+    "receipt: arm B"
+  ]
+}

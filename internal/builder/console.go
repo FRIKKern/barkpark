@@ -8,10 +8,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/secretscrub"
 )
 
 // consolePathFmt is the builder endpoint each build-console narration line is
@@ -270,35 +271,19 @@ func (c *buildConsole) client() *http.Client {
 
 // --- redaction ---------------------------------------------------------------
 
-// builderBearerRe scrubs an `Authorization: Bearer <token>` / bare `Bearer
-// <token>` that a verbose build tool might echo.
-var builderBearerRe = regexp.MustCompile(`(?i)bearer\s+\S+`)
-
-// builderTokenRe scrubs a Barkpark-shaped bearer (bp_admin_…, bp_read_…, …) —
-// belt-and-suspenders on top of the literal-secret scrub.
-var builderTokenRe = regexp.MustCompile(`bp_[a-z]+_[A-Za-z0-9_-]+`)
-
-// builderEnvSecretRe redacts the VALUE of a secret-SHAPED uppercase env
-// assignment (FOO_SECRET=…, API_TOKEN=…, DATABASE_URL=…, *_PASSWORD=…, *_KEY=…)
-// a build step might print — the key is kept, the value scrubbed. Uppercase-only
-// so it never mangles ordinary prose. Nixpacks/Docker build env is arbitrary
-// per-project, so this is broader than the provisioner's fixed key list.
-var builderEnvSecretRe = regexp.MustCompile(`\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|APIKEY|API_KEY|PRIVATE_KEY|DATABASE_URL|KEY)[A-Z0-9_]*)=(\S+)`)
-
 // redactBuildLine scrubs a console line before it leaves the builder: the
-// literal secrets the caller registered, then the Barkpark-token, Bearer, and
-// env-secret PATTERNS. Console narration REUSES the redaction posture and never
-// bypasses it.
+// literal secrets the caller registered, then the Barkpark-token, Bearer,
+// ecto-userinfo and env-secret PATTERNS. Console narration REUSES the redaction
+// posture and never bypasses it.
+//
+// The patterns live in internal/secretscrub, the one owner. This file used to
+// carry its own copy (builderBearerRe / builderTokenRe / builderEnvSecretRe), as
+// did internal/cli/cloud and internal/provisioner/console.go — and the three
+// copies had drifted: this one never grew the ecto/postgres userinfo clause, and
+// its shape alternation was missing KEK, so a BARKPARK_KEK= assignment printed
+// by a build step was NOT redacted here. Delegating fixes both.
 func redactBuildLine(line string, secrets []string) string {
-	for _, s := range secrets {
-		if s != "" {
-			line = strings.ReplaceAll(line, s, "[REDACTED]")
-		}
-	}
-	line = builderBearerRe.ReplaceAllString(line, "Bearer [REDACTED]")
-	line = builderTokenRe.ReplaceAllString(line, "[REDACTED]")
-	line = builderEnvSecretRe.ReplaceAllString(line, "$1=[REDACTED]")
-	return line
+	return secretscrub.Line(line, secrets)
 }
 
 // --- command-output tee ------------------------------------------------------

@@ -36,6 +36,8 @@ Zero findings is a publishable result. Manufacturing a finding is the one failur
 
 **D11 — Absence of mutation is absence of verdict.** The epic names its unreached corners rather than implying coverage: `stale-verdict-watch` (12/12 consecutive main failures, log unread), `webhook-fanout-watch.sh` (the only wired guard with no `set` line and no harness), the six `scripts/connectors/` proofs, `audit-paper-readers.sh` (no baseline at all — it outran every surveyor's timeout). All filed. *Why: a harness's documented exclusions are its blind spot, and an audit that hides its own is the thing it came to delete.*
 
+*Correction, 2026-09-02 (lead-gates, cgsi-bl-unreached-corners closed with run output; the original text above stands as the decision of record):* two of D11's four corners were mis-described because a literal NUL byte inside `webhook-fanout-watch.sh` made every line-printing `grep` classify the file as binary — the census instrument was blind, not the file unguarded. On origin/main the script HAS `set -uo pipefail` and a 49-case `scripts/webhook-fanout-watch.test.sh` wired in shell-harnesses.yml (both since the file landed); the same NUL also broke the meter's jq group key (fixed in PR #14875). `stale-verdict-watch`'s red was a population verdict (one CONFLICTING PR, #11766, since closed), not a script defect. All seven guards (webhook-fanout-watch + the six connectors proofs) were proven able to lose by planted violations; `audit-paper-readers.sh` now has a recorded baseline (~3.1 s/paper, 40–71 min per run against a 75-min cap — task-daf40c9f1f66200f) and its tee pipeline provably does not swallow a non-zero exit.
+
 ### Wave 2 — gate wiring + spec generator (D12–D23)
 
 

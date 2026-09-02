@@ -1,8 +1,17 @@
+# research-ledger.jsonl is COMMITTED and deliberately absent from this list.
+# It is the canonical ledger: one line per file entry, sorted by path. While the
+# pretty JSON below was the only copy, it was gitignored, so the same command at
+# the same commit measured one figure on the one laptop that held it and a flat
+# zero on every clean checkout.
+#
+# Everything listed here is DERIVED from that committed ledger or from a run:
 research-ledger.json
 coverage-report.json
 batch-count.txt
 batches/
 results/
 research-ledger.json.lock
+research-ledger.jsonl.lock
 .research-ledger.json.tmp.*
+.research-ledger.jsonl.tmp.*
 .coverage-report.json.tmp.*
