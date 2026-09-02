@@ -1030,8 +1030,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
     {"site_deployment_json/3", :unread, "preview_url",
      "dr-w11-payload-divergence-close — the click-through target, same gap as preview_host."},
-    {"site_deployment_json/3", :phantom, "port",
-     "dr-w11-payload-divergence-close — declared on the deployment decoder; `port` is emitted on site_json (router.ex:10657), never on a deployment row. Decodes to 0 forever."},
+    {"site_deployment_json/3", :unread, "slot",
+     "site-spawner node slot truth — the PRODUCER half only. The blue/green slot the box MEASURED Caddy to be serving; `deploy/site-spawner-node-live-proof.sh:731,:803` reads it off the wire today, and `internal/cloudclient.SiteDeployment` declares no Slot at all. The Go reader is the CLI half of this split row (which also turns HealthExitCode into a *int); this PR is fenced out of internal/."},
+    {"site_deployment_json/3", :unread, "health_exit_code",
+     "site-spawner node slot truth — the PRODUCER half only. 0 (HEALTH passed) | 14 (failed) | null (never measured); `deploy/site-spawner-node-live-proof.sh:872` reads it. It MUST land in Go as a `*int` — a plain int decodes the null to 0, which is the SUCCESS code, and that is exactly the zero-value success this pair exists to forbid (the same reason SiteDeployment's DeferralDepth/Bound are pointers). CLI half, same split row."},
+    # DELETED (site-spawner node slot truth): `{"site_deployment_json/3", :phantom,
+    # "port"}`. `SiteDeployment.Port` decoded to 0 forever because `deployments`
+    # had no `port` column at all — the one router.ex emitted was the SITE
+    # serializer's. The column now exists and `deployment_json/1` emits it, so
+    # the hole is CLOSED and the row must go: the "no longer phantom" arm reds on
+    # an allowlist row whose key is emitted.
     {"site_deployment_json/3", :phantom, "runtime_target",
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
@@ -1394,7 +1402,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MERGE HAZARD, restated because it has already fired on this branch twice:
   # these are `==` pins. Any PR that also moves them must RE-MEASURE after this
   # one lands, never sum with it.
-  @emitted_pinned 162
+  # 162 -> 165 (site-spawner node slot truth): `deployment_json/1` — which
+  # `site_deployment_json/3` pipes, so the walker follows it — gains `slot`,
+  # `port` and `health_exit_code`. `@go_tag_pinned` does NOT move, and the reason
+  # is structural rather than lucky: this slice writes no Go at all (the reader is
+  # the CLI half of a split row, fenced out of `internal/`), and `Go.all_tags/1`
+  # counts names in that SOURCE. The three keys land on the wire in three
+  # different states, which is why one of them deletes an allowlist row and two
+  # of them add one: `port` was already declared by `SiteDeployment.Port` and
+  # decoded to 0 forever (a PHANTOM — row deleted below), while `slot` and
+  # `health_exit_code` are declared nowhere in the package (`grep -rn 'json:"slot'
+  # internal/cloudclient` is empty) and are therefore new :unread rows.
+  # MEASURED by the PIN CO-EDIT arm on this branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
+  # that the arithmetic happens to agree is the coincidence the comment above
+  # warns about, not the method.
+  @emitted_pinned 165
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2489,7 +2511,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #   * @schema_field_floor went 95 -> 103: eight columns joined the three
   #     censused schemas in the interval. It is measured, never derived — a bound
   #     computed from what it bounds can never red.
-  @schema_field_floor 104
+  # 104 -> 107 (site-spawner node slot truth): the `deployments` schema gains
+  # `slot`, `port` and `health_exit_code`. `@schema_unserialized_floor` does NOT
+  # move — all three are serialized in the same commit, which is the point.
+  # MEASURED: the SERIALIZER-SIDE arm's neutered-walker assertion printed
+  # `left: 106`, which IS the full schema population by construction.
+  @schema_field_floor 107
   @schema_unserialized_floor 24
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:

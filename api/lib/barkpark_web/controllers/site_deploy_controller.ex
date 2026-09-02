@@ -457,9 +457,38 @@ defmodule BarkparkWeb.SiteDeployController do
       exit_code: status.exit_code,
       failure_reason: status.failure_reason,
       log: status.log,
+      # THE SLOT CADDY IS ACTUALLY SERVING (site-spawner: node slot truth), read
+      # back out of the Caddyfile by the node engine AFTER its flip committed —
+      # never the slot the run intended. `null` on every static deploy (a symlink
+      # swap has no slot) and on any node build that died before SWITCH.
+      #
+      # `Map.get/2`, not dot access: `status/1` answers in five shapes (a live
+      # Port run, a reconstructed systemd render, a cached one, a terminal record
+      # and `:idle`), and a status map from a pre-upgrade cached render must not
+      # crash this door.
+      served_port: Map.get(status, :served_port),
+      served_slot: Map.get(status, :served_slot),
       started_at: iso(status.started_at),
       finished_at: iso(status.finished_at)
     }
+    |> put_health_exit_code(status)
+  end
+
+  # THE HEALTH CODE IS OMITTED WHEN IT WAS NEVER MEASURED, and that omission is
+  # the contract — the same discipline `prebuilt_echo/1` above states for the
+  # 202: an absent field is an honest "nobody measured this", where a present one
+  # invites the caller to read it as a considered answer.
+  #
+  # It matters more here than anywhere else on this door, because the value that
+  # would be invented is ZERO and zero is SUCCESS. A `health_exit_code: 0` on a
+  # build that died in BUILD says the health gate passed. So: present and `0`
+  # when HEALTH really ran and passed, present and `14` when it ran and failed,
+  # and ABSENT when there is no HEALTH verdict in the fold at all.
+  defp put_health_exit_code(payload, status) do
+    case DeployRunner.health_exit_code(Map.get(status, :stages) || []) do
+      nil -> payload
+      code -> Map.put(payload, :health_exit_code, code)
+    end
   end
 
   # `detail` is the failed stage's REAL reason (npm's 401, HEALTH's marker miss).
