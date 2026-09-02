@@ -1,17 +1,17 @@
 <!-- doc-tier: human | canonical-for: task-system-guide | budget: 4000tok -->
 # The Task System
 
-Barkpark as your AI's task board: agents claim work over HTTP, you steer the queue in Studio, every change broadcasts live. Tasks are plain `type:task` docs — no second store; claims are atomic and fenced.
+Barkpark as your AI's task board: agents claim work over HTTP, you steer the queue in Studio, every change broadcasts live. Tasks are plain `type:task` docs; claims are atomic and fenced.
 
 ## What you get
 
 | Surface | What |
 |---|---|
-| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system); `dependencies`/`claim` read-only. |
+| **Studio Tasks pane** | **Tasks ✅** desk group at `/studio`, lifecycle tabs; editor = four-group dossier (brief · work · close · system); `dependencies`/`claim` read-only. |
 | **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / close / move` — manifest-driven. |
-| **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the reader; `c`/`x` claim/close (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
-| **HTTP API** | Bearer endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
-| **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
+| **Terminal TUI** | `bp tasks` (= `bp task tui`); `c`/`x` claim/close (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
+| **HTTP API** | Bearer endpoints under `/v1/tasks/*` (read tier): the verbs + fetch, edges, labels, papers. |
+| **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** `GET /v1/tasks/events?since=<id>` (§7). |
 
 Lifecycle: `open · in_progress · blocked · done · cancelled`.
 
