@@ -24,6 +24,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   alias BarkparkCloud.GitHub
   alias BarkparkCloud.GitHub.Fake
   alias BarkparkCloud.Registry
+  alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient
   alias BarkparkCloud.Vercel
@@ -361,13 +362,99 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert ev.metadata == %{"name" => "Doomed"}
     end
 
-    test "a live box (deprovision path) writes NO barkpark.deleted event" do
+    # cch-w57 — THIS TEST USED TO PIN THE DEFECT, AND IT IS INVERTED, NOT DELETED.
+    #
+    # It shipped titled "a live box (deprovision path) writes NO barkpark.deleted
+    # event" and its last line asserted an empty trail. That was a true sentence
+    # about a broken lane, written down as an EXPECTATION — the live deprovision
+    # is the only path a box that actually RAN can take, so the console's
+    # append-only audit list recorded the removal of every box that never ran and
+    # was silent about every box that did.
+    #
+    # Inverting keeps the half of the old assertion that was always right (at the
+    # 202 instant nothing has been destroyed, so an audit row claiming a removal
+    # would be a lie) and moves the trail assertion one step later, to where the
+    # row actually dies. Deleting the test outright would have thrown that half
+    # away and left the ordering unpinned.
+    test "a live box is audited when the deprovision LANDS, not when it is requested" do
       {_user, team, token} = logged_in()
       bp = barkpark_fixture(team, %{name: "Live", host: "10.0.0.1"})
+      slug = "shop-#{System.unique_integer([:positive])}"
+      {:ok, site} = Registry.create_site(bp, %{name: "Shop", slug: slug})
 
       conn = call(:delete, "/v1/barkparks/#{bp.id}", nil, token)
       assert conn.status == 202
+
+      # Still true, and the reason it is true has not changed: the box is up, the
+      # row is here, and the worker has not been anywhere yet.
       assert Accounts.list_audit_events(team) == []
+
+      # The worker's two seams are ordinary public Elixir — the Go process is a
+      # caller, not a prerequisite — so the lane runs to completion in-process.
+      claim_token = "probe-#{System.unique_integer([:positive])}"
+      assert {job, claimed} = Registry.claim_next_deprovision_job(claim_token)
+      assert claimed.id == bp.id
+      assert {:ok, :deleted} = Registry.succeed_deprovision_job(job.id, claim_token: claim_token)
+      assert Repo.get(Barkpark, bp.id) == nil
+
+      assert [ev] = Accounts.list_audit_events(team)
+      assert ev.action == "barkpark.deleted"
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+
+      # NIL ON PURPOSE. The row is deleted by the deprovision worker, minutes to
+      # hours after the admin pressed Remove, and provision_jobs carries no actor
+      # column to relay them through. The register's declared shape for a
+      # system-driven fact is a nil actor, not a guessed one.
+      assert ev.actor_user_id == nil
+      assert ev.metadata["name"] == "Live"
+      assert ev.metadata["via"] == "deprovision"
+
+      # The cascade's victims are NAMED by the row that outlives them: the site
+      # dies with the box and nothing else in this product records that it did.
+      assert ev.metadata["sites"] == [site.slug]
+    end
+
+    # cch-w57 — the ATOMICITY arm. The audit insert is REFUSED at the database,
+    # inside the same transaction as the delete, and the box must be standing
+    # afterwards. Without the rollback the register would be back to recording
+    # fewer removals than happened — which is the exact defect, just rarer.
+    #
+    # The refusal is a real CHECK constraint rather than a mocked writer: the
+    # claim under test is "one transaction", and only the database can answer it.
+    # This module is `async: false`, so the ACCESS EXCLUSIVE lock the ALTER takes
+    # is never held while another test is running, and the sandbox transaction
+    # drops the constraint when the test ends.
+    test "the audit row and the delete are ONE transaction — a refused insert leaves the box up" do
+      {_user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{name: "Live", host: "10.0.0.1"})
+
+      assert call(:delete, "/v1/barkparks/#{bp.id}", nil, token).status == 202
+
+      claim_token = "probe-#{System.unique_integer([:positive])}"
+      assert {job, _} = Registry.claim_next_deprovision_job(claim_token)
+
+      Repo.query!(
+        "ALTER TABLE audit_events ADD CONSTRAINT tmp_refuse_bp_deleted " <>
+          "CHECK (action <> 'barkpark.deleted')"
+      )
+
+      assert_raise Ecto.ConstraintError, fn ->
+        Registry.succeed_deprovision_job(job.id, claim_token: claim_token)
+      end
+
+      Repo.query!("ALTER TABLE audit_events DROP CONSTRAINT tmp_refuse_bp_deleted")
+
+      # THE POINT: the delete went back. A box the control plane still bills for
+      # is better than a removal nobody can prove happened.
+      assert %Barkpark{host: "10.0.0.1"} = Repo.get(Barkpark, bp.id)
+      assert Accounts.list_audit_events(team) == []
+
+      # NON-VACUITY: with the refusal lifted the very same call succeeds and
+      # writes, so the assertions above failed on the constraint and not on some
+      # unrelated breakage in the lane.
+      assert {:ok, :deleted} = Registry.succeed_deprovision_job(job.id, claim_token: claim_token)
+      assert [%AuditEvent{action: "barkpark.deleted"}] = Accounts.list_audit_events(team)
     end
   end
 
