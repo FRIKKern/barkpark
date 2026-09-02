@@ -21,8 +21,9 @@
 //
 // ── ONE INSTRUMENT, ONE VARIABLE: `--store` (D23 discipline) ─────────────────
 //
-// The same binary measures the 62-row store and the post-backfill store. The
-// ONLY input that changes between those two runs is the directory `--store`
+// The same binary measures the PRE-BACKFILL store (62 rows at e8bbba5919,
+// 2026-07-21) and the post-backfill store. The ONLY input that changes between
+// those two runs is the directory `--store`
 // names — the query list, the grep target, the metric, and the predictions are
 // all frozen in this file. So a delta between the two runs is attributable to
 // VOLUME, never to whoever ran it or to a term list assembled after seeing the
@@ -66,9 +67,14 @@
 //
 // Volume must precede the trial: the decisive reading is against the MERGED
 // post-backfill store, which does not exist until S1 lands on origin/main. So
-// this harness SELF-TESTS against a fixture and the current 62-row store and
-// pre-registers W1-W7, but its report marks the leads-wins/loses verdict
-// PENDING-REVIEW. A Review action re-runs it on the integrated tree and writes
+// this harness SELF-TESTS against a fixture and against whatever store `--store`
+// names — it quotes no volume of its own, because the one its first draft
+// quoted went stale sixteen seconds before it merged: the +167-row backfill
+// landed at 87221bfa55 (2026-07-21 22:13:01 +0200) and this file at 50ee37bcbe
+// (22:13:17), so "the current 62-row store" described a store that had already
+// ceased to exist on main. It pre-registers W1-W7, but its report marks the
+// leads-wins/loses verdict PENDING-REVIEW. A Review action re-runs it on the
+// integrated tree and writes
 // the closing verdict from THAT run. A builder stamping the verdict here would
 // be measuring the old, low-volume store — a number that describes nothing that
 // ships (D40's "proven by content on origin/main").
@@ -677,8 +683,8 @@ export function parseArgs(argv) {
 
 const USAGE =
   "usage: node tooling/grip/trial-leads-vs-grep.mjs --store <ledger dir> [--json]\n"
-  + "  --store <dir>   the ledger directory to measure (the SAME instrument reads the 62-row and\n"
-  + "                  post-backfill stores; the delta is attributable to volume, never to the runner).\n"
+  + "  --store <dir>   the ledger directory to measure (the SAME instrument reads the pre-backfill\n"
+  + "                  and post-backfill stores; the delta is attributable to volume, never to the runner).\n"
   + "  --json          emit the structured report instead of the human render.\n";
 
 function main(argv) {
@@ -716,5 +722,12 @@ function main(argv) {
 // Only run when invoked directly, so the test can import the pure functions
 // without spawning the CLI.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  process.exit(main(process.argv.slice(2)));
+  // NO process.exit HERE (charter D92). main() writes the whole report — the
+  // `--json` document included — to stdout on the line before it returns, and
+  // Node writes a PIPE asynchronously: process.exit() discards whatever the
+  // kernel has not taken yet, so `--json | jq` gets a JSON.parse error the
+  // caller blames on this tool's format while `--json > file` is whole. The
+  // exit STATUS is unchanged in every arm (0 clean or selftest OK, 1 selftest
+  // FAIL, 2 no --store).
+  process.exitCode = main(process.argv.slice(2));
 }

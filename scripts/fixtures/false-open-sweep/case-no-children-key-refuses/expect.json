@@ -1,0 +1,9 @@
+{
+  "exit": 3,
+  "refusal": "ROSTER_NO_CHILDREN_KEY",
+  "must_contain": [
+    "REFUSAL:ROSTER_NO_CHILDREN_KEY",
+    "is a TOP-LEVEL key",
+    "ZERO-LINE file"
+  ]
+}

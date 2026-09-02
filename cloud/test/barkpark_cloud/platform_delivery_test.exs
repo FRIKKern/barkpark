@@ -7,8 +7,14 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
   asserted over the RENDERED response bytes, never over the plug list: a test
   that reads "`require_worker` appears above this route" is green against a route
   whose guard result is discarded. The two halves of this slice are different
-  credentials ON PURPOSE — the recorder is worker-token (machine-only) and the
-  reader is PAT-reachable — and that split is exactly what is pinned below.
+  credentials ON PURPOSE — the recorder is worker-token ONLY (machine-only: a PAT
+  and a session are both refused it) and the reader is the wider disjunction
+  session-OR-PAT-OR-worker — and that asymmetry is exactly what is pinned below.
+
+  THE READER ADMITS THE WORKER (task-e2acb66e9ed0da09), reversing the pin
+  task-f7decfcd5fa0eba8 left in §4. The reversal's whole argument, and the clamp
+  that bounds it, are written out at that test — read it before touching either
+  side of the split.
 
   The load-bearing guards, each of which is RED against a plausible mistake:
 
@@ -31,6 +37,8 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.PlatformDelivery
+  alias BarkparkCloud.RouterTierLens
+  alias BarkparkCloud.Web.Auth
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -567,39 +575,123 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
       refute conn.resp_body =~ @sha
     end
 
-    # THE REFUSAL crown-reconcile IS BUILT ON (task-f7decfcd5fa0eba8).
+    # THE WRITER READS ITS OWN RECORD (task-e2acb66e9ed0da09).
     #
-    # The scheduled reconciler has no CROWN_API_TOKEN, so its on-box reader
-    # presents WORKER_TOKEN to this route, takes the 401, and falls back to
-    # reading the same rows out of the control plane's own postgres container.
-    # That fallback is the LEGITIMATE working path, and it is chosen by this
-    # refusal: `require_user_or_pat/2` resolves a session token or a PAT and
-    # nothing else, so the worker principal — neither of those — lands on
-    # `unauthorized/1`. A permanent, deterministic tier mismatch, by design.
+    # THIS INVERTS THE PIN task-f7decfcd5fa0eba8 PUT HERE, and the reversal is
+    # deliberate, not an accident of a later edit. That pin asserted the 401 and
+    # argued the reconciler's SSH+psql fallback was "the LEGITIMATE working
+    # path". It was measured wrong by a production run: crown-reconcile run
+    # 31311887504 printed "the route answered HTTP 401 to the WORKER principal —
+    # read via the control plane's postgres container instead" TWENTY-TWO TIMES,
+    # once per sha. The fallback is not a fallback if it is the only path that
+    # ever runs; it is the door, and the route was a wall. A fallback that always
+    # fires is a broken door with a working window — and because it always fired,
+    # the failure rendered as a `note:` and never once as a verdict.
     #
-    # NOTHING PINNED IT UNTIL NOW, and the failure direction is the nasty one.
-    # Widen this route to accept the worker token and every test in this file
-    # still passes, while in production crown-reconcile silently stops using the
-    # postgres fallback and starts reading through the route — its own report
-    # would call that an IMPROVEMENT (`reader=route` instead of
-    # `postgres-container`) while it is a permission widening on a
-    # platform-scoped operational record that no tenant should reach.
+    # THE OLD PIN'S STATED FEAR DOES NOT SURVIVE READING WHAT THE WORKER HOLDS.
+    # It called this "a permission widening on a platform-scoped operational
+    # record that no tenant should reach". No tenant reaches it now either:
+    # `WORKER_TOKEN` is not a tenant credential. It is the faceless off-box
+    # shared secret that ALREADY reads the cross-team `GET /v1/internal/barkparks`
+    # (every row across every team), already claims and completes every team's
+    # provision jobs, and already WRITES the very rows this route returns
+    # (`POST /v1/internal/platform-deliveries`, asserted above in this same
+    # file). Admitting it to a read of the platform's own deploy record is
+    # STRICTLY SUBSUMED by what it holds before this change. What was actually
+    # true is the narrower thing the reconciler's own report kept saying: the
+    # principal that writes this record could not read it back.
     #
-    # So this asserts the refusal itself, not the fallback: a green here is what
-    # entitles the reconciler to treat a 401 as expected rather than as a fault.
-    test "the WORKER token is REFUSED — the reconciler's postgres fallback rests on this" do
+    # THE WIDENING IS CLAMPED, and the next three tests are the clamp: the worker
+    # is admitted FACELESSLY (no current_user, no current_team) with abilities
+    # `["read"]` and nothing else, and it gains no reach into either TENANT
+    # delivery log.
+    test "the WORKER token READS the record it wrote — the 401 is gone" do
       conn = call(:get, "/v1/deliveries?sha=#{@sha}", nil, @worker_token)
 
-      assert conn.status == 401,
-             "the worker principal must NOT reach the platform delivery reader: " <>
-               "crown-reconcile reads a 401 here as the documented tier mismatch and " <>
-               "falls back to the control plane's postgres container. If this route " <>
-               "starts answering the worker, that fallback silently stops being used " <>
-               "and a permission widening reads as a reader upgrade. Got " <>
-               "#{conn.status}."
+      assert conn.status == 200,
+             "GET /v1/deliveries answered HTTP #{conn.status} to the WORKER principal. " <>
+               "The WORKER principal is the one deploy.yml's crown step carries and the " <>
+               "only one that WRITES this record (POST /v1/internal/platform-deliveries). " <>
+               "A 401 here is the defect task-e2acb66e9ed0da09 closed: it leaves the " <>
+               "delivery record with no working API read path for its own writer, sends " <>
+               "crown-reconcile down the SSH+psql fallback on the NORMAL path, and turns " <>
+               "a route failure into a `note:` instead of a verdict."
 
-      # The refusal must also not leak the row it refused to serve.
+      # Not merely admitted — it gets the ROW, in the rendered bytes.
+      assert conn.resp_body =~ @sha
+      assert %{"count" => 1, "scope" => "platform"} = body(conn)
+    end
+
+    test "the worker is admitted FACELESSLY and clamped to read — never root" do
+      conn =
+        :get
+        |> conn("/v1/deliveries")
+        |> put_req_header("authorization", "Bearer " <> @worker_token)
+        |> Auth.require_user_or_pat_or_worker([])
+
+      refute conn.halted
+      assert conn.assigns[:current_principal] == :worker
+
+      # THE CLAMP. `["read"]` and not `["root"]`: a session carries root, and
+      # handing the worker root would make this plug a back door onto every
+      # write-gated route the moment someone reuses it.
+      assert conn.assigns[:current_abilities] == ["read"]
+      refute Auth.require_ability(conn, "read").halted
+      assert Auth.require_ability(conn, "write").halted
+      assert Auth.require_ability(conn, "deploy").halted
+      assert Auth.require_ability(conn, "root").halted
+
+      # FACELESS. A worker is not a user and resolves no team, so a route that
+      # reads either must not use this plug.
+      assert is_nil(conn.assigns[:current_user])
+      assert is_nil(conn.assigns[:current_team])
+    end
+
+    test "a bearer that is neither worker nor session nor PAT is still 401" do
+      conn = call(:get, "/v1/deliveries?sha=#{@sha}", nil, "not-the-worker-token")
+
+      assert conn.status == 401
       refute conn.resp_body =~ @sha
+    end
+
+    # THE NEGATIVE ARM. Widening the PLATFORM record must not widen what a worker
+    # can SEE. The two neighbouring routes that also end in `/deliveries` are
+    # TENANT surfaces — one team's notification sends, one instance's webhook
+    # send log — and neither may answer this principal.
+    test "the worker gains NO reach into the team notification delivery log" do
+      conn = call(:get, "/v1/notifications/deliveries", nil, @worker_token)
+
+      assert conn.status == 401,
+             "GET /v1/notifications/deliveries answered #{conn.status} to the WORKER " <>
+               "principal. That is a TEAM-scoped tenant log behind `Auth.require_user`; " <>
+               "widening /v1/deliveries must not have leaked into it."
+    end
+
+    test "the worker gains NO reach into a tenant's webhook delivery log" do
+      id = "33333333-3333-3333-3333-333333333333"
+
+      conn =
+        call(:get, "/v1/barkparks/#{id}/api/webhooks/wh_1/deliveries", nil, @worker_token)
+
+      assert conn.status == 401,
+             "GET /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries answered " <>
+               "#{conn.status} to the WORKER principal. That proxy is gated by " <>
+               "`proxy_instance_webhook` -> `Auth.require_user`; widening /v1/deliveries " <>
+               "must not have leaked into it."
+    end
+
+    # The guard is read out of ROUTER SOURCE as well as driven, because the four
+    # tests above are all green against a route that accepts EVERYTHING. This one
+    # names the plug, so "the 401 went away" can never be satisfied by an
+    # accidental removal of the gate.
+    test "the route's gate is the CLAMPED disjunction, not an open door" do
+      guard = RouterTierLens.raw_route_guard("GET", "/v1/deliveries")
+
+      assert guard == "require_user_or_pat_or_worker",
+             "GET /v1/deliveries must be gated by `Auth.require_user_or_pat_or_worker` " <>
+               "(session OR read-PAT OR the faceless worker). Found: #{inspect(guard)}."
+
+      assert RouterTierLens.tier_of("GET", "/v1/deliveries") == {:ok, "user(s)+worker"}
     end
 
     test "the bare list is a PINNED window, and ?limit= is clamped", %{user: user, team: team} do

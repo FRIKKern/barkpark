@@ -6,19 +6,47 @@
 //
 // WHAT IT MEASURES (Cloud Console Hardening wave 61)
 // -------------------------------------------------
-// `cloud/priv/static/__app.test.mjs` suspends module evaluation at its FIRST
-// top-level `await`. Every `test()` registered ABOVE that line is already on
-// node:test's queue and may be DRAINED while the await settles, but every
+// `cloud/priv/static/__app.test.mjs` suspends module evaluation at EVERY
+// top-level `await`. Every `test()` registered ABOVE such a line is already on
+// node:test's queue and may be DRAINED while that await settles, but every
 // module-level binding declared BELOW it is still in its temporal dead zone.
 // A drained early test that reaches one throws
 // `ReferenceError: Cannot access 'X' before initialization`. On PR #11134 that
 // cost five tests and blocked a required gate, and nothing in the repo said so
 // until CI did.
 //
-// So this guard derives the boundary from the file itself, collects the
-// depth-0 bindings declared after it and the depth-0 `test(` registrations
-// before it, resolves references TRANSITIVELY through early top-level helpers,
-// subtracts locally shadowed names, and exits non-zero on any crossing.
+// So this guard derives the suspension points from the file itself, and pairs
+// each early test with the FIRST one that FOLLOWS it — the drain that can catch
+// it — collecting the depth-0 bindings declared after that point, resolving
+// references TRANSITIVELY through helpers initialised before it, subtracting
+// names shadowed IN SCOPE, and exiting non-zero on any crossing.
+//
+// THE FIRST-MATCH AUDIT (wave 62, cchi-w62-bl-…-first-match-hole)
+// --------------------------------------------------------------
+// The sibling guard `console-runtime-pin-check.sh` was measured to have four
+// green-when-it-should-red holes sharing one root cause: it reasoned over a SET
+// and then read ONE value per member (charter D736). This guard was audited for
+// the analogous class by MUTATING THE REAL `__app.test.mjs` — copies, never the
+// tree — and three more of its own were found and closed here, on top of the
+// two #14846 had already closed:
+//
+//   · THE BOUNDARY WAS A FIRST-MATCH READ. `analyze` took the FIRST depth-0
+//     `await` and dropped every test at or after it. The real file has TWO
+//     (lines 635 and 15705); the 851 tests between them drain at the second and
+//     the bindings below it were invisible to all of them. Now every depth-0
+//     await is a suspension point — and that widening immediately found TWO
+//     REAL crossings in the shipped harness (§5b).
+//   · SHADOW SUBTRACTION WAS SPAN-WIDE, NOT SCOPED. Any same-named local
+//     ANYWHERE in a test erased a genuine module-level read elsewhere in it.
+//     Now a declaration shadows only the brace region it is declared in (§4c).
+//   · `test(` WAS COLLECTED AT DEPTH 0 ONLY, so a registration from a top-level
+//     `for`/`if`/`while`/`try` block — which RUNS at module evaluation, and
+//     which this harness already does — was skipped whole (§4d).
+//
+// A fourth measurement went the other way: `function` declarations are hoisted
+// AND initialised, so a late one can never throw the ReferenceError this guard
+// names. They were a FALSE-POSITIVE source that only the widened boundary model
+// could surface, and they are now subtracted from the late set (§5).
 //
 // WHAT IT DOES **NOT** CLAIM
 // --------------------------
@@ -37,6 +65,16 @@
 //     `/class="[^"]*x"/` opened a phantom string that drifted the depth map to
 //     48 by line 13234. That is why `--selftest` ships with it and runs in the
 //     SAME CI step: the fixtures are the proof that the lexer still sees.
+//   · A `test(` registered from a CALLBACK is not counted. `[1].forEach(() =>
+//     test(…))` really does register at module evaluation and is MISSED;
+//     `test("outer", () => test("sub", …))` really does not and must be. The
+//     guard cannot tell those apart without knowing which callee invokes its
+//     argument synchronously, so it counts neither and says so here. THIS IS
+//     THE KNOWN REMAINING GAP in the registration model.
+//   · Shadowing is scoped by BRACE REGION, not by real JS scope: a `var` is
+//     treated as block-scoped, and a concise arrow body's parameters shadow to
+//     the end of their enclosing region. Both over-approximate the shadow
+//     slightly, i.e. toward green, on shapes the harness does not use today.
 //   · It measures ONE file per invocation and says nothing about test ordering,
 //     assertion quality, or whether the harness is otherwise correct.
 //
@@ -73,6 +111,12 @@
 //     names at all to a reader that stops at the first newline, so the entire
 //     declaration disappears — fixtures/multi-decl.mjs)
 //   · the balance invariant   (fixtures/lost-boundary.mjs, eaten-bracket.mjs)
+//   · EVERY depth-0 await is a suspension point, not just the first
+//     (`--demo-first-boundary-only` → misses the second-await crossing)
+//   · scope-bounded shadowing (`--demo-span-shadow`  → a sibling-scope local
+//     erases a live read)
+//   · block-registered tests  (`--demo-depth0-tests` → a `for`-block
+//     registration is never examined) — all three: fixtures/hazards.mjs
 //
 // USAGE
 //   node scripts/console-tdz-order-check.mjs <file.mjs>
@@ -450,12 +494,150 @@ function localNames(text) {
   return names;
 }
 
-function refsOf(masked, span, { shadow = true } = {}) {
-  const text = masked.slice(span[0], span[1]);
-  const locals = shadow ? localNames(text) : new Set();
+function refsOf(masked, span, { shadow = true, spanWide = false } = {}) {
+  const [s0, s1] = span;
+  const text = masked.slice(s0, s1);
+  const byName = new Map();
+  if (shadow) {
+    for (const iv of shadowIntervals(masked, span, { spanWide })) {
+      if (!byName.has(iv.name)) byName.set(iv.name, []);
+      byName.get(iv.name).push(iv);
+    }
+  }
   const out = new Set();
-  for (const n of identifiers(text)) if (!locals.has(n)) out.add(n);
+  const re = /[A-Za-z_$][\w$]*/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const before = text.slice(Math.max(0, m.index - 2), m.index);
+    if (/[.\w$]$/.test(before)) continue; // property access / mid-identifier
+    if (NOISE.has(m[0])) continue;
+    const at = s0 + m.index;
+    const ivs = byName.get(m[0]);
+    if (ivs && ivs.some((iv) => at >= iv.from && at < iv.to)) continue;
+    out.add(m[0]);
+  }
   return out;
+}
+
+// ── 4c. SHADOWING IS AN INTERVAL, NOT A SET ─────────────────────────────────
+// HOLE (wave 62 audit). `localNames(text)` collected every declaration and
+// parameter ANYWHERE in a test's span into one flat SET and subtracted it from
+// every reference in that span — the same set-then-single-read shape as the
+// sibling pin, one level up: a set is built, and then consulted with no regard
+// for WHERE the name was bound. So
+//   test("…", () => { { const X = 0; use(X); } assert.ok(X); })
+// erased the module-level read of `X` on the last line because an unrelated
+// sibling block had declared its own. Measured GREEN on a crossing planted in
+// the real cloud/priv/static/__app.test.mjs (mutation M2).
+//
+// A declaration now shadows only the BRACE REGION it is declared in, and a
+// parameter list only its own function body (for a concise arrow body, to the
+// end of the enclosing region). `spanWide` reproduces the old behaviour so
+// `--demo-span-shadow` can prove the difference is load-bearing.
+function shadowIntervals(masked, span, { spanWide = false } = {}) {
+  const [s0, s1] = span;
+  const text = masked.slice(s0, s1);
+  const intervals = [];
+  if (spanWide) {
+    for (const n of localNames(text)) intervals.push({ name: n, from: s0, to: s1 });
+    return intervals;
+  }
+
+  const openAt = new Int32Array(text.length + 1).fill(-1);
+  const closeOf = new Map();
+  {
+    const stack = [];
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (c === "{") { openAt[i] = stack.length ? stack[stack.length - 1] : -1; stack.push(i); continue; }
+      openAt[i] = stack.length ? stack[stack.length - 1] : -1;
+      if (c === "}") { const o = stack.pop(); if (o !== undefined) closeOf.set(o, i); }
+    }
+  }
+  const regionOf = (i) => {
+    const o = i >= 0 && i < openAt.length ? openAt[i] : -1;
+    if (o < 0) return [s0, s1];
+    return [s0 + o, s0 + (closeOf.has(o) ? closeOf.get(o) + 1 : text.length)];
+  };
+  const bodyAfter = (idx) => {
+    let j = idx;
+    while (j < text.length && /\s/.test(text[j])) j++;
+    if (text[j] === "{") return [s0 + j, s0 + (closeOf.has(j) ? closeOf.get(j) + 1 : text.length)];
+    return regionOf(idx);
+  };
+  const add = (name, from, to) => intervals.push({ name, from, to });
+
+  let m;
+  const decl = /\b(?:const|let|var|function|class)\b/g;
+  while ((m = decl.exec(text))) {
+    const [from, to] = regionOf(m.index);
+    for (const n of bindingNames(text, m.index)) add(n, from, to);
+  }
+  for (const re of [/\bfunction\b[^(]*\(([^)]*)\)/g, /\(([^()]*)\)\s*=>/g, /\bcatch\s*\(([^)]*)\)/g]) {
+    re.lastIndex = 0;
+    while ((m = re.exec(text))) {
+      const [from, to] = bodyAfter(m.index + m[0].length);
+      for (const n of identifiers(m[1])) add(n, from, to);
+    }
+  }
+  const oneArrow = /(^|[^\w$.])([A-Za-z_$][\w$]*)\s*=>/g;
+  while ((m = oneArrow.exec(text))) {
+    const [from, to] = bodyAfter(m.index + m[0].length);
+    add(m[2], from, to);
+  }
+  return intervals;
+}
+
+// ── 4d. WHICH `test(` REALLY REGISTERS AT MODULE EVALUATION ─────────────────
+// HOLE (wave 62 audit). Registrations were collected at depth 0 ONLY, so
+// `for (const v of […]) { test(…) }` at the top level — an idiom this very
+// harness already uses — was skipped WHOLE: not measured, not counted, not
+// mentioned. That block RUNS during module evaluation, so its tests really are
+// on the queue. Measured GREEN on a crossing planted in the real harness
+// (mutation M4).
+//
+// A registration counts when EVERY bracket enclosing it is a synchronous block:
+// the `{` of a `for`/`if`/`while`/`switch`/`try`/`catch`/`else`/`do`, or a bare
+// block. An enclosing `(`/`[`, an object literal, or a function/arrow body means
+// a callee decides when — or whether — the registration happens, and the guard
+// does not guess. See the KNOWN REMAINING GAP in the header.
+const BLOCK_HEADS = new Set(["for", "if", "while", "switch", "catch"]);
+const BLOCK_PRECEDERS = new Set(["try", "else", "do", "finally", "", "{", "}", ";", ")"]);
+
+// The token immediately before `idx`, skipping whitespace. "" at start of file.
+function prevToken(masked, idx) {
+  let i = idx - 1;
+  while (i >= 0 && /\s/.test(masked[i])) i--;
+  if (i < 0) return "";
+  if (/[\w$]/.test(masked[i])) {
+    let j = i; while (j >= 0 && /[\w$]/.test(masked[j])) j--;
+    return masked.slice(j + 1, i + 1);
+  }
+  return masked[i];
+}
+
+function isModuleEvaluated(masked, idx) {
+  const stack = [];
+  for (let i = 0; i < idx; i++) {
+    const c = masked[i];
+    if (c === "(" || c === "[" || c === "{") stack.push({ c, i });
+    else if (c === ")" || c === "]" || c === "}") stack.pop();
+  }
+  for (const { c, i } of stack) {
+    if (c !== "{") return false;
+    const t = prevToken(masked, i);
+    if (t === ")") {
+      let d = 0, open = -1;
+      for (let j = i - 1; j >= 0; j--) {
+        if (masked[j] === ")") d++;
+        else if (masked[j] === "(") { d--; if (d === 0) { open = j; break; } }
+      }
+      if (open < 0 || !BLOCK_HEADS.has(prevToken(masked, open))) return false;
+      continue;
+    }
+    if (!BLOCK_PRECEDERS.has(t)) return false;
+  }
+  return true;
 }
 
 // ── 5. THE ANALYSIS ─────────────────────────────────────────────────────────
@@ -479,63 +661,115 @@ export function analyze(src, opts = {}) {
       !maskReport.unterminated,
   };
 
-  // The boundary is DERIVED: the first `await` token sitting at depth 0.
-  let boundary = -1;
+  const transitive = opts.transitive !== false;
+  const shadow = opts.shadow !== false;
+  const spanWide = opts.spanShadow === true;
+  const firstOnly = opts.everyBoundary === false;
+  const depth0Tests = opts.blockTests === false;
+
+  // HOLE (wave 62 audit). The boundary WAS a first-match read: the first depth-0
+  // `await`, `break`, and every test at or after it dropped. But a module
+  // suspends at EVERY top-level await, and the real cloud/priv/static/
+  // __app.test.mjs has TWO (lines 635 and 15705): the 851 tests registered
+  // between them are on node:test's queue when the second one suspends, and the
+  // bindings below it were invisible to every one of them. A crossing planted
+  // over the second await measured GREEN, rc 0 (mutation M3). Every depth-0
+  // await is now a suspension point.
+  const boundaries = [];
   let awaitTokens = 0;
   const awaitRe = /\bawait\b/g;
   let m;
   while ((m = awaitRe.exec(masked))) {
     awaitTokens++;
-    if (boundary < 0 && depth[m.index] === 0) boundary = m.index;
+    if (depth[m.index] !== 0) continue;
+    if (firstOnly && boundaries.length) continue;
+    boundaries.push(m.index);
   }
-  if (boundary < 0) return { boundary: -1, lex, awaitTokens };
+  if (!boundaries.length) return { boundary: -1, boundaries: [], lex, awaitTokens };
+  const boundary = boundaries[0];
 
-  // Depth-0 declarations, split by the boundary.
-  const early = new Map(); // name -> span (helpers reachable from early tests)
-  const late = new Map();  // name -> declaration line
+  // Depth-0 declarations, in source order. A `function` declaration is HOISTED
+  // AND INITIALISED before any module code runs, so it can never produce the
+  // ReferenceError this guard's error text names — it stays a chaseable EARLY
+  // helper but is never a LATE binding. The widened boundary model surfaced
+  // exactly one such false positive on the real harness (`driveMe`, line 18886).
+  // `let`/`const`/`class` really are dead until evaluated; `var` is hoisted to
+  // `undefined`, a quieter defect that is still worth naming, so it is kept.
+  const decls = [];
   DECL_RE.lastIndex = 0;
   while ((m = DECL_RE.exec(masked))) {
     if (depth[m.index] !== 0) continue;
     const names = bindingNames(masked, m.index);
     if (!names.length) continue;
-    const span = [m.index, statementEnd(masked, depth, m.index)];
-    if (m.index > boundary) {
-      for (const n of names) if (!late.has(n)) late.set(n, lineOf(m.index));
-    } else {
-      for (const n of names) if (!early.has(n)) early.set(n, span);
-    }
+    decls.push({
+      index: m.index,
+      names,
+      span: [m.index, statementEnd(masked, depth, m.index)],
+      line: lineOf(m.index),
+      hoisted: m[1] === "function",
+    });
   }
 
-  // Depth-0 `test(` registrations before the boundary.
+  // `test(` registrations that really run at module evaluation (§4d).
   const tests = [];
   const testRe = /\btest\s*\(/g;
   while ((m = testRe.exec(masked))) {
-    if (depth[m.index] !== 0) continue;
+    if (depth[m.index] !== 0) {
+      if (depth0Tests) continue;
+      if (!isModuleEvaluated(masked, m.index)) continue;
+    }
     const open = masked.indexOf("(", m.index);
     const span = [m.index, matchParen(masked, open)];
-    if (m.index >= boundary) continue;
     const title = (/["'`]([^"'`\n]*)/.exec(src.slice(open, open + 200)) || [, "(untitled)"])[1];
     tests.push({ index: m.index, line: lineOf(m.index), title, span });
   }
 
-  const transitive = opts.transitive !== false;
-  const shadow = opts.shadow !== false;
-  const crossings = [];
+  // Each test is caught by the FIRST suspension point that FOLLOWS it — the
+  // drain that can run it while later bindings are still dead. That boundary
+  // also yields the LARGEST late set, so no later one adds anything.
+  const groups = new Map();
   for (const t of tests) {
-    const seen = new Set();
-    const via = new Map();
-    const queue = [...refsOf(masked, t.span, { shadow })];
-    while (queue.length) {
-      const n = queue.shift();
-      if (seen.has(n)) continue;
-      seen.add(n);
-      if (late.has(n)) {
-        crossings.push({ test: t, binding: n, declLine: late.get(n), via: via.get(n) || null });
-        continue;
+    const b = boundaries.find((x) => x > t.index);
+    if (b === undefined) continue; // nothing suspends after it: it cannot drain early
+    if (!groups.has(b)) groups.set(b, []);
+    groups.get(b).push(t);
+  }
+
+  const crossings = [];
+  const lateSeen = new Set();
+  const earlySeen = new Set();
+  for (const [b, group] of groups) {
+    const early = new Map();
+    const late = new Map();
+    for (const d of decls) {
+      if (d.index > b) {
+        if (d.hoisted) continue;
+        for (const n of d.names) if (!late.has(n)) late.set(n, d.line);
+      } else {
+        for (const n of d.names) if (!early.has(n)) early.set(n, d.span);
       }
-      if (transitive && early.has(n)) {
-        for (const r of refsOf(masked, early.get(n), { shadow })) {
-          if (!seen.has(r)) { if (!via.has(r)) via.set(r, n); queue.push(r); }
+    }
+    for (const n of late.keys()) lateSeen.add(n);
+    for (const n of early.keys()) earlySeen.add(n);
+    for (const t of group) {
+      const seen = new Set();
+      const via = new Map();
+      const queue = [...refsOf(masked, t.span, { shadow, spanWide })];
+      while (queue.length) {
+        const n = queue.shift();
+        if (seen.has(n)) continue;
+        seen.add(n);
+        if (late.has(n)) {
+          crossings.push({
+            test: t, binding: n, declLine: late.get(n),
+            via: via.get(n) || null, boundaryLine: lineOf(b),
+          });
+          continue;
+        }
+        if (transitive && early.has(n)) {
+          for (const r of refsOf(masked, early.get(n), { shadow, spanWide })) {
+            if (!seen.has(r)) { if (!via.has(r)) via.set(r, n); queue.push(r); }
+          }
         }
       }
     }
@@ -544,20 +778,80 @@ export function analyze(src, opts = {}) {
   return {
     boundary,
     boundaryLine: lineOf(boundary),
-    earlyTests: tests.length,
-    lateBindings: late.size,
-    earlyBindings: early.size,
+    boundaries,
+    boundaryLines: boundaries.map(lineOf),
+    earlyTests: [...groups.values()].reduce((n, g) => n + g.length, 0),
+    lateBindings: lateSeen.size,
+    earlyBindings: earlySeen.size,
     crossings,
     lex,
     awaitTokens,
   };
 }
 
+// ── 5b. THE LATENT LEDGER ───────────────────────────────────────────────────
+// Widening the boundary model made a class VISIBLE that no run had ever
+// reached, and it immediately found TWO REAL crossings in the shipped harness —
+// both over the SECOND depth-0 await at line 15705, in tests registered ~13 000
+// lines above it.
+//
+// They are latent rather than firing, and the reason is MEASURED, not assumed:
+// on node v22.22.0 an instrumented copy prints `MODULE about to suspend at
+// point 2` → `MODULE resumed past point 2` BEFORE any test body runs, because
+// line 15705 re-imports `./__preview__/scenarios.mjs`, which line 635 already
+// put in the module cache — the await settles inside one microtask tick and
+// node:test never starts draining. (1200/1200 pass.) That is an ACCIDENT OF THE
+// CACHE, not a property of the file: give that second import any real async
+// work and the window opens on bindings 4 500 lines below.
+//
+// The repair belongs to `__app.test.mjs`, and the audit that found this was
+// fenced off from it. So the two are ledgered here BY NAME, and the ledger is a
+// RATCHET IN BOTH DIRECTIONS:
+//   · a crossing NOT on it is FATAL — a third cannot hide behind the two;
+//   · an entry on it that is NOT FOUND is ALSO FATAL — the ledger cannot rot
+//     into an allowlist that outlives what it excused.
+// Entries key on TEST TITLE + BINDING, never on a line number: this file is
+// edited every wave and a line-anchored pin breaks on the first insertion above
+// it.
+export const LATENT = [
+  {
+    file: "cloud/priv/static/__app.test.mjs",
+    title: "cch-w36-s4: a failed halt/resume stops printing the billing sentence over a 403",
+    binding: "FORBIDDEN_GENERIC",
+    why: "declared at the far end of the file, read ~17 000 lines above it; latent on node 22 only because the boundary-2 import is a module-cache hit",
+  },
+  {
+    file: "cloud/priv/static/__app.test.mjs",
+    title: "mountInstanceTimeline: a failed instance keeps the timeline + shows the verbatim detail + Retry",
+    binding: "ME_OWNER",
+    why: "same suspension point, same cache-hit reason; the repair is to move the fixture above the second await",
+  },
+];
+
+// Split crossings into the ones the ledger carries and the ones it does not,
+// and surface entries that no longer match anything. Pure, so `--selftest` can
+// grade the arm that decides the exit code without a 24 000-line file.
+export function reconcile(file, crossings, ledger = LATENT) {
+  const mine = ledger.filter((e) => file.endsWith(e.file));
+  const hit = new Set();
+  const fresh = [];
+  const known = [];
+  for (const c of crossings) {
+    const i = mine.findIndex((e) => e.title === c.test.title && e.binding === c.binding);
+    if (i < 0) { fresh.push(c); continue; }
+    hit.add(i);
+    known.push({ ...c, why: mine[i].why });
+  }
+  return { fresh, known, stale: mine.filter((_, i) => !hit.has(i)) };
+}
+
 // The one place a result becomes an exit code, so `run()` and `--selftest` can
-// never disagree about what the guard would have done.
-export function exitCodeFor(r) {
+// never disagree about what the guard would have done. `led` is the ledger
+// reconciliation when there is one; without it every crossing is fatal.
+export function exitCodeFor(r, led = null) {
   if (!r.lex.ok) return 3;
   if (r.boundary < 0) return 0;
+  if (led) return led.fresh.length || led.stale.length ? 1 : 0;
   return r.crossings.length ? 1 : 0;
 }
 
@@ -605,21 +899,37 @@ function run(file, opts) {
     console.log("  crossings: 0 (structurally impossible without a top-level await)");
     return 0;
   }
-  console.log(`  module boundary: first depth-0 \`await\` at line ${r.boundaryLine}`);
-  console.log(`  early test registrations (above the boundary): ${r.earlyTests}`);
-  console.log(`  late depth-0 bindings (below the boundary): ${r.lateBindings}`);
+  console.log(`  module suspension points: ${r.boundaries.length} depth-0 \`await\`(s) at line(s) ${r.boundaryLines.join(", ")}`);
+  console.log(`  early test registrations (each above some suspension point): ${r.earlyTests}`);
+  console.log(`  late depth-0 bindings (below the point that catches them): ${r.lateBindings}`);
   console.log(`  crossings: ${r.crossings.length}`);
-  for (const c of r.crossings) {
+
+  const led = reconcile(file, r.crossings);
+  for (const c of led.known) {
+    console.log(
+      `  LEDGERED (latent, NOT excused): test "${c.test.title}" reads \`${c.binding}\` declared at ` +
+      `line ${c.declLine}, below the suspension point at line ${c.boundaryLine} — ${c.why}`
+    );
+  }
+  for (const e of led.stale) {
+    console.error(
+      `::error file=${file}::console-tdz-order-check: STALE LATENT LEDGER ENTRY — "${e.title}" reading ` +
+      `\`${e.binding}\` is no longer a crossing in ${file}. Either the harness was repaired or the test ` +
+      `was renamed. DELETE that entry from LATENT in scripts/console-tdz-order-check.mjs and re-run. ` +
+      `A ledger that outlives what it excused is an allowlist, and this one refuses to become one.`
+    );
+  }
+  for (const c of led.fresh) {
     const hop = c.via ? ` via early helper \`${c.via}\`` : "";
     console.error(
       `::error file=${file},line=${c.test.line}::TDZ ORDER: test "${c.test.title}" (line ${c.test.line}) ` +
-      `registers above the module boundary (line ${r.boundaryLine}) but reads \`${c.binding}\`, ` +
-      `declared at line ${c.declLine}${hop}. If node:test drains that test while the boundary await ` +
+      `registers above the module suspension point at line ${c.boundaryLine} but reads \`${c.binding}\`, ` +
+      `declared at line ${c.declLine}${hop}. If node:test drains that test while that await ` +
       `settles it throws ReferenceError: Cannot access '${c.binding}' before initialization. ` +
-      `Move the test below the boundary, or move the binding above it.`
+      `Move the test below the binding, or move the binding above the test.`
     );
   }
-  return r.crossings.length ? 1 : 0;
+  return exitCodeFor(r, led);
 }
 
 // The self-test. It runs in the SAME CI step as the real measurement, because
@@ -724,6 +1034,88 @@ function selftest() {
     `${lexHealthLine(eaten.lex)} → exit ${exitCodeFor(eaten)}`
   );
 
+  // ── wave 62: the first-match AUDIT (cchi-w62-bl-…-first-match-hole) ───────
+  // Three more green-when-it-should-red holes, each MEASURED on a mutated copy
+  // of the real harness before it was closed, each now pinned by a fixture with
+  // a known answer AND by a crippled variant that reproduces the original miss.
+  const hz = analyze(fixture("hazards.mjs"), {});
+  const hzNames = hz.crossings.map((c) => `${c.test.title}→${c.binding}`).sort();
+  const HAZARDS = [
+    "block-registered→BLOCK_LATE",
+    "sibling shadow→SIBLING_LATE",
+    "split declaration→SPLIT_LATE",
+    "test between the boundaries→SECOND_LATE",
+  ];
+  check(
+    "hazards fixture reds with exactly the four audited crossings",
+    hzNames.length === HAZARDS.length && HAZARDS.every((e, i) => hzNames[i] === e),
+    hzNames.join(", ") || "none"
+  );
+  check(
+    "…and its two DECOYS stay silent: a genuine shadow, and a test registered from a function body",
+    !hzNames.some((n) => /TRUE_SHADOWED|NEVER_EARLY/.test(n)),
+    hzNames.join(", ") || "none"
+  );
+  check(
+    "BOTH depth-0 awaits are suspension points — a module does not stop suspending after the first",
+    (hz.boundaries || []).length === 2,
+    `suspension points at line(s) ${(hz.boundaryLines || []).join(", ") || "none"}`
+  );
+  const firstOnly = analyze(fixture("hazards.mjs"), { everyBoundary: false });
+  check(
+    "WITH ONLY THE FIRST boundary the crossing over the second await is MISSED (measured green on the real harness)",
+    !firstOnly.crossings.some((c) => c.binding === "SECOND_LATE"),
+    firstOnly.crossings.map((c) => c.binding).sort().join(",") || "none"
+  );
+  const spanShadow = analyze(fixture("hazards.mjs"), { spanShadow: true });
+  check(
+    "WITH SPAN-WIDE shadowing a sibling-scope local erases a live read and it is MISSED",
+    !spanShadow.crossings.some((c) => c.binding === "SIBLING_LATE"),
+    spanShadow.crossings.map((c) => c.binding).sort().join(",") || "none"
+  );
+  const depth0Tests = analyze(fixture("hazards.mjs"), { blockTests: false });
+  check(
+    "WITH DEPTH-0-ONLY test collection the block-registered test is not examined at all and is MISSED",
+    !depth0Tests.crossings.some((c) => c.binding === "BLOCK_LATE"),
+    depth0Tests.crossings.map((c) => c.binding).sort().join(",") || "none"
+  );
+  check(
+    "a `function` declared below a suspension point is HOISTED, so it is never reported as a late binding",
+    !hzNames.some((n) => n.includes("registerLater")),
+    hzNames.join(", ") || "none"
+  );
+
+  // ── wave 62: the latent ledger ratchets in BOTH directions ────────────────
+  // Graded on a synthetic ledger so these arms keep their meaning after the real
+  // one is emptied by the harness repair.
+  const LEDGER = [{ file: "f.mjs", title: "T1", binding: "B1", why: "x" }];
+  const cx = (title, binding) => ({ test: { title, line: 1 }, binding, declLine: 2, boundaryLine: 3, via: null });
+  const okLex = { lex: { ok: true }, boundary: 1, crossings: [] };
+  const led1 = reconcile("a/f.mjs", [cx("T1", "B1")], LEDGER);
+  check(
+    "ledger: a crossing it already carries is REPORTED but does not red",
+    led1.known.length === 1 && led1.fresh.length === 0 && led1.stale.length === 0 && exitCodeFor(okLex, led1) === 0,
+    `known ${led1.known.length}, fresh ${led1.fresh.length}, stale ${led1.stale.length} → exit ${exitCodeFor(okLex, led1)}`
+  );
+  const led2 = reconcile("a/f.mjs", [cx("T1", "B1"), cx("T2", "B2")], LEDGER);
+  check(
+    "ledger: a THIRD crossing cannot hide behind the ledgered ones — FRESH and FATAL",
+    led2.fresh.length === 1 && led2.fresh[0].binding === "B2" && exitCodeFor(okLex, led2) === 1,
+    `fresh ${led2.fresh.map((c) => c.binding).join(",") || "none"} → exit ${exitCodeFor(okLex, led2)}`
+  );
+  const led3 = reconcile("a/f.mjs", [], LEDGER);
+  check(
+    "ledger: an entry that matches nothing is STALE and FATAL — it cannot rot into an allowlist",
+    led3.stale.length === 1 && led3.stale[0].binding === "B1" && exitCodeFor(okLex, led3) === 1,
+    `stale ${led3.stale.map((e) => e.binding).join(",") || "none"} → exit ${exitCodeFor(okLex, led3)}`
+  );
+  const led4 = reconcile("other/g.mjs", [cx("T1", "B1")], LEDGER);
+  check(
+    "ledger: it is scoped to its own file — the same title elsewhere is still FATAL",
+    led4.fresh.length === 1 && led4.stale.length === 0,
+    `fresh ${led4.fresh.length}, stale ${led4.stale.length}`
+  );
+
   // A refusal that fires on well-formed input is as useless as a green that
   // never fires. Both good fixtures must stay measurable.
   check(
@@ -746,6 +1138,9 @@ const opts = {
   maskRegex: !argv.includes("--demo-no-regex-mask"),
   transitive: !argv.includes("--demo-no-transitive"),
   shadow: !argv.includes("--demo-no-shadow"),
+  spanShadow: argv.includes("--demo-span-shadow"),
+  everyBoundary: !argv.includes("--demo-first-boundary-only"),
+  blockTests: !argv.includes("--demo-depth0-tests"),
 };
 const demo = argv.some((a) => a.startsWith("--demo-"));
 if (demo) console.log("!! DEMO VARIANT — a deliberately crippled build, NOT the shipped guard.");

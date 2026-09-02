@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-bl-quiet-control-no-receipt-anywhere",
+    "kind": "task",
+    "type": "task",
+    "title": "a row nothing has paid",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "The first half is built.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "The second half is not.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Nothing merged names this row anywhere.",
+          "evidence": "",
+          "met": false
+        }
+      ]
+    }
+  }
+}

@@ -382,6 +382,47 @@
 # NOT WIRED INTO CI. It is an instrument. Arming a gate on it is a separate
 # decision the round has to make on its own evidence.
 #
+# CLAUSE 8 -- A REASON, READ AGAINST ITS OWN CITED ARTIFACTS (wave 28).
+#
+#       Clause 1 is `reason_hashes_distinct == reasons_non_empty` and NOTHING
+#       ELSE. It asserts that the non-empty disposition_reason values are
+#       pairwise md5-distinct, so a stale, wrong or INVENTED reason that is
+#       byte-unique passes it exactly as well as a re-derived one. Both the
+#       wave-27 round builder and the wave reviewer named that asymmetry
+#       independently and neither closed it: the round's correctness came to
+#       rest on committed re-derivation recipes under tooling/grip/ledger/ --
+#       prose a human must read, which no instrument re-checks.
+#
+#       MEASURED, not argued: a fixture of FIVE wholly invented reasons ("re-
+#       derived at <a commit that reached no branch> per <a document that does
+#       not exist>"), each byte-unique, greens clause 1 at 5 == 5 and exits 0
+#       under --assert-round-done. That fixture is in the selftest.
+#
+#       So clause 8 resolves what a reason CITES, at the shallowest depth that
+#       is a fact rather than a judgment: a cited COMMIT must be an ancestor of
+#       origin/main (`git merge-base --is-ancestor`), a cited BLOB or TREE must
+#       exist, and a cited repo path must be present at HEAD. Prior art,
+#       unautomated: pds-w27-round-contradiction-13 verified 13 sha tokens with
+#       exactly that command by hand.
+#
+#       IT IS A SAMPLER AND IT SAYS SO. Truth-grip already built a prose scanner
+#       over these strings and REFUTED it at precision 0.67, so nothing here
+#       reads meaning. Four buckets are REPORTED rather than failed -- thin
+#       (cites nothing at all), ignored (gitignored, so correctly absent from
+#       HEAD), foreign (`origin/main`, `Blobstore.put_bytes/3`, `8/10` --
+#       slash-shaped and not paths) and ambiguous (every segment is a top-level
+#       entry and it does not resolve, which is how this ledger writes "and") --
+#       and three token shapes are not extracted at all (a bare filename, a
+#       32-hex document rev, a short all-digit or all-letter token).
+#
+#       AND IT IS REPORTED BEFORE IT IS ARMED. On the live board (282 reasons,
+#       2026-09-02) it checks 139 rows, calls 143 thin, and names FOUR findings
+#       -- two genuinely stale citations and two reasons that correctly cite a
+#       path AS absent or AS proposed. That is a CORPUS finding, so the default
+#       PRINTS it and --assert-reason-artifacts turns it into a refusal.
+#       Absorbing those four into a build failure, or loosening the clause until
+#       they vanish, both throw the measurement away.
+#
 # EXIT CODES
 #   0  census produced, coherent, and (if asked) the round-done predicate holds
 #   1  --assert-round-done predicate is FALSE — the round is not done
@@ -397,6 +438,8 @@
 #                                [--assert-round-done] [--json]
 #                                [--anchor-from-paper WAVE-PAPER-SLUG]
 #                                [--anchor-unbound] [--no-anchor]
+#                                [--assert-reason-artifacts]
+#                                [--reason-sample N] [--reason-sample-seed S]
 #                                [--fixture-dir DIR] [--server URL]
 #   bash scripts/pds-ledger-census_test.sh    # the mutation fixtures
 #
@@ -406,6 +449,9 @@
 # the only reason the selftest can prove this instrument REDS rather than merely
 # prove it runs. --anchor <ISO-8601> is the selftest's clock and is REFUSED
 # outside --fixture-dir; a certifying run derives its anchor or has none.
+# --reason-repo DIR is the selftest's git oracle for CLAUSE 8 and is REFUSED
+# outside --fixture-dir for the same reason: a repo chosen by argv is a repo
+# where every citation can be made to resolve.
 
 set -euo pipefail
 
@@ -414,12 +460,21 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 3
 fi
 
+# THE SCRIPT'S OWN DIRECTORY, handed across the STDIN boundary. The program is
+# fed to `python3 -I -` so it has no __file__ to resolve the repo from, and
+# -I ignores only PYTHON* variables, so a plain env var survives. Clause 8
+# resolves its default repo from here -- never from the CWD, which is exactly
+# the hostile input `expect_isolated` exists to model.
+PDS_CENSUS_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export PDS_CENSUS_SCRIPT_DIR
+
 exec python3 -I - "$@" <<'PYEOF'
 import argparse
 import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -1096,6 +1151,403 @@ def anchor_binding_line(report):
     return "none"
 
 
+# --- clause 8: a reason, sampled against its own cited artifacts --------------
+#
+# WHAT CLAUSE 1 CANNOT SEE (the wave-27 reviewer's own residual). Clause 1 is
+# `reason_hashes_distinct == reasons_non_empty` and NOTHING ELSE: it asserts that
+# the 282 non-empty reasons are pairwise md5-distinct. A stale, wrong or invented
+# reason that is BYTE-UNIQUE passes it exactly as well as a re-derived one, so the
+# round's correctness rests entirely on committed re-derivation recipes under
+# tooling/grip/ledger/ -- prose a human must read, which no instrument re-checks.
+#
+# SO THIS CLAUSE READS THE REASON AGAINST ITS OWN CITED ARTIFACTS, at the
+# shallowest depth that is still a fact and not a judgment:
+#
+#   * every git object a reason cites must be IN THIS REPO, and a cited COMMIT
+#     must be an ancestor of origin/main (`git merge-base --is-ancestor`);
+#   * every repo path a reason names must EXIST at HEAD.
+#
+# Prior art, unautomated: pds-w27-round-contradiction-13 verified 13 sha tokens by
+# hand with exactly this command. This is that, in the instrument.
+#
+# IT IS A SAMPLER, NOT AN ORACLE, AND IT SAYS SO IN ITS OWN OUTPUT. Truth-grip
+# already built a prose scanner over these same strings and REFUTED it at
+# precision 0.67 (tooling/pds/adjudicate.mjs, header), so nothing here reads
+# meaning. It resolves tokens, and every class it cannot resolve is REPORTED in
+# its own bucket rather than converted into a failure -- because three of the
+# wave-27 reasons are DELIBERATELY thin (unprobed runtime rows) and
+# pds-w25-backlog-merge-gate-split is an explicitly PARTIAL content check wearing
+# the same dress as the other 29. A clause that cannot tell thin-and-honest from
+# wrong must not silently call the first the second.
+#
+# THE FOUR NON-FAILURE BUCKETS, each printed with its count:
+#
+#   thin       the reason cites no object and no path. NOT CHECKABLE. This is the
+#              deliberately-thin class, and it is 143 of 282 on the live board.
+#   ignored    the path is gitignored (api/_build/prod, api/tmp/bundle-spill).
+#              A build/runtime path is a real thing that is correctly absent
+#              from HEAD; calling it a stale citation would be a lie.
+#   ambiguous  the token does not resolve AND every one of its segments is a
+#              top-level entry of this repo -- `cloud/deploy`, `deploy/docs`,
+#              `api/internal/deploy/connectors`. In this ledger's prose a slash
+#              is also used for "and", and this shape is indistinguishable from
+#              a path without reading meaning. Existence is checked FIRST, so a
+#              real path is never demoted into this bucket.
+#   under-reach  three token shapes are NOT extracted at all, on purpose:
+#              a bare filename with no directory (`hetzner_respost.go` -- this
+#              repo has same-named files in several trees, so resolving one
+#              would be a guess); a 32-hex token (that is a Barkpark document
+#              `rev`, never a git sha); and a short token that is all-digits or
+#              all-letters (`20260731`, `defaced`). The price is roughly 4% of
+#              legitimate 7-char abbreviations; the alternative is reading dates
+#              and English words as commit ids.
+#
+# IT IS REPORTED BEFORE IT IS ARMED. Run against the live board this clause names
+# FOUR rows, and only TWO of them are stale citations (pds-bl-charter-slot-durability
+# cites 6e25912bab, a real commit that reached no remote branch; task-fff1116564723b60
+# quotes a `git grep -- api/test/barkpark/workspace_bundle_test.exs` whose "returns
+# nothing" is unearned because the file lives at api/test/barkpark/tenancy/). The
+# other two correctly cite a path AS ABSENT or AS PROPOSED. That is a CORPUS
+# FINDING, so the clause is REPORTED by default and armed only by
+# --assert-reason-artifacts: absorbing four live rows into a build failure, or
+# loosening the clause until they vanish, are the two ways this measurement gets
+# thrown away.
+
+# A URL is stripped before extraction: a GitHub blob link carries a 40-hex sha
+# and a repo-shaped path that belong to github.com, not to this checkout.
+CITE_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+", re.I)
+# 7-40 hex, and the boundaries are EXCLUSIONS rather than \b: `\b` would happily
+# match the hex tail of `foo-deadbeef1` and the head of `abc1234def/x`.
+CITE_SHA_RE = re.compile(r"(?<![0-9A-Za-z_/-])([0-9a-f]{7,40})(?![0-9A-Za-z_-])")
+# At least one `/`, never leading -- `/v1/data/query` is an HTTP route, not a
+# repo path, and this ledger's prose is full of them.
+CITE_PATH_RE = re.compile(r"(?<![0-9A-Za-z_./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.+-]+)+)")
+# The length of a Barkpark document `rev`. Reasons quote them ("at rev
+# 43e6314f314d830fa39f10defbc93ccb"); nothing abbreviates a git sha to 32.
+DOC_REVISION_HEX_LEN = 32
+
+
+def cited_shas(text):
+    """The git object tokens a reason cites. Deduped and sorted, so the count is
+    a property of the reason and not of how often it repeats itself."""
+    stripped = CITE_URL_RE.sub(" ", text)
+    out = set()
+    for match in CITE_SHA_RE.finditer(stripped):
+        token = match.group(1)
+        if len(token) == DOC_REVISION_HEX_LEN:
+            continue
+        if len(token) < 40 and not (any(c.isdigit() for c in token)
+                                    and any(c.isalpha() for c in token)):
+            continue
+        out.add(token)
+    return sorted(out)
+
+
+def cited_paths(text):
+    """The repo-path tokens a reason names. A token followed immediately by a
+    glob metacharacter is a PATTERN (`scripts/pds-*`), never a path, and is
+    dropped here rather than failed later."""
+    stripped = CITE_URL_RE.sub(" ", text)
+    out = set()
+    for match in CITE_PATH_RE.finditer(stripped):
+        if stripped[match.end():match.end() + 1] in ("*", "?"):
+            continue
+        # A trailing `/` is how prose writes a DIRECTORY (`./internal/cli/`), and
+        # git names that tree without it -- keeping the slash turns a citation
+        # that resolves into a citation that does not.
+        token = match.group(1).rstrip(".,;:)-_/")
+        # `./internal/cli/` is a repo path written the way a shell command
+        # writes one. Normalising it here is the difference between checking
+        # that citation and filing it under `foreign`.
+        while token.startswith("./"):
+            token = token[2:]
+        if "/" not in token:
+            continue
+        out.add(token)
+    return sorted(out)
+
+
+def resolve_default_repo():
+    """THE REPO CLAUSE 8 CHECKS AGAINST, resolved from the SCRIPT'S OWN LOCATION.
+
+    Not the CWD. `python3 -I -` already refuses to import from the working
+    directory (that is what `expect_isolated` pins), and resolving the repo from
+    it would reintroduce the same class one layer up: the same census run from
+    two checkouts on one box would measure two different `origin/main`s and
+    neither run would say which.
+
+    A failure here is not fatal on its own -- GitOracle turns an unusable path
+    into the `unavailable` STATE, which is reported and never read as zero
+    findings.
+    """
+    here = os.environ.get("PDS_CENSUS_SCRIPT_DIR") or os.getcwd()
+    try:
+        top = subprocess.run(["git", "-C", here, "rev-parse", "--show-toplevel"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             universal_newlines=True)
+    except (OSError, ValueError):
+        return here
+    if top.returncode == 0 and top.stdout.strip():
+        return top.stdout.strip()
+    return here
+
+
+class GitOracle(object):
+    """THE ONLY THING THIS CLAUSE ASKS GIT, AND IT ASKS ONCE.
+
+    Two whole-repo reads up front (`ls-tree -r` and `rev-parse origin/main`) and
+    a memoised `cat-file -t` / `merge-base --is-ancestor` per DISTINCT token, so
+    282 reasons cost a few dozen subprocesses rather than a few thousand.
+
+    UNAVAILABLE IS A STATE, NEVER A PASS. No git, no repo, or an unresolvable
+    origin/main leaves `state = "unavailable"` with the reason attached; the
+    clause then reports that it could check nothing, and --assert-reason-artifacts
+    treats it as a failure. It never quietly reports zero findings.
+    """
+
+    def __init__(self, repo):
+        self.repo = repo
+        self.state = "checked"
+        self.detail = ""
+        self.origin_main = None
+        self.paths = set()
+        self.tops = set()
+        self._object = {}
+        self._ignored = {}
+
+        listing = self._git(["ls-tree", "-r", "--name-only", "HEAD"])
+        if listing is None or listing.returncode != 0:
+            self.state = "unavailable"
+            self.detail = ("`git -C %s ls-tree -r --name-only HEAD` did not answer -- "
+                           "no repo, no git, or no HEAD" % repo)
+            return
+        for line in listing.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            self.paths.add(line)
+            segments = line.split("/")
+            for i in range(1, len(segments)):
+                self.paths.add("/".join(segments[:i]))
+        self.tops = set(p for p in self.paths if "/" not in p)
+
+        head = self._git(["rev-parse", "--verify", "origin/main^{commit}"])
+        if head is None or head.returncode != 0 or not head.stdout.strip():
+            self.state = "unavailable"
+            self.detail = ("origin/main does not resolve in %s -- ancestry is measured "
+                           "against origin/main and nothing else, so there is no "
+                           "weaker check to fall back to" % repo)
+            return
+        self.origin_main = head.stdout.strip()
+
+    def _git(self, args):
+        try:
+            return subprocess.run(["git", "-C", self.repo] + args,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  universal_newlines=True)
+        except (OSError, ValueError):
+            return None
+
+    def object_state(self, token):
+        """`ok` | `not-ancestor` | `unknown`.
+
+        A COMMIT owes ancestry. A BLOB or TREE owes only existence, and that is
+        the honest depth: those are content-addressed, so `blob 5f34b417ee`
+        resolving at all IS the claim the reason makes, and running
+        `merge-base --is-ancestor` on one exits 128 -- which an ancestry-only
+        implementation would have mis-filed as a stale citation. Four live rows
+        were mis-filed exactly that way before this branch existed.
+        """
+        if token in self._object:
+            return self._object[token]
+        kind = self._git(["cat-file", "-t", token])
+        if kind is None or kind.returncode != 0:
+            state = "unknown"
+        elif kind.stdout.strip() == "commit":
+            ancestor = self._git(["merge-base", "--is-ancestor", token, self.origin_main])
+            state = "ok" if (ancestor is not None and ancestor.returncode == 0) else "not-ancestor"
+        else:
+            state = "ok"
+        self._object[token] = state
+        return state
+
+    def path_state(self, token):
+        """`ok` | `ignored` | `ambiguous` | `missing`.
+
+        ORDER IS THE WHOLE DESIGN. Existence is asked FIRST, so a real path is
+        never demoted into `ambiguous` by a coincidence of its segment names.
+        """
+        if token in self.paths:
+            return "ok"
+        if token in self._ignored:
+            return self._ignored[token]
+        # GITIGNORE IS ASKED BEFORE THE ROOT GATE, because an ignored TOP-LEVEL
+        # tree (`build/`, `api/_build/`) is absent from `ls-tree` and therefore
+        # absent from `tops` -- so the root gate would file every citation of one
+        # as FOREIGN and the ignored bucket would be permanently empty. git's own
+        # answer outranks a set derived from the tree git chose not to track.
+        for candidate in (token, token + "/"):
+            result = self._git(["check-ignore", "-q", candidate])
+            if result is not None and result.returncode == 0:
+                self._ignored[token] = "ignored"
+                return "ignored"
+        # THE ROOT GATE, AND IT IS THE WHOLE DIFFERENCE BETWEEN 4 FINDINGS AND
+        # 279. This ledger's prose is dense with slash-shaped tokens that are
+        # not paths at all -- `origin/main`, `Blobstore.put_bytes/3`, `8/10`,
+        # `done/cancelled`, `application/x-ndjson`, `and/or`. A token whose FIRST
+        # segment is not a top-level entry of this repo cannot be a repo path,
+        # so it is FOREIGN: not checked, not failed, and counted so the size of
+        # what this clause declines to read is visible rather than assumed.
+        if token.split("/")[0] not in self.tops:
+            self._ignored[token] = "foreign"
+            return "foreign"
+        state = "missing"
+        if all(seg in self.tops for seg in token.split("/")):
+            state = "ambiguous"
+        self._ignored[token] = state
+        return state
+
+
+def sample_reason_rows(row_ids, size, seed):
+    """THE SUBSET IS DETERMINISTIC AND ITS MEMBERSHIP IS PRINTED.
+
+    A sample nobody can enumerate restores the disease at one remove: a green run
+    would name a number instead of the rows behind it. So selection is a pure
+    function of (seed, row id) -- sha256(seed + NUL + id) ascending, ties broken
+    by the id -- which means anyone can recompute the membership of any past run
+    from its printed seed, and rotating the round means changing the SEED, never
+    changing the rule.
+
+    Returns (selected_ids_sorted, rule).
+    """
+    ordered = sorted(row_ids)
+    if size is None or size >= len(ordered):
+        return ordered, "ALL"
+    ranked = sorted(ordered, key=lambda i: (
+        hashlib.sha256((seed + "\x00" + i).encode("utf-8")).hexdigest(), i))
+    return sorted(ranked[:size]), "SUBSET"
+
+
+def reason_artifacts(rows, oracle, size, seed):
+    """CLAUSE 8, as a pure function of the closure rows and one git oracle."""
+    carrying = {r["_id"]: reason_of(r) for r in rows if reason_of(r)}
+    sampled, rule = sample_reason_rows(list(carrying), size, seed)
+    report = {
+        "state": oracle.state,
+        "detail": oracle.detail,
+        "repo": oracle.repo,
+        "origin_main": oracle.origin_main,
+        "candidates": len(carrying),
+        "sample_rule": rule,
+        "sample_size": size,
+        "sample_seed": seed,
+        "sampled": sampled,
+        "thin": [],
+        "checked": [],
+        "sha_tokens": 0,
+        "path_tokens": 0,
+        "ignored": [],
+        "ambiguous": [],
+        "foreign": 0,
+        "foreign_tokens": [],
+        "findings": [],
+    }
+    if oracle.state != "checked":
+        return report
+    foreign = set()
+    for row_id in sampled:
+        text = carrying[row_id]
+        shas = cited_shas(text)
+        # THE FOREIGN TOKENS ARE DROPPED BEFORE THE THIN/CHECKED SPLIT. A row
+        # whose only slash-shaped tokens were `origin/main` and `8/10` cited
+        # NOTHING this clause can resolve, and calling it `checked` would inflate
+        # the checked count with rows nobody actually checked -- the same
+        # success-claim-over-unlooked-rows shape clause 4(a) refuses.
+        paths = [p for p in cited_paths(text) if oracle.path_state(p) != "foreign"]
+        for dropped in cited_paths(text):
+            if oracle.path_state(dropped) == "foreign":
+                report["foreign"] += 1
+                foreign.add(dropped)
+        if not shas and not paths:
+            report["thin"].append(row_id)
+            continue
+        report["checked"].append(row_id)
+        report["sha_tokens"] += len(shas)
+        report["path_tokens"] += len(paths)
+        # EVERY violation in the reason, never the first one: a reason that
+        # cites both a dead sha and a dead path must name BOTH, or the second
+        # is invisible until the first is fixed.
+        for token in shas:
+            state = oracle.object_state(token)
+            if state != "ok":
+                report["findings"].append([row_id, state, token])
+        for token in paths:
+            state = oracle.path_state(token)
+            if state == "ignored":
+                report["ignored"].append([row_id, token])
+            elif state == "ambiguous":
+                report["ambiguous"].append([row_id, token])
+            elif state != "ok":
+                report["findings"].append([row_id, "path-missing", token])
+    report["foreign_tokens"] = sorted(foreign)
+    return report
+
+
+def render_reason_artifacts(report, armed):
+    """CLAUSE 8, in the human render. The buckets are printed even when they are
+    empty: a reader must be able to see that the clause looked and found nothing,
+    which is a different sentence from the clause not running."""
+    art = report.get("reason_artifacts")
+    out = ["", "reason artifacts (CLAUSE 8 -- a reason, read against what it CITES)"]
+    if not art:
+        out.append("  NOT RUN")
+        return out
+    if art["state"] != "checked":
+        out.append("  UNAVAILABLE -- %s" % art["detail"])
+        out.append("  This is NOT zero findings. Nothing was checked.")
+        return out
+    out.append("  repo        %s   (origin/main %s)" % (art["repo"], art["origin_main"]))
+    out.append("  membership  %s of %d row(s) carrying a non-empty reason   (seed %r)"
+               % ("ALL" if art["sample_rule"] == "ALL"
+                  else "SUBSET %d" % art["sample_size"], art["candidates"], art["sample_seed"]))
+    if art["sample_rule"] == "SUBSET":
+        out.append("              rule: sha256(seed + NUL + row_id) ascending, first %d, "
+                   "ties by row_id" % art["sample_size"])
+        # PRINTED IN FULL, NEVER ELIDED. This list IS the answer to "which rows
+        # did that green run actually check".
+        for row_id in art["sampled"]:
+            out.append("      sampled: %s" % row_id)
+    out.append("  checked     %5d row(s) citing %d object token(s) and %d path token(s)"
+               % (len(art["checked"]), art["sha_tokens"], art["path_tokens"]))
+    out.append("  thin        %5d row(s) cite NOTHING -- NOT CHECKABLE, and reported as"
+               % len(art["thin"]))
+    out.append("              thin rather than converted into a failure (the deliberately")
+    out.append("              unprobed rows live here, and so does every honest partial)")
+    out.append("  ignored     %5d path cite(s) are gitignored -- correctly absent from HEAD"
+               % len(art["ignored"]))
+    for row_id, token in art["ignored"]:
+        out.append("      ignored: %s -> %s" % (row_id, token))
+    out.append("  foreign     %5d slash-token(s) are NOT repo paths at all (%d distinct) --"
+               % (art["foreign"], len(art["foreign_tokens"])))
+    out.append("              `origin/main`, `Blobstore.put_bytes/3`, `8/10`, `and/or`. The")
+    out.append("              first segment is not a top-level entry of this repo, so nothing")
+    out.append("              here was checked and nothing here was failed.")
+    out.append("  ambiguous   %5d path cite(s) are all-top-level segments and do not resolve"
+               % len(art["ambiguous"]))
+    out.append("              -- a slash used for `and` is not distinguishable from a path")
+    for row_id, token in art["ambiguous"]:
+        out.append("      ambiguous: %s -> %s" % (row_id, token))
+    out.append("  FINDINGS    %5d   %s" % (len(art["findings"]),
+                                           "ARMED (--assert-reason-artifacts)" if armed
+                                           else "REPORTED, NOT ARMED -- see the note below"))
+    for row_id, kind, token in art["findings"]:
+        out.append("      %-14s %s -> %s" % (kind, row_id, token))
+    if not armed:
+        out.append("  Unarmed on purpose: the live board's findings are a CORPUS finding,")
+        out.append("  reported before the clause is armed. Arm it with --assert-reason-artifacts.")
+    return out
+
+
 def lapse_shapes(rows, started, lease_ttl):
     """CLAUSE 7 (PDS-D638): THE LEDGER LAPSE, IN THREE SHAPES THAT DO NOT SHARE
     A KEY. Read straight off the `claim` object the paged read already fetched.
@@ -1558,6 +2010,10 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("disposition_reason")
     out.append("  non-empty                   %5d" % report["reasons_non_empty"])
     out.append("  distinct reason hashes      %5d" % report["reason_hashes_distinct"])
+    out.append("  ^ THAT PAIR IS CLAUSE 1 AND IT IS md5-DISTINCTNESS ALONE. A stale, wrong")
+    out.append("    or invented reason that is BYTE-UNIQUE passes it exactly as well as a")
+    out.append("    re-derived one. CLAUSE 8, below, is what reads a reason against what it")
+    out.append("    actually cites.")
     out.append("  carrying a reopen trigger   %5d   (structured `reopen_trigger` field ONLY)"
                % report["reopen_triggers_structured"])
     out.append("  prose-only REOPEN mention   %5d   (DECORATION -- NEVER summed with the line above)"
@@ -1624,6 +2080,8 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("           key: open + claim.worker SET + claim.closed_at SET")
     out.append("           REMEDY: clear the stale claim -- a worker-keyed check reads this row as HELD")
     out.append("")
+    out.extend(render_reason_artifacts(report, report.get("reason_artifacts_armed")))
+    out.append("")
     out.extend(render_blind_spots(report, root))
     out.append("")
     out.append("off-vocabulary disposition values (vocabulary: %s)"
@@ -1666,6 +2124,43 @@ def round_done_predicate(report):
                         % (non_empty - distinct, non_empty, distinct))
     lines.append("  non-empty reasons > 0                          %d        %s"
                  % (non_empty, "PASS" if non_empty > 0 else "FAIL"))
+
+    # CLAUSE 8 -- the reason, against its own citations. It sits BESIDE clause 1
+    # and never inside it: clause 1 asks whether two reasons are the same string,
+    # clause 8 asks whether one reason's citations resolve. A board can pass
+    # either and fail the other, which is the entire finding this clause pays.
+    art = report.get("reason_artifacts") or {}
+    armed = bool(report.get("reason_artifacts_armed"))
+    if art:
+        if art["state"] != "checked":
+            lines.append("  reason citations resolve                       UNAVAILABLE   %s"
+                         % ("FAIL" if armed else "reported, clause UNARMED"))
+            if armed:
+                failures.append("CLAUSE 8 could check NOTHING (%s) -- an unchecked clause "
+                                "under --assert-reason-artifacts is a refusal, never a pass"
+                                % art["detail"])
+        else:
+            findings = art["findings"]
+            lines.append("  reason citations resolve                      %d/%d    %s   "
+                         "(%d thin, %d ignored, %d ambiguous; membership %s)"
+                         % (len(art["checked"]) - len(set(f[0] for f in findings)),
+                            len(art["checked"]),
+                            ("PASS" if not findings else ("FAIL" if armed else "FINDINGS")),
+                            len(art["thin"]), len(art["ignored"]), len(art["ambiguous"]),
+                            art["sample_rule"]))
+            # THE THIN ROWS ARE NAMED AS THIN, IN THE PREDICATE ITSELF. Saying
+            # "139/139 PASS" over a board where 143 more rows cite nothing would
+            # be a success claim about rows nobody looked at.
+            lines.append("  ^ rows citing NOTHING (thin, NOT CHECKABLE)   %d        %s"
+                         % (len(art["thin"]),
+                            "reported as thin, never as a failure"))
+            if findings and armed:
+                failures.append("%d reason(s) cite an artifact that does not check out "
+                                "(%s) -- a byte-unique reason clause 1 calls distinct: %s"
+                                % (len(set(f[0] for f in findings)),
+                                   ", ".join(sorted(set(f[1] for f in findings))),
+                                   ", ".join("%s->%s" % (f[0], f[2]) for f in findings[:6])
+                                   + (", ..." if len(findings) > 6 else "")))
     if non_empty == 0:
         failures.append("zero non-empty reasons -- an all-empty board trivially has "
                         "all-distinct reasons; that is not done, it is unstarted")
@@ -1813,6 +2308,22 @@ def main(argv):
                         help="do not derive an anchor from the root's %s. This is the "
                              "STRICTER clause (nothing is deferred), so it can never seal "
                              "a round." % ROUND_ANCHOR_FIELD)
+    parser.add_argument("--assert-reason-artifacts", action="store_true",
+                        help="promote CLAUSE 8's findings into round-done failures. "
+                             "OFF by default and that is deliberate: the live board "
+                             "carries findings that are a CORPUS finding, and they are "
+                             "reported before they are enforced.")
+    parser.add_argument("--reason-sample", type=int,
+                        help="check only N of the rows carrying a reason. The subset is "
+                             "deterministic in (--reason-sample-seed, row id) and its "
+                             "MEMBERSHIP IS PRINTED IN FULL.")
+    parser.add_argument("--reason-sample-seed", default="",
+                        help="rotate the CLAUSE 8 subset. Rotating a round means changing "
+                             "this, never changing the selection rule.")
+    parser.add_argument("--reason-repo",
+                        help="SELFTEST REPO ONLY -- refused outside --fixture-dir, for the "
+                             "same reason --anchor is: a repo chosen by argv is a repo where "
+                             "every citation can be made to resolve.")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--fixture-dir")
     parser.add_argument("--server")
@@ -1846,6 +2357,16 @@ def main(argv):
     # everywhere is one nobody reads.
     if args.anchor_unbound and not args.anchor_from_paper:
         die(EXIT_USAGE, "--anchor-unbound overrides nothing without --anchor-from-paper")
+    # THE CLAUSE-8 REPO IS FIXTURE-ONLY, for the same reason the argv anchor is.
+    # Pointed at a repo where every cited object and path happens to resolve, the
+    # clause reports zero findings over the same board that has four -- a green
+    # bought by choosing the oracle instead of by fixing the reasons.
+    if args.reason_repo and not args.fixture_dir:
+        die(EXIT_USAGE,
+            "--reason-repo is the SELFTEST's repo and is refused outside --fixture-dir: "
+            "a repo chosen by argv is a repo where every citation can be made to resolve")
+    if args.reason_sample is not None and args.reason_sample < 1:
+        die(EXIT_USAGE, "--reason-sample %d must be >= 1" % args.reason_sample)
 
     if args.fixture_dir:
         if not os.path.isdir(args.fixture_dir):
@@ -1909,6 +2430,20 @@ def main(argv):
     report["blind_spots"] = blind_spots(
         corpus, closure, args.root, drafts, drafts_unread, started, lease_ttl)
     report["lease_ttl_source"] = lease_ttl_source
+    # CLAUSE 8. It runs on EVERY invocation -- there is no flag that turns the
+    # measurement off, only one (--assert-reason-artifacts) that turns its
+    # findings into a refusal. A clause a caller can silence is a clause that
+    # will be silenced on the run that would have found something.
+    #
+    # THE REPO IS RESOLVED FROM THE SCRIPT'S OWN DIRECTORY, never from the CWD:
+    # this program is launched with `python3 -I -`, and a census that resolved
+    # `origin/main` from wherever it happened to be invoked would answer a
+    # different question in every checkout on the box.
+    reason_repo = args.reason_repo or resolve_default_repo()
+    report["reason_artifacts"] = reason_artifacts(
+        [corpus[i] for i in closure], GitOracle(reason_repo),
+        args.reason_sample, args.reason_sample_seed)
+    report["reason_artifacts_armed"] = bool(args.assert_reason_artifacts)
     # THE LENS IS DERIVED, NOT DECLARED. If the pages disagreed about the
     # perspective they answered with, ALL of them are named -- an averaged lens
     # is the same lie as an averaged snapshot.

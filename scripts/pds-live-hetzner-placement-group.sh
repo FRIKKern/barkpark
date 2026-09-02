@@ -52,10 +52,13 @@
 #     "$HCLOUD_TOKEN is set" would therefore refuse a perfectly credentialed run
 #     on Linux/CI, and — worse — a test for "some token-ish env var is set" would
 #     PROCEED on HETZNER_API_TOKEN, a name bp never reads.
-#     Measured on macOS 2026-07-31: os.UserConfigDir() resolves to
-#     ~/Library/Application Support, so the bare-cli.toml rung is accidentally
-#     DEAD there and LIVE wherever UserConfigDir is ~/.config. The preflight does
-#     not care which is true today; it asks bp.
+#     Measured on macOS 2026-07-31: os.UserConfigDir() resolved to
+#     ~/Library/Application Support, so the bare-cli.toml rung was accidentally
+#     DEAD there and LIVE wherever UserConfigDir is ~/.config. That hole is now
+#     closed — bp tries the Go spelling AND $XDG_CONFIG_HOME (default ~/.config),
+#     first readable wins — and state 4 below proves the bare rung WITHOUT
+#     HCLOUD_CONFIG. The preflight still does not care which spelling paid; it
+#     asks bp.
 #   · A refusal is loud and exits 3 (the resolve-or-die of scripts/pds-pull-proof.sh),
 #     explicitly NOT the shape of scripts/onramp-live-client-smoke.sh, which
 #     prints a friendly no-op and exits 0. There is no fourth outcome and no
@@ -245,7 +248,7 @@ preflight() {
   rc2=$?
   set -e
   if [ "$rc2" -eq 0 ] && shape_ok "$probe2"; then
-    RUNG="hcloud-cli-context (\$HCLOUD_CONFIG else <UserConfigDir>/hcloud/cli.toml)"
+    RUNG="hcloud-cli-context (\$HCLOUD_CONFIG else <UserConfigDir> else \$XDG_CONFIG_HOME|~/.config, then /hcloud/cli.toml)"
   else
     RUNG="env:HCLOUD_TOKEN"
   fi
@@ -262,17 +265,34 @@ preflight() {
 # token, so it descends the SAME ladder bp does — and the value is never printed,
 # never written to an artifact, and never lands in a fixture.
 
-# default_hcloud_config — where Go's os.UserConfigDir() puts hcloud's cli.toml on
-# THIS platform. It is ONE function because two spellings of it drift: an earlier
-# draft hard-coded ~/.config here and Darwin's ~/Library/Application Support in
-# the oracle, so --selftest state 4 looked for the file in a place macOS never
-# writes it and reported the third rung UNPROVEN on a host that has it.
+# default_hcloud_config — where bp looks for hcloud's cli.toml when HCLOUD_CONFIG
+# is unset, in bp's own order: the Go os.UserConfigDir() spelling first, then
+# $XDG_CONFIG_HOME (default ~/.config), FIRST READABLE WINS. It is ONE function
+# because two spellings of it drift: an earlier draft hard-coded ~/.config here
+# and Darwin's ~/Library/Application Support in the oracle, so --selftest state 4
+# looked for the file in a place macOS never writes it and reported the third
+# rung UNPROVEN on a host that has it.
+#
+# The Darwin entry alone was ALSO wrong, and in the same direction as the bug
+# this runner measured: os.UserConfigDir() answers ~/Library/Application Support
+# there, but the hcloud CLI writes ~/.config/hcloud/cli.toml on every platform.
+# So on macOS this oracle found nothing, --selftest refused at exit 3 before its
+# first state, and the third rung was untestable on the very hosts where it was
+# broken. Two spellings, mirroring internal/hetzner's hcloudConfigCandidates.
 default_hcloud_config() {
+  local candidates=()
   if [ "$(uname -s)" = "Darwin" ]; then
-    printf '%s\n' "$HOME/Library/Application Support/hcloud/cli.toml"
-  else
-    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/hcloud/cli.toml"
+    candidates+=("$HOME/Library/Application Support/hcloud/cli.toml")
   fi
+  candidates+=("${XDG_CONFIG_HOME:-$HOME/.config}/hcloud/cli.toml")
+  local c
+  for c in "${candidates[@]}"; do
+    if [ -r "$c" ]; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+  done
+  printf '%s\n' "${candidates[0]}"
 }
 
 ORACLE_TOKEN=""
@@ -1192,13 +1212,18 @@ selftest() {
     -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HETZNER_API_TOKEN=$ORACLE_TOKEN"
   st_case "3. HCLOUD_TOKEN correct" 0 \
     -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_TOKEN=$ORACLE_TOKEN"
-  local cfg="${HCLOUD_CONFIG:-}"
-  [ -n "$cfg" ] || cfg="$(default_hcloud_config)"
+  # State 4 is the BARE rung: no HCLOUD_CONFIG, no env token, just the real HOME
+  # and the cli.toml the hcloud CLI wrote there. Handing it HCLOUD_CONFIG would
+  # have proved only that the override works — which state 4 used to do, and
+  # which is exactly why the macOS hole survived measurement for so long.
+  local cfg
+  cfg="$(default_hcloud_config)"
   if [ -r "$cfg" ]; then
-    st_case "4. HCLOUD_CONFIG -> real cli.toml, no env token" 0 \
-      -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_CONFIG=$cfg"
+    st_case "4. bare cli.toml rung: no HCLOUD_CONFIG, no env token" 0 \
+      -i "PATH=$PATH" "HOME=$HOME" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART"
     grep -q 'hcloud-cli-context' "$ST_LAST_OUT" \
       || { printf '  FAIL   state 4 proceeded but did not NAME the cli-context rung\n'; ST_FAIL=1; }
+    printf '         (the file bp found unaided: %s)\n' "$cfg"
   else
     printf '  FAIL   state 4 needs an hcloud cli.toml at %s (this host has none, so the third rung is UNPROVEN here — that is a gap, not a pass)\n' "$cfg"
     ST_FAIL=1

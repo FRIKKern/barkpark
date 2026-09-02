@@ -170,9 +170,24 @@ func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bo
 // manifest's caller auth_tier echo (M0 decision A3 — no dedicated endpoint) and
 // GET /v1/meta are BEST-EFFORT enrichment that never fail the command. whoami
 // reports your config; it is not a connectivity gate, so it always exits 0.
-func runWhoami(out *writer, g globals, ctx manifest.Context) int {
+func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenance) int {
 	source, active, name := whoamiSourceName(g, ctx)
 	tokenPresent := ctx.Token != ""
+
+	// WHICH credential, not merely whether one exists. `token_present: true` was
+	// the whole diagnosis before this line, and it is the same "true" for a saved
+	// admin token and for a stale BARKPARK_TOKEN that outranked it — the exact
+	// ambiguity that made a shadowed login unreadable. prov comes from
+	// resolveContextProv, beside the fold that picked the token (tokensource.go);
+	// a zero prov (a caller that resolved its own context) degrades to a stated
+	// "unknown"/"none" rather than a blank field.
+	tokenSource := prov.label()
+	if prov.Source == "" {
+		tokenSource = tokenSourceUnknown
+		if !tokenPresent {
+			tokenSource = tokenSourceNone
+		}
+	}
 
 	// Kind classification of the resolved target — honour a known entry's Kind
 	// override when ctx.Server matches one, else derive local/cloud from the URL.
@@ -192,12 +207,21 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 	authTier := ""
 	prod := false
 	var loadedManifest *manifest.Manifest
+	// credentialRefused is the server SAYING NO to this token (401/403), which is
+	// a different fact from "unreachable" and from "reachable at tier none" — and
+	// the shadow warning below needs all three to fire honestly.
+	credentialRefused := false
 	if m, err := loadManifest(g, ctx); err == nil {
 		loadedManifest = m
 		reachable = true
 		serverName = m.Server.Name
 		authTier = m.AuthTier
 		prod = isProd(ctx, m)
+	} else {
+		var se *manifest.StatusError
+		if errors.As(err, &se) && se.Unauthenticated() {
+			credentialRefused = true
+		}
 	}
 
 	// Best-effort /v1/meta for server_time + api version range. Never fatal.
@@ -210,6 +234,30 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 	var tierVal any // null when unreachable
 	if reachable {
 		tierVal = authTier
+	}
+
+	// THE ENV-SHADOWS-CONFIG WARNING. Three conditions, ALL required:
+	//   1. the token came from an env var (prov.fromEnv),
+	//   2. a DIFFERENT saved/repo-file token for the SAME server sits under it
+	//      (prov.Alt — resolveContextProv already refused to claim a shadow
+	//      across servers), and
+	//   3. the server did not accept the env token: it reported auth_tier none
+	//      (the measured shape — /v1/capabilities answers 200 with tier "none"
+	//      for an unknown bearer) or it refused outright with 401/403.
+	// The negative arm matters as much as the positive one: an env token the
+	// server ACCEPTS is a deliberate override and prints nothing. An unreachable
+	// server prints nothing either — we never learned whether the token works,
+	// and "could not measure" is not "rejected".
+	warnings := []string{}
+	tierRejected := (reachable && (authTier == "" || authTier == "none")) || credentialRefused
+	// ONE warning, not two lines that can be read apart: the finding and its
+	// remedy travel together, in stderr and in warnings[] alike.
+	if prov.shadowsSaved() && tierRejected {
+		reason := shadowReasonTierNone
+		if credentialRefused {
+			reason = shadowReasonRefused
+		}
+		warnings = append(warnings, prov.shadowWarning(reason)+" — "+prov.shadowFix())
 	}
 
 	// Cloud control-plane session (cloud-12, re-derived in dr-w35) — SEPARATE
@@ -274,6 +322,8 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		"project":       ctx.Project,
 		"dataset":       ctx.Dataset,
 		"token_present": tokenPresent,
+		"token_source":  tokenSource,
+		"warnings":      warnings,
 		"reachable":     reachable,
 		"server_name":   serverName,
 		"auth_tier":     tierVal,
@@ -294,6 +344,13 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 			"team":          cloudTeam,
 		},
 	}
+	// The warning goes to STDERR in every render — `-o json` included, where
+	// stdout must stay a clean document. whoami still exits 0: it reports your
+	// configuration, and a shadowed credential is a finding, not a failure.
+	for _, w := range warnings {
+		out.errf("%s", w)
+	}
+
 	switch out.output {
 	case "json", "yaml":
 		// D10: `bp whoami -o json` IS the onboarding receipt SPINE. Merge the
@@ -335,7 +392,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 	}
 	out.outf("scope:     w=%s p=%s d=%s", ctx.Workspace, ctx.Project, ctx.Dataset)
 	if tokenPresent {
-		out.outf("token:     set")
+		out.outf("token:     set (%s)", prov.describe())
 	} else {
 		out.outf("token:     none — anonymous")
 	}
@@ -398,7 +455,7 @@ func whoamiSourceLabel(source string, active bool) string {
 // switch and fails on drift — do not hand-trim this without updating the switch.
 var completionNouns = []string{
 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
-	"doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
+	"dev", "doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
 	"logout", "make", "mcp", "media", "migrate", "onramp", "paper", "plugin", "provider", "register",
 	"scaffy", "schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
 	"sites", "style", "subscribe", "task", "tasks", "team", "teams", "tinker", "token", "uninstall", "upgrade",
