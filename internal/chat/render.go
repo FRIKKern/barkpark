@@ -189,7 +189,38 @@ func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, [
 		}
 		return ""
 	}
-	for _, msg := range m.st.Messages {
+	msgs := m.st.Messages
+	for i := 0; i < len(msgs); i++ {
+		msg := msgs[i]
+		// The TURN FOLD (task-8f904a88b9bc3d59). A settled turn's consecutive
+		// tool rows collapse under ONE header block reading "Worked for 3m 12s"
+		// (or "You stopped after 42s"); ctrl+f expands every fold. The run is
+		// keyed by the server-stamped turn_settled_at, so a LIVE turn — which
+		// carries no key — can never fold.
+		//
+		// The header is pushed through the SAME push() every other block uses,
+		// and an expanded fold pushes its header and then its rows as ordinary
+		// blocks: blockStarts keeps counting exactly the units it always did, so
+		// the D80 scroll anchor needs no knowledge of folds at all.
+		if key := turnFoldKey(msg); key != "" && msg.Role == "tool" {
+			j := i
+			for j < len(msgs) && msgs[j].Role == "tool" && turnFoldKey(msgs[j]) == key {
+				j++
+			}
+			run := msgs[i:j]
+			push(renderFoldHeader(width, foldLabel(msg), len(run), m.foldsExpanded)...)
+			if !m.foldsExpanded {
+				i = j - 1
+				continue
+			}
+			for _, row := range run {
+				if r := renderMessage(width, row, false, "", ""); len(r) > 0 {
+					push(r...)
+				}
+			}
+			i = j - 1
+			continue
+		}
 		focused := focusRID != "" && msg.RequestID() == focusRID && answerable(msg)
 		inflight := m.st.AnswerInFlight[msg.RequestID()]
 		r := renderMessage(width, msg, focused, inflight, pickOf(focused))
@@ -359,6 +390,111 @@ func metaTrue(msg Message, key string) bool {
 	}
 	b, ok := msg.Metadata[key].(bool)
 	return ok && b
+}
+
+// ── the turn fold (task-8f904a88b9bc3d59) ────────────────────────────────────
+//
+// The Go twin of BarkparkWeb.Studio.ChatToolRenderer's turn_fold_key/fold_label/
+// format_duration. Same envelope, one more time: the Recorder stamps the turn's
+// facts onto every tool row in the SAME UPDATE that stamps turn_settled, and
+// both surfaces read them rather than deriving anything —
+//
+//	turn_settled_at  — the turn's identity AND its fold key: one
+//	                   settle_tool_rows/2 UPDATE stamps one instant onto all of
+//	                   that turn's rows, so equal keys mean "same turn";
+//	turn_duration_ms — how long the turn ran (the Recorder's clock, or the
+//	                   runtime's own duration when it never saw the turn start);
+//	turn_outcome     — "settled" (ran to its end) | "interrupted" (a Stop).
+//
+// The LABELS are byte-locked to the Elixir formatter by the shared fixture
+// api/test/support/fixtures/chat_fold_labels.json, which fold_test.go and
+// chat_fold_on_settle_test.exs both read — a change to one formatter reds the
+// other surface's test.
+
+// turnFoldKey is the fold GROUP KEY of one row: the turn it belongs to, or ""
+// when that turn has not settled. A LIVE turn has no key, which is exactly what
+// makes it unfoldable; a row from a server too old to stamp the fold facts also
+// has none, and the transcript stays the flat list it has always been.
+func turnFoldKey(msg Message) string {
+	if !metaTrue(msg, "turn_settled") {
+		return ""
+	}
+	key, _ := msg.Metadata["turn_settled_at"].(string)
+	return key
+}
+
+// foldLabel is the fold header's text for one row's turn: "Worked for 3m 12s",
+// or "You stopped after 42s" when a Stop ended it. Reads turn_outcome and
+// turn_duration_ms off the envelope and classifies nothing itself.
+func foldLabel(msg Message) string {
+	outcome, _ := msg.Metadata["turn_outcome"].(string)
+	return foldLabelOf(outcome, metaMillis(msg, "turn_duration_ms"))
+}
+
+// foldLabelOf is THE one place `bp chat` builds the header string (Studio's one
+// place is ChatToolRenderer.fold_label/2). Split from foldLabel so the fixture
+// test drives the formatter directly, with no Message to build.
+func foldLabelOf(outcome string, durationMS int) string {
+	if outcome == "interrupted" {
+		return "You stopped after " + formatDuration(durationMS)
+	}
+	return "Worked for " + formatDuration(durationMS)
+}
+
+// formatDuration spells a turn duration the way the fold header does: 42s,
+// 3m 12s, 1h 4m 5s. Sub-second, missing and negative durations read 0s — an
+// honest zero beats a blank header on a thinner frame.
+func formatDuration(ms int) string {
+	if ms <= 0 {
+		return "0s"
+	}
+	total := ms / 1000
+	h := total / 3600
+	m := (total / 60) % 60
+	s := total % 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
+// metaMillis reads an integer envelope fact off the raw metadata map. JSON
+// numbers decode as float64 through encoding/json, and an int is what a
+// hand-built test row carries — both are accepted; anything else reads 0, the
+// same forward-compatible tolerance metaTrue shows.
+func metaMillis(msg Message, key string) int {
+	if msg.Metadata == nil {
+		return 0
+	}
+	switch v := msg.Metadata[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
+}
+
+// renderFoldHeader paints the collapsed turn's ONE line: a ▸/▾ marker, the
+// server-stamped label, and the step count it stands for. The marker differs by
+// state (not only the color) so a NoColor profile still reads open vs closed.
+func renderFoldHeader(width int, label string, rows int, expanded bool) []string {
+	w := bodyWidth(width)
+	marker := "▸"
+	if expanded {
+		marker = "▾"
+	}
+	noun := "steps"
+	if rows == 1 {
+		noun = "step"
+	}
+	line := fmt.Sprintf("%s %s · %d %s", marker, label, rows, noun)
+	return []string{dimStyle.Render(truncate(line, w))}
 }
 
 // renderToolRow paints one transcript tool row: the settle-gated gutter glyph +

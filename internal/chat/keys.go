@@ -332,6 +332,12 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.followScroll()
 		}
 		return m, nil
+	case tea.KeyCtrlF:
+		// Expand/collapse every settled turn's fold (task-8f904a88b9bc3d59).
+		// A non-printable key, like ctrl+a/ctrl+r before it, so the composer
+		// stays fully typable (the D14 law).
+		m.foldsExpanded = !m.foldsExpanded
+		return m, nil
 	case tea.KeyCtrlB:
 		return m.leaveSession()
 	case tea.KeyCtrlP:

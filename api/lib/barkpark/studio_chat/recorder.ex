@@ -132,6 +132,28 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   @doc """
+  A Stop was asked of THIS turn (task-8f904a88b9bc3d59). The runtime answers an
+  interrupt with an ordinary terminal `result` — `error_during_execution`, the
+  same shape a genuine failure wears — so the only honest way to tell the two
+  apart is that WE asked. The surface that asked tells the Recorder here, and
+  the Recorder (never the surface) writes the outcome onto the turn's rows: one
+  `turn_outcome` truth, whichever tab pressed Stop and whichever tab reopens.
+
+  The flag is TURN-scoped: cleared at the next `system/init` and at the terminal
+  frame that consumes it, so a Stop can never colour a later turn. A no-op when
+  no Recorder is running — a dead session has no turn to interrupt.
+  """
+  @spec note_interrupt_requested(String.t()) :: :ok
+  def note_interrupt_requested(session_id) when is_binary(session_id) do
+    case whereis(session_id) do
+      pid when is_pid(pid) -> GenServer.cast(pid, :interrupt_requested)
+      nil -> :ok
+    end
+  end
+
+  def note_interrupt_requested(_), do: :ok
+
+  @doc """
   The connect-time `stable` snapshot for a session (mobile charter D63) — ONE
   frame from 0 carrying every segment committed in the turn now in flight, so an
   SSE client attaching MID-TURN is not stranded with a cursor at 0 against a
@@ -424,6 +446,15 @@ defmodule Barkpark.StudioChat.Recorder do
       # `nil` between turns; the counter survives so `turn` never repeats.
       stable: nil,
       stable_turn: 0,
+      # The turn-fold stamp's two inputs (task-8f904a88b9bc3d59). `turn_started_at`
+      # is minted at the per-turn `system/init` boundary — the SAME boundary that
+      # resets the todo row and the thinking bout — and consumed at the terminal
+      # frame, so the duration on every one of the turn's tool rows is one
+      # Recorder-owned wall clock rather than N per-surface guesses.
+      # `turn_interrupted?` is the Stop flag a surface reports through
+      # `note_interrupt_requested/1`; both reset per turn.
+      turn_started_at: nil,
+      turn_interrupted?: false,
       # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
       # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
       # one in the same turn UPDATES this persisted row's input in place rather
@@ -543,7 +574,14 @@ defmodule Barkpark.StudioChat.Recorder do
   # re-reads the store before handing back). `state.agent_state` (the
   # last-PERSISTED derived cache) is deliberately NOT touched: hand-back nils
   # it anyway so the flips-only gate can never swallow the re-assert.
+  # A Stop was asked of the turn in flight (task-8f904a88b9bc3d59). Idempotent:
+  # a duplicate Stop, or one that lands after the result frame already consumed
+  # the flag, sets a boolean that the next `system/init` clears.
   @impl true
+  def handle_cast(:interrupt_requested, state) do
+    {:noreply, %{state | turn_interrupted?: true}}
+  end
+
   def handle_cast({:reported_state, _agent_state, %DateTime{} = expires_at}, state) do
     if state.reported_fence_timer, do: Process.cancel_timer(state.reported_fence_timer)
 
@@ -614,13 +652,22 @@ defmodule Barkpark.StudioChat.Recorder do
     # stamped, so this settles exactly this turn's rows and survives a Recorder
     # restart mid-turn. A row whose tool_result never arrived is settled but
     # RESULTLESS — the renderers' provenance gate keeps it neutral, never ✓.
-    StudioChat.settle_tool_rows(state.session_id)
+    #
+    # The SAME statement carries the fold facts (task-8f904a88b9bc3d59): how
+    # long the turn ran and whether it ended or was stopped. One UPDATE means
+    # the whole stamp lands exactly once per turn, and a reopened transcript
+    # folds identically to the live one because both read these bytes.
+    StudioChat.settle_tool_rows(state.session_id, turn_settle_stamp(state, ev))
     # A live accumulator here means text streamed but no assistant frame ever
     # carried it durably, so there is nothing to verify the segments against:
     # abandon them rather than claim a settle we cannot prove (D61).
     state = stable_start(state)
     broadcast(state, msg)
-    # The turn settled — nothing can still be waiting on an ask from it (D56h).
+    # The turn settled — nothing can still be waiting on an ask from it (D56h) —
+    # and its fold stamp is spent: the next turn mints its own start and Stop
+    # flag, so a stamp can never be written twice off one turn's facts.
+    state = %{state | turn_started_at: nil, turn_interrupted?: false}
+
     {:noreply,
      state |> clear_pending_asks() |> publish_activity(%{state: :idle, line: nil}) |> touch()}
   end
@@ -657,7 +704,12 @@ defmodule Barkpark.StudioChat.Recorder do
       maybe_capture_slash_commands(state, ev)
       | todo_tool_use_id: nil,
         pending_thinking: nil,
-        pending_asks: MapSet.new()
+        pending_asks: MapSet.new(),
+        # The turn's wall clock starts HERE (task-8f904a88b9bc3d59) — the same
+        # boundary D39/D41 already treat as "a new turn" — and any Stop reported
+        # against the PREVIOUS turn is spent.
+        turn_started_at: DateTime.utc_now(),
+        turn_interrupted?: false
     }
 
     # The live document's turn boundary too (D59: turn identity is
@@ -848,7 +900,7 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   def handle_info({:claude_chat_exit, status, _stderr_tail} = msg, state) do
-    session_exited(state.session_id)
+    session_exited(state)
     release_admission(state)
     # A loud reuse failure means the bound Cloud sandbox is gone — clear the
     # binding SYNCHRONOUSLY here (charter D139 half B / D152–D155), before the
@@ -866,7 +918,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # The Session process died without a port exit (crash). Tell the store and
   # the viewers the same honest story an exit tells.
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{monitor_pid: pid} = state) do
-    session_exited(state.session_id)
+    session_exited(state)
     release_admission(state)
     broadcast(state, {:claude_chat_exit, :crashed, nil})
     publish_activity(state, %{state: :offline, line: nil})
@@ -879,7 +931,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # so we broadcast the teardown ourselves and stop.
   def handle_info(:idle_reap, state) do
     if pid = state.session, do: Runtime.close(state.provider, pid)
-    session_exited(state.session_id)
+    session_exited(state)
     release_admission(state)
     broadcast(state, {:claude_chat_exit, :idle_reaped, nil})
     publish_activity(state, %{state: :offline, line: nil})
@@ -1212,6 +1264,21 @@ defmodule Barkpark.StudioChat.Recorder do
       n when is_integer(n) and n > 0 -> n
       _ -> 0
     end
+  end
+
+  # The turn's fold stamp (task-8f904a88b9bc3d59), built from the ONE server-owned
+  # builder so the durable write and Studio's live mirror cannot drift. Two
+  # interrupt witnesses are OR-ed: the Stop a surface reported through
+  # `note_interrupt_requested/1`, and the runtime's own `aborted_streaming`
+  # terminus (the CLI tags it when it aborted the stream itself). Either one
+  # means "you stopped this", and neither alone sees both roads.
+  defp turn_settle_stamp(state, ev) do
+    StudioChat.turn_settle_stamp(%{
+      started_at: state.turn_started_at,
+      settled_at: DateTime.utc_now(),
+      duration_ms: ev["duration_ms"],
+      interrupted?: state.turn_interrupted? or ev["terminal_reason"] == "aborted_streaming"
+    })
   end
 
   defp record_result(session_id, ev) do
@@ -1553,7 +1620,28 @@ defmodule Barkpark.StudioChat.Recorder do
     |> Keyword.get(:max_runtime_text_bytes, @default_max_runtime_text_bytes)
   end
 
-  defp session_exited(session_id) do
+  defp session_exited(%{session_id: session_id} = state) do
+    # A turn still in flight at teardown ends the only way it can: STOPPED. This
+    # is the D18 road — the interrupt wedged, the timeout force-closed the
+    # subprocess, and no terminal `result` frame will ever arrive — so the stamp
+    # has to land here or the turn's rows fold under a blank label forever
+    # (task-8f904a88b9bc3d59). `turn_started_at` is the whole test: nil means the
+    # session died BETWEEN turns and there is nothing to settle.
+    if state.turn_started_at do
+      StudioChat.settle_tool_rows(
+        session_id,
+        StudioChat.turn_settle_stamp(%{
+          started_at: state.turn_started_at,
+          settled_at: DateTime.utc_now(),
+          interrupted?: true
+        })
+      )
+    end
+
+    session_exited(session_id)
+  end
+
+  defp session_exited(session_id) when is_binary(session_id) do
     StudioChat.cancel_pending_approvals(session_id)
     # Any sub-agent still "running" at teardown can never report — flip it to
     # "interrupted" so a reopened block never lies "running" forever (charter D45).

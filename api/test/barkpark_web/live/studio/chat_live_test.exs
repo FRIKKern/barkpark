@@ -4437,6 +4437,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send_frame(sid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
     end
 
+    # A settled turn now FOLDS (task-8f904a88b9bc3d59) — its rows live behind the
+    # "Worked for …" header. These gutter tests are about the GLYPH, so they open
+    # the fold first and assert on the rows the reader would see after one click.
+    defp expand_folds(view) do
+      view |> element("[data-turn-fold-toggle]") |> render_click()
+    end
+
     test "the gutter is NEUTRAL while the turn runs — a mid-turn tool_result never flips it",
          %{view: view, sid: sid} do
       settle_tool_use(sid, "toolu_settle_1", "Bash", %{"command" => "ls -la"})
@@ -4463,7 +4470,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       settle_turn(sid)
 
-      html = render(view)
+      html = expand_folds(view)
       assert html =~ ~s(data-tool-state="ok")
       assert html =~ "✓"
       assert html =~ "var(--life-done)"
@@ -4476,7 +4483,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       settle_turn(sid)
 
-      html = render(view)
+      html = expand_folds(view)
       assert html =~ ~s(data-tool-state="error")
       assert html =~ "✗"
       refute html =~ ~s(data-tool-state="ok")
@@ -4491,7 +4498,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # (✓ on settle alone) reds HERE.
       settle_turn(sid)
 
-      html = render(view)
+      html = expand_folds(view)
       assert html =~ ~s(data-tool-state="pending")
       refute html =~ ~s(data-tool-state="ok")
       refute html =~ "✓"
@@ -4565,6 +4572,206 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert ChatToolRenderer.settle_glyph(%{turn_settled: false}) == "●"
       assert ChatToolRenderer.settle_glyph(%{turn_settled: true, output: "x"}) == "✓"
       assert ChatToolRenderer.settle_glyph(%{turn_settled: true, tool_error: true}) == "✗"
+    end
+  end
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # THE TURN FOLD (task-8f904a88b9bc3d59), Studio half. Once a turn settles, its
+  # tool rows collapse under ONE header row reading "Worked for 3m 12s" — or
+  # "You stopped after 42s" when a Stop ended it — which expands on click. A LIVE
+  # turn NEVER folds: the fold key is the server's `turn_settled_at`, and a
+  # running turn has none, so "unfoldable while live" is structural rather than a
+  # condition someone has to remember to write.
+  #
+  # The mutation reds by NAME:
+  #
+  #   SETTLE gate   — "a LIVE turn never folds". Fold before the settle (drop the
+  #                   turn_settled check from turn_fold_key/1) and this reds: the
+  #                   running turn's rows vanish behind a header mid-turn.
+  #   DURATION stamp — "a settled turn folds under its Worked for header" and the
+  #                   interrupt test. Drop turn_duration_ms from the stamp and
+  #                   both labels read "0s".
+  #
+  # The label text itself is byte-locked to `bp chat` by the shared fixture
+  # (chat_fold_on_settle_test.exs + internal/chat/fold_test.go).
+  # ─────────────────────────────────────────────────────────────────────────
+  describe "fold-on-settle (task-8f904a88b9bc3d59)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp fold_tool_use(sid, id, command) do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => id,
+                 "name" => "Bash",
+                 "input" => %{"command" => command}
+               }
+             ]
+           }
+         }}
+      )
+    end
+
+    defp fold_settle(sid, extra) do
+      send_frame(
+        sid,
+        {:claude_chat_event, Map.merge(%{"type" => "result", "subtype" => "success"}, extra)}
+      )
+    end
+
+    test "a LIVE turn never folds — the rows stay flat while the turn runs",
+         %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_live_1", "FOLD_LIVE_ONE")
+      fold_tool_use(sid, "toolu_fold_live_2", "FOLD_LIVE_TWO")
+
+      html = render(view)
+      refute html =~ ~s(data-role="turn-fold")
+      refute html =~ "Worked for"
+      assert html =~ "FOLD_LIVE_ONE"
+      assert html =~ "FOLD_LIVE_TWO"
+    end
+
+    test "a settled turn folds under ONE header carrying the server's duration",
+         %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_1", "FOLD_ROW_ONE")
+      fold_tool_use(sid, "toolu_fold_2", "FOLD_ROW_TWO")
+      assert render(view) =~ "FOLD_ROW_ONE"
+
+      fold_settle(sid, %{"duration_ms" => 192_000})
+
+      html = render(view)
+      assert html =~ ~s(data-role="turn-fold")
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "2 steps"
+      # The rows are BEHIND the header now — that is the fold.
+      refute html =~ "FOLD_ROW_ONE"
+      refute html =~ "FOLD_ROW_TWO"
+    end
+
+    test "an interrupted turn reads You stopped after", %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_stop", "FOLD_STOPPED_ROW")
+
+      # The Stop the reader pressed. The runtime answers with the same
+      # `error_during_execution` a genuine failure wears, so the request is the
+      # only witness that this was a stop and not a crash.
+      render_click(view, "stop_turn", %{})
+      fold_settle(sid, %{"subtype" => "error_during_execution", "duration_ms" => 42_000})
+
+      html = render(view)
+      assert html =~ "You stopped after 42s"
+      refute html =~ "Worked for"
+      refute html =~ "FOLD_STOPPED_ROW"
+    end
+
+    test "the fold expands on click, and collapses again", %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_click", "FOLD_CLICK_ROW")
+      fold_settle(sid, %{"duration_ms" => 192_000})
+      refute render(view) =~ "FOLD_CLICK_ROW"
+
+      opened = view |> element("[data-turn-fold-toggle]") |> render_click()
+      assert opened =~ "FOLD_CLICK_ROW"
+      # The header stays — an expanded fold is still a fold, and its label is
+      # still the reader's way back.
+      assert opened =~ "Worked for 3m 12s"
+      assert opened =~ ~s(aria-expanded="true")
+      # Singular, because the fold stands for exactly one row.
+      assert opened =~ "1 step"
+
+      closed = view |> element("[data-turn-fold-toggle]") |> render_click()
+      refute closed =~ "FOLD_CLICK_ROW"
+      assert closed =~ ~s(aria-expanded="false")
+    end
+
+    test "two settled turns fold SEPARATELY, each with its own label",
+         %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_t1", "FOLD_TURN_ONE_ROW")
+      fold_settle(sid, %{"duration_ms" => 192_000})
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "again"})
+      fold_tool_use(sid, "toolu_fold_t2", "FOLD_TURN_TWO_ROW")
+      fold_settle(sid, %{"duration_ms" => 42_000})
+
+      html = render(view)
+      # Turn one keeps ITS duration: the live mirror must not restamp an
+      # already-settled row with the newer turn's facts.
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "Worked for 42s"
+      refute html =~ "FOLD_TURN_ONE_ROW"
+      refute html =~ "FOLD_TURN_TWO_ROW"
+    end
+
+    test "a REOPENED session folds off the persisted stamp, byte-identically",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      for {tuid, label} <- [
+            {"replay-fold-a", "REPLAY_FOLD_A"},
+            {"replay-fold-b", "REPLAY_FOLD_B"}
+          ] do
+        {:ok, _} =
+          StudioChat.append_message(id, %{
+            role: "tool",
+            source_markdown: "Bash — #{label}",
+            metadata: %{
+              "tool" => "Bash",
+              "tool_use_id" => tuid,
+              "output" => "done",
+              "turn_settled" => true,
+              "turn_settled_at" => "2026-09-02T10:03:12.000000Z",
+              "turn_duration_ms" => 192_000,
+              "turn_outcome" => "settled"
+            }
+          })
+      end
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "2 steps"
+      refute html =~ "REPLAY_FOLD_A"
+
+      opened = view |> element("[data-turn-fold-toggle]") |> render_click()
+      assert opened =~ "REPLAY_FOLD_A"
+      assert opened =~ "REPLAY_FOLD_B"
+    end
+
+    test "a settled row from a server too old to stamp the fold facts stays FLAT",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Bash — OLD_SERVER_ROW",
+          metadata: %{
+            "tool" => "Bash",
+            "tool_use_id" => "old-row",
+            "output" => "done",
+            "turn_settled" => true
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      # Forward-compatible in the honest direction: no fold facts, no fold — the
+      # transcript this row has always drawn, never a "Worked for 0s" header
+      # invented on its behalf.
+      assert html =~ "OLD_SERVER_ROW"
+      refute html =~ ~s(data-role="turn-fold")
     end
   end
 
