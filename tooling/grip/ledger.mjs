@@ -103,6 +103,14 @@ import { quantityPhrase } from "./mint.mjs";
 // corrupt a `| JSON.parse` the moment a caller piped the fold.
 import { emitProvenance } from "./provenance.mjs";
 
+// THE FOLD'S DEFAULT SCREEN. Static, and it creates NO cycle: screen.mjs
+// imports only `node:path` and `node:url` and nothing from grip (verified), and
+// its CLI arm is behind the same `process.argv[1]` main-guard this module uses,
+// so importing it runs nothing. It is here so that `foldLedger` can DEFAULT the
+// screen bound on — see the fold's ARMING header for the measured reason a
+// library read that was silently unscreened is a defect and not a convenience.
+import { screenCommand } from "./screen.mjs";
+
 // ── the row ──────────────────────────────────────────────────────────────────
 
 // The COMPLETE set of keys a ledger row may carry. Anything else is rejected
@@ -814,13 +822,44 @@ export function inScope(run, scope = "all") {
 // `now` and `screen` are the SAME two bounds admitRecipe takes on the write
 // path, and they are here for the same reason: without a clock the future bound
 // cannot fire, and without a screen an outage-capable recipe cannot be caught.
-// The library reads neither (D19) — the CLI reads `date -u` and injects
-// screenCommand, exactly as `write` does — so a fold called with no bounds
-// still rejects the two forgeries that need no external input (a stored `value`
-// and an over-claimed derived_level) and simply cannot check the other two.
 // THE WRITE PATH IS NOW THE READ PATH for admission: the fold COMPOSES
 // admitRecipe rather than re-deriving any rejection class, so a sixth hand-copy
 // of the grammar — this epic's own defect — is impossible by construction.
+//
+// ── ARMING: THE TWO BOUNDS ARE NOT THE SAME KIND OF BOUND ────────────────────
+//
+// MEASURED, on this store, at this head. The same committed directory folded
+// rows 360 / subjects 307 / unreadable 433 through the bare library call
+// `foldLedger()`, and rows 354 / subjects 302 / unreadable 507 through
+// `node ledger.mjs fold` — because the CLI injected a screen and the library
+// did not. Every byte of that 6-row gap was the MISSING SCREEN, not the clock.
+// A number quoted off one path and read as the other was wrong by 5 subjects,
+// silently, with both paths exiting normally. That is the exact defect class
+// this store exists to abolish, so it may not live in the store's own reader.
+//
+// The two bounds therefore behave DIFFERENTLY here, on purpose:
+//
+//   `screen` DEFAULTS ON. screen.mjs is pure, importable and side-effect-free,
+//   so there is no reason a library read should be less screened than the CLI
+//   read of the same bytes — and "less screened" is not a smaller answer, it is
+//   a DIFFERENT answer wearing the same field names. A caller who genuinely
+//   wants the unscreened population says so: `screen: null`.
+//
+//   `now` STAYS INJECTED (D19). admitRecipe reads no clock and neither does the
+//   fold; a default clock would make this module read the wall time behind its
+//   caller's back, which is the seam D4 keeps honest. The CLI supplies
+//   `date -u`; a library caller who wants the future bound passes one.
+//
+// So the two paths can still differ — by the clock, never by the screen — and
+// the fold therefore REPORTS WHICH BOUNDS WERE IN FORCE, top-level, in
+// `arming`:
+//
+//   { screen: "screen.mjs" | "caller" | "none" | "invalid", now: <iso> | null }
+//
+// A count that names its arming cannot be mistaken for a count taken under
+// different bounds. Two folds of one store with EQUAL `now` now agree on
+// rows / subjects / unreadable by construction; a fold that differs carries the
+// reason in a field the reader is looking at anyway.
 //
 // `scope` NARROWS WHICH RUNS ARE FOLDED, BY SHAPE, NEVER BY NAME. Default
 // "all" — the CLI's behaviour is unchanged, and a fold that quietly stopped
@@ -831,6 +870,22 @@ export function inScope(run, scope = "all") {
 // silently — and the scope itself is reported in stats.scope, so no reader can
 // mistake a narrowed fold for a whole one.
 export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen, scope = "all" } = {}) {
+  // THE SCREEN BOUND, RESOLVED ONCE, AT THE FOLD'S OWN BOUNDARY — never inside
+  // admitRecipe, which keeps its "the caller supplies both bounds" contract
+  // intact for the write path. `undefined` (the caller said nothing) means the
+  // module default; `null` is the explicit opt-out and is passed through as
+  // "no screen", exactly the shape admitRecipe already understands.
+  const screenBound = screen === undefined ? screenCommand : screen;
+  const armedScreen = screenBound === screenCommand
+    ? "screen.mjs"
+    : screenBound === null
+      ? "none"
+      // A bound that is neither the default, nor null, nor a function is a
+      // CONTRACT ERROR: admitRecipe rejects every row BAD-OPTION under it. It
+      // must not be reported as "none" — "none" is a population, "invalid" is a
+      // broken read — and it must not be reported as a screen either.
+      : typeof screenBound === "function" ? "caller" : "invalid";
+  const armedNow = typeof now === "string" && now.trim() !== "" ? now.trim() : null;
   const read = Array.isArray(source)
     ? { runs: source, unreadable: [], shape: null }
     : readLedgerRuns(source);
@@ -888,7 +943,7 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen, scope = "
       // which already drives the fold CLI's nonzero exit — a CI tripwire for
       // free. Rejections ACCUMULATE (one forged row can trip several classes);
       // the row is not folded, every other row is.
-      const verdict = admitRecipe(row, { now, screen });
+      const verdict = admitRecipe(row, { now, screen: screenBound });
       if (!verdict.ok) {
         for (const r of verdict.rejections) {
           unreadable.push({
@@ -1011,6 +1066,12 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen, scope = "
     entries,
     rival_methods: rivalMethods,
     unreadable,
+    // WHICH BOUNDS WERE IN FORCE. Present on every fold, pass included: an
+    // arming a reader only sees on failure is an arming nobody quotes. Read it
+    // as the READING PATH of every number below it — two folds of one store
+    // that agree here agree on rows/subjects/unreadable, and two that disagree
+    // say so in the same object the counts live in.
+    arming: { screen: armedScreen, now: armedNow },
     // The rows whose stored level the re-derivation MOVED, split by direction
     // and carried whole (file, index, subject, both levels, rerun) so a reader
     // can name the row instead of counting it. Reported, never a rejection.
@@ -1162,9 +1223,13 @@ function selftest() {
         && folded.stats.quantity_restated === 2 && folded.stats.quantity_fallbacks === 0;
     }],
     ["a row whose command mints NO quantity falls back to the stored one and is MARKED, never silently", () => {
+      // `screen: null` — the EXPLICIT unscreened read. `&&` is not a command at
+      // all, so the default screen refuses it and the row never reaches the
+      // restatement this control is about. Naming the opt-out keeps the control
+      // measuring the fallback rather than the admission.
       const folded = foldLedger([
         { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "hand-written quantity", rerun: "&&", derived_level: "L6", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
-      ]);
+      ], { screen: null });
       const recipe = folded.entries[0]?.recipes?.[0];
       return folded.entries[0]?.quantity === "hand-written quantity"
         && folded.stats.quantity_fallbacks === 1
@@ -1172,11 +1237,35 @@ function selftest() {
         && recipe.quantity_fallback.includes("STORED quantity");
     }],
     ["the fold re-derives derived_level too — a stale stored level is restated, not trusted", () => {
+      // `screen: null` for the same reason as the control above: the L1 command
+      // that makes this control meaningful (it reaches a running system) is
+      // exactly the shape the screen's host bound refuses, so the screened read
+      // would never reach the restatement.
       const folded = foldLedger([
         { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "curl -s https://api.barkpark.cloud/api/schemas", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
-      ]);
+      ], { screen: null });
       const recipe = folded.entries[0]?.recipes?.[0];
       return recipe?.stored_level === "L3" && recipe?.derived_level === "L1" && recipe?.level_restated === true;
+    }],
+    // THE ARMING CONTROL (D18) for this slice: the SAME rows folded twice, once
+    // by default and once through the explicit opt-out, must give DIFFERENT row
+    // counts and SAY SO in `arming`. If the default screen is ever removed the
+    // two folds converge and this control goes SILENT — which is the mutation
+    // that reopened the CLI-vs-library split in the first place.
+    ["the library fold DEFAULTS the screen on, the opt-out is explicit, and `arming` names which was in force", () => {
+      const rows = [
+        { file: "a.json", run_id: "a", recipes: [
+          { subject: "s", quantity: "q", rerun: "wc -l tooling/grip/ledger.mjs", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" },
+          { subject: "t", quantity: "q", rerun: "rm -rf /opt/barkpark/releases", derived_level: "L6", deps: [], observed_at: "2026-07-20T00:00:00Z" },
+        ] },
+      ];
+      const screened = foldLedger(rows);
+      const unscreened = foldLedger(rows, { screen: null });
+      return screened.arming.screen === "screen.mjs" && screened.arming.now === null
+        && unscreened.arming.screen === "none"
+        && screened.stats.rows === 1 && unscreened.stats.rows === 2
+        && screened.unreadable.length === 1 && screened.unreadable[0].reason === "REFUSED-COMMAND"
+        && unscreened.unreadable.length === 0;
     }],
     ["a rotten on-disk row is reported, and does not take the fold down with it", () => {
       const folded = foldLedger([
@@ -1473,6 +1562,14 @@ async function main(argv) {
     // — and a class only visible on failure is a class that gets quietly
     // emptied.
     const s = folded.stats;
+    // THE ARMING RIDES THE SAME LINE AS THE COUNTS, because the counts are only
+    // meaningful under it — a terminal reader who copies "354 rows" out of here
+    // copies the reading path with it. stderr, next to the shape census: stdout
+    // stays pure JSON (the `arming` object is in there too).
+    process.stderr.write(
+      `[grip-fold] arming: screen=${folded.arming.screen} now=${folded.arming.now ?? "none"} — ` +
+        `every count below is under THOSE bounds\n`,
+    );
     process.stderr.write(
       `[grip-fold] scope=${s.scope} — walked ${s.runs} run file(s) / ${s.rows} row(s); ` +
         `store holds ${s.files} file(s): ${s.owned_runs} grip-owned (${s.attested_runs} write-path attested), ` +
