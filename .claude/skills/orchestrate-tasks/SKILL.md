@@ -94,6 +94,27 @@ held). Install the UNAVOIDABLE one: copy `helpers/mix-slot-wrapper.sh` to `~/.lo
 shell picks them up), 3 slots each, `BP_NO_SLOT=1` bypasses, delete the files to disable. Tell the
 owner: their own `mix test` waits for a slot too while the campaign runs.
 
+## 2c. When main goes red — one owner, one fix, then update-branch
+
+Main red is the orchestrator's, not a lane's: every lane sees green on its own head and nobody
+owns the combination (2026-09-02: a REPRODUCTION test from one PR met the fix from another;
+main red for 2.5 h, every open PR's required gate red with it). Playbook, in order:
+
+1. **Diagnose by shape, not by lane.** One failing test whose file arrived in one merged PR and
+   whose subject a LATER merged PR changed = green-apart-red-together. Flip or reconcile; do not
+   investigate as a regression.
+2. **Fix from main in a tiny PR** carrying the campaign row as its trailer; cancel the queued
+   Elixir runs on campaign PR branches (they will all fail on the same test and they starve the
+   fix's own run); cancel the fix's advisory runs too.
+3. **Tell every lane to HOLD** (decisions files): a red or cancelled Elixir run right now is not a
+   signal.
+4. **After the merge: `gh pr update-branch` on every open, non-DIRTY campaign PR.** NEVER
+   `gh run rerun` — a rerun re-checks out the run's ORIGINAL merge sha and cannot see the new
+   main (34 reruns, 0 useful, measured). DIRTY PRs go back to their lane for a real rebase.
+   The main-green watcher does this mechanically; the orchestrator does not remember it at 4 a.m.
+5. **Rule broadcast:** a test that asserts a hole is OPEN ships in the same PR as the fix, or
+   `@tag :skip` with the row id — never green on its own.
+
 ## 3. Improve the system — a standing 1-of-5
 
 Every lead keeps one worker slot for **system improvement**: a trap the lane hit while
