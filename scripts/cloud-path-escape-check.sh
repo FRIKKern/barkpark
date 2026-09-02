@@ -27,12 +27,60 @@
 #
 # HOW AN ESCAPE IS RESOLVED
 # -------------------------
-# Every `"../…"` string literal in cloud/lib and cloud/test is resolved against
+# Every relative-path read in cloud/lib and cloud/test is resolved against
 # BOTH bases the codebase actually uses:
 #   * the file's own directory   — the `Path.expand("../x", __DIR__)` idiom
 #   * `cloud/`                   — the `mix test` cwd idiom (File.read!("../x"))
 # Anything landing inside cloud/ is not an escape. Anything landing outside
 # cloud/ AND existing on disk is a repo-root read the dispatcher must cover.
+#
+# A "read" is recognised in THREE authoring forms, not one (cch-w53). The census
+# used to extract exactly `grep -Eoh '"\.\./[^"]*"'`, which made the ratchet
+# evadable BY AUTHORING STYLE ALONE — measured on origin/main:
+#
+#     Path.expand("../../../internal/provisioner", __DIR__)     -> exit 1,
+#         `::error::… UNCOVERED repo-root read: internal/provisioner`
+#     Path.join([__DIR__, "..", "..", "..", "internal", "provisioner"])
+#         -> exit 0, `OK: every repo-root read … is dispatched on`,
+#            census UNCHANGED
+#
+# The two resolve to the IDENTICAL directory. The second one is the shape this
+# whole shim exists to stop: a Cloud test reading a repo-root path the
+# dispatcher does not dispatch on, so a PR touching that path SKIPS the only
+# suite that checks it and reports green — while the ratchet says OK. And the
+# split idiom is LIVE in this tree (billing_client_mirror_test.exs,
+# sold_capability_manifest_test.exs, site_read_token_revoke_test.exs,
+# notifications/transport_manifest_test.exs), so it is not a hypothetical style.
+#
+# So all three forms feed ONE resolver:
+#   1. `"../…"`  — the double-quoted literal (also covers `~c"../…"`, `~S"../…"`)
+#   2. `'../…'`  — the charlist literal; Path/File take charlists, and the
+#                  double-quote grep cannot see one. Measured cost on this tree:
+#                  zero occurrences, so this arm adds nothing to the census
+#                  today and closes the form before it is used.
+#   3. a SEGMENT LIST — a run of comma-separated string literals containing a
+#      bare `".."` element, re-joined with `/`. `[__DIR__, "..", "..", "x"]`
+#      becomes `../../x` and is then resolved exactly like form 1. The run may
+#      span newlines (a formatted list puts one segment per line) and ends at
+#      the first separator that is NOT a comma — which is what stops
+#      `Path.join([__DIR__, ".."]) == "some/other/thing"` from swallowing the
+#      right-hand side. A run of one element is dropped: a lone `".."` resolves
+#      to the parent of a cloud/ directory, i.e. never outside cloud/.
+#
+# COST, measured rather than assumed: forms 2 and 3 share ONE awk pass per file,
+# so the scan goes from one subprocess per file to two. Over the 388 files in
+# cloud/lib + cloud/test that is ~2.5s -> ~4.5s of wall clock on the unfiltered
+# `path-escape` job. The census itself is UNCHANGED on this tree — 15 distinct
+# repo-root reads before and after, floor still 6, no new declaration and no
+# baseline raised. The only new census ROW is a second reader for the already
+# EXEMPT docker-compose.yml phantom (billing_client_mirror_test.exs, which
+# carries no `"../…"` literal at all and was therefore invisible before).
+#
+# RESIDUE, named rather than left to be found: a path assembled by CHAINED
+# calls — `Path.join(__DIR__, "..") |> Path.join("internal/provisioner")` — is
+# still invisible, because the two literals are not comma-adjacent. Closing that
+# needs an expression evaluator, not a scanner. The forms above are the ones the
+# tree actually uses; a chained read is a new shape and gets a new arm.
 #
 # The existence filter is what keeps the traversal-attack and 404-fixture
 # literals (`"../../etc"`, `"../timeout/index.html"`, `"../up"`) out of the
@@ -252,7 +300,7 @@ templates/search-starter/lib/markers.corpus-status.test.ts'
 # list at zero-growth: the honest fix for a new cross-tree read is to declare it
 # above, not to exempt it — and a shape-2 exemption is only honest while the
 # literal's REAL target is itself covered by the declared set.
-CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin_env_test.exs:189 reads Path.join(__DIR__, "../../docker-compose.yml"), which is cloud/docker-compose.yml (covered by cloud/**). The repo-root file of the same name is reached only by the `cloud/` cwd base, and that base does not apply to a __DIR__-anchored literal.'
+CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin_env_test.exs:189 reads Path.join(__DIR__, "../../docker-compose.yml"), and billing_client_mirror_test.exs reads the same file in the SEGMENT-LIST form [__DIR__, "..", "..", "docker-compose.yml"] (visible since cch-w53). Both are cloud/docker-compose.yml, covered by cloud/**. The repo-root file of the same name is reached only by the `cloud/` cwd base, and that base does not apply to a __DIR__-anchored read.'
 
 # The census floor — a LOWER BOUND, not a headcount. It was set from a
 # population of 6 resolved repo-root reads (the population only grows): the
@@ -368,6 +416,53 @@ EOF
   printf '%s' "$out"
 }
 
+# SEGMENT-LIST READS (cch-w53) — the same directory, authored differently.
+# Prints one synthesised `../…`-style literal per line for each run of
+# comma-separated string literals that contains a bare `".."` element. See
+# "HOW AN ESCAPE IS RESOLVED" at the top for why this exists and what it costs.
+#
+# Line-oriented on purpose: slurping a whole file and walking it with
+# match()/substr() is quadratic, and cloud/lib/barkpark_cloud/web/router.ex is
+# ~12k lines. The `gap` accumulator carries the between-token text ACROSS the
+# newline, so a run survives a formatted list and still breaks on any separator
+# that is not a comma.
+# The charlist form rides the SAME awk rather than a second `grep -Eoh`: this
+# runs once per file over 388 files, and a third subprocess each costs about a
+# second and a half of an unfiltered CI job for nothing. The single-quote regex
+# is built with sprintf("%c", 39) so the whole program stays single-quotable in
+# bash.
+alt_form_literals() {
+  awk '
+    BEGIN { q = sprintf("%c", 39); clre = q "\\.\\./[^" q "]*" q }
+    function flush() {
+      if (dotdot && n >= 2) print run
+      run = ""; n = 0; dotdot = 0
+    }
+    {
+      rest = $0
+      while (match(rest, /"[^"]*"/)) {
+        gap = gap substr(rest, 1, RSTART - 1)
+        tok = substr(rest, RSTART + 1, RLENGTH - 2)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (n > 0 && gap !~ /^[ \t\r\n]*,[ \t\r\n]*$/) flush()
+        run = (n == 0) ? tok : run "/" tok
+        n++
+        if (tok == "..") dotdot = 1
+        gap = ""
+      }
+      gap = gap rest "\n"
+
+      # form 2, independent of the run state above: a charlist literal.
+      tail = $0
+      while (match(tail, clre)) {
+        print substr(tail, RSTART + 1, RLENGTH - 2)
+        tail = substr(tail, RSTART + RLENGTH)
+      }
+    }
+    END { flush() }
+  ' "$1"
+}
+
 # ---------------------------------------------------------------------------
 # the census
 # ---------------------------------------------------------------------------
@@ -379,11 +474,19 @@ list_escapes() {
   sources="$(cd -- "$REPO_ROOT" && find cloud/lib cloud/test -type f \( -name '*.ex' -o -name '*.exs' \) 2>/dev/null | LC_ALL=C sort)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    lits="$(grep -Eoh '"\.\./[^"]*"' "$REPO_ROOT/$f" || true)"
+    # THREE authoring forms, ONE resolver (cch-w53) — see the header. Collected
+    # into one variable rather than piped, so nothing downstream can take
+    # SIGPIPE and no arm can go quietly empty behind a pipefail.
+    lits="$(
+      grep -Eoh '"\.\./[^"]*"' "$REPO_ROOT/$f" || true
+      alt_form_literals "$REPO_ROOT/$f"
+    )"
     [ -n "$lits" ] || continue
     while IFS= read -r lit; do
       lit="${lit%\"}"
       lit="${lit#\"}"
+      lit="${lit%\'}"
+      lit="${lit#\'}"
       # `"../#{Path.basename(x)}"` — keep the static prefix, drop the splice.
       lit="${lit%%\#\{*}"
       # `"…/src/**/*.js"` — keep the longest wildcard-free prefix.
