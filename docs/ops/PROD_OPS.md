@@ -121,6 +121,6 @@ npm/SDK rollback: `docs/ops/npm-rollback-playbook.md`.
 ## Code anchors
 
 - `api/scripts/prod-postcheck.sh` — the postcheck script
-- `.githooks/post-merge` — auto-rebuild on server `git pull` (no migrate step)
+- `.githooks/post-merge` — rebuild + migrate + restart on server `git pull`
 - `Makefile` — `rebuild` / `deploy` / `migrate` / `restart` targets
 - `api/start.sh` — systemd wrapper sourcing ASDF + `.env`
