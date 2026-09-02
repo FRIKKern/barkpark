@@ -44,6 +44,29 @@ defmodule BarkparkWeb.UserSocket do
   and that is stated rather than assumed.
 
   Tunable via `config :barkpark, :user_socket, connects_per_minute: _`.
+  ## The socket id IS the revocation handle
+
+  `connect/3` runs `verify_token/1` exactly ONCE. That function enforces
+  revocation and expiry in its WHERE clause, so every HTTP request re-earns
+  the decision — but a WebSocket verifies at connect and never again. Revoking
+  the token therefore closed the HTTP door and left every already-open socket
+  reading and streaming, indefinitely, for as long as the holder chose to stay
+  connected. That is the post-compromise case revocation exists to answer.
+
+  Nothing could force it, either. `id/1` returned `nil`, and a nil id is
+  precisely the absence of a handle: Phoenix subscribes the transport process
+  to the string `id/1` returns and closes the socket on a `"disconnect"`
+  broadcast there, so with no id there is no topic to broadcast to and no
+  mechanism to reach.
+
+  So `id/1` now returns a token-derived topic (`disconnect_topic/1`), and
+  `Barkpark.Auth.revoke_token/1` broadcasts `"disconnect"` on it. Teardown is
+  CAUSED by the revocation and requires no action from the client. Every
+  socket that verified the same token shares the topic, which is the intended
+  blast radius: revoking a credential kills every connection holding it.
+
+  The id deliberately carries the token ROW id, never the raw bearer or its
+  hash — a topic string is not a place to put a credential.
   """
   use Phoenix.Socket
 
@@ -114,6 +137,29 @@ defmodule BarkparkWeb.UserSocket do
 
   # No socket-wide id — disconnect targeting is per-token if ever needed, not
   # required for read-only search.
+  @doc """
+  The topic every socket that verified `token_id` listens on for a forced
+  teardown — `id/1`'s return value, and the topic
+  `Barkpark.Auth.revoke_token/1` broadcasts `"disconnect"` to.
+
+  Public because the revocation side must build the SAME string; the two
+  halves only meet if exactly one function owns its shape.
+  `SearchChannel` subscribes to it too — see that module's moduledoc for why
+  the channel does not rely on the transport alone.
+  """
+  @spec disconnect_topic(binary()) :: binary()
+  def disconnect_topic(token_id) when is_binary(token_id),
+    do: "user_socket:api_token:" <> token_id
+
+  # A real, token-derived socket id: the handle Phoenix's own
+  # `Endpoint.disconnect` mechanism needs. See the moduledoc — while this
+  # returned nil, a revoked credential's open socket could not be reached by
+  # anything.
   @impl true
+  def id(%{assigns: %{api_token: %{id: token_id}}}) when is_binary(token_id),
+    do: disconnect_topic(token_id)
+
+  # No verified token on the socket (it never got past `connect/3`) — nothing
+  # to target, and nothing that could be serving reads either.
   def id(_socket), do: nil
 end

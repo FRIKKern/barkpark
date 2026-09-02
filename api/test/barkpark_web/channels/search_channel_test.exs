@@ -891,4 +891,187 @@ defmodule BarkparkWeb.SearchChannelTest do
       assert {:ok, _} = connect(UserSocket, %{"token" => other_raw})
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Revocation + seat removal teardown (row task-d67f007715c96828)
+  #
+  # `UserSocket.connect/3` runs `Auth.verify_token/1` ONCE and `join/3` runs
+  # `TenancyAuth.authorize/3` ONCE. Both decisions used to outlive their inputs
+  # forever: a revoked token kept answering "query" frames and kept streaming a
+  # "results" push on every co-tenant write, and nothing could force the socket
+  # down because `id/1` returned nil.
+  #
+  # The expected topic is spelled out LITERALLY here rather than borrowed from
+  # `UserSocket.disconnect_topic/1`. Two reasons: asserting a function equals
+  # itself proves nothing, and this file must still COMPILE against unmodified
+  # main so the red-first run reports failures rather than a compile error.
+  # ---------------------------------------------------------------------------
+
+  describe "revocation and seat-removal teardown" do
+    setup %{ws: ws, proj: proj} do
+      raw = "test-tok-revoke-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "revoke-ch", "test", ["read"], ws.id)
+      plain_socket = socket(UserSocket, "revoke-id", %{api_token: token})
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          plain_socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      # `Phoenix.ChannelTest.join/3` LINKS the channel to the test process. Every
+      # test in this block deliberately kills that channel with a non-normal
+      # reason ({:shutdown, :credential_revoked} / {:shutdown, :unauthorized}),
+      # and a linked exit would take the test down with it — the teardown
+      # working is what would fail the test. Unlink so the exit is observed
+      # through the monitor instead of suffered through the link.
+      Process.unlink(joined.channel_pid)
+
+      %{token: token, raw: raw, plain_socket: plain_socket, joined: joined}
+    end
+
+    test "UserSocket.id/1 is a real token-derived handle, not nil", %{
+      token: token,
+      plain_socket: plain_socket
+    } do
+      # A nil id is the ABSENCE of a disconnect handle: Phoenix subscribes the
+      # transport to the string this returns, so with nil there is no topic to
+      # broadcast to and revocation has nothing to grab.
+      assert UserSocket.id(plain_socket) == "user_socket:api_token:" <> token.id
+
+      # The row id, never the raw bearer or its hash — a topic is not a place
+      # to put a credential.
+      refute UserSocket.id(plain_socket) =~ token.token_hash
+
+      # No verified token on the socket: nothing to target, and nothing that
+      # could be serving reads either.
+      assert UserSocket.id(socket(UserSocket, "no-token", %{})) == nil
+    end
+
+    test "revoking the token broadcasts a disconnect on exactly that topic", %{token: token} do
+      topic = "user_socket:api_token:" <> token.id
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      # The two halves only meet if the broadcast lands on the SAME string
+      # `id/1` returns — which is what this pins.
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"},
+                     @reply_timeout
+    end
+
+    test "after revocation the channel is torn down and a query frame is not answered", %{
+      token: token,
+      joined: joined
+    } do
+      mon = Process.monitor(joined.channel_pid)
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      # Teardown is CAUSED by the revoke — the client is asked for nothing.
+      assert_receive {:DOWN, ^mon, :process, _pid, {:shutdown, :credential_revoked}},
+                     @reply_timeout
+
+      refute Process.alive?(joined.channel_pid)
+
+      # And the frame that used to be answered normally now gets nothing.
+      ref = push(joined, "query", %{"q" => "revokeprobe", "seq" => 1, "engine" => "postgres"})
+      refute_receive %Phoenix.Socket.Reply{ref: ^ref}, 300
+    end
+
+    test "after revocation a document mutation delivers NO live results push", %{
+      ws: ws,
+      proj: proj,
+      token: token,
+      joined: joined
+    } do
+      # Prime the cached query so the channel is armed for live pushes. This is
+      # the leg the query-frame test cannot see: it needs no client frame at
+      # all, so a holder who simply stops typing still gets a live feed of
+      # every mutation in the workspace.
+      ref =
+        push(joined, "query", %{
+          "q" => "revokeprobe",
+          "seq" => 9,
+          "engine" => "postgres",
+          "types" => "post"
+        })
+
+      assert_reply ref, :ok, _initial, @reply_timeout
+
+      mon = Process.monitor(joined.channel_pid)
+      {:ok, _revoked} = Auth.revoke_token(token)
+      assert_receive {:DOWN, ^mon, :process, _pid, _reason}, @reply_timeout
+
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "revoked-push-doc", "title" => "revokeprobe after the revoke"},
+          "test"
+        )
+
+      refute_push "results", _payload, 500
+    end
+
+    test "removing the workspace seat refuses the next query frame and stops the channel", %{
+      ws: ws,
+      token: token,
+      joined: joined
+    } do
+      # Authorized before the seat is removed — this frame proves the test is
+      # measuring the removal and not a channel that was already broken.
+      ref = push(joined, "query", %{"q" => "seatprobe", "seq" => 1, "engine" => "postgres"})
+      assert_reply ref, :ok, _before, @reply_timeout
+
+      # A roster operation, NOT a revoke: the token keeps existing and simply
+      # loses its membership. `authorize/3` read that row at join and never
+      # again.
+      {:ok, _removed} =
+        Barkpark.Tenancy.Members.remove_member(ws.id, %{type: :api_token, id: token.id})
+
+      mon = Process.monitor(joined.channel_pid)
+
+      ref2 = push(joined, "query", %{"q" => "seatprobe", "seq" => 2, "engine" => "postgres"})
+      assert_reply ref2, :error, err, @reply_timeout
+      assert err.reason == "unauthorized"
+      assert err.seq == 2
+
+      # Refused AND ended — a caller who lost access cannot just push again.
+      assert_receive {:DOWN, ^mon, :process, _pid, {:shutdown, :unauthorized}}, @reply_timeout
+    end
+
+    test "removing the workspace seat also closes the live push leg", %{
+      ws: ws,
+      proj: proj,
+      token: token,
+      joined: joined
+    } do
+      ref =
+        push(joined, "query", %{
+          "q" => "seatprobe",
+          "seq" => 3,
+          "engine" => "postgres",
+          "types" => "post"
+        })
+
+      assert_reply ref, :ok, _initial, @reply_timeout
+
+      {:ok, _removed} =
+        Barkpark.Tenancy.Members.remove_member(ws.id, %{type: :api_token, id: token.id})
+
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "seat-removed-push-doc", "title" => "seatprobe after removal"},
+          "test"
+        )
+
+      refute_push "results", _payload, 500
+    end
+  end
 end
