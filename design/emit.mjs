@@ -255,21 +255,29 @@ export const MOTION_STEPS = ["dur-1", "dur-2", "dur-3"];
 // check.mjs Part N reads this list and proves each entry carries the tokens.json
 // bytes exactly once, so the list cannot become a lie in either direction.
 //
-// Most entries get the ladder from the GENERATED block below. Two do not, and the
-// difference matters:
+// Every entry but ONE gets the ladder from the GENERATED block below:
 //   • api/assets/paper-editor/src/styles.css receives it through the de-scoping
-//     paper-surface mirror rather than an emitter of its own.
-//   • cloud/priv/static/app.css DECLARES IT BY HAND and always has — its
-//     decision-29 token area carries --dur-1/-2/-3 with these exact values plus
-//     --ease, --t and a prefers-reduced-motion collapse to 0s, and four rules
-//     already spend them. (This is the half of spd-b21's premise that was wrong:
-//     `grep -rn -- "--dur" api/ cloud/` was empty for api/ only.) Emitting a
-//     second copy would be strictly worse than leaving it: the generated block
-//     sits EARLIER in the file, so the hand copy would win the cascade and the
-//     emitted one — the bytes this gate reads — would go inert. Listing it here
-//     instead governs it where it lives; promoting it into the generated block
-//     is a follow-up that has to move --ease, --t and the reduced-motion block
-//     together, which is a cloud-surface change, not a token change.
+//     paper-surface mirror rather than an emitter of its own. That is the only
+//     surface on this list with no generated declaration of its own.
+//
+// cloud/priv/static/app.css was the second exception until cch-app-css-motion:
+// it DECLARED THE LADDER BY HAND in its decision-29 token area (--dur-1/-2/-3
+// with exactly these values, plus --ease, --t and a prefers-reduced-motion
+// collapse to 0s), and the emitter deliberately wrote nothing, because the
+// generated block sits EARLIER in the file — a hand copy downstream wins the
+// cascade and makes the emitted bytes, the ones Part N reads, inert. That is now
+// closed in the only order that is safe: cloudBlock() EMITS all five declarations
+// plus the reduced-motion collapse, and the hand copy was DELETED in the same
+// diff. Each rung is declared exactly once, and the declaration that paints is
+// the declaration the gate reads. Part N's exactly-once arm is the tripwire —
+// re-adding a hand copy anywhere below the marker reds it immediately, and
+// deleting the hand copy WITHOUT this emission would have left four live
+// consumers (.fresh-badge x2, modal-in, toast-in) resolving to nothing.
+//
+// `--ease` is tokens.motion.ease. `--t` (`var(--dur-1) var(--ease)`) is a
+// cloud-LOCAL shorthand with ~26 consumers, not a new token — it rides along
+// because it is fully DERIVED from the ladder, and leaving it hand-authored
+// while the rungs moved is exactly the split this promotion exists to remove.
 //
 // cloud/priv/static/styleguide.html is absent for a third reason: its generated
 // region is a swatch TABLE (markup), with nowhere to put a declaration. Its one
@@ -554,6 +562,52 @@ const cloudThemeBlock = (name, t) => [
   "}",
 ].join("\n");
 
+// The cloud SPA's decision-29 MOTION area (cch-app-css-motion). Three rungs from
+// tokens.motion via motionVarLines(), then two cloud-local companions:
+//   --ease  is tokens.motion.ease VERBATIM (a token; the schema requires it).
+//   --t     is `var(--dur-1) var(--ease)` — the SPA's transition shorthand, spent
+//           by ~26 rules. Not a token and not a new value: it is a pure function
+//           of the two lines above it, which is why it belongs beside them rather
+//           than hand-authored 100 lines downstream where the two could drift.
+// Theme-INVARIANT, so this goes on the bare :root only — never inside
+// [data-theme="dark"] or a [data-bp-theme] block (D25, the motionVars rule).
+function cloudMotionVars(indent, t = tokens) {
+  return [
+    ...motionVarLines(t),
+    `--ease: ${t.motion.ease};`,
+    "--t: var(--dur-1) var(--ease);",
+  ].map((l) => indent + l).join("\n");
+}
+
+// The reduced-motion collapse, GENERATED with the ladder rather than left beside
+// it. Two reasons, in order of weight:
+//   1. It is DERIVED from MOTION_STEPS, so a fourth rung added to tokens.json is
+//      zeroed automatically. The hand block listed three rungs by name; adding
+//      dur-4 would have shipped a rung that ignores the user's setting, silently.
+//   2. It is emitted LAST in the region — after the theme blocks — so it wins the
+//      cascade over every declaration this emitter writes, which is the property
+//      that makes it a collapse rather than one more shadow.
+// `0s` is written literally, not as `0${t.motion._unit}`: check.mjs Part N's
+// exactly-once arm exempts a re-declaration by the exact VALUE "0s" (that is what
+// keeps the exemption from being stretched to cover a literal that paints), so the
+// byte the gate recognises is the byte we emit. Zero is zero in any time unit.
+// --t needs no entry: var() inside a custom property substitutes at computed-value
+// time on the element that DECLARES it, so --t recomputes to `0s ease` on :root.
+// Spinner keyframes keep their literal durations on purpose — a progress
+// indicator is state, not decoration.
+function cloudReducedMotion() {
+  return [
+    "/* Motion collapses when the user asks for it (decision 29). Only the token",
+    "   durations go to 0 — spinner keyframes keep their literal duration because",
+    "   a progress indicator is state, not decoration. --t follows for free. */",
+    "@media (prefers-reduced-motion: reduce) {",
+    "  :root {",
+    ...MOTION_STEPS.map((k) => `    --${k}: 0s;`),
+    "  }",
+    "}",
+  ].join("\n");
+}
+
 function cloudBlock(themes = loadThemes()) {
   const lines = [
     ":root {",
@@ -562,6 +616,10 @@ function cloudBlock(themes = loadThemes()) {
     cloudStatusVars("light", "  "),
     cloudAccentVars("light", "  "),
     providerVars("light", "  "),
+    "  /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-",
+    "     invariant, so :root only; the reduced-motion collapse is at the end of",
+    "     this region. */",
+    cloudMotionVars("  "),
     "}",
     '[data-theme="dark"] {',
     cloudChromeVars("dark", "  "),
@@ -578,6 +636,8 @@ function cloudBlock(themes = loadThemes()) {
   ];
   const themed = themeBlocks(themes, cloudThemeBlock);
   if (themed) lines.push(THEME_BANNER, themed);
+  // LAST in the region on purpose — see cloudReducedMotion()'s note.
+  lines.push(cloudReducedMotion());
   return lines.join("\n");
 }
 
