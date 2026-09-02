@@ -220,6 +220,7 @@ const DEFECTS = [
   "W26-cred-sheet-exits",
   "W26-new-ready-and-launch-bounded",
   "W14-site-detail-phone-band",
+  "W29-deploy-rail-live-url-wrap",
   "W34-deploy-detail-render-bound",
 ];
 
@@ -1982,6 +1983,274 @@ async function main() {
           `${wrapped} of ${links} link(s) render on more than one line box (the wrap remedy doing its job);` +
           ` ${linkBoxed} with a non-zero clientWidth — the CLIP assertion is inert while that count is 0` +
           ` and goes live the moment the link stops being an inline box, which is exactly how a page-level green would be bought`,
+        );
+      }
+    }
+
+    // ── cch-w29-bl: THE RAIL'S *LIVE* FOOTER, WHICH EVERY LEG ABOVE IS BLIND TO
+    //    W25's leg measures `.deploy-rail-fail`; the W14 leg above measures the
+    //    detail head's `.fleet-url .site-open`. `deployRailHtml` emits a THIRD
+    //    thing neither of them can see — `.deploy-rail-live`, the copyable site
+    //    URL once every stage is done — and until `site-deploy-rail-live` landed
+    //    beside this leg, NO scenario in this harness produced it at any width.
+    //    That is the whole reason the defect survived: #8743 dropped the base
+    //    `white-space: nowrap` for `.fleet-url .site-open` and left the rail's
+    //    twin emit of the SAME class untouched, and both instruments went green
+    //    because neither had a fixture in the live-footer state.
+    //
+    //    THE PAID TWIN IS THE IN-PAGE CONTROL, NOT A SECOND RUN. The fixture's
+    //    site carries `current_deployment_id`, so `siteHasEverDeployed` makes
+    //    the detail head render the SAME derived URL through the selector #8743
+    //    already paid. Every cell reads both anchors and asserts they hold the
+    //    same string first — a comparison between two different strings would
+    //    be a table, not evidence. On origin/main bytes that pair reads, at 320
+    //    light: rail `white-space: nowrap`, 1 line box, `.deploy-rail-live`
+    //    scrollWidth 532 against clientWidth 320; head `normal`, 3 line boxes,
+    //    `.fleet-url` 320/320. Same page, same string, same width.
+    //
+    //    FOUR ASSERTIONS, AND NO ONE REMEDY BUYS ALL FOUR.
+    //      (a) the anchor's computed `white-space` is a WRAPPING value. This is
+    //          the one a `min-width: 0` or an `overflow: hidden` cannot buy, and
+    //          the one that reds the moment the CSS is reverted.
+    //      (b) the footer's own box holds its glyphs — `.deploy-rail-live`
+    //          scrollWidth == clientWidth. A page-level green alone is buyable
+    //          by clipping the URL inside a box that still paints past its
+    //          border (W25's leg exists for the same reason).
+    //      (c) the PAGE does not scroll sideways, asserted on BOTH
+    //          `document.body.scrollWidth` (the row's own criterion) and
+    //          `documentElement`. The row measured body 551 against a 320
+    //          viewport in the real ancestry — `.detail-grid > .detail-main >
+    //          section.deploy-rail`, which is where this fixture mounts it.
+    //      (d) IT WRAPPED, IT WAS NOT TRUNCATED. The URL's intrinsic one-line
+    //          width is MEASURED at the wide entry width and carried in, so any
+    //          cell whose container is narrower than that must show more than
+    //          one line box. A `text-overflow` remedy scores clean on (a)-(c)
+    //          and reds here — which is deliberate: a person reads this line to
+    //          learn where their site now lives, so an ellipsis trades a
+    //          scrollbar for a lie (the same branch cch-w14 took for the twin).
+    //
+    //    THE COPY BUTTON IS MEASURED TOO. `.deploy-rail-live` is a flex row and
+    //    the anchor's unbreakable run pushed its `flex: 0 0 auto` sibling off
+    //    the screen; a remedy that fixes the text and leaves the control
+    //    unreachable has not finished the journey.
+    if (requested.includes("W29-deploy-rail-live-url-wrap")) {
+      const D = "W29-deploy-rail-live-url-wrap";
+      // BLOCK-SCOPED (D247). The phone band the row is about, plus 480/620 as
+      // measured CONTROLS above it — on origin/main bytes the nowrap overhangs
+      // at every one of them, so the "clean above the band" reading has to be
+      // earned by the fix rather than assumed by the axis.
+      const LIVE_WIDTHS = [320, 340, 360, 375, 390, 412, 430, 480, 620];
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      const sc = SCENARIOS["site-deploy-rail-live"];
+      // THE ROUTE AND THE URL ARE DERIVED, NEVER TRANSCRIBED (D228): `?scen=`
+      // alone does not route, and a pasted uuid rots into "the sites list
+      // rendered instead" while printing a full, plausible table.
+      if (!sc || typeof sc.deepLink !== "string" || !sc.deepLink.startsWith("#site/")
+          || !sc.data || !Array.isArray(sc.data.sites) || !sc.data.sites.length) {
+        return die(`${D}: SCENARIOS["site-deploy-rail-live"] no longer carries a #site/ deepLink and a site — the live-footer route cannot be reached, so nothing below would measure the deploy rail`);
+      }
+      const liveSite = sc.data.sites.find((s) => s && s.id === sc.deepLink.slice("#site/".length));
+      if (!liveSite) {
+        return die(`${D}: SCENARIOS["site-deploy-rail-live"].deepLink points at a site that is not in its own data.sites — the fixture and its deep link have drifted apart`);
+      }
+      // The head's twin anchor is a property of the FIXTURE (siteHasEverDeployed
+      // is `!!s.current_deployment_id` — re-derive with `grep -n 'function
+      // siteHasEverDeployed' cloud/priv/static/app.js`). Without it this leg
+      // still measures the rail, but it loses the control that makes the pair
+      // a comparison, so its absence is stated rather than silently tolerated.
+      if (!liveSite.current_deployment_id) {
+        return die(`${D}: the fixture's site no longer carries current_deployment_id, so the detail head renders no \`.fleet-url .site-open\` — this leg's paid-twin control is gone and its central comparison would be against nothing`);
+      }
+      const READY =
+        `document.querySelector('.deploy-rail-live .site-open') && ` +
+        `document.querySelector('.detail-head .fleet-url .site-open') && ` +
+        `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`;
+      const READ =
+        `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*100)/100;};` +
+        `var v=document.querySelector('section.view:not([hidden])');` +
+        // EVERY anchor of each kind, never a pinned one (D228's fifth clause):
+        // querySelector singular cannot tell a footer that rendered nothing
+        // from a footer that rendered a clean box.
+        // LINE BOXES COME FROM A RANGE, NOT FROM `a.getClientRects()`, and the
+        // difference is the whole arm (d). `.deploy-rail-live` is `display:
+        // flex`, so its `.site-open` child is a FLEX ITEM — a block box with
+        // exactly ONE client rect at every width and a width the flex algorithm
+        // resolved, not the text's. Reading `getClientRects().length` there
+        // returns 1 for wrapped and unwrapped text alike (measured: 1L at every
+        // width in both states) and `getBoundingClientRect().width` returns the
+        // COLUMN, not the string. A Range over the anchor's contents reports one
+        // rect per LINE BOX and a union width that is the text's own — which is
+        // what the wrap/truncate question is actually about. The head's twin is
+        // an inline `<a>` where the two agree; it is read the same way anyway so
+        // the control and the subject are measured by one instrument.
+        `var lb=function(el){var g=document.createRange();g.selectNodeContents(el);` +
+        `  var rs=[].slice.call(g.getClientRects());if(g.detach)g.detach();` +
+        `  if(!rs.length)return {n:0,w:0,right:0};` +
+        `  var L=Math.min.apply(null,rs.map(function(x){return x.left;}));` +
+        `  var Rt=Math.max.apply(null,rs.map(function(x){return x.right;}));` +
+        `  return {n:rs.length,w:R(Rt-L),right:R(Rt)};};` +
+        // THE INTRINSIC ONE-LINE WIDTH, MEASURED PER CELL AND OUT OF FLOW.
+        // Arm (d) needs "how wide would this string be if it did not wrap", and
+        // once the fix ships there is no width left at which the live footer
+        // renders it unwrapped (measured: it already wraps at the 900px entry),
+        // so it cannot be read from an entry cell. A clone of the anchor is
+        // appended INSIDE the same `.deploy-rail-live` — so it inherits the very
+        // rule under measurement, `--mono` and 13px included — positioned
+        // absolutely (an out-of-flow box is not a flex item, so it is
+        // shrink-to-fit rather than flex-resolved) with `white-space: nowrap`
+        // forced. It is removed in the same expression, and `residue` below is
+        // asserted so a probe that survived can never be measured as content.
+        `var oneLine=function(a,box){if(!box)return null;` +
+        `  var c=a.cloneNode(true);c.setAttribute('data-w29-probe','1');` +
+        `  c.style.cssText='position:absolute;left:-99999px;top:0;width:auto;max-width:none;white-space:nowrap;';` +
+        `  box.appendChild(c);var w=R(c.getBoundingClientRect().width);box.removeChild(c);return w;};` +
+        `var read=function(sel,boxSel){return [].slice.call(document.querySelectorAll(sel)).map(function(a){` +
+        `  var cs=getComputedStyle(a);var lr=lb(a);` +
+        `  var box=a.closest(boxSel);var bcs=box?getComputedStyle(box):null;` +
+        `  return {right:lr.right,w:lr.w,lines:lr.n,one:oneLine(a,box),` +
+        `    ws:cs.whiteSpace,ow:cs.overflowWrap,wb:cs.wordBreak,ov:cs.textOverflow,` +
+        `    bsw:box?box.scrollWidth:null,bcw:box?box.clientWidth:null,` +
+        `    box:box?(box.className||'?').toString():null,bov:bcs?bcs.overflowX:null,` +
+        `    t:(a.textContent||'').replace(/\\u00a0/g,' ').trim()};});};` +
+        `var btn=document.querySelector('.deploy-rail-live .copy-btn');` +
+        // The real ancestry the row names, asserted rather than assumed: a rail
+        // that stopped mounting inside .detail-main would make every number
+        // below a measurement of some other screen.
+        `var rail=document.querySelector('.detail-grid > .detail-main > #deploy-rail-slot > section.deploy-rail');` +
+        `return {sw:d.scrollWidth,cw:d.clientWidth,bsw:document.body.scrollWidth,bcw:document.body.clientWidth,` +
+        ` residue:document.querySelectorAll('[data-w29-probe]').length,` +
+        ` view:v?v.id:'none',theme:d.getAttribute('data-theme'),ancestry:!!rail,` +
+        ` btnRight:btn?R(btn.getBoundingClientRect().right):null,` +
+        ` live:read('.deploy-rail-live .site-open','.deploy-rail-live'),` +
+        ` head:read('.detail-head .fleet-url .site-open','.fleet-url')};})()`;
+      process.stdout.write(
+        `\n${D} — the rail's LIVE footer x ${LIVE_WIDTHS.length} phone/control widths x 2 themes` +
+        ` (${LIVE_WIDTHS.length * 2} cells); the head's already-paid \`.fleet-url .site-open\` twin is the IN-PAGE control,` +
+        ` and PAGE (body + documentElement), FOOTER BOX, ANCHOR WRAP and COPY BUTTON are asserted in every cell\n`,
+      );
+      let cells = 0, liveSeen = 0, headSeen = 0, wrapped = 0, boxOver = 0, pageOver = 0, nowrapSeen = 0;
+      let intrinsic = null;
+      for (const theme of ["light", "dark"]) {
+        // Enter WIDE. The rail mounts once, on load, off the deployments fetch;
+        // entering narrow would hide a footer that only renders on a phone
+        // layout, and the intrinsic width below has to be read where the URL
+        // still fits on one line.
+        await setViewport(900);
+        await nav(`${BASE}/?scen=site-deploy-rail-live&theme=${theme}${sc.deepLink}`, READY);
+        // (0) THE ENTRY READ IS AN ANTI-VACUITY CHECK, not a measurement kept:
+        // it proves the footer is on the page and that the out-of-flow probe
+        // that feeds arm (d) actually returns a width, BEFORE any cell trusts
+        // one. The threshold itself is re-derived in every cell.
+        const wide = await evalJs(READ);
+        if (!wide.live.length || wide.live[0].one === null) {
+          return die(`${D}: the 900px entry rendered ${wide.live.length} live-footer anchor(s) and no intrinsic width — the WRAP-not-TRUNCATE arm below would have no derived threshold, so this leg would certify a page it could not read`);
+        }
+        const row = [];
+        for (const width of LIVE_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(READ);
+          cells++;
+          // (1) THE ROUTE + THE ANCESTRY. Without these every number is phantom.
+          if (m.view !== "view-site") {
+            fail(D, `${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures the deploy rail`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          if (!m.ancestry) {
+            fail(D, `${theme}@${width}: no \`.detail-grid > .detail-main > section.deploy-rail\` — the rail is not in the ancestry this row measured (the fixture stopped mounting it there), so the page numbers below are about some other screen`);
+          }
+          // (2) AUDITED: an absent anchor is not a wrapping anchor. Exactly one
+          // of each is owed — the live footer by the fixture's all-done ledger,
+          // the head's twin by its current_deployment_id.
+          if (m.live.length !== 1) {
+            fail(D, `${theme}@${width}: ${m.live.length} \`.deploy-rail-live .site-open\`, expected 1 — the rail's LIVE footer is not on the page, so nothing was measured. This is not a pass.`);
+            row.push(`${width}:0live`);
+            continue;
+          }
+          if (m.head.length !== 1) {
+            fail(D, `${theme}@${width}: ${m.head.length} \`.detail-head .fleet-url .site-open\`, expected 1 — the PAID twin is gone, so this cell has no control and its central comparison is against nothing`);
+          }
+          const a = m.live[0], h = m.head[0] || null;
+          liveSeen++;
+          if (h) headSeen++;
+          // (3) ANTI-VACUITY: the two anchors must hold the SAME string. A
+          // control carrying some other text is a table, not a comparison.
+          if (h && h.t !== a.t) {
+            fail(D, `${theme}@${width}: the rail footer holds "${a.t.slice(0, 60)}" while the head's paid twin holds "${h.t.slice(0, 60)}" — they are not the same URL, so the twin cannot serve as this cell's control`);
+          }
+          if (!/^https?:\/\//.test(a.t) || /\s/.test(a.t.replace(/\s*↗$/, ""))) {
+            fail(D, `${theme}@${width}: the footer's anchor holds "${a.t.slice(0, 60)}", which is not one unbreakable absolute URL — a string with a space in it wraps without any remedy, so a green here would be green by construction`);
+          }
+          // (4) THE ANCHOR'S WRAP. The assertion a `min-width: 0` or an
+          // `overflow: hidden` cannot buy, and the one that reds on a revert.
+          if (a.ws === "nowrap" || a.ws === "pre") {
+            nowrapSeen++;
+            fail(D, `${theme}@${width} .deploy-rail-live .site-open: computed white-space is "${a.ws}" — the base \`.site-open\` nowrap still reaches the rail's live footer, so its \`word-break: ${a.wb}\` cannot act and the whole URL is pinned to one ${a.w}px line box (the head's paid twin computes "${h ? h.ws : "n/a"}" on the SAME string in the SAME page)`);
+          }
+          // (5) THE FOOTER'S OWN BOX. Page-level green is buyable by clipping;
+          // this is the metric that cannot be bought that way.
+          if (a.bsw !== null && a.bsw > a.bcw) {
+            boxOver++;
+            fail(D, `${theme}@${width} .deploy-rail-live: scrollWidth ${a.bsw} > clientWidth ${a.bcw} — ${a.bsw - a.bcw}px of the live site URL paints OUTSIDE its own footer (white-space:${a.ws}, word-break:${a.wb}, overflow-x:${a.bov}), through whatever sits beside it`);
+          }
+          if (a.right > m.cw + 1) {
+            fail(D, `${theme}@${width} .deploy-rail-live .site-open: right edge ${a.right} is past the ${m.cw}px viewport — the URL a person is meant to copy paints off-screen`);
+          }
+          // (6) THE COPY BUTTON — the affordance the overhang pushed off.
+          if (m.btnRight === null) {
+            fail(D, `${theme}@${width}: no \`.deploy-rail-live .copy-btn\` — the footer's copy affordance stopped rendering, so its reachability measured nothing`);
+          } else if (m.btnRight > m.cw + 1) {
+            fail(D, `${theme}@${width} .deploy-rail-live .copy-btn: right edge ${m.btnRight} is past the ${m.cw}px viewport — the Copy control is off-screen, so the one gesture this footer exists for cannot be made`);
+          }
+          // (7) THE PAGE, on BOTH axes the row measured.
+          if (m.bsw > m.bcw) {
+            pageOver++;
+            fail(D, `${theme}@${width}: document.body.scrollWidth ${m.bsw} > clientWidth ${m.bcw} — ${m.bsw - m.bcw}px of the site screen is off-screen sideways, at rest and with no cue, while a person reads the address their site just went live on`);
+          }
+          if (m.sw > m.cw) {
+            fail(D, `${theme}@${width}: documentElement.scrollWidth ${m.sw} > clientWidth ${m.cw} — ${m.sw - m.cw}px past the viewport`);
+          }
+          // (8) IT WRAPPED, IT WAS NOT TRUNCATED. Threshold DERIVED at 900 in
+          // this same run, never typed: a cell whose footer is narrower than the
+          // URL's own one-line width owes more than one line box.
+          if (a.lines > 1) wrapped++;
+          if (a.one === null) {
+            fail(D, `${theme}@${width} .deploy-rail-live .site-open: the out-of-flow probe returned no intrinsic width — arm (d) measured nothing in this cell`);
+          } else {
+            intrinsic = intrinsic === null ? a.one : Math.max(intrinsic, a.one);
+            if (a.bcw !== null && a.one > a.bcw && a.lines <= 1) {
+              fail(D, `${theme}@${width} .deploy-rail-live .site-open: ${a.lines} line box for a URL whose intrinsic one-line width is ${a.one}px inside a ${a.bcw}px footer — it is being TRUNCATED or clipped, not wrapped (text-overflow:${a.ov}). A person reads this line to learn where their site now lives; an ellipsis trades a scrollbar for a lie, which is the branch cch-w14 refused for the twin`);
+            }
+          }
+          // PROBE HYGIENE: a clone that survived its own read would be measured
+          // as page content by every cell after it.
+          if (m.residue) {
+            fail(D, `${theme}@${width}: ${m.residue} \`[data-w29-probe]\` element(s) still in the DOM — the intrinsic-width probe did not remove itself and later cells would measure a mutated tree`);
+          }
+          row.push(`${width}:body ${m.bsw}/${m.bcw} box ${a.bsw}/${a.bcw} ${a.lines}L ${a.ws} one${a.one}`);
+        }
+        process.stdout.write(`   live/${theme}  ${row.join("  ")}\n`);
+      }
+      // AN EMPTY POPULATION IS NOT A CLEAN ONE.
+      if (liveSeen === 0) {
+        fail(D, `zero \`.deploy-rail-live .site-open\` measured across ${cells} cells — the rail's live footer stopped rendering, so the element this row is named after was never measured. This is not a pass.`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${LIVE_WIDTHS.join("/")} in both themes on \`site-deploy-rail-live\`, ` +
+          `the first fixture in this harness to render \`.deploy-rail-live\` at all; ${pageOver} page overhangs, ${boxOver} footer boxes overflowing their own border`,
+        );
+        okLine(
+          `${liveSeen} rail-footer anchor(s) measured against ${headSeen} in-page control(s) — the head's already-paid ` +
+          `\`.fleet-url .site-open\` carrying the SAME derived URL in the SAME page, asserted string-equal per cell; ` +
+          `${nowrapSeen} of ${liveSeen} still computing a non-wrapping white-space`,
+        );
+        okLine(
+          `${wrapped} of ${liveSeen} footer anchor(s) render on more than one line box; the WRAP-not-TRUNCATE arm's threshold ` +
+          `is the URL's own intrinsic one-line width, re-measured in EVERY cell by an out-of-flow clone inside the same ` +
+          `footer (widest ${intrinsic}px this run) and never a typed pixel, so a text-overflow remedy — ` +
+          `which passes every page and box metric above — reds on it`,
         );
       }
     }

@@ -1055,6 +1055,58 @@ const depRailFailedKind = deployment({
   ],
 });
 
+// ── cch-w29-bl-deploy-rail-live-site-open-still-nowrap: THE LIVE FOOTER ──────
+//
+// EVERY RAIL FIXTURE ABOVE IS A FAILURE FOOTER. `deployRailHtml` has two
+// footers and only one of them had ever rendered in this harness:
+// `.deploy-rail-fail` (cch-w25-s3, above) and `.deploy-rail-live` — the
+// copyable site URL the OTHER branch emits once every stage is done. So the
+// anchor inside the live footer was never measured at any width, and the base
+// `white-space: nowrap` it inherits from `.site-open` (app.css) went unseen:
+// #8743 dropped that nowrap for `.fleet-url .site-open` and the rail's twin
+// emit kept it. THE SCENARIO-AXIS GAP IS THE DEFECT'S HIDING PLACE, which is
+// why the fixture is the first half of the fix and not an extra.
+//
+// THE STATE IS THE SAME HONEST TRANSIENT WINDOW THE FAILED TWIN LIVES IN:
+// `deployIsActive` (app.js) gates the rail to queued/building/pushing, so the
+// rail is on screen while the control-plane row still reads `pushing` — and the
+// SSE narration can already carry all six stages done, because the last
+// stage-done frame arrives before the row settles to `live`. `deployRailStatus`
+// folds an all-`ok` row set to tone "live", and `deployRailHtml` then emits
+// `.deploy-rail-live` with `opts.url`.
+//
+// THE URL IS DERIVED, NEVER TYPED. `mountDeployRail` passes
+// `siteLiveUrl(site, bp)`, and this site carries no `url` column, so the string
+// is `liveInstance.url + "/sites/" + slug + "/"` — the product's own
+// construction. Nothing here is lengthened to make it overflow: the ordinary
+// 55-character live URL of the ordinary fixture site is what spills.
+//
+// THE HEAD'S `.fleet-url .site-open` IS THE IN-PAGE CONTROL, and that is why
+// this fixture uses `webSiteDeploys` rather than a bare `webSite`: it carries
+// `current_deployment_id`, so `siteHasEverDeployed` makes the detail head
+// render THE SAME STRING through the twin selector #8743 already paid. One
+// route, two anchors, one URL — the measured pair overflow-guard's
+// W29-deploy-rail-live-url-wrap leg reads is a comparison inside a single page,
+// not across two runs.
+const depRailLive = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d8",
+  site_id: IDS.siteWeb,
+  status: "pushing",
+  git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
+  branch: "main",
+  detail: "pushing",
+  inserted_at: tMinus(96),
+  updated_at: tMinus(2),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094118Z-9c1f2ab, blue → green", at: tMinus(96) },
+    { stage: "BUILD", status: "done", detail: "npm ci && npm run build (next standalone)", at: tMinus(58) },
+    { stage: "STAGE", status: "done", detail: "", at: tMinus(40) },
+    { stage: "HEALTH", status: "done", detail: "slot green on :8081 answered 200 at /healthz", at: tMinus(24) },
+    { stage: "SWITCH", status: "done", detail: "", at: tMinus(9) },
+    { stage: "RETIRE", status: "done", detail: "", at: tMinus(2) },
+  ],
+});
+
 // ── cch-deploy-detail-render-has-no-cap: THE LIVE SUB-CAPTION, AT ITS STORE CAP
 //
 // `.deploy-detail` is the only caption on the deploy rail with NO render bound,
@@ -3260,6 +3312,27 @@ export const SCENARIOS = {
         [IDS.siteWeb]: [depRailFailedCruel, depCurrent, depPrior],
         [IDS.siteBlog]: [depRailFailedKind],
       },
+    },
+  },
+  // cch-w29-bl: THE DEPLOY RAIL, LIVE — the OTHER footer, and the first fixture
+  // in this harness to render `.deploy-rail-live` at all (see the ledger beside
+  // `depRailLive` in the fixtures above for why the state is honest and where
+  // the URL comes from). ONE site on purpose: the live footer's anchor and the
+  // detail head's `.fleet-url .site-open` carry the SAME derived URL on this
+  // one route, so the paid twin is the in-page control for the unpaid one.
+  // Driven by overflow-guard's W29-deploy-rail-live-url-wrap leg at 320/360/390
+  // in both themes, page AND anchor.
+  "site-deploy-rail-live": {
+    label: "Deploy rail — every stage done; the footer carries the copyable live URL",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys],
+      audit: [],
+      deployments: [depRailLive, depCurrent, depPrior],
     },
   },
   // ── bp-login-ux W3 (decision 40): the /activate device-login approve page ──

@@ -1654,6 +1654,56 @@ const EXPECTATIONS = {
         "the control must be the ORDINARY word-broken string — shorter, and breakable at spaces");
     },
   },
+  // cch-w29-bl: the deploy rail, LIVE — the fold behind `.deploy-rail-live`,
+  // the footer `deployRailHtml`'s OTHER branch emits and which no scenario in
+  // this harness had ever produced. Same seam limit as the FAILED twin above:
+  // the rail mounts through `scope.querySelector` into `#deploy-rail-slot`, a
+  // real-DOM seam this vm registry does not model, so the browser half of this
+  // proof is overflow-guard's W29-deploy-rail-live-url-wrap leg. What THIS half
+  // owns is that the fixture can reach the live branch AT ALL — an active row,
+  // six done stages, tone "live" — and that the URL in the footer is the SAME
+  // string the detail head's already-paid `.fleet-url .site-open` carries, from
+  // `siteLiveUrl`, so the browser leg's in-page control is a fact about the
+  // fixture rather than a hope.
+  "site-deploy-rail-live": {
+    what: "the deploy rail's LIVE fold — every stage done, and the footer carries the copyable site URL",
+    check(reg, hooks) {
+      const scen = SCENARIOS["site-deploy-rail-live"];
+      const site = scen.data.sites[0];
+      const bp = scen.data.barkparks[0];
+      // The rail tracks the deployment still IN FLIGHT. A fixture whose row went
+      // terminal renders no rail at all, so this is asserted, never assumed.
+      const dep = hooks.railDeployment(scen.data.deployments);
+      assert.ok(dep, "the fixture must carry an ACTIVE deployment or the rail never mounts");
+      const ledger = hooks.deployRailLedgerFromConsole(dep.console);
+      assert.equal(Object.keys(ledger).length, hooks.deployRailStages.length,
+        "every rail stage must survive the fold — a short ledger cannot reach the live branch");
+      const rows = hooks.deployRailRows(ledger);
+      assert.ok(rows.length > 0 && rows.every((r) => r.role === "ok"),
+        "all six rows must fold to ok — that is the ONLY input that makes deployRailStatus say live");
+      assert.equal(hooks.deployRailStatus(rows).tone, "live");
+      // THE URL IS DERIVED FROM THE FIXTURE, exactly as mountDeployRail derives
+      // it — a transcribed string here would keep passing after the fixture
+      // stopped producing one.
+      const url = hooks.siteLiveUrl(site, bp);
+      assert.ok(url && url.startsWith("https://"), "siteLiveUrl must yield an absolute live URL for this fixture");
+      const html = hooks.deployRailHtml(rows, { deploymentId: dep.id, url });
+      assert.ok(html.includes("deploy-rail-status--live"), "the pill must read the live tone");
+      assert.ok(html.includes('<div class="deploy-rail-live">'), "the LIVE footer must render — this is the branch no fixture reached before");
+      const foot = html.split('<div class="deploy-rail-live">')[1].split("</div>")[0];
+      assert.ok(foot.includes('class="site-open"'), "the footer's URL is a `.site-open` anchor — the class the base nowrap rule dresses");
+      assert.ok(foot.includes(">" + url + "&nbsp;"), "the WHOLE url is the anchor's text, not a label");
+      assert.ok(foot.includes('data-copy="' + url + '"'), "the copy button carries the same url");
+      // THE IN-PAGE CONTROL IS A PROPERTY OF THE FIXTURE, not of the browser
+      // run: the detail head renders `.fleet-url .site-open` only when
+      // siteHasEverDeployed, and the browser leg compares the two anchors.
+      assert.ok(site.current_deployment_id,
+        "the fixture's site must carry current_deployment_id or the head renders no `.fleet-url .site-open`, and the browser leg loses its paid-twin control");
+      // The unbreakable run the nowrap pinned: no space anywhere in the URL.
+      assert.ok(!/\s/.test(url) && url.length > 40,
+        "the live URL must be one long unbreakable run — a URL with a space in it could wrap without any remedy at all");
+    },
+  },
   // Invitation accept: each committed terminal renders its designed card with
   // exactly one [data-invite-act] action (esc() turns ' into &#39; in copy).
   "invite-joined": {
