@@ -37,6 +37,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
@@ -5044,9 +5045,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
     store_id = socket.assigns.store_session_id
 
     attachments =
-      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
+      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, _entry ->
+        # (entry ignored: the media type comes from the BYTES, not client_type)
+        # `Attachments.put/2` is the ONE store seam both surfaces write through
+        # (ct-bl-chat-attachments): the Studio composer and the
+        # `POST /v1/chat/sessions/:id/attachments` transport route land in the
+        # SAME content-addressed store, so a Studio-pasted image is readable by
+        # `bp chat` through the chat-owned read route with no second store and no
+        # per-surface fork. It also sniffs the media type from the bytes instead
+        # of trusting `entry.client_type` — a client-declared type is caller
+        # input, and the type the store records is what is served back.
         with {:ok, bytes} <- File.read(tmp_path),
-             {:ok, pointer} <- StudioChat.store_attachment(store_id, bytes, entry.client_type) do
+             {:ok, pointer} <- Attachments.put(store_id, bytes) do
           {:ok, Map.put(pointer, :bytes, bytes)}
         else
           {:error, reason} ->
@@ -5089,15 +5099,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # The jsonb pointer for a stored attachment — path/media_type/sha256/byte_size
-  # ONLY, never the bytes.
-  defp attachment_pointer_json(a) do
-    %{
-      "path" => a.path,
-      "media_type" => a.media_type,
-      "sha256" => a.sha256,
-      "byte_size" => a.byte_size
-    }
-  end
+  # ONLY, never the bytes. Delegated to `Attachments.pointer_json/1` so the
+  # Studio composer and the transport persist the IDENTICAL pointer shape; the
+  # wire projection (`Attachments.reference/2`, which drops `path`) then reads
+  # one shape rather than guessing between two writers.
+  defp attachment_pointer_json(a), do: Attachments.pointer_json(a)
 
   defp data_uri(media_type, bytes),
     do: "data:#{media_type};base64,#{Base.encode64(bytes)}"

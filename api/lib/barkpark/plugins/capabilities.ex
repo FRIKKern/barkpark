@@ -474,7 +474,7 @@ defmodule Barkpark.Plugins.Capabilities do
   defp command_noun(%{"noun" => n}) when is_binary(n), do: n
   defp command_noun(_), do: nil
 
-  # Orthogonal chat side-branch (D36 / charter D16). The nine `chat.*` commands
+  # Orthogonal chat side-branch (D36 / charter D16). The eleven `chat.*` commands
   # DECLARE `auth_tier: "admin"` (unchanged — admin/ingest keep discovering them
   # through the rank ladder), but a caller holding the `chat` capability ALSO
   # discovers the `chat` noun. This is a capability grant, not a rank lift: it
@@ -679,7 +679,7 @@ defmodule Barkpark.Plugins.Capabilities do
       # Claude chat sessions (charter bp-chat-tui, D21). StudioChat is
       # CORE-embedded, NOT a Barkpark.Plugin — it never flows through
       # plugin_nouns/2, so the noun is hand-declared here so MCP/SDK codegen and
-      # any headless harness can DISCOVER chat. The nine non-streaming verbs are
+      # any headless harness can DISCOVER chat. The eleven non-streaming verbs are
       # registered below; the SSE `GET /v1/chat/sessions/:id/events` route is a
       # builtin carve-out (like `listen`) with no manifest verb — it is NAMED
       # here so a reading agent knows live streaming exists via `bp chat`.
@@ -687,7 +687,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "name" => "chat",
         "summary" =>
           "Claude chat sessions — create/list/read/update, send, interrupt, approve, " <>
-            "archive/unarchive. " <>
+            "archive/unarchive, plus chat-owned attachment upload/read " <>
+            "(never the media plugin). " <>
             "Live token streaming rides the `bp chat` SSE events channel " <>
             "(a builtin carve-out, not a manifest verb).",
         "plugin" => nil
@@ -3150,7 +3151,7 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
-      # The nine non-streaming verbs behind the `/v1/chat` scope, which is
+      # The eleven non-streaming verbs behind the `/v1/chat` scope, which is
       # `pipe_through [:api, :require_admin]` — every route needs a data-plane
       # bearer with the global `admin` permission (D21: instance-global scope,
       # NO tenant/workspace/project/dataset column, so NO scoped_prefix). All
@@ -3324,6 +3325,48 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Chat session id.")],
         writes: true,
         default_output: "minimal"
+      ),
+      # Chat-owned attachments (charter D16, `ct-bl-chat-attachments`). These two
+      # ride the SAME `[:api, :require_chat_access]` scope and the SAME
+      # `fetch_scoped` tenant oracle as every other `/sessions/:id` route —
+      # deliberately NOT the media plugin, whose `GET /media/files/*` is
+      # any-token-public. Both bodies are JSON (base64 in, base64 out) rather
+      # than raw bytes, so they are ordinary manifest verbs, not a streaming
+      # builtin carve-out like the SSE `events` route.
+      core_cmd(
+        "chat.upload_attachment",
+        "chat",
+        "upload-attachment",
+        "Upload an image attachment to a chat session's chat-owned store (png|jpeg|gif|webp; base64 body).",
+        "POST",
+        "/v1/chat/sessions/:id/attachments",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg("data", true, "string", "Base64-encoded image bytes (≤3 MB decoded).")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "chat.get_attachment",
+        "chat",
+        "get-attachment",
+        "Read one chat attachment back by its opaque id (base64 payload; never served through any media route).",
+        "GET",
+        "/v1/chat/sessions/:id/attachments/:attachment_id",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg(
+            "attachment_id",
+            true,
+            "string",
+            "Opaque attachment id (the content address returned by upload-attachment)."
+          )
+        ],
+        writes: false,
+        default_output: "json"
       ),
       # ── Mobile app-token exchange (task wb-api-capabilities-undeclared-verbs)
       # Mounted at `/v1/auth/app-tokens` behind `[:api, :require_token]` — the

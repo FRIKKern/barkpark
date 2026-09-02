@@ -725,13 +725,18 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "chat transport commands (charter bp-chat-tui, ct-bl-manifest-commands)" do
     # bp chat was invisible to the capabilities manifest — the MCP bridge
     # (--tools all), SDK codegen, and headless harnesses could not discover it.
-    # These pin the `chat` noun + the nine non-streaming admin verbs mapped to
-    # the already-shipped /v1/chat routes (the eighth, SSE events, is a builtin
-    # carve-out with no manifest verb). StudioChat is core-embedded, NOT a
-    # Barkpark.Plugin, so the noun is declared in core_nouns/0, not plugin_nouns/2.
+    # These pin the `chat` noun + the eleven non-streaming admin verbs mapped to
+    # the already-shipped /v1/chat routes (SSE events is a builtin carve-out with
+    # no manifest verb). StudioChat is core-embedded, NOT a Barkpark.Plugin, so
+    # the noun is declared in core_nouns/0, not plugin_nouns/2.
+    #
+    # The two attachment verbs (ct-bl-chat-attachments) belong to THIS set and
+    # not to the media noun on purpose: chat bytes are gated by the chat tenant
+    # oracle, never by the any-token-public `GET /media/files/*` (charter D16).
     @chat_commands ~w(
       chat.create_session chat.list_sessions chat.get_session chat.update_session
       chat.send_message chat.interrupt chat.approve chat.archive chat.unarchive
+      chat.upload_attachment chat.get_attachment
     )
 
     test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
@@ -748,7 +753,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
     end
 
-    test "exactly the nine non-streaming chat verbs are registered (events stays absent)",
+    test "exactly the eleven non-streaming chat verbs are registered (events stays absent)",
          %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -793,7 +798,9 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         "chat.interrupt" => {"POST", "/v1/chat/sessions/:id/interrupt"},
         "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"},
         "chat.archive" => {"POST", "/v1/chat/sessions/:id/archive"},
-        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"}
+        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"},
+        "chat.upload_attachment" => {"POST", "/v1/chat/sessions/:id/attachments"},
+        "chat.get_attachment" => {"GET", "/v1/chat/sessions/:id/attachments/:attachment_id"}
       }
 
       for {id, {method, path}} <- expected do
