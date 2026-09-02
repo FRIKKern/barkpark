@@ -1881,7 +1881,7 @@ func TestToolRowKeepsItsBlockBelowTheGutter(t *testing.T) {
 		Metadata:       map[string]any{"turn_settled": true, "output": "ok"},
 	}
 
-	out := strings.Join(renderMessage(80, msg, false, ""), "\n")
+	out := strings.Join(renderMessage(80, msg, false, "", ""), "\n")
 	if !strings.Contains(out, "✓") {
 		t.Fatalf("a settled diff row must wear its ✓ gutter:\n%s", out)
 	}

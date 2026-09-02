@@ -330,6 +330,18 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "the token (:global for a global-admin token, {:workspace, ws} for a workspace-bound " <>
          "chat token) and the StudioChat store confines every read to it — a foreign session " <>
          "is a 404, never a 403 oracle."},
+    # ChatController.answer — the AskUserQuestion answer submit
+    # (ct-bl-question-updatedinput). SAME pipeline and SAME oracle as every
+    # sibling /v1/chat/sessions/:id write above.
+    {"POST", "/v1/chat/sessions/:id/answer"} =>
+      {:workspace_derived,
+       "chat_scope-derived: Plugs.RequireChatAccess resolves conn.assigns.chat_scope from " <>
+         "the token (:global for a global-admin token, {:workspace, ws} for a workspace-bound " <>
+         "chat token) and ChatController.answer/2 runs the scoped StudioChat.get_session/2 " <>
+         "BEFORE it reads the pending question row, so the session-keyed (not " <>
+         "workspace-keyed) QuestionAnswer.fetch_pending_question/2 is only ever reached for " <>
+         "a session the credential already owns — a foreign session is a 404, never a 403 " <>
+         "oracle, and no answer is validated or forwarded for it."},
     # ChatController.approval
     {"POST", "/v1/chat/sessions/:id/approval"} =>
       {:workspace_derived,
