@@ -278,6 +278,28 @@ defmodule Barkpark.Sites.DeployRunner do
   @stage_names ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
   @stage_statuses ~w(started ok skipped noop failed)
 
+  # THE SERVED-SLOT MARKER (site-spawner: node slot truth). The node engine
+  # emits, AFTER its Caddy flip has committed and reloaded, one report-only line
+  #
+  #     BPSTAGE name=SERVED status=ok build_id=<id> detail="port=<n|none> slot=<a|b|none>"
+  #
+  # whose values it READ BACK out of the Caddyfile marker block — i.e. what Caddy
+  # is actually proxying, not the TARGET_SLOT the run intended. SERVED is not in
+  # @stage_names above, so `parse_stage_line/2` skips it and it can never reach
+  # `stage_exit_code/1`: it is a measurement, never a verdict.
+  #
+  # Its own regex rather than a widened @stage_re, for exactly that separation —
+  # and `none` is matched as a VALUE, not treated as a parse failure, because
+  # "Caddy names no upstream for this site" is a thing the box learned, not a
+  # thing it failed to say.
+  @served_re ~r/\bBPSTAGE\s+name=SERVED\s+status=ok(?:\s+build_id=\S*)?\s+detail="port=([^\s"]+)\s+slot=([^\s"]+)"/
+
+  # The two node slot names the engine uses for a site's blue/green pair. Anything
+  # else (including the literal `none` the engine emits when the Caddy read
+  # matched neither of this site's ports) is reported as nil — an honest "not
+  # known", never a guess at which half is serving.
+  @served_slots ~w(a b)
+
   # systemctl is-active states that mean the build is STILL running. Everything
   # else (inactive / failed / deactivating / unknown / "") is terminal or gone.
   @active_states ~w(active activating reloading)
@@ -1487,6 +1509,7 @@ defmodule Barkpark.Sites.DeployRunner do
   defp reconstruct(manifest, phase) do
     log = read_log_tail(manifest.log_file)
     stages = fold_status_file(manifest.status_file, manifest.build_id)
+    {served_port, served_slot} = fold_served_file(manifest.status_file)
 
     base = %{
       slug: manifest.slug,
@@ -1495,6 +1518,8 @@ defmodule Barkpark.Sites.DeployRunner do
       mode: manifest.mode,
       runtime_target: manifest.runtime_target,
       stages: stages,
+      served_port: served_port,
+      served_slot: served_slot,
       log: log,
       log_state: disk_log_state(manifest.log_file),
       log_path: manifest.log_file,
@@ -1538,6 +1563,31 @@ defmodule Barkpark.Sites.DeployRunner do
 
       {:error, _} ->
         []
+    end
+  end
+
+  # The SERVED marker's twin of `fold_status_file/2`: latest-wins over the same
+  # durable file, so a systemd run that this process never streamed still reports
+  # the slot Caddy ended up on. `{nil, nil}` when the engine emitted no marker
+  # (every static deploy, and any node build that died before SWITCH) — which is
+  # the honest answer, not a zero.
+  # Reachability: `path` is always `manifest.status_file` (run_state_dir + a
+  # charset-validated slug), never request data.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp fold_served_file(path) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents
+        |> String.split("\n", trim: true)
+        |> Enum.reduce({nil, nil}, fn line, acc ->
+          case parse_served_line(line) do
+            {:ok, port, slot} -> {port, slot}
+            :skip -> acc
+          end
+        end)
+
+      {:error, _} ->
+        {nil, nil}
     end
   end
 
@@ -1907,6 +1957,11 @@ defmodule Barkpark.Sites.DeployRunner do
           state: :running,
           port: port,
           stages: [],
+          # The node engine's SERVED marker fills these once its Caddy flip has
+          # committed; nil until then, and nil forever on a static deploy (a
+          # symlink swap has no slot). Never seeded from the request's intent.
+          served_port: nil,
+          served_slot: nil,
           log: [],
           exit_code: nil,
           failure_reason: nil,
@@ -1996,6 +2051,7 @@ defmodule Barkpark.Sites.DeployRunner do
     run
     |> push_log(line)
     |> parse_stage(line)
+    |> parse_served(line)
   end
 
   defp finish_run(run, code) do
@@ -2024,6 +2080,90 @@ defmodule Barkpark.Sites.DeployRunner do
       :skip -> run
     end
   end
+
+  # Port-stream variant of the SERVED marker: latest-wins onto the run. A line
+  # that is not a SERVED marker leaves the run untouched, so this is safe to run
+  # over every line of a 900-line `npm ci`.
+  defp parse_served(run, line) do
+    case parse_served_line(line) do
+      {:ok, port, slot} -> %{run | served_port: port, served_slot: slot}
+      :skip -> run
+    end
+  end
+
+  @doc """
+  Parse the engine's report-only `SERVED` marker into `{:ok, port, slot}`, or
+  `:skip` for any other line.
+
+  Both halves are INDEPENDENTLY nullable, and neither is ever invented: a `none`
+  port (Caddy names no upstream for this site) yields `nil` while the slot may
+  still be known, and a slot outside `a`/`b` yields `nil` while the port stands.
+  The port is the stronger fact — it is the literal the Caddyfile carries — so a
+  reader that only trusts one should trust that one.
+  """
+  @spec parse_served_line(String.t()) :: {:ok, pos_integer() | nil, String.t() | nil} | :skip
+  def parse_served_line(line) when is_binary(line) do
+    case Regex.run(@served_re, line, capture: :all_but_first) do
+      [port, slot] -> {:ok, served_port(port), served_slot(slot)}
+      _no_match -> :skip
+    end
+  end
+
+  def parse_served_line(_), do: :skip
+
+  defp served_port(raw) do
+    case Integer.parse(raw) do
+      {port, ""} when port > 0 -> port
+      _ -> nil
+    end
+  end
+
+  defp served_slot(raw) when raw in @served_slots, do: raw
+  defp served_slot(_), do: nil
+
+  @doc """
+  The HEALTH stage's exit code, or `nil` when HEALTH was never MEASURED.
+
+  NULLABLE ON PURPOSE, and the nil is the whole point: `0` is the SUCCESS code,
+  so a health field that defaulted to zero would render "the health stage never
+  ran" as "the health stage passed" — a build that died in BUILD would read as
+  health-certified. Three answers, three values:
+
+    * HEALTH `ok`     -> `0`  — it ran and the probe passed.
+    * HEALTH `failed` -> `14` — the engine's cross-engine HEALTH-failed exit code
+      (`stage_exit_code("HEALTH")`, so this cannot drift from the verdict path).
+    * anything else (`started` with no verdict yet, `skipped`, `noop`, or no
+      HEALTH stage in the fold at all) -> `nil`.
+
+  Derived from the stage fold rather than persisted, so it is available from
+  EVERY status shape — the live Port run, the reconstructed systemd render, and
+  the durable terminal record all carry `stages`.
+  """
+  @spec health_exit_code([map()]) :: non_neg_integer() | nil
+  def health_exit_code(stages) when is_list(stages) do
+    case Enum.find(stages, &(stage_name(&1) == "HEALTH")) do
+      nil -> nil
+      stage -> health_code_for(stage_status(stage))
+    end
+  end
+
+  def health_exit_code(_), do: nil
+
+  defp health_code_for("ok"), do: 0
+  defp health_code_for("failed"), do: stage_exit_code("HEALTH")
+  defp health_code_for(_other), do: nil
+
+  # A stage arrives atom-keyed from the live paths and string-keyed from a
+  # decoded terminal record. Both are read, because a health code that silently
+  # vanished once the run went terminal would be exactly the "not measured"
+  # answer for something that WAS measured.
+  defp stage_name(%{name: name}), do: name
+  defp stage_name(%{"name" => name}), do: name
+  defp stage_name(_), do: nil
+
+  defp stage_status(%{status: status}), do: status
+  defp stage_status(%{"status" => status}), do: status
+  defp stage_status(_), do: nil
 
   # The ONE stage parser both sinks share. Returns `{:ok, stage}` for a
   # well-formed, whitelisted BPSTAGE line, else `:skip`. RAW tokens (no
@@ -2382,6 +2522,11 @@ defmodule Barkpark.Sites.DeployRunner do
       "exit_code" => Map.get(render, :exit_code),
       "failure_reason" => Map.get(render, :failure_reason),
       "stages" => Enum.map(Map.get(render, :stages) || [], &encode_record_stage/1),
+      # The served slot outlives the unit. Persisted rather than re-derived,
+      # because the Caddyfile it was read out of has moved on by the time anyone
+      # asks a terminal record what THIS build ended up serving.
+      "served_port" => Map.get(render, :served_port),
+      "served_slot" => Map.get(render, :served_slot),
       "log_file" => log_file,
       "log_bytes" => file_size(log_file),
       "log_state" => Atom.to_string(live_log_state(log_file)),
@@ -2560,6 +2705,8 @@ defmodule Barkpark.Sites.DeployRunner do
       exit_code: record["exit_code"],
       failure_reason: record["failure_reason"],
       stages: record["stages"] || [],
+      served_port: record["served_port"],
+      served_slot: record["served_slot"],
       unit_name: record["unit_name"],
       journal_command: record["journal_command"] || journal_command(record["unit_name"]),
       mode: record["mode"],
@@ -2590,6 +2737,8 @@ defmodule Barkpark.Sites.DeployRunner do
       mode: safe_atom(record["mode"], [:deploy, :rollback, :teardown], :deploy),
       runtime_target: safe_atom(record["runtime_target"], [:static, :node], :static),
       stages: Enum.map(rendered.stages, &decode_record_stage/1),
+      served_port: rendered.served_port,
+      served_slot: rendered.served_slot,
       exit_code: rendered.exit_code,
       failure_reason: rendered.failure_reason,
       # The BYTES are not served here — the record survived, the log may not
@@ -3051,6 +3200,8 @@ defmodule Barkpark.Sites.DeployRunner do
       mode: nil,
       runtime_target: nil,
       stages: [],
+      served_port: nil,
+      served_slot: nil,
       exit_code: nil,
       failure_reason: nil,
       log: [],
@@ -3076,6 +3227,8 @@ defmodule Barkpark.Sites.DeployRunner do
       mode: run.mode,
       runtime_target: run.runtime_target,
       stages: run.stages,
+      served_port: run.served_port,
+      served_slot: run.served_slot,
       exit_code: run.exit_code,
       failure_reason: run.failure_reason,
       log: Enum.reverse(run.log),

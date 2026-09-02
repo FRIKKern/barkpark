@@ -481,11 +481,22 @@ if [ ! -f "$SEAL" ]; then
   bad "scripts/seal-run.sh is missing — the taxonomy this runner reuses has no owner"
 else
   TAX_OK=1
-  for line in "3  REFUSED — shallow repository" "7  REFUSED — the inputs are unusable"; do
-    grep -q "$line" "$SEAL" || { bad "seal-run.sh no longer documents '$line' — the reused taxonomy has drifted"; TAX_OK=0; }
-    grep -q "$line" "$RUN"  || { bad "the exit runner no longer documents '$line'"; TAX_OK=0; }
-  done
-  [ "$TAX_OK" = "1" ] && ok "both scripts document the same refusal families for 3 and 7"
+  LINE="7  REFUSED — the inputs are unusable"
+  grep -q "$LINE" "$SEAL" || { bad "seal-run.sh no longer documents '$LINE' — the reused taxonomy has drifted"; TAX_OK=0; }
+  grep -q "$LINE" "$RUN"  || { bad "the exit runner no longer documents '$LINE'"; TAX_OK=0; }
+  # THE SHALLOW FAMILY DIVERGED BY NUMBER, NOT BY MEANING (task-cfa85992568a4bdc).
+  # seal-run.sh had to give up 3: `cloud/priv/static/__preview__/seal-predicate.mjs`
+  # now exits 3 for a `Refusal` (it measured NOTHING), seal-run.sh forwards the
+  # predicate's own codes untouched, and two different refusals must not share one
+  # code — so seal-run's shallow refusal moved to 8. THIS runner drives no predicate,
+  # has no fourth code to forward, and keeps 3. The family name is still asserted in
+  # BOTH files, each at the number it actually documents, so renaming or deleting the
+  # family still reds here while the deliberate renumber does not.
+  grep -q "8  REFUSED — shallow repository" "$SEAL" \
+    || { bad "seal-run.sh no longer documents '8  REFUSED — shallow repository' — the reused taxonomy has drifted"; TAX_OK=0; }
+  grep -q "3  REFUSED — shallow repository" "$RUN" \
+    || { bad "the exit runner no longer documents '3  REFUSED — shallow repository'"; TAX_OK=0; }
+  [ "$TAX_OK" = "1" ] && ok "both scripts document the same refusal families (shallow at 8 here / 3 there, unusable input at 7 in both)"
 
   ORIGIN_SEAL="$(git -C "$ROOT" rev-parse --verify --quiet origin/main:scripts/seal-run.sh 2>/dev/null || true)"
   if [ -z "$ORIGIN_SEAL" ]; then
