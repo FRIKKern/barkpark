@@ -294,6 +294,20 @@ config :barkpark, :search_retrievers, %{"indx" => Barkpark.Plugins.Indx.Retrieve
 # worker is the authoritative serializer; queue=1 keeps the noise floor
 # low on small clusters and avoids ten redundant SELECT scans every
 # `task_lease_sweep_interval_seconds`).
+
+# The INVERTED after-write listener seam (boundary: content → workers).
+# `Barkpark.Content.WriteScope.fire_after/3` calls every entry here, post-commit,
+# with the same after-payload it hands `Plugins.Hooks.fire/2`. Config is the
+# composition root, so naming a worker HERE creates no module edge from the
+# kernel; naming it inside content did (tooling/concept-map/boundary.mjs,
+# wrong-direction). Entries are `{module, function}` (arity 1) or a 1-arity
+# fun; a raising listener is logged and dropped, never failing the write.
+config :barkpark, :after_write_listeners, [
+  # E5 findability self-test (authoring-excellence D9/D29): self-gated to
+  # `:after_publish` on walled types (paper/task); a no-op for every other event.
+  {Barkpark.Workers.FindabilityPosttest, :enqueue_after}
+]
+
 config :barkpark, Oban,
   repo: Barkpark.Repo,
   # `indx` drives Barkpark.Plugins.Indx.IndexerWorker (blue/green corpus
