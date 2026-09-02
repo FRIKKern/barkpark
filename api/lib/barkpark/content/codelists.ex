@@ -138,7 +138,21 @@ defmodule Barkpark.Content.Codelists do
     description = Map.get(attrs, :description)
     values = Map.get(attrs, :values) || []
 
+    # A codelist replacement is a boot-time / operator-shaped write, never a
+    # request-path one: the two OnixEdit seeders run it at every boot, and the
+    # Thema snapshot alone is ~3,000 nodes whose `replace_values!` DELETE
+    # cascades into translations before the chunked INSERTs land. MEASURED on
+    # guerrilla 2026-09-02 during a busy campaign hour: the boot-time Thema
+    # seed died with ERROR 57014 query_canceled on the role's 60 s
+    # statement_timeout — a slot that fails to START because the box is
+    # already busy is the incident feeding itself. `config/runtime.exs` now
+    # sends a 30 s wall on every pool connection, so this transaction lifts it
+    # for its own statements (SET LOCAL — it dies with the transaction, never
+    # leaks into the pool). The bound on a seed is "as long as the snapshot
+    # takes", exactly like WorkspaceBundle's COPY; see `Barkpark.Repo`'s
+    # opt-out inventory.
     Repo.transaction(fn ->
+      Repo.set_local_statement_timeout!(:infinity)
       codelist = upsert_codelist!(plugin_name, list_id, issue, name, description)
       written = replace_values!(codelist, values)
       assert_payload_written!(list_id, values, written)
