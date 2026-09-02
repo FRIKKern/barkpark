@@ -551,7 +551,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
       with {:ok, doc} <- write,
            {:ok, _revision} <-
              Broadcast.save_revision(doc, doc.type, dataset, action, nil) do
-        doc
+        # RELOAD, and not for tidiness. The `barkpark_bind_document_revision()`
+        # trigger fires on the revision INSERT and issues its own
+        # `UPDATE documents SET current_revision_id = …` — AFTER `Repo.update`
+        # built the struct above. Returning that struct would hand every caller
+        # a row whose `current_revision_id` is stale (nil on a first save), and
+        # `upsert_paper`'s result is compared against a fresh read by existing
+        # tests and re-persisted by real callers. Reloading inside the
+        # transaction returns the row as it actually stands.
+        Repo.reload!(doc)
       else
         {:error, reason} -> Repo.rollback(reason)
       end
