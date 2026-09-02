@@ -65,8 +65,21 @@ const MAX_COL_W = 600
 const CELL_LINES = 2
 
 /** Sheets.Engine.error_values — a cell whose ENTIRE value is one of these
- * renders red + bold on every surface. */
-const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!'])
+ * renders red + bold on every surface.
+ *
+ * This is a MIRROR of `Barkpark.Plugins.Sheets.Engine.error_values/0`
+ * (@canonical capability:engine-error-vocabulary), and it was the SIXTH copy —
+ * the one #15404 named and left unguarded while locking the react mirror. It
+ * had already drifted: #15374 added `#NAME?` engine-side and this set did not
+ * learn it, so a `#NAME?` cell rendered on mobile as ordinary text while every
+ * other surface painted it red. `__tests__/sheetErrorVocabulary.test.ts` now
+ * pins this set to the SAME engine-generated fixture the web and react mirrors
+ * consume (`web/__tests__/fixtures/engine-errors.json`, asserted equal to
+ * `Engine.error_values/0` by api/test/barkpark/sheets_parity_test.exs), so
+ * neither side can drift alone again. Exported for that test and for
+ * `__tests__/gridNatives.test.tsx` — it is not part of any public entry point.
+ */
+export const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!', '#NAME?'])
 
 // The four value-shape gates, byte-copied from react's sheet.ts so the same
 // cell reads the same way on both surfaces.

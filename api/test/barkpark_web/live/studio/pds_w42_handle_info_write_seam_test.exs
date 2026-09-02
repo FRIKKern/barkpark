@@ -81,7 +81,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"(_other, socket)", :no_write}
   ]
 
-  # ChatLive — 43 heads today. Only the store-touching ones are listed; all of
+  # ChatLive — 44 heads today. Only the store-touching ones are listed; all of
   # them write on `socket.assigns.store_session_id`, which is established at
   # mount/handle_params and NEVER taken from the message payload, so none can
   # name another tenant's row the way the by-id `handle_event` clauses could
@@ -97,6 +97,16 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
   # 44 -> 43: `:turn_tick` left when the turn clock moved into the browser
   # (Hooks.ChatElapsed). It was a `:no_write` head — assigns only — so nothing
   # in this list changes with it.
+  #
+  # 43 -> 44: `{:chat_reported_state, sid, _frame}` arrived (chat-local-cloud-
+  # context-w3 — a registered host's authoritative state report, reused to
+  # refresh the transcript's context band), classified `:no_write`: its whole
+  # body is a `store_session_id` equality guard around
+  # `assign_context_identity/1`, whose reads are `StudioChat.get_session/2`,
+  # `ChatHosts.session_execution_identity/1` and `Tenancy.get_workspace_by_id/1`
+  # — three SELECTs and no store write. (The report's own persisted write is
+  # `ChatHosts.report_state/4`'s, server-side, long before this frame is
+  # broadcast.) It is driven by runs in chat_context_band_test.exs.
   @chat_write_heads [
     # ensure_session → StudioChat.create_session; persist_user_message →
     # persist_store → StudioChat.append_message
@@ -232,7 +242,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every ChatLive handle_info head is enumerated, and the store-touching ones are pinned" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/chat_live.ex")
 
-      assert length(heads) == 43,
+      assert length(heads) == 44,
              "chat_live.ex handle_info head count moved to #{length(heads)}; " <>
                "re-run the write classification over the new head."
 
