@@ -61,10 +61,13 @@ func TestRunExportNegotiatesJSONAccept(t *testing.T) {
 // stub, so the verb must exit NON-ZERO and say the output is PARTIAL rather
 // than returning the old silent success.
 //
-// LIMIT, stated honestly: a truncated CLOSE-DELIMITED body is indistinguishable
-// from a complete one at the client (measured: 3 docs, empty stderr, exit 0),
-// so no test can catch that framing. Production uses send_chunked — the honest
-// framing — which is why this test can assert anything at all.
+// The CLOSE-DELIMITED sibling — no Content-Length, no chunked framing, so a
+// truncated body is byte-identical to a complete one — used to be recorded here
+// as an accepted limit (measured: 3 docs, empty stderr, exit 0). It is not one
+// any more: since #14597 Export refuses to attest that framing, and
+// TestRunExportOutCloseDelimitedWritesNoSidecarAndVerifyRefuses proves the
+// refusal reaches the sidecar and `--verify`. Production uses send_chunked — the
+// honest framing this test exercises.
 func TestRunExportTruncatedStreamIsPartialAndNonZero(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
