@@ -220,6 +220,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # session load. A MapSet, not a map: a fold has one bit, and the absent
          # key IS the default, so no stale `false` entries accumulate.
          turn_folds_expanded: MapSet.new(),
+         # SHOW-ACTIVE-ONLY, per-tab (task-b66928b2958c8cfa): has the reader
+         # opened the RUNNING turn's "+N previous" control? One BOOLEAN, not a
+         # set — at most one turn runs at a time, so there is at most one such
+         # fold on screen and nothing to key it by. Default COLLAPSED (the whole
+         # point is that the live row stays visible), reset when a turn settles
+         # and on session load, never broadcast.
+         running_fold_expanded: false,
          # The agents rail (charter D47): the task_id-keyed mission-control
          # snapshot rendered below the composer, Claude-Code-TUI style. `rail` is
          # the live map (hydrated from `rail_snapshot` on reopen, folded by the
@@ -878,6 +885,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
         else: MapSet.put(expanded, key)
 
     {:noreply, assign(socket, turn_folds_expanded: next)}
+  end
+
+  # Expand/collapse the RUNNING turn's "+N previous" control
+  # (task-b66928b2958c8cfa). Per-tab and ASSIGNS-ONLY, exactly like
+  # `toggle_turn_fold` above: what a reader chooses to look at is not a fact
+  # about the turn, so nothing is stored and nothing is broadcast. No key is
+  # carried because there is only ever one running turn to open.
+  def handle_event("toggle_running_fold", _params, socket) do
+    {:noreply, assign(socket, running_fold_expanded: !socket.assigns.running_fold_expanded)}
   end
 
   # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
@@ -2481,6 +2497,76 @@ defmodule BarkparkWeb.Studio.ChatLive do
     """
   end
 
+  # SHOW-ACTIVE-ONLY, the RUNNING turn's control (task-b66928b2958c8cfa): one
+  # "+N previous" row standing in for the tool rows that ran BEFORE the active
+  # one, so the row the reader is actually watching stays on screen no matter
+  # how long the turn gets. Clicking expands every row of the turn; clicking
+  # again re-collapses. The count and the label come from the ONE counter and
+  # the ONE formatter (`ChatToolRenderer.running_hidden_count/1` +
+  # `running_fold_label/1`), the same strings `bp chat` prints.
+  #
+  # A SETTLED turn never reaches here — `fold_running_turn/1`'s gate hands it to
+  # U1's `turn_fold` instead.
+  attr :label, :string, required: true
+  attr :hidden_rows, :list, required: true
+  attr :rows, :list, required: true
+  attr :expanded, :boolean, required: true
+  attr :plan_expanded, :any, required: true
+  attr :question_forms, :map, required: true
+
+  defp running_fold(assigns) do
+    ~H"""
+    <div data-role="running-fold" style="font-family: var(--font-mono);">
+      <button
+        type="button"
+        class="text-xs text-dim"
+        phx-click="toggle_running_fold"
+        data-running-fold-toggle
+        aria-expanded={to_string(@expanded)}
+        style="display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit;"
+      >
+        <span aria-hidden="true" style="flex: none; color: var(--life-in_progress);">
+          <%= if @expanded, do: "▾", else: "▸" %>
+        </span>
+        <span data-running-fold-label style="font-weight: 650;"><%= @label %></span>
+      </button>
+
+      <%!-- The earlier rows, shown only when the reader asks for them. They are
+            rendered by the SAME body every flat row uses — folding is a
+            wrapper, never a second rendering of a row. --%>
+      <div :if={@expanded}>
+        <div
+          :for={message <- @hidden_rows}
+          data-role={message.role}
+          data-parent={message[:parent_tool_use_id]}
+          style={message[:parent_tool_use_id] && trace_child_style()}
+        >
+          <.message_body
+            message={message}
+            plan_expanded={@plan_expanded}
+            question_forms={@question_forms}
+          />
+        </div>
+      </div>
+
+      <%!-- The ACTIVE row (and any pending siblings after it) always paints —
+            that is the whole point of the fold. --%>
+      <div
+        :for={message <- @rows}
+        data-role={message.role}
+        data-parent={message[:parent_tool_use_id]}
+        style={message[:parent_tool_use_id] && trace_child_style()}
+      >
+        <.message_body
+          message={message}
+          plan_expanded={@plan_expanded}
+          question_forms={@question_forms}
+        />
+      </div>
+    </div>
+    """
+  end
+
   # ONE settled turn, folded (task-8f904a88b9bc3d59): a single header row reading
   # "Worked for 3m 12s" — or "You stopped after 42s" when a Stop ended the turn —
   # standing in for the turn's tool rows, which expand on click. The label is
@@ -3142,6 +3228,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       question_forms={@question_forms}
                     />
                   </div>
+                <% {:running_fold, _n, label, hidden_rows, rows} -> %>
+                  <.running_fold
+                    label={label}
+                    hidden_rows={hidden_rows}
+                    rows={rows}
+                    expanded={@running_fold_expanded}
+                    plan_expanded={@plan_expanded}
+                    question_forms={@question_forms}
+                  />
                 <% {:turn_fold, fold_key, label, rows} -> %>
                   <.turn_fold
                     fold_key={fold_key}
@@ -4684,7 +4779,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: messages,
       # Grouped rows memoized at load time (task-9e21c3f285b3d7d0) — the template
       # reads `@grouped_rows`, so reopen does the grouping ONCE, not per render.
-      grouped_rows: fold_settled_turns(group_agent_rows(messages)),
+      grouped_rows: grouped_rows(messages),
       # Sticky draft (charter D36c): restore the unsent words left behind when
       # this session was last switched away from (nil column → clean composer).
       # From the FULL struct — list_sessions omits `draft`.
@@ -4723,6 +4818,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Turn folds reset on reopen (task-8f904a88b9bc3d59): a replayed settled
       # turn starts collapsed under its "Worked for …" header.
       turn_folds_expanded: MapSet.new(),
+      # And a reopened transcript's running fold starts collapsed too
+      # (task-b66928b2958c8cfa) — a reopen has no running turn at all.
+      running_fold_expanded: false,
       # Rail replay parity (charter D47): hydrate the mission-control rail from
       # the stored `rail_snapshot` so a reopened session shows its last-known
       # agents. `interrupt_running_tasks/1` already flipped any dead "running"
@@ -4848,6 +4946,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       agent_expanded: %{},
       # A new chat has no settled turns yet (task-8f904a88b9bc3d59).
       turn_folds_expanded: MapSet.new(),
+      # A new chat has no running turn to fold yet (task-b66928b2958c8cfa).
+      running_fold_expanded: false,
       # A new chat has no background agents yet (charter D47).
       rail: %{},
       rail_sig: [],
@@ -6383,6 +6483,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp settle_tool_rows(socket, stamp) do
     messages = socket.assigns.messages
 
+    # The turn is over, so its "+N previous" control is over with it
+    # (task-b66928b2958c8cfa): the NEXT running turn starts collapsed no matter
+    # what the reader opened during this one.
+    socket = assign(socket, running_fold_expanded: false)
+
     if Enum.any?(messages, &(&1.role == :tool and Map.get(&1, :turn_settled) != true)) do
       row_stamp = %{
         turn_settled: true,
@@ -6480,7 +6585,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # over the full transcript.
   defp assign_messages(socket, messages) do
     trimmed = trim_transcript(messages)
-    assign(socket, messages: trimmed, grouped_rows: fold_settled_turns(group_agent_rows(trimmed)))
+    assign(socket, messages: trimmed, grouped_rows: grouped_rows(trimmed))
   end
 
   # Keep only the last `@transcript_window` rows. The drop count is floored at 0
@@ -6567,6 +6672,63 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # never fold, and a row from a server too old to stamp it degrades to the flat
   # transcript it has always been. Linear, called ONCE per write over the bounded
   # window — the same budget `group_agent_rows/1` is held to.
+  # The transcript's ONE grouping pipeline: D46 agent blocks, then the RUNNING
+  # turn's show-active-only fold (task-b66928b2958c8cfa), then U1's settled
+  # folds (task-8f904a88b9bc3d59). The running pass runs FIRST and on
+  # `{:row, _}` items, so its gate — "this row's turn has not settled" — is the
+  # only thing standing between a SETTLED turn and the active-only collapse.
+  defp grouped_rows(messages) do
+    messages
+    |> group_agent_rows()
+    |> fold_running_turn()
+    |> fold_settled_turns()
+  end
+
+  # SHOW-ACTIVE-ONLY (task-b66928b2958c8cfa). While a turn RUNS, its consecutive
+  # tool rows collapse to the ACTIVE row plus one "+N previous" control, so a
+  # long turn can no longer push the live row off the screen. A SETTLED turn is
+  # NOT ours — it belongs to U1's fold-on-settle — and the gate that says so is
+  # `turn_fold_key/1`: a settled row HAS a key and is chunked away from the
+  # running run, a live row has none.
+  #
+  # Emits `{:running_fold, n, label, hidden_rows, visible_rows}` and only when
+  # `n > 0`: a turn whose active row is its first row hides nothing, so it keeps
+  # the flat rows it always had and no control is drawn.
+  @doc false
+  def fold_running_turn(items) do
+    items
+    |> Enum.chunk_by(&running_run_key/1)
+    |> Enum.flat_map(fn chunk ->
+      if running_run_key(hd(chunk)) == :running, do: collapse_running_run(chunk), else: chunk
+    end)
+  end
+
+  # THE RUNNING GATE. `:running` only for a tool row whose turn has NOT settled.
+  # A settled row chunks under its fold key instead — including the key-less
+  # "server too old to stamp the fold facts" row, which U1 deliberately leaves
+  # FLAT: `turn_settled` is the gate, never the fold key, so a row that cannot
+  # fold does not fall through to the running collapse either.
+  defp running_run_key({:row, %{role: :tool} = message}) do
+    if Map.get(message, :turn_settled) == true,
+      do: {:settled, ChatToolRenderer.turn_fold_key(message)},
+      else: :running
+  end
+
+  defp running_run_key(_item), do: nil
+
+  defp collapse_running_run(chunk) do
+    rows = Enum.map(chunk, fn {:row, message} -> message end)
+
+    case ChatToolRenderer.running_hidden_count(rows) do
+      0 ->
+        chunk
+
+      n ->
+        {hidden, visible} = Enum.split(rows, n)
+        [{:running_fold, n, ChatToolRenderer.running_fold_label(n), hidden, visible}]
+    end
+  end
+
   @doc false
   def fold_settled_turns(items) do
     items

@@ -78,6 +78,7 @@ var helpSections = []helpSection{
 		{"ctrl+a / ctrl+r", "allow / deny the focused pending card"},
 		{"tab", "cycle to the next pending card"},
 		{"ctrl+f", "expand/collapse the settled turn folds"},
+		{"ctrl+o", "show/hide the running turn's earlier tool rows"},
 		{"ctrl+b", "back to the sessions herd"},
 		{"ctrl+p", "flip Plan ⇄ Autopilot mode"},
 		{"ctrl+u", "clear the composer"},
