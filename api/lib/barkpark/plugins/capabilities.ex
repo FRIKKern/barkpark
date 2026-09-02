@@ -2400,7 +2400,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "share.rm",
         "share",
         "rm",
-        "Remove a persisted share by scope (env shares are unaffected).",
+        "Remove a persisted share by scope — also revokes every item /s/ link and edit token under it (env shares are unaffected).",
         "DELETE",
         "/v1/shares",
         "admin",
