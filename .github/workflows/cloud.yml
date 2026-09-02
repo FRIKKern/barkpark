@@ -69,10 +69,30 @@ jobs:
           # ref: they must test the merged result, not the head in isolation.
           # `github.sha` is the fallback for `push` events, which have no PR.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Full history: the PR base sha must be resolvable locally for the
-          # three-dot diff below. A shallow checkout makes `git cat-file -e`
-          # miss it, which this step treats as a hard failure.
-          fetch-depth: 0
+          # A BLOBLESS PARTIAL CLONE, not a shallow one. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE: a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure. The
+          # usual shrink, `fetch-depth: 2`, works only on jobs sitting on
+          # `refs/pull/N/merge`, where HEAD^1 IS the base — this job is
+          # deliberately not one of those (see the `ref:` note above), so
+          # shallow is not available here at any depth.
+          #
+          # `filter: blob:none` is NOT shallow. It fetches every commit and
+          # every tree and omits only blob CONTENTS. `git diff --name-only`
+          # reads trees, not blobs, so the commit graph, the merge base and the
+          # path set below are unchanged BY CONSTRUCTION rather than by
+          # benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways, compares the three-dot changed-path
+          # sets by SORTED CHECKSUM, and refuses to report a pass if a sample is
+          # empty on both sides (two empty sets match, which would be vacuous).
+          # Read 2026-09-03: full clone 138 s / .git 791 MB, blob:none 34 s /
+          # .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set
