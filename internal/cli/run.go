@@ -53,6 +53,13 @@ type manifestRequest struct {
 	headers map[string]string
 	body    []byte
 	stream  io.Reader // non-nil only for a streamed multipart media upload
+
+	// warnings are non-fatal notices the caller must surface on stderr before
+	// the request goes out. buildManifestRequest is writer-less (it is shared
+	// with the headless MCP dispatch), so a notice it discovers rides out here
+	// rather than being printed in place. Today's only producer is
+	// unusedStdinNotice.
+	warnings []string
 }
 
 // dispatchError is a build-stage failure (bad args / URL / body) surfaced by
@@ -123,6 +130,16 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		return nil, &dispatchError{msg: err.Error(), withUsage: false}
 	}
 
+	// A redirected stdin this invocation will not read is REPORTED, never
+	// refused (see unusedStdinNotice for the contract). Computed after the body
+	// so --file - has already claimed stdin when it was going to.
+	var warnings []string
+	if ownsProcessStdin {
+		if n := unusedStdinNotice(cmd, cmdFlags, argMap); n != "" {
+			warnings = append(warnings, n)
+		}
+	}
+
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
 	if needsPerspectiveAuth || needsDraftIDAuth {
@@ -139,11 +156,12 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	}
 
 	return &manifestRequest{
-		method:  cmd.HTTP.Method,
-		url:     rawURL,
-		headers: headers,
-		body:    body,
-		stream:  stream,
+		method:   cmd.HTTP.Method,
+		url:      rawURL,
+		headers:  headers,
+		body:     body,
+		stream:   stream,
+		warnings: warnings,
 	}, nil
 }
 
@@ -331,6 +349,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			}
 		}
 		return exitUsage
+	}
+
+	// Non-fatal notices from the writer-less build half (today: an unused
+	// redirected stdin). stderr, never stdout, so -o json stays one parseable
+	// document; before the dry-run branch, because --dry-run is exactly where a
+	// user is looking for what bp resolved.
+	for _, warning := range req.warnings {
+		out.errf("bp: warning: %s", warning)
 	}
 
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
@@ -1129,6 +1155,17 @@ func flagShaped(tok string, byName map[string]manifest.Flag) bool {
 // Command flags are looked up in cmd.Flags; an unknown -flag is an error so a
 // typo doesn't get silently swallowed as a positional. Long flags use
 // --name[=val]; the -f short form aliases --file when the command declares it.
+//
+// A flag the manifest does NOT declare repeatable may appear AT MOST ONCE — a
+// second occurrence is a usage error naming the flag and both values. See
+// refuseRepeatedFlag: the collection map is map[string][]string, so a repeat
+// used to survive parsing and get resolved by whichever consumer looked at the
+// slice first, each with its own silent tie-break (buildBody takes
+// vals[len(vals)-1]; applyQuery q.Add-ed BOTH as a duplicate scalar key, which
+// Plug decodes by keeping one at random). That is the same class of silence
+// this row exists to remove, and it is a property of the FLAG MODEL, not of
+// --filter: the rule is general and every non-repeatable flag on every command
+// is covered by it.
 func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[string][]string, err error) {
 	flags = map[string][]string{}
 	byName := map[string]manifest.Flag{}
@@ -1160,6 +1197,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 				if hasInline {
 					return nil, nil, fmt.Errorf("flag --%s takes no value", name)
 				}
+				if err := refuseRepeatedFlag(cmd, f, flags[name], "true"); err != nil {
+					return nil, nil, err
+				}
 				flags[name] = append(flags[name], "true")
 			} else {
 				if !hasInline {
@@ -1171,6 +1211,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 					}
 					val = tail[i+1]
 					i++
+				}
+				if err := refuseRepeatedFlag(cmd, f, flags[name], val); err != nil {
+					return nil, nil, err
 				}
 				flags[name] = append(flags[name], val)
 			}
@@ -1190,6 +1233,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
 			}
 			if f.Type == "bool" {
+				if err := refuseRepeatedFlag(cmd, f, flags[long], "true"); err != nil {
+					return nil, nil, err
+				}
 				flags[long] = append(flags[long], "true")
 				i++
 				continue
@@ -1200,6 +1246,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			if flagShaped(tail[i+1], byName) {
 				return nil, nil, fmt.Errorf("flag %s needs a value", a)
 			}
+			if err := refuseRepeatedFlag(cmd, f, flags[long], tail[i+1]); err != nil {
+				return nil, nil, err
+			}
 			flags[long] = append(flags[long], tail[i+1])
 			i += 2
 			continue
@@ -1209,6 +1258,45 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 		i++
 	}
 	return pos, flags, nil
+}
+
+// setBodyFlagName is the CLI's key=value body-merge flag. It is repeatable BY
+// CONSTRUCTION — buildBody folds every occurrence into one object, and every
+// `set` flag the served manifest declares already carries `repeatable: true`.
+// It is named here so a manifest that FORGETS the declaration (a plugin's own
+// command, a hand-rolled fixture) cannot turn a working `--set a --set b` into
+// a usage error: the flag model's repeat rule is a guard against silently
+// DISCARDING a value, and --set discards nothing.
+const setBodyFlagName = "set"
+
+// flagAcceptsRepeat reports whether a flag may legitimately appear more than
+// once on one command line: the manifest declared it repeatable, or it is the
+// always-repeatable --set body flag.
+func flagAcceptsRepeat(f manifest.Flag) bool {
+	return f.Repeatable || f.Name == setBodyFlagName
+}
+
+// refuseRepeatedFlag is the general no-silent-last-wins rule. seen is what the
+// flag has collected so far and next is the occurrence about to be appended; a
+// non-repeatable flag that already has a value refuses, naming the flag and
+// BOTH values so the caller can see exactly which of the two bp would have
+// thrown away. A repeatable flag (or --set) is always allowed through.
+//
+// Scope, stated because the row asks which OTHER flags this covers: EVERY
+// command-local flag the manifest declares, on every command — value flags and
+// bool flags alike, in both the --long and the -f short spellings. The two
+// exemptions are the manifest's own `repeatable: true` (today: doc.query's
+// --filter, and the six --set flags) and setBodyFlagName. Global flags
+// (-o/-w/-p/-d/--limit/--offset/--token/-s) never reach here; parseGlobals
+// consumes them wherever they appear in argv and resolves them itself.
+func refuseRepeatedFlag(cmd manifest.Command, f manifest.Flag, seen []string, next string) error {
+	if len(seen) == 0 || flagAcceptsRepeat(f) {
+		return nil
+	}
+	if f.Type == "bool" {
+		return fmt.Errorf("flag --%s given twice for %s %s but is not repeatable; pass it once", f.Name, cmd.Noun, cmd.Verb)
+	}
+	return fmt.Errorf("flag --%s given twice for %s %s (%q then %q) but is not repeatable; bp will not silently keep just one of the two — pass it once", f.Name, cmd.Noun, cmd.Verb, seen[0], next)
 }
 
 // bindArgs maps positional values onto the command's declared args by position,
@@ -1371,10 +1459,12 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 }
 
 // buildBodyWithStdinOwnership keeps process-stdin policy at the existing
-// human/headless dispatch seam. Direct CLI commands own stdin and therefore
-// reject redirected input unless --file - consumes it. Headless dispatchers
-// (MCP stdio and HTTP) do not own process stdin: it may be a protocol transport,
-// so they neither inspect nor consume it.
+// human/headless dispatch seam. Direct CLI commands own stdin, so `--file -`
+// may consume it; a redirected stdin they do NOT consume is reported by
+// unusedStdinNotice and never refused here (S2 #20 — see that function for the
+// contract and what it replaced). Headless dispatchers (MCP stdio and HTTP) do
+// not own process stdin: it may be a protocol transport, so they neither
+// inspect nor consume it, and `--file -` is refused outright.
 func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
 	if !cmd.Writes {
 		return nil, nil, "", nil
@@ -1388,19 +1478,18 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		return nil, r, ct, err
 	}
 
-	stdinRedirected := ownsProcessStdin && stdinHasRedirectedInput()
-
 	// For ordinary writes, --file is the whole request body. Mutation commands
 	// instead treat it as the document object that declared args and --set merge
 	// into before the mutation wrapper is applied.
+	//
+	// An unused redirected stdin no longer aborts anything here — the notice is
+	// unusedStdinNotice's job and rides out on manifestRequest.warnings. See
+	// that function for the contract and why the refusal was the wrong shape.
 	var obj map[string]any
 	if files, ok := flags["file"]; ok && len(files) > 0 {
 		path := files[len(files)-1]
 		if path == "-" && !ownsProcessStdin {
 			return nil, nil, "", fmt.Errorf("--file - is unavailable in headless dispatch")
-		}
-		if path != "-" && stdinRedirected {
-			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
 		}
 		var raw []byte
 		if path == "-" {
@@ -1428,31 +1517,6 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		if obj == nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object", path, bodyKind)
 		}
-	} else if stdinRedirected {
-		// Recommend --file - only where the manifest actually declares the
-		// flag — `doc patch` declares [set] only, and telling its user to
-		// pass a flag the parser rejects with exit 2 is worse than no hint.
-		if commandHasFileFlag(cmd) {
-			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
-		}
-		// A mutation command (create/patch/etc via --set) has NO file flag but
-		// its payload is still plausibly meant to come from a piped body — a
-		// user might reasonably expect `cat doc.json | bp doc patch task <id>`
-		// to work the way `--file -` does. Keep the hard refusal there so that
-		// expectation never silently loses data (the doc-patch boundary,
-		// gfr-w1-stdin-guard-altitude — decided explicitly, not by omission).
-		if cmd.MutationOp != "" {
-			return nil, nil, "", fmt.Errorf("piped stdin is unused and %s %s does not accept --file; remove the stdin redirect", cmd.Noun, cmd.Verb)
-		}
-		// Every other write command (task close, task next, webhook create,
-		// media upload, most cloud verbs — 59 of the 72 write commands in the
-		// served manifest) has NEITHER a file flag NOR a mutation_op: there is
-		// NO way for it to read a body from stdin at all, so a piped/redirected
-		// stdin can never be silently swallowed here. Refusing anyway only
-		// serves to abort `while read -r id; do bp task close "$id" …; done`
-		// on every iteration (Gyldendal finding #20 — 'knekker enhver
-		// while-read-lokke'). Proceed: the command was going to ignore stdin
-		// either way, so nothing about its behavior changes.
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
@@ -1597,6 +1661,61 @@ func bodyFlagKey(name string) string {
 		b.WriteString(p[1:])
 	}
 	return b.String()
+}
+
+// unusedStdinNotice returns the ONE stderr line to print when this invocation
+// was handed a redirected stdin it will not read, or "" when there is nothing
+// to say. It never reads, never blocks and never fails the command.
+//
+// THE CONTRACT, stated because it REPLACES a refusal (Gyldendal finding #20,
+// "knekker enhver while-read-lokke"): bp does not abort because of a stdin it
+// does not consume. It says so, on stderr, naming what WOULD have consumed it,
+// and proceeds. The old shape returned exit 2 from buildBody, which is the
+// worst of both worlds — inside `while read -r id; do bp doc patch task "$id"
+// --set …; done < ids.txt` the loop and bp share fd 0, so every iteration
+// aborted while the reads around them succeeded and the run looked healthy.
+// A refusal is only justified when proceeding would LOSE the piped data; here
+// the command was never going to read stdin under any flag combination it was
+// given, so nothing is lost by proceeding and everything is lost by stopping.
+// The notice keeps the honesty the refusal was buying: the pipe is ignored and
+// the user is told, in the same breath as the flag that would change that.
+//
+// Silence (not a notice) is correct in four cases:
+//   - a read: no body, so stdin was never a candidate;
+//   - `--file -`: stdin IS the body, exactly as asked;
+//   - a multipart upload with a file-typed ARG: the payload is that file;
+//   - a write with NEITHER a file flag NOR a mutation_op (task close, task
+//     next, webhook create, most cloud verbs — 59 of the 72 write commands in
+//     the served manifest): there is no flag that could ever route stdin into
+//     it, so naming one would be a lie and warning on every `while read`
+//     iteration would be noise about a non-choice.
+func unusedStdinNotice(cmd manifest.Command, flags map[string][]string, args map[string]string) string {
+	if !cmd.Writes {
+		return ""
+	}
+	if _, ok := mediaUploadFileArg(cmd, args); ok {
+		return ""
+	}
+	if !stdinHasRedirectedInput() {
+		return ""
+	}
+	if files, ok := flags["file"]; ok && len(files) > 0 {
+		path := files[len(files)-1]
+		if path == "-" {
+			return ""
+		}
+		return fmt.Sprintf("piped stdin is unused: --file %s is the body for this %s %s. Pass --file - to read the body from stdin instead.", path, cmd.Noun, cmd.Verb)
+	}
+	// Recommend --file - only where the manifest actually declares the flag —
+	// `doc patch` declares [set] only, and telling its user to pass a flag the
+	// parser rejects with exit 2 is worse than no hint.
+	if commandHasFileFlag(cmd) {
+		return fmt.Sprintf("piped stdin is unused by %s %s. Pass --file - to send it as the request body.", cmd.Noun, cmd.Verb)
+	}
+	if cmd.MutationOp != "" {
+		return fmt.Sprintf("piped stdin is unused: %s %s does not accept --file, so its body comes from its arguments and --set only.", cmd.Noun, cmd.Verb)
+	}
+	return ""
 }
 
 // commandHasFileFlag reports whether cmd's manifest declares the --file body
