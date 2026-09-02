@@ -160,6 +160,7 @@ on:
       - "tooling/task-obsession/reland_loudfail.test.sh"
       - "tooling/task-obsession/fixtures/*.json"
       - ".github/workflows/reland-check.yml"
+      - "scripts/relandcheck-diff-producer.test.sh"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -364,6 +365,7 @@ on:
       - "tooling/task-obsession/reland_loudfail.test.sh"
       - "tooling/task-obsession/fixtures/*.json"
       - ".github/workflows/reland-check.yml"
+      - "scripts/relandcheck-diff-producer.test.sh"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -895,6 +897,18 @@ jobs:
           # The sim reads reland-check.yml itself, so PyYAML is load-bearing here.
           python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
           bash tooling/task-obsession/reland_loudfail.test.sh
+      - name: relandcheck-diff-producer.test.sh syntax check
+        run: bash -n scripts/relandcheck-diff-producer.test.sh
+      - name: reland-check.yml's changed-file producer keeps quote-bearing paths and rename sources
+        # The step body is EXTRACTED from reland-check.yml and EXECUTED against
+        # real git fixtures, so this cannot drift into a paraphrase of what CI
+        # runs. Case 4 restores the PRE-FIX producer on a copy and proves both
+        # false-green shapes reappear — the harness has been shown to lose.
+        # PyYAML is load-bearing: the harness exits 2 (HARNESS-UNAVAILABLE,
+        # never a pass) without it, so install rather than skip.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash scripts/relandcheck-diff-producer.test.sh
       - name: fleet-run verdict matrix
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check
