@@ -184,7 +184,9 @@ defmodule Barkpark.Repo.StatementTimeoutTest do
           end
         end)
 
-      assert %Postgrex.Error{postgres: %{code: :query_canceled}} = error,
+      server_cancelled? = match?(%Postgrex.Error{postgres: %{code: :query_canceled}}, error)
+
+      assert server_cancelled?,
              "expected the SERVER's 57014 cancellation; got #{inspect(error)}"
 
       assert micros < 5_000_000,
@@ -210,7 +212,9 @@ defmodule Barkpark.Repo.StatementTimeoutTest do
           end
         end)
 
-      assert %Postgrex.Error{postgres: %{code: :query_canceled}} = error,
+      server_cancelled? = match?(%Postgrex.Error{postgres: %{code: :query_canceled}}, error)
+
+      assert server_cancelled?,
              "expected the SERVER's 57014 cancellation; got #{inspect(error)}"
 
       assert micros < 5_000_000,

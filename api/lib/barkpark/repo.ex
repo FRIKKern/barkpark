@@ -19,6 +19,15 @@ defmodule Barkpark.Repo do
 
   ### The opt-out inventory (as of 2026-09-02)
 
+    * `Barkpark.Content.Codelists.register/3` — the codelist replacement
+      transaction both OnixEdit boot seeders (`Codelists.EDItEUR.seed_bundled/0`
+      and `seed_thema/0`) and the WI3 import task run. `replace_values!` is one
+      cascading DELETE plus chunked INSERTs over ~3,000 Thema nodes; on
+      guerrilla 2026-09-02, under campaign load, the boot-time Thema seed was
+      CANCELLED by the role's 60 s wall (57014) — a slot that cannot finish
+      booting on a busy box. It issues `set_local_statement_timeout!(:infinity)`
+      as its first statement.
+
     * `Barkpark.Tenancy.WorkspaceBundle.run_copy_out/2` — one
       `COPY (SELECT …) TO STDOUT` per table. Run-proven at 9.34 s / 478 MB
       (`mutation_events`) and 8.04 s / 385 MB (`revisions`) on a WARM cache and
