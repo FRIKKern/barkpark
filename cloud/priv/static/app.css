@@ -131,6 +131,14 @@
   --ok-strong: hsl(151.96 71.81% 23.22%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
+  /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-
+     invariant, so :root only; the reduced-motion collapse is at the end of
+     this region. */
+  --dur-1: 0.15s;
+  --dur-2: 0.18s;
+  --dur-3: 0.28s;
+  --ease: ease;
+  --t: var(--dur-1) var(--ease);
 }
 [data-theme="dark"] {
   --cc-bg: #0b0e13;
@@ -303,6 +311,16 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
   --ok-strong: hsl(248.87 100% 85.45%);
 }
+/* Motion collapses when the user asks for it (decision 29). Only the token
+   durations go to 0 — spinner keyframes keep their literal duration because
+   a progress indicator is state, not decoration. --t follows for free. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0s;
+    --dur-2: 0s;
+    --dur-3: 0s;
+  }
+}
 /* END GENERATED: tokens */
 
 /* coherence-fixture legend chips (coherenceFixtureToHtml) — the committed TUI
@@ -396,15 +414,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --space-6: 24px;
   --step: 8px;
 
-  /* Motion (decision 29) — durations + easing; the reduced-motion media block
-     at the end of the token area collapses durations to 0. Spinners keep a
-     literal duration on purpose: a loading indicator is state, not decoration. */
-  --dur-1: 0.15s;
-  --dur-2: 0.18s;
-  --dur-3: 0.28s;
-  --ease: ease;
-  --t: var(--dur-1) var(--ease);
-
   /* Elevation ladder (decision 29). --shadow / --shadow-sm are legacy aliases
      resolving into the ladder; the dark block re-tunes the --elev-* values and
      re-declares the aliases (scoped-theme substitution — see the E8 note there). */
@@ -467,17 +476,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --console-bg: hsl(240 10% 8%);
   --console-fg: hsl(0 0% 88%);
   --console-dim: hsl(240 5% 55%);
-}
-
-/* Motion collapses when the user asks for it (decision 29). Only the token
-   durations go to 0 — spinner keyframes keep their literal duration because a
-   progress indicator is state, not decoration. */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --dur-1: 0s;
-    --dur-2: 0s;
-    --dur-3: 0s;
-  }
 }
 
 * { box-sizing: border-box; }
