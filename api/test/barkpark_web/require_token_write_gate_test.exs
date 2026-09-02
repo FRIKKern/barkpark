@@ -48,11 +48,26 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+
   alias Barkpark.{Access, Auth, Repo, TenancyFixtures}
   alias Barkpark.Tenancy
   alias BarkparkWeb.Plugs.RequireWriteForMutation
 
   @dataset "production"
+
+  # The self-service describe below drives DELETE /v1/auth/app-tokens{,/current,
+  # /:id}, and AppTokenController bills every one of those against ONE
+  # whole-node bucket, `{:app_token_revoke, client_ip}`, capacity 10/min. Under
+  # `mix test` every conn is the loopback peer with no x-forwarded-for, so the
+  # key is `127.0.0.1` for this file AND for every other suite that revokes
+  # (app_token_admin_revoke, app_token_cross_workspace_revoke, the flat-route
+  # census, the capabilities manifest...). Whether this file lands inside a
+  # spent minute is a function of the seed: main run 33681637129 answered 429
+  # to both self-service probes; the very next merge sha ran green. The
+  # sibling revoke suites already start from an empty table — do the same, so
+  # the two statuses asserted here are the gate's answer, not the meter's.
+  setup :reset_rate_limiter!
 
   @router_path Path.expand("../../lib/barkpark_web/router.ex", __DIR__)
 
