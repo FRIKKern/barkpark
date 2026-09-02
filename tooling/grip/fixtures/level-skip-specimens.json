@@ -32,7 +32,8 @@
       "how_derived": "NOT taken from the wave brief. Re-derived from the durable paper itself on 2026-07-20: `bp doc get paper survey-once-build-forever -o json`, then counting rows of the table block whose cells carry the level-skip vocabulary. That block is table index 1 of 4 and has 6 rows, matching specimens 1-6 in order.",
       "rerun": "bp doc get paper survey-once-build-forever -o json | node -e 'const d=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));const t=(d.blocks||[]).filter(b=>b.type===\"table\")[1];console.log(t.rows.length)'",
       "why_this_matters": "Accepting 'six rows' from the brief would have been an L6 read quoted as an L5 fact about the paper — this fixture's own failure mode, committed while building the fixture that documents it. The count is derived from the paper, not from the prompt."
-    }
+    },
+    "r3_has_no_check_on_the_fact_path": "MEASURED 2026-09-02, and recorded here so it cannot decay into folklore. R3 is enforced NOWHERE on the fact path. admitFact's entire rejection vocabulary is MISSING-SUBJECT, MISSING-CLAIM, BAD-DEPS, LEVEL-SKIP, PATHLESS-REF and INADMISSIBLE-CONTINUOUS, and not one of them asks whether the method could have answered differently; adjudicate composes that vocabulary and adds none of its own. R3 lives only in the injected `now`/`screen` bounds admitRecipe takes on the RECIPE path. It is unenforceable at the fact seam as the record is shaped: the eight fields a fact carries are subject, quantity, claim, evidence, rerun, level, observed_at and deps, and NONE of them can hold a negative demonstration. `evidence` is the only field that could carry the prose of one, and it is L6 by construction and never parsed (D1, whose prose-scanner precursor scored 0.67 precision) — so a check keyed on it would be keyed on nothing. Closing R3 here needs a fact-SHAPE decision (a `control` field holding a literal COMMAND, which the grammar could level and screen the way it already levels `rerun`), not a new branch in admitFact. Specimen 103 is the standing negative control for the gap: it violates R3 with honest levels and the adjudicator ADMITS it."
   },
   "specimens": [
     {
@@ -148,15 +149,19 @@
       "wrong_evidence": "ops recipient is configured: kalle@jarl.no is set and the config parses",
       "honest_counterpart": "platform_admin_emails/0 maps each configured address through Accounts.get_user_by_email/1 and rejects nils — so an address with no matching USER row yields []. Config presence does not imply a recipient; only calling the function does.",
       "rerun": "git show origin/main:cloud/lib/barkpark_cloud/notifications.ex | sed -n '389,399p'",
-      "caught_by": "R3",
-      "why_caught": "The control never fired. Nothing demonstrated the method COULD have answered differently — the check would have reported success against an empty list just as readily. R3 rejects at WRITE time any fact stored without that demonstration.",
+      "caught_by": "R1",
+      "caught_by_was": "R3, until 2026-09-02. The R3 hypothesis was never ratified — the paper's row names no rule and no L-levels (see verified_row_text) — and it was REFUTED by running the specimen through the real adjudicator: R3 has no check on the fact path at all (see _meta.r3_has_no_check_on_the_fact_path). A label naming a rule that does not exist where the fact is admitted is this fixture's own subject matter committed against the fixture, so the label now names the rule that fires and the R3 content is kept below as an OBSERVATION rather than deleted.",
+      "why_caught": "The read is L5/L3 and the claim is L1, so the derived level is a ceiling BELOW the claimed level and LEVEL-SKIP fires on admission, before any other reasoning. Measured, not assumed: `node tooling/grip/acceptance.mjs` reports this specimen REJECTED (LEVEL-SKIP), and L5 is remapped to L3 in the report because no command derives L5.",
+      "r3_observation": "The specimen IS also an R3 violation and that stays true: the check would have reported success against an empty list just as readily, so nothing demonstrated the method could have answered differently. That is an OBSERVATION about the specimen, never a catch — and it can never be the catch here, because R1 fires first on a fact whose levels are dishonest. Specimen 103 is the same violation with HONEST levels, which is the only shape an R3 check could ever be tested on.",
       "control_that_should_have_run": "Call platform_admin_emails/0 with the env set to an address that has NO user row and assert it returns []. If that assertion cannot fail, the original check proved nothing.",
       "path_note": "D9: the original citation was the path-less `notifications.ex:389-397`, which sent a verifier to api/lib and returned empty. The real file is cloud/lib/barkpark_cloud/notifications.ex — a path-less line reference is REJECTED.",
       "last_rerun": {
         "at": "2026-07-20T12:38Z",
         "exit": 0,
         "output": "  def platform_admin_emails do\n    :barkpark_cloud\n    |> Application.get_env(:platform_admin_emails, [])\n    |> List.wrap()\n    |> Enum.map(&normalize_recipient/1)\n    |> Enum.reject(&is_nil/1)\n    |> Enum.map(&Accounts.get_user_by_email/1)\n    |> Enum.reject(&is_nil/1)\n    |> Enum.map(& &1.email)\n    |> Enum.uniq()\n  end"
-      }
+      },
+      "verified_row_text": "kalle@jarl.no as the ops value | env present, config parses | the function still returns [] — unregistered addresses are dropped",
+      "verified_row_note": "Re-derived from the durable paper on 2026-09-02, not taken from a brief: `bp doc get paper survey-once-build-forever -o json`, table index 1, row 5. The ratified row names NO rule and NO L-levels; `caught_by` is a fixture-authored hypothesis (see _meta.caught_by_is_a_hypothesis), so correcting it against measurement changes no ratified text. The `read at L5/L3, claimed at L1` modelling in level_skip is likewise the fixture's reading, not the paper's wording."
     },
     {
       "id": 6,
@@ -204,6 +209,22 @@
       "why_frozen_anyway": "Frozen as an explicit NEGATIVE control for the R1 grammar and as a positive fixture for the LATER R4 conflict engine. Labelled honestly so wave 1 cannot bank it as a catch.",
       "number_is_frozen": false,
       "no_rerun_reason": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen."
+    },
+    {
+      "id": 103,
+      "ratified": false,
+      "title": "\"census.mjs never screens\" — a grep that could not see the file",
+      "level_skip": "NONE — read at L3 (a local grep over a local file) and claimed at L3 (a statement about that same local file). The two levels are EQUAL, so R1 has nothing to compare and structurally cannot fire. What failed is the CONTROL, not the ladder.",
+      "wrong_evidence": "census.mjs never screens a command — grep found no occurrences of the screen call in it",
+      "honest_counterpart": "The file carried a literal NUL byte, so the shell's grep wrapper skipped it as binary and printed nothing at exit 1 — byte-identical to `no matches`. `/usr/bin/grep -ac census tooling/grip/census.mjs` returns 30 on the same file. The read could never have come back non-empty, so an empty result distinguished nothing: it measured the wrapper, not the file. The verifier who drew this concluded the exact opposite of the truth and caught it by accident.",
+      "rerun": "/usr/bin/grep -ac census tooling/grip/census.mjs",
+      "rerun_note": "The honest counterpart, not the sin: `-a` forces the binary-safe read the bare wrapper refused. The sinful command is the wrapper form the specimen's prose describes, which is why it is not the `rerun` field — the same asymmetry the ratified specimens carry.",
+      "caught_by": "UNCAUGHT",
+      "uncaught_reason": "R1 compares the level a fact was READ at against the level it is CLAIMED at; both are L3 here, so R1 structurally cannot fire — the fact is honestly levelled and WRONG. Catching it is exactly R3's job (`no fact is stored without a demonstration the method COULD have answered differently`), and R3 has NO check on the fact path: run this specimen through the real adjudicator and it comes back ADMITTED with zero reasons. Recorded as a known gap, NOT as a catch.",
+      "control_that_should_have_run": "Run the same wrapper against a file the pattern is KNOWN to occur in and assert a non-zero count BEFORE trusting the zero. If that positive control cannot fail, an empty result is not an absence — it is an unread file.",
+      "why_frozen_anyway": "Frozen as the fixture's FIRST R3-shaped specimen and as an explicit negative control. Specimen 5 was labelled R3 for a year and could never have tested R3, because its levels are dishonest and LEVEL-SKIP fires first — so no R3 check was testable against the fixture at all. This specimen supplies the missing shape: an R3 violation R1 cannot reach. The suite must NOT claim to catch it while the fact path has no R3 check, and the day one lands, the assertion that this specimen is ADMITTED goes red and this label gets re-derived — which is the whole point of freezing it.",
+      "why_this_one": "It is real and it happened inside this module. tooling/grip/README.md records it under its own METHOD RULING: every negative in the epic resting on grepping census.mjs through the wrapper is VOID. A fixture of invented sins would be the vacuity this epic exists to prevent.",
+      "number_is_frozen": false
     }
   ]
 }

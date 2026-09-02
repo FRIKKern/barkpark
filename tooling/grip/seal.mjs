@@ -561,4 +561,14 @@ export function main(argv = process.argv.slice(2), out = console.log) {
   return code;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());
+if (import.meta.url === `file://${process.argv[1]}`) {
+  // NO process.exit HERE (charter D92). main() buffers the whole seal report
+  // and writes it in ONE out() call on the line above, and the VERDICT-TOKEN is
+  // the LAST line of it — so a torn pipe eats the verdict first and leaves
+  // something that still reads like a complete report. Node writes a pipe
+  // asynchronously, so process.exit() discards whatever the kernel has not
+  // taken yet: `seal.mjs | tee` could lose the token that `seal.mjs > file`
+  // keeps. exitCode preserves all three statuses exactly — 0 HOLDS, 1 NOT YET,
+  // 2 INFRA FAULT, the distinction seal.test.mjs asserts run by run.
+  process.exitCode = main();
+}

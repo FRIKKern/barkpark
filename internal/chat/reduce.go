@@ -99,6 +99,40 @@ type State struct {
 	// cap bounds ONE turn's preview, never the session.
 	TailCapped bool
 
+	// ── the LIVE DOCUMENT (charter D81) ─────────────────────────────────────
+	//
+	// Every field here is INERT until a server puts `event: stable` frames on the
+	// wire: Segments stays empty, the cursors stay 0, and the tail is exactly the
+	// plain string it is today. That is the improvement-only floor (D76), and it
+	// is structural rather than a flag. The consumer lives in stable.go.
+
+	// Segments are the committed rich segments of the turn now streaming,
+	// append-only, keyed on the SERVER's turn and byte cursor.
+	Segments []StableSegment
+	// StableTurn is the server-authored turn whose segment stream is being
+	// consumed (0 = none yet). This — never the client's Gen — fences the cursor:
+	// Gen advances on system/init, not on the reconnect replay that causes a gap.
+	StableTurn int
+	// StableBase is the byte index in Tail where StableTurn's byte 0 sits. It is
+	// almost always 0; it is non-zero exactly in the D77 residual window where a
+	// finished turn's text is still painted (its settle GET has not landed) while
+	// the next turn already streams. Stamped at the turn-start frame both lanes
+	// emit (claude system/init, codex turn_started), released with the tail.
+	StableBase int
+	// CommittedBytes is the exclusive end, in the SERVER's byte space, of
+	// everything committed for StableTurn — and the only `from` the next frame
+	// may carry.
+	CommittedBytes int
+	// Skeleton classifies the block still forming past the cursor (D67), off the
+	// last accepted frame. nil means the remainder is ordinary prose.
+	Skeleton *StableSkeleton
+	// StableStopped latches when this turn stops consuming `stable` frames: a
+	// hole, the client segment bound, an unmappable window, or a terminal frame.
+	// The committed segments STAY — the remainder simply goes back to plain.
+	StableStopped bool
+	// StableEnd is the terminal reason seen for StableTurn ("" = still streaming).
+	StableEnd string
+
 	// Rail is the decoded agents-rail (charter D47) hydrated from the session's
 	// rail_snapshot — task-keyed mission control that survives a surface switch
 	// (Law-2). Re-decoded on every full session load / turn-boundary refetch.
@@ -366,6 +400,15 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		return reduceClaudeFrame(st, ev.Data)
 	case "runtime":
 		return reduceRuntimeFrame(st, ev.Data)
+	case "stable":
+		// The live document (charter D81): one committed segment of the streaming
+		// turn, PortableDoc blocks and a byte window. PRESENTATION ONLY — no
+		// Effect, no LastSeq, no tail clear; the frame is id-less so the resume
+		// cursor never moves for it either. stable.go owns the rule.
+		return reduceStable(st, ev.Data), nil
+	case "stable_end":
+		// The turn's terminal segment frame: settled / capped / degraded.
+		return reduceStableEnd(st, ev.Data), nil
 	case "workflow":
 		// Live workflow delta (wsc-bl-workflow-sse): the COMPACT summary pushed
 		// mid-turn so the collapsed strip refreshes without a turn-boundary
@@ -457,6 +500,11 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		// tail stays painted until its own settle lands (no blank flash), carrying
 		// its own generation with it.
 		st.Gen++
+		// The new turn's byte 0 is wherever the tail stands right now (charter
+		// D81): normally 0, and the leftover length of a still-unsettled prior
+		// turn in the D77 residual window. Stamped BEFORE any of this turn's
+		// deltas append, which is the only moment the offset is knowable.
+		st.StableBase = len(st.Tail)
 		// Any queued sends' badges clear — the queue is
 		// now draining, oldest first, exactly like ChatLive's
 		// clear_queued_badges (charter D12).
@@ -539,6 +587,14 @@ func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
 	}
 
 	switch frame.Kind {
+	case "turn_started":
+		// The codex lane's turn-start signal — the sibling of the claude lane's
+		// system/init, and the ONLY moment this turn's byte 0 is knowable (charter
+		// D81). It stamps the live-document base and NOTHING else: phase, tail and
+		// notice stay exactly as inert as they were before this case existed.
+		st.StableBase = len(st.Tail)
+		return st, nil
+
 	case "text_delta":
 		// native is decoded lazily and tolerantly: a provider envelope whose
 		// params.delta is not a string leaves the tail untouched rather than
@@ -654,6 +710,13 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 		st.Tail = ""
 		st.TailBytes = 0
 		st.TailCapped = false
+		// The live document dies WITH the tail it annotates (charter D81): the
+		// committed segments describe bytes of Tail, and the persisted row that
+		// replaces them was appended above in this same reducer step. Dropping
+		// them here — never earlier, never later — is what makes the promotion
+		// atomic: no frame paints the segments and the settled row together, and
+		// none paints neither.
+		st = clearStable(st)
 	}
 	return st, nil
 }

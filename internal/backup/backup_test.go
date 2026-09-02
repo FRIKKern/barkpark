@@ -301,16 +301,24 @@ func TestRestoreRoundTrip(t *testing.T) {
 	}
 
 	sink := &fakeSink{}
-	if err := Restore(context.Background(), store, "bk", key, sink); err != nil {
+	rep, err := Restore(context.Background(), store, "bk", key, sink)
+	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	if !bytes.Equal(sink.got, dump) {
 		t.Errorf("Restore streamed %q, want the original dump %q", sink.got, dump)
 	}
+	if !rep.Verified() {
+		t.Errorf("a dump restored straight from Backup reported %q (%s), want %q",
+			rep.Verification, rep.Reason, RestoreVerified)
+	}
+	if rep.Bytes != int64(len(dump)) {
+		t.Errorf("report counted %d bytes, want %d", rep.Bytes, len(dump))
+	}
 
 	// A key that is not gzip must fail loudly, not restore garbage.
 	store.store("bk", "prod/garbage.sql.gz", []byte("not gzip at all"))
-	if err := Restore(context.Background(), store, "bk", "prod/garbage.sql.gz", &fakeSink{}); err == nil {
+	if _, err := Restore(context.Background(), store, "bk", "prod/garbage.sql.gz", &fakeSink{}); err == nil {
 		t.Error("Restore of a non-gzip object did not error")
 	}
 }
@@ -464,4 +472,113 @@ func gzipBytes(t *testing.T, b []byte) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// TestRestoreManifestMismatchFails: the manifest is the declared truth and
+// Restore now READS it. A dump/manifest pair that drifted — a re-uploaded
+// object, a half-written backup, anything that gunzips cleanly but is not the
+// stream the manifest describes — must FAIL, naming both sides.
+//
+// The same-length case is the one that matters: it is invisible to a length
+// check, so it proves the SHA256 comparison specifically.
+func TestRestoreManifestMismatchFails(t *testing.T) {
+	pinNow(t, time.Date(2026, 7, 2, 6, 0, 0, 0, time.UTC))
+	dump := []byte("SELECT 'the manifest describes THIS';\n")
+
+	for _, tc := range []struct {
+		name    string
+		planted []byte
+	}{
+		{"different length", []byte("SELECT 'but the object holds this instead, and it is longer';\n")},
+		{"SAME length, different bytes", []byte("SELECT 'the manifest describes THAT';\n")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "SAME length, different bytes" && len(tc.planted) != len(dump) {
+				t.Fatalf("fixture bug: planted %d bytes, dump %d — the case is not same-length", len(tc.planted), len(dump))
+			}
+			store := newFakeObjStore()
+			key, err := Backup(context.Background(), &fakeDumpSource{name: "db", data: dump}, store, "bk", "prod")
+			if err != nil {
+				t.Fatalf("Backup: %v", err)
+			}
+			// The manifest stays exactly as Backup wrote it; only the dump drifts.
+			store.store("bk", key, gzipBytes(t, tc.planted))
+
+			sink := &fakeSink{}
+			rep, rerr := Restore(context.Background(), store, "bk", key, sink)
+			if rerr == nil {
+				t.Fatalf("Restore reported success (%q) on a dump that disagrees with its manifest", rep.Verification)
+			}
+			if rep.Verified() {
+				t.Errorf("a failed restore reported %q", rep.Verification)
+			}
+			msg := rerr.Error()
+			for _, want := range []string{
+				"does not match its manifest",
+				hex.EncodeToString(sha256Sum(dump)),       // what the manifest declares
+				hex.EncodeToString(sha256Sum(tc.planted)), // what actually streamed
+				fmt.Sprintf("%d bytes", len(dump)),
+			} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("mismatch error does not name %q:\n%s", want, msg)
+				}
+			}
+		})
+	}
+}
+
+// sha256Sum is the test's own digest helper — deliberately independent of the
+// production hashing path so a bug there cannot make the expectation agree.
+func sha256Sum(b []byte) []byte {
+	h := sha256.Sum256(b)
+	return h[:]
+}
+
+// TestRestoreWithoutManifestIsUnverified: backups taken before manifests
+// existed have none. Those still restore — but they come back UNVERIFIED, with
+// their own name and their own reason, never counted as a verified pass.
+func TestRestoreWithoutManifestIsUnverified(t *testing.T) {
+	pinNow(t, time.Date(2026, 7, 3, 6, 0, 0, 0, time.UTC))
+	dump := []byte("SELECT 'an old backup, no manifest';\n")
+	store := newFakeObjStore()
+	key, err := Backup(context.Background(), &fakeDumpSource{name: "db", data: dump}, store, "prod", "old")
+	if err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	// Age the object back to the manifest-less era.
+	delete(store.objects["prod"], key+manifestSuffix)
+
+	sink := &fakeSink{}
+	rep, rerr := Restore(context.Background(), store, "prod", key, sink)
+	if rerr != nil {
+		t.Fatalf("a manifest-less backup must still restore, got: %v", rerr)
+	}
+	if !bytes.Equal(sink.got, dump) {
+		t.Errorf("Restore streamed %q, want %q", sink.got, dump)
+	}
+	if rep.Verified() || rep.Verification != RestoreUnverified {
+		t.Fatalf("a manifest-less restore reported %q, want %q — it must NEVER read as a verified pass",
+			rep.Verification, RestoreUnverified)
+	}
+	if !strings.Contains(rep.Reason, manifestSuffix) {
+		t.Errorf("unverified reason does not name the missing manifest: %q", rep.Reason)
+	}
+	// The counter is still honest about what streamed, even unverified.
+	if rep.Bytes != int64(len(dump)) || rep.SHA256 != hex.EncodeToString(sha256Sum(dump)) {
+		t.Errorf("unverified report mis-counts the stream: %d bytes / %s", rep.Bytes, rep.SHA256)
+	}
+
+	// A manifest that exists but declares no sha256 cannot verify either.
+	key2, err := Backup(context.Background(), &fakeDumpSource{name: "db", data: dump}, store, "prod", "old")
+	if err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	store.store("prod", key2+manifestSuffix, []byte(`{"database":"db","bytes":0}`))
+	rep2, rerr2 := Restore(context.Background(), store, "prod", key2, &fakeSink{})
+	if rerr2 != nil {
+		t.Fatalf("Restore: %v", rerr2)
+	}
+	if rep2.Verified() {
+		t.Errorf("a manifest with no sha256 reported %q, want %q", rep2.Verification, RestoreUnverified)
+	}
 }

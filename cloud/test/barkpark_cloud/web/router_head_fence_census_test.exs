@@ -106,7 +106,18 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
 
   # Machine identities: an agent token or the internal worker shared secret.
   # Checked FIRST, so a route carrying both classifies as machine.
-  @machine_wrappers ["Auth.require_agent", "Auth.require_worker"]
+  #
+  # `Auth.require_user_or_pat_or_worker` is listed here DELIBERATELY even though
+  # it also admits a human: it is a route a MACHINE can reach, and the whole
+  # point of checking this list first is that "carries both" resolves to machine.
+  # Leaving it out would have been the quiet option — the substring
+  # `Auth.require_user` matches it, so the census would have stayed 68/49/7/12
+  # and a route that became worker-reachable would have moved no number at all.
+  @machine_wrappers [
+    "Auth.require_agent",
+    "Auth.require_worker",
+    "Auth.require_user_or_pat_or_worker"
+  ]
 
   # THE BASELINE. Four integers, re-derived from source above, changed only
   # DELIBERATELY and with a reason written next to them.
@@ -182,9 +193,25 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # consume a key in transit. The only write on the path is the same throttled
   # `last_used` bookkeeping every session GET in this baseline shares. machine
   # and public are unchanged: no existing route changed class.
+  # 2026-09-02: 68 / 48 / 8 / 12. NO ROUTE WAS ADDED OR REMOVED — one existing
+  # route CHANGED CLASS, which this file's own failure message calls "the more
+  # dangerous of the two", so it is spelled out here rather than nudged.
+  # `GET /v1/deliveries` moved session -> machine: its guard became
+  # `Auth.require_user_or_pat_or_worker`, so the WORKER principal that WRITES the
+  # platform delivery record (POST /v1/internal/platform-deliveries, deploy.yml's
+  # crown step) can now READ it back (task-e2acb66e9ed0da09). It is still
+  # session- and PAT-reachable — D385/D412 preserved — but the honest class for a
+  # route a machine can reach is machine, per the "carries both" rule above.
+  # RULED NOT SIDE-EFFECTING, unchanged from the 2026-08-08 entry: the handler is
+  # still `PlatformDelivery.normalize_sha/1` + `clamp_limit/1` (pure) and
+  # `PlatformDelivery.list/1` (one `Repo.all`). The new principal makes a bare
+  # HEAD *less* stateful, not more — the worker branch assigns two conn fields and
+  # does no lookup at all, so it does not even reach the throttled `last_used`
+  # bookkeeping the session branch defers. No `side_effecting_get?/1` clause is
+  # owed. agent_or_worker gains exactly the route session loses; public unchanged.
   @baseline_total 68
-  @baseline_session 49
-  @baseline_machine 7
+  @baseline_session 48
+  @baseline_machine 8
   @baseline_public 12
 
   # THE FENCE. Every `side_effecting_get?/1` clause, as {path_segments, verdict}.

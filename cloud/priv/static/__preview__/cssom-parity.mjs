@@ -91,6 +91,20 @@
 //  wave. The invariant is `heads == CSSOM rules` and `MISSES == 0`, and both
 //  censuses independently carry the same 31-rule head-to-flattened gap.
 //
+//  CONFIRMED OFF THE CALIBRATION HOST / CHROME. Every number this file quotes was
+//  calibrated on ONE host against Chrome 150.0.7871.129, and the parity numbers are
+//  Chrome-version-dependent by construction — normalise() absorbs Chrome's selector
+//  rewrites, so a rewrite class that appears in a later build lands here first. The
+//  invariant was therefore re-driven on a SECOND Chrome, two major versions on:
+//  Chrome 152.0.7977.65 / node v22.22.0, app.css @ sha256 ad46cfd02092… —
+//  1342 heads == 1342 CSSOM rules, 1288/1288 flattened, MISSES 0, DEFICITS 0; and
+//  styleguide.html 84 == 84, 82/82, MISSES 0, DEFICITS 0. NO divergence: not one
+//  selector normalised differently between 150 and 152, so the roster's committed
+//  sidecars are portable across at least that span rather than facts about one
+//  laptop. (CI is a third witness on Chrome 150.0.7871.114 / ubuntu-latest, and the
+//  ubuntu build is a different package of the same major as the calibration host —
+//  which is exactly why a MAJOR-version step needed driving separately.)
+//
 // ─────────────────────────────────────────────────────────────────────────────
 //  MUTATION-PROVEN AT TWO LOCATIONS ~2000 LINES APART
 // ─────────────────────────────────────────────────────────────────────────────
@@ -124,9 +138,12 @@
 //    HEADS_BASELINE=/path    node cssom-parity.mjs     # override app.css's sidecar
 //    CHROME=/path/to/chrome  node cssom-parity.mjs
 //
-//  Exit codes: 0 = every authored selector reached the CSSOM · 1 = at least one
-//  MISS or a baseline-count mismatch — a fact about the CSS · 2 = GUARD (no Chrome,
-//  no stylesheet, no baseline sidecar, wrong Node) — a fact about the ENVIRONMENT,
+//  Exit codes: 0 = every authored selector reached the CSSOM as often as it is
+//  authored · 1 = at least one MISS, a MULTISET DEFICIT (a selector the browser
+//  produced fewer times than the source authors it — see the multiset ruling below)
+//  or a baseline-count mismatch — a fact about the CSS · 2 = GUARD (no Chrome, no
+//  stylesheet, no baseline sidecar or one that does not carry exactly one count,
+//  wrong Node) — a fact about the ENVIRONMENT,
 //  refused before anything is spawned, PLUS (D101) a Chrome that was spawned and
 //  never came up, refused at the bring-up boundary. The 1/2 split is load-bearing,
 //  see D19 and D101 below.
@@ -368,19 +385,101 @@ function applyBaselineOverride(entries) {
   return entries.map((e) => (e.file === DEFAULT_CSS ? { ...e, baseline: resolved } : e));
 }
 
-// The sidecar is a committed text file: `#` lines are human context, the first
-// bare-integer line is the count. Override with HEADS_BASELINE=/path (pair it with
-// CSS= when certifying a non-default stylesheet — the fixture proof does exactly
-// that). A missing or unparseable sidecar is an ENVIRONMENT fact — the gate cannot
-// know what to assert — so it GUARDS on exit 2 in the preflight below, never reds as
-// though the CSS were broken.
-function parseBaseline(text) {
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
+// The sidecar is a committed text file: `#` lines are human context and the payload
+// is ONE bare-integer line. Override with HEADS_BASELINE=/path (pair it with CSS=
+// when certifying a non-default stylesheet — the fixture proof does exactly that). A
+// missing or unresolvable sidecar is an ENVIRONMENT fact — the gate cannot know what
+// to assert — so it GUARDS on exit 2 in the preflight below, never reds as though the
+// CSS were broken.
+//
+// ── D222 — EXACTLY ONE PAYLOAD LINE, AND IT MUST BE THE INTEGER ──────────────
+// This resolver used to be "the FIRST non-comment line decides", and that one word
+// was the file's only silent failure shape. Driven through this tool's own
+// HEADS_BASELINE= override on fc6ecdfdd6, all four shapes a merge can produce:
+//
+//   `1342` then `9999`  -> rc=0, PARITY PASS   <- THE 9999 IS INVISIBLE
+//   `9999` then `1342`  -> rc=1 naming baseline 9999 ← BELOW
+//   prose, zero integers -> rc=2 GUARD, loud
+//   conflict markers kept -> rc=2 GUARD, loud
+//
+// Three of the four were already loud. The first was not, and it is precisely the
+// shape this sidecar invites: every wave APPENDS prose above the payload and the
+// count is the LAST line (287 of 287 lines of the committed app.css sidecar are
+// prose), so a merge that keeps BOTH sides with `ours` on top passes green while the
+// file says two different things — and the human habit is to read the TAIL.
+//
+// IT IS A HAZARD PROVEN BY CONSTRUCTION, NOT A LANDED DEFECT. Do not go looking for
+// the commit that carried it: a sweep across 18 main commits touching this file, 448
+// origin refs and 110 local worktrees found ZERO anomalies — every one of them
+// carries exactly one integer. This assertion is a tripwire on a door nobody has
+// walked through yet, which is the only time a tripwire is cheap.
+//
+// WHY "EXACTLY ONE NON-COMMENT LINE" AND NOT "EXACTLY ONE INTEGER". The narrower
+// rule (count the bare integers, refuse on two) would have LOOSENED the resolver in
+// one direction while tightening it in another: a conflict whose two sides carry the
+// same count, or whose second side is prose, leaves exactly one integer — and the
+// `<<<<<<< HEAD` / `>>>>>>>` lines would then sail through a check that only looks
+// at integers. So the payload is defined positively: after `#` comments and blank
+// lines there must be ONE line left, and it must be a bare integer. Everything else
+// — zero payload lines, two payload lines, one payload line that is not a number —
+// is a refusal that names what it found and where.
+//
+// It returns a RESULT rather than `number | null` so the refusal can name the exact
+// lines: `{ count }` on success, `{ count: null, reason, payload }` otherwise, where
+// every payload entry carries its 1-based line number, its text, and whether it is a
+// bare integer. baselineRefusal() below turns that into the operator's message, and
+// cssom-parity.test.mjs drives BOTH directly — which is why this helper and that one
+// are exported. Before D222 this file had ZERO `export` statements, so the resolver
+// could only ever be driven through a whole Chrome run; the four shapes above cost
+// ~20s of browser each to observe, and a helper that expensive to probe is a helper
+// nobody probes.
+export function parseBaseline(text) {
+  const payload = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
     if (line === "" || line.startsWith("#")) continue;
-    return /^\d+$/.test(line) ? Number(line) : null; // first non-comment line decides
+    payload.push({ line: i + 1, text: line, integer: /^\d+$/.test(line) });
   }
-  return null; // no count line at all
+  if (payload.length === 1 && payload[0].integer) return { count: Number(payload[0].text), payload };
+  const reason = payload.length === 0 ? "empty" : payload.length === 1 ? "not-an-integer" : "ambiguous";
+  return { count: null, reason, payload };
+}
+
+// The refusal an unresolvable sidecar prints, kept beside the resolver so the two
+// can never drift and so a unit test can assert the words without a browser. It
+// NAMES EVERY PAYLOAD LINE with its line number: "carries no parseable count" sent a
+// reader to a file whose defect is that it holds two perfectly parseable counts, and
+// a message that will not say which lines it means costs the reader the one minute
+// this whole assertion exists to save.
+export function baselineRefusal(parsed, { id, path: sidecarPath }) {
+  const shown = parsed.payload
+    .map((e) => `     line ${e.line}: ${e.text}${e.integer ? "   ← a bare integer" : ""}\n`)
+    .join("");
+  const head =
+    `!! GUARD (exit 2): baseline sidecar ${sidecarPath} (for "${id}") does not carry EXACTLY ONE count.\n` +
+    `   Expected a file whose non-\`#\`, non-blank content is ONE line holding a bare integer\n` +
+    `   (the authored-head count).\n`;
+  if (parsed.reason === "empty") {
+    return head + `   It carries NO payload line at all — only comments and blank lines.\n`;
+  }
+  if (parsed.reason === "not-an-integer") {
+    return head + `   It carries ONE payload line and it is not a bare integer:\n${shown}`;
+  }
+  const ints = parsed.payload.filter((e) => e.integer);
+  return (
+    head +
+    `   It carries ${parsed.payload.length} payload lines` +
+    (ints.length > 1
+      ? `, ${ints.length} of them bare integers (${ints.map((e) => `${e.text} on line ${e.line}`).join(", ")}).\n`
+      : `.\n`) +
+    shown +
+    `   REFUSING RATHER THAN PICKING ONE. The old resolver took the FIRST and ignored the\n` +
+    `   rest, so a merge that kept both sides with the correct count on top passed GREEN\n` +
+    `   while the file said two different things — and a reader checking the tail saw the\n` +
+    `   other number. This is an ENVIRONMENT fact (the gate cannot know what to assert),\n` +
+    `   never a CSS defect. Resolve the sidecar to ONE count and re-run.\n`
+  );
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -431,11 +530,16 @@ const atName = (head) => (head.match(/^@([a-zA-Z-]+)/) || [, ""])[1].toLowerCase
 // Every style-rule head the source authors, in file order, with its line number.
 // A "head" is the raw prelude text before a `{` — it may be a comma group, and
 // it may span many lines (40 of them do).
-function authoredHeads(css) {
+// `depth` is 0 for a head authored at the top level of the sheet and N for one
+// nested inside N grouping at-rules. It is carried so the TOP-LEVEL duplicate census
+// (the population the "6 twice-authored selectors" figure was counted over) can be
+// recomputed rather than remembered — see the census note above topLevelDuplicateHeads().
+export function authoredHeads(css) {
   const heads = [];
   let i = 0;
   let buf = "";
   let bufStart = 0;
+  let groupDepth = 0;
   // Leading whitespace is never part of a head, and swallowing it here is what
   // makes the reported line the line the DEFECT is on rather than the line the
   // previous rule closed on.
@@ -459,15 +563,18 @@ function authoredHeads(css) {
       const start = bufStart;
       buf = "";
       if (head.startsWith("@")) {
-        if (GROUPING_AT.has(atName(head))) { i++; continue; } // descend
-        i = skipBlock(css, i);                                 // opaque — skip
+        if (GROUPING_AT.has(atName(head))) { groupDepth++; i++; continue; } // descend
+        i = skipBlock(css, i);                                              // opaque — skip
         continue;
       }
-      if (head !== "") heads.push({ head, index: start, braceIndex: i });
+      if (head !== "") heads.push({ head, index: start, braceIndex: i, depth: groupDepth });
       i = skipBlock(css, i);
       continue;
     }
-    if (c === "}") { buf = ""; i++; continue; }        // leaving a grouping block
+    // Leaving a grouping block. `groupDepth` is floored at 0 rather than allowed to
+    // go negative: a malformed sheet with a stray `}` must not make every head after
+    // it read as "more top-level than top-level" and silently drop out of the census.
+    if (c === "}") { buf = ""; if (groupDepth > 0) groupDepth--; i++; continue; }
     // A `;` ends a STATEMENT at-rule (@import, @charset, @layer a, b;). It does
     // NOT end a qualified rule's prelude — CSS error recovery runs to the next
     // `{`, which is precisely how #4592 swallowed the rule that followed it, and
@@ -484,7 +591,7 @@ function authoredHeads(css) {
 // It is NOT a list of Chrome's known rewrites — it is a canonical form both a
 // hand-written selector and a Chrome-serialised one collapse into. An unknown
 // fourth serialisation class costs sensitivity here, never correctness.
-function normalise(sel) {
+export function normalise(sel) {
   return sel
     .replace(/\s+/g, " ")               // multi-line comma continuations
     .replace(/\s*([>+~])\s*/g, "$1")    // combinators — AND the An+B `-n + 2`
@@ -496,7 +603,7 @@ function normalise(sel) {
 }
 
 // Split a comma group at TOP level only — `:is(a, b)` and `[x=","]` stay whole.
-function splitGroup(head) {
+export function splitGroup(head) {
   const out = [];
   let depth = 0;
   let cur = "";
@@ -519,6 +626,179 @@ const lineOf = (css, index) => css.slice(0, index).split("\n").length;
 // hides exactly the selector the gate exists to name.
 const ellipsis = (s, max = 150) =>
   s.length <= max ? s : s.slice(0, max - 60) + " … " + s.slice(-57);
+
+// ── 2b. THE MULTISET RULING (gr-backlog-cssom-parity-count-skew) ─────────────
+// THE EXPOSURE, STATED AS A DEFECT AND NOT AS A CAVEAT. Until this block, both
+// sides of the diff were SETS: the authored side was a Map with an explicit
+// first-wins (`if (key && !authored.has(key))`) and the CSSOM side was a
+// `new Set()`, so the comparison was pure membership. A normalised selector
+// authored TWICE therefore occupied one slot on each side, and the browser only
+// had to produce ONE of the two rules for the diff to stay empty:
+//
+//     .card { padding: 8px }        <- authored occurrence 1
+//     …
+//     .card { border: 1px solid }   <- authored occurrence 2, LOST in the browser
+//
+//   set semantics:      authored {".card"}  vs  CSSOM {".card"}   -> MISSES 0, exit 0
+//   multiset semantics: authored .card ×2   vs  CSSOM .card ×1    -> 1 lost occurrence
+//
+// The count assertions do not catch it either, and that is the whole point: the
+// authored-head count is unchanged (the source still authors both), the sidecar
+// still matches, and `heads == CSSOM rules` fires only the ADVISORY count-skew
+// banner. So on today's main the exit code is 0 with a rule missing from the
+// browser — a count skew hiding a lost rule behind a duplicated one.
+//
+// IT IS CLOSED, NOT RULED OUT OF CONTRACT. The earlier note argued the residual
+// exposure needed "a mechanism that removes an authored duplicate cleanly, which
+// also removes it from the parser's view, making it symmetric and arguably outside
+// the gate's contract". That argument is about the DE-AUTHORING direction and it
+// holds there — but it is not the only direction. The browser dropping one of two
+// same-normalising rules (an invalid-selector rejection, a nesting form this parser
+// flattens and Chrome does not, a duplicate the CSSOM coalesces) is asymmetric,
+// leaves the source untouched, and is exactly the class this instrument exists for.
+// A ruling that closes a hole costs one Map of integers; a ruling that documents it
+// costs a paragraph and leaves the hole. So: BOTH SIDES ARE MULTISETS.
+//
+// WHY THIS CANNOT MANUFACTURE A FALSE RED. Both sides pass through the same
+// splitGroup() and the same normalise(), so a comma group contributes the same
+// occurrence count to both censuses by construction, and an unknown Chrome
+// serialisation class moves an occurrence from one key to another on the CSSOM side
+// — which the pre-existing set membership check already reds on. Measured on the
+// committed roster at fc6ecdfdd6 under Chrome 152.0.7977.65: app.css 1342 heads /
+// 1288 distinct flattened selectors / 76 of them authored more than once / ZERO
+// multiset deficits; styleguide.html 84 / 82 / 4 / ZERO. Those 76 and 4 are the
+// occurrences the old Set collapsed — the exposure was not hypothetical, it was 80
+// selectors wide on the committed roster. The deficit signal is silent on a clean
+// tree and is proven able to fire in cssom-parity.test.mjs.
+//
+// ── THE DUPLICATE-SELECTOR CENSUS — 8 vs 6 WAS A POPULATION DISPUTE ──────────
+// The census has been carried in prose twice and disagreed with itself: EIGHT
+// twice-authored top-level selectors, then a correction to SIX naming
+//
+//     :root · [data-theme="dark"] · .app-shell · .inst-lifecycle-actions ·
+//     .new-step-label · .new-step.failed .new-step-label
+//
+// with `body` struck out as "authored exactly once". BOTH NUMBERS WERE RE-MEASURED
+// HERE, on the wave-12-era app.css the census was taken against
+// (0261ace15 — 1201 authored heads, the same 1201 D20 pinned its static floor to)
+// and on app.css @ fc6ecdfdd6 (1342 heads), using the functions below:
+//
+//                                              0261ace15   fc6ecdfdd6
+//   top-level RULE HEADS, normalised prelude        5           6
+//   flattened selectors, top level only             8           9
+//   flattened selectors, every depth (compared)    n/a         76
+//
+// SO THE 8 WAS RIGHT FOR ITS POPULATION and the 6 is reproducible under neither.
+// The two consistent readings of "twice-authored top-level selector" answer 5 and 8
+// on the tree the census was taken on; 6 is what you get by mixing them — striking
+// `body` under the RULE-HEAD reading (it is authored once as a head, and its second
+// flattened occurrence comes from the comma group `html, body`) while keeping
+// `.new-step.failed .new-step-label`, which is only ever authored inside a comma
+// group and so is NOT a duplicated head either. Its twin `.new-step.failed
+// .new-step-dot` is duplicated identically, in the same two comma groups, and was
+// dropped from the list of six for no stated reason.
+//
+// WHAT SURVIVES, AND IT IS THE PART THAT MATTERED: every one of the six named IS
+// genuinely twice-authored — all six are in the flattened top-level population on
+// both trees — so the LIST is sound and no selector on it was invented. What does
+// not survive is the NUMBER as a durable fact. A hand-counted census over a
+// stylesheet that grows every wave decays exactly as MIN_AUTHORED_HEADS did.
+//
+// THE NUMBER THEREFORE STOPS BEING PROSE. duplicateCensus() recomputes the compared
+// population on every run and the report prints it; topLevelDuplicateHeads() below
+// recomputes the top-level one on demand, and each names its population in the same
+// breath as its number — which is the one thing neither earlier citation did.
+export function authoredIndex(css, heads = authoredHeads(css)) {
+  const authored = new Map(); // normalised selector -> {head, line, braceLine, count, sites}
+  for (const h of heads) {
+    const where = { head: h.head, line: lineOf(css, h.index), braceLine: lineOf(css, h.braceIndex) };
+    for (const sel of splitGroup(h.head)) {
+      const key = normalise(sel);
+      if (!key) continue;
+      const rec = authored.get(key);
+      // FIRST-WINS IS KEPT FOR THE REPORTED LOCATION and only for that: the head,
+      // line and braceLine a miss is printed with stay the first authored site, so
+      // every existing accusation reads exactly as it did. What changes is that the
+      // occurrences are now COUNTED and every site is retained, so a deficit can
+      // name all of them.
+      if (!rec) authored.set(key, { ...where, count: 1, sites: [where] });
+      else { rec.count += 1; rec.sites.push(where); }
+    }
+  }
+  return authored;
+}
+
+// The browser side as a MULTISET — the mirror of authoredIndex, same splitGroup,
+// same normalise, so an occurrence counted on one side is counted on the other.
+export function cssomIndex(selectorTexts) {
+  const counts = new Map();
+  for (const sel of selectorTexts) {
+    for (const one of splitGroup(sel)) {
+      const key = normalise(one);
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+// The diff, as two disjoint lists. A MISS is a selector the browser never produced
+// at all (the pre-D222 signal, unchanged, and still what the #4592 proof reports). A
+// DEFICIT is a selector the browser produced FEWER times than the source authors it
+// — the multiset half, and the only signal that can see a rule lost behind its own
+// duplicate. Kept separate because they read differently to a human: a miss names a
+// dead selector, a deficit names a selector that is alive and short.
+export function diffPopulations(authored, cssomCounts) {
+  const misses = [];
+  const deficits = [];
+  for (const [key, rec] of authored) {
+    const seen = cssomCounts.get(key) || 0;
+    if (seen === 0) misses.push({ key, ...rec });
+    else if (seen < rec.count) deficits.push({ key, authoredCount: rec.count, seen, ...rec });
+  }
+  return { misses, deficits };
+}
+
+// Every normalised selector this file authors more than once, most-duplicated
+// first. Recomputed every run — see the census note above for why the six named
+// there are the top-level subset and this is the compared population.
+export function duplicateCensus(authored) {
+  return [...authored]
+    .filter(([, rec]) => rec.count > 1)
+    .map(([key, rec]) => ({ key, count: rec.count, lines: rec.sites.map((s) => s.line) }))
+    .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : 1));
+}
+
+// THE TOP-LEVEL HEAD CENSUS — the stricter of the two readings behind the 8-vs-6
+// dispute above, and the one under which `body` is authored exactly once. A head is
+// counted here at most once no matter how many selectors its comma group carries, so
+// `.new-step.failed .new-step-label` — always authored inside a group — never
+// appears, while `html, body` does not lend `body` a second occurrence.
+//
+// MEASURED: 5 heads on 0261ace15, 6 on fc6ecdfdd6 (`.app-shell`,
+// `.inst-lifecycle-actions`, `.instance-card-head`, `.new-step-label`, `:root`,
+// `[data-theme="dark"]`) — note that today's six are NOT the census's six: the
+// membership turned over while the count coincidentally landed on the same number,
+// which is exactly how a prose census stays plausible while going wrong. Re-measure
+// rather than trust this paragraph:
+//
+//   node -e 'import("./cloud/priv/static/__preview__/cssom-parity.mjs").then(async m=>{
+//     const css=(await import("node:fs")).readFileSync("cloud/priv/static/app.css","utf8");
+//     console.log(m.topLevelDuplicateHeads(css));})'
+export function topLevelDuplicateHeads(css, heads = authoredHeads(css)) {
+  const byHead = new Map();
+  for (const h of heads) {
+    if (h.depth !== 0) continue;
+    const key = normalise(h.head);
+    if (!key) continue;
+    const rec = byHead.get(key);
+    if (!rec) byHead.set(key, { key, count: 1, lines: [lineOf(css, h.index)] });
+    else { rec.count += 1; rec.lines.push(lineOf(css, h.index)); }
+  }
+  return [...byHead.values()]
+    .filter((r) => r.count > 1)
+    .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : 1));
+}
 
 // ── 3. the CSSOM side, as it runs inside the page ─────────────────────────────
 // Recurse into grouping rules so a rule is never "missing" merely because it is
@@ -680,14 +960,12 @@ async function main() {
       );
       process.exit(2);
     }
-    const baseline = parseBaseline(fs.readFileSync(entry.baseline, "utf8"));
-    if (baseline === null) {
-      process.stderr.write(
-        `!! GUARD (exit 2): baseline sidecar ${entry.baseline} (for "${entry.id}") carries no parseable count.\n` +
-          `   Expected a file whose first non-\`#\` line is a bare integer (the authored-head count).\n`,
-      );
+    const parsed = parseBaseline(fs.readFileSync(entry.baseline, "utf8"));
+    if (parsed.count === null) {
+      process.stderr.write(baselineRefusal(parsed, { id: entry.id, path: entry.baseline }));
       process.exit(2);
     }
+    const baseline = parsed.count;
 
     const raw = fs.readFileSync(entry.file, "utf8");
     const got = extractSheet(entry, raw);
@@ -704,14 +982,7 @@ async function main() {
 
     const css = got.css;
     const heads = authoredHeads(css);
-    const authored = new Map(); // normalised selector -> first {head, line, braceLine}
-    for (const h of heads) {
-      const where = { head: h.head, line: lineOf(css, h.index), braceLine: lineOf(css, h.braceIndex) };
-      for (const sel of splitGroup(h.head)) {
-        const key = normalise(sel);
-        if (key && !authored.has(key)) authored.set(key, where);
-      }
-    }
+    const authored = authoredIndex(css, heads);
 
     sheets.push({
       id: entry.id,
@@ -998,11 +1269,9 @@ async function main() {
   // facts and collapsing them into one exit code without printing both is how a
   // reader ends up hunting the wrong file.
   for (const s of sheets) {
-    const cssomSet = new Set();
-    for (const sel of s.cssom.rules) for (const one of splitGroup(sel)) cssomSet.add(normalise(one));
-
-    const misses = [];
-    for (const [key, where] of s.authored) if (!cssomSet.has(key)) misses.push({ key, ...where });
+    const cssomCounts = cssomIndex(s.cssom.rules);
+    const { misses, deficits } = diffPopulations(s.authored, cssomCounts);
+    const dupes = duplicateCensus(s.authored);
 
     const baselineMismatch = s.heads.length !== s.baseline;
     const grew = s.heads.length > s.baseline;
@@ -1011,8 +1280,10 @@ async function main() {
       `── ${s.id} ───\n` +
         `   authored rule heads   ${s.heads.length} (baseline ${s.baseline}${baselineMismatch ? (grew ? " ← ABOVE" : " ← BELOW") : ""})\n` +
         `   CSSOM style rules     ${s.cssom.rules.length}\n` +
-        `   flattened selectors   ${s.authored.size} authored / ${cssomSet.size} CSSOM\n` +
-        `   MISSES                ${misses.length}\n`,
+        `   flattened selectors   ${s.authored.size} authored / ${cssomCounts.size} CSSOM\n` +
+        `   duplicate heads       ${dupes.length} selector(s) authored more than once (multiset-checked)\n` +
+        `   MISSES                ${misses.length}\n` +
+        `   MULTISET DEFICITS     ${deficits.length}\n`,
     );
 
     // Count skew means the parser no longer models the file (CSS nesting, a new
@@ -1068,14 +1339,42 @@ async function main() {
       }
     }
 
-    if (misses.length === 0 && !baselineMismatch) {
-      process.stdout.write(`   PASS — every authored selector reached the CSSOM, count matches baseline\n\n`);
+    // THE MULTISET DEFICIT — FATAL, and reported before the miss list for the same
+    // reason the baseline is: under a duplicate-hidden loss it is the ONLY signal.
+    // MISSES is 0 (the selector is alive), the head count is unchanged (the source
+    // still authors both), the sidecar still matches, and COUNT SKEW is advisory —
+    // so without this the run exits 0 with a rule missing from the browser.
+    if (deficits.length) {
+      process.stderr.write(
+        `\n!! MULTISET DEFICIT in ${s.id}: ${deficits.length} selector(s) reach the CSSOM FEWER times than the\n` +
+          `   source authors them. The set-membership diff above cannot see this — the selector IS\n` +
+          `   present, just not as often — and neither can the head-count assertions, because the\n` +
+          `   source still authors every occurrence. A rule is lost behind its own duplicate.\n\n`,
+      );
+      for (const d of deficits) {
+        process.stderr.write(
+          `   ✗ ${s.id}  ${ellipsis(d.key)}   authored ${d.authoredCount}× · in the CSSOM ${d.seen}×\n` +
+            `     authored at ${d.sites.map((x) => `${s.id}:${x.braceLine}`).join(", ")}\n`,
+        );
+      }
+      process.stderr.write("\n");
+    }
+
+    if (misses.length === 0 && deficits.length === 0 && !baselineMismatch) {
+      process.stdout.write(`   PASS — every authored selector reached the CSSOM as often as it is authored, count matches baseline\n\n`);
       continue;
     }
     failed++;
 
     if (misses.length === 0) {
-      process.stderr.write(`\n   FAIL ${s.id} — baseline mismatch with 0 misses\n\n`);
+      process.stderr.write(
+        `\n   FAIL ${s.id} — ${[
+          baselineMismatch ? "baseline mismatch" : null,
+          deficits.length ? `${deficits.length} multiset deficit(s)` : null,
+        ]
+          .filter(Boolean)
+          .join(" + ")} with 0 misses\n\n`,
+      );
       continue;
     }
 
@@ -1125,7 +1424,8 @@ async function main() {
   if (failed === 0) {
     process.stdout.write(
       `PARITY PASS — ${sheets.length} rostered sheet(s) certified, every authored selector reached the ` +
-        `CSSOM, counts match baselines · ${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n`,
+        `CSSOM as often as it is authored, counts match baselines · ${(wall / 1000).toFixed(1)}s wall · ` +
+        `teardown ${teardownMs}ms\n`,
     );
     process.exit(0);
   }
@@ -1138,4 +1438,29 @@ async function main() {
   process.exit(1);
 }
 
-main();
+// ── THE MAIN GUARD (D222) ────────────────────────────────────────────────────
+// `main()` used to be called unconditionally at module scope, which is why this
+// file could carry no exports worth having: any `import` of a helper launched a
+// full Chrome parity run and then called process.exit() out from under the
+// importer. Guarding the call is what makes parseBaseline/baselineRefusal/
+// authoredIndex/duplicateCensus unit-testable at all — cssom-parity.test.mjs
+// imports them and drives them in milliseconds, with no browser anywhere.
+//
+// realpathSync on BOTH sides, not a string compare: this file is habitually run
+// from a git worktree reached through a symlinked scratch path, and
+// `process.argv[1]` then differs from import.meta.url by the link while naming the
+// same inode. A guard that answers "not main" on a real invocation would turn the
+// CI gate into a silent no-op exit 0 — the exact false green this instrument
+// exists to refuse — so the comparison resolves links and falls back to running.
+const invokedDirectly = (() => {
+  const self = fileURLToPath(import.meta.url);
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return fs.realpathSync(argv1) === fs.realpathSync(self);
+  } catch {
+    return path.resolve(argv1) === self;
+  }
+})();
+
+if (invokedDirectly) main();

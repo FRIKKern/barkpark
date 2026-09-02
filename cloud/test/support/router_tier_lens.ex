@@ -53,7 +53,15 @@ defmodule BarkparkCloud.RouterTierLens do
   # allowed. `admin(d)` (session team-admin OR a PAT carrying the `deploy`
   # ability) stays its own tier too: a deploy-PAT holder needs no role at all and
   # telling them "admin" is its own lie.
-  @tier_tokens ~w[user user* user(s) admin admin(d) owner worker operator agent]
+  # `user(s)+worker` is a tier of its own for the SAME reason `user(s)` is: it
+  # names a DIFFERENT credential set, not a footnote. GET /v1/deliveries admits
+  # a session, a read-ability PAT, OR the faceless WORKER token — the principal
+  # that WRITES the row (task-e2acb66e9ed0da09). Folding it to `user(s)` would
+  # tell a CLI author the route is human-only, which is how the record ended up
+  # with no API read path for its own writer; folding it to `worker` would tell
+  # a human it is machine-only and delete the D385/D412 PAT reachability from
+  # the contract. Both halves have to stay sayable in ONE cell.
+  @tier_tokens ~w[user user* user(s) user(s)+worker admin admin(d) owner worker operator agent]
 
   # Every guard idiom the router uses, mapped to the tier column it justifies. A
   # guard MISSING from this map is treated as UNRESOLVED, never as a pass — a new
@@ -68,6 +76,14 @@ defmodule BarkparkCloud.RouterTierLens do
     # description column; the tier column names the credential.
     "require_user_or_pat" => "user(s)",
     "require_ability" => "user(s)",
+
+    # SESSION OR PAT OR THE WORKER TOKEN — the disjunction that lets the
+    # principal which WRITES the platform delivery record read it back
+    # (task-e2acb66e9ed0da09). It is NOT `require_user_or_pat` with a footnote:
+    # the worker is faceless (no current_user / no current_team) and clamped to
+    # `["read"]`, so this key must map to its own tier or the route table would
+    # advertise a human-only read on a route a machine reaches.
+    "require_user_or_pat_or_worker" => "user(s)+worker",
     "require_team_role" => "user",
     "require_team_admin" => "admin",
     "require_primary_team_admin" => "admin",
@@ -429,6 +445,9 @@ defmodule BarkparkCloud.RouterTierLens do
   @doc "`user*` is a footnoted `user`; `user(s)` and `admin(d)` are their own tiers."
   @spec normalize_tier(binary()) :: binary()
   def normalize_tier("user(s)"), do: "user(s)"
+  # BEFORE the `"user" <> _` catch-all, which would otherwise flatten this to a
+  # plain `user` and make the census compare `user` against `user(s)+worker`.
+  def normalize_tier("user(s)+worker"), do: "user(s)+worker"
   def normalize_tier("user" <> _), do: "user"
   def normalize_tier(tier), do: tier
 

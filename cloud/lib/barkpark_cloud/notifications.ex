@@ -389,7 +389,11 @@ defmodule BarkparkCloud.Notifications do
   concerns instead of belonging to nobody. Returns `{:ok, :no_admins}` or
   `{:ok, %{sent: n, recipients: [...]}}` — the `:no_admins` atom is kept verbatim
   because `DailyDigestWorker.perform/1` matches on it; the LOG reason carries the
-  honest new wording (`no_team_recipients`).
+  honest new wording (`no_team_recipients`). Since the dr-w26 escalation the
+  worker TRANSLATES that match into `{:cancel, :no_team_recipients}`, so the Oban
+  row for a digest that mailed nobody reads `cancelled` with a reason instead of
+  `completed` — the refusal is the CALLER's to make, because this function is
+  also called outside a job.
 
   ## dr-w19-s5 — THE ADDRESS, not just the count
 
