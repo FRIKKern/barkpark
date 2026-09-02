@@ -19,7 +19,7 @@ Lifecycle: `open · in_progress · blocked · done · cancelled`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp            # no config + TTY → the setup wizard, then the TUI
+bp  # no config + TTY → the setup wizard, then the TUI
 ```
 
 The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`); accept and schema, routes and crons go live on first boot. A dev server on `:4000` blocks the local DB reset — stop it or pick **connect**.
@@ -27,24 +27,24 @@ The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `m
 **Existing installs** — enable via env and restart:
 
 ```bash
-BARKPARK_PLUGINS=bulldocs,tasks    # CSV whitelist · unset = all plugins · empty = kill switch
+BARKPARK_PLUGINS=bulldocs,tasks  # CSV whitelist · unset = all plugins · empty = kill switch
 ```
 
 The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); two Oban crons ride along: lease sweeper, compaction (6 h).
 
 ## Point an AI agent at it
 
-**Register the movement.** Every unit of work runs under a claimed task: if no row names it, create one and claim it FIRST, then work. The doctrine, why unregistered work is unrecoverable, and the three ways a registration silently does not land: [AGENT-ONRAMPS](AGENT-ONRAMPS.md#register-the-movement); in this repo it also gates merge ([merge-gates](../ops/merge-gates.md)).
+**Register the movement.** Every unit of work runs under a claimed task: if no row names it, create one and claim it FIRST, then work. The doctrine, why unregistered work is unrecoverable, and the three ways registration silently does not land: [AGENT-ONRAMPS](AGENT-ONRAMPS.md#register-the-movement); here it also gates merge ([merge-gates](../ops/merge-gates.md)).
 
-**1. Token.** Any bearer token works for the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`. A stale `BARKPARK_TOKEN` SHADOWS `~/.config/barkpark/config.json`: `bp whoami` reads `auth_tier: none` and every `bp task` verb says *hidden at your tier* — `unset BARKPARK_TOKEN` (or `env -u BARKPARK_TOKEN bp …`) before blaming the server.
+**1. Token.** Any bearer token reaches the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`. A stale `BARKPARK_TOKEN` SHADOWS `~/.config/barkpark/config.json`: `bp whoami` reads `auth_tier: none` and every `bp task` verb says *hidden at your tier* — `unset BARKPARK_TOKEN` (or `env -u BARKPARK_TOKEN bp …`) before blaming the server.
 
 **2. Discover.** One call teaches the whole surface:
 
 ```bash
-bp capabilities -o json          # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
+bp capabilities -o json  # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
 ```
 
-**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …) — the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback; author briefs as blocks, not a text wall. `bp task create "<title>" --yes` files a draft; `--publish` also needs `--description` (20+ chars) and 1–12 tags already registered as `type:tag` docs (`bp doc ls tag --all`) — an invented tag is refused before anything is created.
+**3. Create tasks.** Standard mutation envelope. Required: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …) — the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback; author briefs as blocks, not a text wall. `bp task create "<title>" --yes` files a draft; `--publish` also needs `--description` (20+ chars) and 1–12 tags already registered as `type:tag` docs (`bp doc ls tag --all`) — an invented tag is refused before anything is created.
 
 ```bash
 curl -X POST $API/v1/data/mutate/production \
@@ -53,19 +53,19 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing*: an unpaired `drafts.<id>` task IS listed as itself; only a draft with a published twin is collapsed into it. Lifecycle is independent of draft/publish. `bp doc patch` (like `create --set`) writes the DRAFT: the published row — the one boards and `bp task get` read — does not change until `bp doc publish task <id> --yes`.
+> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing*: an unpaired `drafts.<id>` task IS listed as itself; only one with a published twin is collapsed into it. Lifecycle is independent of draft/publish. `bp doc patch` (like `create --set`) writes the DRAFT: the published row — the one boards and `bp task get` read — does not change until `bp doc publish task <id> --yes`.
 
-**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts (`prod write not confirmed`) and sends nothing, so a batch script missing it no-ops every write. Reading a row back: in `bp task get <id> -o json` criteria sit under `doc.content.acceptance_criteria`, the lease under `doc.claim` — a reader walking the top level sees an empty row.
+**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts (`prod write not confirmed`) and sends nothing — a batch script missing it no-ops every write. Reading back: in `bp task get <id> -o json` criteria sit under `doc.content.acceptance_criteria`, the lease under `doc.claim` — a reader walking the top level sees an empty row.
 
 ```bash
 # Queue claim: take the NEXT ready task (priority order)
-bp task next agent-1                # prints doc_id + epoch; no_ready (HTTP 200, not an error) when the queue is empty
+bp task next agent-1          # prints doc_id + epoch; no_ready (HTTP 200, not an error) when the queue is empty
 
 # Targeted claim: name the row
-bp task claim t1 agent-1            # <doc_id> <worker_id>
+bp task claim t1 agent-1      # <doc_id> <worker_id>
 
 # Voluntary walk-away (fenced)
-bp task release t1 agent-1 1        # <doc_id> <worker> <epoch>
+bp task release t1 agent-1 1  # <doc_id> <worker> <epoch>
 
 # Mid-claim: stamp a criterion — met, honestly missed, or WITHDRAWN (--criterion N is ZERO-based: 0 = the first)
 bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --met --evidence "gate green"
@@ -76,30 +76,32 @@ bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --withdr
 bp task pulse t1 agent-1 --now "warm-up pinned, rerunning" --criterion 2
 
 # Close (epoch-fenced)
-bp task close t1 agent-1 1          # <doc_id> <worker> <epoch> [status] [reason]
+bp task close t1 agent-1 1    # <doc_id> <worker> <epoch> [status] [reason]
 
 # Close with evidence: flips ride the same rev-CAS — but a flip made HERE is not proof of itself.
 bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"PR #123","criterion":"gate passes"}]'
+
+# Landing from CI: no worker, no epoch; --criterion N seals ONE merge-shaped row
+bp task landed t1 --commit a1b2c3d --pr 123 --note "merged to main" --criterion 6
 ```
 
 **Withdrawing a proof.** `--withdraw` is the only verb that LOWERS a met flag —
 review usually refutes a proof *after* the close. It sets `met: false`, leaves
-the original evidence exactly where it was, and appends a signed withdrawal
-record; a bare `met:true → met:false` patch is refused everywhere.
+the original evidence where it was, and appends a signed withdrawal record; a bare `met:true → met:false` patch is refused everywhere.
 
 **Lease + epoch.** A claim is a **45 min** lease (`:task_lease_ttl_seconds`, 2700 s) that `claim`/`next`/`pulse` print. Every pulse renews it **and** bumps `claim.epoch` — pass the pulse's epoch, not the claim's, to `stamp`/`close`.
 
-The full contract — what each verb fences on, every refusal it can emit (`409
+The full contract — what each verb fences on, every refusal (`409
 fenced_off`, `not_holder`, `criteria_unmet`, …), and the
 withdrawal's sealed-row rules — is [the claim-lifecycle
-contract](../contracts/task-claim-lifecycle.md); how to write the close receipt
-is [the close-packet convention](../contracts/close-packet.md).
+contract](../contracts/task-claim-lifecycle.md); the close receipt is [the
+close-packet convention](../contracts/close-packet.md).
 
 **5. Dependencies, labels, papers.** Same bearer + JSON headers as the mutate call above:
 
 ```bash
 POST /v1/tasks/edges              {"from_id":"drafts.t2","to_id":"drafts.t1"}  # t2 waits on t1 (from=dependent, to=blocker; kind defaults "blocks")
-GET  /v1/tasks/drafts.t2/edges                                                 # ?kind=all for every edge kind
+GET  /v1/tasks/drafts.t2/edges    # ?kind=all for every edge kind
 POST /v1/tasks/drafts.t1/labels   {"add":["sprint-3"],"remove":[]}
 POST /v1/tasks/drafts.t1/papers   {"add":["design-notes"]}
 ```
@@ -107,9 +109,9 @@ POST /v1/tasks/drafts.t1/papers   {"add":["design-notes"]}
 **6. Filtered reads.**
 
 ```bash
-bp task ready --limit 5 --offset 0     # deterministic queue page
-bp task ready --all                    # aggregate pages
-bp task ls --limit 20                  # all tasks, goals included
+bp task ready --limit 5 --offset 0  # deterministic queue page
+bp task ready --all                 # aggregate pages
+bp task ls --limit 20               # all tasks, goals included
 ```
 
 Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Never cap paging at a round number** — a run stopped at offset 3000 read its cap as the end; the set held 7,652. A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
@@ -129,13 +131,13 @@ Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.m
 
 `.github/workflows/pr-task-gate.yml` runs `scripts/pr-task-gate.sh` as the REQUIRED check "PR references an active task" on `opened`, `synchronize`, `reopened` and `edited`. Three rules a green PR obeys:
 
-- **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids there make `extract_task_id` exit 4 — "ambiguous task reference … Exactly one is required" — and the check reds (measured 2026-09-02: three PRs closing 2–3 rows each, all red here, none on a claim). A PR that lands several rows keeps ONE `Task:` and lists the others as `Also-closes: <doc_id>`, stamped and closed by hand. Restating the same id twice is fine; ids are deduplicated.
-- **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim still live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = definitive fail. Hold the claim until the PR MERGES — pulse every ~18 min (a pulse bumps the epoch; re-read before stamp/close).
+- **Exactly one `Task: <doc_id>` at column 0** of the PR body. Two DISTINCT ids there make `extract_task_id` exit 4 — "ambiguous task reference … Exactly one is required" — and the check reds (measured 2026-09-02: three PRs closing 2–3 rows each, all red here, none on a claim). A PR landing several rows keeps ONE `Task:` and lists the others as `Also-closes: <doc_id>`, stamped and closed by hand. Restating the same id twice is fine; ids are deduplicated.
+- **The claim is read when the gate RUNS, not when the PR opened.** Pass = the row is `in_progress` with a `claim.worker`, `done` with a `claim.closed_by`, or `open` with a claim still live at the PR's `created_at`. Never claimed, lapsed BEFORE the PR opened, cancelled, or wrong worker = definitive fail. Hold the claim until the PR MERGES — pulse every ~18 min (see **Lease + epoch**).
 - **A red caused by the body is fixed by editing the body**, not by pushing a commit — `edited` re-triggers the workflow. Exit 2 (ledger unreachable) and 3 (the gate's credential refused) are the workflow's, not yours: re-run once the ledger is up.
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** **pulses** ≤1/60s (holder-only renew; now-line from `tool_name` + cwd basename, never the transcript; a lost lease answers `not_holder`, never a re-claim), **Stop**/**SessionEnd** close on the epoch pulse stamped (re-claiming only if that stamp is stale) IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
+A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** **pulses** ≤1/60s (holder-only renew; now-line from `tool_name` + cwd basename, never the transcript; a lost lease answers `not_holder`, never a re-claim), **Stop**/**SessionEnd** close on the epoch pulse stamped (re-claiming only if that stamp is stale) IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`). No `uninstall` — remove hook groups by hand.
 
 ## Working with your AI in Studio
 
@@ -168,9 +170,9 @@ A scattered board is a defect — make every new task fit the structure:
 Any write-tier token spins up an isolated sandbox in one command (deleting a workspace is [deferred](../decisions/deferred.md); spikes are abandoned in place):
 
 ```bash
-bp workspace create Spike     # → workspace + you as owner + a Default project + production dataset
+bp workspace create Spike  # → workspace + you as owner + a Default project + production dataset
 bp -w spike workspace project-create agents-v2  # member-gated; -w names the workspace
-bp workspace ls                                 # what your token can reach
+bp workspace ls  # what your token can reach
 ```
 
 Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror the prefix; flat `/v1/tasks/*` uses the server's default scope. Membership is the boundary: non-members get 404, never a leak.
