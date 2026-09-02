@@ -147,7 +147,23 @@
     body:has(.bp-paper-article) {
       background: var(--paper-bg-deep);
       color: var(--paper-ink);
-      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
+      /* THE READING SERIF, on the reader's <body>. This used to be a FOURTH
+         hand-kept copy of the stack (paper-surface.css, root.html.heex and
+         the paper-editor bundle carry the other three). It is now emitted
+         from design/tokens.json `font.reading.stack` like every other
+         `--tok-*`, so the ratified order has ONE source and the eventual
+         Source-Serif-first cutover is still a one-token edit.
+
+         The token is DECLARED here rather than merely consumed: paper-surface.css
+         scopes `--tok-reading-font` to `.bp-paper-surface, .bp-paper-body`, and
+         <body> is neither — the reader's surface class rides the <main> inside
+         it. Declaring it on the reader body makes `var()` below resolve for
+         real instead of silently living on a fallback, and the value is
+         byte-identical to the one .bp-paper-surface re-declares, so the
+         inner scope is a no-op re-statement rather than an override.
+         view_edit_parity_test.exs §10 pins this against the other three. */
+      --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
+      font-family: var(--tok-reading-font);
     }
     @media (prefers-color-scheme: dark) {
       body:has(.bp-paper-article),
@@ -879,8 +895,9 @@
           The reader now takes size, leading, tracking and font-features from the
           one source like every other paper surface. --%>
     .bp-paper-shell.bp-paper-article {
+      --paper-gutter: 40px;
       max-width: 660px;
-      padding: 56px 40px 96px;
+      padding: 56px var(--paper-gutter) 96px;
       /* Client evidence needs more stage than prose. Keep the shared reading
          measure untouched while letting paired screenshots use the viewport. */
       --bp-evidence-band: 1180px;
@@ -1126,10 +1143,35 @@
       .bp-image-lightbox__caption { font-size: 0.74rem; }
     }
 
-    @media (max-width: 720px) {
+    <%!-- THE GUTTER LADDER — 40 / 24 / 16 at 767 / 479, THE SAME STEPS AND THE
+          SAME BREAKPOINTS as the Studio's `.bp-paper-surface`
+          (root.html.heex). They were 40 -> 24 at 720 here and 40/24/16 at
+          767/479 there, and below 720 a later rule pushed this shell's
+          `padding-inline` to 20px while the Studio's was 24 or 16. Two shells
+          that share one `.bp-paper-surface` type scale but pad differently
+          wrap a line at a DIFFERENT WORD in View than in Edit, which is the
+          one thing the parity work exists to prevent.
+
+          The 16px step is also what buys the narrow measure back: 390 - 2*16 =
+          a 358px column, 42 characters per line, inside the 40-46 the reader
+          is designed to. At 20px it was 350px and 41; at the 24px this file
+          used to stop at, 342px and 40.
+
+          Each step REDECLARES the token and CONSUMES it — the invariant
+          measure_parity_test.exs pins on both shells now, in both directions:
+          redeclare without consuming and the padding is stale, consume without
+          redeclaring and the ladder has a rung that renders the wrong gutter. --%>
+    @media (max-width: 767px) {
       .bp-paper-shell.bp-paper-article {
+        --paper-gutter: 24px;
         max-width: 100%;
-        padding: 36px 24px 72px;
+        padding: 36px var(--paper-gutter) 72px;
+      }
+    }
+    @media (max-width: 479px) {
+      .bp-paper-shell.bp-paper-article {
+        --paper-gutter: 16px;
+        padding: 32px var(--paper-gutter) 72px;
       }
     }
 
@@ -1643,12 +1685,18 @@
       .bp-paper-article figure > .bp-cols { grid-template-columns: 1fr; }
     }
 
-    @media (max-width: 720px) {
+    @media (max-width: 767px) {
       .bp-paper-shell.bp-paper-article {
-        --bp-evidence-gutter: 16px;
-        --bp-evidence-width: calc(100vw - 32px);
+        /* The band collapses onto the gutter ladder above rather than onto its
+           own literals. `padding-inline: 20px` used to live here and was the
+           source of the reader's 20px narrow gutter — a THIRD value, later in
+           the sheet than the ladder and therefore the winner, while these two
+           band literals were already written for a 16px gutter (32 = 2 x 16).
+           The band's edge and the prose's edge were 4px apart by construction.
+           Both now read the one token, so they cannot drift again. */
+        --bp-evidence-gutter: var(--paper-gutter);
+        --bp-evidence-width: calc(100vw - 2 * var(--paper-gutter));
         --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
-        padding-inline: 20px;
       }
       .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
         display: block;
