@@ -633,7 +633,7 @@ tripwire '89.167.28.206' \
 tripwire 'v1=<hex>' \
   "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \
-  "docs/auth.md docs/api-v1.md api/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md templates/place-directory/README.md tooling/doc-onboarding/TRUTH-AUDIT.md"
+  "docs/auth.md docs/api-v1.md api/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/branch-protection-and-overrides.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md templates/place-directory/README.md tooling/doc-onboarding/TRUTH-AUDIT.md"
 
 if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
   echo "ok:   allowlist staleness not applicable to a custom DOCS_ANCHORS_ROOT"
@@ -852,6 +852,70 @@ elif ! printf '%s\n' "$CANON_PAIRS" | diff -u "$CANON_PIN" - >/dev/null 2>&1; th
   FAIL=1
 else
   echo "ok:   §8b all $CANON_PAIR_N marker pairing(s) match the pin — none has migrated"
+fi
+
+# --- 8c. merge-gates.md -> elixir.yml anchors (delegated) --------------------
+# WHY THIS SECTION EXISTS, and why it is a delegation rather than an inline arm.
+#
+# docs/ops/merge-gates.md is the card the routing table hands an agent who needs
+# to verify a MERGE-AUTHORITY claim, and four of its pointers into
+# .github/workflows/elixir.yml were bare line numbers. Insertions above them slid
+# every one by 80-95 lines: :510 landed on a golden-parity step, :667 on a
+# `MIX_ENV: prod` line, :655 on a libvips install. Every SENTENCE stayed true;
+# every POINTER stopped resolving, so a reader sent to confirm "no needs:
+# mix-test edge" read unrelated YAML instead. NOTHING IN CI READ THEM: §3/§3b
+# of this file validate PATH and SYMBOL anchors and have no line-number arm, so
+# the whole class was invisible here by construction. The pins are now job keys
+# and quoted comment text (#14842); this is what stops them rotting back.
+#
+# THE TRIGGER IS ALREADY CORRECT, which is the whole reason the check is mounted
+# HERE rather than in a workflow of its own: doc-gates.yml runs this script and
+# fires on `**/*.md` AND `.github/workflows/**` -- exactly the pair this guard
+# needs, since either side of the anchor can move. A new workflow would have had
+# to re-derive that trigger pair and be kept in sync with it forever.
+#
+# WHAT THIS BUYS, said honestly: doc-gates.yml's `Doc budgets + anchors` job is
+# NOT in the required set (its own header says its red does not stop a merge,
+# and .github/required-checks.json carries an S4 exclusion row). So this is a
+# real trigger on the right path pair -- wired and triggering, NOT merge
+# authority. Do not upgrade that wording without upgrading the job.
+#
+# DELEGATED, NOT INLINED. scripts/merge-gates-elixir-anchor-check.sh owns its
+# ANCHORS table, its non-vacuity row count and a 5-arm --selftest (a rename REDS;
+# a 40-line insertion above every job stays GREEN -- that pair is the argument
+# for anchors over line pins, and it is not restatable in three lines here).
+# Inlining it would copy the table into a second owner, which is the failure
+# §5 of this very file exists to prevent.
+MG_ANCHOR_GUARD="$REPO_ROOT/scripts/merge-gates-elixir-anchor-check.sh"
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO -- same reasoning as §8b. --selftest drives
+  # this gate against throwaway fixture trees carrying neither
+  # docs/ops/merge-gates.md nor .github/workflows/elixir.yml, and the delegated
+  # guard resolves both paths from ITS OWN location (the real checkout), so
+  # running it under a fixture root would judge the real repo while claiming to
+  # judge the fixture -- a pass or a fail that means nothing either way. This is
+  # also why §8c adds no st_case arm: the harness cannot reach it. Its coverage
+  # is the guard's own --selftest, run as a step beside this one.
+  echo "ok:   §8c merge-gates anchor check not applicable to a custom DOCS_ANCHORS_ROOT"
+elif [ ! -f "$MG_ANCHOR_GUARD" ]; then
+  # FAIL-CLOSED ON ABSENCE. A deleted guard must RED here rather than skip:
+  # otherwise "the file is gone" and "the anchors are fine" print the same
+  # `ok:`, which is the vacuous-green shape §8's positive control exists to kill.
+  echo "FAIL: §8c scripts/merge-gates-elixir-anchor-check.sh is missing."
+  echo "      merge-gates.md's elixir.yml anchors are then unguarded and will rot"
+  echo "      back to line pins. Restore it, or remove this section deliberately."
+  FAIL=1
+else
+  MG_OUT="$(mktemp)"
+  if bash "$MG_ANCHOR_GUARD" >"$MG_OUT" 2>&1; then
+    MG_OK=$(grep -c '^ok:' "$MG_OUT" || true)
+    echo "ok:   §8c ${MG_OK:-0} merge-gates.md -> elixir.yml anchor check(s) resolve"
+  else
+    echo "FAIL: §8c docs/ops/merge-gates.md's pointers into elixir.yml no longer resolve:"
+    sed 's/^/      /' "$MG_OUT"
+    FAIL=1
+  fi
+  rm -f "$MG_OUT"
 fi
 
 # --- summary ------------------------------------------------------------------

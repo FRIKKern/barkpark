@@ -749,6 +749,21 @@ if (verifyAssignments.length < VERIFY_FLOOR) {
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'fable').length} fable@high, rest opus@medium; ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
 SPENT.digest = budget.spent()
 
+// THE CARVE-OUT, MADE RUNNABLE. The verify prompt below granted a write and
+// named no verb, so a verifier had to rediscover the write path from scratch
+// and most abandoned the write. This is the whole path — the schema it must
+// materialise, the rehearsal, the verb, the one-new-file fence, and what a
+// refusal does. Kept literal: verifier-write-join.test.mjs EXTRACTS these two
+// commands from this string and runs them, so wording that drifts away from
+// ledger.mjs reds. No level-ladder vocabulary here (D20).
+const LEDGER_WRITE_HOWTO = `
+WRITING A LEDGER ROW (the carve-out above, made runnable — nothing materialises the input for you):
+- Your facts file is a JSON array of \`{claim, evidence, rerun}\` — exactly those three keys, and never a \`value\`/\`result\` key (the store indexes how to re-derive, never the answer). Only \`rerun\` reaches the store; subject and quantity are minted out of that command, not out of your prose, so write \`rerun\` as if it were the only thing you were saying.
+- Rehearse: \`node tooling/grip/ledger.mjs prescreen <facts.json>\` — stores nothing, prints ADMIT/REFUSE plus the screen's own reason per row, exits 1 exactly when the write would refuse.
+- Write: \`node tooling/grip/ledger.mjs write <facts.json>\` — omit the optional trailing [dir] and the run file lands in tooling/grip/ledger/ from any cwd.
+- SCOPE FENCE: run it ONCE. It creates exactly one new \`<run_id>-<digest>.json\` and opens no existing file. Never hand-edit a *.json there — the fold reads a forgery back as authoritative — and touch nothing else under tooling/grip/.
+- FAILURE IS ALL-OR-NOTHING: one refused row stores NOTHING, prints \`REJECTED — nothing was written\` with a reason class per row (REFUSED-COMMAND, VALUE-STORED, UNKNOWN-FIELD, …) and exits 1; nothing mintable also exits 1; an unreadable or non-array facts file exits 2. Success exits 0 and prints \`wrote <path>\`; the identical write re-run is idempotent — \`already recorded\`, same file, still exit 0. Never retry a refusal unchanged: fix or drop those rows and re-run prescreen.`
+
 // ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
 //
 // THE STRANDED-FILE CASE IS RULED, NOT LEFT SILENT (charter D27/D35). Verify
@@ -791,6 +806,7 @@ ${q.verify_commands ? `MUST RUN (proof, not reading): ${q.verify_commands}
 Run it (plus whatever else proves/refutes the claim), and QUOTE the decisive output lines in proofs[] — never paraphrase a pass. A failing command is a finding, not a failure of yours.` : 'Reading suffices for this assignment, but if you find a load-bearing claim that only a run can settle, run it and record the proof.'}
 
 Investigate sharply — grep/read${CHARTER_EXISTS ? `, the charter at ${CHARTER_PATH},` : ''} \`bp search query "<terms>"\` for prior art (the \`query\` sub-verb is REQUIRED — without it the command exits 2 and the empty result is indistinguishable from genuine absence). "The premise is wrong" remains a valid answer. Every fact needs evidence you actually derived plus its \`rerun\` command; every proof needs real output.
+${q.needs_worktree ? '' : LEDGER_WRITE_HOWTO}
 
 COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what you checked it for, found / not_found / partial. Not-found is a finding. Unlisted = unchecked. The wave Paper (${WAVE_PAPER}) will carry your coverage; you do NOT write the Paper yourself.
 ${JOURNEY_BLOCK}`,

@@ -226,7 +226,10 @@ if command -v psql >/dev/null 2>&1 \
   if [ -n "$PENDING" ]; then
     bad "pending migrations:$PENDING — run: cd api && mix ecto.migrate"
   else
-    ok "dev DB migrations are current"
+    # VERSION rows only. A migration amended in place after it ran keeps its
+    # row and its stale object forever, so "current" here is not a claim that
+    # the schema OBJECTS match the files (PDS-D311).
+    ok "dev DB migration versions are current (version rows, not a read of the objects)"
   fi
 else
   skip "dev DB not reachable — migration check skipped"

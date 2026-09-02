@@ -471,6 +471,8 @@ func spaceLines(res cloudclient.MetricsResult) ([]string, []pdrender.Block) {
 	}
 
 	lines = append(lines, spaceSitesLine(sp))
+	lines = append(lines, spaceConsumerLines(sp)...)
+	lines = append(lines, spaceResidualLine(sp))
 
 	// The bar chart is the sites breakdown, and it is drawn ONLY when there is a
 	// measured list with rows in it. nil and empty are both worded on the sites
@@ -528,10 +530,18 @@ func spaceSitesLine(sp *cloudclient.MetricsSpace) string {
 		line += " (" + sanitizeCell(strings.TrimSpace(*sp.Sites.Dir)) + ")"
 	}
 	line += ": "
-	if sp.Sites.Bytes != nil {
-		line += humanBytes(*sp.Sites.Bytes)
-	} else {
+	switch {
+	case sp.Sites.Bytes == nil:
 		line += "size not reported"
+	case *sp.Sites.Bytes < 0:
+		// The -1 sentinel, worded. It was reaching the terminal as the literal
+		// string "-1 B" — a NEGATIVE byte figure presented as a size, on the
+		// live build-plane box, whose sites walk fails on every cadence. The
+		// count beside it already words its own -1 correctly; the bytes did
+		// not, and the two halves of the same measurement disagreed on screen.
+		line += "size UNKNOWN: the walk failed (this is not a size of zero)"
+	default:
+		line += humanBytes(*sp.Sites.Bytes)
 	}
 
 	switch {
@@ -548,6 +558,193 @@ func spaceSitesLine(sp *cloudclient.MetricsSpace) string {
 		line += "  ·  biggest consumers not reported"
 	case len(sp.Sites.Top) == 0:
 		line += "  ·  no sites reported"
+	}
+	return line
+}
+
+// spaceConsumerLines names the roots this box was told to look at, one line
+// each, with WHAT WAS FOUND INSIDE them.
+//
+// Until this existed `bp` had no reader for consumer_roots at all. The agent
+// has posted the rows since #13000 and the only surface that rendered them was
+// the browser console, so an operator holding a terminal still had to ssh to
+// the box to learn what was eating its disk — with the answer already sitting
+// in the control plane's database. The whole point of the space payload was to
+// stop that being an ssh question.
+//
+// Every root gets a line even when it holds nothing, and ESPECIALLY when it is
+// absent: a row that vanishes is indistinguishable from a root that is empty,
+// and that confusion is how a probe pointed at /opt/barkpark/sites reported
+// good news about a box that was 100% full.
+func spaceConsumerLines(sp *cloudclient.MetricsSpace) []string {
+	if sp.ConsumerRoots == nil {
+		return []string{"  consumers on this box: not reported — this agent predates the consumer-root list " +
+			"(it looks only at the sites tree, which does not exist on a build box at all)"}
+	}
+	if len(sp.ConsumerRoots) == 0 {
+		return []string{"  consumers on this box: none configured — this agent was told to look nowhere, " +
+			"which is not the same as looking and finding nothing"}
+	}
+
+	lines := make([]string, 0, len(sp.ConsumerRoots)+1)
+	lines = append(lines, "  consumers on this box:")
+	for _, r := range sp.ConsumerRoots {
+		lines = append(lines, "    "+spaceConsumerLine(r))
+	}
+	return lines
+}
+
+func spaceConsumerLine(r cloudclient.MetricsSpaceConsumerRoot) string {
+	line := sanitizeCell(strings.TrimSpace(r.Path)) + ": "
+	status := ""
+	if r.Status != nil {
+		status = *r.Status
+	}
+
+	switch status {
+	case "absent":
+		// The state this whole axis exists for. It is a MEASUREMENT — "we
+		// looked; there is no such directory" — and it must never render as a
+		// size, least of all as zero.
+		return line + "not on this box (this is a measurement, not a size of zero)"
+	case "unmeasured", "":
+		return line + "could not be read (this is not a size of zero)"
+	}
+
+	if r.Bytes == nil || *r.Bytes < 0 {
+		return line + "size not reported"
+	}
+	line += humanBytes(*r.Bytes)
+	if status == "degraded" {
+		// The number is a FLOOR, not a size: measured on a real box, 212K
+		// reported against a true 712K, a 70% shortfall. Word it as "or more"
+		// or the reader takes a floor for an answer.
+		line += " OR MORE"
+		if r.DegradedCount != nil && *r.DegradedCount > 0 {
+			line += fmt.Sprintf(" (du could not descend into %d subtree(s)", int(*r.DegradedCount))
+			if len(r.Degraded) > 0 {
+				line += ": " + sanitizeCell(strings.Join(r.Degraded, ", "))
+			}
+			line += ")"
+		}
+	}
+
+	// The biggest child, by name. An operator acts on
+	// io.containerd.snapshotter.v1.overlayfs, never on "/var/lib/containerd".
+	if len(r.Top) > 0 {
+		line += "  ·  biggest: " + sanitizeCell(r.Top[0].Name) + " " + humanBytes(r.Top[0].Bytes)
+		if r.Count != nil && int(*r.Count) > len(r.Top) {
+			line += fmt.Sprintf(" (top %d of %d)", len(r.Top), int(*r.Count))
+		}
+	}
+
+	// And WHY it was held out of the residual, if it was. This is on the same
+	// line as the bytes on purpose: the reading is real and the exclusion is
+	// about the SUBTRACTION, and splitting them invites reading one without the
+	// other.
+	if r.ExcludedReason != nil && strings.TrimSpace(*r.ExcludedReason) != "" {
+		line += "  ·  " + wordExclusion(strings.TrimSpace(*r.ExcludedReason))
+	}
+	return line
+}
+
+// wordExclusion turns the payload's machine-readable slug into the sentence for
+// this surface. The slug is the contract; every surface words it for its own
+// reader, and none of them parses prose back into a decision.
+func wordExclusion(reason string) string {
+	switch {
+	case reason == "cross-mount":
+		return "NOT subtracted: on a different filesystem than /, so these bytes are not in this box's root-filesystem total"
+	case reason == "device-unverified":
+		return "NOT subtracted: this agent could not tell which filesystem it is on, and unknown is not the same as same"
+	case strings.HasPrefix(reason, "under:"):
+		return "NOT subtracted: already counted inside " + sanitizeCell(strings.TrimPrefix(reason, "under:"))
+	}
+	return "NOT subtracted: " + sanitizeCell(reason)
+}
+
+// spaceResidualLine is the line this whole axis was missing: what the reading
+// did NOT measure.
+//
+// COVERAGE IS ALWAYS THIS BOX'S, NEVER THE FLEET'S, and the wording says so in
+// as many words. That is not pedantry — coverage is ANTI-CORRELATED with
+// trouble: the same two roots cover 81.66% of the box at 96% disk and 34.86% of
+// another, a 47-point spread, so a fleet-wide average is highest exactly where
+// it is least true. There is no such thing as "the fleet's coverage" on this
+// axis, only one box's at a time.
+func spaceResidualLine(sp *cloudclient.MetricsSpace) string {
+	const head = "  unaccounted: "
+	r := sp.Residual
+	if r == nil {
+		return head + "not reported — this agent predates the residual, so the roots above are a " +
+			"SUBSET of this box's disk and nothing says how large a subset"
+	}
+
+	status := ""
+	if r.Status != nil {
+		status = *r.Status
+	}
+
+	switch status {
+	case "undefined":
+		// The clamp, worded. A negative figure never reaches here, and neither
+		// does a zero: "0 B unaccounted" is the strongest claim this axis can
+		// make and it must not be reachable by arithmetic going wrong.
+		line := head + "NOT COMPUTABLE"
+		if r.MeasuredBytes != nil && r.OfBytes != nil {
+			line += fmt.Sprintf(" — the measured roots total %s against this box's %s used",
+				humanBytes(*r.MeasuredBytes), humanBytes(*r.OfBytes))
+		}
+		return line + ". Disjoint trees on one filesystem cannot exceed its used total, so the " +
+			"roots overlap or cross a mount. No figure is reported rather than a negative one"
+	case "unmeasured":
+		reason := ""
+		if r.Reason != nil {
+			reason = *r.Reason
+		}
+		switch reason {
+		case "root-used-unmeasured":
+			return head + "not computed — this box reported no root-filesystem used total, and there is " +
+				"nothing to subtract from (df's capacity percent is a share of a different whole and is not a substitute)"
+		case "root-device-unverified":
+			return head + "not computed — this agent could not verify which filesystem its roots are on, " +
+				"and roots that cannot be placed cannot be subtracted"
+		}
+		return head + "not computed"
+	case "computed":
+	default:
+		return head + "not reported"
+	}
+
+	if r.Bytes == nil || r.OfBytes == nil || *r.Bytes < 0 {
+		return head + "not reported"
+	}
+
+	// The value, its share, AND the denominator that produced the share — all
+	// three, so nothing here can be quoted as a percentage nobody can check.
+	line := head + humanBytes(*r.Bytes) + " (" + pctOf(*r.Bytes, *r.OfBytes) +
+		" of this box's " + humanBytes(*r.OfBytes) + " used)"
+
+	if r.CountedRoots != nil {
+		total := int(*r.CountedRoots)
+		if r.ExcludedRoots != nil {
+			total += int(*r.ExcludedRoots)
+		}
+		line += fmt.Sprintf("  ·  measured %d of %d root(s) on this box", int(*r.CountedRoots), total)
+		if r.ExcludedRoots != nil && *r.ExcludedRoots > 0 {
+			line += " (the rest are named above with the reason they were not subtracted)"
+		}
+	}
+
+	// Postgres is the one consumer this payload can measure twice, so which
+	// measurement was used is stated rather than assumed.
+	if r.PGSource != nil {
+		switch *r.PGSource {
+		case "du-root":
+			line += "  ·  postgres counted once, via its du root"
+		case "pg-size-bytes":
+			line += "  ·  postgres counted once, via pg_database_size"
+		}
 	}
 	return line
 }

@@ -217,6 +217,31 @@ grep -q "MATCHES EVERYTHING" <<<"$OUT" \
 run "$TMP/empty-population.json" WEBHOOK_FANOUT_EXPECT_MIN=1
 grep -q "rows=0" <<<"$OUT" && ok "the meter still prints on a red (rows=0)" || bad "meter silent on the empty-population red"
 
+# THE GROUP KEY MUST ACTUALLY SEPARATE. The meter groups on
+# `.dataset + <sep> + .doc_type`, so a separator that is not there at RUNTIME
+# silently merges distinct pairs whose concatenations collide — and prints the
+# merged count under the FIRST member's labels, i.e. a wrong dataset and a wrong
+# doc_type on a wrong number. The separator was written as a literal NUL byte
+# inside the jq program, and bash DROPS a NUL while building an argv (a NUL
+# cannot survive exec): jq received `.dataset + "" + .doc_type`, so there was no
+# separator at all. This fixture is the shape that tells the two forms apart —
+# ("ab","c") and ("a","bc") both concatenate to "abc" — and it goes RED on the
+# raw-NUL form while the \u0000 escape keeps them two groups of one.
+{
+  printf '{"webhooks":['
+  printf '%s,' "$(row site-autodeploy-collide-1 ab '["c"]')"
+  printf '%s'  "$(row site-autodeploy-collide-2 a  '["bc"]')"
+  printf ']}\n'
+} >"$TMP/key-collision.json"
+
+run "$TMP/key-collision.json" WEBHOOK_FANOUT_EXPECT_MIN=2
+if grep -q "dataset=ab doc_type=c rows=1" <<<"$OUT" && grep -q "dataset=a doc_type=bc rows=1" <<<"$OUT"; then
+  ok "the meter group key SEPARATES: (ab,c) and (a,bc) stay two rows of 1"
+else
+  bad "the meter merged two distinct dataset/doc_type pairs — the group-key separator never reached jq"
+  printf '%s\n' "$OUT" | sed 's/^/       | /' >&2
+fi
+
 # ═══ 5. THE GUARD CANNOT BE LAUNDERED ════════════════════════════════════════
 section "the reporting can lose"
 
@@ -245,12 +270,16 @@ section "the reporting can lose"
 # to close early, and the status read below is then grep's own, not a pipeline's.
 #
 # `-a` is the second half of the fix and is NOT cosmetic. webhook-fanout-watch.sh
-# carries a literal NUL byte — the `^@` separator inside the jq group_by near its
-# meter — so grep classifies it as BINARY and, instead of the ~6.4 kB of stripped
-# text, emits the one line `Binary file … matches`. Without -a the script-side
-# assertion below therefore searched 38 bytes that can never contain the pattern:
-# it was not flaky, it was UNCONDITIONALLY blind, and it printed its ok over a
-# copy of the script with continue-on-error planted in it three times.
+# USED TO carry a literal NUL byte — the `^@` separator inside the jq group_by
+# near its meter — so grep classified it as BINARY and, instead of the ~6.4 kB of
+# stripped text, emitted the one line `Binary file … matches`. Without -a the
+# script-side assertion below therefore searched 38 bytes that can never contain
+# the pattern: it was not flaky, it was UNCONDITIONALLY blind, and it printed its
+# ok over a copy of the script with continue-on-error planted in it three times.
+# The separator is a \u0000 escape today and the no-NUL invariant is asserted
+# below, so `-a` is now a BELT, not the load-bearing half — it is kept because a
+# predicate that only works while a file happens to be plain text is one byte
+# away from going blind again.
 uncommented() { grep -a -vE '^[[:space:]]*#' "$1"; }
 
 # uncommented_has PATTERN FILE [extra grep flags…] → 0 iff the stripped file matches.
@@ -309,11 +338,9 @@ if [ -f "$WF" ]; then
   # print ok on a file that carries one — a false green indistinguishable from a
   # real pass. Plant one in a copy of the SCRIPT and require the same predicate
   # those assertions use to say so.
-  # The fixture is built with cat, NOT with awk/sed. awk silently drops the NUL
-  # byte in $WATCH, and a fixture without that NUL is a fixture without the very
-  # property that blinds the check — the arm would then pass while the real file
-  # stayed unreadable. Copy the bytes, append the plant, and assert BOTH the
-  # plant and the NUL survived before trusting the result.
+  # The fixture is built with cat, NOT with awk/sed, so it is a BYTE copy of
+  # $WATCH plus the plant: whatever makes the real file hard to read is
+  # reproduced here rather than filtered out on the way in.
   { cat "$WATCH"; printf '        continue-on-error: true\n'; } > "$TMP/laundered-watch.sh"
   if [ "$(grep -c -a "continue-on-error" "$TMP/laundered-watch.sh")" -gt \
        "$(grep -c -a "continue-on-error" "$WATCH")" ]; then
@@ -321,10 +348,20 @@ if [ -f "$WF" ]; then
   else
     bad "the script-side plant did not land in $TMP/laundered-watch.sh"
   fi
-  if [ "$(tr -dc '\000' < "$WATCH" | wc -c)" = "$(tr -dc '\000' < "$TMP/laundered-watch.sh" | wc -c)" ]; then
-    ok "the fixture preserves \$WATCH's NUL bytes (it still reproduces the binary-blindness)"
+  # $WATCH MUST STAY PLAIN TEXT. It used to carry a raw NUL — the group_by
+  # separator near the meter — and one NUL byte makes every line-printing grep
+  # over scripts/ call the file BINARY and emit nothing but "Binary file …
+  # matches". That is not hypothetical: it blinded the two assertions above, and
+  # it is how a census of scripts/ concluded this script had no `set` line and no
+  # harness when line 123 is `set -uo pipefail` and this file is the harness. The
+  # separator is a \u0000 ESCAPE now (which is also the only form that reaches
+  # jq — bash drops a literal NUL from an argv), so the invariant is checkable:
+  # ZERO NUL bytes, forever. This arm replaces a preservation check that went
+  # vacuous the moment the NUL left — 0 == 0 is an ok that proves nothing.
+  if [ "$(tr -dc '\000' < "$WATCH" | wc -c | tr -d ' ')" = "0" ]; then
+    ok "\$WATCH carries no NUL byte — every line-printing grep over it can still read it"
   else
-    bad "the fixture lost \$WATCH's NUL bytes — it no longer tests the condition that blinded this check"
+    bad "\$WATCH carries a NUL byte — grep will call it BINARY and the assertions above go blind"
   fi
   if uncommented_has "continue-on-error" "$TMP/laundered-watch.sh" -i; then
     ok "the script-side predicate FIRES on a planted continue-on-error (the no-continue assertion can still lose)"

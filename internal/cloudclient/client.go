@@ -1132,7 +1132,67 @@ type MetricsSpace struct {
 	DBSize       *float64          `json:"db_size"`
 	TopRelations []RelationSize    `json:"top_relations"`
 	Sites        MetricsSpaceSites `json:"sites"`
-	ReportedAt   *string           `json:"reported_at"`
+
+	// ConsumerRoots is the BUILD PLANE's disk and every other tree the sites
+	// axis structurally cannot see. Until it was decoded here, `bp` had NO
+	// reader for it at all: the agent has posted these rows since #13000 and
+	// the only surface that rendered them was the browser console, so "what is
+	// eating the disk on that box" was still an ssh question with the answer
+	// already in the database. That is the same failure the space payload was
+	// built to end, one layer up.
+	//
+	// nil is "this agent measured no roots"; an empty slice is "it was
+	// configured to look nowhere". Different facts, kept different.
+	ConsumerRoots []MetricsSpaceConsumerRoot `json:"consumer_roots"`
+
+	// Residual is what the reading did NOT measure — or a stated refusal.
+	// nil is an agent that predates the field, which a view must word
+	// differently from a refusal.
+	Residual *MetricsSpaceResidual `json:"residual"`
+
+	ReportedAt *string `json:"reported_at"`
+}
+
+// MetricsSpaceConsumerRoot is one named disk-consumer root on THIS box.
+//
+// Status carries four states and a reader must branch on it, never on
+// Bytes >= 0: "read", "degraded" (the total is a FLOOR — du finished but could
+// not descend everywhere), "absent" (not on this box, which must never render
+// as 0 bytes) and "unmeasured".
+//
+// ExcludedReason is INDEPENDENT of Status: a root can be perfectly well read
+// and still not be subtractable from the residual — an overlay mount is a
+// complete, correct reading of a tree that is not on the root filesystem.
+type MetricsSpaceConsumerRoot struct {
+	Path           string         `json:"path"`
+	Status         *string        `json:"status"`
+	Bytes          *float64       `json:"bytes"`
+	Count          *float64       `json:"count"`
+	Top            []RelationSize `json:"top"`
+	Degraded       []string       `json:"degraded"`
+	DegradedCount  *float64       `json:"degraded_count"`
+	ExcludedReason *string        `json:"excluded_reason"`
+}
+
+// MetricsSpaceResidual is the answer to the question every part-of-a-whole
+// reading begs and almost none of them state: what about the rest?
+//
+// OfBytes is the denominator — the root filesystem's USED total — and it
+// travels with the value so no view can render a share without the volume that
+// produced it. It is never df's capacity percent: that is ceil(used/(used+avail))
+// with root-reserved blocks excluded, a share of a DIFFERENT whole.
+//
+// Status "undefined" is the refusal a negative result becomes, and Bytes keeps
+// the -1 sentinel there. A view must word it, never print it.
+type MetricsSpaceResidual struct {
+	Status        *string  `json:"status"`
+	Bytes         *float64 `json:"bytes"`
+	OfBytes       *float64 `json:"of_bytes"`
+	MeasuredBytes *float64 `json:"measured_bytes"`
+	CountedRoots  *float64 `json:"counted_roots"`
+	ExcludedRoots *float64 `json:"excluded_roots"`
+	PGSource      *string  `json:"pg_source"`
+	Reason        *string  `json:"reason"`
 }
 
 // MetricsSpaceRoot is the root filesystem's used/total pair. Both nil is "we

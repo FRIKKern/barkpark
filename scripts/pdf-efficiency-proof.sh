@@ -211,20 +211,138 @@ for r in d.get("documents") or []:
         break'
 }
 
-census_ours() { # -> count of raw task rows carrying this run'"'"'s order prefix
-  curl -sS --max-time 10 -H "Authorization: Bearer $TARGET_TOKEN" \
-    "$TARGET_BASE/v1/data/query/production/task?perspective=raw&limit=1000" \
-  | P="$OP-" python3 -c '
+# >>> CENSUS-WALK BEGIN (extracted VERBATIM by scripts/pdf-efficiency-proof.test.sh)
+#
+# THE RAW-TASK CENSUS — PAGE TO EXHAUSTION, OR REFUSE. Never a number taken from
+# one capped read.
+#
+# The query API's contract (api/lib/barkpark_web/controllers/query_controller.ex,
+# `query_index/4` + `maybe_put_total/7`): `limit` clamps to [1,1000] (default
+# 100), `offset` clamps to [0,100_000], every page carries `result.hasMore`, and
+# `?count=true` adds `result.total` — the UNPAGINATED count for exactly this
+# type + perspective + filter.
+#
+# WHAT THIS REPLACED: a single `?perspective=raw&limit=1000` GET whose rows were
+# grepped client-side and printed as a census. Measured against the live ledger
+# 2026-08-22 that read returned 1000 rows of 7527 (13.3%); measured again
+# 2026-09-01 it returns 1000 of 8447 (11.8%). A draft sorting past position 1000
+# was invisible, and the census printed "0" — the SAME "0" a run that filed
+# nothing prints. Truncation and absence were indistinguishable at the call site,
+# so the proof could not fail on a miss. Never raise the cap: a raised cap
+# truncates again silently at the new number (the PR #11438 / #13011 pattern).
+#
+# FIVE NAMED REFUSALS, each asserting NOTHING about the census — a check that
+# cannot lose proves nothing (PDS-D20):
+#   CENSUS-UNPARSEABLE   a page was not a documents envelope, on any attempt
+#   CENSUS-NO-TOTAL      ?count=true was asked for and no `total` came back
+#   CENSUS-PAGE-OVERRUN  the pages never went short — more pages than `total`
+#                        can hold, so the walk has no end
+#   CENSUS-DUP-ROWS      an id repeated across pages (the window shifted under
+#                        the walk, so something also fell through the seam)
+#   CENSUS-TRUNCATED     rows walked < the server's own `total`
+#
+# SEAMS (the hermetic harness and a live re-measure drive this SAME text):
+#   CENSUS_ID_PREFIX   server-side `filter[_id][contains]` AND the client-side
+#                      match; set to "" for the whole type, unfiltered
+#   CENSUS_PAGE_LIMIT  rows per page (the API clamps it to 1000)
+#   CENSUS_MAX_PAGES   absolute page ceiling (offset itself clamps at 100_000)
+#   CENSUS_PAGE_TRIES  attempts per page before CENSUS-UNPARSEABLE. A loaded
+#                      server answers a deep-offset page with an intermittent
+#                      500 (`DBConnection.ConnectionError`) — measured on
+#                      guerrilla 2026-09-01 at roughly one request in three. A
+#                      bounded retry is not a swallow: the cap is small, the
+#                      refusal names it, and every OTHER refusal still fires on
+#                      the first parseable page.
+CENSUS_PAGE_LIMIT="${CENSUS_PAGE_LIMIT:-1000}"
+CENSUS_MAX_PAGES="${CENSUS_MAX_PAGES:-200}"
+CENSUS_PAGE_TRIES="${CENSUS_PAGE_TRIES:-6}"
+CENSUS_ID_PREFIX="${CENSUS_ID_PREFIX-$OP-}"
+CENSUS=""   # the ONLY output channel — census_ours must NOT run in a subshell,
+            # or a refusal would exit that subshell and leave a number behind.
+CENSUS_PARSED=""
+CENSUS_HDR=""
+
+census_refuse() { # NAME message — non-zero, BY NAME, asserting nothing
+  say ""
+  say "      $1: $2"
+  say "      the census is NOT reported — a walk that cannot prove it read every"
+  say "      row proves nothing about the rows it did read."
+  exit 1
+}
+
+census_page() { # offset -> raw page body on stdout
+  # `[`/`]` are percent-encoded: curl reads a bare `[...]` as a glob range and
+  # refuses the URL ("bad range specification") before the server ever sees it.
+  local off="$1" url
+  url="$TARGET_BASE/v1/data/query/production/task?perspective=raw&count=true"
+  url="$url&limit=$CENSUS_PAGE_LIMIT&offset=$off&order=_createdAt:asc"
+  if [ -n "$CENSUS_ID_PREFIX" ]; then
+    url="$url&filter%5B_id%5D%5Bcontains%5D=$CENSUS_ID_PREFIX"
+  fi
+  curl -sS --max-time 60 -H "Authorization: Bearer $TARGET_TOKEN" "$url"
+}
+
+census_fetch_page() { # offset — sets CENSUS_PARSED/CENSUS_HDR, or refuses
+  local off="$1" attempt=0 body
+  while :; do
+    attempt=$((attempt + 1))
+    body="$(census_page "$off")"
+    # ONE python pass per page: a header line `OK<TAB>n<TAB>total`, then one
+    # `M|X<TAB>id` line per returned row (M = matches the prefix).
+    CENSUS_PARSED="$(printf '%s' "$body" | P="$CENSUS_ID_PREFIX" python3 -c '
 import json, os, sys
 try:
     d = json.load(sys.stdin)
 except Exception:
-    print(-1); sys.exit(0)
+    print("PARSE-FAIL"); sys.exit(0)
 res = d.get("result", d) if isinstance(d, dict) else {}
-docs = res.get("documents") or []
-p = os.environ["P"]
-print(sum(1 for x in docs if p in str(x.get("_id", ""))))'
+docs = res.get("documents")
+if not isinstance(docs, list):
+    print("PARSE-FAIL"); sys.exit(0)
+tot = res.get("total")
+print("OK\t%d\t%s" % (len(docs), tot if isinstance(tot, int) else ""))
+p = os.environ.get("P", "")
+for x in docs:
+    i = str(x.get("_id", "") if isinstance(x, dict) else "")
+    print("%s\t%s" % ("M" if (p == "" or p in i) else "X", i))')"
+    # NOT `| head -1`: pipefail + SIGPIPE turns an early-closing head into rc
+    # 141, and `set -e` would kill the run mid-walk. Pure expansion, no pipe.
+    CENSUS_HDR="${CENSUS_PARSED%%$'\n'*}"
+    case "$CENSUS_HDR" in OK*) return 0 ;; esac
+    [ "$attempt" -lt "$CENSUS_PAGE_TRIES" ] || census_refuse CENSUS-UNPARSEABLE "the page at offset $off (limit $CENSUS_PAGE_LIMIT) was not a documents envelope on any of $CENSUS_PAGE_TRIES attempt(s); last body: $(printf '%s' "$body" | tr -d '\n' | cut -c1-200)"
+  done
 }
+
+census_ours() { # sets CENSUS to the count of raw task rows carrying the prefix
+  local off=0 pages=0 walked=0 total=0 overrun=0 max_pages
+  local ids n page_total distinct matched
+  ids="$(mktemp "${WORKDIR:-${TMPDIR:-/tmp}}/census-ids.XXXXXX")"
+  while :; do
+    census_fetch_page "$off"
+    n="$(printf '%s' "$CENSUS_HDR" | cut -f2)"
+    page_total="$(printf '%s' "$CENSUS_HDR" | cut -f3)"
+    [ -n "$page_total" ] || census_refuse CENSUS-NO-TOTAL "the page at offset $off was asked for ?count=true and came back with no integer \`total\` — without the server's own count a walk cannot know it finished"
+    printf '%s\n' "$CENSUS_PARSED" | tail -n +2 >> "$ids"
+    walked=$((walked + n))
+    pages=$((pages + 1))
+    total="$page_total"
+    max_pages=$(( (page_total + CENSUS_PAGE_LIMIT - 1) / CENSUS_PAGE_LIMIT + 2 ))
+    [ "$max_pages" -le "$CENSUS_MAX_PAGES" ] || max_pages="$CENSUS_MAX_PAGES"
+    [ "$n" -ge "$CENSUS_PAGE_LIMIT" ] || break
+    if [ "$pages" -ge "$max_pages" ]; then overrun=1; break; fi
+    off=$((off + CENSUS_PAGE_LIMIT))
+  done
+  [ "$overrun" -eq 0 ] || census_refuse CENSUS-PAGE-OVERRUN "read $pages full page(s) of $CENSUS_PAGE_LIMIT ($walked rows) against a server-reported total of $total — the pages never went short, so this walk has no end and any count would be an artefact of where it gave up"
+  [ "$walked" -ge "$total" ] || census_refuse CENSUS-TRUNCATED "walked $walked row(s) in $pages page(s) but the server reports total=$total for this read — $((total - walked)) row(s) were never looked at, and a row that was not read is indistinguishable from a row that is not there"
+  distinct="$(cut -f2 "$ids" | sort -u | wc -l | tr -d ' ')"
+  [ "$distinct" -eq "$walked" ] || census_refuse CENSUS-DUP-ROWS "walked $walked row(s) across $pages page(s) but only $distinct distinct id(s) — the page window shifted under the walk, so a row fell through the seam between two pages"
+  matched="$(grep -c '^M' "$ids" 2>/dev/null || true)"
+  [ -n "$matched" ] || matched=0
+  rm -f "$ids"
+  CENSUS="$matched"
+  say "      census walk: $pages page(s) of $CENSUS_PAGE_LIMIT, $walked row(s) read, server total=$total, $matched carrying '${CENSUS_ID_PREFIX:-<no filter>}'"
+}
+# <<< CENSUS-WALK END
 
 delete_doc() { # id type — dataset-in-path delete (PDF-D44d); body swallowed
   curl -sS --max-time 10 -X POST "$TARGET_BASE/v1/data/mutate/production" \
@@ -236,7 +354,7 @@ cleanup_filed() { # delete both filed order drafts, assert census back to zero
   delete_doc "$OP-export" "task"
   delete_doc "$OP-lint" "task"
   local c
-  c="$(census_ours)"
+  census_ours; c="$CENSUS"
   info "cleanup: deleted $OP-export + $OP-lint — raw census now $c"
   [ "$c" = "0" ] || efail "cleanup left $c raw row(s) behind (want 0)"
 }
@@ -679,7 +797,7 @@ rung_seal 1 "two stub listeners up in distinct PGIDs, profiles live on the roste
 head_rung 2 "POSITIVE — mixed batch: heavy-on-big + light-on-lean from a LIVE pull"
 
 : >"$FILER_LOG"
-C_BEFORE="$(census_ours)"
+census_ours; C_BEFORE="$CENSUS"
 [ "$C_BEFORE" = "0" ] || efail "raw census not clean before R2 (found $C_BEFORE row(s) with prefix $OP-)"
 
 ROSTER_R2="$WORKDIR/roster-r2.json"
@@ -707,7 +825,7 @@ else
   reject_line "UNPLACEABLE"
   FILED_N="$(grep -c '^FILED ' "$FILER_LOG" 2>/dev/null || true)"
   [ "$FILED_N" = "2" ] || efail "stub filer log shows $FILED_N FILED line(s), want 2 ($(head -c 200 "$FILER_LOG" 2>/dev/null))"
-  C_AFTER="$(census_ours)"
+  census_ours; C_AFTER="$CENSUS"
   [ "$C_AFTER" = "2" ] || efail "raw census delta wrong: $C_BEFORE -> $C_AFTER (want +2 drafts)"
   info "raw census (perspective=raw, bearer): $C_BEFORE -> $C_AFTER"
   cleanup_filed
@@ -798,7 +916,7 @@ show_ledger
 info "FLEET_SPEND_CAP=\$$CAP_USD · 2.50 + 2.50 = 5.0000 >= 5.00 (the compare is >=, D54 pin 4)"
 
 : >"$FILER_LOG"
-C_BEFORE="$(census_ours)"
+census_ours; C_BEFORE="$CENSUS"
 ROSTER_R4="$WORKDIR/roster-r4.json"
 pull_roster "$ROSTER_R4"
 run_dispatch "$ORDERS_FILE" "$ROSTER_R4" "$CAP_USD"
@@ -811,7 +929,7 @@ if [ -s "$FILER_LOG" ]; then
   efail "stub filer log is NOT 0 bytes ($(wc -c < "$FILER_LOG" | tr -d ' ') bytes) — the dispatch layer invoked the filer under a tripped cap (D54 pin 5)"
 fi
 info "stub filer log: 0 bytes (the filer was never invoked — dispatch layer frozen, not just the route layer)"
-C_AFTER="$(census_ours)"
+census_ours; C_AFTER="$CENSUS"
 [ "$C_AFTER" = "$C_BEFORE" ] || efail "raw census moved under the freeze: $C_BEFORE -> $C_AFTER (want delta 0)"
 info "raw census delta: $C_BEFORE -> $C_AFTER (zero orders filed)"
 rung_seal 4 "cap tripped at the exact boundary: ONE loud freeze line, every order spend_cap, filer log 0 bytes, raw census delta 0"
@@ -823,7 +941,7 @@ head_rung 5 "UNTRIPPED CONTROL — fresh ledger UNDER the cap: dispatch proceeds
 printf '%s\n' "$UNDER_ROW" > "$LEDGER"
 show_ledger
 : >"$FILER_LOG"
-C_BEFORE="$(census_ours)"
+census_ours; C_BEFORE="$CENSUS"
 ROSTER_R5="$WORKDIR/roster-r5.json"
 pull_roster "$ROSTER_R5"
 run_dispatch "$ORDERS_FILE" "$ROSTER_R5" "$CAP_USD"
@@ -834,7 +952,7 @@ expect_line "$OP-export → $BIG (heavy)"
 expect_line "$OP-lint → $LEAN (light)"
 FILED_N="$(grep -c '^FILED ' "$FILER_LOG" 2>/dev/null || true)"
 [ "$FILED_N" = "2" ] || efail "stub filer log shows $FILED_N FILED line(s), want 2"
-C_AFTER="$(census_ours)"
+census_ours; C_AFTER="$CENSUS"
 [ "$C_AFTER" = "2" ] || efail "raw census after the untripped batch: $C_AFTER (want 2)"
 cleanup_filed
 rung_seal 5 "under the cap the SAME batch proceeds and matches the R2 mapping — the freeze is the cap's doing, nothing else's"

@@ -182,28 +182,95 @@ func Backup(ctx context.Context, src DumpSource, cl ObjStore, bucket, prefix str
 	return key, nil
 }
 
-// Restore downloads bucket/key, gunzips it and streams the SQL into sink. The
-// gzip reader's Close is checked so a truncated download fails loudly instead
-// of silently restoring a partial dump.
-func Restore(ctx context.Context, cl ObjStore, bucket, key string, sink RestoreSink) error {
+// RestoreVerified / RestoreUnverified are the two values RestoreReport's
+// Verification field can take. They are SEPARATE outcomes on purpose: an
+// unverified restore has its own name and its own counter at every call site,
+// so "we could not check" can never be tallied as "we checked and it passed".
+const (
+	RestoreVerified   = "verified"
+	RestoreUnverified = "unverified"
+)
+
+// RestoreReport is what Restore accounts for: the uncompressed bytes it
+// streamed into the sink, their running sha256, and whether the dump's OWN
+// manifest verified both.
+//
+// Verification is RestoreVerified only when a manifest was readable AND both
+// its Bytes and its SHA256 matched the stream. When no manifest exists (every
+// backup taken before manifests were written), or it is unreadable, or it
+// declares no sha256, Verification is RestoreUnverified and Reason names which
+// — the restore still happened, but it is NEVER reported as a verified pass.
+// A manifest that exists and DISAGREES is not a report at all: Restore fails.
+type RestoreReport struct {
+	Bytes        int64  `json:"bytes"`
+	SHA256       string `json:"sha256"`
+	Verification string `json:"verification"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+// Verified reports whether the manifest check actually ran and passed.
+func (r RestoreReport) Verified() bool { return r.Verification == RestoreVerified }
+
+// countingWriter counts bytes and discards them — the restored stream is
+// consumed by the sink, so the tee only needs its length.
+type countingWriter struct{ n int64 }
+
+func (c *countingWriter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
+
+// Restore downloads bucket/key, gunzips it, streams the SQL into sink and
+// CHECKS THE RESULT AGAINST THE DUMP'S OWN MANIFEST — the uncompressed length
+// and sha256 Backup declared when it wrote the object. The gzip reader's Close
+// is checked too, so a truncated download fails loudly; but a stream that
+// gunzips cleanly and is simply not the one the manifest describes (a drifted
+// pair, a re-uploaded object) now fails as well, naming both sides of the
+// mismatch instead of reporting success against nothing.
+//
+// The returned RestoreReport says which check actually ran: a dump with no
+// readable manifest restores and comes back RestoreUnverified, never a pass.
+func Restore(ctx context.Context, cl ObjStore, bucket, key string, sink RestoreSink) (RestoreReport, error) {
+	// Read the manifest FIRST so the report can name why a check is missing
+	// even when the dump itself streams perfectly.
+	man, manErr := readManifest(ctx, cl, bucket, key+manifestSuffix)
+
 	rc, err := cl.GetObject(ctx, bucket, key)
 	if err != nil {
-		return fmt.Errorf("backup: download %s/%s: %w", bucket, key, err)
+		return RestoreReport{}, fmt.Errorf("backup: download %s/%s: %w", bucket, key, err)
 	}
 	defer rc.Close()
 
 	gzr, err := gzip.NewReader(rc)
 	if err != nil {
-		return fmt.Errorf("backup: %s/%s is not a gzip stream: %w", bucket, key, err)
+		return RestoreReport{}, fmt.Errorf("backup: %s/%s is not a gzip stream: %w", bucket, key, err)
 	}
-	if err := sink.Restore(ctx, gzr); err != nil {
+	hash := sha256.New()
+	counter := &countingWriter{}
+	if err := sink.Restore(ctx, io.TeeReader(gzr, io.MultiWriter(hash, counter))); err != nil {
 		_ = gzr.Close()
-		return fmt.Errorf("backup: restore %s/%s: %w", bucket, key, err)
+		return RestoreReport{}, fmt.Errorf("backup: restore %s/%s: %w", bucket, key, err)
 	}
 	if err := gzr.Close(); err != nil {
-		return fmt.Errorf("backup: %s/%s: corrupt gzip stream: %w", bucket, key, err)
+		return RestoreReport{}, fmt.Errorf("backup: %s/%s: corrupt gzip stream: %w", bucket, key, err)
 	}
-	return nil
+
+	report := RestoreReport{Bytes: counter.n, SHA256: hex.EncodeToString(hash.Sum(nil))}
+	switch {
+	case manErr != nil:
+		report.Verification = RestoreUnverified
+		report.Reason = fmt.Sprintf("no readable manifest at %s/%s%s (%v) — the restored bytes were not checked against anything",
+			bucket, key, manifestSuffix, manErr)
+		return report, nil
+	case man.SHA256 == "":
+		report.Verification = RestoreUnverified
+		report.Reason = fmt.Sprintf("manifest %s/%s%s declares no sha256 — the restored bytes were not checked against anything",
+			bucket, key, manifestSuffix)
+		return report, nil
+	case man.Bytes != report.Bytes || !strings.EqualFold(man.SHA256, report.SHA256):
+		return RestoreReport{}, fmt.Errorf(
+			"backup: %s/%s does not match its manifest: manifest declares %d bytes sha256 %s, restored stream was %d bytes sha256 %s",
+			bucket, key, man.Bytes, man.SHA256, report.Bytes, report.SHA256)
+	}
+	report.Verification = RestoreVerified
+	return report, nil
 }
 
 // List returns every backup under prefix, newest first. Each *.sql.gz key is

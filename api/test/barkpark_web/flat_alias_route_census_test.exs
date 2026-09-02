@@ -377,7 +377,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
-         "from the token before AssignDefaultScope can stamp Default."},
+         "from the token before AssignDefaultScope can stamp Default. Since " <>
+         "task-633d94b5a598c0f7 it rides [:api, :require_token, :api_grant_read] in its own " <>
+         "scope rather than bare [:api, :require_token]: workspace derivation was never the " <>
+         "gap, the ROW narrowing inside it was. Without :api_grant_read nothing assigned " <>
+         ":grant_scoped_read, so scope_opts carried no :grant_scoped and the " <>
+         "maybe_scope_to_grants/2 calls in all three aggregates were inert — an owned-token " <>
+         "grantee, narrowed on the sibling query/counts reads, read the whole Default census " <>
+         "here. Pinned by flat_analytics_grant_enforcement_test.exs."},
     # QueryController.backlinks
     {"GET", "/v1/data/backlinks/:dataset/:id"} =>
       {:workspace_derived,
@@ -537,7 +544,17 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     {"GET", "/v1/instance/metrics"} =>
       {:global,
        "instance-operational, no tenant rows: Prometheus text exposition of this BEAM's own " <>
-         "telemetry aggregates out of ETS. Source carries no scope marker at all."},
+         "telemetry aggregates out of ETS. The CONTROLLER PATH is tenant-blind — it calls no " <>
+         "scope_opts/1 and reads no :current_workspace — so :global still holds for the " <>
+         "route's own scope handling. The `workspace_id` this source carries is MODULEDOC, " <>
+         "not a read: it names the four series that carry a :workspace_id Prometheus LABEL " <>
+         "(content.mutate.stop.duration, search.query.stop.duration, " <>
+         "content.lifecycle.stop.duration, media.mutate.count), so ONE scrape enumerates the " <>
+         "box's workspace roster plus each tenant's write/search/publish volume. Tenant " <>
+         "identifiers ride the LABEL SET even though no tenant row rides the body — which is " <>
+         "why PR #14793 moved this route onto [:api, :require_admin]. The route is global; " <>
+         "the PAYLOAD is not, and the gate for that is admission, not scope. Operator-tier " <>
+         "home: task-c7e2b87f1bbca815."},
     # RequestStatsController.show
     {"GET", "/v1/instance/request-stats"} =>
       {:global,
@@ -546,7 +563,11 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     # InstanceSiteDeployController.show
     {"GET", "/v1/instance/site-deploy"} =>
       {:global,
-       "instance-operational, no tenant rows: a capability probe over " <>
+       "admin-gated since PR #14793 ([:api, :require_admin]) because door.in_flight_slugs " <>
+         "names OTHER tenants' sites — the payload crosses tenants even though the read does " <>
+         "not, same shape as /v1/instance/metrics above; operator-tier home " <>
+         "task-c7e2b87f1bbca815. Still :global on the route's own scope handling: " <>
+         "instance-operational, no tenant rows: a capability probe over " <>
          "DeployRunner.enabled?/0, Process.whereis/1, door_census/0 and ServingMemory.read/1. " <>
          "Source carries no scope marker at all."},
     # V1.MediaController.index

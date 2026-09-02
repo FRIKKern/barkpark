@@ -1,0 +1,9 @@
+{
+  "exit": 3,
+  "refusal": "ROW_FETCH_INCOMPLETE",
+  "must_contain": [
+    "REFUSAL:ROW_FETCH_INCOMPLETE",
+    "cch-w41-bl-row-two: EMPTY (zero bytes)",
+    "15 EMPTY files"
+  ]
+}
