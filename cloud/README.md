@@ -18,6 +18,33 @@ A `barkpark-agent` on each managed box reports health and claims an allow-listed
 
 A Coolify-derived **beta foundation** (#352) extends the plane — RBAC roles, account sessions, personal-access-tokens, email notifications, team invitations, and an Oban job substrate — each documented in [`docs/swarm/`](../docs/swarm/). Its **beta-exit batch** (#680) layers OAuth/SSO login, two-factor auth, email verification, onboarding, team-shared secrets, and usage limits on top.
 
+## Archive bundles — what a decommission leaves, and for how long
+
+A **decommission** writes a portable archive bundle — a `pg_dump` plus a media
+tar, a full copy of that instance's content — to `archives/<team_id>/<slug>/` in
+the bundle bucket, then DELETES the `barkparks` row. There is no `archives`
+table (the manifest IS the index), so no row's delete could cascade to it.
+
+**A bundle is kept 30 days after the instance is torn down, then purged by a
+daily sweep**: `BarkparkCloud.Workers.ArchiveRetentionWorker` (`45 3 * * *`, the
+`:maintenance` queue) driving `ArchiveStore.delete_bundle/2` — the erasure route
+the plane did not have before cch-w54-bl. Two carve-outs:
+
+- **A still-live team never loses its most recent bundle.** "Live" means the team
+  still has at least one `barkparks` row; that bundle is what a `resurrect`
+  restores from. Its OLDER bundles still expire on the 30-day clock.
+- **A bundle with no readable `created_at` is never purged.** An age the sweep
+  cannot compute is not an age of zero.
+
+An unconfigured bundle store makes the sweep a no-op, not a failure. The window
+is ONE constant (`@retention_days` in that worker) and is quoted in exactly two
+other places — this section and the console's Decommission sheet
+(`priv/static/app.js`, `confirmDecommission`). Move all three together, or the
+copy starts promising a window the sweep does not apply.
+
+There is **no account-delete and no team-delete route** anywhere on the plane,
+and the console offers neither — erasure exists per BUNDLE, not per account.
+
 ## Run it (local dev)
 
 ```bash
