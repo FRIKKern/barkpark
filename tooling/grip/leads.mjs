@@ -52,13 +52,15 @@
 //
 // ── THE SUBJECT IS THE DEFAULT HAYSTACK; THE COMMAND TEXT IS `--cmd` ─────────
 //
-// Measured (D80): with the command text in the haystack unconditionally,
-// `leads origin/main` returned 51 of the store's 62 recipes (82%) with ZERO
-// subject matches. A question is asked ABOUT a subject; the command text is the
-// answer's machinery, not its topic. `--cmd` restores the wider haystack (a raw
-// case-insensitive substring over subject+command), and the count of what it
-// would add (`cmd_only_recipes`) is stated on the empty AND on the hit list — so
-// this is a precision fix with its recall moved behind a named, counted flag.
+// Measured (D80) at 331d418418 (2026-07-21): with the command text in the
+// haystack unconditionally, `leads origin/main` returned 51 of the store's 62
+// recipes (82%) with ZERO subject matches — a reading against that snapshot,
+// never a live share. A question is asked ABOUT a subject; the command text is
+// the answer's machinery, not its topic. `--cmd` restores the wider haystack
+// (a raw case-insensitive substring over subject+command), and the count of
+// what it would add (`cmd_only_recipes`) is stated on the empty AND on the hit
+// list — so this is a precision fix with its recall moved behind a named,
+// counted flag.
 //
 // ── THE FILTER IS CASE-INSENSITIVE (charter D44) ─────────────────────────────
 //

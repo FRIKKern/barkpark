@@ -469,10 +469,11 @@ export function recipeKey(recipe) {
 // THE MEASURED DEFECT. `quantity` is minted from the rerun command by
 // mint.mjs's `quantityPhrase`, and that grammar MOVED: before its defect 8 was
 // fixed, `git show P | wc -l` and `git show P | grep -c x` both minted
-// `git:show`. 57 of the 62 committed rows (91.9%) still carry a quantity the
-// merged mint no longer produces — and because a row on disk is IMMUTABLE by
-// construction (wx/O_EXCL, no update verb, no delete verb, and an appended
-// correction becomes a RIVAL rather than a supersession), not one of those
+// `git:show`. At e8bbba5919 (2026-07-21), 57 of the 62 committed rows (91.9%)
+// carried a quantity the merged mint no longer produced — and because a row on
+// disk is IMMUTABLE by construction (wx/O_EXCL, no update verb, no delete verb,
+// and an appended correction becomes a RIVAL rather than a supersession), not
+// one of those
 // bytes can be corrected in place.
 //
 // Folding on the stored value therefore made the shipping product lie: the
@@ -796,8 +797,9 @@ export function inScope(run, scope = "all") {
 // `stored_quantity` / `stored_level` with a `*_restated` flag, and a
 // re-derivation that cannot answer falls back to the stored value under a
 // NAMED `*_fallback` marker. See "the key is RE-DERIVED" above for the measured
-// defect this closes — 57 of 62 committed rows carry a quantity the merged mint
-// no longer produces, and the store is immutable by construction.
+// defect this closes — at e8bbba5919 (2026-07-21), 57 of 62 committed rows
+// carried a quantity the merged mint no longer produced, and the store is
+// immutable by construction.
 //
 // RIVAL-METHOD is two or more DISTINCT `rerun` commands over one key: two ways
 // to re-derive the same property, both kept and both flagged. READ IT AS THE
@@ -1321,9 +1323,10 @@ async function writeCommand(rest) {
 // per-row verdict and WRITES NOTHING — no run file, no directory, no mkdir.
 //
 // THE VERDICT KEY IS `.ok`, NOT `.safe`. screenCommand returns
-// `{ ok, reason }`. A verifier read `.safe`, got `undefined`, scored 0 of 40
-// rows refused — and the carried reason string still read "admitted", so the
-// mistake rendered as its own opposite: a screen reporting total refusal while
+// `{ ok, reason }`. A verifier read `.safe`, got `undefined`, and on one
+// 40-row batch at 6a5baa2476 (2026-07-21) scored 0 of 40 rows refused — and the
+// carried reason string still read "admitted", so the mistake rendered as its
+// own opposite: a screen reporting total refusal while
 // explaining that everything was admitted. test/leads.test.mjs pins the shape.
 async function prescreenCommand(rest) {
   const [factsPath] = rest;
