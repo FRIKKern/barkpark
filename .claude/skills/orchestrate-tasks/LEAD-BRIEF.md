@@ -65,6 +65,13 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
    slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
    means re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
+   **Two well-tested copies with no shared fixture is an UNLOCKED MIRROR.** Whenever a value —
+   a vocabulary, a marker string, a field order, an error set — exists on two surfaces
+   (Elixir + TypeScript, Elixir + Go, api + js/, studio + mobile), a passing test on each side
+   proves nothing about drift: change one and both suites stay green while users see two
+   different answers. The fix is ONE fixture file read by BOTH suites, with the mutation proved
+   in both directions — a lock only one side checks is half a lock. Before you ship a value to a
+   second surface, ask where the lock is; if the answer is "both are tested", there is none.
    **The real cap is FILE saturation, not the PR count.** When the open PRs in your fence
    already touch the same handful of files, an extra PR is a guaranteed green-apart /
    red-together collision no matter how much WIP headroom you have. A lane that is saturated
