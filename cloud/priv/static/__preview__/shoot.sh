@@ -30,6 +30,14 @@
 # call "a guaranteed KILL" was unreachable code. bash `wait` has no timeout, so
 # only an EXTERNAL watchdog can bound it — see the reap block in shot().
 #
+# CLEANING UP AFTER A WEDGE — USE reap-orphans.sh, NOT A pkill SWEEP. The
+# watchdog above is scoped to processes THIS run spawned. For the leftovers a
+# wedged or killed run leaves on the host, run ./reap-orphans.sh (dry run by
+# default, --kill to act). It matches on a SIGNATURE plus PPID=1 plus an
+# elapsed floor, never on a name or a port: a broad `headless|serve.mjs` sweep
+# once killed a two-minute-old serve.mjs belonging to a CONCURRENT sibling
+# worktree, silently corrupting that run. Many sessions share this checkout.
+#
 # THE HARNESS'S OWN FALSE-GREEN CLASSES, now guarded (charter GR98). Each of
 # these shipped a full-looking matrix that was wrong:
 #   - server dies mid-run ⇒ every remaining shot is an ERR_CONNECTION_REFUSED

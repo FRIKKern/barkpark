@@ -215,9 +215,20 @@ test("seed preserves unknown keys already on a ledger entry", () => {
 
 test("scan writes coverage-report.json, and the header no longer calls it read-only", () => {
   const r = makeRepo(40);
+  // A LEDGER HAS TO EXIST FIRST, and that is a real change of premise, not a
+  // workaround. scan now refuses (LEDGER_ABSENT) rather than reporting a flat
+  // zero when no ledger is on the machine, so this test used to reach the
+  // reporting path only because the absent-ledger case silently produced one.
+  // An empty `record` creates the ledger without researching anything, which
+  // keeps what this test is actually about — that scan emits the report, and
+  // that the header no longer calls itself read-only — unchanged.
+  r.run("record");
   r.run("scan");
   const report = join(r.cd, "coverage-report.json");
   assert.ok(existsSync(report), "scan stopped emitting the report four other tools read");
+  // Still exactly 43: the ledger `record` just created is excluded from its own
+  // coverage by config.json, which is what stops a committed ledger from
+  // re-staling itself on every write.
   assert.equal(readJson(report).total, 43, "43 = 40 src + coverage.mjs + ledger-io.mjs + config.json");
 
   // The row's cheap-and-related clause: a command documented "(read-only)" that

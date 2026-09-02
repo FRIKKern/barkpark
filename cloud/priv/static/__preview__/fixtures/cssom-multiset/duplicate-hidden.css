@@ -1,0 +1,21 @@
+/* duplicate-hidden.css — a rule that never reaches the browser, hidden behind its
+   own duplicate. The fixture for gr-backlog-cssom-parity-count-skew's multiset half.
+
+   `.alpha` is authored TWICE: once at the top level and once inside `@document`.
+   `@document` is in the gate parser's GROUPING_AT set, so the parser DESCENDS into
+   it and counts the inner `.alpha` as authored — but Chrome has never shipped
+   `@document` and drops the whole block, so the browser sees `.alpha` ONCE.
+
+   That is the exposure in one file, and every other signal in the gate is blind:
+     · MISSES is 0        — `.alpha` IS in the CSSOM, just not twice (set membership)
+     · the head count is 3 — the source really does author three heads
+     · the sidecar matches — nothing about the source changed
+     · COUNT SKEW fires    — and is ADVISORY by design, it never touches the exit code
+
+   Only the multiset comparison can see it. Driven on origin/main (fc6ecdfdd6) this
+   file exits 0 with PARITY PASS. */
+.alpha { color: red; }
+.beta { color: green; }
+@document url("http://example.test/") {
+  .alpha { color: black; }
+}
