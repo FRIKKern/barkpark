@@ -114,7 +114,8 @@ defmodule BarkparkWeb.PulseController do
   defp check_ip_bucket(conn, channel, cfg) do
     rate = cfg["rate_per_min"]
 
-    case RateLimiter.check({:pulse, RateLimiter.client_ip(conn), channel},
+    case RateLimiter.check(
+           RateLimiter.scope_key(conn, {:pulse, RateLimiter.client_ip(conn), channel}),
            capacity: @burst,
            refill_per_sec: rate / 60
          ) do
@@ -135,7 +136,8 @@ defmodule BarkparkWeb.PulseController do
   # visitors polling normally never trip it; a single-IP flood does. Retry
   # of 1s: at 10 tokens/sec a client is clear again almost immediately.
   defp check_read_bucket(conn, channel) do
-    case RateLimiter.check({:pulse_read, RateLimiter.client_ip(conn), channel},
+    case RateLimiter.check(
+           RateLimiter.scope_key(conn, {:pulse_read, RateLimiter.client_ip(conn), channel}),
            capacity: @read_capacity,
            refill_per_sec: @read_refill_per_sec
          ) do

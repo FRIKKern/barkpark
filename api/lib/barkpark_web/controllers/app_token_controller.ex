@@ -409,12 +409,24 @@ defmodule BarkparkWeb.AppTokenController do
   # (Registry.revoke_app_token/3) still wins — a whole team does not share one
   # bucket keyed on the single Cloud egress IP — provided that egress address is
   # listed in BARKPARK_TRUSTED_PROXIES; unlisted, it is correctly disbelieved.
+  #
+  # The key goes through `RateLimiter.scope_key/2` (the per-test isolation
+  # scope `Plugs.RateLimit` always honoured; a no-op in production). Without it
+  # this bucket was the ONE unscoped meter on the app-token routes: every test
+  # conn is the loopback peer, so every revoking suite spent the same
+  # `127.0.0.1` allowance of 10/min, and which file saw the 429 was a function
+  # of the seed (main run 33681637129, seed 210993, reddened
+  # RequireTokenWriteGateTest; the next sha was green).
   defp revoke_rate_limited?(conn) do
     RateLimiter.check(
-      {:app_token_revoke, RateLimiter.client_ip(conn)},
+      revoke_bucket_key(conn),
       capacity: @revoke_bucket_capacity,
       refill_per_sec: @revoke_bucket_capacity / 60
     ) == :rate_limited
+  end
+
+  defp revoke_bucket_key(conn) do
+    RateLimiter.scope_key(conn, {:app_token_revoke, RateLimiter.client_ip(conn)})
   end
 
   defp mint(conn, params) do

@@ -56,20 +56,12 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
 
   @dataset "production"
 
-  # The self-service describe below drives DELETE /v1/auth/app-tokens{,/current,
-  # /:id}, and AppTokenController bills every one of those against ONE
-  # whole-node bucket, `{:app_token_revoke, client_ip}`, capacity 10/min. Under
-  # `mix test` every conn is the loopback peer with no x-forwarded-for, so the
-  # key is `127.0.0.1` for this file AND for every other suite that revokes
-  # (app_token_admin_revoke, app_token_cross_workspace_revoke, the flat-route
-  # census, the capabilities manifest...). Whether this file lands inside a
-  # spent minute is a function of the seed: main run 33681637129 answered 429
-  # to both self-service probes; the very next merge sha ran green. The
-  # sibling revoke suites already start from an empty table — do the same, so
-  # the two statuses asserted here are the gate's answer, not the meter's.
-  setup :reset_rate_limiter!
-
   @router_path Path.expand("../../lib/barkpark_web/router.ex", __DIR__)
+
+  # This file spends the UNSCOPED `{:app_token_revoke, "127.0.0.1"}` bucket on
+  # purpose (the red-before proof below); start from an empty table so that
+  # spend never leaks into a sibling revoke suite in the same minute.
+  setup :reset_rate_limiter!
 
   setup do
     {ws, project} = TenancyFixtures.ensure_default_scope!()
@@ -98,6 +90,16 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
   end
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  # The envelope's error code, so a refusal names WHICH refuser answered
+  # ("rate_limited" is a meter; "unauthorized" is the gate) instead of a bare
+  # "expected 200".
+  defp error_code(resp) do
+    case Jason.decode(resp.resp_body) do
+      {:ok, %{"error" => %{"code" => code}}} -> code
+      _ -> "no envelope"
+    end
+  end
 
   # Every refusal this gate emits must be the canonical envelope, not a bare
   # string — `{"error": {"code": …}}`. A 403 whose body is a naked message is a
@@ -331,7 +333,7 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
       resp = conn |> authed(read) |> delete("/v1/auth/app-tokens/current")
 
       assert resp.status == 200,
-             "a read-only token could not self-revoke (#{resp.status}) — possession " <>
+             "a read-only token could not self-revoke (#{resp.status} #{error_code(resp)}) — possession " <>
                "IS the authorization here and write-gating it strands the token: " <>
                resp.resp_body
 
@@ -340,6 +342,37 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
       # Fail-closed proof: the same bearer is now rejected by :require_token.
       repeat = conn |> authed(read) |> delete("/v1/auth/app-tokens/current")
       assert repeat.status == 401
+    end
+
+    # RED-BEFORE for main run 33681637129 (seed 210993): both self-service
+    # probes answered 429 `rate_limited` — "rate limit exceeded", the bare
+    # envelope AppTokenController's own `revoke_rate_limited?/1` emits, not
+    # Plugs.RateLimit's "too many requests" + retry_after. That bucket was keyed
+    # on `{:app_token_revoke, client_ip}` alone, so under `mix test` every
+    # revoking suite spent one `127.0.0.1` allowance of 10/min and this file's
+    # 429 depended on what ran in the same minute. The controller now honours
+    # the per-test `:barkpark_rate_limit_scope` ConnCase stamps, like
+    # Plugs.RateLimit does. Spend the UNSCOPED loopback bucket to zero, then
+    # self-revoke on a scoped conn: a shared meter answers 429, a scoped one 200.
+    test "self-revoke does not share the loopback revoke bucket with other tests", %{
+      conn: conn,
+      read: read
+    } do
+      assert is_binary(conn.private[:barkpark_rate_limit_scope]),
+             "ConnCase no longer stamps :barkpark_rate_limit_scope — this proof is vacuous"
+
+      key = {:app_token_revoke, Barkpark.RateLimiter.client_ip(conn)}
+      opts = [capacity: 10, refill_per_sec: 10 / 60]
+      for _ <- 1..10, do: Barkpark.RateLimiter.check(key, opts)
+      assert Barkpark.RateLimiter.check(key, opts) == :rate_limited
+
+      resp = conn |> authed(read) |> delete("/v1/auth/app-tokens/current")
+
+      assert resp.status == 200,
+             "self-revoke answered #{resp.status} (#{error_code(resp)}) with the unscoped " <>
+               "loopback bucket spent — the controller's revoke meter ignores the " <>
+               "per-test scope and shares one 10/min allowance across the suite: " <>
+               resp.resp_body
     end
 
     test "POST /v1/auth/login-tickets still mints a self-bound ticket", %{
@@ -378,7 +411,7 @@ defmodule BarkparkWeb.RequireTokenWriteGateTest do
         resp = call.(authed(conn, read))
 
         assert resp.status == 401,
-               "#{label} answered #{resp.status} for a read-only bearer — the write " <>
+               "#{label} answered #{resp.status} #{error_code(resp)} for a read-only bearer — the write " <>
                  "gate must defer to the controller's stronger admin check here, or " <>
                  "the generic 401 becomes a tier oracle: #{resp.resp_body}"
       end

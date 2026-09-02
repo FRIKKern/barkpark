@@ -94,10 +94,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
           "ip:#{RateLimiter.client_ip(conn)}:#{class}:#{scope}"
       end
 
-    case conn.private[:barkpark_rate_limit_scope] do
-      test_scope when is_binary(test_scope) -> key <> ":test:" <> test_scope
-      _ -> key
-    end
+    RateLimiter.scope_key(conn, key)
   end
 
   defp retry_after_seconds(per_minute) when is_integer(per_minute) and per_minute > 0 do

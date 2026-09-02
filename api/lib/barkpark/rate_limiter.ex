@@ -260,6 +260,33 @@ defmodule Barkpark.RateLimiter do
   end
 
   @doc """
+  Apply the per-test isolation scope to a bucket key — EVERY conn-keyed bucket
+  in the tree must build its key through this, plug or controller-inline.
+
+  `BarkparkWeb.ConnCase` stamps each test conn with a unique
+  `conn.private[:barkpark_rate_limit_scope]`; nothing in production sets a
+  conn private, so outside the suite this returns `key` unchanged. Inside it,
+  a key that ignores the scope is a WHOLE-SUITE bucket: every test conn is the
+  loopback peer, so `client_ip/1` is `127.0.0.1` for all 17k tests and one
+  file's spend is charged to whichever file runs next in the window.
+  `BarkparkWeb.Plugs.RateLimit` had this from the start; the controller-inline
+  `{:app_token_revoke, ip}` bucket (10/min) did not, and main run 33681637129
+  (seed 210993) reddened two RequireTokenWriteGateTest assertions with a 429
+  from it — read as an auth failure until the body was opened.
+
+  A binary key gets `":test:" <> scope` appended (the plug's historical shape,
+  byte-identical); a tuple key gets the scope as a trailing element.
+  """
+  @spec scope_key(Plug.Conn.t(), tuple() | binary()) :: tuple() | binary()
+  def scope_key(%Plug.Conn{} = conn, key) do
+    case conn.private[:barkpark_rate_limit_scope] do
+      scope when is_binary(scope) and is_binary(key) -> key <> ":test:" <> scope
+      scope when is_binary(scope) and is_tuple(key) -> Tuple.append(key, scope)
+      _ -> key
+    end
+  end
+
+  @doc """
   As `client_ip/1`, plus WHICH of the two values it is:
 
     * `{ip, :forwarded}` — derived from a trusted front's `x-forwarded-for`
