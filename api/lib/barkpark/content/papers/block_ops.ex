@@ -1528,7 +1528,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def validate_render_shapes(blocks) when is_list(blocks) do
     case render_shape_errors(blocks, "blocks") do
       [] -> :ok
-      errors -> {:error, {:invalid_paper_structure, %{"blocks" => errors}}}
+      errors -> {:error, {:invalid_paper_structure, structure_refusal_details(blocks, errors)}}
     end
   end
 
@@ -1537,6 +1537,50 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error,
        {:invalid_paper_structure,
         %{"blocks" => ["must be an array when a Paper declares a block body"]}}}
+
+  # The refusal's registered hint tells the author to "Fix the listed block
+  # paths", and the `blocks` messages do carry a POSITIONAL one
+  # (`blocks[12].rows[0].cells[1] has no renderable inline content`). What they
+  # never carried is the authored block ID — the token an author greps their own
+  # document for, and the one the reporter of this wall had to BISECT a
+  # 105-block Paper to recover ("the first rejecting block was b12"). A
+  # positional index is only as good as the caller's copy of the list; the id
+  # survives an insert above it. `block_ids` names the offending blocks
+  # directly, deduplicated, in first-refusal order.
+  #
+  # Purely ADDITIVE: `blocks` stays byte-identical, and the key is OMITTED (not
+  # emitted empty) when no offending block carries an id, so a block list
+  # without ids refuses exactly as it always did.
+  defp structure_refusal_details(blocks, errors) do
+    ids =
+      errors
+      |> Enum.map(&leading_block_index/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(fn
+        nil ->
+          []
+
+        index ->
+          case Enum.at(blocks, index) do
+            %{"id" => id} when is_binary(id) and id != "" -> [id]
+            _ -> []
+          end
+      end)
+
+    case ids do
+      [] -> %{"blocks" => errors}
+      ids -> %{"blocks" => errors, "block_ids" => ids}
+    end
+  end
+
+  defp leading_block_index(message) when is_binary(message) do
+    case Regex.run(~r/^blocks\[(\d+)\]/, message) do
+      [_, index] -> String.to_integer(index)
+      _ -> nil
+    end
+  end
+
+  defp leading_block_index(_), do: nil
 
   defp render_shape_errors(blocks, prefix) do
     blocks
@@ -1705,7 +1749,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_render_block(%{"type" => "table"} = block) do
-    normalize_table_shape(block)
+    block
+    |> canonicalize_table_headers_key()
+    |> normalize_table_shape()
   end
 
   defp normalize_render_block(%{"type" => "callout", "text" => text} = block)
@@ -2208,6 +2254,33 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp record_table_text(nil), do: ""
   defp record_table_text(value), do: to_string(value)
+
+  # The `headers` (PLURAL) head spelling — the one dialect that reached exactly
+  # ONE reader. The Bulldocs BPML printer has always accepted it
+  # (`printer.ex` — `alias_get(b, ["head", "header", "headers", "columns"])`),
+  # so a BPML export printed the header row. Nothing else did: compose.ex
+  # resolves `head` / `header` / `columns` / a legacy header ROW and drops
+  # `headers` on the floor, so the authored header row rendered as NOTHING
+  # behind a 200; `render_block_errors/2` reads `head || header`, so its cells
+  # were never validated (an unrenderable one published clean, and the wall
+  # named no path because it never looked); and neither the inline-leaf rescue
+  # nor the bare-string cell rescue keys on it. That is what makes a `bp doc
+  # get` of a `headers`-keyed table un-round-trippable: the bytes come back and
+  # go back in, and the head is silently not there.
+  #
+  # Canonicalize the key ONCE, here at the write chokepoint, and all three
+  # surfaces inherit the dialect for free. Renaming only — cell bytes are
+  # untouched. A block that already declares a non-empty `head` keeps BOTH keys
+  # verbatim: `head` wins in every reader, and dropping the twin would delete
+  # authored content this function has no mandate to judge.
+  defp canonicalize_table_headers_key(block) do
+    with cells when is_list(cells) and cells != [] <- Map.get(block, "headers"),
+         head when head in [nil, []] <- Map.get(block, "head") do
+      block |> Map.delete("headers") |> Map.put("head", cells)
+    else
+      _ -> block
+    end
+  end
 
   defp table_head_or_header(block) do
     case Map.get(block, "head") do
