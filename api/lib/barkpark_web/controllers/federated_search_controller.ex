@@ -252,7 +252,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   # whose schema cannot be resolved.
   defp schema_resolver(dataset, scope) do
     fn type ->
-      case Content.get_schema(type, dataset, scope) do
+      case Content.Schema.get_schema_for_redaction(type, dataset, scope) do
         {:ok, schema} -> schema
         _ -> nil
       end

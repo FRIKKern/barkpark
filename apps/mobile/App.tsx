@@ -137,7 +137,7 @@ export default function App() {
       <View style={styles.shell}>
         <View style={styles.content}>
           {tab === 'tasks' && <TasksScreen connection={connection} />}
-          {tab === 'chat' && <ChatScreen connection={connection} />}
+          {tab === 'chat' && <ChatScreen connection={connection} claim={config} />}
           {tab === 'papers' && <PapersScreen connection={connection} />}
         </View>
         {pushLine !== undefined && (
