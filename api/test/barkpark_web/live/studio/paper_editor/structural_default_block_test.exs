@@ -62,9 +62,26 @@ defmodule BarkparkWeb.Studio.PaperEditor.StructuralDefaultBlockTest do
     end
   end
 
-  test "compose_block(action default) is a PdButton with empty href/label" do
+  # SUPERSEDED BY THE EMPTY-CHROME INVARIANT, not deleted. This pinned the
+  # DEFECT: the canvas default action composed to a PdButton with href "" and
+  # label "", which the walker painted as `<a href="#" class="bp-button"></a>` —
+  # a zero-width CLICKABLE control on the PUBLIC reader. The default block itself
+  # is unchanged (the mirror contract above still holds); what changed is what a
+  # blank one composes to. This is the `image` precedent exactly: post-#1161 every
+  # new paper seeds an asset-less featured image that likewise composes to "" and
+  # is still fully editable, because the canvas builds its per-block DOM from the
+  # `data-canvas-blocks` block DATA (paper.ex:656), never from the reader HTML.
+  test "compose_block(action default) is the empty raw node — scaffolding, not a button" do
     node = Compose.compose_block(Blocks.default_block("action", @id))
-    assert %{"kind" => "PdButton", "href" => "", "label" => ""} = node
+    assert node == %{"kind" => "_raw", "html" => ""}
+  end
+
+  # The same doctrine reaches the default FIGURE through its child: the seeded
+  # empty-paragraph child contributes no bytes and there is no caption, so the
+  # frame is skipped rather than painting an empty bordered <figure>.
+  test "compose_block(figure default) is the empty raw node — no empty bordered frame" do
+    node = Compose.compose_block(Blocks.default_block("figure", @id))
+    assert node == %{"kind" => "_raw", "html" => ""}
   end
 
   test "compose_block(table default) is a PdTable with a head + one body row" do
