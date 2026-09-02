@@ -307,9 +307,17 @@ jobs:
       - name: Fetch deps
         run: mix deps.get
 
-      - name: Install libvips (the app compile Sobelow triggers pulls the vix NIF)
-        run: sudo apt-get update && sudo apt-get install -y libvips-dev
-        working-directory: .
+      # NO apt libvips-dev HERE. Same mechanism cb298518f (#13083) established
+      # for the elixir.yml Test job, which compiles the whole app: the repo sets
+      # no VIX_COMPILATION_MODE, so vix runs in its default
+      # PRECOMPILED_NIF_AND_LIBVIPS mode and the NIF arrives prebuilt with
+      # libvips bundled. Nothing in this job links the system libvips-dev this
+      # step installed: a Sobelow job log (run job 100433615028) shows the apt
+      # taking 33 s (update 6 s + 70 MB install 27 s) and ZERO `Compiling N
+      # files` lines afterwards.
+      #
+      # If system libvips is ever genuinely needed here, prefer caching the
+      # .deb over re-adding a cold `apt-get update && install`.
 
       - name: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)
         # A newly introduced insecure pattern is not in the reviewed baseline and
