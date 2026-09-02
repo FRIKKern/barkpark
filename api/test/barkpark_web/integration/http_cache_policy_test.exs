@@ -99,8 +99,12 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
   describe "GET /v1/instance/metrics (MetricsController.scrape/2)" do
     test "the Prometheus scrape is never stored by any cache", %{conn: conn} do
+      # ADMIN: the route moved to `[:api, :require_admin]` in
+      # task-d7ac954aa57aa522 (its Prometheus label set carries `workspace_id`).
+      # A `["read"]` token now 403s, and this test is about the cache header on
+      # the 200.
       raw = "cache-policy-metrics-" <> Integer.to_string(System.unique_integer([:positive]))
-      {:ok, _} = Auth.create_token(raw, "cache-policy-metrics", "test", ["read"])
+      {:ok, _} = Auth.create_token(raw, "cache-policy-metrics", "test", ["read", "write", "admin"])
 
       conn = conn |> bearer(raw) |> get("/v1/instance/metrics")
 

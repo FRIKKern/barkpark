@@ -60,7 +60,17 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
     {".bp-doc-checkbox:focus-visible", "the bulk-select checkbox on every doc row"},
     # spd-w18-desk-chips-answer — the chips are Tab-reachable anchors and now
     # show it; the ring graduated out of the absent-list below.
-    {".bp-desk-chip:focus-visible", "the desk filter chips"}
+    {".bp-desk-chip:focus-visible", "the desk filter chips"},
+    # spd-b18-btn-focus-visible-desk-wide — the SHARED button family. Not a
+    # desk-only ring: `.btn` reaches ~190 call sites across the Studio, and
+    # until this slice it declared only :hover and :disabled, so every one of
+    # them fell back to the UA outline. Pinned here rather than in a new file
+    # because this module's own docs say a later ring must EXTEND the list.
+    # Literal matching is what makes this entry safe: `.btn:focus-visible {`
+    # is NOT a substring of `.pane-add-btn:focus-visible {` (that one has
+    # `-btn`, not `.btn`), which is exactly the miscount the moduledoc's
+    # regex-minefield note describes.
+    {".btn:focus-visible", "every control wearing the shared .btn base class"}
   ]
 
   defp sheet, do: File.read!(@root)
@@ -150,6 +160,52 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
         refute rule_body(cut, selector),
                "the declaration check cannot fail, so it guards nothing"
       end
+    end
+  end
+
+  describe "the shared .btn ring uses the BARE ring token" do
+    # design/check.mjs Part E counts colour literals per file against a
+    # hand-stamped ledger. `var(--ring, #2c6d5a)` reads as a literal and pushes
+    # the root.html.heex row off its baseline — measured this wave at 165 -> 166
+    # with the run FAILING. The presence checks above accept any body containing
+    # `var(--ring)`, and `var(--ring, #hex)` does NOT contain that literal, so
+    # they already discriminate; this test says so out loud and pins the offset
+    # so the ring stays INSET (a positive offset on a 32px control clips).
+    test ".btn:focus-visible declares no fallback hex and is inset" do
+      body = rule_body(sheet(), ".btn:focus-visible")
+
+      assert body, "`.btn:focus-visible` is missing from root.html.heex"
+
+      refute body =~ "var(--ring,",
+             "`.btn:focus-visible` must use the BARE token — a `var(--ring, #hex)` " <>
+               "fallback is a colour literal and reds design/check.mjs Part E. " <>
+               "Got: #{inspect(body)}"
+
+      refute body =~ "#",
+             "`.btn:focus-visible` declares a hex literal. Got: #{inspect(body)}"
+
+      assert body =~ "outline-offset: -2px",
+             "`.btn:focus-visible` must draw the ring INSIDE the box (the house " <>
+               "idiom, 8+ existing uses) so a 28-32px control is not clipped. " <>
+               "Got: #{inspect(body)}"
+    end
+
+    test "SABOTAGE CONTROL: the bare-token check says NO to a fallback hex" do
+      bare = ".btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }"
+      fallback = ".btn:focus-visible { outline: 2px solid var(--ring, #2c6d5a); outline-offset: -2px; }"
+
+      # positive arm — the real idiom passes every predicate…
+      assert rule_body(bare, ".btn:focus-visible") =~ "var(--ring)"
+      refute rule_body(bare, ".btn:focus-visible") =~ "var(--ring,"
+      refute rule_body(bare, ".btn:focus-visible") =~ "#"
+
+      # …negative arm — and a fallback hex fails all three. Without this, a
+      # predicate that always returned truthy would guard nothing.
+      refute rule_body(fallback, ".btn:focus-visible") =~ "var(--ring)",
+             "the bare-token check cannot fail, so it guards nothing"
+
+      assert rule_body(fallback, ".btn:focus-visible") =~ "var(--ring,"
+      assert rule_body(fallback, ".btn:focus-visible") =~ "#"
     end
   end
 

@@ -15,6 +15,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,6 +86,21 @@ const (
 	cp500Absent
 )
 
+// cpDecodeBody reads the flat string map the CLI dispatch POSTs. Every value the
+// manifest binds arrives here as a JSON string, so a fixture that reads the
+// query string sees nothing and quietly falls back to its own defaults.
+func cpDecodeBody(r *http.Request) map[string]string {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil
+	}
+	var body map[string]string
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	return body
+}
+
 // cpStore is the fake server's state: exactly what a write actually put there.
 type cpStore struct {
 	mu        sync.Mutex
@@ -92,6 +108,14 @@ type cpStore struct {
 	worker    string
 	epoch     int
 	now       string
+	// closedBy/closedAt are the CLOSE-OUT STAMP. The real server does not
+	// delete the claim when it seals a row — Tasks.Close.apply_close_update/9
+	// keeps `claim.worker` as the attribution and stamps these two onto the
+	// same map in the same atomic write. Modelling the close as "the claim
+	// disappears" is what let a receipt that refuses every sealed-and-named row
+	// pass its own suite.
+	closedBy string
+	closedAt string
 }
 
 // cpTestServer wires a fake Barkpark that counts POSTs to the close/pulse
@@ -112,14 +136,21 @@ func cpTestServer(t *testing.T, mode cpStoreMode) (*cpStore, *int32) {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
 			atomic.AddInt32(&hits, 1)
 			if commits {
-				q := r.URL.Query()
-				seal := q.Get("lifecycle_status")
+				// The dispatch sends the close's args as a JSON BODY, not as
+				// query params — reading them off the URL is how this fixture
+				// silently defaulted its way to a green.
+				body := cpDecodeBody(r)
+				seal := body["lifecycle_status"]
 				if seal == "" {
 					seal = "done"
 				}
 				st.mu.Lock()
 				st.lifecycle = seal
-				st.worker = "" // a real close releases the claim
+				// The claim map SURVIVES, exactly as the server leaves it: the
+				// worker stays as the attribution and the close-out stamp is
+				// added beside it.
+				st.closedBy = body["worker_id"]
+				st.closedAt = "2026-09-01T20:41:44.493753Z"
 				st.mu.Unlock()
 			}
 			if fails {
@@ -162,6 +193,10 @@ func cpTestServer(t *testing.T, mode cpStoreMode) (*cpStore, *int32) {
 			// The claim rides the TOP LEVEL, exactly as render_doc emits it —
 			// it is deleted out of content server-side.
 			claim := map[string]any{"worker": st.worker, "epoch": st.epoch}
+			if st.closedBy != "" {
+				claim["closed_by"] = st.closedBy
+				claim["closed_at"] = st.closedAt
+			}
 			if st.now != "" {
 				claim["now"] = map[string]any{"text": st.now, "ts": "2026-08-24T10:00:00Z"}
 			}

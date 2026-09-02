@@ -36,6 +36,27 @@ cd "$APP" || { log "no $APP"; exit 10; }
 OLD="$(git rev-parse HEAD)"
 log "current=$OLD"
 
+# ---- Docker version: ASSERT it answers, and LOG it (dr-w20-bl-cp-deploy-...).
+# The 48h47m blackout below is a DAEMON-BEHAVIOUR bug, and this box's docker is
+# mutable state that no commit records: a reprovision, a snapshot rebake or an
+# unattended upgrade can move it under us and nothing in the repo would date the
+# change. Read off barkpark-cp on 2026-09-02 (L1): server 29.6.1, API 1.55,
+# compose v5.2.0, containerd v2.2.5, runc 1.3.6, overlayfs — and `docker network
+# disconnect -f` (the clearer below) confirmed present with its --force flag.
+# A mismatch WARNS and never refuses: a stale pin that blocks every deploy is
+# worse than drift you can read in the log (same call as the headroom guard).
+DOCKER_VER="$(docker version --format '{{.Server.Version}}' 2>/dev/null)"
+if [ -z "$DOCKER_VER" ]; then
+  log "WARNING: 'docker version' did not answer — the daemon may be down or unreachable; continuing (compose will fail loudly if it is)"
+else
+  log "docker server $DOCKER_VER / compose $(docker compose version --short 2>/dev/null || echo '?')"
+  EXPECT_DOCKER_MAJOR="${BARKPARK_EXPECT_DOCKER_MAJOR:-29}"
+  case "$DOCKER_VER" in
+    "$EXPECT_DOCKER_MAJOR".*) : ;;
+    *) log "WARNING: docker server $DOCKER_VER is not the expected ${EXPECT_DOCKER_MAJOR}.x — deploy/ was written and verified against ${EXPECT_DOCKER_MAJOR}.x on barkpark-cp (2026-09-02); the wedged-endpoint clearer below leans on 'docker network disconnect -f' and 'docker network inspect', whose behaviour may differ. Override the expectation with BARKPARK_EXPECT_DOCKER_MAJOR." ;;
+  esac
+fi
+
 docker tag cloud-control_plane:latest cloud-control_plane:rollback 2>/dev/null \
   && log "tagged rollback image" || log "no current image to tag (first deploy?)"
 
@@ -93,6 +114,14 @@ if [ "$TARGET_PORT" = "$ACTIVE_PORT" ]; then
 fi
 log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 
+# The slot that is SERVING RIGHT NOW — the one container the endpoint clearer
+# below must never unplug. Derived from the SAME blue/green marker the flip
+# uses (ACTIVE_PORT, read out of the Caddyfile above), never guessed, so the
+# guard cannot disagree with the deploy about which slot is live.
+if [ "$TARGET" = blue ]; then ACTIVE_SLOT=green; else ACTIVE_SLOT=blue; fi
+CP_NETWORK="${BARKPARK_CP_NETWORK:-cloud_default}"
+SERVING_CONTAINER="${COMPOSE_PROJECT_NAME:-cloud}-control_plane_${ACTIVE_SLOT}-1"
+
 # db+postfix must NEVER be left stopped: a recreate (image/config changed by the
 # pull) stops the old containers first, and on Docker 29 the follow-up network
 # disconnect can 500 ("container … is not connected to the network") while the
@@ -102,12 +131,112 @@ log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 # served 500s on all DB-backed routes until someone noticed (16h on 2026-07-21,
 # and re-broken by every subsequent merge — the site LOOKS up because the static
 # SPA still serves).
-ensure_shared_services() {
-  compose up -d db postfix && return 0
-  log "db/postfix up hit the recreate race — retrying"
-  sleep 3
-  compose up -d db postfix
+#
+# ===========================================================================
+# THE WEDGED ENDPOINT (dr-w20-bl-cp-deploy-cannot-clear-a-wedged-endpoint)
+# ===========================================================================
+# THE OUTAGE. 2026-07-21T07:59:48Z .. 07-23T08:46:54Z: 48h47m, 121 deploy.yml
+# runs, 84 failures, 37 cancelled, ZERO successes. 82 of the 84 are exit 13 and
+# the SAME thing in two phrasings — the daemon refusing the recreate with
+#   network cloud_default has active endpoints (name:"cloud-control_plane_green-1" id:"9a7aab2dba5b")
+# (65 runs, this function) or its sibling
+#   container ... is not connected to the network cloud_default
+# (15 runs, the slot boot below). The endpoint id 9a7aab2dba5b is BYTE-IDENTICAL
+# across 27 hours: ONE stale endpoint re-hit by every merge, not 84 independent
+# races.
+#
+# WHY SLEEP-AND-RETRY IS NOT ENOUGH — MEASURED, NOT ASSUMED. The one-shot retry
+# (#5584, 5866f3b90, 2026-07-22T01:05:26Z) was live for the blackout's final 27
+# hours: 66 of the 84 failures land after it and 65 of those 66 carry `FAILED
+# twice`. The retry is measured 0-FOR-65. That is not bad luck — a stale
+# endpoint is DAEMON STATE, and sleeping 3 seconds does not remove daemon state,
+# so the second `up` meets the identical refusal as the first. The retry is KEPT
+# (it does clear the genuinely transient teardown race it was written for) but
+# it can no longer be the only lever: a retry only helps once the blocker is
+# GONE, and nothing here was removing the blocker.
+#
+# WHAT ACTUALLY ENDED IT, read off the box 2026-09-02 (L1, not CI logs):
+#   docker network inspect cloud_default --format '{{.Created}}'
+#     -> 2026-07-23T09:48:58.600589216Z
+# while the daemon's own `bridge` network is dated 2026-07-22T00:58:15Z (=
+# docker.service ExecMainStartTimestamp) and the box has not rebooted since
+# 2026-06-29. So cloud_default was DESTROYED AND RECREATED BY HAND at 09:48:58Z
+# — 17 minutes into the first successful run (29995701440, 09:31:55Z..09:57:36Z,
+# 25m41s against a ~7min norm), which was sitting on this script's own
+# `flock -w 1800` while the operator worked. No commit records any of it.
+#
+# The same read rules out the two cheaper remedies. `systemctl restart docker`
+# was ALREADY TRIED, at 2026-07-22T00:58:14Z — 17h into the blackout — and the
+# blackout ran 32 HOURS LONGER (no docker package moved: /var/log/apt shows only
+# kernel/wget/sqlite3 that morning). And the retry is the 0-for-65 above.
+#
+# THE REMEDY THIS INSTALLS. Recreating the network is a full-downtime hammer: it
+# requires every attached container stopped, the live DB and the SERVING slot
+# included. `docker network disconnect -f` is the surgical form of the same act,
+# and it is present on this box's docker (29.6.1, `-f, --force` confirmed). So:
+# when the daemon says one of its OWN two strings, enumerate cloud_default's
+# endpoints, disconnect the ones whose container NO LONGER EXISTS, and then
+# retry — a retry that now happens after the blocker has been removed.
+
+# Disconnect every $CP_NETWORK endpoint whose container is gone. Returns 0 when
+# it cleared at least one (so a retry is worth something), 1 when it cleared
+# nothing. Never fatal: this runs on a path that is already failing.
+clear_wedged_endpoints() {
+  cleared=0
+  while IFS=' ' read -r cid cname; do
+    [ -n "$cid" ] && [ -n "$cname" ] || continue
+    # GUARD — NEVER unplug the slot that is serving traffic right now. A running
+    # container's endpoint is not the fault anyway (the wedge is an endpoint
+    # whose container is GONE), but this is the one mistake that would convert a
+    # failed deploy into a live outage, so it is checked by name and first.
+    if [ "$cname" = "${SERVING_CONTAINER:-}" ]; then
+      log "endpoint '$cname' is the SERVING slot on :$ACTIVE_PORT — never disconnecting it"
+      continue
+    fi
+    # STALE = the daemon still holds an endpoint for a container it no longer
+    # has. A container that still exists is a legitimate attachment; leave it.
+    # A dangling endpoint can also key as 'ep-<endpoint id>' with no container
+    # at all, which is stale by construction.
+    case "$cid" in
+      ep-*) : ;;
+      *) if docker inspect --type container "$cid" >/dev/null 2>&1; then continue; fi ;;
+    esac
+    log "STALE ENDPOINT on $CP_NETWORK: '$cname' (container $cid no longer exists) — docker network disconnect -f"
+    if docker network disconnect -f "$CP_NETWORK" "$cname" >/dev/null 2>&1; then
+      cleared=$((cleared + 1))
+    else
+      log "WARNING: could not disconnect '$cname' from $CP_NETWORK"
+    fi
+  done <<EOF
+$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
+{{end}}' 2>/dev/null)
+EOF
+  [ "$cleared" -gt 0 ]
 }
+
+# `compose up -d …` with the endpoint repair. On a failure it reads the DAEMON'S
+# OWN WORDS to choose: the wedge (clear the stale endpoint, then retry) or the
+# transient teardown race (#5584's sleep, then retry). Exactly one retry either
+# way — the change is not "retry harder", it is "retry after removing the thing
+# that refused you".
+compose_up_repair() {
+  what="$1"; shift
+  out="$(compose up -d "$@" 2>&1)"; rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out"
+  [ "$rc" = 0 ] && return 0
+  if printf '%s' "$out" | grep -qE 'has active endpoints|is not connected to the network'; then
+    log "$what: the daemon refused on a WEDGED ENDPOINT — the exact shape of the 2026-07-21 48h47m blackout, whose sleep-and-retry was measured 0-for-65. Clearing the endpoint BEFORE the retry."
+    clear_wedged_endpoints || log "$what: the daemon named a wedged endpoint but none of $CP_NETWORK's endpoints is stale — retrying once anyway"
+  else
+    log "$what hit the recreate race — retrying"
+    sleep 3
+  fi
+  out="$(compose up -d "$@" 2>&1)"; rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return "$rc"
+}
+
+ensure_shared_services() { compose_up_repair "db/postfix up" db postfix; }
 
 # Rolls back git + image tag and stops the target slot; the active slot keeps
 # serving throughout, so every abort path here is zero-downtime. Re-asserts
@@ -171,14 +300,12 @@ if ! ensure_shared_services; then
   log "db/postfix up FAILED twice — abort (active slot untouched)"; abort_deploy; exit 13
 fi
 log "boot slot $TARGET (auto-migrates on boot; active slot untouched)"
-# Same retry: the slot's own up can trip the identical recreate race when it
-# (re)starts db as a dependency.
-if ! compose up -d --no-build "control_plane_$TARGET"; then
-  log "slot boot hit the recreate race — retrying"
-  sleep 3
-  if ! compose up -d --no-build "control_plane_$TARGET"; then
-    log "SLOT BOOT FAILED — abort (active slot untouched)"; abort_deploy; exit 13
-  fi
+# Same repair: the slot's own up can trip the identical recreate race when it
+# (re)starts db as a dependency, and it is the path that carried the blackout's
+# SECOND phrasing ("container ... is not connected to the network cloud_default",
+# 15 of the 84 runs) straight into SLOT BOOT FAILED.
+if ! compose_up_repair "slot boot" --no-build "control_plane_$TARGET"; then
+  log "SLOT BOOT FAILED — abort (active slot untouched)"; abort_deploy; exit 13
 fi
 
 ok=0

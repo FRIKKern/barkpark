@@ -48,7 +48,8 @@ func run(args []string) int {
 		once       = fs.Bool("once", false, "run a single report+poll cycle and exit")
 		checkout   = fs.String("checkout", "/opt/barkpark", "deployed code dir git is read from")
 		healthURL  = fs.String("health-url", "", "this server's public origin for the health gate (empty skips it)")
-		healthTok  = fs.String("health-token", "", "token for the health gate's DB-read probe (optional)")
+		healthTok  = fs.String("health-token", "", "health-gate bearer, VERBATIM (optional; overrides --health-token-file)")
+		healthTokF = fs.String("health-token-file", "", "file holding the health-gate bearer (empty resolves BARKPARK_HEALTH_TOKEN_FILE, then "+defaultHealthTokenFile+"); an ABSENT file leaves req/s + p95 + 5xx unmetered, never a crash")
 		printCmds  = fs.Bool("print-allowed-commands", false, "print the approved command allowlist and exit")
 		sitesDir   = fs.String("sites-dir", "", "sites root measured per-slug (empty resolves BARKPARK_SITES_DIR, then "+defaultSitesDir+")")
 		spaceEvery = fs.Duration("space-interval", agent.DefaultSpaceInterval, "cadence of the space report (its own, slower than --interval)")
@@ -89,6 +90,15 @@ func run(args []string) int {
 	// small number confidently.
 	resolvedConsumerRoots := resolveConsumerRoots(*consumers, os.Getenv("BARKPARK_CONSUMER_ROOTS"))
 
+	// The health-gate bearer is resolved HERE, once, from a FILE the provisioner
+	// writes — not from a flag literal in a hand-added drop-in on one box. An
+	// absent file is not an error: the token stays empty, the ReqStatsProbe sends
+	// no bearer, and req/s + p95 + 5xx keep their -1 unmeasured sentinels. Which
+	// source answered is PRINTED, because a silently-empty token is exactly the
+	// hole this closes — every box but one read "" and nothing said so.
+	healthToken, healthTokenSource := resolveHealthToken(*healthTok, *healthTokF, os.Getenv("BARKPARK_HEALTH_TOKEN_FILE"))
+	fmt.Fprintf(os.Stderr, "barkpark-agent: health token %s\n", healthTokenSource)
+
 	a := &agent.Agent{
 		ControlURL: *controlURL,
 		Token:      token,
@@ -116,6 +126,15 @@ func run(args []string) int {
 			ConsumerRoots:      resolvedConsumerRoots,
 			ConsumerRootExists: agent.NewConsumerRootExists(),
 			ConsumerRootProbe:  agent.NewConsumerRootProbe(),
+			// The residual's mount guard. `du -x` refuses to cross INTO a
+			// mount, so a root that SITS ON one is measured in full while its
+			// parent's walk stopped at the boundary — subtracting both from a
+			// root-filesystem total is bytes that are not in the denominator,
+			// and the residual goes negative. Only st_dev can tell those apart.
+			DeviceProbe: agent.NewDeviceProbe(),
+			// Where PGDATA is, so a du root covering it and PGSizeBytes are
+			// never BOTH subtracted. Nothing walks this path.
+			PGDataDir: agent.DefaultPGDataDir,
 		},
 		ReportProbes: agent.ReportConfig{
 			Checkout:  *checkout,
@@ -141,7 +160,7 @@ func run(args []string) int {
 			// Request stats ride the SAME base+token seam as the health gate: the
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
-			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
+			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, healthToken, nil),
 			// WHO is spending the box, beside the aggregates that can only
 			// say THAT it is being spent. One bounded `ps` per beat, no state.
 			// This is the detection half of the 2026-08-06 guerrilla runaway;
@@ -151,8 +170,8 @@ func run(args []string) int {
 			// would read "nothing running here".
 			RunawayProbe:   agent.NewRunawayProbe(),
 			HealthBaseURL:  *healthURL,
-			HealthToken:    *healthTok,
-			HealthGateOpts: agentHealthGateOpts(*healthURL, *healthTok),
+			HealthToken:    healthToken,
+			HealthGateOpts: agentHealthGateOpts(*healthURL, healthToken),
 		},
 	}
 
@@ -217,6 +236,49 @@ func resolveSitesDir(flagValue, envValue string) string {
 		return d
 	}
 	return defaultSitesDir
+}
+
+// defaultHealthTokenFile is where the provisioner writes the health-gate bearer
+// (internal/cli/cloud.agentInstallStep, 0600 root-only), beside the report token
+// it has always written. The COMMITTED unit names this same path explicitly in
+// its ExecStart — TestCommittedUnitNamesTheHealthTokenFile pins the two together
+// so a rename here cannot silently unmeter the fleet.
+const defaultHealthTokenFile = "/etc/barkpark/agent.health.token"
+
+// resolveHealthToken answers the health-gate bearer and NAMES the source that
+// answered, in precedence order:
+//
+//  1. --health-token, VERBATIM. This is the pre-existing flag, and the hand-added
+//     drop-in on guerrilla passes it (`--health-token "$(cat …)"`), so that box
+//     keeps behaving byte-for-byte after this change.
+//  2. the file at --health-token-file, else BARKPARK_HEALTH_TOKEN_FILE, else
+//     defaultHealthTokenFile.
+//
+// ABSENCE IS NOT AN ERROR, and no garbage token is ever returned in its place: a
+// missing, empty, or unreadable file yields "" and a source string that SAYS so.
+// The agent then sends no bearer and req/s, p95 and err_5xx report their -1
+// sentinels — the exact behaviour of every box in the fleet today. Crash-looping
+// the beat over a missing telemetry credential would trade three unmetered
+// numbers for ALL of them.
+func resolveHealthToken(flagToken, flagFile, envFile string) (token, source string) {
+	if t := strings.TrimSpace(flagToken); t != "" {
+		return t, "from --health-token"
+	}
+	path := strings.TrimSpace(flagFile)
+	if path == "" {
+		path = strings.TrimSpace(envFile)
+	}
+	if path == "" {
+		path = defaultHealthTokenFile
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "unset (" + path + " unreadable: " + err.Error() + ") — req/s, p95 and 5xx stay unmetered"
+	}
+	if t := strings.TrimSpace(string(data)); t != "" {
+		return t, "read from " + path
+	}
+	return "", "unset (" + path + " is empty) — req/s, p95 and 5xx stay unmetered"
 }
 
 // consumerRootsNone is the explicit opt-OUT. It exists because "" already

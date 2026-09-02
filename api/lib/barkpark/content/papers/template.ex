@@ -120,6 +120,20 @@ defmodule Barkpark.Content.Papers.Template do
   The forced initial block set: the locked `role: "title"` level-1 heading. The
   optional featured/ingress slots are NOT seeded — they are ghost affordances the
   editor offers in their enforced place (D11).
+
+  THE TITLE ARGUMENT IS CONTENT, NOT CHROME. Whatever the caller passes is
+  copied VERBATIM into the heading's `"text"` — it becomes real stored text the
+  author must select and delete before typing their own, and `derive_title/2`
+  reads it straight back out as `doc.title`. So `nil` (or `""`) is the correct
+  argument for a paper born WITHOUT a title: the block starts empty, the editor
+  paints its own heading placeholder over it, and every display surface falls
+  back with `doc.title || "Untitled"` until the author types.
+
+  A caller must therefore never pass a DISPLAY DEFAULT here. The Studio's
+  new-document handler used to pass the literal `"Untitled"`, which seeded that
+  word as the title block's text and made the first keystroke append to it —
+  see `[untitled-is-a-fallback-not-a-seed]` in
+  `BarkparkWeb.Studio.StudioLive.Handlers.Fields`.
   """
   @spec template_blocks(String.t() | nil) :: [map()]
   def template_blocks(title) do

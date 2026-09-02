@@ -881,6 +881,18 @@ if [ -f /etc/barkpark/agent.token ]; then
     else
       log "WARN: barkpark-agent enable/restart failed — beat down until next deploy"
     fi
+    # SAY whether this box is metered. The unit now names
+    # --health-token-file /etc/barkpark/agent.health.token; the file is written at
+    # PROVISION time (internal/cli/cloud.agentInstallStep) and a self-update has no
+    # admin bearer to mint one with, so a box provisioned before that step exists
+    # keeps reporting -1 for req_per_s / p95_ms / err_5xx_per_s. That is survivable
+    # — but it must not be SILENT, which is exactly how the whole fleet stayed
+    # unmetered while one hand-patched box looked fine.
+    if [ -s /etc/barkpark/agent.health.token ]; then
+      log "barkpark-agent health token present — req/s, p95 and 5xx are metered"
+    else
+      log "WARN: no /etc/barkpark/agent.health.token — req/s, p95 and 5xx stay UNMETERED on this box (written at provision time; see deploy/systemd/README.md to backfill)"
+    fi
   else
     log "WARN: barkpark-agent rebuild skipped/failed — keeping the running agent"
   fi

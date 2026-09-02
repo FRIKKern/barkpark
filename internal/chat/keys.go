@@ -304,7 +304,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		content := m.input
 		m.input = ""
-		m.scroll = -1 // a send always re-follows so you see your own line
+		m = m.followScroll() // a send always re-follows so you see your own line
 		return m.apply(SendEvent{Content: content})
 	case tea.KeyEsc:
 		// Contextual Esc, decided at the SHELL, never the reducer (herd charter
@@ -328,7 +328,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Cycle the focus ring to the next pending card. A no-op with 0/1 cards.
 		if n := len(m.answerableCards()); n > 0 {
 			m.cardCursor = (m.cardCursor + 1) % n
-			m.scroll = -1
+			m = m.followScroll()
 		}
 		return m, nil
 	case tea.KeyCtrlB:
@@ -362,11 +362,10 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyPgDown:
 		return m.scrollBy(m.bodyHeight() / 2), nil
 	case tea.KeyHome:
-		m.scroll = 0
-		return m, nil
+		_, _, blockStarts := m.transcriptAnchored(m.width, "")
+		return m.pinScroll(0, blockStarts), nil
 	case tea.KeyEnd:
-		m.scroll = -1 // re-enter follow mode
-		return m, nil
+		return m.followScroll(), nil // re-enter follow mode
 	case tea.KeyRunes:
 		m.input += string(msg.Runes)
 		return m, nil
@@ -514,7 +513,7 @@ func (m Model) answerFocused(decision string) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	m.scroll = -1
+	m = m.followScroll()
 	m.focus = focusComposer
 	m.wfExpanded = false
 	m.wfAgentDetail = false
@@ -532,14 +531,14 @@ func (m Model) jumpToPendingCard() Model {
 	if !ok {
 		return m
 	}
-	_, start := m.transcriptBuild(m.width, card.RequestID())
+	_, start, blockStarts := m.transcriptAnchored(m.width, card.RequestID())
 	if start < 0 {
 		start = 0
 	}
 	if maxTop := m.maxScrollTop(); start > maxTop {
 		start = maxTop
 	}
-	m.scroll = start
+	m = m.pinScroll(start, blockStarts)
 	m.focus = focusComposer
 	m.wfExpanded = false
 	m.wfAgentDetail = false
@@ -550,8 +549,11 @@ func (m Model) jumpToPendingCard() Model {
 // mode and pins a top line; reaching the bottom re-enters follow (scroll = -1)
 // so a streaming reply resumes auto-scroll.
 func (m Model) scrollBy(delta int) Model {
+	_, _, blockStarts := m.transcriptAnchored(m.width, "")
 	maxTop := m.maxScrollTop()
-	cur := m.scroll
+	// The move starts from where the reader is ACTUALLY looking this frame — the
+	// anchor-relocated top, not the possibly-stale raw index (charter D80).
+	cur := m.viewportTop(blockStarts, maxTop)
 	if cur < 0 {
 		cur = maxTop // follow mode is logically pinned to the bottom
 	}
@@ -560,10 +562,30 @@ func (m Model) scrollBy(delta int) Model {
 		next = 0
 	}
 	if next >= maxTop {
-		m.scroll = -1 // back at the bottom → follow
-		return m
+		return m.followScroll() // back at the bottom → follow
 	}
-	m.scroll = next
+	return m.pinScroll(next, blockStarts)
+}
+
+// pinScroll freezes the viewport at a physical top line AND records the content
+// anchor for it, against the layout that line was measured in. Every pin goes
+// through here: a bare `m.scroll = n` would freeze a line NUMBER, which is the
+// defect (charter D80).
+func (m Model) pinScroll(top int, blockStarts []int) Model {
+	if top < 0 {
+		top = 0
+	}
+	m.scroll = top
+	m.anchor = anchorAt(blockStarts, top)
+	return m
+}
+
+// followScroll returns to follow mode and drops the anchor: follow is a pure
+// last-N slice per frame and must stay byte-identical to the pre-anchor
+// behaviour, so nothing may relocate it.
+func (m Model) followScroll() Model {
+	m.scroll = -1
+	m.anchor = scrollAnchor{}
 	return m
 }
 

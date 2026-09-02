@@ -1,0 +1,29 @@
+[
+  {
+    "number": 9356,
+    "title": "fix(cch): seal the predicate provenance gap",
+    "body": "Closes the provenance gap the control asserted.\n\nThis also pays the empty-roster control's merge criterion.\n\nTask: gr-bl-seal-predicate-provenance-gap\n",
+    "mergedAt": "2026-08-03T14:53:51Z",
+    "mergeCommit": {
+      "oid": "0a1b4d2ea53be3cb507834f0663faae998e13de3"
+    }
+  },
+  {
+    "number": 9685,
+    "title": "feat(cch): notifications withhold branches",
+    "body": "Withholds the branch list.\n\nTask: cch-w32-r2-notifications-withhold-branches\n",
+    "mergedAt": "2026-08-05T09:10:00Z",
+    "mergeCommit": {
+      "oid": "7ad181d1969ec3e26a8e948a9c741d173f035b38"
+    }
+  },
+  {
+    "number": 9001,
+    "title": "chore: unrelated",
+    "body": "Nothing to do with the roster.\n\nTask: some-other-epic-row\n",
+    "mergedAt": "2026-08-04T00:00:00Z",
+    "mergeCommit": {
+      "oid": "aaaaaaaaaaaa1111"
+    }
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "exit": 3,
+  "refusal": "EMPTY_POPULATION",
+  "must_contain": [
+    "REFUSAL:EMPTY_POPULATION",
+    "will not print a clean sweep over"
+  ]
+}

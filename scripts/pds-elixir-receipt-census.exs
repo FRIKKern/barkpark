@@ -270,6 +270,39 @@ defmodule PDS.Census do
   # site, and `read` counts the route's sibling GET /v1/auth/app-tokens arriving in the
   # read-routed population. `phantom` is unchanged at 9 BY CONSTRUCTION — the receipt's
   # own comment deliberately does not spell the needle, so it names no emitter.
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the two moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, :binary.matches/2, depth 6, @write_verbs without
+  # `transaction`, corpus api/lib/**/*.ex = 827 files, CORPUS-INTACT this run); engine
+  # of this re-derivation: Elixir 1.19.5 . Erlang/OTP 28 (erts 16.3.1) .
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-01.
+  #
+  # WHAT MOVED IT: task-ef3eb91bf7f87d4c scoped the `auth: :ingest` sheets doors to the
+  # caller's workspace. ONE emitter changed CLASS and NONE entered or left the
+  # population -- textual, ast, phantom, consumer, emitted and write all read `==` in
+  # the same run, which is the tell: no new success claim was written, an existing one
+  # simply started reaching a Repo verb.
+  #
+  #   read       15 -> 16   Barkpark.Plugins.Sheets.Web.OpsController.apply_ops/2's
+  #                         `ok: true` arm. Its new authorize_sheet/3 tenant gate calls
+  #                         Content.get_document/4, so the depth-6 relation now reaches
+  #                         a READ verb where it previously reached none: the ops door
+  #                         used to hand the slug straight to Session.apply_ops/4, a
+  #                         GenServer hop this lens cannot follow.
+  #   unrouted   23 -> 22   the SAME site, leaving. read + unrouted is 38 before and
+  #                         after; a pair moving in opposite directions by exactly one
+  #                         is a RECLASSIFICATION, never an arrival.
+  #
+  # ISOLATED BY RUN, not by reading the diff. Reverting ONLY
+  # api/lib/barkpark/plugins/sheets/web/ops_controller.ex to its pre-change bytes and
+  # re-running the census printed all eight rows `==` again, D448-DRIFT-REFUSES PASS.
+  # The PR's two other edited controllers move NOTHING: export_controller.ex holds no
+  # `ok: true` literal at all (it sends bytes, so it is not in this lens's population
+  # and its threaded scope cannot show up here), and import_controller.ex's receipt was
+  # already write-routed through Content.upsert_document/4 -- adding scope opts to a
+  # call that already reached a write verb changes no class. Naming the two doors that
+  # did NOT move is the half a diff-reader skips.
   @rederived %{
     textual: 108,
     ast: 99,
@@ -277,8 +310,8 @@ defmodule PDS.Census do
     consumer: 4,
     emitted: 95,
     write: 57,
-    read: 15,
-    unrouted: 23
+    read: 16,
+    unrouted: 22
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -6780,8 +6813,11 @@ defmodule PDS.Census do
     # unmutatability PDS-D541 named, wearing a new arm's name.
     #
     # IT ASSERTS ONLY THE COUNT IT INJECTED ITSELF. The mutation moves the BASELINE (a
-    # literal in this file), never the tree, so `24` is THIS CASE'S OWN number and pinning
-    # it is safe. THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED — the
+    # literal in this file), so the injected `@rederived.unrouted + 1` is THIS CASE'S OWN
+    # number and pinning it is safe. THE DIGIT ITSELF IS NOT WRITTEN HERE, and it used to
+    # be: this comment read "`24`" while the baseline sat at 23, and the wave that moved
+    # `unrouted` off 23 left that digit describing nothing. A prose figure beside a derived
+    # one is the defect this whole file polices; it was carrying an instance of it. THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED — the
     # expectation stops at the word `derived` — because pinning what follows it is the one
     # thing the banner forbids, and pinning it is what left the sibling arm below dead-red
     # for two waves. An honest lens correction moves `derived` and this case does not
