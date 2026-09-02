@@ -583,6 +583,14 @@ defmodule Barkpark.StudioChat.Recorder do
     # to result) still flushes its pulse row so the thought is never lost.
     state = flush_thinking(state)
     record_result(state.session_id, ev)
+    # The TURN SETTLED — stamp every unsettled tool row of this session so a
+    # reopened transcript (Studio replay AND the Go TUI, which reads the same
+    # row metadata off message_json) draws the outcome glyph instead of a
+    # forever-neutral gutter. Stateless: rows of earlier turns are already
+    # stamped, so this settles exactly this turn's rows and survives a Recorder
+    # restart mid-turn. A row whose tool_result never arrived is settled but
+    # RESULTLESS — the renderers' provenance gate keeps it neutral, never ✓.
+    StudioChat.settle_tool_rows(state.session_id)
     # A live accumulator here means text streamed but no assistant frame ever
     # carried it durably, so there is nothing to verify the segments against:
     # abandon them rather than claim a settle we cannot prove (D61).
@@ -675,8 +683,8 @@ defmodule Barkpark.StudioChat.Recorder do
   # Attach it to the persisted tool row so replay shows the terminal's ⎿ line;
   # the frame also rebroadcasts so live tabs update their in-memory row.
   def handle_info({:claude_chat_event, %{"type" => "user"} = ev} = msg, state) do
-    for {tool_use_id, output} <- user_tool_results(ev) do
-      StudioChat.attach_tool_result(state.session_id, tool_use_id, output)
+    for {tool_use_id, output, error?} <- user_tool_results(ev) do
+      StudioChat.attach_tool_result(state.session_id, tool_use_id, output, error?)
     end
 
     broadcast(state, msg)
@@ -2156,14 +2164,23 @@ defmodule Barkpark.StudioChat.Recorder do
     Application.get_env(:barkpark, :studio_chat_idle_reap_ms, @idle_after_ms)
   end
 
-  # {tool_use_id, output} pairs off a wire user-frame; [] for anything else
-  # (our own echoed sends through test fakes never match). Output capped so a
-  # huge tool result can't bloat the jsonb row.
+  # {tool_use_id, output, is_error?} triples off a wire user-frame; [] for
+  # anything else (our own echoed sends through test fakes never match). Output
+  # capped so a huge tool result can't bloat the jsonb row. `is_error` is the
+  # ONLY wire fact that turns a settled row's gutter ✗, so an ERROR result with
+  # empty text is KEPT (a failing tool often prints nothing, and dropping it
+  # would leave the replayed row falsely neutral); a plain empty result is still
+  # ignored, exactly as before.
   defp user_tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
     content
     |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
-    |> Enum.map(fn b -> {b["tool_use_id"], result_text(b["content"])} end)
-    |> Enum.reject(fn {_id, out} -> out in [nil, ""] end)
+    |> Enum.map(fn b ->
+      # `result_text/1` answers nil for a contentless block — normalize to ""
+      # so an ERROR result with no text still reaches the persist seam (whose
+      # guard is `is_binary(output)`) instead of raising a FunctionClauseError.
+      {b["tool_use_id"], result_text(b["content"]) || "", b["is_error"] == true}
+    end)
+    |> Enum.reject(fn {_id, out, error?} -> out == "" and not error? end)
   end
 
   defp user_tool_results(_), do: []
