@@ -47,6 +47,40 @@ defmodule BarkparkWeb.SearchChannel do
   updates through the same shaper it already uses for replies, without polling.
   Channels with no cached query (e.g. an empty `""` or no query yet) get a
   no-op; the channel only wakes for queries the user is actively running.
+
+  ## The per-socket query throttle (and why it cannot be a plug)
+
+  A `"query"` frame runs a full `Content.search_documents/3` against Postgres.
+  The HTTP twin of that exact capability is capped at 300 reads/min by
+  `BarkparkWeb.Plugs.RateLimit`, mounted on both search routes. **A channel
+  frame never reaches it**: `socket "/socket", BarkparkWeb.UserSocket`
+  (endpoint.ex) enters BELOW the router, so no plug in the `:api` /
+  `:scoped_api` pipelines runs, and no plug could be mounted that would. The
+  cap therefore has to live here, in the channel, per socket — which is
+  precisely the shape both sibling channels already use off
+  `System.monotonic_time/1`: `PulseChannel`'s `"cursor"` (80ms) and
+  `QuizChannel`'s `"submit_answer"` / `"cursor"` / `"hover"` (250/33/50ms).
+
+  One difference from the siblings, deliberate: this bucket carries BURST
+  credit rather than a bare minimum interval. Their frames are fire-and-forget
+  (a PubSub broadcast, a GenServer cast) and a dropped one costs nothing; a
+  dropped `"query"` frame darks a keystroke on the flagship search-as-you-type
+  surface the charter's D38/D52 acceptance requires to keep working. So the
+  bucket is sized so human typing never touches it (`:query_burst` frames of
+  credit) while the SUSTAINED rate is exactly the 300/min the HTTP twin
+  already enforces. Over budget the frame is refused with a named
+  `"rate_limited"` reason rather than dropped silently, so the client can back
+  off instead of rendering a stale box.
+
+  Tunable via `config :barkpark, :search_channel, query_per_minute: _,
+  query_burst: _`.
+
+  ### What this does NOT cap
+
+  One channel process serialises its own frames, so the per-socket bucket
+  bounds one socket. The unbounded quantity is the number of SOCKETS, and that
+  is capped separately, at connect, in `BarkparkWeb.UserSocket` — see its
+  moduledoc. Neither cap subsumes the other.
   """
   use Phoenix.Channel
 
@@ -59,6 +93,15 @@ defmodule BarkparkWeb.SearchChannel do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   @max_limit 100
+
+  # Sustained rate, deliberately EQUAL to `Plugs.RateLimit`'s read budget
+  # (rate_limit.ex `default_per_minute(_, :read)`), so the socket door and the
+  # HTTP door price the same capability the same way.
+  @default_query_per_minute 300
+  # Burst credit: how many back-to-back frames a socket may spend before the
+  # sustained rate binds. Sized for a human hammering a search box, not for a
+  # loop.
+  @default_query_burst 30
 
   @impl true
   def join("search:" <> scope, _params, socket) do
@@ -89,6 +132,13 @@ defmodule BarkparkWeb.SearchChannel do
         |> assign(:current_project, proj)
         |> assign(:dataset, dataset)
         |> assign(:last_query, nil)
+        # Seed the query bucket FULL, off a real monotonic reading. Note the
+        # lesson pulse_channel.ex records in the same place: monotonic time is
+        # usually NEGATIVE, so a `0` sentinel would look like an enormous
+        # elapsed interval (or, for the mirror bug, throttle forever). Take the
+        # actual clock.
+        |> assign(:query_allowance, query_burst() * 1.0)
+        |> assign(:query_last_ms, System.monotonic_time(:millisecond))
 
       {:ok, socket}
     else
@@ -114,41 +164,102 @@ defmodule BarkparkWeb.SearchChannel do
         {:reply, {:ok, empty_reply(seq, "")}, socket}
 
       query ->
-        opts_base = [
-          type: params["type"],
-          types: parse_types(params["types"]),
-          # PINNED — never read from `params`. See the moduledoc.
-          perspective: :published,
-          limit: clamp_limit(params["limit"]),
-          offset: parse_int(params["offset"], 0),
-          engine: params["engine"] || "indx"
-        ]
+        # The throttle is charged HERE and not on the `""` branch above: the
+        # empty branch answers from a literal and never touches Postgres, so
+        # billing it would spend a real search's budget on a frame that costs
+        # nothing. What is being rationed is `Content.search_documents/3`.
+        case take_query_token(socket) do
+          {:rate_limited, retry_after_ms, socket} ->
+            {:reply,
+             {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms, seq: seq}},
+             socket}
 
-        opts = opts_base ++ scope_opts(socket)
-
-        {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
-
-        reply =
-          build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
-
-        # Cache the latest query parameters so a downstream
-        # `{:document_changed, _}` PubSub message can re-run the SAME search
-        # without the client re-pushing. `opts_base` excludes the tenancy scope
-        # — that is re-derived from the socket on each re-run via `scope_opts/1`
-        # so a workspace move (today purely defensive) cannot stale-pin the old
-        # tenant filter. `view` rides along so a brief subscriber's live pushes
-        # stay brief.
-        socket =
-          assign(socket, :last_query, %{
-            seq: seq,
-            query: query,
-            opts_base: opts_base,
-            fields: params["fields"],
-            view: params["view"]
-          })
-
-        {:reply, {:ok, reply}, socket}
+          {:ok, socket} ->
+            run_query(query, seq, params, socket)
+        end
     end
+  end
+
+  defp run_query(query, seq, params, socket) do
+    opts_base = [
+      type: params["type"],
+      types: parse_types(params["types"]),
+      # PINNED — never read from `params`. See the moduledoc.
+      perspective: :published,
+      limit: clamp_limit(params["limit"]),
+      offset: parse_int(params["offset"], 0),
+      engine: params["engine"] || "indx"
+    ]
+
+    opts = opts_base ++ scope_opts(socket)
+
+    {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
+
+    reply =
+      build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
+
+    # Cache the latest query parameters so a downstream
+    # `{:document_changed, _}` PubSub message can re-run the SAME search
+    # without the client re-pushing. `opts_base` excludes the tenancy scope
+    # — that is re-derived from the socket on each re-run via `scope_opts/1`
+    # so a workspace move (today purely defensive) cannot stale-pin the old
+    # tenant filter. `view` rides along so a brief subscriber's live pushes
+    # stay brief.
+    socket =
+      assign(socket, :last_query, %{
+        seq: seq,
+        query: query,
+        opts_base: opts_base,
+        fields: params["fields"],
+        view: params["view"]
+      })
+
+    {:reply, {:ok, reply}, socket}
+  end
+
+  # The bucket itself: monotonic-time refill, burst-capped, held in socket
+  # assigns so it is per-socket and dies with the socket.
+  #
+  # Two details that are easy to get wrong and are load-bearing here:
+  #
+  #   * `query_last_ms` advances on a REFUSED frame too. `RateLimiter.debit/4`
+  #     famously does not (its own moduledoc records the consequence), which
+  #     freezes the clock at the last ADMITTED frame; here the elapsed interval
+  #     is what earns credit, so freezing it would mean a socket that keeps
+  #     hammering never earns its way back — a refusal would be permanent under
+  #     sustained load.
+  #   * a refused frame CARRIES its fractional allowance forward instead of
+  #     resetting it, so being denied costs nothing but the frame.
+  defp take_query_token(socket) do
+    burst = query_burst()
+    refill_per_ms = query_per_minute() / 60_000
+    now = System.monotonic_time(:millisecond)
+    last = socket.assigns[:query_last_ms] || now
+    held = socket.assigns[:query_allowance] || burst * 1.0
+
+    allowance = min(burst * 1.0, held + (now - last) * refill_per_ms)
+    socket = assign(socket, :query_last_ms, now)
+
+    if allowance >= 1.0 do
+      {:ok, assign(socket, :query_allowance, allowance - 1.0)}
+    else
+      retry_after_ms = ceil((1.0 - allowance) / refill_per_ms)
+      {:rate_limited, retry_after_ms, assign(socket, :query_allowance, allowance)}
+    end
+  end
+
+  defp query_per_minute do
+    :barkpark
+    |> Application.get_env(:search_channel, [])
+    |> Keyword.get(:query_per_minute, @default_query_per_minute)
+    |> max(1)
+  end
+
+  defp query_burst do
+    :barkpark
+    |> Application.get_env(:search_channel, [])
+    |> Keyword.get(:query_burst, @default_query_burst)
+    |> max(1)
   end
 
   @impl true

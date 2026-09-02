@@ -293,7 +293,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "observed_epoch": {
       "type": "integer",
-      "description": "The epoch from your claim (doc.claim.epoch). Close is a compare-and-swap on this — a stale epoch 409s."
+      "description": "The CURRENT claim epoch (doc.claim.epoch) — not necessarily the one your claim returned: every task_pulse ADVANCES it, so re-read it from the pulse response. Close is a compare-and-swap on this — a stale epoch 409s fenced_off."
     },
     "observed_rev": {
       "type": "string",
@@ -596,7 +596,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "observed_epoch": {
       "type": "integer",
-      "description": "The epoch from your claim (doc.claim.epoch). Same fence as close — a stale epoch 409s. Stamp does NOT bump it."
+      "description": "The CURRENT claim epoch (doc.claim.epoch) — not necessarily the one your claim returned: every task_pulse ADVANCES it, so re-read it from the pulse response. Same fence as close — a stale epoch 409s fenced_off. Stamp itself does NOT bump it."
     },
     "criterion": {
       "type": "integer",

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -107,6 +108,14 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// non-2xx (auth/validation/not_found/conflict/rate-limit) is the server
 	// refusing BEFORE any commit, so both skip straight through untouched.
 	if g.dryRun || (rc != exitOK && rc != exitServer) {
+		// A fenced_off 409 is the ONE refusal whose cause the caller cannot see
+		// from the message: the epoch did not go wrong, a pulse MOVED it. Read
+		// the row back and name the epoch that is current now (tasks_lease.go).
+		if rc == exitConflict && staleEpochReasons[out.lastErrorCode] {
+			if req, ok := stampRequestOf(cmd, forward); ok {
+				explainStaleEpoch(out, ctx, req.docID, req.worker)
+			}
+		}
 		return rc
 	}
 	req, ok := stampRequestOf(cmd, forward)
@@ -122,11 +131,17 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	return confirmStampLanded(out, ctx, req, rc)
 }
 
+// stampReadbackRetryDelay is the whole budget of the stamp read-back's second
+// look — the twin of closeClaimRecheckDelay, and short enough that an operator
+// never notices it. A var so tests can drive both arms without sleeping.
+var stampReadbackRetryDelay = 400 * time.Millisecond
+
 // stampRequest is what the caller ASKED the ledger to write. It is the request
 // half of the receipt and is NEVER the source of the verdict — renderStampVerdict
 // prints from the STORED row and uses these fields only to say what was expected.
 type stampRequest struct {
 	docID    string
+	worker   string
 	index    int
 	text     string
 	met      bool
@@ -173,6 +188,7 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 	}
 	return stampRequest{
 		docID:    docID,
+		worker:   strings.TrimSpace(argMap["worker_id"]),
 		index:    idx,
 		text:     last("criterion-text"),
 		met:      last("met") == "true",
@@ -210,9 +226,26 @@ func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest, ori
 	// a draft answered; see renderStampVerdict.
 	stored, readback, err := taskboard.FetchCriterion(taskReadbackClient(ctx), req.docID, req.index)
 	if err != nil {
-		out.userErr("stamp sent but NOT confirmed — the read-back of %s criterion index %d failed: %v",
+		// ONE bounded second look, the twin of close's (closeClaimRecheckDelay).
+		// The line this path used to print — "the write may or may not have
+		// landed; re-read with `bp task get …` before trusting it" — is the
+		// exact ambiguity this verb exists to remove, and it was reached
+		// LIVE during a load spike by a read that lost a single race, not by a
+		// store with no answer. Under LEDGER DIET the `bp task get` it told the
+		// operator to run is also the expensive call (the unindexable children
+		// walk) where this read fetches one criterion. So ask again, briefly,
+		// before giving up on knowing.
+		time.Sleep(stampReadbackRetryDelay)
+		stored, readback, err = taskboard.FetchCriterion(taskReadbackClient(ctx), req.docID, req.index)
+	}
+	if err != nil {
+		out.userErr("✗ NOT confirmed — the read-back of %s criterion index %d could not reach the store, twice: %v",
 			req.docID, req.index, err)
-		out.errf("  the write may or may not have landed; re-read with `bp task get %s` before trusting it", req.docID)
+		// NOT "may or may not have landed". The store is what "landed" means and
+		// it did not answer, so the only safe reading is UNSTORED — and acting on
+		// that reading is free, because a stamp that DID land is idempotent: the
+		// same --met with the same --evidence re-writes the same row.
+		out.errf("  treat this stamp as NOT stored and stamp again — a stamp that did land is idempotent (same --criterion, same --met/--evidence, same row), so re-stamping costs nothing and settles it")
 		if origRC != exitOK {
 			return origRC
 		}
@@ -271,7 +304,7 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 	for _, m := range mismatches {
 		out.errf("  ✗ %s", m)
 	}
-	out.errf("  a stamp is only real once the store holds it — re-read with `bp task get %s` and stamp again", req.docID)
+	out.errf("  ✗ NOT stored — stamp again (re-read with `bp task get %s` first if the criteria list may have moved). A stamp is only real once the store holds it.", req.docID)
 	return exitConflict
 }
 

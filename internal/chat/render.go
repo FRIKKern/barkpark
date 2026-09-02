@@ -202,6 +202,15 @@ func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, [
 		// on the wire this returns renderTail's bytes unchanged.
 		push(renderLiveTail(chatRegistry, width, m.st)...)
 	}
+	// Live ledger transitions (tlv-bl-chat-live-transition-stream) close the
+	// transcript. They are pushed LAST, in arrival order, because they are the
+	// newest thing that happened and they carry no seq to interleave by — a
+	// live-only frame has no persisted row to sit beside. This is the honest
+	// MVP the charter allows: one line per transition, no chip rendering (the
+	// TUI has none for tasks at all today).
+	if ls := renderTaskTransitions(w, m.st.TaskTransitions); len(ls) > 0 {
+		push(ls...)
+	}
 	if len(lines) == 0 {
 		lines = []string{dimStyle.Render("No messages yet — type below and press Enter.")}
 		blockStarts = []int{0}
@@ -221,7 +230,7 @@ func renderMessage(width int, msg Message, focused bool, inflight string) []stri
 	case msg.Role == "assistant":
 		return renderAssistantDoc(chatRegistry, width, msg)
 	case msg.Role == "user":
-		return renderUserEcho(w, msg.SourceMarkdown)
+		return append(renderUserEcho(w, msg.SourceMarkdown), renderAttachments(w, msg.Attachments)...)
 	case cardRoles[msg.Role] != "":
 		return cardView(w, msg, focused, inflight)
 	case msg.Role == "tool":
@@ -395,6 +404,47 @@ func renderUserEcho(w int, src string) []string {
 	return out
 }
 
+// renderAttachments draws a user row's chat-owned attachment references
+// (ct-bl-chat-attachments) as one dim chip per file: the media type and a human
+// byte size, under the prompt echo.
+//
+// It renders the REFERENCE and nothing else. The terminal never fetches or
+// draws the bytes, and there is deliberately nothing here to print a local path
+// or a URL with a token in it — the wire shape carries neither, so this renderer
+// structurally cannot leak one. That is the same reference Studio renders from,
+// which is what makes "one shape, both surfaces" true rather than parallel.
+func renderAttachments(w int, atts []Attachment) []string {
+	if len(atts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(atts))
+	for _, a := range atts {
+		label := a.MediaType
+		if label == "" {
+			label = "attachment"
+		}
+		if a.ByteSize > 0 {
+			label += " · " + humanBytes(a.ByteSize)
+		}
+		out = append(out, "  "+dimStyle.Render(truncate("⎘ "+label, w-2)))
+	}
+	return out
+}
+
+// humanBytes formats a byte count for an attachment chip. Deliberately coarse —
+// a chip says "how big, roughly", and a precise count would be noise next to a
+// media type.
+func humanBytes(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 // renderLocalSend paints an optimistic, not-yet-settled user send. A mid-turn
 // send wears the ⧗ queued badge (charter D12) until its own turn drains it.
 func renderLocalSend(w int, ls LocalSend) []string {
@@ -485,6 +535,53 @@ func cardResolutionBadge(status string) string {
 		return dimStyle.Render("— canceled (no runtime to answer)")
 	default:
 		return dimStyle.Render(status)
+	}
+}
+
+// ── live ledger transitions (tlv-bl-chat-live-transition-stream) ─────────────
+
+// renderTaskTransitions renders the session's live ledger transitions: one dim
+// mono line per transition, oldest first, each printed as `<glyph> <label>`.
+// The label string comes STRAIGHT off the wire — Elixir's
+// `Barkpark.StudioChat.TaskTransition.label/3` built it, the same function
+// Studio's transcript row renders — so the two surfaces cannot word a
+// transition differently. The glyph carries the state the GUI carries in a
+// `--life-*` tint: a terminal has no colour token to borrow.
+//
+// Only the last maxTaskTransitions are shown, with an honest "+N earlier"
+// header above them: a long session accumulates them, and a transcript that is
+// mostly ledger noise is the firehose the scoping rule exists to refuse.
+func renderTaskTransitions(w int, ts []TaskTransition) []string {
+	if len(ts) == 0 {
+		return nil
+	}
+	const maxTaskTransitions = 6
+	var out []string
+	start := 0
+	if len(ts) > maxTaskTransitions {
+		start = len(ts) - maxTaskTransitions
+		out = append(out, dimStyle.Render(fmt.Sprintf("… +%d earlier task transitions", start)))
+	}
+	for _, t := range ts[start:] {
+		out = append(out, truncate(taskTransitionGlyph(t.Status)+" "+dimStyle.Render(t.Label), w))
+	}
+	return out
+}
+
+// taskTransitionGlyph is the terminal's stand-in for Studio's `--life-*` tint:
+// a settled task reads ✓, a cancelled/blocked one ✕, live work ●, anything else
+// the neutral ◆. It mirrors railGlyph's vocabulary so the two live bands in this
+// TUI do not teach two different alphabets.
+func taskTransitionGlyph(status string) string {
+	switch status {
+	case "done", "closed":
+		return allowStyle.Render("✓")
+	case "cancelled", "blocked":
+		return noticeStyle.Render("✕")
+	case "in_progress":
+		return badgeStyle.Render("●")
+	default:
+		return dimStyle.Render("◆")
 	}
 }
 

@@ -303,9 +303,24 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   ## Complexity
 
   One topological pass (Kahn) over the formula-dependency graph — O(cells +
-  edges), no per-cell rescans. Range dependencies intersect the formula set
-  instead of expanding the rectangle; range evaluation iterates
-  min(rectangle, occupied cells).
+  edges), no per-cell rescans.
+
+  Graph BUILD resolves a range dependency through a formula-position index
+  (per column, rows sorted; built once per recompute in O(F log F)), so a
+  range costs O(log F + hits) — never the rectangle, and never a scan of the
+  formula set. Resolving the whole graph is therefore O(cells + edges + F log
+  F). Before that index every range filtered the entire formula set, which
+  made a document with one row-local `SUM(A_r:J_r)` per row cost O(n^2) to
+  BUILD — quadratic on a workload whose evaluation is linear, and the reason
+  a measured log-log sweep on that shape fitted k ~ 2.0 against this
+  paragraph's promise.
+
+  Range EVALUATION iterates min(rectangle, occupied cells).
+
+  A formula whose own reads grow with the sheet is still quadratic and
+  correctly so: `=SUM($A$1:A_r)` on every row reads Sum(r) cells by
+  definition, in this engine and in Excel alike. `mix barkpark.sheets.bench`
+  sweeps both families and labels which is which.
 
   ## Examples
 
@@ -1224,11 +1239,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp walk_qualified(_literal, _own, acc), do: acc
 
   defp build_graph_unified(node_asts, node_set) do
+    index = build_pos_index_unified(MapSet.to_list(node_set))
+
     Enum.reduce(node_asts, {%{}, %{}}, fn {key, {_ast, pts, rgs}}, {in_deg, out} ->
       deps =
         pts
         |> Enum.filter(&MapSet.member?(node_set, &1))
-        |> Kernel.++(range_node_deps_unified(rgs, node_set))
+        |> Kernel.++(range_node_deps_unified(rgs, index))
         |> Enum.uniq()
 
       in_deg = Map.put(in_deg, key, length(deps))
@@ -1237,13 +1254,18 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
-  # Range deps intersect the formula set of the range's OWN tab (bounded by the
-  # formula count, never the rectangle) — the per-tab guarantee, tab-qualified.
-  defp range_node_deps_unified(ranges, node_set) do
+  # Range deps hit the formula-position index of the range's OWN tab (never the
+  # rectangle, never a full scan) — the per-tab guarantee, tab-qualified. An
+  # absent tab has no index entry and contributes nothing.
+  defp range_node_deps_unified(ranges, index) do
     Enum.flat_map(ranges, fn {{t, c1, r1}, {t, c2, r2}} ->
-      Enum.filter(node_set, fn {tt, c, r} ->
-        tt == t and c >= c1 and c <= c2 and r >= r1 and r <= r2
-      end)
+      case index do
+        %{^t => tab_index} ->
+          Enum.map(index_band(tab_index, c1, r1, c2, r2), fn {c, r} -> {t, c, r} end)
+
+        _ ->
+          []
+      end
     end)
   end
 
@@ -1433,11 +1455,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp build_graph(node_asts, node_set) do
+    index = build_pos_index(MapSet.to_list(node_set))
+
     Enum.reduce(node_asts, {%{}, %{}}, fn {pos, {_ast, points, ranges}}, {in_deg, out} ->
       deps =
         points
         |> Enum.filter(&MapSet.member?(node_set, &1))
-        |> Kernel.++(range_node_deps(ranges, node_set))
+        |> Kernel.++(range_node_deps(ranges, index))
         |> Enum.uniq()
 
       in_deg = Map.put(in_deg, pos, length(deps))
@@ -1446,12 +1470,74 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
-  # Range deps intersect the FORMULA set (bounded by formula count), never
-  # the rectangle — a SUM over a million-cell range stays cheap.
-  defp range_node_deps(ranges, node_set) do
-    Enum.flat_map(ranges, fn {{c1, r1}, {c2, r2}} ->
-      Enum.filter(node_set, fn {c, r} -> c >= c1 and c <= c2 and r >= r1 and r <= r2 end)
+  # Range deps hit the FORMULA-position index (§Complexity), never the
+  # rectangle and never a full scan of the formula set: a binary search per
+  # covered column yields only the formula positions actually inside the
+  # rectangle, so one range costs O(log F + hits) instead of O(F). A SUM over a
+  # million-cell range stays cheap AND n row-local SUMs stay O(n) in total.
+  defp range_node_deps(ranges, index) do
+    Enum.flat_map(ranges, fn {{c1, r1}, {c2, r2}} -> index_band(index, c1, r1, c2, r2) end)
+  end
+
+  # ── formula-position index (the §Complexity range bound) ────────────────────
+  #
+  # Built ONCE per recompute in O(F log F) and queried once per range. Shape:
+  # `{cols, %{col => rows}}` where `cols` is a tuple of the distinct formula
+  # columns in ascending order and each `rows` is a tuple of that column's
+  # formula rows in ascending order. Tuples (not lists) because `elem/2` is
+  # O(1), which is what makes the binary search a binary search.
+  #
+  # Before this index each range ran `Enum.filter` over the WHOLE formula set,
+  # so a document with one row-local `SUM` per row cost O(ranges x formulas) =
+  # O(n^2) to merely BUILD the graph — quadratic on a workload whose real work
+  # is linear, and directly contrary to the O(cells + edges) contract above.
+
+  defp build_pos_index(positions) do
+    by_col =
+      positions
+      |> Enum.group_by(fn {c, _r} -> c end, fn {_c, r} -> r end)
+      |> Map.new(fn {c, rows} -> {c, rows |> Enum.sort() |> List.to_tuple()} end)
+
+    {by_col |> Map.keys() |> Enum.sort() |> List.to_tuple(), by_col}
+  end
+
+  # One index per tab, keyed by tab index; corners carry their tab, so a
+  # cross-tab range never touches another tab's positions.
+  defp build_pos_index_unified(keys) do
+    keys
+    |> Enum.group_by(fn {t, _c, _r} -> t end, fn {_t, c, r} -> {c, r} end)
+    |> Map.new(fn {t, pairs} -> {t, build_pos_index(pairs)} end)
+  end
+
+  # Every indexed position inside the rectangle, as {col, row}. Cost:
+  # O(log C + covered_cols x log R + hits) — bounded by the ANSWER, not by the
+  # formula count and not by the rectangle area.
+  defp index_band({cols, by_col}, c1, r1, c2, r2) do
+    cols
+    |> tuple_band(c1, c2)
+    |> Enum.flat_map(fn c ->
+      by_col |> Map.fetch!(c) |> tuple_band(r1, r2) |> Enum.map(&{c, &1})
     end)
+  end
+
+  # Ascending-sorted tuple -> the elements in [lo, hi], in order.
+  defp tuple_band(t, lo, hi), do: take_band(t, lower_bound(t, lo), tuple_size(t), hi, [])
+
+  # Smallest 1-based index i with elem(t, i - 1) >= v; tuple_size(t) + 1 if none.
+  defp lower_bound(t, v), do: lower_bound(t, v, 1, tuple_size(t) + 1)
+
+  defp lower_bound(_t, _v, lo, hi) when lo >= hi, do: lo
+
+  defp lower_bound(t, v, lo, hi) do
+    mid = div(lo + hi, 2)
+    if elem(t, mid - 1) < v, do: lower_bound(t, v, mid + 1, hi), else: lower_bound(t, v, lo, mid)
+  end
+
+  defp take_band(_t, i, size, _hi, acc) when i > size, do: :lists.reverse(acc)
+
+  defp take_band(t, i, size, hi, acc) do
+    v = elem(t, i - 1)
+    if v > hi, do: :lists.reverse(acc), else: take_band(t, i + 1, size, hi, [v | acc])
   end
 
   defp topo([], computed, in_deg, _out, _node_asts, _base), do: {computed, in_deg}

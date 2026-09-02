@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp            # no config + TTY → the setup wizard, then the TUI
 ```
 
-The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`); accept and schema, routes and crons are live on first boot. A dev server on `:4000` blocks the local DB reset — stop it or pick **connect**.
+The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`); accept and schema, routes and crons go live on first boot. A dev server on `:4000` blocks the local DB reset — stop it or pick **connect**.
 
 **Existing installs** — enable via env and restart:
 
@@ -36,7 +36,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 
 **Register the movement.** Every unit of work runs under a claimed task: if no row names it, create one and claim it FIRST, then work. The doctrine, why unregistered work is unrecoverable, and the three ways a registration silently does not land: [AGENT-ONRAMPS](AGENT-ONRAMPS.md#register-the-movement); in this repo it also gates merge ([merge-gates](../ops/merge-gates.md)).
 
-**1. Token.** Any bearer token works for the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`. A stale `BARKPARK_TOKEN` in the environment SHADOWS `~/.config/barkpark/config.json`: `bp whoami` then reads `auth_tier: none` and every `bp task` verb says *hidden at your tier* — `unset BARKPARK_TOKEN` (or run `env -u BARKPARK_TOKEN bp …`) before blaming the server.
+**1. Token.** Any bearer token works for the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`. A stale `BARKPARK_TOKEN` SHADOWS `~/.config/barkpark/config.json`: `bp whoami` reads `auth_tier: none` and every `bp task` verb says *hidden at your tier* — `unset BARKPARK_TOKEN` (or `env -u BARKPARK_TOKEN bp …`) before blaming the server.
 
 **2. Discover.** One call teaches the whole surface:
 
@@ -44,7 +44,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 bp capabilities -o json          # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
 ```
 
-**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …) — the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback; author briefs as blocks, not a text wall. `bp task create "<title>" --yes` files a draft; `--publish` also needs `--description` (20+ chars) and 1–12 tags ALREADY registered as `type:tag` docs (`bp doc ls tag --all`) — an invented tag is refused before anything is created.
+**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …) — the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback; author briefs as blocks, not a text wall. `bp task create "<title>" --yes` files a draft; `--publish` also needs `--description` (20+ chars) and 1–12 tags already registered as `type:tag` docs (`bp doc ls tag --all`) — an invented tag is refused before anything is created.
 
 ```bash
 curl -X POST $API/v1/data/mutate/production \
@@ -53,9 +53,9 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing* — listing is NOT published-only: an unpaired `drafts.<id>` task IS listed as itself; only a draft with a published twin is collapsed into it. Lifecycle is independent of draft/publish. `bp doc patch` (like `create --set`) writes the DRAFT: the published row — the one boards and `bp task get` read — does not change until `bp doc publish task <id> --yes`.
+> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing*: an unpaired `drafts.<id>` task IS listed as itself; only a draft with a published twin is collapsed into it. Lifecycle is independent of draft/publish. `bp doc patch` (like `create --set`) writes the DRAFT: the published row — the one boards and `bp task get` read — does not change until `bp doc publish task <id> --yes`.
 
-**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts with `prod write not confirmed` and sends nothing — a batch script missing it no-ops every write. Reading a row back: in `bp task get <id> -o json` the criteria sit under `doc.content.acceptance_criteria` and the lease under `doc.claim` — a reader walking the top level sees an empty row.
+**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts (`prod write not confirmed`) and sends nothing, so a batch script missing it no-ops every write. Reading a row back: in `bp task get <id> -o json` criteria sit under `doc.content.acceptance_criteria`, the lease under `doc.claim` — a reader walking the top level sees an empty row.
 
 ```bash
 # Queue claim: take the NEXT ready task (priority order)
@@ -87,7 +87,10 @@ review usually refutes a proof *after* the close. It sets `met: false`, leaves
 the original evidence exactly where it was, and appends a signed withdrawal
 record; a bare `met:true → met:false` patch is refused everywhere.
 
-The full contract — what each verb fences on, every refusal it can emit, and the
+**Lease + epoch.** A claim is a **45 min** lease (`:task_lease_ttl_seconds`, 2700 s) that `claim`/`next`/`pulse` print. Every pulse renews it **and** bumps `claim.epoch` — pass the pulse's epoch, not the claim's, to `stamp`/`close`.
+
+The full contract — what each verb fences on, every refusal it can emit (`409
+fenced_off`, `not_holder`, `criteria_unmet`, …), and the
 withdrawal's sealed-row rules — is [the claim-lifecycle
 contract](../contracts/task-claim-lifecycle.md); how to write the close receipt
 is [the close-packet convention](../contracts/close-packet.md).
@@ -112,7 +115,7 @@ bp task ls --all                       # every page, offset-walked
 
 **Pages by default.** `ls` serves **100** rows when you name no `--limit`, `ready` 50; both cap at **1000**. Every list response carries `page:{limit,offset,returned,has_more}` — `has_more` is `returned == limit`, so `returned < limit` proves the last page but a full page may over-report. A default page that fills prints `result page reached the default limit of 100` on **stderr**; the remedy is `--all` (offset-walked, lookahead-anchored) or a bigger `--limit`. Never read a 100-row `ls` as the whole board.
 
-Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Never cap paging at a round number** — a run stopped at offset 3000 read its own cap as a natural end; the set held 7,652. A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
+Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Never cap paging at a round number** — a run stopped at offset 3000 read its cap as the end; the set held 7,652. A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
 
 **7. Watch the stream.** Both routes are in **What you get**. **Push:** SSE, `task.*`, no polling. **Pull:** `bp task events --since <id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic PK). Resume with the last `cursor` as `--since`; omit = from start, `has_more:true` → poll again. One `dataset` (default `production`), `type=task`.
 
@@ -135,13 +138,13 @@ Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.m
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** **pulses** ≤1/60s (holder-only renew + a bounded now-line from `tool_name` + cwd basename — never the transcript; a lost lease answers `not_holder` and is NOT re-claimed), **Stop**/**SessionEnd** close on the epoch that pulse stamped (re-claiming only if the stamp is stale) IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
+A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** **pulses** ≤1/60s (holder-only renew; now-line from `tool_name` + cwd basename, never the transcript; a lost lease answers `not_holder`, never a re-claim), **Stop**/**SessionEnd** close on the epoch pulse stamped (re-claiming only if that stamp is stale) IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
 
 ## Working with your AI in Studio
 
 In `/studio` → **Tasks ✅**: you (form) flip `lifecycle_status`/`priority`/`assignee` and edit titles/descriptions; the agent (API) claims/closes with fencing, adds edges, relabels, links papers. The TUI edits flat fields; composites (`acceptance_criteria`) are Studio/API-only — the API single-writes structured values. Live over PubSub.
 
-The live board at **`/admin/projects`** (`:ops` admin-gated) is a kanban over the same docs: five realtime columns — open · ready · in_progress · blocked · done (cancelled → tally). **Drag** restages through the fenced `claim`/`close` primitives (foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived, no drop). **Group**/**filter** via chips in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
+**`/admin/projects`** (`:ops` admin-gated) is a live kanban over the same docs: five realtime columns — open · ready · in_progress · blocked · done (cancelled → tally). **Drag** restages through the fenced `claim`/`close` primitives (a foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived, no drop). **Group**/**filter** via chips in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
 
 ## Goals and phases
 
@@ -182,8 +185,5 @@ Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes m
 | No **Tasks** pane in Studio, or `404` on `/v1/tasks/*` | Plugin off — pane and routes mount only when `tasks` is on: `BARKPARK_PLUGINS` set without it, or the `task` schema isn't registered. Fix env + restart; the schema auto-registers on boot. |
 | `404 task not found` right after create | See **Draft prefix**; check plugin enabled + token access. |
 | Task invisible in Studio but in API | Tenancy: the doc is scoped to a different workspace/project than this Studio. |
-
-Claim/close refusals (`409 fenced_off`, `not_holder`, `criteria_unmet`, …) are in
-[the claim-lifecycle contract](../contracts/task-claim-lifecycle.md).
 
 Cheatsheet: [tasks](../cheatsheets/tasks.md) · CLI canon: [HANDBOOK](../cli/HANDBOOK.md) · HTTP contract: [api-v1](../api-v1.md)

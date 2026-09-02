@@ -87,6 +87,14 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// "a 500 can hide a write that landed" — so an 8 is never taken as proof
 	// the seal is absent.
 	if g.dryRun || (rc != exitOK && rc != exitServer) {
+		// Same fenced_off explanation the stamp path gets: a close refused on a
+		// stale epoch is a pulse's doing, and the 409 alone never says so
+		// (explainStaleEpoch, tasks_lease.go).
+		if rc == exitConflict && staleEpochReasons[out.lastErrorCode] {
+			if req, ok := closeRequestOf(cmd, tail); ok {
+				explainStaleEpoch(out, ctx, req.docID, req.worker)
+			}
+		}
 		return rc
 	}
 	req, ok := closeRequestOf(cmd, tail)
@@ -381,6 +389,15 @@ func renderPulseVerdict(out *writer, req pulseRequest, stored taskboard.PulseRow
 			out.progressf("✓ the store holds the now-line despite the POST answering a server error (exit %d) — a 5xx can commit the write before the response fails; the read-back is the truth here, not the transport error", origRC)
 		}
 		out.progressf("✓ the store holds it — %s", storedPulseSummary(stored))
+		// THE NEW EPOCH, said out loud. storedPulseSummary already carried it
+		// inside a claim summary, where it read as a description of the lease
+		// rather than as the number the next stamp/close must pass — and a
+		// builder holding the epoch it was handed at claim time has no cue that
+		// its own heartbeat just invalidated it.
+		if stored.ClaimEpoch > 0 {
+			out.progressf("  the pulse ADVANCED the claim epoch to %d — pass %d to the next `bp task stamp` / `bp task close`; the epoch you were given at claim time is now stale",
+				stored.ClaimEpoch, stored.ClaimEpoch)
+		}
 		return exitOK
 	}
 	out.userErr("pulse NOT confirmed by the store — the now-line did not land as asked")

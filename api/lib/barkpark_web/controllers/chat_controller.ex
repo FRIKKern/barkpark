@@ -77,7 +77,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{FleetHub, Recorder, Runtime}
+  alias Barkpark.StudioChat.{Attachments, FleetHub, Recorder, Runtime}
   alias BarkparkWeb.ErrorResponse
 
   # Wire bounds (charter "Security, validation, and transport verification
@@ -664,6 +664,16 @@ defmodule BarkparkWeb.ChatController do
         # re-GET the session at every turn boundary to notice one (charter D15).
         chunk_or_stop(conn, sse_title_frame(sid, title))
 
+      {:chat_task_transition, _sid, transition} ->
+        # A live ledger transition (tlv-bl-chat-live-transition-stream): the
+        # Recorder's scoped re-broadcast on the per-session topic. The sid is
+        # embedded in the topic the forwarder subscribed to, so it is
+        # authoritative — this clause ignores the tuple's sid, exactly like the
+        # workflow clause above. Secret-safe by construction (D23): the payload
+        # is a fixed set of ledger fields the Recorder built, never an inspect
+        # or a raw document.
+        chunk_or_stop(conn, sse_task_frame(transition))
+
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
         # so no stderr/path/token can reach the wire. The stream stays open — a
@@ -805,6 +815,16 @@ defmodule BarkparkWeb.ChatController do
   # stale the way a replayed frame can.
   def sse_title_frame(session_id, title),
     do: "event: title\ndata: #{Jason.encode!(%{session_id: session_id, title: title})}\n\n"
+
+  @doc false
+  # The live task-transition frame (tlv-bl-chat-live-transition-stream). ID-LESS
+  # and UNREPLAYABLE, exactly like `workflow`/`title`/`runtime`/`permission`
+  # (D5): a resuming client re-reads settled ledger truth, never a replayed
+  # transition. The payload carries its OWN `event_id` — the mutation_events row
+  # id — so the reducer dedupes a duplicate live delivery without that id ever
+  # becoming an SSE `Last-Event-ID` cursor for this stream.
+  def sse_task_frame(transition),
+    do: "event: task\ndata: #{Jason.encode!(transition)}\n\n"
 
   @doc false
   # The fixed public exit contract (D23): the reason enum, plus the numeric
@@ -1470,19 +1490,36 @@ defmodule BarkparkWeb.ChatController do
   without a live SSE loop.
   """
   def message_json(%StudioChat.Message{} = m) do
+    metadata = m.metadata || %{}
+
     base = %{
       seq: m.seq,
       role: m.role,
       source_markdown: m.source_markdown,
-      metadata: m.metadata || %{},
+      # `attachments` is LIFTED OUT of metadata and re-projected below — the
+      # persisted pointer carries the store `path` (`<session_id>/<sha256>`),
+      # and a filesystem path must never reach a client (ct-bl-chat-attachments).
+      # Dropping the key here makes that structural rather than a convention: the
+      # only attachment representation on the wire is the reference shape.
+      metadata: Map.delete(metadata, "attachments"),
       inserted_at: m.inserted_at
     }
 
-    case toolrow_blocks(m) do
-      nil -> base
-      blocks -> Map.put(base, :blocks, blocks)
-    end
+    base
+    |> put_attachments(Attachments.references(metadata, m.session_id))
+    |> put_blocks(toolrow_blocks(m))
   end
+
+  # The ONE wire attachment shape both surfaces speak: `{id, media_type,
+  # byte_size, url}` — an opaque content-addressed id and the chat-owned read
+  # URL, with no store path, no bearer token, and no bytes. Absent entirely when
+  # the row has none, so an attachment-free transcript is byte-identical to
+  # before.
+  defp put_attachments(json, nil), do: json
+  defp put_attachments(json, refs), do: Map.put(json, :attachments, refs)
+
+  defp put_blocks(json, nil), do: json
+  defp put_blocks(json, blocks), do: Map.put(json, :blocks, blocks)
 
   # The `blocks` a settled row projects, or nil (no blocks key). An assistant row
   # converts its markdown; the three chat rows emit ONE typed chat block each,

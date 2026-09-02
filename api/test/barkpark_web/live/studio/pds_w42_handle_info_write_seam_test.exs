@@ -81,11 +81,18 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"(_other, socket)", :no_write}
   ]
 
-  # ChatLive — 43 heads today. Only the store-touching ones are listed; all of
+  # ChatLive — 44 heads today. Only the store-touching ones are listed; all of
   # them write on `socket.assigns.store_session_id`, which is established at
   # mount/handle_params and NEVER taken from the message payload, so none can
   # name another tenant's row the way the by-id `handle_event` clauses could
   # (that is `tenancy_permits?/2`'s job, PR #14593).
+  #
+  # The 44th head is `{:claude_chat_task_hands, verdict}` (task-token renewal),
+  # classified `:no_write`: its whole body is
+  # `assign(socket, readiness: readiness_for_hands(verdict))` — a pure atom→atom
+  # map into assigns, no Content/StudioChat call on the path. It is driven by a
+  # run in chat_live_test.exs ("a renewal that lands mid-session flips the card
+  # in place"), which sends both `:rearmed` and `:expired` to a live socket.
   @chat_write_heads [
     # ensure_session → StudioChat.create_session; persist_user_message →
     # persist_store → StudioChat.append_message
@@ -221,7 +228,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every ChatLive handle_info head is enumerated, and the store-touching ones are pinned" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/chat_live.ex")
 
-      assert length(heads) == 43,
+      assert length(heads) == 44,
              "chat_live.ex handle_info head count moved to #{length(heads)}; " <>
                "re-run the write classification over the new head."
 

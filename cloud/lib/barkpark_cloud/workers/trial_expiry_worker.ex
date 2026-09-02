@@ -20,6 +20,33 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
        teardown machinery. Idempotent: a still-pending teardown is deduped
        (`:already_deprovisioning`).
 
+       AND IT NOTIFIES (cch-w52-bl). Until this slice the teardown was the one
+       destructive act in the lifecycle that dispatched nothing: the T-3 and T-1
+       advance notices were the ONLY warning a team ever got, and a team that
+       missed both learned its instances were gone at the outage. Measured on a
+       trial whose window was already closed: `%{expired: 1, teardowns: 1}`,
+       `delivery_rows_any_status = 0`, one `{"deprovision","pending"}` job and no
+       notification of any kind. The teardown arm now dispatches `:trial_expired`
+       — a NEW event, not a day-0 reuse of `trial_expiring`, because "we have
+       torn your instances down" is a different fact from "your trial is ending"
+       and future-tense copy about a past event is the lie this wave deletes.
+
+       THE PASS THAT TORE DOWN IS THE PASS THAT TELLS. The notice is gated on
+       THIS pass having actually won the enqueue for at least one box, which
+       makes it exactly-once by riding the dedup that already exists rather than
+       inventing a second budget: a still-pending teardown returns
+       `:already_deprovisioning` on every later pass, a SUCCEEDED one deletes the
+       barkpark row so there is nothing left to enqueue, and a finalised trial
+       has left `Billing.active_trials/1` for good. It is also the only moment
+       the instance NAMES exist — `Registry.succeed_deprovision_job/1` deletes
+       the row — and the mail names them.
+
+       THE LIMIT, STATED SO NOBODY OVER-READS IT: a lapsed trial with NO boxes
+       gets no `trial_expired` notice, because this worker tore nothing down. The
+       fifteen ghost rows of cch-w50 carry exactly that shape. A notice there
+       would be a teardown report about a teardown this pass did not perform, and
+       it could name nothing.
+
     3. **Finalisation (cch-w50).** Once the teardown has actually HAPPENED — the
        team has no boxes left — writes the terminal status on the subscription
        row (`Billing.expire_trial/2` → `canceled`). Until cch-w50 this step did
@@ -114,13 +141,14 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
       # edit to finalise a team whose teardown this very pass just started —
       # which is the race the ordering exists to prevent.
       boxes = Registry.list_barkparks(team)
-      n = teardown(boxes)
+      torn = teardown(boxes)
       f = finalize(sub, boxes, now)
+      notify_teardown(team, torn)
 
       %{
         acc
         | expired: acc.expired + 1,
-          teardowns: acc.teardowns + n,
+          teardowns: acc.teardowns + length(torn),
           finalized: acc.finalized + f
       }
     else
@@ -219,15 +247,40 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   end
 
   # Enqueue a deprovision through the EXISTING path for each of the team's boxes.
-  # Deduped + idempotent; returns how many fresh teardowns were enqueued. Takes
-  # the ALREADY-READ box list (see handle_trial/4) so the finalisation gate and
-  # the enqueue can never disagree about what the team owned this pass.
+  # Deduped + idempotent. Takes the ALREADY-READ box list (see handle_trial/4) so
+  # the finalisation gate and the enqueue can never disagree about what the team
+  # owned this pass.
+  #
+  # cch-w52-bl: returns the BOXES this pass actually won the enqueue for, not a
+  # count. The count is still `length/1` of it, and the identities are what the
+  # `:trial_expired` notice needs — a teardown report that cannot name what it
+  # tore down leaves the team guessing which of its boxes went.
   defp teardown(boxes) do
-    Enum.reduce(boxes, 0, fn bp, n ->
-      case Registry.enqueue_deprovision_job(bp) do
-        {:ok, _job} -> n + 1
-        _ -> n
-      end
+    Enum.filter(boxes, fn bp ->
+      match?({:ok, _job}, Registry.enqueue_deprovision_job(bp))
     end)
+  end
+
+  # cch-w52-bl — THE TEARDOWN'S OWN NOTICE. Fires only on the pass that won the
+  # enqueue (see the moduledoc for why that is the exactly-once gate and why a
+  # zero-box lapse is deliberately silent).
+  #
+  # FACTS, NOT A SENTENCE — the same rule cch-w42-s6 imposed on `notify/3` one
+  # arm up. The payload carries the instance names and the team name; both
+  # renderers compose from them (`EventEmail` per recipient, so the owner gets
+  # the imperative and everyone else gets who can act; `Render` for chat), and
+  # `Render.teardown_clause/1` is the single formatter both call, so the inbox
+  # and Slack can never disagree about which instances a team lost.
+  #
+  # `dispatch_event/3` never raises into this worker (it rescues into a withhold
+  # row), so a notification failure cannot strand a teardown that has already
+  # been enqueued.
+  defp notify_teardown(_team, []), do: :ok
+
+  defp notify_teardown(team, torn) do
+    Notifications.dispatch_event(team, :trial_expired, %{
+      name: team.name,
+      instances: Enum.map(torn, & &1.name)
+    })
   end
 end

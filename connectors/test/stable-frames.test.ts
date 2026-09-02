@@ -45,7 +45,7 @@ const config = { baseUrl: TEST_BASE, token: TOKEN_WS_BOUND };
 
 // ── byte-exact frame builders ────────────────────────────────────────────────
 // chat mirrors handlers.ts chatFrame; stable/stable_end mirror
-// chat_controller.ex sse_stable_frame/1 (:758-762) VERBATIM.
+// chat_controller.ex sse_stable_frame/1 VERBATIM.
 
 const chatFrame = (streamJsonLine: string): string =>
   `event: chat\ndata: ${streamJsonLine}\n\n`;

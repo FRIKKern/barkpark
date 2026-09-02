@@ -448,7 +448,8 @@ defmodule BarkparkWeb.TasksController do
                   %{
                     ok: true,
                     doc: Params.render_doc(seal_doc(doc, conn)),
-                    help: Params.mutation_help(:claim, doc, worker_id)
+                    help: Params.mutation_help(:claim, doc, worker_id),
+                    lease: Params.claim_lease(doc)
                   },
                   doc,
                   nil,
@@ -574,7 +575,8 @@ defmodule BarkparkWeb.TasksController do
                 %{
                   ok: true,
                   doc: Params.render_doc(seal_doc(doc, conn)),
-                  help: Params.mutation_help(:claim_by_id, doc, worker_id)
+                  help: Params.mutation_help(:claim_by_id, doc, worker_id),
+                  lease: Params.claim_lease(doc)
                 },
                 doc,
                 baseline_rev,
@@ -1011,7 +1013,10 @@ defmodule BarkparkWeb.TasksController do
           json(conn, %{
             ok: true,
             doc: Params.render_doc(seal_doc(doc, conn)),
-            help: Params.mutation_help(:pulse, doc, worker_id)
+            help: Params.mutation_help(:pulse, doc, worker_id),
+            # A pulse RENEWS the lease (Tasks.Pulse refreshes ts_iso), so the
+            # receipt reports the NEW window, not the one the claim granted.
+            lease: Params.claim_lease(doc)
           })
 
         {:error, reason} ->

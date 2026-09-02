@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"os"
 	"strconv"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -49,6 +50,18 @@ type Transport interface {
 	// Interrupt POSTs the interrupt; the ack is semantically EMPTY (charter D11)
 	// — the real signal is the result frame on the event stream.
 	Interrupt(id string) error
+	// UploadAttachment reads a LOCAL file and stores it in the session's
+	// chat-owned attachment store: POST /v1/chat/sessions/:id/attachments
+	// (charter D16, ct-bl-chat-attachments). It returns the wire REFERENCE —
+	// an opaque content-addressed id, the server-sniffed media type, the byte
+	// size, and the chat-owned read URL.
+	//
+	// The local path is an INPUT to this call and never an output: it is not in
+	// the reference, so it can never reach a transcript, another client, or the
+	// server's own store row. And the bytes never go near /media/upload — the
+	// media plugin's read boundary (any-token-public) is the exact leak this
+	// route family exists to avoid.
+	UploadAttachment(sessionID, path string) (Attachment, error)
 	// Approve answers a pending approval/question/plan card: POST
 	// /v1/chat/sessions/:id/approval {request_id, decision} → 204. decision is
 	// "allow" or "deny" ONLY (charter D22/D28 — allow echoes the server-held
@@ -170,6 +183,18 @@ func (t *clientTransport) Interrupt(id string) error {
 	// discarded — the true signal is the result frame on the event stream.
 	_, err := t.c.InterruptChat(id)
 	return err
+}
+
+func (t *clientTransport) UploadAttachment(sessionID, path string) (Attachment, error) {
+	// Read locally, POST the bytes, keep the path here. The size ceiling is the
+	// SERVER's (3 MB, charter D25) and it is enforced there — the client does not
+	// carry a second copy of that number to drift out of step, it just reports
+	// the server's refusal.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Attachment{}, err
+	}
+	return t.c.UploadChatAttachment(sessionID, data)
 }
 
 func (t *clientTransport) Approve(id, requestID, decision string) error {

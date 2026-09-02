@@ -568,6 +568,47 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "task token has expired"
       assert has_element?(view, "form[phx-submit=send]")
     end
+
+    # task-cth-bl-token-renewal. A renewal cannot re-arm a RUNNING child (its
+    # environment was fixed at Port.open), so the card must say the one true
+    # next step rather than report a success the shell lane did not get.
+    test ":task_token_rearmed names the restart instead of claiming a live re-arm",
+         %{conn: conn} do
+      put_hands_state(fn _session -> :rearmed end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_rearmed")
+      assert html =~ "Restart this session"
+      # The chat itself keeps working — this is a bp-lane banner, not a lock.
+      assert has_element?(view, "form[phx-submit=send]")
+    end
+
+    # The renewal happens on the SESSION's clock, mid-conversation, with nobody
+    # watching. It must reach the card with no reload and no Re-check click.
+    test "a renewal that lands mid-session flips the card in place — no reload",
+         %{conn: conn} do
+      put_hands_state(fn _session -> :ok end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+      refute render(view) =~ ~s(data-readiness="task_token_rearmed")
+
+      # Exactly what the Recorder rebroadcasts when the Session renews.
+      send(view.pid, {:claude_chat_task_hands, :rearmed})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_rearmed")
+      assert html =~ "Restart this session"
+
+      # …and a later expiry the renewal could not fix arrives the same way.
+      send(view.pid, {:claude_chat_task_hands, :expired})
+      assert render(view) =~ ~s(data-readiness="task_token_expired")
+    end
   end
 
   describe "runtime auth guard (unauthed stream replay — chat-task-hands, decision 5)" do
@@ -2316,9 +2357,18 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "sending an image stores a pointer (no base64 in the DB), renders inline, no /media route",
          %{view: view} do
+      # A REAL PNG, not a stand-in string: the composer now stores through
+      # `Attachments.put/2` (ct-bl-chat-attachments), the ONE store seam the
+      # `/v1/chat` upload route also writes through, and that seam derives the
+      # media type from the bytes' own magic prefix instead of trusting the
+      # browser-declared `client_type`. Bytes that are not one of the four
+      # accepted images are refused — which is what keeps an SVG/HTML payload out
+      # of a store whose contents are served back to other clients.
+      png = png_fixture()
+
       avatar =
         file_input(view, "#chat-composer-form", :attachments, [
-          %{name: "pic.png", content: "PNGDATA", type: "image/png"}
+          %{name: "pic.png", content: png, type: "image/png"}
         ])
 
       render_upload(avatar, "pic.png")
@@ -2331,7 +2381,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
 
       # Live bubble inlines the image server-side as a data-URI — never /media.
-      assert html =~ "data:image/png;base64,#{Base.encode64("PNGDATA")}"
+      assert html =~ "data:image/png;base64,#{Base.encode64(png)}"
       assert html =~ "look at this"
       refute html =~ "/media/files"
 
@@ -2342,11 +2392,38 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert [ptr] = user_msg.metadata["attachments"]
       assert ptr["media_type"] == "image/png"
-      assert ptr["sha256"] == :sha256 |> :crypto.hash("PNGDATA") |> Base.encode16(case: :lower)
-      assert ptr["byte_size"] == byte_size("PNGDATA")
+      assert ptr["sha256"] == :sha256 |> :crypto.hash(png) |> Base.encode16(case: :lower)
+      assert ptr["byte_size"] == byte_size(png)
       # the jsonb pointer carries NO base64 / bytes
       refute Map.has_key?(ptr, "data")
       refute Map.has_key?(ptr, "bytes")
+    end
+
+    test "a non-image payload is refused by the shared store seam, never persisted",
+         %{view: view} do
+      # The browser can call anything image/png. The store seam does not take its
+      # word for it — so the turn sends, and NO attachment pointer is written.
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{
+            name: "evil.png",
+            content: "<svg xmlns='http://www.w3.org/2000/svg'/>",
+            type: "image/png"
+          }
+        ])
+
+      render_upload(avatar, "evil.png")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "look at this"})
+      html = render(view)
+
+      assert html =~ "look at this"
+      refute html =~ "data:image/png;base64,"
+
+      user_msg =
+        view |> store_id() |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+
+      refute Map.has_key?(user_msg.metadata, "attachments"),
+             "a refused payload must not land a pointer on the message row"
     end
 
     test "replay inlines the stored image as a data-URI, server-side (no route)", %{conn: conn} do
@@ -2394,6 +2471,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "data:image/png;base64,"
       assert Process.alive?(view.pid)
     end
+  end
+
+  # A genuine 1x1 PNG — the chat attachment store sniffs the media type from
+  # these magic bytes, so a fixture that merely CLAIMS to be a PNG is refused.
+  defp png_fixture do
+    Base.decode64!(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
   end
 
   defp attachment_json(ptr) do
@@ -3679,6 +3764,208 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute render(view) =~ "data-role=\"chat-hand-task\""
     end
 
+    # ── live ledger transitions in the transcript (tlv) ───────────────────
+    #
+    # The Doing strip shows WHAT this session holds; these rows show WHEN it
+    # changed. The scope rule under test is the STICKY worker rule: a task is
+    # in scope while this session's worker holds its claim, and STAYS in scope
+    # afterwards — which is the only way a release/reap/kill (all of which
+    # clear or never carry the claim) can ever reach the transcript.
+
+    test "a claim by THIS session's worker renders a live transition row", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-1",
+          "Stage the candidate",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-1"
+        )
+      )
+
+      html = render(view)
+      assert html =~ ~s(data-role="task_transition")
+      assert html =~ ~s(data-task-transition="task-tlv-1")
+      assert html =~ ~s(data-task-status="in_progress")
+      assert html =~ "Stage the candidate → in_progress (claimed)"
+      # The lifecycle tint is a DESIGN TOKEN, never a literal colour.
+      assert html =~ "var(--life-in_progress)"
+    end
+
+    test "a transition arriving over the REAL dataset topic renders", %{view: view, sid: sid} do
+      # The direct `send/2` tests above bypass PubSub entirely, so they cannot
+      # tell a live subscription from a dead one. This one broadcasts on the
+      # SAME `documents:<dataset>` topic the ledger writes to, proving the
+      # subscription chat_live already holds is what carries the transition.
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      dataset = List.first(Barkpark.Content.list_datasets()) || "production"
+
+      {:document_changed, msg} =
+        task_changed(
+          "task-tlv-pubsub",
+          "Arrived over the bus",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-pubsub"
+        )
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:#{dataset}",
+        {:document_changed, msg}
+      )
+
+      # One round-trip through the LiveView process to settle the async cast.
+      html = render(view)
+      assert html =~ ~s(data-task-transition="task-tlv-pubsub")
+      assert html =~ "Arrived over the bus → in_progress (claimed)"
+    end
+
+    test "a replayed lifecycle event renders ONCE and keeps transcript order", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      claim =
+        task_changed(
+          "task-tlv-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-claim"
+        )
+
+      close =
+        task_changed(
+          "task-tlv-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "done", "claim" => %{"worker" => worker}},
+          mutation: "task.closed",
+          event_id: "ev-tlv-close"
+        )
+
+      send(view.pid, claim)
+      send(view.pid, close)
+      # The duplicate: byte-identical to the claim, mutation_event id and all —
+      # a Last-Event-ID replay, or a two-topic double delivery.
+      send(view.pid, claim)
+
+      html = render(view)
+
+      assert transition_rows(html, "task-tlv-2") == 2,
+             "a replayed event must render once, not twice"
+
+      # ORDER preserved: the claim row still precedes the close row. A dedupe
+      # that re-appended (or that moved the row to the tail) would invert this.
+      claim_at = :binary.match(html, "Dig the trench → in_progress (claimed)")
+      close_at = :binary.match(html, "Dig the trench → done (closed)")
+      assert claim_at != :nomatch and close_at != :nomatch
+      assert elem(claim_at, 0) < elem(close_at, 0)
+    end
+
+    test "a release AFTER the claim still renders — the scope set is sticky", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-3",
+          "Hold the lease",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-3a"
+        )
+      )
+
+      # Tasks.Release CLEARS the claim lease, so this carries NO worker to match
+      # on. Only the sticky set can keep it in scope.
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-3",
+          "Hold the lease",
+          %{"lifecycle_status" => "open"},
+          mutation: "task.released",
+          event_id: "ev-tlv-3b"
+        )
+      )
+
+      html = render(view)
+      assert html =~ "Hold the lease → open (released)"
+      assert transition_rows(html, "task-tlv-3") == 2
+    end
+
+    test "another worker's task never reaches the transcript", %{view: view} do
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-4",
+          "Someone else's yard",
+          %{
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "claude-chat-deadbeef"}
+          },
+          mutation: "task.claimed",
+          event_id: "ev-tlv-4"
+        )
+      )
+
+      html = render(view)
+      refute html =~ ~s(data-task-transition="task-tlv-4")
+      refute html =~ "Someone else's yard →"
+    end
+
+    test "a pulse heartbeat is not a transition", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      content = %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}}
+
+      send(
+        view.pid,
+        task_changed("task-tlv-5", "Keep the lease warm", content,
+          mutation: "task.claimed",
+          event_id: "ev-tlv-5a"
+        )
+      )
+
+      send(
+        view.pid,
+        task_changed("task-tlv-5", "Keep the lease warm", content,
+          mutation: "task.pulse",
+          event_id: "ev-tlv-5b"
+        )
+      )
+
+      # The claim rendered; the timer-driven pulse that followed it did not.
+      assert transition_rows(render(view), "task-tlv-5") == 1
+    end
+
+    test "a draft-twin echo never renders a transition", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "drafts.task-tlv-6",
+          "Draft twin",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-6"
+        )
+      )
+
+      refute render(view) =~ ~s(data-role="task_transition")
+    end
+
     test "the picker opens on the ready head and hands a task to Claude", %{view: view} do
       register_task_schema()
 
@@ -4455,6 +4742,105 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert html =~ "0 ready"
       refute html =~ "more"
+    end
+
+    # ── tlv-s5: chips speak the lifecycle (TLV charter D12/D14) ───────────────
+
+    test "a task chip carries the lifecycle glyph + hue from the payload's lifecycle_status" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-c1","title":"Weighing the rewrite",) <>
+            ~s("type":"task","lifecycle_status":"considering",) <>
+            ~s("engagement":{"object":"research","holder":"cycle-42"}}})
+        )
+
+      assert chip.state == "considering"
+      assert chip.object == "research"
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      # ◌ is the GENERATED manifest's considering glyph — the identical character
+      # the board and the Go TUI paint (the chip folds TokensGen.lifecycle/0).
+      assert html =~ ~s(data-life-state="considering")
+      assert html =~ "◌"
+      assert html =~ "var(--life-considering)"
+      # the CONSIDERING object marker: what the task is being weighed FOR (D12)
+      assert html =~ ~s(data-engagement-object="research")
+      assert html =~ "research"
+      # tokens only — no copied hex/hsl literal (studio-literal-check doctrine)
+      refute html =~ ~r/#[0-9a-fA-F]{3,6}\b/
+    end
+
+    test "an UNKNOWN chip state draws the NEUTRAL token, never a known state's hue" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-x","title":"From a newer server",) <>
+            ~s("type":"task","lifecycle_status":"marinating"}})
+        )
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      assert html =~ ~s(data-life-state="marinating")
+      assert html =~ "var(--fg-dim)"
+      # borrowing ANY --life-* hue would report a queue state that does not exist
+      refute html =~ "var(--life-"
+    end
+
+    test "a payload with NO lifecycle_status draws no state mark at all" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_create",
+          ~s({"ok":true,"id":"task-n","title":"No state here"})
+        )
+
+      # NOT defaulted to "open": an entity payload that simply omits the field
+      # tells us nothing, and inventing "open" would report claimable work.
+      assert chip.state == nil
+      assert chip.object == nil
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      refute html =~ "data-life-state"
+      refute html =~ "data-engagement-object"
+      assert html =~ "var(--primary)"
+    end
+
+    test "the engagement object marker is drawn ONLY for the thought states" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-w","title":"Already building",) <>
+            ~s("type":"task","lifecycle_status":"in_progress","engagement":{"object":"build"}}})
+        )
+
+      # a stale engagement left on a card that has MOVED ON is not a live
+      # deliberation — drawing it would report thinking that already ended.
+      assert chip.object == nil
+
+      refute render_component(&ChatToolRenderer.tool_chip/1, chip: chip) =~
+               "data-engagement-object"
+    end
+
+    test "search hits carry their own lifecycle mark, and an unknown one stays neutral" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_ready",
+          ~s({"ok":true,"docs":[) <>
+            ~s({"doc_id":"task-a","title":"Ready one","type":"task","lifecycle_status":"ready"},) <>
+            ~s({"doc_id":"task-b","title":"Thinking","type":"task","lifecycle_status":"researching"},) <>
+            ~s({"doc_id":"task-c","title":"Newer server","type":"task","lifecycle_status":"marinating"}]})
+        )
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      assert html =~ ~s(data-life-state="ready")
+      assert html =~ ~s(data-life-state="researching")
+      assert html =~ ~s(data-life-state="marinating")
+      assert html =~ "var(--life-researching)"
+      assert html =~ "var(--fg-dim)"
+      assert html =~ "◎"
     end
   end
 
@@ -5242,6 +5628,58 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
       assert rail_html(view) =~ ~s(data-rail-phase="done")
       assert rail_html(view) =~ "Strategize"
+    end
+
+    # ── tlv-s5: the rail's fall-through is neutral (TLV charter D14) ──────────
+
+    test "a rail status OUTSIDE the workflow vocabulary is neutral, never a bright live run",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      # A rail_snapshot REPLAYS verbatim on reopen (charter D57), so a status a
+      # different build wrote reaches the renderer untouched. The default used to
+      # be --life-in_progress: an unrecognised value rendered as a live run —
+      # the worst direction for a wrong guess, since it claims work is in flight.
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "queued epic"},
+            "status" => "queued",
+            "seq" => 1
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      html = rail_html(view)
+
+      assert html =~ ~s(data-rail-status="queued")
+      assert html =~ "var(--fg-dim)"
+      refute html =~ "var(--life-in_progress)"
+    end
+
+    test "the three REAL workflow statuses keep their exact hues after the default flip",
+         %{conn: conn} do
+      for {status, token} <- [
+            {"running", "var(--life-in_progress)"},
+            {"completed", "var(--life-done)"},
+            {"interrupted", "var(--life-blocked)"}
+          ] do
+        {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+        {:ok, _} =
+          StudioChat.set_rail_snapshot(s.id, %{
+            "t" => %{
+              "row" => %{"task_type" => "local_workflow", "description" => "an epic"},
+              "status" => status,
+              "seq" => 1
+            }
+          })
+
+        {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+
+        assert rail_html(view) =~ token,
+               "the #{status} rail row lost its hue to the default flip"
+      end
     end
 
     test "an INTERRUPTED cycle shows exactly the frontier phase, with agents visible but NOT breathing (D58)",
@@ -6916,19 +7354,51 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   # A task-document broadcast as the Doing strip sees it — the lean mirror of
   # Content.Broadcast.broadcast_document_mutation/3's :document_changed shape.
-  defp task_changed(doc_id, title, content) do
-    {:document_changed,
-     %{
-       type: "task",
-       doc_id: doc_id,
-       doc: %{
-         doc_id: doc_id,
-         title: title,
-         status: "published",
-         content: content,
-         updated_at: nil
-       }
-     }}
+  #
+  # `opts` adds the two fields the LIVE-TRANSITION fold reads
+  # (tlv-bl-chat-live-transition-stream): `:mutation`, the mutation_events kind
+  # string, and `:event_id`, the durable row id that IS the idempotency key.
+  # Omitting them reproduces the Doing-strip-only shape the strip tests use —
+  # and a broadcast with no mutation kind projects to no transition, which is
+  # exactly why those tests still assert a strip and no transcript row.
+  defp task_changed(doc_id, title, content, opts \\ []) do
+    msg =
+      %{
+        type: "task",
+        doc_id: doc_id,
+        rev: Keyword.get(opts, :rev, "rev-1"),
+        doc: %{
+          doc_id: doc_id,
+          title: title,
+          status: "published",
+          content: content,
+          updated_at: nil
+        }
+      }
+      |> then(fn m ->
+        case Keyword.get(opts, :mutation) do
+          nil -> m
+          kind -> Map.put(m, :mutation, kind)
+        end
+      end)
+      |> then(fn m ->
+        case Keyword.get(opts, :event_id) do
+          nil -> m
+          id -> Map.put(m, :event_id, id)
+        end
+      end)
+
+    {:document_changed, msg}
+  end
+
+  # How many live transition rows the transcript is currently painting for a
+  # task id. Counts the row's own data attribute, so a second render of the SAME
+  # event is a COUNT of 2 — the shape an idempotency regression takes.
+  defp transition_rows(html, task_id) do
+    html
+    |> String.split(~s(data-task-transition="#{task_id}"))
+    |> length()
+    |> Kernel.-(1)
   end
 
   # Register the tasks plugin's schema definitions under the flat default scope

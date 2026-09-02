@@ -837,7 +837,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Optimistic concurrency guard; a stale value is refused 409 fenced_off."
           },
           %{
             name: "lifecycle_status",
@@ -868,7 +869,19 @@ defmodule Barkpark.Plugins.Tasks do
                 "flipping a neighbouring criterion, and a text that does not match the row at that index " <>
                 "is REJECTED too (409 criteria_mismatch). An entry with met=false needs no text. Optional " <>
                 "evidence is presence-sensitive: omit the key to preserve stored evidence, or " <>
-                "send evidence:\"\" to clear it. THE CRITERIA GATE (close honesty, PDS-D289): a " <>
+                "send evidence:\"\" to clear it. THE RUBRIC SHAPE (no index): an entry may instead " <>
+                "name its row by wording alone — --set 'criteria:=[{\"criterion\":\"<the exact stored " <>
+                "wording>\",\"met\":true,\"evidence\":\"PR #1234\"}]' — which is the row exactly as " <>
+                "`bp task get <id>` prints it, so you can flip the rubric you just read without " <>
+                "reconstructing 0-based indices. The server resolves it by EXACT text match inside the " <>
+                "same close write; the text is its own guard. It must hit exactly one row: no match is " <>
+                "REJECTED (409 criterion_not_found), two or more rows sharing that wording are REJECTED " <>
+                "(409 criterion_ambiguous — use the indexed shape for those). A text-keyed entry with " <>
+                "met=true REQUIRES non-empty evidence (400) — the indexed shape pays for a met-flip with " <>
+                "its text guard, and a rubric row read back from the task already carries its evidence. " <>
+                "ONE SHAPE PER COMMAND: mixing indexed and text-keyed entries in the same criteria list " <>
+                "is REJECTED (400). An entry carrying BOTH index and criterion is the indexed shape with " <>
+                "its guard, not a mix. THE CRITERIA GATE (close honesty, PDS-D289): a " <>
                 "done close over unmet acceptance criteria is REFUSED — 409 criteria_unmet, naming " <>
                 "the 0-based unmet indices. Unmet is measured on the task AS STORED (criteria " <>
                 "flipped in this very close command do not count), and a criterion the merge-gate " <>
@@ -932,7 +945,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Optimistic concurrency guard; a stale value is refused 409 fenced_off."
           }
         ],
         flags: [],
@@ -968,7 +982,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (same fence as close)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Same fence as close; a stale value is refused 409 fenced_off."
           }
         ],
         flags: [

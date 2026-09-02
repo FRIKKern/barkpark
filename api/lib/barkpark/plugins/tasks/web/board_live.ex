@@ -1259,10 +1259,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     "in_progress" => :in_progress,
     "blocked" => :blocked,
     "done" => :done,
-    "cancelled" => :cancelled
+    "cancelled" => :cancelled,
+    "considering" => :considering,
+    "researching" => :researching
   }
 
-  defp safe_role(status), do: Map.get(@peek_roles, status, :open)
+  # The FAIL-OPEN DIM default (TLV charter D14). This used to answer `:open` for
+  # anything unrecognised, so a peeked considering task — and any status a future
+  # build writes — rendered as a bright, claimable backlog ○: the surface
+  # reporting work that does not exist. `:unknown` is visible and neutral.
+  defp safe_role(status), do: Map.get(@peek_roles, status, :unknown)
 
   defp peek_role(%{col: col}) when is_atom(col) and not is_nil(col), do: col
   defp peek_role(peek), do: safe_role(peek.lifecycle_status)
@@ -1271,7 +1277,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     do: peek |> peek_role() |> Atom.to_string() |> String.replace("_", " ")
 
   defp role_glyph(:in_progress), do: ""
-  defp role_glyph(role), do: Board.glyphs()[role] || "○"
+  defp role_glyph(role), do: Board.glyphs()[role] || Board.glyphs()[:unknown]
 
   # push_patch to the URL encoding this (group, filters, peeked task) triple —
   # the ONLY mutation path (D14). The bare path when nothing is selected keeps
@@ -2289,6 +2295,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .gi--blocked { color: var(--life-blocked); font-weight: 700; }  /* amber ! */
       .gi--done { color: var(--life-done); }                          /* teal ✓ */
       .gi--cancelled { color: var(--life-cancelled); }
+      /* Thought states (TLV D11/D14) — dim by design: visible, never claimable.
+         The hues are the GENERATED --life-considering / --life-researching
+         tokens tlv-s2 emitted, same governance as every role above. */
+      .gi--considering { color: var(--life-considering); opacity: 0.75; }
+      .gi--researching { color: var(--life-researching); opacity: 0.85; }
+      /* The fail-open role: a lifecycle value this build does not know paints
+         the neutral foreground, dim — it must never borrow a work state's hue. */
+      .gi--unknown { color: var(--fg-dim); opacity: 0.6; }
 
       /* in_progress: pure-CSS Braille spinner, TUI-identical 10 frames,
          ~80ms/frame (800ms cycle). The glyph is supplied entirely by ::before
@@ -3095,6 +3109,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # ready, blocked, open — and Done is the LAST card, a single ledger phone.
   # Cards are not draggable here (there are no drop targets); a click peeks.
   # Grouped/filtered views keep the kanban + drag — the drill-down.
+  # THOUGHT COLUMNS ARE DELIBERATELY ABSENT (TLV charter ruling): the deck is the
+  # WORK FUNNEL — what can be picked up, in relevance order. Considering and
+  # researching are visible as their own columns in the desktop grid
+  # (`board_grid/1`, which walks the full `Board.columns/0`); putting them on the
+  # rail would put un-actionable cards in front of actionable ones. They are not
+  # dropped from the model either — `lane_settled?/1` counts them as live, so a
+  # board holding only thought cards never collapses to the done ledger.
   @deck_order [:in_progress, :ready, :blocked, :open]
 
   defp deck(assigns) do
@@ -3534,9 +3555,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # earn a receipt line instead of five columns of nothing. A lane with no
   # cards at all is NOT settled (there is nothing to receipt); the board-empty
   # state owns that.
+  # The settled hero REPLACES the board with a done ledger, so anything not
+  # counted here is a card that VANISHES. The thought columns count as live for
+  # exactly that reason — a pipeline still weighing work is not "clear".
   defp lane_settled?(lane) do
     live =
-      Enum.sum(for col <- [:open, :ready, :in_progress, :blocked], do: lane.counts[col] || 0)
+      Enum.sum(
+        for col <- [:open, :ready, :in_progress, :blocked, :considering, :researching],
+            do: lane.counts[col] || 0
+      )
 
     live == 0 and (lane.counts[:done] || 0) > 0
   end
@@ -3585,16 +3612,43 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp lane_dom_id(key) when is_binary(key), do: String.replace(key, ~r/[^a-zA-Z0-9]+/, "-")
   defp lane_dom_id(key), do: lane_dom_id(to_string(key))
 
-  defp col_label(:open), do: "Open"
-  defp col_label(:ready), do: "Ready"
-  defp col_label(:in_progress), do: "In Progress"
-  defp col_label(:blocked), do: "Blocked"
-  defp col_label(:done), do: "Done"
+  @doc """
+  A column atom's header label. TOTAL — the last clause is a fail-open
+  humanizer, not decoration.
+
+  This function had NO catch-all: every clause was an explicit atom, so the
+  FIRST new column `Barkpark.Tasks.Board.columns/0` grew crashed the whole board
+  render with `FunctionClauseError` (the header is drawn inside a
+  `:for={col <- Board.columns()}` comprehension — one unlabelled atom takes down
+  every column, not just its own). Adding a column must never be able to blank
+  the board, so an unrecognised atom titlecases its own name and renders.
+
+  Public because the catch-all is the CONTRACT and a regression test has to be
+  able to hand it an atom no clause names — a column that does not exist yet is,
+  by definition, unreachable through the render.
+  """
+  @spec col_label(atom()) :: String.t()
+  def col_label(:open), do: "Open"
+  def col_label(:ready), do: "Ready"
+  def col_label(:in_progress), do: "In Progress"
+  def col_label(:blocked), do: "Blocked"
+  def col_label(:done), do: "Done"
+  def col_label(:considering), do: "Considering"
+  def col_label(:researching), do: "Researching"
+
+  def col_label(col) when is_atom(col) do
+    col
+    |> Atom.to_string()
+    |> String.split("_")
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
 
   # The column header's §1 ladder glyph. in_progress paints entirely from the
   # CSS `::before` spinner (same as the card glyph), so its span body is empty.
+  # Fail-open like `col_label/1`: an unglyphed column draws the neutral dot
+  # rather than an empty header (`Board.glyphs/0` is itself total).
   defp col_glyph(:in_progress), do: ""
-  defp col_glyph(col), do: Board.glyphs()[col]
+  defp col_glyph(col), do: Board.glyphs()[col] || Board.glyphs()[:unknown]
 
   # in_progress renders its (animated) glyph entirely from CSS `::before`, so the
   # span body is empty — every other state prints the literal §1 Unicode char.

@@ -162,8 +162,35 @@ type State struct {
 	// flips it (or the POST errors and it clears).
 	AnswerInFlight map[string]string
 
+	// TaskTransitions is the session's live ledger-transition log
+	// (tlv-bl-chat-live-transition-stream): one row per `event: task` frame the
+	// Recorder re-broadcast for a task THIS session touched. Append-only in
+	// ARRIVAL order, so a duplicate or replayed frame can never reorder what is
+	// already painted; seenTaskEvents is the dedupe set keyed on the frame's own
+	// event_id (the mutation_events row id), which is why a second delivery of
+	// the same transition renders exactly once. These rows are LIVE-ONLY: the
+	// server never persists them, so a tail refetch neither duplicates nor
+	// erases them, and the settled task_prime snapshot contract is untouched.
+	TaskTransitions []TaskTransition
+	seenTaskEvents  map[string]bool
+
 	Notice string // one-line footer status (never an error screen)
 	Exited bool   // the session process exited (event:exit)
+}
+
+// TaskTransition is one decoded `event: task` frame — the compact summary
+// Recorder.transition_summary/1 builds from the SAME
+// Barkpark.StudioChat.TaskTransition projection Studio's transcript renders, so
+// the terminal prints the server's `label` verbatim rather than re-deriving a
+// second wording that could drift.
+type TaskTransition struct {
+	EventID  string `json:"event_id"`
+	TaskID   string `json:"task_id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Mutation string `json:"mutation"`
+	Verb     string `json:"verb"`
+	Label    string `json:"label"`
 }
 
 // Event is anything Reduce consumes.
@@ -441,6 +468,28 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 				st.Title = t
 			}
 		}
+		return st, nil
+	case "task":
+		// A live ledger transition (tlv-bl-chat-live-transition-stream): a task
+		// THIS session touched changed lifecycle state mid-conversation. NO
+		// Effect — the point of the frame is that the transcript learns about the
+		// move WITHOUT a re-fetch. A malformed frame is inert (forward-compatible,
+		// the same tolerance the workflow/exit paths show), and a frame carrying
+		// no event_id is dropped rather than rendered twice, because an
+		// unkeyable row cannot be deduped.
+		var t TaskTransition
+		if err := json.Unmarshal(ev.Data, &t); err != nil || t.EventID == "" {
+			return st, nil
+		}
+		if st.seenTaskEvents[t.EventID] {
+			return st, nil
+		}
+		if st.seenTaskEvents == nil {
+			st.seenTaskEvents = map[string]bool{}
+		}
+		st.seenTaskEvents[t.EventID] = true
+
+		st.TaskTransitions = append(st.TaskTransitions, t)
 		return st, nil
 	case "permission":
 		// The ask row is persisted by the Recorder — refetch the tail so the
