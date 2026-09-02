@@ -2,9 +2,10 @@
 #
 # The gate flags an ExUnit test that mutates VM-global state
 # (Application.put_env / put_all_env / :persistent_term.put) with no paired
-# restore in the same module. These 13 sites already existed when the gate
-# landed. They are LITERAL, COMMITTED rows — never a floor computed from the
-# tree, which would agree with a gutted tree by construction.
+# restore in the same module. 13 sites already existed when the gate landed;
+# task-949912e93ee948d4 PAID the 11 that were real leaks, and 2 remain. They are
+# LITERAL, COMMITTED rows — never a floor computed from the tree, which would
+# agree with a gutted tree by construction.
 #
 # FORMAT (TAB-separated, exactly four fields):
 #   <count>	<path relative to api/test>	<app>/<key>	<reason>
@@ -21,14 +22,22 @@
 #
 # EVERY ROW WAS READ INDIVIDUALLY before being written here. 21 candidate sites
 # were adjudicated; 6 were false positives the scanner was then taught to stop
-# flagging (a def/defp-scoped try/after, and case-template credit); 15 survived.
-# 11 are real leaks tracked by task-949912e93ee948d4. 2 are KNOWN false
-# positives kept as rows rather than papered over in the detector; their reasons
-# say so.
+# flagging (a def/defp-scoped try/after, and case-template credit); 15 survived,
+# and the motivating specimen's row was deleted mid-review (see below) leaving
+# 13. Of those 13, 11 were real leaks tracked by task-949912e93ee948d4 and are
+# now FIXED — each mutating file captures the prior value in `setup` and puts it
+# back in `on_exit` (erasing a :persistent_term that had no prior value, so an
+# absent key stays absent) — so their six rows are DELETED here rather than
+# lowered. What is left is the 2 KNOWN false positives, kept as rows rather than
+# papered over in the detector; their reason says so.
+#
+# THE DEBT ROW IS PAID, AND THE RATCHET IS WHAT COLLECTED IT. Deleting a row
+# without fixing its file cannot pass: the gate re-reads the tree and reds on any
+# site it still finds. The six deletions below are therefore each a receipt.
 #
 # THE FILE DID NOT GROW WHEN #14414 LANDED, AND THAT IS THE POINT. #14414
-# rewrote the :plugins idiom across the tree and touched three files named
-# below. It raised 12 NEW hits in three OTHER files — every one of them a false
+# rewrote the :plugins idiom across the tree and touched three files this file
+# named at the time. It raised 12 NEW hits in three OTHER files — every one of them a false
 # positive on code that is not merely correct but better than the inline idiom,
 # because it restores through `Barkpark.PluginEnv.restore/1` and so tells an
 # absent :plugins from an explicit [] (the discovery kill switch). Baselining
@@ -52,25 +61,14 @@
 # so the row was deleted. Counts may only fall, and a floor nobody re-earns is
 # a floor that rusts.
 
-# ── :barkpark/:allow_private_outbound ───────────────────────────────────────
-# An SSRF guard's kill switch, set in `setup`. Both files DO register an
-# on_exit — it restores :webhook_http_adapter and deletes the test pid, and
-# never touches this key. Leaked ON, the guard is disarmed for whatever module
-# runs next, and a test can then pass for the wrong reason.
-1	barkpark/webhooks/audit_dispatch_test.exs	:barkpark/:allow_private_outbound	pre-existing, filed as task-949912e93ee948d4 — SSRF kill switch set in setup; the file's on_exit restores other keys but never this one
-1	barkpark/webhooks/audit_webhooks_test.exs	:barkpark/:allow_private_outbound	pre-existing, filed as task-949912e93ee948d4 — SSRF kill switch set in setup; the file's on_exit restores other keys but never this one
-
-# ── :persistent_term, custom per-test keys ──────────────────────────────────
-# Capture terms written by fixture plugins to record that a callback fired
-# ({SeederPlugin, :ran}, {BootCollectorsTest, :route_ctx}, …). :persistent_term
-# is not merely global, it is global AND unowned — nothing tears it down between
-# modules, and no case template knows these keys exist. Several are `erase`d
-# BEFORE the test that reads them, which is the same protects-only-me shape as
-# the incident.
-3	barkpark/plugins/registry/plugin_callbacks_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — per-plugin capture terms; RegistryCase restores its own snapshot key, never these
-2	barkpark/plugins/registry/boot_collectors_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — capture terms erased before the reading test, never after it
-3	barkpark/plugins/registry_collect_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — capture terms erased before the reading test, never after it
-1	barkpark/plugins/indx/recovery_persistence_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — the indexer live_dataset pointer is written by wipe_pointer/1 and never restored
+# ── PAID AND DELETED — the 11 real leaks (task-949912e93ee948d4) ────────────
+# Six rows stood here: the SSRF kill switch (:barkpark/:allow_private_outbound,
+# 1 each in webhooks/audit_dispatch_test.exs and webhooks/audit_webhooks_test.exs)
+# and four :persistent_term capture-term rows (plugin_callbacks_test.exs 3,
+# registry_collect_test.exs 3, registry/boot_collectors_test.exs 2,
+# indx/recovery_persistence_test.exs 1). Every one now captures its prior value
+# in `setup` and restores it in `on_exit`. Nothing was lowered — a fixed file
+# leaves the census entirely, so its row goes.
 
 # ── KNOWN FALSE POSITIVES — kept as rows, not hidden in the detector ─────────
 # These two ARE restored: the file writes `use Barkpark.RegistryCase`, whose

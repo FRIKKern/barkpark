@@ -74,6 +74,18 @@ type Executor struct {
 	FS            FS
 	Ports         PortAllocator
 
+	// RetainImages bounds how many container generations — and therefore how
+	// many loaded Docker images — this box keeps PER SITE after a PROVEN
+	// cutover. Zero (unset) takes DefaultRetainImages; RetainImagesUnlimited
+	// (-1) restores the historical never-delete behaviour that filled the jarl
+	// box to 100%. See image_retention.go.
+	RetainImages int
+
+	// BuildCacheKeep is the storage floor the co-located build plane's
+	// BuildKit cache is swept down to after a proven cutover (e.g. "5GB").
+	// Zero (unset) takes DefaultBuildCacheKeep; "off" disables that arm.
+	BuildCacheKeep string
+
 	// Logger is called for non-fatal warnings the executor wants visible
 	// without failing the deploy — e.g. a best-effort drain that didn't
 	// succeed. nil -> silent.
@@ -297,7 +309,7 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.writeCaddyfile(updated); err != nil {
 		// The green container is up but unreachable (no Caddyfile entry). Tear
 		// it down so a flapping Caddy doesn't leak 512m orphans across reboots.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", fmt.Sprintf("site-%s-%s", slug, short(d.ID)))
+		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -310,7 +322,7 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.reloadCaddy(ctx); err != nil {
 		// Same as above — the new container is pinned to a loopback port that
 		// Caddy never picked up. Reap it before failing the transition.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", fmt.Sprintf("site-%s-%s", slug, short(d.ID)))
+		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -346,6 +358,19 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.transition(ctx, d.ID, body); err != nil {
 		return true, fmt.Errorf("transition live: %w", err)
 	}
+
+	// THE CUTOVER IS NOW A FACT — Caddy is proxying the new port and the
+	// control plane has accepted `live`. Only here may the executor delete
+	// anything: every failure path above returns before this line, so a deploy
+	// that did NOT cut over leaves the previous container (stopped, instant
+	// `docker start` rollback) and its image untouched.
+	//
+	// Before this call nothing in this repo had EVER removed a site container
+	// or a loaded site image: RunOnce only `docker stop`s the blue, and a
+	// stopped container pins its image against `docker image prune`. Ten
+	// deploys on the jarl box left 18 images / 20.76 GB on a 38 GB disk and
+	// took the CMS down (jpf-box-prune-op).
+	e.sweepSiteImages(ctx, slug, containerName(slug, d.ID), otherSlugs(state.LiveSites, slug))
 
 	_ = site // future: emit local audit log keyed on site
 	return true, nil
@@ -512,18 +537,18 @@ func (e *Executor) executeDeploy(
 	// 4. Run the new container. Site env rides FIRST and the platform pairs
 	// (HOSTNAME/PORT) LAST — with docker the last `-e` wins, so a site env that
 	// names PORT can never repoint the container off the port Caddy proxies to.
-	containerName := fmt.Sprintf("site-%s-%s", slug, short(d.ID))
+	container := containerName(slug, d.ID)
 
 	// Belt and braces: a previous failed cycle can leave a Created-but-never-
 	// started container squatting this exact name (seen in production —
 	// deployment 2f92055a left site-jarl-website-2f92055a in Created, and the
 	// retry's `docker run` failed with "name already in use", exit 125).
 	// Best-effort removal; an absent name just errors quietly.
-	_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName)
+	_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", container)
 
 	args := []string{
 		"run", "-d",
-		"--name", containerName,
+		"--name", container,
 		"--restart", "unless-stopped",
 		"--memory=512m", "--cpus=1",
 	}
@@ -543,7 +568,7 @@ func (e *Executor) executeDeploy(
 	// 5. Health-check the container until /` answers (any non-5xx).
 	if err := e.healthCheck(ctx, port); err != nil {
 		// Tear down the failed container before bailing.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName)
+		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", container)
 		return "", "", nil, 0, 0, fmt.Errorf("health-check: %w", err)
 	}
 

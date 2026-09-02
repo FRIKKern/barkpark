@@ -13667,3 +13667,45 @@ to that bound via `bp doc patch`, criterion 5's text only, the other four byte-i
 the disclosure to state the floor as "431 proved". It is now the wrong number by the count above. It was left
 untouched deliberately — this row's fence was criterion 5 — and it must be corrected to 460 (458 + 3) before the
 packet is executed, or the notification goes out quoting a floor this ledger has already superseded.
+
+**D593 (2026-09-02) — THE SPAWNED-BOX SITE-DEPLOY GAP IS CLOSED AS A CONSENT BOUNDARY, AND ITS DENOMINATOR IS
+STILL ZERO.** `dr-w31-bl-spawned-box-never-gets-site-deploy-apply` is landed. **The denominator has not moved and
+must never be quoted as anything but ZERO:** no spawned box has ever received a site deploy, so this row explains
+**0 of the 219 in-window `BOX_DEPLOY_DISABLED_503` rows and 0 of the 1,045 settled failures** — all of which are
+Guerrilla's, which HAS the flag three ways (D527). Nothing in this repo attributes a measured row to it: the row
+is cited exactly once outside the ledger (`tooling/grip/ledger/w32-open-row-landed-partition-2026-08-09.md:245`,
+a `0/3` partition line carrying no arithmetic), and D517's `20.96%` belongs to the measured
+`BOX_DEPLOY_DISABLED_503` class, not to this row. **This landing may not be read as a cure**: it changes what a
+never-consented box SAYS and adds a check an operator can RUN; it fixes no observed failure, and any BEFORE/AFTER
+window that credits it with one is the re-bucketing D90/D196/D527 ban.
+
+**THE ARM CHOSEN IS THE RE-WORD, AND THE ROW'S OWN DESCRIPTION CHOOSES IT.** The two offered arms were
+"the spawner provisions the flag" and "the 503 names the consent boundary". The first is refused by the row's own
+finding that `runtime.exs` gates site builds separately because **"npm runs third-party postinstall code"** —
+provisioning the flag means a spawner consenting to arbitrary third-party execution on a box for its owner, which
+is not a bug fix but a decision taken from the person entitled to make it. `instance-deploy.sh` PRESERVING and
+never SETTING the flag (D38, `instance-deploy_test.sh` Case 14) is therefore CORRECT and stays; the spawner path
+is untouched. So `SiteDeployController.feature_not_configured/1` now answers *"this instance has not consented to
+run third-party site build code…"* instead of *"(set BARKPARK_SITE_DEPLOY_APPLY=1)"* — the old sentence was an
+INSTRUCTION issued to an operator who may have every reason to decline.
+
+**THE STATUS AND THE CODE WORD ARE UNCHANGED, WHICH IS WHAT KEEPS THE LEDGER WHOLE.**
+`DeployLedger.refusal_class/2` keys `BOX_DEPLOY_DISABLED_503` on `{:code, "feature_not_configured"}`, never on the
+prose, so no historical row reclassifies and the `deploy_ledger_test.exs` corpus (verbatim 2026-08 samples) is
+untouched by construction — the same D115 discipline the `deploy_runner_unavailable` split used. **One correction
+for anyone re-deriving D517:** its *"215 of its rows literally read 'set BARKPARK_SITE_DEPLOY_APPLY=1'"* is now a
+HISTORICAL statement. Rows minted after this lands carry the consent sentence, so a phrase-count over that string
+under-reads the class from here on; count the code word.
+
+**THE FOUR PREREQUISITES STOP BEING PROSE.** `deploy/instance-deploy.sh --site-deploy-preflight` is read-only,
+takes **no lock** (an operator weighing consent must never be answered `already_running`) and exits typed —
+**31** npm not on the BEAM's PATH, **32** no `flock(1)`, **33** neither `python3` nor `caddy`, **34** under 2 GiB
+available — printing one `SITE_DEPLOY_PREREQ_*=` line per prerequisite either way. Each has a named failure
+already in the tree: the slot unit sets no `PATH=`, so npm is derived by REPLAYING `api/start.sh`'s own export
+rather than re-typing it; `site-deploy-common.sh:374-377` makes the fleet build gate FAIL OPEN with no `flock`;
+`site-deploy.sh:311-318` cannot gate AT ALL with no health server; and one build slot at `MemoryMax=1500M` on a
+box with less headroom is the swap-thrash shape. **An unreadable meter exits 34, not 0** — a prerequisite that
+cannot be measured is not met. The deploy path runs the same function ADVISORY when consent is recorded, and a
+content deploy never dies for a site prerequisite. `instance-deploy_test.sh` Case 19 drives every arm: each
+removal demands ITS code, and the OTHER three must still report `ok`, so a check that stops discriminating reds
+instead of greening a box that cannot build.

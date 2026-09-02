@@ -2,6 +2,8 @@
 
 # PDS wave 24 — parked-row adjudication: re-derivation recipe
 
+> HISTORICAL RECORD (2026-07-30) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verifier lane `parked-adjudication`. Every number below is re-derivable from the commands here.
 The dispositions themselves live on the Barkpark ledger, not in this file.
 

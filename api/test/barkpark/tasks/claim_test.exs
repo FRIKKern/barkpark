@@ -10,6 +10,8 @@ defmodule Barkpark.Tasks.ClaimTest do
     4. claim_by_id/3 — drafts. fallback: claim by bare id when the row lives as drafts.<id>.
     5. claim_by_id/3 — :not_ready when the target is already in_progress.
     6. claim_by_id/3 — resource conflict: refuses when the requested resource is held.
+    7. both paths — a closed-then-reopened task is claimable by a NEW worker,
+       while a LIVE claim stays foreign (task-8be484b5fca6e31c).
   """
 
   use Barkpark.DataCase, async: true
@@ -275,6 +277,94 @@ defmodule Barkpark.Tasks.ClaimTest do
                  project_id: nil,
                  resources: ["lib/shared.ex"]
                )
+    end
+  end
+
+  # ─── (7) reopened tasks are claimable again ────────────────────────────────
+
+  describe "claim after a close + reopen" do
+    # THE BUG (task-8be484b5fca6e31c, hit live on stw7-backlog-drafts-clamp-gap):
+    # `close` KEEPS `claim.worker` and stamps `closed_by`/`closed_at`, and the
+    # `done → open` reopen (`Stage`) "never reads or writes `content.claim`" — so
+    # the reopened row still wore its dead holder's name, `execution_class/2`
+    # derived `foreign_claimed` from that name alone, and NO new worker could
+    # ever claim it. The only workaround was to claim AS the residual worker,
+    # release, then re-claim.
+    #
+    # This test drives the REAL primitives end to end (claim → close → stage)
+    # rather than hand-writing a claim map, so it fails if any of the three ever
+    # stops producing the shape the fix reads.
+    test "a NEW worker can claim a task that was closed and then reopened", %{scope: scope} do
+      doc_id = uniq("reopened")
+      task = mk_task!(doc_id, scope)
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-first", scope)
+      assert {:ok, closed} = Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+      assert closed.content["lifecycle_status"] == "done"
+
+      # The shape the fix has to survive: worker KEPT, close stamped.
+      assert closed.content["claim"]["worker"] == "worker-first"
+      assert is_binary(closed.content["claim"]["closed_at"])
+      assert closed.content["claim"]["closed_by"] == "worker-first"
+
+      assert {:ok, reopened} = Tasks.stage(task.id, "open")
+      assert reopened.content["lifecycle_status"] == "open"
+      # The reopen does NOT clear the claim — that is the whole premise.
+      assert reopened.content["claim"]["worker"] == "worker-first"
+      assert is_binary(reopened.content["claim"]["closed_at"])
+
+      # RED BEFORE THE FIX: {:error, :not_ready}, forever.
+      assert {:ok, reclaimed} = Tasks.claim_by_id(doc_id, "worker-second", scope)
+      assert reclaimed.content["lifecycle_status"] == "in_progress"
+      assert reclaimed.content["claim"]["worker"] == "worker-second"
+      assert reclaimed.content["assignee"] == "worker-second"
+      # A fresh claim replaces the map wholesale — the epitaph does not survive.
+      refute Map.has_key?(reclaimed.content["claim"], "closed_at")
+      refute Map.has_key?(reclaimed.content["claim"], "closed_by")
+    end
+
+    test "the reopened row is also handed out by the READY QUEUE (SQL twin)", %{scope: scope} do
+      # `execution_class/2` gates the TARGETED claim; `QueueGate.executable_query/0`
+      # gates the queue `bp task ready` / `bp task next` read. Fixing only the
+      # first would leave the row claimable by name but invisible on the board.
+      phase_id = uniq("phase-reopened")
+      task = mk_task!(uniq("reopened-queue"), scope, %{"parent_id" => phase_id})
+      queue_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
+
+      assert {:ok, claimed} = Tasks.claim("worker-first", queue_opts)
+      assert claimed.id == task.id
+      {:ok, _closed} = Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+      {:ok, _reopened} = Tasks.stage(task.id, "open")
+
+      # RED BEFORE THE FIX: {:ok, nil} — the queue skipped its own reopened row.
+      # Matching %Document{} (not a bare var) is what makes `{:ok, nil}` a
+      # NAMED failure instead of a BadMapError three lines later.
+      assert {:ok, %Document{} = handed_out} = Tasks.claim("worker-second", queue_opts)
+      assert handed_out.id == task.id
+      assert handed_out.content["claim"]["worker"] == "worker-second"
+    end
+
+    test "a LIVE claim is still foreign: a contender gets :not_ready and the queue skips it",
+         %{scope: scope} do
+      # The over-widening guard. Same fixture as above, stopped one step short:
+      # claimed and NOT closed. Nothing about it may become claimable.
+      phase_id = uniq("phase-live")
+      doc_id = uniq("live-claim")
+      task = mk_task!(doc_id, scope, %{"parent_id" => phase_id})
+      queue_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-holder", scope)
+      assert claimed.id == task.id
+      refute Map.has_key?(claimed.content["claim"], "closed_at")
+
+      assert Tasks.execution_class(claimed.content, "worker-contender") == "foreign_claimed"
+      assert {:error, :not_ready} = Tasks.claim_by_id(doc_id, "worker-contender", scope)
+      assert {:ok, nil} = Tasks.claim("worker-contender", queue_opts)
+
+      # And the row really is untouched by the failed attempts.
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["claim"]["worker"] == "worker-holder"
+      assert reloaded.content["lifecycle_status"] == "in_progress"
     end
   end
 

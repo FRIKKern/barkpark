@@ -2,6 +2,8 @@
 
 # Law 0 — wave 22 executable repayment list (re-derivation recipe)
 
+> HISTORICAL RECORD (2026-08-02) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Derived 2026-08-02T04:57:42Z at the Verify phase of wave 22. Nothing here is a
 number to quote; everything here is a command to re-run.
 

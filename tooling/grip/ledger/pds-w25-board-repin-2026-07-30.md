@@ -2,6 +2,8 @@
 
 # PDS wave 25 — board re-pin at a named instant, and the pinned shard manifest
 
+> HISTORICAL RECORD (2026-07-30) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 RE-DERIVATION RECIPE. Nothing below is quotable without re-running it; the board moves.
 
 ```

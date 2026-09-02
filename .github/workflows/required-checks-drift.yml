@@ -9,7 +9,7 @@
 #
 #   `Required-check spec gate`          Hermetic: no network, no token, no
 #                                       writes. Runs the mutation suite with
-#                                       --hermetic (183 assertions, ~1min). The
+#                                       --hermetic (200 assertions, ~1min). The
 #                                       count is maintained by hand and was
 #                                       stale at 166 for several waves — if it
 #                                       disagrees with the suite's own tally
@@ -40,8 +40,8 @@
 # Until wave 53 this header labelled the spec-gate job BLOCKING. It is not, and
 # saying so here was the epic's own defect class in the epic's own workflow.
 # `.github/required-checks.json` holds the context out under `S7 EXCLUDED BY
-# DECISION` (replacement trigger: cch-w36-bl-register-spec-gate-after-census-
-# green), and docs/ops/merge-gates.md already states the truth this header now
+# DECISION` (replacement trigger: cch-w37-bl-register-spec-gate-human-gate),
+# and docs/ops/merge-gates.md already states the truth this header now
 # matches rather than inventing a third phrasing: the job "is in no required
 # aggregator's `needs:` and carries no required name, so it cannot block a
 # merge." Its red is a signal a human must read, not a stop.
@@ -143,6 +143,49 @@ jobs:
       # verify's own 16 mutation clauses via §9. No network, no token.
       - name: Prove the toolchain by mutation (hermetic)
         run: bash scripts/required-checks.test.sh --hermetic
+
+      # THE COMMIT PATH. apply.sh floors the WRITE path — it runs the floor
+      # before the protection PUT and is fail-closed on every rc — but nothing
+      # floored the COMMIT: `git grep -n required-checks-floor origin/main --
+      # .github` returns exactly one hit and it is PROSE inside
+      # required-checks.json's own _readme. So a PR that rewrote the spec —
+      # dropping a required context, dropping a hand-authored _readme paragraph,
+      # or flipping enforced back to false, all three of which the floor now
+      # refuses — reddened nothing until someone ran apply by hand afterwards.
+      #
+      # THIS JOB AND NOT THE ADVISORY ONE. `Required-check spec drift
+      # (advisory)` carries `continue-on-error: true`, so a floor breach there
+      # prints and the job still concludes SUCCESS — a guard whose red is
+      # swallowed is the defect class this workflow exists to delete. `spec-gate`
+      # is hermetic (the floor makes no API call and needs no credential),
+      # deliberately path-unfiltered so it renders on EVERY pull request rather
+      # than only on ones that look like CI changes, and its failure is a real
+      # red X. It is not a REQUIRED context today — registering it is a
+      # branch-protection change and a lead call — so this is an unswallowed red
+      # a human must read, which is strictly more than the advisory job can offer,
+      # and it becomes blocking for free the day that name is registered.
+      #
+      # The reference is fetched explicitly: `fetch-depth: 1` leaves no
+      # `origin/main` for the floor's default `git show origin/main:…` to
+      # resolve, and the floor treats an unreadable reference as a REFUSAL, so
+      # without this step the job reds for the wrong reason. On `pull_request`
+      # actions/checkout gives the MERGE commit, so the candidate is the spec as
+      # it would exist on main — a branch that is merely behind main cannot red
+      # this.
+      - name: Fetch the floor's reference (origin/main's committed spec)
+        run: git fetch --depth=1 origin main:refs/remotes/origin/main
+
+      - name: The committed spec holds the floor (contexts, _readme, enforced)
+        run: |
+          set -euo pipefail
+          rc=0
+          bash scripts/required-checks-floor.sh .github/required-checks.json || rc=$?
+          case "$rc" in
+            0) ;;
+            1) echo "::error::FLOOR BREACH — this PR's .github/required-checks.json loses a required context, an _readme entry, or the enforced flag. The floor's own output above names each loss."; exit 1 ;;
+            2) echo "::error::FLOOR GROWTH — this PR ADDS required context(s). Every PR in this repo must render them forever, and a job that is green today and paths-filtered tomorrow deadlocks main (D69). CI never passes --acknowledge-growth on its own: a human decides each added name belongs, and says so in the PR."; exit 1 ;;
+            *) echo "::error::the floor could not be evaluated (exit $rc) — an unreadable reference is a refusal, never a pass."; exit 1 ;;
+          esac
 
   # ── the workflow-file shape ratchet ─────────────────────────────────────────
   # WHY IT LIVES HERE AND NOT IN shell-harnesses.yml, where every other

@@ -45,6 +45,10 @@
 #     "… is failing."                     RED           RE-RUN FIRST, then investigate (D57)
 #     "… is cancelled."                   RERUN         a superseded run, not a code defect
 #     "… is in progress."                 WAIT          ABSENT from D38, and the most common real state
+#     "failed to delete local branch …
+#      … checked out at …"                LOCAL_POST_MERGE  NOT a merge refusal at all: gh's own local
+#                                                       branch-delete, which runs only AFTER the merge
+#                                                       call returned. See merged_despite_error.
 #     anything else                       UNRECOGNISED  refuse loudly — NEVER assume green
 #
 #   The `is failing.` row advises a re-run before any code investigation because
@@ -102,6 +106,23 @@ classify_refusal() {
     *"is failing."*)                  printf 'RED\n' ;;
     *"is cancelled."*)                printf 'RERUN\n' ;;
     *"is in progress."*)              printf 'WAIT\n' ;;
+    # NOT A MERGE REFUSAL. gh runs its local branch-delete only AFTER the merge
+    # call returned, so this string is only ever emitted about a merge that
+    # already went to the server; git is refusing to delete a branch another
+    # WORKTREE has checked out, which is the resting state of this fleet.
+    #
+    # WHETHER IT LANDED IS STILL THE API'S QUESTION, NOT THIS TABLE'S:
+    # merge_loop calls merged_despite_error() first and it wins, so this arm is
+    # reached only when the state read did NOT confirm MERGED. All it changes is
+    # the ADVICE — UNRECOGNISED sends the reader to re-merge by hand, and on this
+    # shape that is an instruction to re-merge an already-merged PR.
+    #
+    # BOTH NEEDLES ARE REQUIRED, and the match is deliberately not widened to
+    # every "failed to run git": a branch-delete that failed for some other
+    # reason is not a worktree collision, and a message-shaped guess about
+    # whether a merge landed is the vacuous pass in the other direction.
+    *"failed to delete local branch"*"checked out at "*)
+                                      printf 'LOCAL_POST_MERGE\n' ;;
     *)                                printf 'UNRECOGNISED\n' ;;
   esac
 }
@@ -160,6 +181,17 @@ refusal_advice() {
     WAIT)
       printf 'A required context is still running. This is the most common state and it is not an error.\n'
       printf 'RESOLVE: gh pr checks %s --watch\n' "$pr"
+      ;;
+    LOCAL_POST_MERGE)
+      printf 'NOT A MERGE REFUSAL. gh emitted this from its own LOCAL branch-delete, which runs only\n'
+      printf 'AFTER the merge call returned — git will not delete a branch another WORKTREE has checked\n'
+      printf 'out, and on this fleet every agent works in one. The merge very likely LANDED; the state\n'
+      printf 'read above is what could not confirm it, so this is reported rather than assumed.\n'
+      printf 'RESOLVE: gh pr view %s --json state,mergedAt      # confirm — do NOT re-merge on this message\n' "$pr"
+      printf 'THEN:    if it MERGED, the remote head branch is probably still there — gh never reached\n'
+      printf '         its delete either. gh pr view %s --json headRefName,isCrossRepository names it;\n' "$pr"
+      printf '         delete that ref in the BASE repo only when isCrossRepository is false (a fork PR\n'
+      printf '         head name resolves to a DIFFERENT branch here).\n'
       ;;
     UNRECOGNISED)
       printf 'UNRECOGNISED REFUSAL. This shape is not in the measured table, so this script refuses to guess —\n'
@@ -291,6 +323,14 @@ refuse() {
     echo "  gh said, verbatim:"
     printf '%s\n' "$msg" | sed 's/^/    /'
     counter_line "$msg" | sed 's/^/    /'
+    if [ "$PR_STATE_READ" = "UNKNOWN" ]; then
+      echo
+      echo "  NOTE: the landed-check could NOT read the PR state — the API did not answer:"
+      printf '%s\n' "$PR_STATE_ERROR" | sed 's/^/        /'
+      echo "        So this refusal is classified from gh's MESSAGE ALONE, and an unreadable"
+      echo "        instrument is not evidence that the merge did not land. Confirm first:"
+      echo "        gh pr view $PR_NUMBER --json state,mergedAt"
+    fi
     echo
     refusal_advice "$state" "$PR_NUMBER" "$HEAD_SHA" "$run_id" | sed 's/^/  /'
     echo
@@ -315,13 +355,40 @@ refuse() {
 # would fire on every successful merge. The fix is to ask the server what
 # happened rather than to add another string to the table — a message-shaped
 # guess about whether a merge landed is the vacuous pass in the other direction.
+# AN UNREADABLE STATE IS NOT "NOT MERGED". Measured 2026-09-02 on this fleet:
+# `gh pr view` fails outright under a rate limit ("API rate limit already
+# exceeded for user ID …"), so this returns UNKNOWN — and the caller's `!=
+# MERGED` test cannot tell UNKNOWN from a confirmed-OPEN PR. That is the false
+# stall coming back through the INSTRUMENT instead of through the table. The
+# answer and the error are recorded so refuse() can say which one it got; the
+# script still refuses either way, because a blind read is never a green.
+#
+# IT SETS GLOBALS AND IS NEVER CALLED INSIDE $( ). A command substitution runs a
+# SUBSHELL, so a global assigned in there dies with it — the error text would be
+# discarded in exactly the case it exists for, and the refusal would go back to
+# sounding as confident as a read one.
+PR_STATE_READ=""
+PR_STATE_ERROR=""
+
 pr_state() {
-  gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || printf 'UNKNOWN\n'
+  local out rc=0
+  out="$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$out" ]; then
+    PR_STATE_READ="$out"
+    PR_STATE_ERROR=""
+  else
+    PR_STATE_READ="UNKNOWN"
+    PR_STATE_ERROR="$out"
+  fi
 }
 
 merged_despite_error() {
   local out="$1"
-  [ "$(pr_state)" = "MERGED" ] || return 1
+  # Called PLAINLY, never as $(pr_state): this if-condition is not a subshell,
+  # so the globals survive and the refusal path can distinguish a PR the API
+  # said is OPEN from one the API never answered about at all.
+  pr_state
+  [ "$PR_STATE_READ" = "MERGED" ] || return 1
   {
     echo
     echo "bp-merge: MERGED #$PR_NUMBER (squash) — the server-side merge LANDED."

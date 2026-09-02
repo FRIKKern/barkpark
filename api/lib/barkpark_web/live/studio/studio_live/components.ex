@@ -394,8 +394,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 </article>
               <% true -> %>
                 <%!-- HTML-only (legacy): whole opaque body, re-assigned on
-                      update. Keyed on the slug too so a jump swaps the node. --%>
-                <article id={"paper-body-#{@slug}"} data-rev={@paper_rev}>{raw(@paper_html)}</article>
+                      update. Keyed on the slug too so a jump swaps the node.
+
+                      spd-w18 — its id is `paper-body-legacy-<slug>`, NOT the
+                      streamed arm's `paper-body-<slug>`, for exactly the reason
+                      spd-w19 gave the never-blank arm its own id one clause
+                      above. A legacy `body_html` paper that GAINS a block list
+                      while its pane is open (an ingest write, or any future
+                      html-to-blocks path) crosses the same boundary: with
+                      `BARKPARK_PAPER_CANVAS=0` the converted document renders
+                      the STREAMED arm, so a shared id meant one node kept its
+                      identity while GAINING `phx-update="stream"` — and a
+                      stream container never removes children it did not insert
+                      (`dom_patch.js` deletes only `[data-phx-stream-ref]` rows
+                      on reset). The opaque raw body would have SURVIVED its own
+                      replacement, stacked above the streamed blocks;
+                      `LiveViewTest` refuses the same transition outright
+                      ("phx-update stream requires setting an ID on each
+                      child"), which is how it is pinned. A distinct id makes
+                      the swap a node REPLACEMENT, which is what a swap is.
+
+                      Nothing keys on the old id: every `#paper-body…` CSS rule
+                      in `paper-surface.css` pins the EXACT id `#paper-body`
+                      (the reader's container and the nil-slug arm), never the
+                      slug-suffixed Studio one, so this rename touches no
+                      styling. --%>
+                <article id={"paper-body-legacy-#{@slug}"} data-rev={@paper_rev}>
+                  {raw(@paper_html)}
+                </article>
             <% end %>
           </main>
         </div>

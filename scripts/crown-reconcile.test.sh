@@ -80,8 +80,16 @@
 #       absent file exits 0 with the caller's statement and 2 without   → 0, 2
 #   (o) WHICH READER ANSWERED is a verdict field: the same script,
 #       driven down the SSH transport against a control plane in effigy,
-#       names `route` when the route answers 200 and
-#       `postgres-container` when it answers 401                        → 0, 0
+#       names `route` when the route answers 200, and when the route
+#       answers 401 to the WORKER principal it names the REFUSAL — the
+#       postgres detour is deleted, so a 401 is a VERDICT (#14979) and a
+#       body claiming any substitute reader is refused           → 0, 2, 2
+#   (o2) THE REMOTE READER ITSELF, extracted from the script and run
+#       against docker/curl in effigy: 401 and 403 emit
+#       CR_ERROR=http_<code>_worker_principal plus a CR_DETAIL naming
+#       the route, WORKER_TOKEN and #14979, `docker` is NEVER asked for
+#       the postgres container and `psql` is never run; a 500 still
+#       emits the plain CR_ERROR=http_500 arm
 #   (m) PREDATES-WRITER: a delivering run created before the
 #       record-delivery job existed is its own printed class, with the
 #       birth instant beside it — never a BEHIND                      → exit 0
@@ -92,7 +100,11 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CR="$REPO_ROOT/scripts/crown-reconcile.sh"
+# THE SCRIPT UNDER TEST, overridable ONLY so a red-before can be RUN rather than
+# asserted. `CROWN_RECONCILE_SH=<a pre-fix copy> bash scripts/crown-reconcile.test.sh`
+# drives these same cases at an older script and is how the 401-is-a-verdict arms
+# below were proven to RED before the fix. CI sets nothing and gets the repo's own.
+CR="${CROWN_RECONCILE_SH:-$REPO_ROOT/scripts/crown-reconcile.sh}"
 WF="$REPO_ROOT/.github/workflows/crown-reconcile.yml"
 SPEC="$REPO_ROOT/.github/required-checks.json"
 
@@ -1362,18 +1374,27 @@ printf '%s\n' "$out" > "$TMP/last.out"
 rm -f "$STATE_TMP"
 saw "does NOT survive a run boundary" "a state file in a temp directory says so, instead of passing for persistence"
 
-section "(o) WHICH READER ANSWERED is a verdict field, not a repeated note:"
+section "(o) WHICH READER ANSWERED is a verdict field, and a 401 is a VERDICT"
 # The live shape, in effigy. A production run took the 401→postgres downgrade on
 # every read and said so TEN times as a `note:` on stderr, behind a header that
-# named only the TRANSPORT (`reader=ssh`). The transport is not the reader: the
-# SSH transport carries two of them, and only the route's answer to the WORKER
-# principal decides which one produced the rows.
+# named only the TRANSPORT (`reader=ssh`). The transport is not the reader.
 #
-# So this arm stands up a control plane in effigy — `gh`, `curl` and `ssh` are
-# all fakes on PATH — and drives the SAME script down the SSH reader twice, once
-# where the route answers 200 and once where it answers 401. The verdict field
-# must NAME a different reader in each. A field that printed a constant would
-# pass a single-case assertion, which is why there are two.
+# PR #14979 admitted the WORKER principal to GET /v1/deliveries, so the detour's
+# premise — "a 401 here is a TIER MISMATCH, not a broken box" — is now false, and
+# the detour is deleted. These arms stand up a control plane in effigy (`gh`,
+# `curl` and `ssh` are all fakes on PATH) and drive the SAME script down the SSH
+# reader three ways:
+#
+#   200 + CR_VIA=route   → read by `route`, rc 0            (the normal path)
+#   401 + CR_ERROR       → REFUSED: rc 2, and the verdict NAMES the code, the
+#                          WORKER principal and #14979      (was: a silent green)
+#   401 + CR_VIA=sql     → a body claiming the postgres container is REFUSED
+#                          rather than counted               (was: rc 0, `read by
+#                          postgres-container`)
+#
+# The fake NEVER supplies the refusal sentence: it emits only CR_HTTP + CR_ERROR,
+# exactly the shape the script's own remote reader emits, so the naming asserted
+# below is the SCRIPT's sentence and not the harness's.
 FAKE="$TMP/fake"; mkdir -p "$FAKE"
 cat > "$FAKE/gh" <<'SH'
 #!/usr/bin/env bash
@@ -1388,11 +1409,17 @@ cat "$CR_FAKE_HEALTH"
 SH
 cat > "$FAKE/ssh" <<'SH'
 #!/usr/bin/env bash
-# The control plane's remote reader, in effigy: it reports which reader answered
-# exactly the way scripts/crown-reconcile.sh's own remote.sh does.
+# The control plane's remote reader, in effigy: it reports exactly the lines
+# scripts/crown-reconcile.sh's own remote.sh emits. CR_FAKE_VIA empty means the
+# refusal shape — a code and an error name, and NO body and NO sentence, so any
+# naming downstream is the script's own.
 echo "CR_HTTP=$CR_FAKE_HTTP"
-echo "CR_VIA=$CR_FAKE_VIA"
-echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS")}"
+if [ -n "${CR_FAKE_VIA:-}" ]; then
+  echo "CR_VIA=$CR_FAKE_VIA"
+  echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS")}"
+else
+  echo "CR_ERROR=http_${CR_FAKE_HTTP}_worker_principal"
+fi
 SH
 chmod +x "$FAKE/gh" "$FAKE/curl" "$FAKE/ssh"
 
@@ -1423,11 +1450,125 @@ run_fake 0 "the route answers 200 over the SSH transport" 200 route
 saw "READER: transport=ssh, answered by route" "the reader that answered is its own printed field, beside the verdict"
 saw "read by route" "and the green sentence names it too"
 
-run_fake 0 "the route answers 401 to the WORKER principal and postgres answers instead" 401 sql
-saw "READER: transport=ssh, answered by postgres-container" "the 401 downgrade is NAMED in the verdict field, not only in the body"
-saw "the /v1/deliveries route answered HTTP 401 to the WORKER principal" "the field says WHY the reader changed"
-saw "read by postgres-container" "the green sentence carries the downgraded reader, so a green cannot hide which reader produced it"
-not_saw "answered by route" "the transport did not decide the answer — the two runs report DIFFERENT readers"
+# THE ROW THIS FIX EXISTS FOR. Pre-#14979 this same input exited 0 and said
+# `read by postgres-container`. It must now be a read that DID NOT HAPPEN.
+run_fake 2 "the route answers 401 to the WORKER principal — a VERDICT, not a detour" 401 ""
+saw "COULD NOT FULLY READ" "a 401 to the WORKER principal is an unreadable condition, never a green"
+saw "answered HTTP 401 to the WORKER principal" "the verdict names the CODE and the PRINCIPAL"
+saw "WORKER_TOKEN" "…and the credential by name, so an operator knows which bearer was refused"
+saw "#14979" "…and the PR that admitted that principal, so the refusal reads as the REGRESSION it is"
+saw "refused-401/403=" "the refusal is a counted field beside the reader, not only a sentence"
+not_saw "read by postgres-container" "no substitute reader answered in its place"
+not_saw "RECONCILED:" "a run that could not read the crown never prints a green"
+
+# THE SUBSTITUTE READER IS REFUSED, not counted. This is the OLD detour's own
+# output shape, replayed: a body that claims it came from the postgres container.
+# The detour is gone from the script, so a body claiming it can only come from a
+# script that still detours — and it must not be able to buy a green.
+run_fake 2 "a body claiming the postgres container is REFUSED, not counted as a read" 401 sql
+saw "claiming reader 'sql'" "the substitute reader is named in the refusal"
+saw "NO substitute reader" "the sentence states the rule it enforced"
+not_saw "answered by postgres-container" "the deleted reader is not a name this script can print"
+not_saw "read by postgres-container" "and it cannot ride a green sentence either"
+not_saw "answered by route" "the transport did not decide the answer — the three runs report DIFFERENT outcomes"
+
+section "(o2) THE REMOTE READER ITSELF — a 401 names the principal and NEVER reaches psql"
+# (o) drives the script with `ssh` faked, so it proves what the LOCAL half does
+# with a refusal. It cannot prove what the REMOTE half emits, because the remote
+# half never runs there — and the remote half is where the psql detour lived.
+#
+# So this arm EXTRACTS the remote reader out of the script's own heredoc (never a
+# copy typed here: a heredoc that drifts moves this test) and runs it against a
+# control plane in effigy — `docker` and `curl` are fakes, and the fake `docker`
+# answers the postgres container AND `psql` with rows. A script that still
+# detours would therefore take the detour and print CR_VIA=sql. The assertions
+# below are what makes that impossible: the 401 arm must NAME the refusal, and
+# the fake docker's LOG must never have been asked for postgres at all.
+RFAKE="$TMP/rfake"; mkdir -p "$RFAKE"
+REMOTE_SH="$TMP/remote-extracted.sh"
+awk '/<<.REMOTE.$/ { f = 1; next } f && /^REMOTE$/ { exit } f { print }' "$CR" > "$REMOTE_SH"
+if [ -s "$REMOTE_SH" ]; then
+  ok "the remote reader was extracted from the script's own heredoc ($(wc -l < "$REMOTE_SH" | tr -d ' ') lines)"
+else
+  bad "the remote reader heredoc could not be extracted from $CR — every assertion below would be vacuous"
+fi
+
+cat > "$RFAKE/docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CR_DOCKER_LOG"
+case "$*" in
+  *"ancestor=cloud-control_plane"*)   echo "cp-container-in-effigy" ;;
+  *"printenv WORKER_TOKEN"*)          echo "worker-token-in-effigy" ;;
+  # The DETOUR's own dependencies, all answered generously ON PURPOSE: a script
+  # that still detours gets everything it needs and prints CR_VIA=sql, so the
+  # assertions below fail LOUDLY rather than for want of a fixture.
+  *"ancestor=postgres"*)              echo "db-container-in-effigy" ;;
+  *"printenv POSTGRES_USER"*)         echo "bp" ;;
+  *"printenv POSTGRES_DB"*)           echo "bp_prod" ;;
+  *psql*)                             echo '[{"sha":"detour","target":"cp"}]' ;;
+esac
+SH
+cat > "$RFAKE/curl" <<'SH'
+#!/usr/bin/env bash
+# Prints the code and writes NOTHING: no arm below reads a body, and the reader's
+# body path is an absolute path on the control plane, not a path this harness owns.
+printf '%s' "$CR_FAKE_HTTP"
+SH
+chmod +x "$RFAKE/docker" "$RFAKE/curl"
+
+remote_run() { # <http-code>
+  CR_DOCKER_LOG="$TMP/docker-$1.log"; : > "$CR_DOCKER_LOG"
+  PATH="$RFAKE:$SANDBOX_PATH" CR_FAKE_HTTP="$1" CR_DOCKER_LOG="$CR_DOCKER_LOG" \
+    bash "$REMOTE_SH" "sha=$SHA_A" > "$TMP/last.out" 2>&1
+  DOCKER_LOG="$CR_DOCKER_LOG"
+}
+no_detour() { # <label>
+  if grep -qE 'postgres|psql' "$DOCKER_LOG"; then
+    bad "$1 — docker was asked: $(tr '\n' ';' < "$DOCKER_LOG")"
+  else
+    ok "$1"
+  fi
+}
+
+remote_run 401
+saw "CR_HTTP=401" "the reader reports the code it got"
+saw "CR_ERROR=http_401_worker_principal" "a 401 is an ERROR that names the PRINCIPAL, not a via"
+saw "GET /v1/deliveries answered HTTP 401 to the WORKER principal" "the detail line names the ROUTE, the CODE and the PRINCIPAL"
+saw "WORKER_TOKEN" "…and the credential by name"
+saw "#14979" "…and the PR that admitted that principal, so a refusal reads as a REGRESSION"
+not_saw "CR_VIA=sql" "the postgres detour does not fire"
+not_saw "CR_BODY=" "and it produces no rows to be mistaken for a read"
+no_detour "docker was NEVER asked for the postgres container, and psql was never run"
+
+remote_run 403
+saw "CR_ERROR=http_403_worker_principal" "a 403 takes the same named arm as a 401"
+not_saw "CR_VIA=sql" "a 403 does not detour either"
+no_detour "a 403 reaches no psql either"
+
+# THE NON-401 ARM IS KEPT, and kept DISTINCT: a 500 is a broken box, not a
+# refused principal, and calling it one would misname the next outage.
+remote_run 500
+saw "CR_ERROR=http_500" "a non-401/403 code keeps its plain CR_ERROR=http_N arm"
+not_saw "_worker_principal" "a 500 is a broken box, not a refused principal — the two are not merged"
+no_detour "a 500 reaches no psql either"
+
+# The static half of the same claim: the detour is DELETED, not merely unreached.
+# THE CODE, NOT THE WORD. The reader's own prose says what was removed and why —
+# a bare grep would red on the explanation, which is the trap a fix's rationale
+# comment always sets for the check that guards it. Comments are stripped first,
+# and the strip is proven non-empty so this cannot pass by grepping nothing.
+grep -v '^[[:space:]]*#' "$REMOTE_SH" > "$TMP/remote-code.sh"
+if [ -s "$TMP/remote-code.sh" ]; then
+  ok "the reader has code left after its comments are stripped — the check below is not vacuous"
+else
+  bad "stripping comments emptied the reader — the detour check below would pass on nothing"
+fi
+if grep -qE 'psql|platform_deliveries' "$TMP/remote-code.sh"; then
+  bad "the remote reader still carries the psql detour — a branch that is unreached today is a branch that returns"
+  grep -nE 'psql|platform_deliveries' "$TMP/remote-code.sh" >&2
+else
+  ok "no executable line of the remote reader mentions psql or platform_deliveries — the detour is deleted, not skipped"
+fi
 
 section "(k) the workflow's own shape"
 if grep -q "cron:" "$WF"; then ok "the workflow carries a cron"; else bad "the workflow has no cron"; fi

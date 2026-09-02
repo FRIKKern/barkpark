@@ -564,6 +564,32 @@ if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
   config :barkpark, :allow_bundle_import, true
 end
 
+# INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815), mirroring cloud's
+# PLATFORM_ADMIN_EMAILS shape (cloud/config/runtime.exs). Comma-separated, in
+# ALL envs. BOTH unset/blank => the lists stay [] => UNSET => legacy behaviour
+# (the `admin` bit alone still opens the seven instance-global route groups) plus
+# a startup warning from BarkparkWeb.Plugs.RequirePlatformOperator.warn_if_unset/0.
+# EITHER non-empty => the tier is ARMED and the seven groups are allowlist-only,
+# fail closed. Emails are matched against the BEARER'S OWNER (a PAT's
+# owner_user_id -> user.email, or an app token's "app:<email>" label); ids are
+# `api_tokens.id` values, the direct handle for a machine token with no human
+# behind it. Blank entries are dropped, so "a@b.io,," is one operator, not three.
+for {env_name, config_key} <- [
+      {"BARKPARK_OPERATOR_EMAILS", :operator_emails},
+      {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
+    ] do
+  entries =
+    env_name
+    |> System.get_env("")
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+
+  if entries != [] do
+    config :barkpark, config_key, entries
+  end
+end
+
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
     val when is_binary(val) and val != "" ->

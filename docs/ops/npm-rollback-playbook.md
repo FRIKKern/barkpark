@@ -22,10 +22,10 @@ unpublish + dist-tag runs.
 
 **Default to `npm deprecate`. Reach for `npm unpublish` only when install is
 broken for users who would otherwise get the bad version.** Deprecate is
-reversible (deprecate with `""` to undo), non-destructive (version stays
+reversible, non-destructive (version stays
 installable; pinned users unaffected), visible at install time. Unpublish is
-**irreversible** past the first re-publish attempt, breaks every lockfile pinned
-to that version, and is allowed only within **72h** of publish
+**irreversible** past the first re-publish attempt (see *Downstream impact*)
+and is allowed only within **72h** of publish
 ([npm unpublish policy](https://docs.npmjs.com/policies/unpublish)); beyond 72h
 requires a registry support ticket. Same rule for scoped + unscoped.
 
@@ -67,8 +67,8 @@ silently ignored, so no "no dependents" claim is available to lean on.
 
 ## Mechanism B — `npm unpublish` (hard recall)
 
-Only for: completely broken installs; security hazards where the artifact itself
-is the harm; accidental wrong-content publishes caught <72h.
+Only for: completely broken installs; security hazards where the artifact is
+the harm; wrong-content publishes caught <72h.
 
 Constraints: **72h window** (`E403` after); blocked if another public package
 depended on the version in the last 72h; token needs publish + unpublish scope
@@ -85,8 +85,7 @@ dead version BEFORE or IMMEDIATELY AFTER unpublish.
 
 **Re-publish blocker (critical):** after unpublishing `1.0.0` you **cannot
 publish a new artifact at `1.0.0` for 24h** (registry anti-replay). Always ship
-the fix as `1.0.1` — never re-use the number. This is why deprecate is the
-default: it doesn't burn a version.
+the fix as `1.0.1` — never re-use the number.
 
 **Downstream impact:** every lockfile pinned to the version fails next `npm ci`;
 pre-write a pinned GitHub issue comment with the upgrade line; CI metadata
@@ -101,13 +100,11 @@ When the artifact is fine but `@latest` points at the wrong version.
 npm dist-tag add @barkpark/core@0.9.5 latest # move back to last good
 ```
 
-Instant, non-destructive, burns no version number. Prefer over unpublish when
-the bug is "wrong version got promoted."
+Instant, non-destructive, burns no version number.
 
-### Dist-tag changes via CI (`retag.yml`) — absorbed retag runbook
+### Dist-tag changes via CI (`retag.yml`)
 
-Local `npm dist-tag` returns **HTTP 403** — only the CI `NPM_TOKEN` holds
-publish/dist-tag scope on the `@barkpark` org. Dispatch through
+Local `npm dist-tag` 403s for the token reason given under A. Dispatch through
 `.github/workflows/retag.yml` (`workflow_dispatch`, no branch restriction — can
 be dispatched from any branch that carries the file). It fails closed **twice**:
 `::error title=Missing NPM_TOKEN::` if the secret is unset, and
@@ -132,9 +129,9 @@ annotation (exit 0 — the workflow still succeeds) when `remove_tag` is
 with the same inputs — the `Add dist-tag` step is idempotent on npm. Full undo
 (restore the version to `latest`): dispatch with `add_tag=latest` and
 `remove_tag` **empty** — never strip `preview` on the way back (the guard
-skips it with a warning anyway). If the workflow refuses (secret unset, or
-`npm whoami` rejected the token), fix that first — rotate the token if the
-registry rejected it — then re-dispatch. Never improvise locally (403s).
+skips it with a warning anyway). If the workflow refuses, clear that first (see
+the two fail-closed errors above), then re-dispatch. Never improvise locally
+(403s).
 
 **404-is-intentional:** `npm dist-tag rm <pkg> latest` **deletes** the `latest`
 entry — it does not reassign. With no stable version published, a bare
@@ -164,9 +161,9 @@ parallel, not after.
 2. **Assess** (<15 min): reproduce in a scratch dir; classify (type-only / runtime / install-time / security / dist-tag); estimate blast radius.
 3. **Decide:** use the decision tree; **write the decision down** in the incident ticket before acting. Critical ⇒ Boss approves.
 4. **Execute:** most incidents combine two mechanisms (A+D, C+D, or B+D). Every command goes in the ticket verbatim with timestamps.
-5. **Verify:** mechanism checks above + fresh-install invariant: `npx create-barkpark-app@latest /tmp/rollback-smoke-$(date +%s) --template blog-starter --yes`. The CLI takes **one** positional (the target directory) — a second one is silently ignored, so the old two-argument form scaffolded into `./blog` instead; `blog` is not a template name (`website-starter` | `blog-starter`), and without `--yes` it blocks on interactive prompts. Re-test from a clean cache (`npm cache clean --force`).
+5. **Verify:** mechanism checks above + fresh-install invariant: `npx create-barkpark-app@latest /tmp/rollback-smoke-$(date +%s) --template blog-starter --yes`. The CLI takes **one** positional (the target directory); a second is silently ignored, so the old two-argument form scaffolded into `./blog` — and `blog` is no template name (`website-starter` | `blog-starter`). Without `--yes` it blocks on prompts. Re-test from a clean cache (`npm cache clean --force`).
 6. **Communicate:** "rolled back" banner on the GitHub Release; reply where users reported it.
-7. **Postmortem (48h):** record as a task in the task system — a `type:"task"` document via the standard mutate endpoint with `content.kind == "task"`; there is no `POST /v1/tasks` create verb (`bp task` verbs are read/lifecycle only). Capture timeline, detection gap, decision rationale, fix, prevention. Long-form: attach a Bulldocs paper via `POST /v1/tasks/<task_id>/papers`. Never write to `.doey/plans/` (retired). File preventive tickets; a same-class second incident upgrades prevention to P0.
+7. **Postmortem (48h):** record the incident as a task with `bp task create` — the contract-correct front door: a CLI built-in (hence absent from `bp task --help`) that injects the schema's required `kind:"task"` + `lifecycle_status:"open"`. Contract: `bp task create --help`; ledger mechanics: [TASK-SYSTEM](../setup/TASK-SYSTEM.md). **Fallback, no `bp` on hand:** `POST /v1/data/mutate/production` — still the only route, the server has no bare `POST /v1/tasks` create verb — with `kind` AND `lifecycle_status` in the payload; omitting them 422s `validation_failed`. Capture timeline, detection gap, decision rationale, fix, prevention. Long-form: attach a Bulldocs paper via `POST /v1/tasks/<task_id>/papers`. Never write to `.doey/plans/` (retired). File preventive tickets; a same-class second incident upgrades prevention to P0.
 
 ## Known pitfalls
 

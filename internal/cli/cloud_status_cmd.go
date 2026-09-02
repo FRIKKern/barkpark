@@ -487,6 +487,21 @@ func commitCell(b cloudclient.Barkpark) string {
 	if sha == "" {
 		return commitDistanceUnmetered
 	}
+	// dr-w22-bl SINCE WHEN, appended only when the plane MEASURED it. The sha
+	// alone answers "what is it running"; the operator's next question is always
+	// "since when", and until this the only place to get that was
+	// `GET /v1/barkparks/:id/events` — require_user, 200 rows a page, about
+	// three hours of a fourteen-day history.
+	//
+	// A SUFFIX AND NOT A COLUMN, on purpose. An empty first-seen is the NORMAL
+	// reading for a box that has not changed sha since the plane grew the column,
+	// so a dedicated column would print UNMETERED down its whole length on a
+	// perfectly healthy fleet and teach the reader to ignore the word. Absent
+	// here simply means the cell is the bare sha it has always been — the older-CP
+	// render, byte-identical, which is also what a plane that omits the key gets.
+	if since := strings.TrimSpace(b.GitCommitFirstSeenAt); since != "" {
+		return sanitizeCell(shortSha(sha) + " (since " + relativeAge(since) + ")")
+	}
 	return sanitizeCell(shortSha(sha))
 }
 
@@ -602,13 +617,16 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		// commit-distance sentence for a box whose tag grade disagrees.
 		reason = behindDetail(b)
 	}
-	// Two markers ride on top of the status's own reason, on ANY row: what we
-	// could not read (unmeteredMarker) and what is eating the box right now
-	// (runawayMarker). Joined with the same separator the strained reason uses
-	// for its swap clause, and every empty one drops out rather than leaving a
-	// dangling dot.
-	parts := make([]string, 0, 4)
-	for _, s := range []string{reason, runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
+	// Markers ride on top of the status's own reason, on ANY row — including a
+	// row that reads `ok`, which is the whole point of every one of them: what we
+	// could not read (unmeteredMarker), what is eating the box right now
+	// (runawayMarker), what it is answering (err5xxMarker), and whether the
+	// deploy pair is intact (slotUnitMarker — a box serving on green with a
+	// FAILED blue is correctly `ok` and still needs the sentence). Joined with
+	// the same separator the strained reason uses for its swap clause, and every
+	// empty one drops out rather than leaving a dangling dot.
+	parts := make([]string, 0, 5)
+	for _, s := range []string{reason, slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
@@ -663,6 +681,210 @@ func err5xxRow(b cloudclient.Barkpark) map[string]any {
 		return map[string]any{"state": "zero", "per_s": 0.0}
 	}
 	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS}
+}
+
+// --- the slot-unit marker (dr-bl-w5-failed-slot-unit-is-invisible) -----------
+//
+// WHAT WAS MISSING: on 2026-08-06 guerrilla's `barkpark-slot@blue` sat in
+// `failed` — an 8m30s stop-sigterm timeout ending in SIGKILL, itself a symptom
+// of a box at 92.9% swap — and this screen said `ok`. It was ACCIDENTALLY right:
+// green was serving, so the box genuinely was serving. But the verdict had zero
+// unit-state inputs, so it would have said `ok` with either half dead and with
+// BOTH. A light that cannot go out is not a light.
+//
+// DETAIL LINE, NOT A RUNG — the third time this call is made in this file
+// (runawayMarker, err5xxMarker) and for the stronger of their two reasons. The
+// decision-15 vocabulary is pinned across three surfaces by the decision-32
+// fixture (attention_order.json) and mirrored by the SPA, and a twelfth status
+// minted here would be the drift D32 exists to prevent. But the deciding reason
+// is that the ROW'S VERDICT IS ALREADY CORRECT: a box serving on green with a
+// failed blue IS ok, and re-ranking it would trade a false negative for a false
+// positive. What was missing was never the verdict — it was the SENTENCE.
+//
+// It never fabricates, on the same rule the two markers above keep: an
+// unmeasured box (nil list — no systemd, or an agent predating the probe) and a
+// measured-intact box (a pair both active) both render "", because neither has
+// a failure to name. Those two ARE distinguished in `-o json` (slotUnitsRow).
+func slotUnitMarker(b cloudclient.Barkpark) string {
+	p := b.Pressure
+	if p == nil || len(p.SlotUnits) == 0 {
+		return ""
+	}
+	var (
+		slots   []cloudclient.SlotUnit
+		failed  []cloudclient.SlotUnit
+		serving []string
+		sites   []cloudclient.SlotUnit
+	)
+	for _, u := range p.SlotUnits {
+		if strings.Contains(u.Unit, slotUnitPrefix) {
+			slots = append(slots, u)
+			switch {
+			case u.ActiveState == "active" && slotUnitRunning(u):
+				serving = append(serving, slotUnitShortName(u))
+			case u.ActiveState == "failed":
+				failed = append(failed, u)
+			}
+			continue
+		}
+		if u.ActiveState == "failed" {
+			sites = append(sites, u)
+		}
+	}
+
+	parts := make([]string, 0, 3)
+	switch {
+	case len(failed) > 0 && len(serving) > 0:
+		// THE CASE THE ROW IS ABOUT, and the reason the verdict stays `ok`: the
+		// box IS serving. The detail says half the pair is down anyway, because
+		// the next deploy has nowhere to cut over TO.
+		parts = append(parts, fmt.Sprintf("serving on %s; %s",
+			strings.Join(serving, "+"), slotUnitFailureClause(failed)))
+	case len(failed) > 0:
+		// Failed AND nothing serving. Still not a rung — `health_status` is the
+		// field that owns "is this box answering" and it is on the same row — but
+		// the contradiction is named when health disagrees.
+		parts = append(parts, "NO slot is serving; "+slotUnitFailureClause(failed))
+		parts = append(parts, slotUnitHealthContradiction(b)...)
+	case len(slots) > 0 && len(serving) == 0:
+		// Nothing failed and nothing serving: every slot is inactive/activating.
+		// A mid-cutover beat looks exactly like this for a few seconds, so it is
+		// only worth a sentence when health claims the box is UP — that is a
+		// contradiction, not a race.
+		if c := slotUnitHealthContradiction(b); len(c) > 0 {
+			parts = append(parts, "no blue/green slot is active")
+			parts = append(parts, c...)
+		}
+	}
+
+	if len(sites) > 0 {
+		names := make([]string, 0, len(sites))
+		for _, u := range sites {
+			names = append(names, slotUnitShortName(u))
+		}
+		s := fmt.Sprintf("%d site unit(s) failed: %s", len(sites), strings.Join(names, ", "))
+		// The agent caps the site list and reports what the cap hid, so a short
+		// list says it is short rather than passing for a whole one.
+		if p.SlotUnitsTruncated != nil && *p.SlotUnitsTruncated > 0 {
+			s += fmt.Sprintf(" (+%d more)", int(*p.SlotUnitsTruncated))
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// slotUnitPrefix is the blue/green template unit's name. A unit that does not
+// carry it is a spawned SITE unit, which is a different story on the same list.
+const slotUnitPrefix = "barkpark-slot@"
+
+// slotUnitRunning is the second half of "is this slot serving": systemd says
+// active AND a main process exists. An `active` unit with MainPID 0 has no
+// process (a oneshot that exited), and treating it as serving is how a box with
+// nothing running reads healthy. A nil pid is UNKNOWN and does NOT vouch —
+// unmeasured never becomes evidence for the reassuring answer.
+func slotUnitRunning(u cloudclient.SlotUnit) bool {
+	return u.MainPID != nil && *u.MainPID > 0
+}
+
+// slotUnitShortName is the unit stripped to what an operator says out loud:
+// "barkpark-slot@green.service" → "green", "barkpark-site@search__b.service" →
+// "search__b". A unit that matches neither shape is carried VERBATIM rather than
+// mangled.
+func slotUnitShortName(u cloudclient.SlotUnit) string {
+	name := strings.TrimSuffix(u.Unit, ".service")
+	if i := strings.Index(name, "@"); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+// slotUnitFailureClause names the failed slot(s) with the two facts that decide
+// what an operator does next: WHY systemd calls it failed, and SINCE WHEN.
+//
+// The reason is Result + ExecMainStatus TOGETHER, never Result alone. Measured
+// 2026-09-01: a deliberate retire reads Result "exit-code" with status 143 —
+// 128+15, a clean SIGTERM — because the unit file lacks SuccessExitStatus=143
+// (PR #14863). Printing "(exit-code)" and dropping the 143 would report that
+// retire as a crash.
+func slotUnitFailureClause(failed []cloudclient.SlotUnit) string {
+	out := make([]string, 0, len(failed))
+	for _, u := range failed {
+		s := fmt.Sprintf("%s slot FAILED", slotUnitShortName(u))
+		if why := slotUnitReason(u); why != "" {
+			s += " (" + why + ")"
+		}
+		if u.StateSince != nil && strings.TrimSpace(*u.StateSince) != "" {
+			// systemd's own timestamp string, verbatim: a reformat here would be
+			// a second source of truth for a fact systemd already states.
+			s += " since " + strings.TrimSpace(*u.StateSince)
+		}
+		out = append(out, s)
+	}
+	return strings.Join(out, ", ")
+}
+
+func slotUnitReason(u cloudclient.SlotUnit) string {
+	result := ""
+	if u.Result != nil {
+		result = strings.TrimSpace(*u.Result)
+	}
+	if u.ExecMainStatus == nil || *u.ExecMainStatus < 0 {
+		return result
+	}
+	if result == "" {
+		return fmt.Sprintf("status %d", int(*u.ExecMainStatus))
+	}
+	return fmt.Sprintf("%s %d", result, int(*u.ExecMainStatus))
+}
+
+// slotUnitHealthContradiction is the sentence that only exists because two
+// independent readings disagree: systemd says no slot is serving and the
+// control plane's health gate says the box is up. It is deliberately phrased as
+// a disagreement rather than a verdict — the gate probes over HTTP through
+// Caddy and could be reading a cached or stale answer, and systemd could be
+// mid-cutover. Naming BOTH readings is what lets an operator resolve it; naming
+// one would be picking a winner nobody measured.
+func slotUnitHealthContradiction(b cloudclient.Barkpark) []string {
+	if b.HealthStatus != "up" {
+		return nil
+	}
+	return []string{"health says up — systemd and the gate disagree"}
+}
+
+// slotUnitsRow is the `-o json` projection, and it is where the THREE STATES the
+// table collapses stay three: an absent key is UNMEASURED (no systemd, or an
+// agent predating the probe), `[]` is MEASURED AND INTACT, and a populated list
+// is the units themselves — every property the control plane sent, not the
+// table's one-line glance. Same rule and same reason as runaway_procs above: a
+// `"slot_units": []` for a box nobody looked at is the most reassuring lie this
+// payload could tell.
+func slotUnitsRow(b cloudclient.Barkpark) []any {
+	if b.Pressure == nil || b.Pressure.SlotUnits == nil {
+		return nil
+	}
+	rows := make([]any, 0, len(b.Pressure.SlotUnits))
+	for _, u := range b.Pressure.SlotUnits {
+		row := map[string]any{
+			"unit":         u.Unit,
+			"active_state": u.ActiveState,
+			"sub_state":    u.SubState,
+			"serving":      slotUnitRunning(u),
+		}
+		if u.Result != nil {
+			row["result"] = *u.Result
+		}
+		if u.MainPID != nil {
+			row["main_pid"] = int(*u.MainPID)
+		}
+		if u.ExecMainStatus != nil {
+			row["exec_main_status"] = int(*u.ExecMainStatus)
+		}
+		if u.StateSince != nil {
+			row["state_since"] = *u.StateSince
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // rankedBarkpark is one fleet row with its computed decision-15 triage fields.
@@ -749,6 +971,24 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// sitting beside one that does, would read as freshness. If it is ever
 		// wanted it ships as `agent_version`, named for what it is.
 		"git_commit": r.BP.GitCommit,
+		// dr-w22-bl: SINCE WHEN the box has served that sha, RFC3339, ALWAYS
+		// present (empty string when the plane never observed the transition) —
+		// the same honesty rule `git_commit` itself follows one line above. A
+		// script must be able to tell "the plane has no first-appearance for this
+		// box" from "this CLI never asked", and an absent key cannot say that.
+		//
+		// The number it replaces reaching for: the `(sha, first_seen)` history has
+		// existed in `agent_events` for 14 days all along (measured on prod
+		// 2026-09-01: 132,120 rows, 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z),
+		// but its only reader is `GET /v1/barkparks/:id/events` — `require_user`,
+		// 200 rows a page, ~3h of it. This key rides the fleet list every PAT
+		// holder already reads.
+		//
+		// EMPTY IS UNMEASURED, NEVER "just now". Two honest populations read
+		// empty: a box that has not changed sha since the column shipped, and a
+		// box whose stored sha was blank when a sha first arrived (that commit may
+		// have been running long before the first beat carrying it reached us).
+		"git_commit_first_seen_at": r.BP.GitCommitFirstSeenAt,
 		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
 		// rate-as-itself — the json render where the three states stay three.
 		"err_5xx":                err5xxRow(r.BP),
@@ -820,6 +1060,12 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 			})
 		}
 		row["runaway_procs"] = procs
+	}
+	// The blue/green unit states, same tri-state idiom and same reason: the key
+	// is emitted only when the box was MEASURED, so an absent key forces a script
+	// to branch and `[]` is a real "we looked, the pair is there" answer.
+	if units := slotUnitsRow(r.BP); units != nil {
+		row["slot_units"] = units
 	}
 	return row
 }

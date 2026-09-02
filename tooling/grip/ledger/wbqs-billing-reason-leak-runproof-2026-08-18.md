@@ -2,6 +2,8 @@
 
 # wbq-cloud-billing-reason-leak — fail-closed re-derivation recipe
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verifier assignment [billing-runproof], wild-bulk-quality-sweep reconcile wave.
 Pin: origin/main @ 710c38f06a7e21441f3993ef3ebff01c1317a8ae.
 

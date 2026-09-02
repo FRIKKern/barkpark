@@ -2,6 +2,8 @@
 
 # Residue-parentage pin — Cloud GUI remake reconcile wave (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Re-derivation recipe for the four named residue items of epic task-47bc4168392dec17.
 A true residue number rests on these four being OPEN and correctly homed to LIVE
 owners. billing-live-gate is parented to the GOAL (not the epic) so it is invisible
