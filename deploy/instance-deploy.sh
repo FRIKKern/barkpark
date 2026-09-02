@@ -925,7 +925,22 @@ if command -v go >/dev/null 2>&1; then
     # restart (not just enable --now): an already-running unit must pick up the
     # freshly-installed binary.
     if systemctl enable barkpark-mcp >/dev/null 2>&1 && systemctl restart barkpark-mcp; then
-      log "barkpark-mcp enabled (https://$HEALTH_HOST/mcp -> 127.0.0.1:$MCP_PORT)"
+      # `systemctl restart` of a Type=simple unit returns the moment the process
+      # is forked — it says NOTHING about whether the serve survived its startup
+      # manifest fetch. task-1a641b21d19595d3: this line read "enabled" on
+      # guerrilla while the unit crash-looped 2,464 times (anonymous manifest,
+      # no task noun, default --tools tasks fails fast). Settle, then read the
+      # unit's OWN state and say what it is; a dead endpoint is named in the
+      # deploy log, still non-fatal (the app slot is already live).
+      sleep "${MCP_SETTLE_SECS:-15}"
+      MCP_STATE="$(systemctl is-active barkpark-mcp 2>/dev/null || true)"
+      MCP_RESTARTS="$(systemctl show barkpark-mcp -p NRestarts --value 2>/dev/null || true)"
+      if [ "$MCP_STATE" = "active" ]; then
+        log "barkpark-mcp active after ${MCP_SETTLE_SECS:-15}s (restarts=${MCP_RESTARTS:-?}; https://$HEALTH_HOST/mcp -> 127.0.0.1:$MCP_PORT)"
+      else
+        log "WARN: barkpark-mcp is NOT active after ${MCP_SETTLE_SECS:-15}s (state=${MCP_STATE:-unknown} restarts=${MCP_RESTARTS:-?}) — remote MCP /mcp is DOWN; journal tail:"
+        journalctl -u barkpark-mcp -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || true
+      fi
     else
       log "WARN: barkpark-mcp enable/restart failed — remote MCP down until next deploy"
     fi
