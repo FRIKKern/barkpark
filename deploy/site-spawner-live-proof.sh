@@ -53,6 +53,7 @@
 #   49 PREBUILT_BASE_BROKEN         — served bp-site-base != /sites/<slug>/ (every asset href is dead; HEALTH cannot see it)
 #   50 DEPLOY_FAILED                — the deployment never reached live
 #   51 DEPLOY_STAGES_INCOMPLETE     — the six stages did not all land, in order
+#   52 PREBUILT_BUILD_NO_TIMINGS    — the payload carried NO per-stage durations to compare
 #   60 LIVE_NOT_200                 — the live URL does not serve
 #   61 LIVE_BUILD_ID_MISMATCH       — served bp-build-id != the deployment's build_id
 #   62 LIVE_CONTENT_EMPTY           — bp-content-rev or bp-doc-id empty (a vacuous green page)
@@ -119,6 +120,7 @@ E_PB_BYTES_NOT_LIVE=48
 E_PB_BASE_BROKEN=49
 E_DEPLOY_FAILED=50
 E_DEPLOY_STAGES=51
+E_PB_BUILD_NO_TIMINGS=52
 E_LIVE_NOT_200=60
 E_LIVE_BUILD_MISMATCH=61
 E_LIVE_CONTENT_EMPTY=62
@@ -150,6 +152,7 @@ codename() {
     "$E_PB_BASE_BROKEN") echo "PREBUILT_BASE_BROKEN" ;;
     "$E_DEPLOY_FAILED") echo "DEPLOY_FAILED" ;;
     "$E_DEPLOY_STAGES") echo "DEPLOY_STAGES_INCOMPLETE" ;;
+    "$E_PB_BUILD_NO_TIMINGS") echo "PREBUILT_BUILD_NO_TIMINGS" ;;
     "$E_LIVE_NOT_200") echo "LIVE_NOT_200" ;;
     "$E_LIVE_BUILD_MISMATCH") echo "LIVE_BUILD_ID_MISMATCH" ;;
     "$E_LIVE_CONTENT_EMPTY") echo "LIVE_CONTENT_EMPTY" ;;
@@ -486,9 +489,21 @@ judge_build_disagree() {
 # took 40ms did not run npm either, so the ratio would be a comparison between two
 # no-ops. A real Astro build on this fleet is tens of seconds; 1000ms is the
 # generous line under which we refuse to call it a build at all.
+# ABSENT TIMINGS ARE THEIR OWN RED, AND THAT DISTINCTION IS THE POINT.
+# A live run measured BUILD at 0ms on BOTH paths — while the source run had
+# visibly just done `npm ci && npm run build`. The durations were not equal, they
+# were MISSING: `siteDeploymentMap` (internal/cli/cloud_site_cmd.go) emits each
+# stage as {name, status, detail} only, dropping the `started_at`/`finished_at`
+# that `SiteStage` carries, so the `-o json` envelope this journey reads can
+# never contain a duration at all. Folding that into NOT_FASTER made the script
+# say "if these are close, the box is doing the same work on both paths" — an
+# accusation against the ENGINE for what is a payload gap. A source BUILD of 0ms
+# is not a fast build, it is no measurement; it gets its own name so nobody
+# optimises a box that was never the problem.
 judge_build_orders() {
   local pb="$1" src="$2" factor="${3:-10}"
-  [ "$pb" -ge 0 ] 2>/dev/null || return "$E_PB_BUILD_NOT_FASTER"
+  [ "$pb" -ge 0 ] 2>/dev/null || return "$E_PB_BUILD_NO_TIMINGS"
+  [ "$src" -gt 0 ] 2>/dev/null || return "$E_PB_BUILD_NO_TIMINGS"
   [ "$src" -ge 1000 ] 2>/dev/null || return "$E_PB_BUILD_NOT_FASTER"
   [ "$src" -ge $(( (pb + 1) * factor )) ] || return "$E_PB_BUILD_NOT_FASTER"
   return 0
@@ -617,6 +632,10 @@ self_check() {
   expect_code "$E_PB_BUILD_NOT_FASTER" "42000ms vs 47000ms — the same build twice" judge_build_orders 42000 47000
   expect_code "$E_PB_BUILD_NOT_FASTER" "the 'source' BUILD took 40ms — that is not a build either" \
     judge_build_orders 0 40
+  expect_code "$E_PB_BUILD_NO_TIMINGS" "0 vs 0 — the payload carried no durations at all" \
+    judge_build_orders 0 0
+  expect_code "$E_PB_BUILD_NO_TIMINGS" "a prebuilt duration but no source one" \
+    judge_build_orders 120 0
   expect_pass      "the served page carries the minted build id"     judge_prebuilt_live 200 b-mint b-mint
   expect_code "$E_PB_BYTES_NOT_LIVE" "the site 404s after the upload"        judge_prebuilt_live 404 b-mint b-mint
   expect_code "$E_PB_BYTES_NOT_LIVE" "200, but an OLDER build is still live" judge_prebuilt_live 200 b-old b-mint
@@ -1348,7 +1367,7 @@ prebuilt_journey() {
   ok "the runs DISAGREE about BUILD: prebuilt='$pb_build' vs source='$src_build'"
   judge_build_orders "$pb_ms" "$src_ms" "$JOURNEY_FACTOR" ||
     fail $? "BUILD took ${pb_ms}ms prebuilt and ${src_ms}ms from source — not the ${JOURNEY_FACTOR}x apart a skipped build must be (and a 'source' build under 1000ms is not a build either)." \
-      "if these are close, the box is doing the same work on both paths"
+      "a source BUILD of 0ms is NOT a fast build, it is NO measurement: the CLI's \`-o json\` deployment envelope emits each stage as {name, status, detail} and drops the started_at/finished_at that SiteStage carries, so no duration can be read from it. Fix the payload before reading anything into these numbers — the box is not implicated by a missing field."
   ok "BUILD ${pb_ms}ms vs ${src_ms}ms — orders apart, without a shell on the box"
 
   say ""
