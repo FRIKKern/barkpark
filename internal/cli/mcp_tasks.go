@@ -321,7 +321,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "lifecycle_status": {
       "type": "string",
-      "enum": ["done", "cancelled", "blocked"],
+      "enum": ` + closeLifecycleStatusEnumJSON + `,
       "description": "The done-signal. Default \"done\".",
       "default": "done"
     },
