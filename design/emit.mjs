@@ -234,6 +234,55 @@ export const SECTION_UNITS = { beat: "", rule: "px", gap: "px" };
 // find what the census is allowed to see.
 export const RULE_KEYS = ["hairline"];
 export const RULE_UNITS = { hairline: "px" };
+// The MOTION LADDER (tokens.motion), quickest → slowest. Three durations and
+// nothing else: `dur-1` is the chrome tick (a hover, a border warming), `dur-2`
+// the state change, `dur-3` the one that has to be SEEN (a panel fading out, a
+// column morphing between two widths). Emitted as bare `--dur-N` custom
+// properties — the same shape the Studio's chrome type scale ships as
+// (`--text-*`), not the `--tok-*`/`--bp-*` bridge the reading surface uses,
+// because a duration has no per-surface reinterpretation to bridge THROUGH.
+//
+// This family was authored in tokens.json and emitted NOWHERE until
+// spd-b21: every transition in the Studio was a hand-typed literal, and
+// spd-s5 hardcoded 0.15s on `.pane-column` ON PURPOSE because a `var(--dur-1)`
+// would have resolved to nothing and silently killed the collapse animation.
+// check.mjs Part N is the gate that keeps it honest — it re-asserts these bytes
+// against tokens.json on every emitting surface AND ratchets the count of
+// hand-typed duration literals that are still outside the ladder.
+export const MOTION_STEPS = ["dur-1", "dur-2", "dur-3"];
+// Every surface that MUST declare the ladder: it draws a `transition` or an
+// `animation` and has a root-equivalent scope to hang a custom property on.
+// check.mjs Part N reads this list and proves each entry carries the tokens.json
+// bytes exactly once, so the list cannot become a lie in either direction.
+//
+// Most entries get the ladder from the GENERATED block below. Two do not, and the
+// difference matters:
+//   • api/assets/paper-editor/src/styles.css receives it through the de-scoping
+//     paper-surface mirror rather than an emitter of its own.
+//   • cloud/priv/static/app.css DECLARES IT BY HAND and always has — its
+//     decision-29 token area carries --dur-1/-2/-3 with these exact values plus
+//     --ease, --t and a prefers-reduced-motion collapse to 0s, and four rules
+//     already spend them. (This is the half of spd-b21's premise that was wrong:
+//     `grep -rn -- "--dur" api/ cloud/` was empty for api/ only.) Emitting a
+//     second copy would be strictly worse than leaving it: the generated block
+//     sits EARLIER in the file, so the hand copy would win the cascade and the
+//     emitted one — the bytes this gate reads — would go inert. Listing it here
+//     instead governs it where it lives; promoting it into the generated block
+//     is a follow-up that has to move --ease, --t and the reduced-motion block
+//     together, which is a cloud-surface change, not a token change.
+//
+// cloud/priv/static/styleguide.html is absent for a third reason: its generated
+// region is a swatch TABLE (markup), with nowhere to put a declaration. Its one
+// literal (a 1.4s skeleton shimmer) is ledgered in Part N's ratchet instead.
+export const MOTION_SURFACES = [
+  "api/lib/barkpark_web/layouts/root.html.heex",
+  "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+  "api/assets/paper-surface/paper-surface.css",
+  "api/assets/paper-editor/src/styles.css",
+  "api/lib/barkpark_web/controllers/session_html.ex",
+  "cloud/priv/static/app.css",
+  "web/app/globals.css",
+];
 const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
@@ -333,6 +382,18 @@ function statusVars(theme, indent, t = tokens) {
 
 function baseVars(theme, indent, t = tokens) {
   return BASE_ROLES.map((r) => indent + baseVar(r, theme, t)).join("\n");
+}
+
+// The motion ladder → `--dur-1/-2/-3`. THEME-INVARIANT (a duration does not flip
+// with a palette, exactly as the chrome type scale does not), so every surface
+// emits it once, on its root-equivalent scope, and never inside a
+// [data-bp-theme] or [data-theme] block — the chromeTypeVars precedent (D25).
+// The unit comes from tokens.motion._unit, so a token authored in seconds can
+// never be emitted as a bare number.
+export const motionVarLines = (t = tokens) =>
+  MOTION_STEPS.map((k) => `--${k}: ${t.motion[k]}${t.motion._unit};`);
+function motionVars(indent, t = tokens) {
+  return motionVarLines(t).map((l) => indent + l).join("\n");
 }
 
 // --primary carries the same -hsl/-soft machinery the status roles use, so blue
@@ -665,6 +726,9 @@ function paperBlock(themes = loadThemes()) {
     ...sectionVars,
     ...ruleVars,
     ...evidenceVars,
+    // The motion ladder rides the reading surface's own root scope so the
+    // paper-editor bundle inherits it through the de-scoping mirror.
+    ...motionVarLines(),
   ].map((l) => "  " + l).join("\n");
 
   const lifeClasses = (theme) =>
@@ -796,6 +860,7 @@ function studioBlock(themes = loadThemes()) {
     onStatusVars("light", ind + "  "),
     chromeVars("light", ind + "  "),
     chromeTypeVars(ind + "  "),
+    motionVars(ind + "  "),
     lifeVars("light", ind + "  "),
     ind + "}",
     ind + 'html[data-theme="dark"] {',
@@ -855,6 +920,9 @@ function webBlock(themes = loadThemes()) {
     // Tailwind v4 auto-generates bg-graph-canvas; deliberately NO dark/theme
     // override — the Obsidian graph panel never flips.
     `  --color-graph-canvas: ${tokens.color.graphCanvas.canvas};`,
+    // Motion ladder — theme-invariant, so it registers once in @theme and is
+    // deliberately absent from the [data-theme]/[data-bp-theme] overrides below.
+    ...motionVarLines().map((l) => "  " + l),
     "}",
     '[data-theme="dark"] {',
     ...BASE_ROLES.map((r) => `  --color-${r}: ${hsl(tokens.color[r].dark)};`),
@@ -1796,6 +1864,9 @@ function sessionAuthBlock(themes = loadThemes()) {
   const lines = [
     ind + ".bp-auth {",
     ...authRows("light").map((l) => ind + "  " + l),
+    // Motion ladder on the login card's own root scope (the page has no other):
+    // `.bp-auth-btn` is a descendant, so the ladder reaches it by inheritance.
+    ...motionVarLines().map((l) => ind + "  " + l),
     ind + "}",
     ind + 'html[data-theme="dark"] .bp-auth {',
     ...authRows("dark").map((l) => ind + "  " + l),
@@ -2019,6 +2090,13 @@ function bulldocsBlock(themes = loadThemes()) {
   const ra = (theme) => hslToHex(tokens.color["reading-accent"][theme]);
   const themed = themeBlocks(themes, bulldocsThemeBlock);
   return [
+    "    /* MOTION ladder (tokens.motion) — theme-invariant, so it sits on the",
+    "       page root rather than inside any of the reader's palette scopes. The",
+    "       reader's own chrome (view toggle, action bar, mail popup) is the",
+    "       consumer; a duration does not flip with a skin. */",
+    "    :root {",
+    motionVars("      "),
+    "    }",
     "    /* Article chrome — applied only when BulldocsLive marks the doc as",
     "       `content[\"style\"] == \"article\"` (the LiveView stamps the",
     "       `.bp-paper-article` class on its <main>). Cool bp-theme page, a",

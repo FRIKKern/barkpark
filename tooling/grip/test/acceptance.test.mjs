@@ -22,7 +22,10 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runAcceptance, checkProbes, parseLevelSkip, READ_LEVEL_PROBES, EXPECTED, SCREEN_EXPECTED, DECLARED_DIVERGENCES, FIXTURE } from "../acceptance.mjs";
+import { runAcceptance, checkProbes, parseLevelSkip, factFromSpecimen, READ_LEVEL_PROBES, EXPECTED, SCREEN_EXPECTED, DECLARED_DIVERGENCES, FIXTURE } from "../acceptance.mjs";
+// The REAL fact-path engine. Specimen 103 is judged by the shipped adjudicator,
+// never by a restatement of what it is believed to do.
+import { adjudicate, VERDICTS } from "../adjudicate.mjs";
 import { screenCommand } from "../screen.mjs";
 // Imported to MEASURE the difference between the two gates, never to run one.
 import { classifySafety } from "../rerun.mjs";
@@ -174,19 +177,41 @@ test("MUTATION: an unexpected new ratified specimen turns it RED", () => {
 // The declared divergence is a FINDING under a filed task, not a waiver
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("specimen 5's R3 label diverges from what the adjudicator does, and it is DECLARED", () => {
+test("specimen 5 is caught by R1 and NOTHING is declared — the divergence is paid off, not waived", () => {
+  // It was `labelled R3 / actually R1` for the life of this file. The fixture's
+  // label now names the rule that actually fires, so there is nothing left to
+  // silence. `caught_by` is a HYPOTHESIS the fixture asks this suite to test
+  // (_meta.caught_by_is_a_hypothesis) — correcting it against measurement is the
+  // fixture working, not the fixture being edited to match a green.
   const outcome = runAcceptance();
-  const finding = outcome.findings.find((f) => f.kind === "DECLARED-DIVERGENCE" && f.id === 5);
 
-  assert.ok(finding, "specimen 5's divergence must be REPORTED on every run, not absorbed silently");
-  assert.equal(finding.labelled, "R3");
-  assert.equal(finding.actually, "R1");
-  assert.ok(finding.filed_as, "a declared divergence must name the task that pays it off");
+  assert.deepEqual(Object.keys(DECLARED_DIVERGENCES), [],
+    "a declaration is back: it silences a real finding and must be paid off by a filed task, not carried");
+  assert.deepEqual(outcome.findings, [],
+    `the run reported findings it should no longer have: ${JSON.stringify(outcome.findings)}`);
 
-  // It is caught — the SAFETY half holds. Only the DIAGNOSIS half diverges.
   const row = rowFor(outcome, 5);
-  assert.equal(row.caught, true, "specimen 5 IS caught; the divergence is about which rule catches it");
+  assert.equal(row.caught_by, "R1", "specimen 5's label must name the rule that actually rejects it");
+  assert.equal(row.caught, true, "the SAFETY half was never in doubt — specimen 5 is caught");
   assert.deepEqual(row.reasons, ["LEVEL-SKIP"]);
+  assert.equal(row.divergence, undefined, "a row carrying a divergence means the label and the adjudicator still disagree");
+  assert.equal(outcome.ok, true);
+});
+
+test("MUTATION: specimen 5 relabelled back to R3 is UNDECLARED — removing the entry RE-ARMED the guard on the row it silenced", () => {
+  // The one failure mode of paying off a declaration by relabelling: doing it
+  // while the guard that would have caught the wrong label stays asleep. It does
+  // not. Put the R3 label back and the run fails by name — which is exactly what
+  // the declaration suppressed for as long as it existed.
+  const outcome = withMutatedFixture((fixture) => {
+    specimen(fixture, 5).caught_by = "R3";
+  }, (path) => runAcceptance(path));
+
+  assert.equal(outcome.ok, false, "the R3 label went green again — the declaration was removed without the guard picking the finding back up");
+  const row = rowFor(outcome, 5);
+  const divergence = row.failures.find((f) => f.kind === "UNDECLARED-DIVERGENCE");
+  assert.ok(divergence, `expected UNDECLARED-DIVERGENCE, got ${row.failures.map((f) => f.kind).join("+")}`);
+  assert.match(divergence.detail, /labelled caught_by R3/);
 });
 
 test("a divergence may only be declared for a specimen that actually diverges", () => {
@@ -194,13 +219,22 @@ test("a divergence may only be declared for a specimen that actually diverges", 
   // specimens that behave correctly, it would become a place to park anything
   // inconvenient and the suite would rot from the inside.
   const outcome = runAcceptance();
+  const wouldBeJustified = (row) => !(row.caught_by === "R1" && row.reasons.includes("LEVEL-SKIP"));
+
   for (const id of Object.keys(DECLARED_DIVERGENCES)) {
     const row = rowFor(outcome, Number(id));
     assert.ok(row, `specimen ${id} is declared divergent but is not in the ratified set`);
-    const byLabelledRule = row.caught_by === "R1" && row.reasons.includes("LEVEL-SKIP");
-    assert.equal(byLabelledRule, false,
+    assert.equal(wouldBeJustified(row), true,
       `specimen ${id} is declared divergent but is caught by exactly the rule its label names — remove the declaration`);
   }
+
+  // NON-VACUITY. The table is empty, so the loop above asserts nothing on its
+  // own — an empty `for` is the shape a guard dies in. The predicate is
+  // therefore exercised directly, in both directions, against real rows.
+  assert.equal(wouldBeJustified(rowFor(outcome, 5)), false,
+    "specimen 5 is caught by exactly the rule its label names — a declaration for it would now be unjustified and this check must say so");
+  assert.equal(wouldBeJustified({ caught_by: "R3", reasons: ["LEVEL-SKIP"] }), true,
+    "a row whose label names a rule other than the one that fired IS a real divergence — the predicate must not refuse every declaration");
 });
 
 test("every ratified specimen has an expectation, and EXPECTED carries no phantoms", () => {
@@ -280,22 +314,76 @@ const mutatedModule = async (mutate) => {
   }
 };
 
+// THE TABLE IS EMPTY, SO THE GUARD IS PROVEN AGAINST A SYNTHETIC ENTRY.
+//
+// These tests used to mutate the shipped specimen-5 declaration. That
+// declaration is paid off and gone, and a guard whose proof depended on a live
+// divergence existing would go vacuous the moment the honest state (nothing
+// declared) was reached — the escape hatch would be unguarded exactly when
+// nobody was looking at it. So the entry is INSERTED into the empty table
+// instead, and the insertion is asserted to have applied: a mutation that did
+// not land is not a catch, it is a green.
+const DECL_ANCHOR = "const DECLARED_DIVERGENCES = Object.freeze({});";
+
+const withDeclaration = ({ filed_as = "tgw4-r3-has-no-adjudicator-check", actually = "R1" } = {}) => (src) => {
+  assert.equal(src.split(DECL_ANCHOR).length - 1, 1,
+    "the declaration anchor no longer occurs exactly once in acceptance.mjs — these mutations are not landing where they claim to");
+  const entry = `const DECLARED_DIVERGENCES = Object.freeze({
+  5: {
+    labelled: "R3",
+    actually: ${JSON.stringify(actually)},
+    finding: "A SYNTHETIC declaration written by the test suite, long enough to clear the eighty-character floor the shape guard puts on a finding.",
+    filed_as: ${JSON.stringify(filed_as)},
+  },
+});`;
+  const out = src.replace(DECL_ANCHOR, entry);
+  assert.notEqual(out, src, "the synthetic declaration did not apply");
+  return out;
+};
+
 test("a declaration with no filed task is FATAL — the hatch cannot be padded with a shrug", async () => {
-  const err = await mutatedModule((s) => s.replace(/filed_as: "tgw4-r3-has-no-adjudicator-check"/, 'filed_as: ""'));
+  const err = await mutatedModule(withDeclaration({ filed_as: "" }));
   assert.ok(err, "an empty filed_as imported cleanly — the guard is not enforcing its own rule");
   assert.match(String(err.message), /DECLARED_DIVERGENCES\[5\] is malformed/);
   assert.match(String(err.message), /filed_as/);
 });
 
 test("a declaration whose label does not actually diverge is FATAL", async () => {
-  const err = await mutatedModule((s) => s.replace(/actually: "R1"/, 'actually: "R3"'));
+  const err = await mutatedModule(withDeclaration({ actually: "R3" }));
   assert.ok(err, "a non-divergent declaration imported cleanly");
   assert.match(String(err.message), /not a divergence/);
 });
 
-test("the shipped declaration passes its own guard — the check is not simply always-fatal", async () => {
+test("an HONEST declaration imports cleanly — the guard is not simply always-fatal", async () => {
+  const err = await mutatedModule(withDeclaration());
+  assert.equal(err, null, `a well-formed declaration was rejected by the shape guard: ${err?.message}`);
+});
+
+test("the shipped (empty) table passes its own guard", async () => {
   const err = await mutatedModule((s) => s);
   assert.equal(err, null, `the unmutated module failed its own declaration guard: ${err?.message}`);
+});
+
+test("MUTATION: a DECLARED divergence is reported as a finding and keeps the suite green", async () => {
+  // Emptying DECLARED_DIVERGENCES leaves the emission path with no live entry to
+  // exercise it — an unreachable branch is exactly what this file refuses to
+  // ship — so it is driven here against a module carrying the synthetic entry
+  // and a fixture that actually diverges from its label.
+  const mod = await importMutated("acceptance.mjs", withDeclaration());
+  const outcome = withMutatedFixture((fixture) => {
+    specimen(fixture, 5).caught_by = "R3";
+  }, (path) => mod.runAcceptance(path));
+
+  const finding = outcome.findings.find((f) => f.kind === "DECLARED-DIVERGENCE" && f.id === 5);
+  assert.ok(finding, `a declared divergence must be REPORTED on every run, got ${JSON.stringify(outcome.findings)}`);
+  assert.equal(finding.labelled, "R3");
+  assert.equal(finding.actually, "R1");
+  assert.equal(finding.filed_as, "tgw4-r3-has-no-adjudicator-check");
+
+  const row = outcome.results.find((r) => r.id === 5);
+  assert.deepEqual(row.failures, [], "a declared divergence is a FINDING, never a row failure — that is the whole difference from UNDECLARED");
+  assert.ok(row.divergence, "the row must carry the declaration that silenced it");
+  assert.equal(outcome.ok, true, "a declared divergence keeps the suite green — that is what declaring buys, and why the shape guard has to be fatal");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -527,4 +615,163 @@ test("the UNMUTATED selftest is clean at exit 0 — the exit-3 path is not simpl
   assert.match(out, /grip --selftest — clean/);
   assert.match(out, /all \d+ controls fired as designed\./,
     "the verdict line must be present — capture the selftest to a FILE, never a pipe (tgw11-bl-cli-selftest-pipe-truncation)");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R3 HAS NO CHECK ON THE FACT PATH — specimen 103 is the standing proof
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Specimen 5 carried the R3 label for the life of this fixture and could never
+// have tested R3: its levels are dishonest, so LEVEL-SKIP fires first and no R3
+// reasoning is ever reached. Until specimen 103 there was no specimen anywhere
+// that violates R3 WITHOUT also being a level skip, which means no R3 check was
+// testable against this fixture at all — a rule with nothing able to make it
+// fire, which is the vacuity this module exists to refuse.
+//
+// 103 supplies the missing shape and the two tests below say what the fact path
+// does with it: it ADMITS it. That is a gap, stated as a measurement. The day an
+// R3 rejection lands on the fact path, the second test goes RED — the correct
+// signal, not a regression: re-derive 103's label, promote it from a negative
+// control to a catch, and delete the assertion.
+
+test("specimen 103 violates R3 with HONEST levels — R1 structurally cannot reach it", () => {
+  const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
+  const s = specimen(fixture, 103);
+  assert.ok(s, "specimen 103 is missing — the fixture holds no R3 case R1 cannot reach, so no R3 check is testable against it");
+
+  assert.equal(s.ratified, false, "the ratified table has SIX rows; 103 is a negative control, never a seventh row");
+  assert.equal(s.caught_by, "UNCAUGHT", "labelling this a catch would bank a rejection the fact path does not make");
+  assert.ok(typeof s.uncaught_reason === "string" && s.uncaught_reason.length > 20,
+    "an UNCAUGHT specimen with no reason is padding — the fixture's own anti-vacuity rule");
+
+  // THE POINT: the levels are EQUAL. LEVEL-SKIP compares the read level against
+  // the claimed one, so it has nothing to compare. What is wrong here is the
+  // CONTROL — the read could not have come back any other way — and nothing else.
+  const parsed = parseLevelSkip(s.level_skip);
+  assert.deepEqual(parsed.read, ["L3"]);
+  assert.deepEqual(parsed.claimed, ["L3"]);
+});
+
+test("the fact path ADMITS specimen 103 — R3 is enforced NOWHERE on it", () => {
+  const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
+  const { fact, readLevel, claimedLevel } = factFromSpecimen(specimen(fixture, 103));
+
+  // Modelled EXACTLY as a ratified specimen is — same probe table, same fields.
+  // A bespoke fact built for this test would prove something about the test.
+  assert.equal(readLevel, "L3");
+  assert.equal(claimedLevel, "L3");
+  assert.equal(fact.rerun, READ_LEVEL_PROBES.L3);
+
+  const ruling = adjudicate(fact, { execute: false });
+  assert.equal(ruling.verdict, VERDICTS.ADMITTED,
+    `the fact path now rejects specimen 103 (${ruling.label}) — if that is an R3 check landing, this is the moment to re-derive 103's caught_by label and promote it from a negative control to a catch`);
+  assert.deepEqual(ruling.reasons, [],
+    "a vacuously-controlled but honestly-levelled fact is admitted with no reason recorded — that IS the gap this specimen freezes");
+  assert.equal(ruling.level, "L3");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C6 — THE TWO GUARDS THAT HAD ONLY EVER BEEN ASSERTED ABSENT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Everything above proves a mutation turns some specimen red. Two of this
+// module's own failure names were never in that set, and the shapes of their
+// non-coverage are different:
+//
+//   PROBE-DRIFT was asserted TWICE, both times as an ABSENCE — `probe_drift`
+//   is empty on the shipped tree. An absence assertion is green whether the
+//   guard works or has been deleted, and this is the guard that decides whether
+//   any other line of the report means anything: it returns FATALLY, before a
+//   single specimen is judged. So the one control standing between "6/6 PASS"
+//   and "6/6 PASS against a model that does not model the specimens" had never
+//   been shown able to speak.
+//
+//   REASONS had ZERO occurrences under test/ in any spelling. Its sibling
+//   VERDICT is mutation-proven twice over; REASONS — the check that a ratified
+//   specimen is rejected for the REASON the doctrine says, and not merely
+//   rejected — was carried entirely by the fact that it happened to be green.
+//
+// Both are fired POSITIVELY below, and both name the drift they found.
+
+test("PROBE-DRIFT FIRES: a probe moved off its level voids the whole run before any specimen is judged", async () => {
+  // The mutation is the realistic one — someone "simplifies" the L2 probe into a
+  // local read. `wc -l README.md` derives L3, so the L2 row of the model is a
+  // lie, and every specimen modelled through it would be judged against a fact
+  // that does not model the specimen.
+  const mod = await importMutated("acceptance.mjs", (src) => {
+    const patched = src.replace('L2: "git show origin/main:README.md",', 'L2: "wc -l README.md",');
+    assert.notEqual(patched, src, "the L2 probe moved — this mutation no longer mutates anything");
+    return patched;
+  });
+
+  // checkProbes NAMES the drift: which level, which command, what it derives now.
+  assert.deepEqual(mod.checkProbes(), [{ level: "L2", command: "wc -l README.md", derived: "L3" }]);
+
+  const outcome = mod.runAcceptance(FIXTURE);
+  assert.equal(outcome.ok, false, "a broken read-level model reported PASS");
+  assert.deepEqual(outcome.probe_drift, [{ level: "L2", command: "wc -l README.md", derived: "L3" }]);
+
+  // THE FATAL HALF, which is the entire point of the guard and the half an
+  // absence assertion can never reach: NOTHING was judged. A version that
+  // reported drift and then went on to print six confident specimen rows would
+  // satisfy every previous assertion about PROBE-DRIFT in this file.
+  assert.deepEqual(outcome.results, [], "specimens were judged against a broken model");
+  assert.deepEqual(outcome.findings, []);
+
+  // And the report says so instead of printing a tally nobody should trust.
+  const text = mod.report(outcome);
+  assert.match(text, /PROBE-DRIFT — the read-level model is broken; no specimen was judged\./);
+  assert.match(text, /L2 probe now derives L3: wc -l README\.md/);
+  assert.doesNotMatch(text, /ratified specimens adjudicate as expected/,
+    "a drifted run must not print a specimen tally at all");
+});
+
+test("PROBE-DRIFT never cries wolf: the shipped probe table derives its own levels, drift-free", () => {
+  // The other direction, so the control above cannot be satisfied by a guard
+  // that simply always fires. Note this is the SAME shape as the absence
+  // assertion that used to be the only coverage — it is honest here only
+  // because the firing half above exists to pair with it.
+  assert.deepEqual(checkProbes(), []);
+  assert.deepEqual(runAcceptance().probe_drift, []);
+});
+
+test("REASONS FIRES: a specimen still REJECTED, but for a reason the doctrine did not name", () => {
+  // The gap REASONS exists to hold. Specimen 2's verdict is REJECTED and stays
+  // REJECTED — so VERDICT, CAUGHT-BY and the divergence checks all stay green —
+  // while the reason set gains a rejection the ratified expectation never named.
+  // Giving the specimen's title a path-less line reference is enough: the title
+  // becomes the fact's `subject`, which record.mjs scans for D9 refs.
+  const outcome = withMutatedFixture((fixture) => {
+    const s = specimen(fixture, 2);
+    s.title = `${s.title} — notifications.ex:389-397`;
+  }, (path) => runAcceptance(path));
+
+  assert.equal(outcome.ok, false, "a specimen rejected under an unexpected reason reported PASS");
+
+  const row = rowFor(outcome, 2);
+  const kinds = row.failures.map((f) => f.kind);
+  assert.deepEqual(kinds, ["REASONS"],
+    `REASONS must be the failure, and the ONLY one — the verdict never moved. Got ${kinds.join("+") || "none"}`);
+  assert.equal(row.failures[0].detail, "expected [LEVEL-SKIP], got [LEVEL-SKIP+PATHLESS-REF]");
+
+  // THE DISCRIMINATION, asserted rather than assumed: the verdict half is
+  // untouched. A suite that only checked the verdict would call this row clean.
+  assert.equal(row.verdict, "REJECTED");
+  assert.equal(row.caught, true);
+  assert.equal(kinds.includes("VERDICT"), false, "the verdict held — only the reason set drifted");
+
+  // ATTRIBUTION — only the mutated specimen goes red.
+  const others = outcome.results.filter((r) => r.id !== 2 && r.failures.length > 0);
+  assert.deepEqual(others, [], "the reason-set mutation leaked into other specimens");
+});
+
+test("REASONS never cries wolf: the shipped specimens carry exactly the reason sets EXPECTED names", () => {
+  const outcome = runAcceptance();
+  const reasoned = outcome.results.filter((r) => r.failures.some((f) => f.kind === "REASONS"));
+  assert.deepEqual(reasoned, []);
+  // Measured, not restated — the row's reasons ARE the expectation's, per specimen.
+  for (const row of outcome.results) {
+    assert.deepEqual(row.reasons, [...EXPECTED[row.id].reasons].sort(),
+      `specimen ${row.id}'s reason set drifted from EXPECTED`);
+  }
 });
