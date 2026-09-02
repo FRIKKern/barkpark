@@ -2318,10 +2318,17 @@ defmodule BarkparkWeb.Router do
   # `:caller_context` over the `:api_token`, so setting it on a write could
   # DOWNGRADE the caller. This scope holds one GET. Its former neighbours keep
   # bare `[:api, :require_token]` — deliberately: `POST .../reindex` is a write
-  # and must never carry these plugs, and export/listen/history/revision are a
-  # separate question (their query builders do not call
-  # `maybe_scope_to_grants/2` at all, so the pipeline alone would be inert
-  # there — a fix, not a move, and out of this row's fence).
+  # and must never carry these plugs. Export/history/revision WERE the separate
+  # question this comment named — their builders called `maybe_scope_to_grants/2`
+  # nowhere, so the pipeline alone would have been inert. task-5fa8c834e1afa197
+  # fixed it AT the builders (`Content.Export.export_stream/2`,
+  # `Content.Revisions.list_revisions/4` + `get_revision/3`), which narrows the
+  # flat AND scoped mounts at once — so they stay bare here on purpose. LISTEN is
+  # NOT closed: `ListenController` resolves each event through the grant-narrowed
+  # `Content.get_document/4`, but on `{:error, :not_found}` `redacted_result/4`
+  # falls back to `Envelope.redact(event.document, …)` unless the type is
+  # `owner_scoped`, so an out-of-grant event still ships its `documentId`, `type`,
+  # `syncTags` AND frozen envelope to a grant-narrowed subscriber — its own row.
   #
   # Pinned by `test/barkpark_web/controllers/flat_analytics_grant_enforcement_test.exs`.
   scope "/v1/data", BarkparkWeb do
