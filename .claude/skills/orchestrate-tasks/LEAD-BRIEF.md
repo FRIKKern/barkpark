@@ -100,6 +100,10 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    it. Any one part alone is a candidate generator, not a detector — measured 2026-09-02, the
    naive "unreferenced fixture" form yields 67 hits of which roughly 90%% are not the hazard
    (a renderer comparing its OWN output fails (a); a third-party API capture fails (b)).
+   **A SIBLING LIST IN A FILING IS WHAT WAS CHECKED, NOT WHAT EXISTS.** Three of ten confirmed
+   defects in one audit were "the fix landed on every sibling the filing NAMED and missed one it
+   did not". When you fix a class, DERIVE the sibling set from the code — grep the call shape,
+   the behaviour, the supervisor list — and state in the PR body how you derived it.
    **The real cap is FILE saturation, not the PR count.** When the open PRs in your fence
    already touch the same handful of files, an extra PR is a guaranteed green-apart /
    red-together collision no matter how much WIP headroom you have. A lane that is saturated
