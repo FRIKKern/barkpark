@@ -199,7 +199,10 @@ die_auth() {
   exit 1
 }
 
-usage() { sed -n '2,140p' "$SELF" | sed 's/^# \{0,1\}//'; }
+# The header IS the documentation, so --help prints it. The range stops one
+# line short of `set -uo pipefail`; a hardcoded end that drifts behind the
+# header silently truncates the decision record out of --help.
+usage() { sed -n "2,$(($(grep -n '^set -uo pipefail' "$SELF" | head -1 | cut -d: -f1) - 1))p" "$SELF" | sed 's/^# \{0,1\}//'; }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -237,7 +240,7 @@ command -v python3 >/dev/null 2>&1 || die2 "python3 is not on PATH — the row r
 PYHELPER="$(mktemp -t landed-mark-py.XXXXXX)"
 trap 'rm -f "$PYHELPER"' EXIT
 cat > "$PYHELPER" <<'PYEOF'
-import json, os, re, sys
+import json, re, sys
 
 # A criterion is merge-shaped when its own text says so. Deliberately narrow:
 # three spellings, case-insensitive, and nothing else is ever flipped by CI.
