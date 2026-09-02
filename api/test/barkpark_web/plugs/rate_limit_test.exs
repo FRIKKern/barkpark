@@ -245,4 +245,125 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       refute allowed?(proxied("8.8.8.8", @direct_peer))
     end
   end
+
+  # The SAME defect the block above closes for the IP half, on the token half:
+  # the bucket key must not be a function of a string the caller writes. Every
+  # test ABOVE presents a bearer that exists nowhere in the database, so none of
+  # them could ever distinguish "keyed on the raw header" from "keyed on the
+  # resolved principal" — they all pin a SINGLE spelling and check that repeats
+  # of it share a bucket. The adversary varies the spelling.
+  #
+  # PROTECTIVE, not vacuous. The mutation these exist to catch is the code they
+  # replaced, `token_id = Barkpark.Auth.ApiToken.hash_token(raw)` with no
+  # verification: restore it and "a rotating bearer cannot mint a fresh bucket"
+  # REDS on the very first over-limit request, because the attacker's third
+  # spelling is a third full bucket.
+  describe "a bearer that resolves to no principal (the caller-chosen key)" do
+    @attacker_peer {198, 51, 100, 200}
+
+    defp attack(bearer, peer \\ @attacker_peer) do
+      build(:post, "/v1/auth/request-reset", %{}, [{"authorization", "Bearer " <> bearer}])
+      |> Map.put(:remote_ip, peer)
+    end
+
+    defp admitted?(conn), do: not RateLimit.call(conn, RateLimit.init([])).halted
+
+    test "a rotating bearer cannot mint a fresh bucket — the limit still binds" do
+      with_limits(read_per_minute: 1, write_per_minute: 2)
+
+      # Three DIFFERENT random bearers, one attacker, one meter. This is the
+      # /v1/auth/request-reset shape: `:user_auth` mounts this plug as its only
+      # throttle, and each admitted request sends one email to an address the
+      # caller names.
+      bearers = for _ <- 1..3, do: Base.encode16(:crypto.strong_rand_bytes(16))
+
+      # The premise, asserted rather than assumed: if the bearers were ever
+      # equal this test would be measuring the ordinary same-token path.
+      assert length(Enum.uniq(bearers)) == 3
+
+      [b1, b2, b3] = bearers
+
+      assert admitted?(attack(b1))
+      assert admitted?(attack(b2))
+      # write_per_minute is 2 and the budget is SHARED, so the third spelling
+      # buys nothing. Before the fix each of these was a fresh 2-token bucket
+      # and this line — and any number after it — was `true`.
+      refute admitted?(attack(b3))
+    end
+
+    test "an unresolvable bearer lands in the SAME bucket as no bearer at all" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      anonymous =
+        build(:post, "/v1/auth/request-reset", %{})
+        |> Map.put(:remote_ip, @attacker_peer)
+
+      # The anonymous request spends the one write token for this address...
+      assert admitted?(anonymous)
+      # ...and adding a bearer does not buy a second budget. A bearer nobody
+      # vouched for is worth exactly what no bearer is worth.
+      refute admitted?(attack(Base.encode16(:crypto.strong_rand_bytes(16))))
+    end
+
+    test "a REVOKED bearer falls back to the IP bucket" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      raw = "revoked-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, token} = Barkpark.Auth.create_token(raw, "revoked", "production", ["read"])
+
+      {:ok, _} =
+        token
+        |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
+        |> Barkpark.Repo.update()
+
+      # `verify_token/1` refuses it, so it is not a principal — and a token the
+      # server has stopped honouring must not keep a private budget.
+      assert admitted?(attack(raw))
+      refute admitted?(attack(raw))
+    end
+  end
+
+  # Criterion 3: the fix must not cost a legitimate caller its own bucket.
+  # Nothing in the file above proves this, because nothing above mints a token
+  # that actually EXISTS — so IP fallback alone would have passed every one.
+  describe "a bearer that DOES resolve to a principal" do
+    @shared_peer {198, 51, 100, 30}
+
+    defp mint(label) do
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, _token} = Barkpark.Auth.create_token(raw, label, "production", ["read"])
+      raw
+    end
+
+    defp read_with(raw) do
+      build(:get, "/v1/data/query/production/post", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+      |> Map.put(:remote_ip, @shared_peer)
+    end
+
+    test "two live tokens from ONE address keep independent buckets" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      a = mint("tenant-a")
+      b = mint("tenant-b")
+
+      assert not RateLimit.call(read_with(a), RateLimit.init([])).halted
+      # A has spent its own 1/min budget...
+      assert RateLimit.call(read_with(a), RateLimit.init([])).halted
+      # ...and B, sharing A's egress address, still has all of its own. If the
+      # fix had simply deleted token keying, this line would red.
+      assert not RateLimit.call(read_with(b), RateLimit.init([])).halted
+    end
+
+    test "one live token's repeated requests still share ITS bucket" do
+      with_limits(read_per_minute: 2, write_per_minute: 1)
+
+      raw = mint("tenant-c")
+
+      assert not RateLimit.call(read_with(raw), RateLimit.init([])).halted
+      assert not RateLimit.call(read_with(raw), RateLimit.init([])).halted
+      assert RateLimit.call(read_with(raw), RateLimit.init([])).halted
+    end
+  end
 end
