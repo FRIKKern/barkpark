@@ -673,20 +673,21 @@ PROSE_RECORD_MARKERS='retracted|retired|struck|corrected|superseded|obsolete|no 
 # un-pins it and brings it back for a human reading, while an unrelated edit to
 # the file does not.
 #
-# CLASS A IS NOT PINNABLE ANYWHERE ELSE IN THIS REPO, AND THERE IS ONE HERE.
-# `.claude/workflows/bp-cloud-console-hardening-charter.md:514` tells a builder,
-# under the heading "AND THE FACT A BUILDER MUST NOT MISREAD", that `Cloud gate`
+# THE LIST IS EMPTY, AND THE HISTORY OF ITS ONE ENTRY IS THE CONTRACT IN ACTION.
+# When this clause was first run at full width it found exactly ONE class-A
+# claim: `.claude/workflows/bp-cloud-console-hardening-charter.md` (D163, under
+# "AND THE FACT A BUILDER MUST NOT MISREAD") told a builder that `Cloud gate`
 # and `Console gate` "are ADVISORY today — a red one does not stop the merge
-# button", in the same sentence that correctly says the committed spec carries
+# button", in the same sentence that correctly said the committed spec carries
 # FOUR contexts with `enforced: true`. Live protection has required all four
-# since 2026-08-03. It is the cch-w32-s4 defect, verbatim, in this epic's OWN
-# charter. It is pinned here — with its owner and its replacement — ONLY because
-# the slice that added this clause is fenced out of the charters; the pin says
-# UNRESOLVED on every run rather than passing in silence, and the correction
-# makes this clause red until the pin comes out with it. If that pin is still
-# here a wave from now, this clause has become the thing it was written to
-# catch.
-PROSE_CLAIM_PINS='.claude/workflows/bp-cloud-console-hardening-charter.md|Console gate|` are advisory today'
+# since 2026-08-03 — the cch-w32-s4 defect, verbatim, in this epic's OWN
+# charter. The builder pinned it (fenced out of the charters); the lead then
+# corrected the sentence into a dated record (CORRECTED 2026-09-02, "used to
+# say") and dropped the pin IN THE SAME COMMIT, which is the only order the
+# STALE arm permits. A future entry here must carry its owner and its
+# replacement, and must not outlive one wave: a pin that is still here a wave
+# later means this clause has become the thing it was written to catch.
+PROSE_CLAIM_PINS=''
 
 merge_truth_prose_check() {
   local files
