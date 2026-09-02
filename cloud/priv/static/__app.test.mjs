@@ -24561,3 +24561,93 @@ test("task-0dd7578bc3d2bcbd: an operator resuming an UNARMED box reads the remed
   assert.doesNotMatch(body, /^instance not armed/i,
     "the key.replace fallback shape — proof the curated entry is the one resolving");
 });
+
+// ── THE FIXTURE ENVELOPE, DERIVED (cch-backlog-bpbase-envelope-incomplete) ───
+// scenarios.mjs's bpBase() is the base barkpark row every fleet/instance
+// fixture is built from, and it PROMISED to carry "every barkpark row
+// envelope-complete". It was a promise, checked by nobody: at the time this
+// test was written bpBase declared 35 of the 49 keys `barkpark_json` puts on
+// the wire. That is not cosmetic — a key no fixture declares is a key no
+// fixture can OVERRIDE, so no instrument in this repo can drive that field at
+// all, and any guard written against it structurally cannot fail.
+//
+// THE LIST IS DERIVED, NEVER TYPED. Typing it just moves the staleness from
+// scenarios.mjs into this file: the next field the server adds would be missing
+// from both and nothing would say so. So the expected set is parsed out of the
+// serializer itself — `defp barkpark_json` in
+// cloud/lib/barkpark_cloud/web/router.ex — as
+//   the `base = %{…}` literal's keys
+//   + every key the `|> merge_*(…)` pipeline adds, resolved TWO ways:
+//       • atom arguments passed at the call site (merge_job_status's
+//         :provision_status / :provision_error), and
+//       • the `Map.put(map, :key, …)` in the helper's own fallback clause
+//         (merge_provision_steps, merge_provision_console, merge_pressure).
+// A merge helper this parser cannot resolve THROWS rather than being skipped —
+// a silently-dropped key is the exact failure this test exists to prevent.
+//
+// NOTE ON DIRECTION: this asserts bpBase ⊇ serializer. It does NOT forbid extra
+// keys, because a fixture legitimately carries console-only scaffolding.
+const ROUTER_EX = new URL("../../lib/barkpark_cloud/web/router.ex", import.meta.url);
+
+function barkparkJsonKeys(src) {
+  const lines = src.split("\n");
+  const start = lines.findIndex((l) => l.startsWith("  defp barkpark_json("));
+  assert.notEqual(start, -1, "`defp barkpark_json(` is gone from router.ex — this parser is reading the wrong file or the serializer was renamed");
+  let end = -1;
+  for (let i = start + 1; i < lines.length; i++) if (lines[i] === "  end") { end = i; break; }
+  assert.notEqual(end, -1, "no closing `end` for barkpark_json");
+  const body = lines.slice(start, end + 1);
+
+  const keys = new Set();
+  let inBase = false;
+  for (const l of body) {
+    if (/^ {4}base = %\{\s*$/.test(l)) { inBase = true; continue; }
+    if (inBase && /^ {4}\}\s*$/.test(l)) { inBase = false; continue; }
+    if (inBase) {
+      const m = /^ {6}([a-z_0-9]+):/.exec(l);
+      if (m) keys.add(m[1]);
+    }
+  }
+  assert.ok(keys.size > 30,
+    "the `base = %{…}` literal parsed to " + keys.size + " keys — the parser lost the map, " +
+    "and an empty expected-set would make this whole test vacuous");
+
+  for (const l of body) {
+    const m = /^\s*\|>\s*([a-z_0-9]+)\(([^)]*)\)/.exec(l);
+    if (!m) continue;
+    const atoms = [...m[2].matchAll(/:([a-z_0-9]+)/g)].map((x) => x[1]);
+    if (atoms.length) { for (const a of atoms) keys.add(a); continue; }
+    const re = new RegExp("defp " + m[1] + "\\(map, _[^)]*\\), do: Map\\.put\\(map, :([a-z_0-9]+)", "g");
+    let hit, found = 0;
+    while ((hit = re.exec(src)) !== null) { keys.add(hit[1]); found++; }
+    assert.ok(found > 0,
+      "barkpark_json pipes through `" + m[1] + "` and this parser cannot tell which key it adds. " +
+      "Teach it (a call-site atom, or a `defp " + m[1] + "(map, _), do: Map.put(map, :key, …)` clause) — " +
+      "skipping it would silently shrink the expected envelope, which is the defect this test guards.");
+  }
+  return keys;
+}
+
+test("bpBase declares every key barkpark_json serializes", async () => {
+  const { bpBase } = await import("./__preview__/scenarios.mjs");
+  const serverKeys = barkparkJsonKeys(fs.readFileSync(ROUTER_EX, "utf8"));
+
+  // Non-vacuity, stated as a floor and as named members: a parser that returned
+  // an empty (or gutted) set would otherwise pass this test forever.
+  assert.ok(serverKeys.size >= 45,
+    "derived only " + serverKeys.size + " serialized keys — barkpark_json carried 49 when this was written, " +
+    "so the parser has gone blind rather than the serializer having shrunk by a third");
+  for (const named of ["id", "provider", "pressure", "provision_steps", "verify_reachable"]) {
+    assert.ok(serverKeys.has(named),
+      "the derivation lost `" + named + "` — one from each arm (base map, merge_job_status atoms, " +
+      "merge_* fallback Map.put), so this loop fails loudly if any arm stops resolving");
+  }
+
+  const declared = new Set(Object.keys(bpBase({})));
+  const missing = [...serverKeys].filter((k) => !declared.has(k)).sort();
+  assert.deepEqual(missing, [],
+    "bpBase omits " + missing.length + " key(s) barkpark_json sends on EVERY row: " + missing.join(", ") +
+    ". A key no fixture declares is a key no fixture can override, so no instrument here can ever drive it. " +
+    "Add each to bpBase with the SERVER's default (the Ecto schema's for a column-backed key, null for the " +
+    "serializer's UNMEASURED contract) — never a value the control plane would not send.");
+});
