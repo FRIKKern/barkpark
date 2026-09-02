@@ -80,13 +80,24 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   `Barkpark.Media.ImageBackend.Vix`'s `guard_dimensions/1` for images. The
   MECHANISM: `:zip.list_dir/1` reports each member's declared UNCOMPRESSED size
   straight from the central directory WITHOUT inflating anything, so the guard
-  sums those declared sizes and rejects up front with
+  sums those sizes and rejects up front with
   `{:error, :xlsx_decompressed_size_exceeded}` when the total exceeds the
   ceiling — BEFORE `open_package/1` (covering a bomb hidden in a member
   `XlsxReader` itself reads, e.g. a huge `xl/sharedStrings.xml`) and before the
   raw extract in `parse_layout/1`. The ceiling defaults to 256 MiB and is
   overridable per-env via
   `config :barkpark, Barkpark.Plugins.Sheets.XlsxImport, max_decompressed_bytes: N`.
+
+  A declared size is ATTACKER-AUTHORED, though, so it is trusted only when it is
+  a positive integer. A member declaring `0` (or anything non-integer) while
+  carrying real compressed bytes used to contribute `0` to the sum — a package
+  declaring `0` everywhere cleared the ceiling and was then fully inflated
+  anyway, since `:zip.extract` and `XlsxReader` read the LOCAL headers and the
+  actual deflate streams. Such a member is now bounded by `comp_size × 1032`,
+  deflate's theoretical maximum ratio, which is a fact about the bytes present
+  rather than a claim about them. Legitimate packages are untouched: their
+  declarations are positive and honest. A member-count cap (10_000) closes the
+  companion shape, a central directory of hundreds of thousands of tiny members.
   """
 
   alias Barkpark.Plugins.Sheets.Fmt
@@ -101,6 +112,25 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   # backend's `@default_max_decode_bytes`. Overridable per-env for tests via
   # `config :barkpark, __MODULE__, max_decompressed_bytes: N`.
   @default_max_decompressed_bytes 256 * 1024 * 1024
+
+  # Deflate's theoretical maximum compression ratio is 1032:1 — RFC 1951 §3.2.5
+  # lets a single length/distance pair reproduce a 258-byte match, and the
+  # cheapest such pair costs ~2 bits, so 258 bytes out per ~0.25 bytes in. Used
+  # ONLY for a member whose declared uncompressed size is not a positive integer
+  # (`member_bound/2`): the declaration is attacker-authored, the compressed
+  # length is a physical fact about the bytes actually present, and 1032× it is
+  # the most that member could possibly inflate to.
+  @deflate_max_ratio 1032
+
+  # A central directory naming hundreds of thousands of tiny members is its own
+  # resource attack: `parse_layout/1`'s `:zip.extract(binary, [:memory])`
+  # materialises one binary per member and folds them all into a map, and the
+  # controller's 15 MB compressed cap still leaves room for ~190k ~80-byte
+  # entries. A real xlsx carries tens of members, so 10_000 is generous by three
+  # orders of magnitude. (`:zip.list_dir/1` has already walked the directory by
+  # the time this is counted — the cap bounds the DOWNSTREAM inflate and fold,
+  # not the directory read itself.)
+  @max_zip_members 10_000
 
   # xlsx column widths are in "character" units; Excel's default char is
   # ~7px. round(px / 7 * 7) is exact for integers, so widths round-trip.
@@ -172,49 +202,91 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     _ -> {:error, "invalid xlsx: not an xlsx package"}
   end
 
-  # Pre-extract decompression-bomb guard: sum every member's DECLARED
-  # uncompressed size from the zip central directory — `:zip.list_dir/1` reads
-  # only the directory, it does NOT inflate — and reject before any member is
+  # Pre-extract decompression-bomb guard: bound every member's uncompressed
+  # size from the zip central directory — `:zip.list_dir/1` reads only the
+  # directory, it does NOT inflate — and reject before any member is
   # materialised when the total exceeds the ceiling. Sits ahead of BOTH inflate
-  # vectors (`open_package/1` and `parse_layout/1`). A binary whose central
-  # directory does not read as a zip is NOT rejected here — `:ok` lets
-  # `open_package/1` produce the canonical `"invalid xlsx"` error instead of
-  # masking a plain not-a-zip as a size violation.
+  # vectors (`open_package/1` and `parse_layout/1`).
+  #
+  # The DECLARED size stays the primary bound, but the central directory is
+  # written by whoever built the archive, so a declaration is only trusted when
+  # it is a positive integer. A member that declares nothing usable while
+  # carrying real compressed bytes is bounded by what deflate could physically
+  # produce from those bytes instead (`member_bound/2`) — the shape that used to
+  # walk straight through: a package declaring `0` everywhere summed to `0`,
+  # cleared the ceiling, and was then fully inflated.
+  #
+  # A binary whose central directory does not read as a zip is NOT rejected
+  # here — `:ok` lets `open_package/1` produce the canonical `"invalid xlsx"`
+  # error instead of masking a plain not-a-zip as a size violation. That
+  # abstention is the `:not_a_zip` arm below; the rescue that used to wrap this
+  # WHOLE function is gone, so a fault in the sizing arithmetic can no longer
+  # silently skip the guard.
   defp guard_decompressed_size(binary) do
-    case :zip.list_dir(binary) do
+    case list_dir(binary) do
       {:ok, entries} ->
-        if declared_uncompressed_bytes(entries) > max_decompressed_bytes() do
-          {:error, :xlsx_decompressed_size_exceeded}
-        else
-          :ok
+        cond do
+          member_count(entries) > @max_zip_members ->
+            {:error, :xlsx_decompressed_size_exceeded}
+
+          bounded_uncompressed_bytes(entries) > max_decompressed_bytes() ->
+            {:error, :xlsx_decompressed_size_exceeded}
+
+          true ->
+            :ok
         end
 
-      _ ->
+      :not_a_zip ->
         :ok
     end
+  end
+
+  # `:zip.list_dir/1` traps its own failures and returns `{:error, {:EXIT, _}}`
+  # for garbage bytes rather than raising (pinned by `XlsxZipbombTest`, so an
+  # OTP change that starts raising reds a test instead of turning a 422 into a
+  # 500). Both error shapes mean the same thing here: no readable central
+  # directory, so the guard abstains. Scoped to THIS call on purpose.
+  defp list_dir(binary) do
+    case :zip.list_dir(binary) do
+      {:ok, entries} -> {:ok, entries}
+      _ -> :not_a_zip
+    end
   rescue
-    _ -> :ok
+    _ -> :not_a_zip
   end
 
   # `:zip.list_dir/1` yields `{:zip_comment, _}` plus one
-  # `{:zip_file, name, file_info, comment, offset, comp_size}` per member;
-  # `elem(file_info, 1)` is the uncompressed size record field.
-  defp declared_uncompressed_bytes(entries) do
+  # `{:zip_file, name, file_info, comment, offset, comp_size}` per member.
+  defp member_count(entries) do
+    Enum.count(entries, &match?({:zip_file, _n, _fi, _c, _o, _z}, &1))
+  end
+
+  defp bounded_uncompressed_bytes(entries) do
     Enum.reduce(entries, 0, fn
-      {:zip_file, _name, file_info, _comment, _offset, _comp}, acc ->
-        acc + uncompressed_size(file_info)
+      {:zip_file, _name, file_info, _comment, _offset, comp}, acc ->
+        acc + member_bound(file_info, comp)
 
       _entry, acc ->
         acc
     end)
   end
 
-  defp uncompressed_size(file_info) do
+  # `elem(file_info, 1)` is the uncompressed size record field. A positive
+  # integer is the archive's own declaration and is used as-is — a legitimate
+  # xlsx declares honest positive sizes, so this branch carries every real
+  # package and the ceiling behaves exactly as before. Anything else is an
+  # UNTRUSTED declaration: fall back to the worst case deflate could produce.
+  defp member_bound(file_info, comp) do
     case elem(file_info, 1) do
       n when is_integer(n) and n > 0 -> n
-      _ -> 0
+      _ -> worst_case_bytes(comp)
     end
   end
+
+  defp worst_case_bytes(comp) when is_integer(comp) and comp > 0,
+    do: comp * @deflate_max_ratio
+
+  defp worst_case_bytes(_comp), do: 0
 
   defp max_decompressed_bytes do
     :barkpark
