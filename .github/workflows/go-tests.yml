@@ -39,6 +39,15 @@ on:
       # fixture-only PRs — the same #963->#969-class gap the pdrender carve-out above
       # closes, which whitelisted its testdata but not the board's.
       - "internal/taskboard/testdata/**"
+      # Hetzner live-proof fixtures (internal/cli/testdata/pds_live_hetzner_*.json).
+      # TestPDSLiveFixturesRecordTheirOwnKindAndLength pins every harvested body to
+      # the byte count its manifest records, TestPDSLiveManifestIsMachineEmitted pins
+      # each body's sha256_chunked and the chain folded over all of them, and
+      # scripts/pds-live-hetzner-placement-group.sh --selftest-offline re-emits the
+      # manifest and diffs it against the committed one. A fixture REGEN carries NO
+      # .go diff, so without this carve-out all three pins are unreachable on the very
+      # PR that edits them — the same #963->#969-class gap as the carve-outs above.
+      - "internal/cli/testdata/**"
       # CLI manifest fixtures (docs/cli/fixtures/*.json). The capsbrief protective
       # kit (ratio tripwire, invoke-completeness) and the mcp/tickets/cli suites all
       # pin behaviour against full-manifest.json; a fixture regen carries NO .go
@@ -84,6 +93,10 @@ on:
       - "templates/**"
       - "internal/pdrender/testdata/**"
       - "internal/taskboard/testdata/**"
+      # Hetzner live-proof fixtures (mirrors the push list): the byte-count,
+      # sha256_chunked and --selftest-offline pins are unreachable on a
+      # fixture-only PR without it.
+      - "internal/cli/testdata/**"
       - "docs/cli/fixtures/**"
       - "cloud/priv/static/__fixtures__/**"
       # Scaffy census trap (mirrors the push list): catalog + testdata fixtures
