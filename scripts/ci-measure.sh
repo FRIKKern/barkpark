@@ -81,6 +81,7 @@ while [ $# -gt 0 ]; do
     --sample) SAMPLE="${2:-}"; shift 2 ;;
     --selftest) MODE=selftest; shift ;;
     --census) MODE=census; shift ;;
+    --value-audit) MODE=value; shift ;;
     -h|--help) usage ;;
     *) echo "ci-measure: unknown argument '$1'" >&2; usage ;;
   esac
@@ -413,6 +414,75 @@ FIX
     fail=$((fail+1)); echo "  FAIL a7 a healthy sample was flagged as under-filled — the guard cries wolf"
   fi
 
+  # ── v1 THE ARM THE VALUE AUDIT EXISTS FOR ────────────────────────────────
+  # A red and a later GREEN on the SAME head sha is a RERUN-GREEN: nothing about
+  # the code changed between them, so the red carried no information. Counting
+  # it as a catch is not a rounding error, it is BACKWARDS — a flaky check
+  # reruns green often and would score the HIGHEST catch rate in the repo.
+  cat > "$tmp/rerun.jsonl" <<'FIX'
+{"wf":"flaky.yml","sha":"aaa111","concl":"failure","created":"2026-09-01T10:00:00Z","pr":7,"id":1}
+{"wf":"flaky.yml","sha":"aaa111","concl":"success","created":"2026-09-01T10:30:00Z","pr":7,"id":2}
+FIX
+  local vj
+  vj=$(CI_MEASURE_FIXTURE="$tmp/rerun.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null)
+  local rg cc
+  rg=$(printf '%s' "$vj" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["rerun_green"])' 2>/dev/null)
+  cc=$(printf '%s' "$vj" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["catch_candidate"])' 2>/dev/null)
+  if [ "$rg" = "1" ] && [ "$cc" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   v1 a rerun-green on the SAME sha counts as a flake and NOT as a catch"
+  else
+    fail=$((fail+1)); echo "  FAIL v1 rerun_green=$rg catch_candidate=$cc — expected 1 and 0. A rerun-green is being counted as a catch, which scores flaky checks HIGHEST."
+  fi
+
+  # v1b — THE SHAPE THAT ACTUALLY OCCURS. `gh run rerun` re-runs the SAME run
+  # id in place, so a rerun-green never appears as a second run row. The first
+  # real pass of this audit reported rerun=0 for EVERY workflow — not credible,
+  # and the tell that the detector was blind. run_attempt > 1 with a green
+  # conclusion is that event seen correctly.
+  cat > "$tmp/attempt.jsonl" <<'FIX'
+{"wf":"inplace.yml","sha":"fff111","concl":"success","created":"2026-09-01T10:00:00Z","pr":13,"id":8,"attempt":2}
+FIX
+  local va
+  va=$(CI_MEASURE_FIXTURE="$tmp/attempt.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null \
+        | python3 -c 'import json,sys; r=json.load(sys.stdin)["rows"][0]; print(r["rerun_green"], r["catch_candidate"])' 2>/dev/null)
+  if [ "$va" = "1 0" ]; then
+    pass=$((pass+1)); echo "  ok   v1b an in-place rerun (run_attempt 2, green) is a flake — the shape that actually occurs"
+  else
+    fail=$((fail+1)); echo "  FAIL v1b got '$va', expected '1 0' — in-place reruns are invisible, so rerun=0 will read as 'no flakes'"
+  fi
+
+  # v2 — and the discriminator works the other way: a green on a LATER sha of
+  # the same PR is a catch CANDIDATE. If v1 and v2 both passed for the same
+  # reason (everything classed as flake) the audit would be useless.
+  cat > "$tmp/fixed.jsonl" <<'FIX'
+{"wf":"real.yml","sha":"bbb111","concl":"failure","created":"2026-09-01T10:00:00Z","pr":9,"id":3}
+{"wf":"real.yml","sha":"ccc222","concl":"success","created":"2026-09-01T11:00:00Z","pr":9,"id":4}
+FIX
+  local vj2 rg2 cc2
+  vj2=$(CI_MEASURE_FIXTURE="$tmp/fixed.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null)
+  rg2=$(printf '%s' "$vj2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["rerun_green"])' 2>/dev/null)
+  cc2=$(printf '%s' "$vj2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["catch_candidate"])' 2>/dev/null)
+  if [ "$cc2" = "1" ] && [ "$rg2" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   v2 a green on a LATER sha is a catch CANDIDATE, not a flake (the two buckets discriminate)"
+  else
+    fail=$((fail+1)); echo "  FAIL v2 rerun_green=$rg2 catch_candidate=$cc2 — expected 0 and 1"
+  fi
+
+  # v3 — a workflow that never went red is NEVER-RED, never a catch. A green
+  # streak proves the check ran, not that it protects anything.
+  cat > "$tmp/never.jsonl" <<'FIX'
+{"wf":"quiet.yml","sha":"ddd111","concl":"success","created":"2026-09-01T10:00:00Z","pr":11,"id":5}
+{"wf":"quiet.yml","sha":"eee222","concl":"success","created":"2026-09-01T11:00:00Z","pr":11,"id":6}
+FIX
+  local vv
+  vv=$(CI_MEASURE_FIXTURE="$tmp/never.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null \
+        | python3 -c 'import json,sys; r=json.load(sys.stdin)["rows"][0]; print(r["verdict"], r["catch_candidate"])' 2>/dev/null)
+  if [ "$vv" = "NEVER-RED 0" ]; then
+    pass=$((pass+1)); echo "  ok   v3 an all-green workflow is NEVER-RED with zero catches (a green streak proves nothing)"
+  else
+    fail=$((fail+1)); echo "  FAIL v3 got '$vv', expected 'NEVER-RED 0'"
+  fi
+
   echo
   echo "SELFTEST: $pass passed, $fail failed."
   [ "$fail" -eq 0 ]
@@ -459,6 +529,156 @@ census() {
     [ "$d" \> "$UNTIL" ] && break
   done
 }
+
+# ---------------------------------------------------------------------------
+# value_audit — cost is measured; VALUE is not. This mode asks, per workflow:
+# when it went red, did that red mean anything?
+#
+# THE CLASSIFICATION RULE, stated because a table of percentages without one is
+# an opinion with decimal places:
+#
+#   RERUN-GREEN  a red run and a later GREEN run on the SAME head sha. Nothing
+#                about the code changed between them, so the red carried no
+#                information. This is a FLAKE and it can NEVER be a catch —
+#                selftest arm v1 exists solely to keep it that way.
+#   FIXED-LATER  a red run, then green on a LATER head of the same PR. The red
+#                MAY have caught something. It is reported as CATCH-CANDIDATE,
+#                not as a catch: proving it requires diffing the two heads and
+#                asking whether the change touched non-test code or this check's
+#                inputs, which is per-workflow knowledge this mode does not have.
+#                Overclaiming here would flatter every gate in the repo.
+#   NEVER-RED    zero reds in the window. Not automatically useless — a gate can
+#                be cheap insurance — but it has demonstrated nothing, so it is
+#                the first place to look when deciding what to retire.
+#
+# WHY THE HONEST BUCKET MATTERS: a "catch rate" that counts rerun-greens is
+# exactly backwards, because a flaky check reruns green often and would score
+# HIGHEST. The two must never be summed.
+# ---------------------------------------------------------------------------
+value_audit() {
+  local wfs
+  if [ -n "${CI_MEASURE_FIXTURE:-}" ]; then
+    cat "$CI_MEASURE_FIXTURE" | classify_runs
+    return $?
+  fi
+  wfs=$(gh api "repos/$REPO/actions/workflows?per_page=100" --jq '.workflows[] | "\(.id)\t\(.path)"' 2>/dev/null)
+  [ -z "$wfs" ] && { echo "value-audit: could not list workflows" >&2; return 1; }
+  {
+    while IFS=$'\t' read -r id path; do
+      [ -z "$id" ] && continue
+      local page=1
+      while [ "$page" -le 3 ]; do
+        gh api "repos/$REPO/actions/workflows/$id/runs?event=pull_request&created=>=$SINCE&per_page=100&page=$page" \
+          --jq ".workflow_runs[] | {wf: \"$(basename "$path")\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt}" 2>/dev/null
+        page=$((page + 1))
+      done
+    done <<< "$wfs"
+  } | classify_runs
+}
+
+classify_runs() {
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'VPY'
+import json, sys, collections
+
+runs = collections.defaultdict(list)
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except json.JSONDecodeError: continue
+    runs[o["wf"]].append(o)
+
+rows = []
+for wf, rs in runs.items():
+    rs.sort(key=lambda r: r.get("created") or "")
+    reds = [r for r in rs if r.get("concl") == "failure"]
+    by_sha = collections.defaultdict(list)
+    for r in rs: by_sha[r.get("sha")].append(r)
+
+    rerun_green = 0
+    fixed_later = 0
+    unresolved = 0
+    evidence = collections.defaultdict(list)
+
+    # AN IN-PLACE RERUN IS INVISIBLE AS TWO RUNS. `gh run rerun` re-runs the
+    # SAME run id and updates it, so a red-then-green rerun never appears as a
+    # second run row — the first pass of this audit reported rerun=0 for EVERY
+    # workflow, which is not credible and was the tell. `run_attempt > 1` with
+    # a green conclusion is the same event seen correctly: it failed on an
+    # earlier attempt and passed on a later one, with no code change between.
+    for r in rs:
+        if (r.get("attempt") or 1) > 1 and r.get("concl") == "success":
+            rerun_green += 1
+            evidence["rerun-green"].append((r.get("id"), "attempt %s" % r.get("attempt")))
+
+    for red in reds:
+        sha = red.get("sha")
+        # THE ARM: a later GREEN on the SAME sha is a rerun-green. Never a catch.
+        same = [r for r in by_sha[sha]
+                if r.get("concl") == "success"
+                and (r.get("created") or "") > (red.get("created") or "")]
+        if same:
+            rerun_green += 1
+            evidence["rerun-green"].append((red.get("id"), same[0].get("id")))
+            continue
+        # a later green on a DIFFERENT sha of the same PR
+        pr = red.get("pr")
+        later = [r for r in rs
+                 if r.get("pr") == pr and r.get("sha") != sha
+                 and r.get("concl") == "success"
+                 and (r.get("created") or "") > (red.get("created") or "")]
+        if later:
+            fixed_later += 1
+            evidence["fixed-later"].append((red.get("id"), later[0].get("id")))
+        else:
+            unresolved += 1
+
+    total = len(rs)
+    nred = len(reds)
+    if nred == 0:
+        verdict = "NEVER-RED"
+    elif rerun_green > fixed_later:
+        verdict = "FLAKE-DOMINANT"
+    elif fixed_later > 0:
+        verdict = "CATCH-CANDIDATE"
+    else:
+        verdict = "RED-UNRESOLVED"
+    rows.append({
+        "workflow": wf, "runs": total, "reds": nred,
+        "rerun_green": rerun_green, "catch_candidate": fixed_later,
+        "unresolved": unresolved, "verdict": verdict,
+        "evidence": {k: v[:3] for k, v in evidence.items()},
+    })
+
+rows.sort(key=lambda r: (-r["reds"], -r["runs"]))
+print("CI VALUE AUDIT — did the red mean anything?")
+print("RULE: a later GREEN on the SAME head sha is a RERUN-GREEN and is NEVER a catch.")
+print("      a later green on a LATER head is a CATCH-CANDIDATE, not a proven catch:")
+print("      proving it needs a per-workflow diff test this mode does not do.")
+print()
+print(f"{'workflow':<34}{'runs':>6}{'reds':>6}{'rerun':>7}{'cand':>6}{'unres':>7}  verdict")
+for r in rows:
+    print(f"{r['workflow']:<34}{r['runs']:>6}{r['reds']:>6}{r['rerun_green']:>7}"
+          f"{r['catch_candidate']:>6}{r['unresolved']:>7}  {r['verdict']}")
+print()
+for r in rows:
+    if r["evidence"].get("rerun-green"):
+        pairs = "; ".join(f"red {a} -> green {b} (same sha)" for a, b in r["evidence"]["rerun-green"])
+        print(f"FLAKE EVIDENCE {r['workflow']}: {pairs}")
+print()
+print(json.dumps({"rows": rows}, indent=2), file=sys.stderr)
+VPY
+  python3 "$pyf"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
+if [ "$MODE" = value ]; then
+  [ -n "$SINCE" ] || { echo "ci-measure: --value-audit needs --since" >&2; usage; }
+  value_audit; exit $?
+fi
 
 if [ "$MODE" = census ]; then
   [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --census needs --since and --until" >&2; usage; }
