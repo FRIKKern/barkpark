@@ -151,8 +151,7 @@ defmodule BarkparkWeb.PluginLiveSessionScopeOptsGuardTest do
             :ok
 
           {m, f, a} ->
-            {:fires,
-             "calls #{inspect(m)}.#{f}/#{a}, and #{inspect(m)} itself calls scope_opts/1"}
+            {:fires, "calls #{inspect(m)}.#{f}/#{a}, and #{inspect(m)} itself calls scope_opts/1"}
         end
     end
   end
