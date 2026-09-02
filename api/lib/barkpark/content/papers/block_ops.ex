@@ -453,7 +453,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # content type. Threading `type` through here is safe by construction.
     case enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
       {:ok, content} ->
-        persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title)
+        persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title, opts)
 
       {:error, _} = error ->
         error
@@ -462,7 +462,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # The Repo write + broadcast tail, reached only once the wall passed (or an
   # audited caller bypassed it).
-  defp persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title) do
+  defp persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title, opts) do
     doc_attrs = %{
       "doc_id" => slug,
       "type" => type,
@@ -496,6 +496,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     case result do
       {:ok, doc} ->
+        save_upsert_revision(doc, type, dataset, existing, opts)
         broadcast_paper_update(doc)
         enqueue_edge_projection(doc)
         # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
@@ -512,6 +513,59 @@ defmodule Barkpark.Content.Papers.BlockOps do
       error ->
         error
     end
+  end
+
+  # [paper-upsert-unlogged-clobber] Record the version-history row for a paper
+  # upsert. THE ASYMMETRY THIS CLOSES: `Content.upsert_document/4` pipes its
+  # result through `Broadcast.tap_broadcast/7`, which calls `save_revision/5`
+  # UNCONDITIONALLY — every write through the writer path leaves a snapshot. The
+  # paper path above instead called only `broadcast_paper_update/1`, a bare
+  # PubSub fan-out that saves NO revision. So `upsert_paper/2` replaced a
+  # PUBLISHED paper's whole `content` under a fresh opaque `rev` while
+  # `bp doc history` stood still, and the state it overwrote was never captured
+  # anywhere — not merely hard to find, gone. Every seal citing such a revision
+  # became unverifiable, and a legitimate bulk migration became
+  # indistinguishable from an accidental clobber.
+  #
+  # Measured on the live corpus before the fix by lead-corpus (2026-09-02, one
+  # `bp doc query paper --all` dump of all 1050 published papers; ledger row
+  # `task-45307192c1b0e1ef` — note its ORIGINAL description undercounts by an
+  # order of magnitude, having sampled a single 30-paper wave cohort, and was
+  # corrected in a later stage note): 485 of 1050 published papers were
+  # rewritten inside a 46-second window on 2026-08-17 (15:40:09.987Z →
+  # 15:40:55.791Z), with further sweeps on 08-23 (131 + 54), 08-25 (153) and
+  # 09-02 (51), and `intuition-atlas-verdict` is live and published with a
+  # revision history of count 0 — born here, never logged.
+  #
+  # NOT one runaway script: `barkpark-changelog-2026-07-17` has history through
+  # 2026-08-24T17:12Z and then an unlogged write on 08-25 — a different day and
+  # a different batch from the 08-17 sweep. Several callers reach this one
+  # low-level write, which is why the fix belongs HERE and not in any caller.
+  #
+  # STATED PRECISELY, because the stronger claim was never established: what was
+  # measured is that this path DID NOT RECORD WHAT IT CHANGED. Whether it was
+  # obliged to is a question nobody verified beforehand — this commit decides it
+  # by making the path log, rather than asserting an intent it inherited.
+  #
+  # WHY LOG, NOT FORBID: this is the legitimate Bulldocs ingest / `bp paper`
+  # publish entry point. Refusing a republish would break authoring outright. A
+  # migration must stay possible — it must just leave a trace. Both legs record:
+  # the UPDATE leg as "update" (the clobber), the INSERT leg as "create" (the
+  # count-0 case). `attrs` is deliberately NOT consulted for the action — the
+  # row's prior existence is the ground truth for which happened.
+  #
+  # BEST-EFFORT, matching `maybe_save_batch_revision/3` and
+  # `maybe_append_paper_event/3`: the paper save is the source of truth, and
+  # `save_revision/5` is the non-bang variant that already logs its own failures
+  # ([revision-loss-silent] in broadcast.ex). Failing an otherwise-valid content
+  # write because history could not be persisted would be worse than the write
+  # landing with a logged gap.
+  defp save_upsert_revision(%Document{} = doc, type, dataset, existing, opts) do
+    action = if existing, do: "update", else: "create"
+
+    Broadcast.save_revision(doc, type, dataset, action, Keyword.get(opts, :user_id))
+
+    :ok
   end
 
   # Append a `paper_events` row when this upsert carries a non-empty
