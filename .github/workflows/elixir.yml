@@ -339,14 +339,16 @@ jobs:
         run: bash scripts/merge-authority-claim-check.sh
 
   format:
-    # ADVISORY format signal — NOT a merge gate. The project pins formatting
-    # to the PROD Elixir version (server runs 1.18.x; local dev runs 1.19.x,
-    # whose formatter produces different output). Running `mix format` on a
-    # local toolchain is forbidden (see CLAUDE.md), so this check is
-    # structurally red whenever code was last formatted under a different
-    # Elixir than CI's 1.18.1. Formatting passes must only ever happen in a
-    # deliberate session pinned to the prod Elixir version; until then this
-    # job stays visible as a drift signal, not a blocker.
+    # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
+    # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`
+    # output is decided by the Elixir that types it, and everyone (and every
+    # agent) who runs `mix format` before pushing is on 1.19.5 — so that is
+    # what this job measures. Pinning it to anything else does not make the
+    # tree prod-formatted, it just makes the job a treadmill: see the matrix
+    # comment below for the measurement that settled it. Production's
+    # toolchain is a SEPARATE question with a separate owner — .tool-versions,
+    # and the mix-test / mix-prod-compile matrices further down this file,
+    # which this job does not speak for and does not touch.
     #
     # IT RUNS THE SAME INSTRUMENT A DEVELOPER RUNS (scripts/format-check.sh,
     # format-gate-is-elixir-version-contaminated). `mix format --check-formatted`
@@ -372,22 +374,51 @@ jobs:
       fail-fast: false
       matrix:
         otp: ["27.0"]
-        # THE DECLARED TOOLCHAIN, not the historical one. `.tool-versions` says
-        # `elixir 1.18.4-otp-27`, and that declaration is what PRODUCTION runs:
-        # release-artifact.yml builds the prebuilt with `version-file:
-        # .tool-versions` under a comment requiring it to "match the box runtime
-        # exactly", and deploy/azure-base-install.sh pins every box's asdf to the
-        # same file. The gate sat one patch BELOW it at 1.18.1, so a developer
-        # who honoured the pin formatted with a formatter this job did not use
-        # and could not clear the red no matter how many times they fixed it —
-        # and a permanently-red advisory gate teaches the fleet to skip the one
-        # red that is real. Moving the DECLARATION down instead would have
-        # changed what prod installs to settle a formatter disagreement, which
-        # is the wrong direction: one CI matrix has no consumers outside CI,
-        # while .tool-versions has three outside it. OTP is deliberately NOT
-        # moved here (the pin says erlang 27.3.4, this says 27.0) — formatter
-        # output is an Elixir-level rule, and OTP is a wider blast radius.
-        elixir: ["1.18.4"]
+        # THE FORMATTER THE FLEET ACTUALLY RUNS, measured — not the declared
+        # toolchain, and deliberately not production's. `elixir --version` on
+        # this repo's dev Mac and on every ephemeral agent box, 2026-09-02:
+        # 1.19.5. `.tool-versions` says `elixir 1.18.4-otp-27` and asdf is not
+        # installed on those boxes, so nobody lands on the pin — bare
+        # `mix format` is 1.19.5 every time.
+        #
+        # The two formatters DISAGREE on line breaking, and the tell is
+        # DIRECTIONAL — read it the right way round, because the filing had it
+        # backwards. The `{:fires, "calls …"}` tuple in
+        # api/test/barkpark_web/plugin_live_session_scope_opts_guard_test.exs is
+        # EXACTLY 98 columns, which is the default `line_length`. 1.19.5 keeps
+        # it on one line; 1.18.4 splits it across two. Commit 670ab4659b
+        # ("style(test): format …") is a 1.19.5 box JOINING that tuple, and main
+        # run 33639424802 (e7e3df5b0b) is the 1.18.4 gate immediately asking for
+        # it back on two lines. A boundary disagreement at the width limit, so
+        # it fires on whatever happens to sit at 98 and no listing of affected
+        # files stays true.
+        #
+        # That is a treadmill in both directions: every 1.18-shaped repair
+        # (#14963, #15308) is undone by the next local `mix format`, and every
+        # local `mix format` re-reds this job. A permanently-red advisory gate
+        # teaches the fleet to skip the one red that is real.
+        #
+        # WHICH PIN MOVES IS THE WHOLE DECISION (orchestrator ruling 2026-09-02,
+        # task-9a08c27d897f38e6). Not this one: forcing ~30 ephemeral worktree
+        # agents onto an asdf install nothing checks is unenforceable, and it was
+        # tried — .tool-versions has said 1.18.4-otp-27 for months and the fleet
+        # has never once honoured it. Not .tool-versions either, for the same
+        # reason it was not moved when this pin last changed: it has consumers
+        # OUTSIDE CI (release-artifact.yml builds the prebuilt with
+        # `version-file: .tool-versions`; deploy/azure-base-install.sh pins every
+        # box's asdf to it), so moving it would change what production installs
+        # to settle a formatter disagreement. This matrix has no consumer but
+        # this job and scripts/format-check.sh. THE FORMAT JOB MEASURES THE
+        # FORMATTER; production's Elixir is the mix-test / mix-prod-compile
+        # matrices' business (still 1.18.1, untouched here) and the deploy row's.
+        #
+        # OTP STAYS 27.0 and did not have to move: erlef/setup-beam resolves
+        # elixir-version 1.19.5 against otp-version 27.0 to the published
+        # `elixir-otp-27` build (1.19.5 ships otp-26/27/28 artifacts). Formatter
+        # output is an Elixir-level rule — the fleet's own 1.19.5 sits on OTP 28
+        # and emits the same bytes — and OTP is the wider blast radius, so it
+        # stays where the rest of this file has it.
+        elixir: ["1.19.5"]
     defaults:
       run:
         working-directory: api
