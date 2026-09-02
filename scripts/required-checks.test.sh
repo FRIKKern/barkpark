@@ -79,6 +79,22 @@ APPLY="$REPO_ROOT/scripts/required-checks-apply.sh"
 VERIFY="$REPO_ROOT/scripts/required-checks-verify.sh"
 SPEC="$REPO_ROOT/.github/required-checks.json"
 
+# THE MUTANTS RUN FROM A TEMP DIRECTORY, AND THE SHARED READER LIVES IN THE REPO.
+# Both instruments now source scripts/lib/check-runs.sh instead of each keeping a
+# private copy of the check-run pipeline (cch-adopt-check-runs-lib-in-required-checks),
+# and both resolve it through $0-derived REPO_ROOT. Every `sed`-mutated copy in
+# this file is written to $TMP, whose REPO_ROOT is the temp directory's parent —
+# so without this handle each mutant would die on a missing lib instead of on the
+# clause it is meant to prove. It is the same accommodation the mutants already
+# make with an explicit --workflows and --prose, and it points at the REAL lib,
+# so nothing is stubbed. §4 below re-runs the generator with it UNSET, which is
+# what keeps the default resolution from rotting behind this export.
+export BARKPARK_CHECK_RUNS_LIB="$REPO_ROOT/scripts/lib/check-runs.sh"
+[ -f "$BARKPARK_CHECK_RUNS_LIB" ] || {
+  echo "required-checks.test.sh: no shared check-runs reader at $BARKPARK_CHECK_RUNS_LIB — both instruments source it, so every clause below would red on the lib rather than on itself" >&2
+  exit 3
+}
+
 LIVE=0
 # `--hermetic` gates the API stage the way `--live` gates the branch stage: a
 # named flag on a named function, never a line range. A line range rots the next
@@ -948,6 +964,53 @@ if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaMISSIN
 else
   ok "an unreadable feed is a hard failure"
 fi
+
+# ── THE EMPTY-FEED REFUSAL BELONGS TO THIS CALLER, AND A REFUSAL NOBODY CAN
+#    DELETE IS A REFUSAL NOBODY HAS PROVEN ──────────────────────────────────
+#
+# `fetch_check_runs` no longer owns the read: it calls check_runs_rows_ext from
+# scripts/lib/check-runs.sh, which returns an EMPTY feed as zero rows and exit 0
+# ON PURPOSE (for the registration sampler a head with no runs is the cadence
+# datum, so a primitive that died there could not be shared). The refusal above
+# therefore has to live at the CALL SITE — and an adoption that silently
+# inherited the lib's permissiveness would turn this fail-closed guard into a
+# fail-open one with no test noticing. So: name the message, then delete it from
+# a copy and watch the same fixture stop naming it.
+RC4_EMPTY_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaEMPTY --sha shaA 2>&1)" && RC4_EMPTY_RC=0 || RC4_EMPTY_RC=$?
+if [ "$RC4_EMPTY_RC" -ne 0 ] && grep -q "refusing to generate a spec from nothing" <<<"$RC4_EMPTY_OUT"; then
+  ok "…and it reds BY NAME — the generator's own refusal, not something the shared reader happened to raise"
+else
+  bad "the empty feed did not red with the generator's own refusal (exit $RC4_EMPTY_RC): $(head -2 <<<"$RC4_EMPTY_OUT")"
+fi
+RC4_NOEMPTY="$TMP/gen-no-empty-refusal.sh"
+sed 's%^.*refusing to generate a spec from nothing.*$%    || : # EMPTY REFUSAL REMOVED%' "$GEN" > "$RC4_NOEMPTY"
+RC4_MUTN="$(grep -c 'EMPTY REFUSAL REMOVED' "$RC4_NOEMPTY" || true)"
+if [ "$RC4_MUTN" -ne 1 ]; then
+  bad "the empty-refusal mutation applied $RC4_MUTN times, not 1 — the die moved, so the proof below is vacuous"
+else
+  ok "the mutation applies: the generator's empty-feed die is removed from a copy"
+  RC4_MUT_OUT="$(bash "$RC4_NOEMPTY" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaEMPTY --sha shaA 2>&1)" || true
+  # The mutant still reds — `selection produced ZERO contexts` is a downstream
+  # backstop — but it reds for the WRONG REASON, naming the selection rather
+  # than the empty feed that caused it. That difference is the whole point: the
+  # call-site die is what turns "the sample was unusable" into a diagnosis.
+  if grep -q "refusing to generate a spec from nothing" <<<"$RC4_MUT_OUT"; then
+    bad "the mutant STILL refuses by name — the mutation did not reach the clause under test, so the proof above is vacuous"
+  elif grep -q "selection produced ZERO contexts" <<<"$RC4_MUT_OUT"; then
+    ok "…and WITHOUT it the identical empty feed falls through to the downstream backstop, which blames the SELECTION instead of the feed"
+  else
+    bad "the mutant neither refused by name nor hit the backstop — the fixture no longer discriminates: $(head -2 <<<"$RC4_MUT_OUT")"
+  fi
+fi
+# NON-VACUITY OF THE EXPORT ABOVE. Every clause in this file runs with
+# BARKPARK_CHECK_RUNS_LIB set, so the DEFAULT resolution — the one every real
+# invocation and every other harness uses — would rot behind it unnoticed. Run
+# the healthy sample once with the handle unset.
+if env -u BARKPARK_CHECK_RUNS_LIB bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA --sha shaB >/dev/null 2>&1; then
+  ok "the generator finds the shared reader on its own with BARKPARK_CHECK_RUNS_LIB UNSET — the handle is a mutant accommodation, not the production path"
+else
+  bad "the generator cannot resolve scripts/lib/check-runs.sh without the harness's handle — every other caller (bp-merge, the drift workflow, CI) would be broken"
+fi
 if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA >/dev/null 2>&1; then
   bad "a single-sha sample was accepted without --allow-single-sha"
 else
@@ -1294,6 +1357,44 @@ if bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "
   bad "an unreadable check-run feed passed"
 else
   ok "an unreadable check-run feed FAILS (no PR to render names against = red, not green)"
+fi
+
+# ── AN EMPTY FEED IS NOT A DEADLOCK, AND THE REFUSAL THAT SAYS SO IS THIS
+#    CALLER'S ────────────────────────────────────────────────────────────────
+#
+# `rendered_names` now reads through scripts/lib/check-runs.sh, which returns an
+# empty feed as zero rows and exit 0 on purpose (the sampler needs that; see §4).
+# Drop the call-site refusal and the guard does not go quietly green — it goes
+# LOUDLY WRONG: zero rendered names makes every required context read as missing,
+# so an unusable feed is reported as exit 3 DEADLOCK, a formal accusation that
+# the committed spec names contexts the workflows never emit. scripts/bp-merge.sh
+# routes on that 3. Wrong state, right-looking red.
+RC8_EMPTY_RUNS="$TMP/runs-empty.json"
+echo '{ "check_runs": [] }' > "$RC8_EMPTY_RUNS"
+RC8_E_OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$RC8_EMPTY_RUNS" --sha probe 2>&1)" && RC8_E_RC=0 || RC8_E_RC=$?
+if [ "$RC8_E_RC" -eq 1 ] && grep -q "refusing to declare agreement against an empty feed" <<<"$RC8_E_OUT"; then
+  ok "an EMPTY check-run feed FAILS BY NAME (exit 1) — never a green, and never a deadlock verdict against the spec"
+else
+  bad "an empty check-run feed did not red with the guard's own refusal (exit $RC8_E_RC): $(grep -m2 -e FAIL -e DEADLOCK <<<"$RC8_E_OUT")"
+fi
+RC8_NOEMPTY="$TMP/verify-no-empty-refusal.sh"
+sed 's%^.*refusing to declare agreement against an empty feed.*$%    || : # EMPTY REFUSAL REMOVED%' "$VERIFY" > "$RC8_NOEMPTY"
+RC8_MUTN="$(grep -c 'EMPTY REFUSAL REMOVED' "$RC8_NOEMPTY" || true)"
+if [ "$RC8_MUTN" -ne 1 ]; then
+  bad "the empty-refusal mutation applied $RC8_MUTN times, not 1 — the fail moved, so the proof below is vacuous"
+else
+  ok "the mutation applies: the verifier's empty-feed fail is removed from a copy"
+  # --workflows/--prose for the reason §8b(d) writes down: the mutant lives in
+  # $TMP, so its own REPO_ROOT is the temp directory.
+  RC8_NEUTRAL="$TMP/rc8-prose-neutral"
+  mkdir -p "$RC8_NEUTRAL"
+  printf '%s\n' "Neutral corpus, naming no required context." > "$RC8_NEUTRAL/neutral.md"
+  RC8_M_OUT="$(bash "$RC8_NOEMPTY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$RC8_EMPTY_RUNS" --sha probe --workflows "$REPO_ROOT/.github/workflows" --prose "$RC8_NEUTRAL" 2>&1)" && RC8_M_RC=0 || RC8_M_RC=$?
+  if [ "$RC8_M_RC" -eq 3 ] && grep -q "DEADLOCK: the committed spec requires context(s) that head" <<<"$RC8_M_OUT"; then
+    ok "…and WITHOUT it the identical empty feed becomes a FALSE DEADLOCK (exit 3) blaming the spec — the fail-open the shared reader would have handed us"
+  else
+    bad "the unguarded verify did not reproduce the false deadlock (exit $RC8_M_RC) — the clause above may be reding for an unrelated reason: $(grep -m2 -e FAIL -e DEADLOCK <<<"$RC8_M_OUT")"
+  fi
 fi
 jq '.protection.required_status_checks.checks = []' "$TMP/enforced.json" > "$TMP/empty-spec.json"
 if bash "$VERIFY" --spec "$TMP/empty-spec.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe >/dev/null 2>&1; then
