@@ -7,13 +7,13 @@ Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root
 
 ## Golden Rules
 
-1. **NEVER compile without cleaning first.** Always `rm -rf api/_build/prod` before `mix compile` on the server. Use `make rebuild`.
-2. **NEVER partially clean.** Cleaning just `lib/barkpark` leaves stale HEEx templates. Nuke the entire `_build/prod`.
+1. **NEVER build by hand on prod.** `make rebuild` runs `scripts/deploy-rebuild.sh`: builds ASIDE in `api/_build_next`, migrates, swaps. Never `rm -rf api/_build/prod` (LIVE).
+2. **NEVER partially clean.** Subtree cleans leave stale HEEx; the engine nukes the whole aside root.
 3. **NEVER skip `systemctl restart`** after compiling. The old BEAM process stays in memory.
 4. **NEVER add blocking `<script>` in `<head>`** in root.html.heex. Use `async` at the bottom. (Lucide was 400KB blocking and killed page load.)
 5. **NEVER use `force_ssl` without HTTPS.** It causes 301 redirect loops. Currently disabled in prod.exs.
 6. **ALWAYS test after deploy.** At minimum: `curl http://localhost:4000/api/schemas`
-7. **`git pull` IS the deploy** — the `.githooks/post-merge` hook does the clean rebuild + restart (`make deploy` wraps the pull). For a manual recompile use `make rebuild`. Never raw `mix compile`.
+7. **`git pull` IS the deploy** (single-box): `.githooks/post-merge` runs `scripts/deploy-rebuild.sh`; `.slots` hosts: use `deploy/instance-deploy.sh`. Never raw `mix compile`.
 8. **The main checkout stays on `main` — ALWAYS. No branch jumps, period.** Never `git switch` / `git checkout <branch>` / `-b` / detached HEAD here — not even "briefly, then back." Code reaches this checkout one way only: merge to origin/main, then pull (`make update`). Need another branch? That IS the worktree signal: `git worktree add <dir> <branch>` (agents use EnterWorktree); remove it when the branch merges. Many concurrent sessions share this checkout — any switch strands or clobbers their work (uncommitted edits are silently lost on switch).
 
 ## Routing table
