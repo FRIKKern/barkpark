@@ -3142,6 +3142,28 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	stages := make([]map[string]any, 0, len(d.Stages))
 	for _, st := range siteStagesInOrder(d) {
 		row := map[string]any{"name": st.Name, "status": st.Status}
+		// WHEN the stage ran, which is the only thing on this row a script can do
+		// arithmetic with. `SiteStage` has carried both since the six-stage bar
+		// shipped and `Sites.Deploy.stages/1` folds them off each console entry's
+		// `at`, but this map built {name,status,detail} and dropped them — so
+		// `deploy/site-spawner-live-proof.sh`'s `stage_status_ms`, which reads
+		// exactly these two keys, could only ever return 0ms and the --prebuilt
+		// journey's BUILD-duration comparison red 52 on every run. The durations
+		// were never equal; they were MISSING.
+		//
+		// Each key is written only when the control plane sent it. A stage that
+		// never ran (the `pending` row siteStagesInOrder synthesizes off a lean
+		// payload) gets NEITHER — an invented zero renders "0001-01-01T00:00:00Z"
+		// and a reader differencing two of those gets a duration in millennia,
+		// which is worse than the absence it replaced. Same rule as
+		// `health_exit_code` one payload up: an absent field is an honest "nobody
+		// measured this".
+		if st.StartedAt != "" {
+			row["started_at"] = st.StartedAt
+		}
+		if st.FinishedAt != "" {
+			row["finished_at"] = st.FinishedAt
+		}
 		if st.Detail != "" {
 			row["detail"] = st.Detail
 		}
