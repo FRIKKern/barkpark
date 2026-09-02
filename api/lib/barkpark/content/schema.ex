@@ -172,6 +172,68 @@ defmodule Barkpark.Content.Schema do
     |> Repo.insert()
   end
 
+  @doc """
+  Run the FULL `upsert_schema/3` validation pipeline and return its verdict
+  WITHOUT touching the store — the server side of `POST /v1/schemas/:dataset`
+  with `validate_only: true` (task-19b7ca7ff92fb710 #21).
+
+  `bp schema apply --dry-run` is a CLIENT-side preview only: the global
+  `--dry-run` flag prints the resolved request and exits before the send
+  (`internal/cli/run.go`), so until now there was no way to ask the SERVER
+  "would this schema be accepted?" without also writing it. A caller who wanted
+  the answer had to write and then undo, which is not a validation, it is a
+  deploy.
+
+  Same gates as the write, in the same order, so a verdict here binds:
+
+    1. `Content.put_scope_attrs/2` — the fail-closed scope stamp. A refused
+       dataset resolution errors out of the `with` exactly as on the write
+       path, so nobody gets a green verdict for a scope the write would refuse.
+    2. The same upsert TARGET selection — an existing in-scope row of that name
+       becomes the changeset base, so an UPDATE is validated as an update
+       (partial payloads keep the stored values they omit); a row owned by
+       another workspace is not, because the write would insert there too.
+    3. `SchemaDefinition.changeset/2` + `Ecto.Changeset.apply_action/2` — every
+       cast / `validate_required` / `validate_inclusion` / desk-group rule the
+       write runs, applied in memory.
+
+  DELIBERATELY NOT CHECKED, because it is only knowable at the database: the
+  `unique_constraint`s on `(name, dataset_id)` and `(name, dataset)`.
+  `apply_action/2` never reaches Postgres, so a name collision still surfaces
+  on the real write. The verdict is "this payload is well-formed and in scope",
+  never "this write is guaranteed to succeed" — say so at any door that renders
+  it rather than letting a caller read it as a reservation.
+
+  Returns `{:ok, %SchemaDefinition{}}` — the unsaved struct the write WOULD
+  have produced — or `{:error, %Ecto.Changeset{}}` / the scope error, both of
+  which `Content.Errors` already renders in the write's own envelope shape.
+  """
+  @spec validate_schema(map(), String.t(), keyword()) ::
+          {:ok, SchemaDefinition.t()} | {:error, term()}
+  def validate_schema(attrs, dataset, opts \\ []) do
+    name = Map.get(attrs, "name") || Map.get(attrs, :name)
+
+    with {:ok, attrs} <-
+           attrs
+           |> Map.put("dataset", dataset)
+           |> Content.put_scope_attrs(opts) do
+      base =
+        case name && get_schema(name, dataset, opts) do
+          {:ok, existing} ->
+            if owned_by_other_workspace?(existing, attrs),
+              do: %SchemaDefinition{},
+              else: existing
+
+          _ ->
+            %SchemaDefinition{}
+        end
+
+      base
+      |> SchemaDefinition.changeset(attrs)
+      |> Ecto.Changeset.apply_action(if base.id, do: :update, else: :insert)
+    end
+  end
+
   # The cross-tenant ownership guard (pds-bl-bootstrap-cross-tenant-theft).
   #
   # An opts-less caller (Plugins.Bootstrap, Content.TagRegistry) reads through
