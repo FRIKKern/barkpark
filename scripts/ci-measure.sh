@@ -80,6 +80,7 @@ while [ $# -gt 0 ]; do
     --allow-mixed-concurrency) ALLOW_MIXED=1; shift ;;
     --sample) SAMPLE="${2:-}"; shift 2 ;;
     --selftest) MODE=selftest; shift ;;
+    --census) MODE=census; shift ;;
     -h|--help) usage ;;
     *) echo "ci-measure: unknown argument '$1'" >&2; usage ;;
   esac
@@ -417,6 +418,52 @@ FIX
   [ "$fail" -eq 0 ]
 }
 
+# ---------------------------------------------------------------------------
+# census — the run COUNT per day, per workflow, per trigger. Unlike compute,
+# this IS affordable as a true census: it comes from the paginated list
+# endpoint's `total_count`, one call per (workflow, day) or (workflow, event),
+# never from per-run job detail. So every number below is MEASURED, not sampled
+# and not scaled — which is exactly why it is reported separately from the
+# compute table rather than mixed into it.
+# ---------------------------------------------------------------------------
+census() {
+  local wfs day ev
+  wfs=$(gh api "repos/$REPO/actions/workflows?per_page=100" --jq '.workflows[] | "\(.id)\t\(.name)\t\(.path)"' 2>/dev/null)
+  [ -z "$wfs" ] && { echo "census: could not list workflows" >&2; return 1; }
+
+  echo "CI RUN CENSUS — $SINCE .. $UNTIL (MEASURED, not sampled: total_count from the list endpoint)"
+  echo
+  printf '%-34s%10s%10s%10s%10s\n' "workflow" "total" "pull_req" "push" "schedule"
+  local g_total=0 g_pr=0 g_push=0 g_sched=0
+  while IFS=$'\t' read -r id name path; do
+    [ -z "$id" ] && continue
+    local t pr pu sc
+    t=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&per_page=1" --jq '.total_count' 2>/dev/null); t=${t:-0}
+    [ "$t" -eq 0 ] && continue
+    pr=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&event=pull_request&per_page=1" --jq '.total_count' 2>/dev/null); pr=${pr:-0}
+    pu=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&event=push&per_page=1" --jq '.total_count' 2>/dev/null); pu=${pu:-0}
+    sc=$(gh api "repos/$REPO/actions/workflows/$id/runs?created=$SINCE..$UNTIL&event=schedule&per_page=1" --jq '.total_count' 2>/dev/null); sc=${sc:-0}
+    printf '%-34s%10s%10s%10s%10s\n' "$(basename "$path")" "$t" "$pr" "$pu" "$sc"
+    g_total=$((g_total+t)); g_pr=$((g_pr+pr)); g_push=$((g_push+pu)); g_sched=$((g_sched+sc))
+  done <<< "$wfs"
+  printf '%-34s%10s%10s%10s%10s\n' "TOTAL" "$g_total" "$g_pr" "$g_push" "$g_sched"
+  echo
+  echo "per-day totals (all workflows):"
+  local d="$SINCE"
+  while :; do
+    local dt
+    dt=$(gh api "repos/$REPO/actions/runs?created=$d..$d&per_page=1" --jq '.total_count' 2>/dev/null); dt=${dt:-0}
+    printf '  %s  %6s runs\n' "$d" "$dt"
+    [ "$d" = "$UNTIL" ] && break
+    d=$(python3 -c "import datetime,sys;print((datetime.date.fromisoformat(sys.argv[1])+datetime.timedelta(days=1)).isoformat())" "$d")
+    [ "$d" \> "$UNTIL" ] && break
+  done
+}
+
+if [ "$MODE" = census ]; then
+  [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --census needs --since and --until" >&2; usage; }
+  census; exit $?
+fi
 if [ "$MODE" = selftest ]; then selftest; exit $?; fi
 [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --since and --until are required" >&2; usage; }
 fetch | analyze "$SINCE" "$UNTIL" "$JSON" "$CONCURRENCY_LEDGER"

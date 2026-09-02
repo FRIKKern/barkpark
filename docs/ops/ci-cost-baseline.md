@@ -26,6 +26,83 @@ the concurrent-job ceiling went 10 to 20. Compute minutes are comparable; queue 
 | 2026-09-01 | 10 | 8,181 | 46 | 88.5 | 20.5 | 68 | 24 |
 | 2026-09-02 | 20 | 12,838 | 42 | 51.0 | 651.1 | 60 | 71 |
 
+## The run census — MEASURED, not sampled
+
+This table is a true census: run counts come from the list endpoint's `total_count`, one call per
+workflow, never from per-run job detail. Every number here is exact. It is reported separately from
+the compute table above precisely because that one is sampled and this one is not.
+
+**22,244 runs in four days.** 14,092 pull_request, 8,026 push, 114 schedule.
+
+**1,227 PR pushes produced 14,092 pull_request-triggered runs — 11.5 runs per push.**
+
+**Six workflows fire 1,853 times each**, the highest count in the repo and identical across all six:
+`elixir`, `cloud`, `compose-smoke`, `console-harness`, `required-checks-drift`, `security`. Identical
+totals mean they are not responding to what a change touched — they fire on every push of every PR
+(1,227) and every push to main (626). That is the shape of the "mess": six workflows, one trigger
+condition between them, 11,118 runs.
+
+| workflow | total | pull_request | push | schedule |
+|---|---|---|---|---|
+| `cloud.yml` | 1853 | 1227 | 626 | 0 |
+| `compose-smoke.yml` | 1853 | 1227 | 626 | 0 |
+| `console-harness.yml` | 1853 | 1227 | 626 | 0 |
+| `elixir.yml` | 1853 | 1227 | 626 | 0 |
+| `required-checks-drift.yml` | 1853 | 1227 | 626 | 0 |
+| `security.yml` | 1853 | 1227 | 626 | 0 |
+| `doc-gates.yml` | 1661 | 1115 | 546 | 0 |
+| `pr-task-gate.yml` | 1428 | 1428 | 0 | 0 |
+| `reland-check.yml` | 1227 | 1227 | 0 | 0 |
+| `architecture.yml` | 807 | 807 | 0 | 0 |
+| `crown-reconcile.yml` | 667 | 26 | 626 | 15 |
+| `stale-verdict-watch.yml` | 666 | 19 | 626 | 21 |
+| `breakglass-watch.yml` | 648 | 2 | 626 | 20 |
+| `go-tests.yml` | 635 | 515 | 120 | 0 |
+| `shell-harnesses.yml` | 575 | 193 | 382 | 0 |
+| `pr-meta.yml` | 562 | 407 | 155 | 0 |
+| `deploy.yml` | 430 | 0 | 429 | 0 |
+| `go-format.yml` | 321 | 212 | 109 | 0 |
+| `task-lease-renew.yml` | 308 | 308 | 0 | 0 |
+| `release-artifact.yml` | 255 | 0 | 255 | 0 |
+| `landed-mark.yml` | 229 | 0 | 229 | 0 |
+| `js-tests.yml` | 78 | 51 | 27 | 0 |
+| `typedoc.yml` | 77 | 51 | 26 | 0 |
+| `grip-suite.yml` | 67 | 40 | 27 | 0 |
+| `mobile.yml` | 57 | 43 | 14 | 0 |
+| `twoslash.yml` | 53 | 53 | 0 | 0 |
+| `ci.yml` | 47 | 33 | 14 | 0 |
+| `sheet-grid-js.yml` | 45 | 33 | 12 | 0 |
+| `paper-editor.yml` | 35 | 28 | 7 | 0 |
+| `pdrender-wasm.yml` | 33 | 23 | 10 | 0 |
+| `search-template-gates.yml` | 33 | 33 | 0 | 0 |
+| `deploy-harnesses.yml` | 32 | 32 | 0 | 0 |
+| `main-gate-watch.yml` | 21 | 0 | 0 | 21 |
+| `search-starter-smoke.yml` | 21 | 10 | 7 | 4 |
+| `create-quickstart-smoke.yml` | 19 | 14 | 5 | 0 |
+| `absent-context-census.yml` | 14 | 0 | 0 | 14 |
+| `cp-ops.yml` | 11 | 0 | 0 | 0 |
+| `astro-finder-drift.yml` | 7 | 5 | 2 | 0 |
+| `scaffy-catalog-drift.yml` | 7 | 0 | 3 | 4 |
+| `chronicle-paper.yml` | 6 | 2 | 0 | 4 |
+| `research-coverage-suite.yml` | 6 | 3 | 3 | 0 |
+| `web-fork-drift.yml` | 6 | 4 | 2 | 0 |
+| `astro-search-finder-test.yml` | 5 | 3 | 2 | 0 |
+| `connectors.yml` | 4 | 3 | 1 | 0 |
+| `paper-readers.yml` | 4 | 0 | 0 | 4 |
+| `plugin-node.yml` | 4 | 3 | 1 | 0 |
+| `studio-journey-smoke.yml` | 4 | 0 | 0 | 4 |
+| `weekly-changelog.yml` | 3 | 2 | 0 | 1 |
+| `bp-graph-drift.yml` | 2 | 1 | 1 | 0 |
+| `cli-release.yml` | 2 | 0 | 2 | 0 |
+| `sdk-tests.yml` | 2 | 1 | 1 | 0 |
+| `codebase-intel.yml` | 1 | 0 | 0 | 1 |
+| `renew-mail-cert.yml` | 1 | 0 | 0 | 1 |
+| **TOTAL** | **22,244** | **14,092** | **8,026** | **114** |
+
+Per-day totals, all workflows: 30 (08-30), 4,583 (08-31), 8,181 (09-01), **12,854 (09-02)**.
+
+Reproduce with `bash scripts/ci-measure.sh --census --since <d> --until <d>`.
+
 ## The two findings that should drive the work
 
 **1. 36.5% of sampled jobs executed nothing** — 142 of 389. They were cancelled while still
