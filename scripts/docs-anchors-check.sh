@@ -164,6 +164,19 @@ if [ "$MODE" = selftest ]; then
   st_case "missing anchor path reds" 1 "anchors missing path: api/lib/gone.ex" '
     printf -- "- api/lib/gone.ex — def whatever\n" >> "$FIX/docs/cards/a.md"'
 
+  # §3 NON-VACUITY (silent-w9). Before these arms, a card could keep its
+  # '## Code anchors' heading, lose every bullet under it, and the section
+  # printed its header and no verdict while the gate exited 0 — a green that
+  # audited nothing. Both shapes of blindness are pinned: bullets deleted, and
+  # bullets reformatted so the `/^- /` parser stops seeing them.
+  st_case "a card with an EMPTY Code anchors section reds" 1 "ZERO parseable anchor lines" '
+    sed "/^- api\/lib\/x.ex/d" "$FIX/docs/cards/a.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/cards/a.md"'
+  st_case "anchor bullets the parser cannot see red rather than passing silently" 1 "ZERO parseable anchor lines" '
+    sed "s|^- api/lib/x.ex|* api/lib/x.ex|" "$FIX/docs/cards/a.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/cards/a.md"'
+  # The counter is a MEASUREMENT, so a passing tree must state it. If this arm
+  # ever needs its number edited, §3's corpus moved and somebody should know.
+  st_case "a passing §3 states how many anchor lines it read" 0 "§3 checked 1 anchor line(s) across 1 card(s)" ':'
+
   # §1 / §2 / §3b — DEFECT B: an empty grep result must NAME the outcome, never
   # abort the run under `set -euo pipefail` and skip §3c-§8.
   st_case "unresolvable routing target reds" 1 "routing-table target does not resolve: docs/cards/ghost.md" '
@@ -491,12 +504,40 @@ for e in $INDEX_ENTRIES; do
 done
 
 # --- 3. card Code anchors ---------------------------------------------------
+# NON-VACUITY (silent-w9). Until this counter existed, §3 asserted only that the
+# '## Code anchors' HEADING was present — never that it contained a single
+# anchor. Empty the bullet list (or reformat the bullets so `/^- /` stops
+# matching) and the awk below emits nothing, the `while` body never runs, no
+# FAIL is written, and the section prints its header and NOTHING ELSE while the
+# gate exits 0. PROVEN by mutation on a fixture card: deleting the one anchor
+# bullet and keeping the heading printed `== card Code anchors ==` followed by
+# no verdict at all, and `docs-anchors-check: PASS`. That is the exact shape the
+# doc contract leans on — "touched a file a card anchors? update the card or
+# docs-anchors-check.sh fails" — so a card that quietly loses its anchor list
+# disarms the gate for itself and reads identical to a card that passed.
+# §3b one section below ALREADY names its empty case out loud; §3 did not.
+# The counters are asserted, not merely printed: a total of zero over a
+# non-empty card set is a scanner that went blind, not a clean tree.
 echo "== card Code anchors =="
+CARDS_WITH_ANCHORS=0
+ANCHOR_LINES_TOTAL=0
 for card in docs/cards/*.md; do
   if ! grep -q '^## Code anchors' "$card"; then
     fail "$card has no '## Code anchors' section"
     continue
   fi
+  CARDS_WITH_ANCHORS=$((CARDS_WITH_ANCHORS + 1))
+  # How many anchor lines the parser will actually SEE. Counted here, in the
+  # parent shell, because the `while` below reads from a pipe and runs in a
+  # subshell whose counters cannot escape. `grep -c .` prints 0 and exits 1 on
+  # no match, so `|| true` keeps the substitution alive under `set -e` while
+  # stdout stays a single integer.
+  card_anchor_lines=$(awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$card" | grep -c . || true)
+  if [ "$card_anchor_lines" -eq 0 ]; then
+    fail "$card has a '## Code anchors' section but ZERO parseable anchor lines under it (expected \`- <path> — <description>\` bullets). An empty section is not a card with nothing to anchor: it is a card this gate cannot check, and it passes silently."
+    continue
+  fi
+  ANCHOR_LINES_TOTAL=$((ANCHOR_LINES_TOTAL + card_anchor_lines))
   # anchor lines: "- <path> — <description with optional func/def/defmodule symbols>"
   awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$card" |
   while IFS= read -r line; do
@@ -542,6 +583,13 @@ for card in docs/cards/*.md; do
   if grep -q '^FAIL:' /tmp/anchors-out.$$; then FAIL=1; fi
   rm -f /tmp/anchors-out.$$
 done
+
+# The sample size, out loud AND asserted. A green §3 that cannot say how many
+# anchors it read is indistinguishable from a §3 that read none.
+echo "ok:   §3 checked $ANCHOR_LINES_TOTAL anchor line(s) across $CARDS_WITH_ANCHORS card(s)"
+if [ "$CARDS_WITH_ANCHORS" -gt 0 ] && [ "$ANCHOR_LINES_TOTAL" -eq 0 ]; then
+  fail "§3 found $CARDS_WITH_ANCHORS card(s) with a '## Code anchors' section and NOT ONE anchor line among them — the anchor parser is blind, not the corpus clean."
+fi
 
 # --- 3b. Code anchors in NON-card agent docs (path existence) ---------------
 # Cards (3 above) are fully validated, but other docs carrying a '## Code
