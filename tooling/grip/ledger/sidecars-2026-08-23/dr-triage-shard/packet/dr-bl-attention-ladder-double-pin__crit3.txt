@@ -1,0 +1,1 @@
+go-tests.yml's paths filter covers internal/cli/testdata/** and cloud/priv/static/__fixtures__/**, proved by a fixture-only commit that now runs the Go suite

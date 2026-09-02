@@ -1,0 +1,1 @@
+The existing tripwire in deploy_ledger_test.exs is updated to the new arithmetic rather than deleted

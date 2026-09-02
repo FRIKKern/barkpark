@@ -1,0 +1,1 @@
+The control plane is NOT inserted into the `barkparks` table. The PR body states in one sentence why (charter D398: the table is team-scoped and arms DELETE / self-update / studio-link / app-token against every row) and pastes `select count(*) from barkparks` unchanged, or the equivalent test assertion.

@@ -1,0 +1,1 @@
+Creating a task with an empty or absent acceptance_criteria under the scoped parent is REJECTED with a message naming the field. Evidence: the rejected create and its error.

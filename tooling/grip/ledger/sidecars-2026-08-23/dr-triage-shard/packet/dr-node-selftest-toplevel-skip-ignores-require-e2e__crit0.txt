@@ -1,0 +1,1 @@
+deploy/site-deploy-node.sh:653-655 hard-fails with exit 1 and a FAIL line naming the missing binary when BARKPARK_SELFTEST_REQUIRE_E2E=1, matching the flock gate at :1388-1392. Evidence: a run with python3 masked off PATH under the flag exiting non-zero, and the same run without the flag still printing the honest SKIP + PASS.

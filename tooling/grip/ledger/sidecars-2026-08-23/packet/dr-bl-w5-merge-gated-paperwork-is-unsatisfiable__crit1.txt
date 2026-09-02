@@ -1,0 +1,1 @@
+The four unsatisfiable "the PR body states X" criteria are RETIRED or rewritten as post-merge derivations, and a standing line is added to the charter so no future slice writes one.

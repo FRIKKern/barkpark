@@ -1,0 +1,1 @@
+Both gates still RED on a planted literal and still PASS on clean files - the floor added no false positive at all.

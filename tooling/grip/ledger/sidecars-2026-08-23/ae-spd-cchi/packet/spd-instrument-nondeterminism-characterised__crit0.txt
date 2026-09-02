@@ -1,0 +1,1 @@
+N>=20 runs against a frozen served build, stderr captured on every invocation, with a full outcome classification table pasted

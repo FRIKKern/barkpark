@@ -1,0 +1,1 @@
+The behaviour is pinned by a test: a tag rationale below the minimum is refused with a message naming rationale length, and one at the minimum publishes.

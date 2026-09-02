@@ -1,0 +1,1 @@
+The OSC hole (\e]0;t\ain + api_key=, which leaks under BOTH orders because stripping leaves `inapi_key=` and blocks the scrub's lookbehind) is either fixed or filed by name, and the PR body says which.

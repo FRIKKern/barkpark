@@ -1,0 +1,1 @@
+GET /v1/graph/:id at the default perspective no longer returns the title of a document that has no published revision — proven by a test over a draft-only id.

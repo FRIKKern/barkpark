@@ -1,0 +1,1 @@
+A harness case reproduces a wedged endpoint (or an equivalent injected daemon refusal) and proves the new handling fires - FAIL-BEFORE and FIX-AFTER pasted.

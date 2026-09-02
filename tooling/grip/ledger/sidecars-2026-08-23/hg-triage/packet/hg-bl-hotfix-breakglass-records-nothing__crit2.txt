@@ -1,0 +1,1 @@
+The ledger auto-file is DELETED and the override is recorded through the built-in GITHUB_TOKEN (PR comment and/or labelled issue). BARKPARK_TASK_TOKEN is NOT provisioned. Evidence: the diff plus a recorded override.

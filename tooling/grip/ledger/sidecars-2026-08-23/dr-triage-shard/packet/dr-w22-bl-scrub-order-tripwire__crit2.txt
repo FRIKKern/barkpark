@@ -1,0 +1,1 @@
+The check runs inside a REQUIRED context (Cloud gate), not an advisory job, and the PR body names the context and shows it reporting

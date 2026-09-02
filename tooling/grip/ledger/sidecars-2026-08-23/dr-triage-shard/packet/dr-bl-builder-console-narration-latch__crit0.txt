@@ -1,0 +1,1 @@
+A build whose console narration latched OFF is DISTINGUISHABLE from a build that simply produced few lines — the latch is recorded somewhere a reader can reach, not only on the builder's stderr.

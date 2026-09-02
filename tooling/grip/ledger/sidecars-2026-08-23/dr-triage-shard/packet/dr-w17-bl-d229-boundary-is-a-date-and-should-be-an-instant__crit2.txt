@@ -1,0 +1,1 @@
+The slide hazard is recorded: the boundary's first hour holds 4 rows, so a retention pass would move it and silently disarm every cross-boundary refusal

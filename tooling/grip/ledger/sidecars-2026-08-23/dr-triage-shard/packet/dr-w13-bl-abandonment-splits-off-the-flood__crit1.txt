@@ -1,0 +1,1 @@
+A routine (non-abandonment) failure still dispatches deployment_failed unchanged — the split does not reclassify the flood

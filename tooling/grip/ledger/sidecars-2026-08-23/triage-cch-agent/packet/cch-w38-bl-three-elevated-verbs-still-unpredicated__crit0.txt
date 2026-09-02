@@ -1,0 +1,1 @@
+Re-derived on origin/main at the time this row is taken, not quoted from this description: the three verbs are still offered to a member. Evidence: the browser frame with location.port and me.role stamped in the SAME evaluated object.

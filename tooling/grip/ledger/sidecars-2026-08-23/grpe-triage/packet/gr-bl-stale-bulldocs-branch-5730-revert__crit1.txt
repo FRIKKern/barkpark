@@ -1,0 +1,1 @@
+Before merge, either rebase the branch onto current origin/main and drop the stale workflow delta, or update its PR so the workflow file is excluded; preserve unrelated intended changes.

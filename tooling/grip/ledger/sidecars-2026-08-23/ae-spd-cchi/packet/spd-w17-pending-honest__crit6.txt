@@ -1,0 +1,1 @@
+cd api && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_web/live/studio test/barkpark_web/components is GREEN and mix format --check-formatted passes

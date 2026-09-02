@@ -1,0 +1,1 @@
+The seven smoke scenarios this conversion would red WITHOUT s1's fixture are green, and the PR body records that dependency as the reason the slice was sequenced. Evidence: `node cloud/priv/static/__preview__/smoke.mjs` fully green, plus the recorded before-state.

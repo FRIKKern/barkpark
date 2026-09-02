@@ -1,0 +1,1 @@
+THE LIMIT IS STATED IN THE GUARD'S OWN HEADER AND IN THE PR BODY: the list is source-editable like EXPECT, so this is LOUD, not unbypassable; and R3/R4 simulate the fix by editing PIN judgements because the census cannot see a real client predicate (D430), so this is not the drift arm. Evidence: the header text and the PR paragraph.

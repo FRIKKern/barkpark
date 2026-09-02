@@ -1,0 +1,1 @@
+The defect is REPRODUCED in a browser: the providers card painted, the credential modal opened over it through the launch wizard, and the numbers written down - which element #cred-submit resolves to, what readCredentialFields() returns, and what the person sees after pressing the button.

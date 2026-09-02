@@ -1,0 +1,1 @@
+A refusal is still VISIBLE to a human — it is never silently swallowed, whatever colour it ends up. Evidence: the rendered check-run title/annotation on a refusing run.

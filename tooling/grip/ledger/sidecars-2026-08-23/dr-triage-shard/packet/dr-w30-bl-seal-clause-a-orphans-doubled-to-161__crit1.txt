@@ -1,0 +1,1 @@
+The orphan population is broken down by shape: shipped-but-open, zero-criteria-met, no-criteria-at-all, and draft twins — each with its count and its as_of. Evidence: the breakdown.

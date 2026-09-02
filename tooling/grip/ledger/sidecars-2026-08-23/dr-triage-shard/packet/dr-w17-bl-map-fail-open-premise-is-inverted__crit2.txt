@@ -1,0 +1,1 @@
+The zero-impact fact is recorded on the row: zero place-directory sites, zero of 31,137 rows, and a live /proc environ read over 11 slots showing no NEXT_PUBLIC_* or LISTINGS_TYPE — so the fix moves the reported rate by 0.00 pp

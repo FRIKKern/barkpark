@@ -1,0 +1,1 @@
+The <:empty_state> slot is FILLED at the sole studio_editor_shell call site, located by selector rather than by line number, and clear_paper_view/1 and setup_paper_view/2 are unchanged - shown by git diff.

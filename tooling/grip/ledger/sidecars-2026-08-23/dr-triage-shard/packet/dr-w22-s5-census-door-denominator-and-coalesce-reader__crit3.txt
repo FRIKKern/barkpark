@@ -1,0 +1,1 @@
+`cloudclient.DeployCensus` gains a `Coalesced` field and `-o table` renders it. `bp cloud deployments -o table | grep -c coalesced` is > 0 in the PR body — built from `git archive origin/main` with `CGO_ENABLED=0`, per charter D396, and the PR body pastes the build recipe used.

@@ -1,0 +1,1 @@
+All four rows are re-claimed on their `claim.previous_worker` identity and the NEW epoch is read back from each re-claim response, not reused from this brief.

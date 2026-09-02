@@ -1,0 +1,1 @@
+The three states are distinguished and MUTATION-PROVEN: nil renders nothing, measured 0.0 renders a real zero, positive renders itself. Evidence: the three test cases with their outputs, plus a demonstration that collapsing nil and 0.0 makes a test FAIL (mutate, do not read).

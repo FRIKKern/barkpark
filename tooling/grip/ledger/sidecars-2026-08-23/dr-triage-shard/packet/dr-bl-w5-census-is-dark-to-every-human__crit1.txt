@@ -1,0 +1,1 @@
+`GET /v1/operator/deploy-ledger/census?from=..&to=..` returns 200 over a pinned window for that human, and the numbers MATCH what `DeployLedger.census/2` returns via rpc for the same pin -- proving the HTTP layer (param parsing + serialisation), which is still unproven end to end.

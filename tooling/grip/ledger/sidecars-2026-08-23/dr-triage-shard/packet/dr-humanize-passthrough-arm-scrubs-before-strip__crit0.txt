@@ -1,0 +1,1 @@
+FailureCopy.humanize/1 runs strip_ansi/1 BETWEEN classify/1 and scrub/1, and the moduledoc explains why neither first nor last is correct (classifier prefixes vs the pass-through arm).

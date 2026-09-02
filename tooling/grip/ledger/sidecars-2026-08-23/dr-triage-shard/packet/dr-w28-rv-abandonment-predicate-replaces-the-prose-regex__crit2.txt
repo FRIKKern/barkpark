@@ -1,0 +1,1 @@
+Prove by MUTATION that a reword of abandonment_reason/3 no longer silently degrades a stamped abandonment to BOX_BUSY_409.

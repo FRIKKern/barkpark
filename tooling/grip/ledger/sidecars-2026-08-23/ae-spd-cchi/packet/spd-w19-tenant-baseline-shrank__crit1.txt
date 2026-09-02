@@ -1,0 +1,1 @@
+After re-baselining, bash scripts/tenant-scope-check.sh PASSES with the count dropped to 46 and no shrank-NOTE — output quoted.

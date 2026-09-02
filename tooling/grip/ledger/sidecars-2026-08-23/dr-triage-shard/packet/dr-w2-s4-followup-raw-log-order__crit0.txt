@@ -1,0 +1,1 @@
+Every raw-log read path in cloud/lib that renders an unclassified capture uses strip_ansi then scrub; humanize/1 keeps classify then scrub then strip_ansi. Enumerate the paths found by grep -rn scrub cloud/lib.

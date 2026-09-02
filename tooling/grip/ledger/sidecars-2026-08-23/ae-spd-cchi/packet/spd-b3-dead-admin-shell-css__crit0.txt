@@ -1,0 +1,1 @@
+The dead .sidebar/.main layout rules are deleted while .sidebar-brand-icon (the one live consumer) still renders correctly

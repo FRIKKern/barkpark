@@ -1,0 +1,1 @@
+#10811 is rebased onto current origin/main and its three conflicts are resolved, with the floor-pin conflict resolved to main's side rather than to the PR's stale 227. Evidence: the rebase and the resolved hunk.

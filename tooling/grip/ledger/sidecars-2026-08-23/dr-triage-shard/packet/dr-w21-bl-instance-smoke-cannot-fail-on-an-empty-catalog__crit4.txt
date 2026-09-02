@@ -1,0 +1,1 @@
+Charter D344's sentence is re-cut from "the instance job is already correct" to "the instance job covers the dead-pool class and nothing else", and scripts/check-deploy-smoke.sh's header prose (lines 22-25) is amended to match.

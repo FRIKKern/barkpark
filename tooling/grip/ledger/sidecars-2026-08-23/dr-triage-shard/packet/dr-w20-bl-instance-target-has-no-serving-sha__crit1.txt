@@ -1,0 +1,1 @@
+A box reading `current` while N commits behind is impossible: the reading is proven able to go UP on a real stale box (four exist today at 213/578/872/2,454), with the before/after pasted.

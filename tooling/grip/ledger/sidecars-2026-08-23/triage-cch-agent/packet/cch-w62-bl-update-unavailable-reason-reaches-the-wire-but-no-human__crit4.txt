@@ -1,0 +1,1 @@
+bp cloud status renders UpdateUnavailableReason beside UpdateCheckedAt and NEVER renders an empty reason as fine; a Go test pins both the present and the empty case.

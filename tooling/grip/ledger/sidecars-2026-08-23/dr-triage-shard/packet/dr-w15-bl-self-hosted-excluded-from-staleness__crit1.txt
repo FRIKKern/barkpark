@@ -1,0 +1,1 @@
+If the answer is yes: the scan includes it and a test drives the latch on a self_hosted fixture; if no: a comment at registry.ex:757 states WHY, so the next reader does not re-discover it as a bug

@@ -1,0 +1,1 @@
+**/*.heex is in BOTH blocks, and the commit body states plainly that this gap is PROSPECTIVE: zero .heex files exist outside api/lib/barkpark_web/ today.

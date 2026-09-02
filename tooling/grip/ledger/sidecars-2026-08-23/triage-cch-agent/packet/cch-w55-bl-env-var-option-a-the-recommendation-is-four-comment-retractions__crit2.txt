@@ -1,0 +1,1 @@
+`env`'s status as a permanently-reserved discarded claim key is recorded where the custody manifest's next reader will find it, so the reservation is not re-litigated. Evidence: the manifest hunk or the D-row.

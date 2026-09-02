@@ -1,0 +1,1 @@
+A DRIVEN recovery proof, not a presence proof: render the unknown arm, click the shared retry control, resolve /v1/me 200 owner, and assert the owner affordance RETURNS on every surface that control serves. The assertion must RED when the retry is disconnected — quote that mutation red, because a fixture that cannot produce the recovery makes the guard green by construction.

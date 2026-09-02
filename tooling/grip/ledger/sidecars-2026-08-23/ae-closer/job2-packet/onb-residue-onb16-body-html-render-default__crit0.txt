@@ -1,0 +1,1 @@
+The current default rendering path for a style-less published doc is characterized with a quoted before screenshot or HTML excerpt

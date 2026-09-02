@@ -1,0 +1,1 @@
+The declaration is mutation-proved: removing the reader's assertion reds a blocking context

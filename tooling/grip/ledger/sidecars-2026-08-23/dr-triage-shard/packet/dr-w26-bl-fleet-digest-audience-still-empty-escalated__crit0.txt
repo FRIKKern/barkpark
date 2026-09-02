@@ -1,0 +1,1 @@
+deliver_fleet_digest/1 with an empty audience is a LOUD refusal, not {:ok, :no_admins} recorded as `completed`.

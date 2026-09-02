@@ -1,0 +1,1 @@
+The eight narrower-than-slug ERRORS entries are pinned BY KEY with a one-line reason each, and the gate reds on a member ADDED or REMOVED — never a count. Evidence: the pin list plus both mutation directions.

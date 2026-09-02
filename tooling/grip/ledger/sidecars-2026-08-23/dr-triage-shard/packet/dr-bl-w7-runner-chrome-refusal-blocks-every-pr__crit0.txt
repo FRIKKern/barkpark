@@ -1,0 +1,1 @@
+The behaviour is REPRODUCED or its absence is proven: either a linked check-run showing a refusal-driven Console gate red, or evidence that the chosen fix makes one impossible. Evidence: the job URL and the verbatim refusal line.

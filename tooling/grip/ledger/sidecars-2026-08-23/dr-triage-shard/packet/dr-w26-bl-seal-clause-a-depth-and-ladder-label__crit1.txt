@@ -1,0 +1,1 @@
+Forwarding recurses too — a row correctly forwarded to a GRANDCHILD of the successor currently reads as an orphan (a false FAIL beside the false PASS).

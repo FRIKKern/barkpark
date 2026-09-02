@@ -1,0 +1,1 @@
+render.ex grows a trial_expiring arm whose copy derives from the same payload the email reads, routed through FailureCopy.humanize/1 or an equivalent scrub — never the raw detail (D340 scrub-boundary trap).

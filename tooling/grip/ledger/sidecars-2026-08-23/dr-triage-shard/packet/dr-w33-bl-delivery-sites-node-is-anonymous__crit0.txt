@@ -1,0 +1,1 @@
+The delivery site node carries site identity beyond the UUID, using the SAME shape dr-w32-followup-coverage-names-no-site settled on rather than a second one. Evidence: the shared shape named, and the diff.

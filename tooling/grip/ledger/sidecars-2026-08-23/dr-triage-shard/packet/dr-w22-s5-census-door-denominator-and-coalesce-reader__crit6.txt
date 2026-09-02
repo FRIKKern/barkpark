@@ -1,0 +1,1 @@
+`cd cloud && CC=clang MIX_ENV=test mix test <the new test>` green, and `CC=/usr/bin/clang go build ./... && go test ./internal/cli/...` green — pasted with real exit codes.

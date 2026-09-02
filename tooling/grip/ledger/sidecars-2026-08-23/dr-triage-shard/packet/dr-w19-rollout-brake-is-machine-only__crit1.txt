@@ -1,0 +1,1 @@
+The empty-audience census's empty? predicate is REVISITED under whichever ruling was chosen: if (a), the new route's tier is asserted; if (b), the census reds on tier 'worker' for human-facing signals and a test proves it reds. A ruling that leaves the census unchanged has not closed this row.

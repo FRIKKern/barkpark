@@ -1,0 +1,1 @@
+A fixture can PRODUCE an unregistered content-bound site, so the coverage number can lose

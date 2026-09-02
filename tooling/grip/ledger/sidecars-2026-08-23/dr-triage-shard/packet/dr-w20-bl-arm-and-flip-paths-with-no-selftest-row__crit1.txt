@@ -1,0 +1,1 @@
+The node engine gains a fixture that drives a rejecting caddy through SWITCH and asserts its fail-closed exit 16.

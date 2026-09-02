@@ -1,0 +1,1 @@
+No percentage is printed without its unit: a test asserts the rendered attribution sentence names whether it is a share of ROWS or of SECONDS.

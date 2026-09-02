@@ -1,0 +1,1 @@
+Each gate --selftest gains a case that copies the script out of the tree and asserts the relocated copy REDS naming the floor, and each case is mutation-proven by setting that floor to 0.

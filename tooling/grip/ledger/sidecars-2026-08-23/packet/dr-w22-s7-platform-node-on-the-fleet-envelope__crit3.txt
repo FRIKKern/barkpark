@@ -1,0 +1,1 @@
+THE RESTART TEST: a test proves `first_seen_at` does NOT move when the sha is unchanged and DOES move when it changes. The PR body pastes both assertions and states that today's `serving_since` is improvable by a `docker restart` (health.ex:54, :68).

@@ -1,0 +1,1 @@
+The predicate is rect-based, not element-local scrollWidth — and the row records that scrollWidth == clientWidth under this defect, so the old predicate was blind independently of the selector. Evidence: both numbers.

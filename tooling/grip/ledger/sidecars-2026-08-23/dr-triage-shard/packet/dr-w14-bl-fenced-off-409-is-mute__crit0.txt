@@ -1,0 +1,1 @@
+A wrong-epoch close returns a message naming the CURRENT epoch and the recovery step, and a test pins that the body is non-empty

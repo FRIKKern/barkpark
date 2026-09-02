@@ -1,0 +1,1 @@
+The two implementations are converged onto ONE predicate carrying ONE `@canonical capability:console-authority-predicate` marker above its PUBLIC entry point, and the loser is DELETED. Verify by run: `grep -rn '@canonical capability:console-authority-predicate'` returns exactly one hit and `bash scripts/docs-anchors-check.sh` exits 0 — quote both.

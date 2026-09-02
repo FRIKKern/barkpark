@@ -1,0 +1,1 @@
+bp is available to the runner (make cli-install step or released binary), proven by a run log.

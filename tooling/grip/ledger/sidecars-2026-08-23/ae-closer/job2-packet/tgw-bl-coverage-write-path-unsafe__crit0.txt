@@ -1,0 +1,1 @@
+A planted provenance key survives a record() fold, via an explicit allowlist rather than a blind spread - evidence: paste the before (absent) and after (present) mutation runs

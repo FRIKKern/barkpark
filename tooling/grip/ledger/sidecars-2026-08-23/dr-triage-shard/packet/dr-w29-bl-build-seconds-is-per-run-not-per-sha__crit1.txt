@@ -1,0 +1,1 @@
+That meaning is pinned by a test that reds if a future recorder changes which rows share the value. Evidence: the test and a mutation proving it can lose.

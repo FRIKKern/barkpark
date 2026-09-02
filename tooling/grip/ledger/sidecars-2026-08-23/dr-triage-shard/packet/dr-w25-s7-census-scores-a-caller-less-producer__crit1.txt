@@ -1,0 +1,1 @@
+The two caller-less literals carry allowlist rows with reasons: /v1/internal/barkparks as `:called_out_of_corpus` naming internal/cli/hetzner_instance_cmd.go and the refusal in cloud-path-escape-check.sh's prose; /v1/internal/platform-deliveries as `:no_caller` naming dr-w25-s8-crown-gets-its-writer as the slice that deletes the row. Paste both rows.

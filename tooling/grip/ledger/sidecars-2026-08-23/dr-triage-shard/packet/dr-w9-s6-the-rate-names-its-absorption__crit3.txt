@@ -1,0 +1,1 @@
+CONDITIONAL ON #10014: if @basis_attempted and rate/3 are on main when you build, absorption's basis equals failure_rate's basis and differs from the terminal-rate node, asserted by a test; if they are NOT on main, absorption uses rate/2 and this criterion is stamped --miss with a note naming #10014 as the blocker

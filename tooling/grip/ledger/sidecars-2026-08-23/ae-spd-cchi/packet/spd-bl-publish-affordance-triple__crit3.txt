@@ -1,0 +1,1 @@
+A hand-created paper can be taken from draft to published entirely through the UI, with each wall refusal surfaced in plain language rather than as a raw error atom - proven by a walk whose output is quoted.

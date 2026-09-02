@@ -1,0 +1,1 @@
+seal-predicate.mjs's header and its four reasoning comments describe what the file ACTUALLY spawns: the two entries in KNOWN_DEFECTS, named. Evidence: the diff plus `grep -n 'guard:' cloud/priv/static/__preview__/seal-predicate.mjs` showing the register agrees with the prose.

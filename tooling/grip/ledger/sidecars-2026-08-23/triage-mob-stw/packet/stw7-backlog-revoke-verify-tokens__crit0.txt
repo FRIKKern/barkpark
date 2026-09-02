@@ -1,0 +1,1 @@
+Both api_tokens (labels stw7-verify-public-read, ws-live-query-proof-verifier) deleted from guerrilla; a search with each token now 401/403s

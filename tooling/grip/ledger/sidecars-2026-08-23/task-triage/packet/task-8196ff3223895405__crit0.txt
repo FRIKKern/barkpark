@@ -1,0 +1,1 @@
+--selftest is invoked from doc-gates.yml.

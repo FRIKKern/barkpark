@@ -1,0 +1,1 @@
+A browser drive shows an owner with a delayed /v1/me reaching the owner surface, and an owner with a FAILED /v1/me told we could not check rather than refused — both readings stamping location.port and me.role. Evidence: the returned JSON.

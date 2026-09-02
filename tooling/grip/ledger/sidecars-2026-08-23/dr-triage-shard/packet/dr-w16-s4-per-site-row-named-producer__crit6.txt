@@ -1,0 +1,1 @@
+A comment on site_row/2 records D199's clause-union trap: a second clause emitting a different key set would be GREEN, so the producer stays single-clause

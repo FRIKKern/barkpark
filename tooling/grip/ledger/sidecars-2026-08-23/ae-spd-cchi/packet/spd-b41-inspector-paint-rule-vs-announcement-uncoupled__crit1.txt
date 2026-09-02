@@ -1,0 +1,1 @@
+The pin is proven non-vacuous by mutation: change the CSS rule to exclude one more bucket, watch it RED, revert, watch it GREEN — both runs pasted

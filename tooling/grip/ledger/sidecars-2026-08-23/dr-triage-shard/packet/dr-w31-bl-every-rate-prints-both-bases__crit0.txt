@@ -1,0 +1,1 @@
+census/3 emits BOTH rate_on_volume and rate_on_settled, each with its own denominator printed, and the full partition volume|failed|live|deferred|in_flight|cancelled|residual travels with them.

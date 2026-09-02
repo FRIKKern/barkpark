@@ -1,0 +1,1 @@
+MUTATION PROOF: reverting the new guard lets the delete through again and reds the test — proven by creating a draft-only doc, discarding it, and asserting it still resolves. A green that cannot go red does not prove the footgun is closed.

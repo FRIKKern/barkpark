@@ -1,0 +1,1 @@
+Every enumerated desk row kind has a row in the table recording element id, VISIBLE LABEL, and outcome (URL patch / aria-current move / new pane / HTTP status / press count / nothing) in the same row.

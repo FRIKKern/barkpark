@@ -1,0 +1,1 @@
+A decision is recorded with its reason: filter elixir.yml (with a skip-shim) or keep it unfiltered as the protection anchor

@@ -1,0 +1,1 @@
+cch-w58-s2-a-refusal-is-not-a-started-run is corrected as the first live subject, and its criteria_progress reads 6/8 rather than 7/8 afterwards. Quote it before and after.

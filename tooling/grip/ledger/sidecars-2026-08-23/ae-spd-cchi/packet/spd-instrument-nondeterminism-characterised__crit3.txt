@@ -1,0 +1,1 @@
+A ruling is written on whether a run with face_applied=false in any row should fail the gate, and whether bounded retries for named fail-closed aborts belong in the instrument

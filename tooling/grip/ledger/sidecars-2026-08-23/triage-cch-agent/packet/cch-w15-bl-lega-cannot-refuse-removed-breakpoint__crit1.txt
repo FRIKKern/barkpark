@@ -1,0 +1,1 @@
+The axis report line can no longer print an arithmetically impossible pairing — a breakpoint count and a boundary-width count that cannot coexist under the walk are themselves a refusal.

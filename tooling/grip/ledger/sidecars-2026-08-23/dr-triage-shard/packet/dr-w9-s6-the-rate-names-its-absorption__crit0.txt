@@ -1,0 +1,1 @@
+census/3 emits deferred_total and absorption as TOP-LEVEL keys, and the protected headline assertions (volume, failed, failure_rate.numerator, failure_rate.sample) are unchanged. Evidence: the diff and the passing pre-existing tests.

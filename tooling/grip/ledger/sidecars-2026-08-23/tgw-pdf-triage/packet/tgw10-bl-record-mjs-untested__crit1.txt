@@ -1,0 +1,1 @@
+`tooling/grip/test/record.test.mjs` exists and covers admitFact's rejection classes with a fail-before plant and a never-cry-wolf near-miss for each. Evidence: paste the test names and the green run.

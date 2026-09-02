@@ -1,0 +1,1 @@
+A `v0.2.26` release is cut and blessed. Evidence: the tag, the release URL, and the sha it points at.

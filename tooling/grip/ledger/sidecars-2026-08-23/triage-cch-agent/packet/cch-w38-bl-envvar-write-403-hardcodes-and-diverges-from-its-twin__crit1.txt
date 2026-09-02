@@ -1,0 +1,1 @@
+A test pins that the WRITE and DELETE twins render the same sentence for the same 403 body, and it reds before the fix. Evidence: the failing then passing output.

@@ -1,0 +1,1 @@
+`dr-w20-bl-fleet-digest-receipts-have-no-team-reader` (#10599) is reconciled — closed, amended, or explicitly scoped against this row — and its false sentence about the operator route being the only reader is corrected. Evidence: the amended text or the close.

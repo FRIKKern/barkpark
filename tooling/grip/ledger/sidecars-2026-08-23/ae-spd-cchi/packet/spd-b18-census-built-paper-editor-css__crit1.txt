@@ -1,0 +1,1 @@
+Non-vacuity: a planted selector in the built sheet fails the new assertion, proven by pasting the failure

@@ -1,0 +1,1 @@
+AFTER cch-w31-s1-delivery-reason-closed-vocabulary and cch-w31-s4-crash-blame-boundary are merged, this slice's branch is cut from a main containing both. Evidence: `git merge-base --is-ancestor <each dep sha> HEAD` returning 0 for both.

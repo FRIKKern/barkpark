@@ -1,0 +1,1 @@
+The orphaned squatter holding 4199 (currently pid 92003, PPID 1) is reaped and `lsof -nP -iTCP:4199 -sTCP:LISTEN` returns nothing.

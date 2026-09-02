@@ -1,0 +1,1 @@
+The check is proven able-to-fail: planting a bare cancel-in-progress:true on a push-to-main workflow reds it, and it fails-closed on a vacuous/short scan; evidence quotes the selftest output

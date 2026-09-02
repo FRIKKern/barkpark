@@ -1,0 +1,1 @@
+DEGRADE_ONLY is DERIVED from a marker on the renderers, not hand-maintained

@@ -1,0 +1,1 @@
+The gate is a pinned-allowlist SET DIFF that reds on ADD and on REMOVE and never on a count; the adversarial fix-one-add-one mutant (population size unchanged) still exits 1. Paste that mutant's output showing pinned N / found N with a red verdict.

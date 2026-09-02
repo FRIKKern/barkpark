@@ -1,0 +1,1 @@
+A comment or string literal naming meState() cannot silence a debt row — comments and string literals are stripped offset-preserving before analysis. Paste the control mutant showing exit 0 unchanged.

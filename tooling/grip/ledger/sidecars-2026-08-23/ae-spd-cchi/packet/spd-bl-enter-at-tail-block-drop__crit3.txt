@@ -1,0 +1,1 @@
+If it is a defect, a regression test pins the op batch or the persisted block set; if it is not, a note is left where the next person will look.

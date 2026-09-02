@@ -1,0 +1,1 @@
+After the fix, node seal-predicate.mjs --successor cch-instruments-epic --repo <repo> emits a real VERDICT-TOKEN over cloud-console-hardening-epic with a=/b=/c= determinate and an orphans count derived from the FULL roster - and that count is stated beside the 218 the stale pre-fix copy printed, so the record shows what the truncation cost.

@@ -1,0 +1,1 @@
+The 30-day census is re-derived with the PAGINATED API (not `gh run list --limit 1000`, which truncates to ~24 days) and the fresh numbers are pasted with their as-of date.

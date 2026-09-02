@@ -292,7 +292,17 @@ defmodule Barkpark.StudioChat.StreamTail do
         cond do
           # A blank line outside every fence is where the prefix is safe to cut.
           # Committing it retires any component we were tracking below it.
-          line == "" ->
+          #
+          # BLANK MEANS `blank?/1`, NOT `== ""` (mob-bl-streamtail-blank-line-law).
+          # CommonMark's blank line is "whitespace only", and a provider that
+          # emits `"\n   \n"` between two paragraphs is emitting a paragraph
+          # break — the strict byte comparison saw prose there and pinned the
+          # boundary before it, so the whole rest of the turn re-rendered as one
+          # forming tail. The module already defined `blank?/1` as the trim
+          # comparison and already used it on BOTH fence clauses (:194, :315);
+          # this one clause was the last strict reader, so the fold disagreed
+          # with itself about what "blank" meant.
+          blank?(line) ->
             %{scan | boundary: nl + 1, component: nil}
 
           scan.component == nil ->

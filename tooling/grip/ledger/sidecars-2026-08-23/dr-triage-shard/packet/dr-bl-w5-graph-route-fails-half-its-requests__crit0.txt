@@ -1,0 +1,1 @@
+The 51.60% is re-derived on a quiet window with volume printed beside the rate (D3), and the per-request DB round-trip count for a typical `/v1/graph` call is measured.

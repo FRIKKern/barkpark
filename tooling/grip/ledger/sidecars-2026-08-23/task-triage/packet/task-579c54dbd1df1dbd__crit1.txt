@@ -1,0 +1,1 @@
+A test proves a role absent from design/status-manifest.json never reaches the legend, and reds if the allowlist is reverted to a blocklist

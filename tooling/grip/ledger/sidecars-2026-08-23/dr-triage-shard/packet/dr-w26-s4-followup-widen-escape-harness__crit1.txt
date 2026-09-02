@@ -1,0 +1,1 @@
+CLOUD_PATHS declares scripts/** and .github/workflows/**, the superseded exact entries are deleted with their rulings folded into the glob comment, and --selftest is green

@@ -1,0 +1,1 @@
+The `invalid` precedence is fixed so server-sent per-field details reach the screen. Evidence: a before/after render for a real changeset error payload.

@@ -1,0 +1,1 @@
+Measured evidence at <=420px emulated width on guerrilla: content readable, crumbs navigate, document.body.scrollWidth == innerWidth

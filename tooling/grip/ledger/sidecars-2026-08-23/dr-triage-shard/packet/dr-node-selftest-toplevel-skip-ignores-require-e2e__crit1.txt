@@ -1,0 +1,1 @@
+bash deploy/site-deploy-node.sh --self-test still passes at its full count on a normal tree. Paste the total.

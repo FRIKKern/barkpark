@@ -1,0 +1,1 @@
+A list route exists (or the PR states with evidence why enumeration must stay closed), so an operator can see what credentials exist.

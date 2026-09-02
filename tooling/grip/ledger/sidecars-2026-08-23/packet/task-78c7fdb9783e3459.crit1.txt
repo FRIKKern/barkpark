@@ -1,0 +1,1 @@
+Every cell the widened lens surfaces as drifted is fixed in the @moduledoc, guards untouched. Evidence: the router.ex diff.

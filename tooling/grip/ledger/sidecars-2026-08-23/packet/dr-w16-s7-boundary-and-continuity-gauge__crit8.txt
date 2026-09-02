@@ -1,0 +1,1 @@
+NO VOLUME TOLERANCE EXISTS ANYWHERE IN THE PREDICATE: `grep -n 'tolerance\|0\.9\|1\.1' ` over the new code returns nothing relevant, and the PR body states the measured reason (one of six adjacent-day pairs survives a +/-10% gate)

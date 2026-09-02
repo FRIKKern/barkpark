@@ -1,0 +1,1 @@
+MERGE-GATED, LEAD CLOSES: the PR is merged to main and its branch is on origin. Do not stamp this yourself; leave lifecycle in_progress with every other criterion stamped.

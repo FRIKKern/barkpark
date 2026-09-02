@@ -1,0 +1,1 @@
+Issue 5658 is closed with a reason recorded naming the real cause (30-minute job timeouts, not a reader-edge failure).

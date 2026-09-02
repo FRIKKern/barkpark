@@ -1,0 +1,1 @@
+The zero-byte exit-1 failure is reproduced with stderr intact and diagnosed to a named cause, or proven unreproducible in N runs and recorded as such

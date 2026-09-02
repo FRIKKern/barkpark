@@ -1,0 +1,1 @@
+Mutation-proved BOTH directions: adding an Elixir key with no Go decoder REDS, and adding a Go field with no Elixir key REDS.

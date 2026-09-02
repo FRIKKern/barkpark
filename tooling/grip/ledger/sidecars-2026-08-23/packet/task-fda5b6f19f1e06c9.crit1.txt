@@ -1,0 +1,1 @@
+The provider-credential class still fires for a real provider 401 — the new clause is not a blanket bypass. Both rows in the table.

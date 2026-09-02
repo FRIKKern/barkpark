@@ -1,0 +1,1 @@
+ProjectorWorkerEnqueueTest's oban_jobs residue is either fixed at the sandbox level or documented as a required setup step, with the row count that caused it quoted.

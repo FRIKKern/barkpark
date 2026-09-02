@@ -1,0 +1,1 @@
+A committed reader pages the roster and REFUSES with a named code when pagination cannot terminate. Mutation-prove the refusal fires.

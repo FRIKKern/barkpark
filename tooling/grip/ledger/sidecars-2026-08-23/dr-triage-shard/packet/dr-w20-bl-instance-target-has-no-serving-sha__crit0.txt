@@ -1,0 +1,1 @@
+`bp cloud status` carries each box's git_commit and a freshness reading derived by COMPARING it to the ref CI merged, not by mirroring the box's own self-grade; the comparator's input (what origin/main is) is named and its source stated.

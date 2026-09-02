@@ -1,0 +1,1 @@
+If the route is opened: a CI run reports `CR_VIA=route` with a 200, proving the worker principal can read it. Evidence: the run log line.

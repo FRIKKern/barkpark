@@ -1,0 +1,1 @@
+The harness fixture in scripts/cloud-path-escape-check.test.sh emits at least as many covered repo-root reads as the real measured population; paste the new count

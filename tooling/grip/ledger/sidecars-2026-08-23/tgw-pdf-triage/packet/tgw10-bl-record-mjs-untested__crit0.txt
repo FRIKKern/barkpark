@@ -1,0 +1,1 @@
+The gap is re-derived: `ls tooling/grip/test/record.test.mjs` fails and the module-vs-test parity is shown to be coincidental. Evidence: paste both listings and the three-file mismatch.

@@ -1,0 +1,1 @@
+Anchor criterion 4 of task-f559f7c508527010 is stamped with bp task stamp using --criterion-text verbatim, and the PUBLISHED perspective is read back afterwards proving the three pre-existing attempt notes survived and drafts.task-f559f7c508527010 was never published.

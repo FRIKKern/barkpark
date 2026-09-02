@@ -1,0 +1,1 @@
+Every census invocation in the proof pins `--from`/`--to` explicitly. The PR body states in one sentence why (charter D395: the failure-rate refusal expires ~2026-08-12T21:13Z and a `--days`-default criterion would silently flip).

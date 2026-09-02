@@ -1,0 +1,1 @@
+Primary checkout HEAD == origin/main (git rev-parse both, equal) and scripts/studio-desk-measure.mjs contains the D185 bucketPrecondition

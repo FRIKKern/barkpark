@@ -1,0 +1,1 @@
+The fix scopes the whole credential form to its host (one root, resolved fields) rather than adding a per-id resolver, or the two hosts stop sharing ids; no singular single-element cred lookup survives in either submit path.

@@ -1,0 +1,1 @@
+A human verifies and reconciles the gyl and dooodo host keys (or confirms the rebuild that changed them), so a fleet sweep covers 6 of 6.

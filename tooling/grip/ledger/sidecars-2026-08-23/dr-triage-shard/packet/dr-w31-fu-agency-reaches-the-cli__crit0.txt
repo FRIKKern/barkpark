@@ -1,0 +1,1 @@
+DeployCensusClass carries an Agency field with a json:"agency" tag and the table renderer shows it on every class row, with a sample rendered table quoted in the evidence.

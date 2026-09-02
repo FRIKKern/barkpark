@@ -1,0 +1,1 @@
+Any memory bound lands on the per-build transient units, and the serving slot's swap and memory maxima are demonstrably unchanged. Evidence: the unit files and a systemctl show.

@@ -1,0 +1,1 @@
+ALL FIVE SITES ARE CORRECTED, NOT ONE: overflow-guard.mjs :1930 (comment), :1934 (the predicate), :1937 (the operator-facing failure string), :1962 (the ok-line), and app.css:2254 (the CSS comment beside `.set-row-name` at :2261). Quote each as it now reads. A diff touching only the predicate does not satisfy this criterion.

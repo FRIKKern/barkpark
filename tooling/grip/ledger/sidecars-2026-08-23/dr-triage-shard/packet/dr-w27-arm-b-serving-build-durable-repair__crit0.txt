@@ -1,0 +1,1 @@
+A deployment whose settle-live CAS was lost on a build the box IS serving does NOT end as a terminal failed row blaming the builder lease — proved behaviourally against the real reaper, extending the ARM B test in terminal_write_census_test.exs rather than replacing it.

@@ -1,0 +1,1 @@
+Round 2 gates on round_trip.ran && returns_bit_identical (D184), never on check-prediction exit 0, and its bracket REPORTS the 1280 prior-observation misses as registered staleness rather than as a fidelity failure.

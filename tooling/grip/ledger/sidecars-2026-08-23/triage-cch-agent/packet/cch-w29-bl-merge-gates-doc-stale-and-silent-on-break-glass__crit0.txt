@@ -1,0 +1,1 @@
+merge-gates.md:55-57 and :397-398 match the committed behaviour: no token means the lane REDS. Evidence: the doc diff beside the harness line that pins it.

@@ -1,0 +1,1 @@
+priv/static/assets/bp-paper-editor.css is censused: its position:fixed selector set is asserted equal to the source stylesheet's, so both a new built-only selector and a stale build fail

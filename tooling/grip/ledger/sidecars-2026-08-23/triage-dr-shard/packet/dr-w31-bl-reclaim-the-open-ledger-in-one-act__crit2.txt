@@ -1,0 +1,1 @@
+The three draft twins are DISCARDED (not closed) per D491, and the three duplicate crown-401 rows are closed against #11234 as the survivor.

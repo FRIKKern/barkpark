@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR merges to main with all four required contexts green, AFTER an independent second review of the rank-5 ruling and the D31 bilateral amendment (a manual lead step this wave arranged).

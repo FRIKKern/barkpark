@@ -1,0 +1,1 @@
+LEAD-VERIFIED: no concurrent session lost work to the reset (checked before firing)

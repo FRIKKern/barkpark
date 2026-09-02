@@ -87,10 +87,18 @@ func runCloudMembers(out *writer, g globals, args []string) int {
 	invitations, ierr := client.TeamInvitations(cloudCtx(), teamID)
 
 	if out.output == "json" || out.output == "yaml" {
+		// The machine path re-emits the control-plane BYTES (D4), so a parse
+		// failure of OUR row structs does not corrupt it — it stays exit 0.
 		emitMembersRaw(out, members, invitations, ierr)
 		return exitOK
 	}
 	renderMembersResult(out, teamID, members, invitations, ierr)
+	if members.DecodeErr != nil {
+		// The human table is built from the PARSED rows, and they do not describe
+		// what the server sent. Refuse rather than let "(no members)" or a
+		// dashed-out cell pass for a measured roster.
+		return exitGeneric
+	}
 	return exitOK
 }
 
@@ -148,14 +156,24 @@ func renderMembersResult(out *writer, teamID string, m cloudclient.MembersResult
 	out.outf("Members of team %s", sanitizeCell(teamID))
 	out.outf("")
 
-	if len(m.Members) == 0 {
+	switch {
+	case m.DecodeErr != nil:
+		// A refused/unreadable roster must never be byte-identical to an empty
+		// one. Say what could not be read and point at the verbatim bytes, which
+		// `-o json` still serves correctly.
+		out.outf("Could not read the member roster: %s", sanitizeCell(m.DecodeErr.Error()))
+		out.outf("The seat count below is NOT the roster — re-read with '-o json' for the raw contract bytes.")
+	case len(m.Members) == 0:
 		out.outf("(no members)")
-	} else {
+	default:
 		renderMemberTable(out, m.Members)
 	}
 
 	out.outf("")
 	switch {
+	case invErr == nil && inv.DecodeErr != nil:
+		// Same rule as the roster: an unparseable list is not "none pending".
+		out.outf("Could not read pending invitations: %s", sanitizeCell(inv.DecodeErr.Error()))
 	case invErr == nil:
 		if len(inv.Invitations) == 0 {
 			out.outf("No pending invitations.")

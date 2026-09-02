@@ -1,0 +1,1 @@
+The count of latest-per-site production deployments carrying a DEFERRED_* failure_class but a non-deferred status word is MEASURED and pasted

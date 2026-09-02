@@ -1,0 +1,1 @@
+A fail-before pin exists in __app.test.mjs proving TODAY the failed-/v1/me rail renders the checking sentence and offers no recovery: drive loadMe to a 500, render lifecycleActionRowHtml, assert the checking string is present AND no retry affordance exists. It must red after the fix.

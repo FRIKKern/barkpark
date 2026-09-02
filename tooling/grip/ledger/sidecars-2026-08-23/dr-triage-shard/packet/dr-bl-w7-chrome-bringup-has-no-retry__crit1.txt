@@ -1,0 +1,1 @@
+The candidate causes named in the guard log (Chrome binary, Node 22, port squatter, SERVER_CAP) are each tested and eliminated or confirmed.

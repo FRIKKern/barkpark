@@ -1,0 +1,1 @@
+The two drifted served-catalog commands are re-seeded or the drift is explained, and the audit is green on a main head.

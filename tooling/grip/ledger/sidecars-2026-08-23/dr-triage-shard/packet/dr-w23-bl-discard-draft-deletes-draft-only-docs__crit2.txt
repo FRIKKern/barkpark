@@ -1,0 +1,1 @@
+The corpus is SWEPT for draft-only `type:task` rows stranded by the publish wall's `duplicate_of` guard: the list is pasted with each row's id and age, and each is either published (differentiated) or explicitly ruled a duplicate. A count of zero is an acceptable answer only if the query that produced it is shown.

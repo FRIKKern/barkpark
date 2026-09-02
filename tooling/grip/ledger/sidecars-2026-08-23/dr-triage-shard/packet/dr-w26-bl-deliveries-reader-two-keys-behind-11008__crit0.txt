@@ -1,0 +1,1 @@
+internal/cloudclient/deliveries.go declares PreviousSHA and Transition as pointers and the struct comment says FIFTEEN keys; paste the field lines.

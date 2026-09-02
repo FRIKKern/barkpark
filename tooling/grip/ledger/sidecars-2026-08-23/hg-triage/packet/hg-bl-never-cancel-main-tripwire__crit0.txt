@@ -1,0 +1,1 @@
+A CI check exists that scans push-to-main workflows and reds on a bare cancel-in-progress:true; evidence names the script path and the workflow job that runs it

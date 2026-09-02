@@ -1,0 +1,1 @@
+Site delete revokes before final deregistration with explicit retry/partial-failure semantics, and rotate atomically installs a new credential, updates the box safely, then revokes the old token with audit events and recovery tests.

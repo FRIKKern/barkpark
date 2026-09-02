@@ -150,11 +150,24 @@ defmodule Barkpark.Sharing.Links do
   candidates (a Studio socket can carry both an api_token session and a
   logged-in account; either may legitimately hold the seat).
 
-  TOTALITY: bare `TenancyAuth.workspace_admin?/2` RAISES on most shapes that can
-  reach here — `FunctionClauseError` on a nil principal, an `%ApiToken{id: nil}`
-  or a nil workspace id, and `Ecto.Query.CastError` on `""` / any non-UUID
-  binary. Both sides are narrowed first and ANYTHING unmatched is a DENIAL: a
-  500 here would trade a leak for a crash oracle.
+  TOTALITY, split by side (task-83ceffc9e7e32174). The PRINCIPAL side is
+  narrowed HERE: `principal_admin?/2` admits only an `%ApiToken{}` / `%User{}`
+  with a binary id (or a list of them) and denies every other shape, because
+  bare `TenancyAuth.workspace_admin?/2` would `FunctionClauseError` on a nil
+  principal or an `%ApiToken{id: nil}`. The WORKSPACE-ID side is the
+  CHOKEPOINT's: `Tenancy.Auth.membership/3` runs both ids through
+  `Barkpark.Repo.uuid_or_nil/1` (the uuid-guarded-fetch canonical) and answers
+  `nil` — a denial — on a nil, `""` or any non-UUID binary, so no malformed id is
+  ever bound to a `:binary_id` column and no `Ecto.Query.CastError` can surface
+  here. This function used to wrap the call in its own
+  `case Repo.uuid_or_nil(workspace_id)`; that copy was redundant since
+  #12710 made the chokepoint total and was dropped for the same reason #15341
+  dropped `ShareController`'s — a second guard is how the next reader concludes
+  the chokepoint is partial and adds a third. Pinned by
+  `test/barkpark/sharing/links_test.exs` ("workspace_admin?/2 …"), whose
+  mutation arm reds with `Ecto.Query.CastError` when `Repo.uuid_or_nil/1` is
+  disarmed by hand. Anything unmatched on either side is a DENIAL: a 500 here
+  would trade a leak for a crash oracle.
 
   The predicate is `workspace_admin?/2` (the membership ROLE), NEVER
   `TenancyAuth.authorize/3` — authorize/3's api_token arm ORs the token's GLOBAL
@@ -163,12 +176,7 @@ defmodule Barkpark.Sharing.Links do
   committed cross-tenant tests, so swapping the call turns them RED.
   """
   @spec workspace_admin?(term(), term()) :: boolean()
-  def workspace_admin?(principal, workspace_id) do
-    case Repo.uuid_or_nil(workspace_id) do
-      nil -> false
-      ws_id -> principal_admin?(principal, ws_id)
-    end
-  end
+  def workspace_admin?(principal, workspace_id), do: principal_admin?(principal, workspace_id)
 
   defp principal_admin?(principals, ws_id) when is_list(principals),
     do: Enum.any?(principals, &principal_admin?(&1, ws_id))

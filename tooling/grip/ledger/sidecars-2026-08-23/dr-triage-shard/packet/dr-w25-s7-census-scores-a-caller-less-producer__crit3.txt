@@ -1,0 +1,1 @@
+The cloud/test/** exclusion is asserted (no corpus file starts with `cloud/`), with a note that platform_delivery_test.exs hits the route eleven times while no recorder exists. Paste the assertion.

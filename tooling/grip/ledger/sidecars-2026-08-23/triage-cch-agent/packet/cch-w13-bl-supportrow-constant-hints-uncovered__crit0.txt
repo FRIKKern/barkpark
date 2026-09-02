@@ -1,0 +1,1 @@
+Every newStepsHtml call site is enumerated with whether any test pins its rendered time column - the list pasted.

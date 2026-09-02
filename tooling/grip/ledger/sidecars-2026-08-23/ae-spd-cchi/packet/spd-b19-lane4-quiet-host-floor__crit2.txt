@@ -1,0 +1,1 @@
+The ~5.06s readyState-to-dispatchable-press gap is re-taken on the quiet host and either confirmed as a real third failure mode (clicks queued, not dropped) or refuted as load artefact - with the spread quoted either way.

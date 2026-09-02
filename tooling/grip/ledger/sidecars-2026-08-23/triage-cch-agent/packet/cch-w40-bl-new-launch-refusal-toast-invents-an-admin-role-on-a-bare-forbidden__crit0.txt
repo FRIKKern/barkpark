@@ -1,0 +1,1 @@
+app.js:16424 stops asserting a role the server never sent: `var role = (data && typeof data.required === "string" && data.required) || "admin";` no longer defaults to 'admin' on a BARE forbidden — the toast says nothing about a role instead of naming one.
