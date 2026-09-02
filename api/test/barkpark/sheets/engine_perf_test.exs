@@ -96,6 +96,34 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
   sensitive. If you are tempted to lower it back toward the noise floor, lower
   the *variance* first (a dedicated perf runner), not the ceiling.
 
+  ## The range-index lock
+
+  A third test guards the specific defect the two above could not see. Both
+  measure WALL CLOCK, so both must carry enough margin to survive a loaded
+  runner — and that margin is exactly the room a quadratic GRAPH-BUILD hid in.
+  The linearity ratio permits 8x for a 3x row growth, i.e. anything up to
+  ~n^1.9; the near-cap bound is absolute and clears by 10x. Neither reds on an
+  O(ranges x formulas) graph build, and neither did: a log-log sweep of
+  `mix barkpark.sheets.bench --shapes window --sizes 250,500,1000,2000`
+  measured a local exponent rising 1.57 -> 1.72 -> **1.84** on a shape whose
+  real work is exactly linear, while this file stayed green. The same sweep
+  after the formula-position index landed reads 1.00 -> 1.00 -> 1.03, and the
+  2000-row rung costs 3.9M reductions instead of 32.1M.
+
+  The lock measures REDUCTIONS instead. A reduction count is a deterministic
+  function of the work performed — immune to CPU speed, contention, and GC —
+  so its ceiling can sit at 1.5x the linear expectation and still never flake.
+  On the row-local-SUM shape, 4x the rows must cost ~4x the reductions; a
+  per-range scan of the formula set costs ~16x. Measured on this exact
+  fixture: **11.8x before the fix (2_720_690 -> 32_102_563) and 4.00x after
+  (965_307 -> 3_862_230)** — 8.3x fewer reductions at the 2000-row rung.
+
+  The wall-clock columns in that same sweep are the control that proves this
+  choice was necessary, not fastidious: on the LINEAR `independent` shape the
+  pre-fix run printed wall exponents of 1.79, 0.37 and 1.26 for an engine
+  whose reduction exponents were 0.98, 0.97 and 1.01. The wall clock could not
+  see the defect and could not see its absence either.
+
   This test is intentionally UN-tagged: it runs in the default suite. An
   excluded guard is a vacuous guard.
   """
@@ -125,6 +153,15 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
   # cap so this second test adds only a fraction of a second).
   @lin_small_rows 700
   @lin_factor 3
+
+  # Range-index lock geometry. Rows carrying one row-local SUM each; the ratio
+  # is measured in REDUCTIONS, not wall clock, so these can be large enough to
+  # separate n from n^2 without buying any flake. See @moduledoc
+  # §The range-index lock.
+  @rr_rows 500
+  @rr_factor 4
+  @rr_window_cols 10
+  @rr_ceiling 6.0
 
   describe "recompute/1 complexity floor (near @cell_cap)" do
     test "a near-cap unified recompute finishes inside the generous bound" do
@@ -192,6 +229,41 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
              #{@lin_factor}x (small #{Float.round(small_ms, 1)}ms -> \
              big #{Float.round(big_ms, 1)}ms). Super-linear growth toward \
              #{@lin_factor * @lin_factor}x points at an O(n^2) rescan.
+             """
+    end
+
+    # The range-index lock (task spd-b33). Growing the row count @rr_factor x
+    # multiplies the WORK by @rr_factor and nothing else: every formula is a
+    # `SUM` over its OWN row's fixed 10-column literal block, so ranges grow
+    # with n while each range's answer stays constant-size. If graph
+    # construction resolves a range by filtering the whole formula set, this
+    # document costs O(ranges x formulas) = O(n^2) to merely BUILD — which is
+    # what it did until the formula-position index landed, and what a log-log
+    # sweep measured at k ~ 2.0 on exactly this shape.
+    #
+    # Measured in REDUCTIONS, deliberately, not wall clock. A reduction count is
+    # a deterministic property of the work performed: it does not move with CPU
+    # speed, scheduler contention, GC timing, or how many other test files are
+    # running. That is the whole reason the two tests above need essays about
+    # margin and this one does not — the ceiling can sit at 1.5x the linear
+    # expectation instead of 2x, and still never flake.
+    test "row-local range dependencies do not rescan the formula set per range" do
+      small = row_local_sum_content(@rr_rows)
+      big = row_local_sum_content(@rr_rows * @rr_factor)
+
+      small_reds = reductions(fn -> Engine.recompute(small) end)
+      big_reds = reductions(fn -> Engine.recompute(big) end)
+
+      ratio = big_reds / small_reds
+
+      assert ratio < @rr_ceiling,
+             """
+             #{@rr_factor}x the rows cost #{Float.round(ratio, 2)}x the reductions \
+             (#{small_reds} -> #{big_reds}) on a shape whose real work is exactly \
+             #{@rr_factor}x. Linear is ~#{@rr_factor}.0x; a per-range scan of the \
+             formula set is ~#{@rr_factor * @rr_factor}.0x. Look at \
+             range_node_deps/2 and the formula-position index it queries \
+             (engine.ex §Complexity) before touching this ceiling.
              """
     end
   end
@@ -270,6 +342,53 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
   end
 
   # ── measurement + assertions helpers ────────────────────────────────────────
+
+  # n rows, each: 10 literal columns plus ONE formula `SUM(A_r:J_r)` over them.
+  # n ranges, each covering a constant 10 cells and containing NO formula cell,
+  # so total evaluation work is exactly linear in n. Single tab -> fast path.
+  defp row_local_sum_content(rows) do
+    cells =
+      Enum.flat_map(1..rows, fn row ->
+        literals =
+          for col <- 1..@rr_window_cols, do: {a1(col, row), %{"v" => rem(row + col, 97) + 1}}
+
+        [
+          {a1(@rr_window_cols + 1, row),
+           %{"f" => "SUM(#{a1(1, row)}:#{a1(@rr_window_cols, row)})"}}
+          | literals
+        ]
+      end)
+      |> Map.new()
+
+    %{"tabs" => [%{"name" => "Data", "cells" => cells}]}
+  end
+
+  # Reductions consumed by `fun`, measured in a dedicated process so nothing the
+  # test framework does is charged to the number. Deterministic for a given
+  # input: unlike wall clock it cannot be moved by load.
+  defp reductions(fun) do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        fun.()
+        {:reductions, r} = Process.info(self(), :reductions)
+        send(parent, {:reductions, self(), r})
+      end)
+
+    ref = Process.monitor(pid)
+
+    receive do
+      {:reductions, ^pid, r} ->
+        Process.demonitor(ref, [:flush])
+        r
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        flunk("reduction probe died: #{inspect(reason)}")
+    after
+      120_000 -> flunk("reduction probe timed out")
+    end
+  end
 
   # Minimum wall time over `n` runs, in ms — best-of-N microbenchmark denoiser.
   defp best_ms(fun, n) do

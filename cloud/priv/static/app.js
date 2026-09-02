@@ -175,6 +175,18 @@
     return TRANSPORT_COPY[transport] || ERRORS.network_error;
   }
 
+  // cch-w50-bl — THE TEST-MODE DISCLOSURE, said once and used twice.
+  //
+  // The live control plane runs a Stripe TEST secret key (`sk_test_…`) with real
+  // prices and a real webhook secret wired, so before this slice the money
+  // screen's Subscribe opened a REAL hosted Checkout Session that no real card
+  // could pay, and the console said nothing about it. This sentence is the
+  // disclosure, and it is BYTE-IDENTICAL to `BarkparkCloud.Billing`'s
+  // `@test_mode_disclosure` — the server refuses the POST with it in `reason`,
+  // the disabled tier button prints it, and the ERRORS arm below resolves it.
+  // Plain words, past/present tense: it never says a live key "will" arrive.
+  var TEST_MODE_DISCLOSURE = "Checkout runs in Stripe test mode — no real card can pay.";
+
   // ----------------------------------------------------------- error copy
   var ERRORS = {
     invalid_credentials: "Wrong email or password.",
@@ -212,6 +224,16 @@
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // cch-w50-bl — the 422 POST /v1/billing/checkout sends when the plane's
+    // Stripe key is a TEST key (Billing.checkout_capability() == :test_mode).
+    // BYTE-IDENTICAL to Billing.test_mode_disclosure/0, which is what the
+    // server puts in the envelope's `reason`; the tier card below prints the
+    // same sentence, so the disabled button and the toast never disagree. This
+    // arm is the fallback path — a page whose capability read is stale, a `bp`
+    // client, a hand-rolled POST — because the button is already disabled when
+    // the console knows. Past/present tense: it says what IS, and promises
+    // nothing about a live key arriving.
+    billing_test_mode: TEST_MODE_DISCLOSURE,
     // cch-w54-s1 — the 409 cch-w54-s2 introduces on a suspended instance. Inert
     // until that slice merges; without the entry a `suspended` code toasts the
     // bare word "suspended" through the key.replace fallback. It names the CP's
@@ -3675,7 +3697,16 @@
     ["test", "Test",
      "No producer — only the test buttons on this page emit it: “Send test email” mails one team member over the Barkpark platform transport, and each channel’s own “Send test” fires that channel."],
     ["trial_expiring", "Trial ending",
-     "Always sent to every enabled channel — email and chat alike; no per-event toggle, silenced only by the master alerts switch above."]
+     "Always sent to every enabled channel — email and chat alike; no per-event toggle, silenced only by the master alerts switch above."],
+    // cch-w52-bl: the TEARDOWN's own notice. The row above is the ADVANCE
+    // warning; this one reports what was destroyed, and it exists because the
+    // teardown used to dispatch nothing at all — a team that missed both advance
+    // notices learned its instances were gone at the outage. Stated here, not
+    // column-ised: a per-event opt-out for “we destroyed your instances” is an
+    // offer to be un-told a fact (D342(d)), and the row is what keeps the
+    // bidirectional census green now that cloud/lib dispatches the event.
+    ["trial_expired", "Trial ended",
+     "Sent once when a lapsed trial's instances are torn down — names what went, to every enabled channel; no per-event toggle, silenced only by the master alerts switch above."]
   ];
 
   // The email transport single-select (GR34: pill()/`.seg` segmented control).
@@ -10410,9 +10441,178 @@
     return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
 
-  // The page shell: four cards, each with its own body slot so one silent route
+  // 5. DEPLOY LEDGER CENSUS — GET /v1/operator/deploy-ledger/census?from=&to=
+  // (deploy-reliability W1 S2, dr-w1-s2). `DeployLedger.census/3` has counted
+  // failure classes, site volumes and the failure rate WITH its denominator
+  // since W1, and until this card NOTHING RENDERED ONE BYTE OF IT: the route
+  // existed, the Go reader existed, and no human surface read either.
+  //
+  // THE WINDOW IS PINNED, AND THE CONSOLE PINS IT. `from` and `to` are REQUIRED
+  // by the route (422 otherwise) and that refusal is deliberate — daily volume
+  // fell 2,766 → 332 over six days, so an unpinned "now minus" window silently
+  // compares two different populations and reports a volume collapse as a
+  // repair. The card therefore sends two explicit instants and PRINTS the
+  // window it read, so nobody can mistake which population a number came from.
+  //
+  // THE TAXONOMY IS NEVER RE-DERIVED HERE, and that is the whole ruling of this
+  // card. Every class NAME, its human LABEL and its SHARE are read straight off
+  // the payload (`classes[].class` / `.label` / `.share`); this file owns no
+  // class list, no label map and no percentage arithmetic. A second derivation
+  // is a second truth, and it drifts from `DeployLedger.classify/2` the first
+  // time a class is added upstream — the class would silently render under the
+  // wrong name, or vanish. __app.test.mjs pins the absence by NAME.
+  var OPERATOR_DEPLOY_CENSUS = "/v1/operator/deploy-ledger/census";
+  // The window this console reads. Seven days is the same default the Go reader
+  // (`bp cloud deployments`) uses, so the two readers of one ledger answer over
+  // the same population rather than quietly disagreeing.
+  var OPERATOR_CENSUS_DAYS = 7;
+
+  // Pure + injectable: the two instants the URL carries. `nowMs` is an argument
+  // so the harness reads the exact bytes the browser sends.
+  function operatorCensusWindow(nowMs) {
+    var toMs = nowMs == null ? Date.now() : nowMs;
+    return {
+      from: new Date(toMs - OPERATOR_CENSUS_DAYS * 86400000).toISOString(),
+      to: new Date(toMs).toISOString(),
+    };
+  }
+
+  function operatorCensusPath(nowMs) {
+    var w = operatorCensusWindow(nowMs);
+    return OPERATOR_DEPLOY_CENSUS +
+      "?from=" + encodeURIComponent(w.from) + "&to=" + encodeURIComponent(w.to);
+  }
+
+  // ONE rate line, THREE outcomes — and the REFUSAL is the load-bearing one.
+  // `DeployLedger.rate/2` refuses below `@min_sample` and says so on the wire
+  // (`refused: true`, `pct: nil`, `sample: 74`). This renders THAT refusal —
+  // "not enough data (n=74)" — and never a percentage, because a percentage off
+  // n=74 is exactly as dishonest in a browser as it is in Elixir.
+  //
+  // `n` IS THE SERVER'S OWN DENOMINATOR (`sample`), never a count this file
+  // re-totalled off `classes` or `volume`: a client-side sum is a second
+  // definition of the denominator, and it would disagree with the refusal
+  // sentence sitting beside it the moment the two populations differ.
+  //
+  // A rate that is present and NOT refused prints its numerator AND its
+  // denominator beside the percentage — no bare percentage escapes this
+  // function, which is the console-side statement of the same rule the rate
+  // node enforces on the wire by carrying `sample` inside itself.
+  function operatorCensusRateHtml(node, title) {
+    if (!node || typeof node !== "object" || typeof node.sample !== "number") {
+      return '<p class="op-gate">' + operatorPillHtml("neutral", title) +
+        "<span>not reported — this reading carried no rate node, so there is no number " +
+        "and no refusal to show.</span></p>";
+    }
+    if (node.refused === true || typeof node.pct !== "number") {
+      return '<p class="op-gate">' + operatorPillHtml("neutral", title) +
+        "<span>" + esc(operatorCensusRefusalText(node)) + "</span></p>";
+    }
+    return '<p class="op-gate">' + operatorPillHtml("info", title) +
+      "<span>" + esc(String(node.pct)) + "% — " +
+      esc(String(node.numerator == null ? "?" : node.numerator)) + " of " +
+      esc(String(node.sample)) + "</span></p>";
+  }
+
+  // The refusal sentence, in ONE place so the top-level rate and every class
+  // row's share cannot drift. The server's own `reason` rides along when it
+  // sent one; the leading clause is this console's, and it never contains a
+  // percent sign.
+  function operatorCensusRefusalText(node) {
+    return "not enough data (n=" + String(node.sample) + ")" +
+      (node.reason ? " — " + String(node.reason) : "");
+  }
+
+  // ONE class row. Name, label, count and share ALL come off the payload; the
+  // share is its own rate node, refusal and all, so the "not enough data (n=…)"
+  // rule applies one level down without this file owning a second copy of it.
+  function operatorCensusClassRowHtml(row) {
+    row = row || {};
+    var name = typeof row.class === "string" && row.class ? row.class : "—";
+    var label = typeof row.label === "string" ? row.label : "";
+    var share = row.share;
+    var shareText =
+      !share || typeof share !== "object" || typeof share.sample !== "number" ? "share not reported"
+      : share.refused === true || typeof share.pct !== "number" ? operatorCensusRefusalText(share)
+      : String(share.pct) + "% of " + String(share.sample);
+    return '<div class="set-row">' +
+      '<div class="set-row-main">' +
+        '<div class="set-row-name">' + esc(name) + "</div>" +
+        (label ? '<div class="set-row-note">' + esc(label) + "</div>" : "") +
+        '<div class="set-row-meta">' + esc(shareText) + "</div>" +
+      "</div>" +
+      '<div class="set-row-side">' +
+        operatorPillHtml("neutral", String(row.count == null ? "—" : row.count)) +
+      "</div>" +
+    "</div>";
+  }
+
+  // The window the reading covers, printed rather than assumed. ISO, verbatim
+  // from the payload — a locale-formatted stamp is a different string on every
+  // machine, and this line exists so two operators can confirm they are looking
+  // at the same population.
+  function operatorCensusWindowHtml(w) {
+    if (!w || !w.from || !w.to) return "";
+    return '<p class="op-foot">Window ' + esc(String(w.from)) + " → " + esc(String(w.to)) +
+      " — pinned, because an unpinned window compares two populations and reads a volume collapse as a repair.</p>";
+  }
+
+  // Every named state the census reports, as COUNTS. Counts, never a second
+  // rate: `census/3` names the whole population on purpose (live / in_flight /
+  // cancelled / deferred / residual) so the success count is not "the part we
+  // did not name", and re-deriving any of them here would put a second
+  // definition beside the first.
+  function operatorCensusTotalsHtml(data) {
+    var bits = [];
+    function push(k, v) { if (typeof v === "number") bits.push(k + " " + v); }
+    push("volume", data.volume);
+    push("failed", data.failed);
+    push("live", data.live);
+    push("in flight", data.in_flight);
+    push("deferred", data.deferred_total);
+    push("cancelled", data.cancelled);
+    push("residual", data.residual);
+    return bits.length ? '<p class="op-foot">' + esc(bits.join(" · ")) + "</p>" : "";
+  }
+
+  // THE CARD. Four states, and three of them are the honest ones:
+  //   • unreadable — the census didn't answer (or answered a shape this cannot
+  //     read). Says so about ITSELF, the G-04 pattern every card here follows.
+  //   • ZERO ROWS — "no deployments in this window". NEVER a zeroed table: a
+  //     table of 0s reads like health, and "nothing was attempted" and "nothing
+  //     failed" are different facts an operator acts on differently.
+  //   • a reading whose rate the ledger REFUSED — the refusal, verbatim.
+  //   • a reading with a rate — the percentage WITH its numerator and its
+  //     denominator, and the basis sentence naming what the denominator counts.
+  function operatorCensusCardHtml(data) {
+    if (!data || typeof data !== "object" || typeof data.volume !== "number" ||
+        !Array.isArray(data.classes)) {
+      return '<p class="set-empty">Deploy ledger unavailable — the census didn\'t answer. ' +
+        "That says nothing about the fleet's deploys; this card just couldn't read it.</p>";
+    }
+    var win = operatorCensusWindowHtml(data.window);
+    if (data.volume === 0) {
+      return win + '<p class="set-empty">No deployments in this window. ' +
+        "Nothing was attempted, so there is no rate to report and no class table to draw — " +
+        "an empty window is not a healthy one, and a table of zeroes would say the opposite.</p>";
+    }
+    var basis = data.failure_rate && data.failure_rate.basis
+      ? '<p class="op-foot">Denominator: ' + esc(String(data.failure_rate.basis)) + "</p>"
+      : "";
+    var table = data.classes.length
+      ? '<div class="set-list">' + data.classes.map(operatorCensusClassRowHtml).join("") + "</div>"
+      : '<p class="set-empty">No failure class was recorded in this window — the ledger names ' +
+        "no failed row here. The counts below are still the whole population.</p>";
+    return win +
+      operatorCensusRateHtml(data.failure_rate, "Failure rate") +
+      basis + table + operatorCensusTotalsHtml(data);
+  }
+
+  // The page shell: five cards, each with its own body slot so one silent route
   // never blanks the others. Painted BEFORE the reads land, so the console has a
-  // shape instantly and every card owns its loading line.
+  // shape instantly and every card owns its loading line — the loading line is
+  // the card's HONEST in-flight state, and it is why a card is never empty
+  // while its request is still out.
   function operatorPageHtml() {
     function card(id, heading, purpose) {
       return '<section class="set-section">' +
@@ -10428,7 +10628,9 @@
       card("op-warm-body", "Warm pool",
         "Pre-provisioned boxes a launch can claim instead of waiting for a cold provision.") +
       card("op-digest-body", "Fleet digest",
-        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.");
+        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.") +
+      card("op-census-body", "Deploy ledger",
+        "Failure classes across every site over a pinned window, and the failure rate with its own denominator beside it.");
   }
 
   // ---- DOM mounts -----------------------------------------------------------
@@ -10535,6 +10737,15 @@
     operatorPaint("#op-warm-body", OPERATOR_WARM_POOL, function (data) { return operatorWarmPoolCardHtml(data); });
     operatorPaint("#op-digest-body", OPERATOR_DELIVERIES, function (data) {
       return operatorDigestCardHtml(data && data.deliveries);
+    });
+    // The census rides the SAME funnel as the other four: operatorPaint owns the
+    // only GET call site the whole console has, so the window query is computed
+    // here and handed in as a path rather than opening a fifth read seam with a
+    // degrade story of its own. (Spelled without the call expression on purpose
+    // — __unknown_census greps the source for it, and a comment that names it
+    // arrives as a phantom sixty-fourth call site.)
+    operatorPaint("#op-census-body", operatorCensusPath(), function (data) {
+      return operatorCensusCardHtml(data);
     });
   }
 
@@ -15490,6 +15701,34 @@
     });
   }
 
+  // dr-w1-s2's `failure_class`, RENDERED — and read straight OFF the payload.
+  //
+  // `deployment_json/1` carries `failure_class: DeployLedger.classify(d)` on
+  // every row, and until this pill nothing in the console read it: the row
+  // showed the humanized prose in `failure_reason` and the operator had no way
+  // to say WHICH named class the ledger had put this failure in — the same
+  // class the census card above counts, and the same one `bp cloud site status`
+  // prints. Three readers, one name, one derivation.
+  //
+  // THE STRING IS RENDERED VERBATIM AND NOTHING MAPS IT. No allowlist, no label
+  // table, no client-side classify: a second derivation is a second truth, and
+  // it drifts from `DeployLedger.classify/2` the first time a class is added
+  // upstream — an unknown class would silently render as the wrong name, or
+  // (worse, because it looks like health) not render at all. So an ARBITRARY
+  // string the server sends renders as itself, and __app.test.mjs pins exactly
+  // that, plus the ABSENCE of any taxonomy vocabulary in this file.
+  //
+  // The pill is the shared `.dep-pill` base and no new modifier: colouring the
+  // class would be a second, client-side judgement about severity on top of the
+  // one the row's own status pill already states (GR11/D24 freeze the .dep-*
+  // family, and this is a consumer of it, never a restyle).
+  function deployFailureClassPillHtml(d) {
+    var fc = d && d.failure_class;
+    if (typeof fc !== "string" || fc === "") return "";
+    return '<span class="dep-pill" title="The deploy ledger\'s class for this row">' +
+      esc(fc) + "</span>";
+  }
+
   function deployRow(d, currentId, flash) {
     var st = d.status || "queued";
     // Headline ref: a full 40-char commit sha is noise, not information — show
@@ -15540,7 +15779,11 @@
         '<div class="deploy-meta">' + metaBits.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
-      '<div class="dep-side">' + actionBtn +
+      // The ledger's class sits BESIDE the status pill, not inside the failure
+      // panel: the panel carries the server's prose sentence, this carries the
+      // machine name that prose was classified into, and conflating them would
+      // hide the one an operator can grep a census for.
+      '<div class="dep-side">' + actionBtn + deployFailureClassPillHtml(d) +
         '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div></div>";
     return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
@@ -17537,8 +17780,18 @@
   // the action — no price and no instance ceiling, neither of which this screen
   // can support (see PLAN_CATALOG). A subscribed team changes plans in the
   // portal, self-serve.
-  function tierCardHtml(t, active, subscribed) {
+  //
+  // cch-w50-bl — `capability` is the plane's declared checkout capability
+  // (GET /v1/subscription's `billing_capability.checkout`). On "test_mode" the
+  // paid tiers render a LABELLED, DISABLED Subscribe carrying the disclosure
+  // sentence, because the session that button would open is real and no real
+  // card can pay it. The argument is optional: an unknown capability (a cold
+  // cache, an older payload) renders exactly what it rendered before, and the
+  // server still refuses the POST — this card is the disclosure, never the
+  // enforcement.
+  function tierCardHtml(t, active, subscribed, capability) {
     var isCurrent = t.plan === active;
+    var testMode = capability === "test_mode";
     var btn;
     if (isCurrent) {
       btn = '<button class="btn" disabled>Current plan</button>';
@@ -17550,9 +17803,21 @@
       // server 422s plan_invalid — and "doing nothing" IS how a trial lands on
       // Free, so the honest action here is no action at all.
       btn = '<button class="btn" disabled>Yours when the trial ends</button>';
+    } else if (testMode) {
+      // Labelled, disabled, and NOT wired: no data-plan attribute means
+      // renderTiers binds no click handler at all, so there is no path from
+      // this card to a checkout the plane would only refuse.
+      btn = '<button class="btn" disabled>Subscribe unavailable</button>';
     } else {
       btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
     }
+    // The disclosure sits ABOVE the button on purpose: `.tier .btn` carries
+    // `margin-top: auto`, so the button must stay the card's LAST child or the
+    // grid's bottom-aligned button row breaks (the same geometry
+    // cch-tier-note-undefined-render measured for the optional note).
+    var disclosure = testMode && !isCurrent && !subscribed && !t.free
+      ? '<p class="tier-note">' + esc(TEST_MODE_DISCLOSURE) + "</p>"
+      : "";
     return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
       '<div class="tier-name">' + esc(t.name) + "</div>" +
       // cch-tier-note-undefined-render — a note is OPTIONAL prose, so a tier
@@ -17562,6 +17827,7 @@
       // carried by the button itself. Measured in a browser before and after —
       // dropping the <p> alone moved this card's button 36px up.
       (t.note ? '<p class="tier-note">' + esc(t.note) + "</p>" : "") +
+      disclosure +
       btn +
     "</div>";
   }
@@ -17572,7 +17838,8 @@
     // A `trial` team has NOT paid — the paid tiers must stay subscribable so it
     // can upgrade (dwb-13); only a real paid plan routes changes to the portal.
     var subscribed = active !== "free" && active !== "trial";
-    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed); }).join("");
+    var capability = checkoutCapability();
+    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability); }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
@@ -17997,6 +18264,23 @@
   // ({status, data, transport} — exactly faultCopy()'s arguments) and is cleared
   // in lockstep with subError everywhere it is reset.
   var subErrorFault = null;
+  // cch-w50-bl — the plane's PRE-HOC billing declaration (D554), which rides
+  // GET /v1/subscription as a TOP-LEVEL sibling and which the console has never
+  // read. `{checkout: "available"|"unconfigured"|"unverifiable"|"test_mode",
+  // plans: [...]}` — computed server-side by CALLING
+  // Billing.checkout_capability/0, never a constant. Cached on the same seam as
+  // subCache and, like it, LEFT UNTOUCHED on a failed read: an unknown
+  // capability must never read as a known one. Unknown renders the ordinary
+  // Subscribe button, which is safe because the SERVER is the gate — POST
+  // checkout refuses :test_mode itself (422 billing_test_mode).
+  var capCache = null;
+
+  // The declared checkout capability, or "" when the server has not told us.
+  // Pure over the cache so the tier renderer takes it as an argument and a node
+  // test can drive every state without a fetch.
+  function checkoutCapability() {
+    return capCache && typeof capCache.checkout === "string" ? capCache.checkout : "";
+  }
 
   function loadSubscription() {
     return api("GET", "/v1/subscription").then(function (r) {
@@ -18005,6 +18289,7 @@
         subError = false;
         subErrorFault = null;
         subCache = (r.data && r.data.subscription) || null;
+        capCache = (r.data && r.data.billing_capability) || null;
       } else {
         // Keep the prior cache untouched; surface a retry instead of a
         // free-looking null. `subLoaded` stays as-is (false on a cold first
@@ -23919,6 +24204,11 @@
       subLoaded = false;
       subError = false;
       subErrorFault = null;
+      // cch-w50-bl: the declaration is per-DEPLOY, not per-account, but it
+      // arrives on the same response as subCache and must never outlive the
+      // session that fetched it — a cold paint reads "" (unknown) and the
+      // server stays the gate until the next GET answers.
+      capCache = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared
@@ -25651,6 +25941,7 @@
       promotePath: promotePath, promoteActionFor: promoteActionFor,
       promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
       deployRefLabel: deployRefLabel, deployRow: deployRow,
+      deployFailureClassPillHtml: deployFailureClassPillHtml,
       // cch-w28-bl: previewRow was NEVER exported, so the one test named for it
       // guarded its assertions behind `if (html !== null)` and ran ZERO of them
       // — deleting its whole failure panel left the suite 797/797 green while
@@ -25980,6 +26271,18 @@
       operatorCanaryCardHtml: operatorCanaryCardHtml,
       operatorWarmPoolCardHtml: operatorWarmPoolCardHtml,
       operatorDigestCardHtml: operatorDigestCardHtml,
+      // dr-w1-s2's census, finally read. The window helpers are exported so the
+      // harness can assert the URL the browser actually sends, and the rate /
+      // class-row helpers so the REFUSAL arm ("not enough data (n=74)") is
+      // pinned by name rather than only through the card.
+      operatorCensusWindow: operatorCensusWindow,
+      operatorCensusPath: operatorCensusPath,
+      operatorCensusRateHtml: operatorCensusRateHtml,
+      operatorCensusRefusalText: operatorCensusRefusalText,
+      operatorCensusClassRowHtml: operatorCensusClassRowHtml,
+      operatorCensusCardHtml: operatorCensusCardHtml,
+      OPERATOR_DEPLOY_CENSUS: OPERATOR_DEPLOY_CENSUS,
+      OPERATOR_CENSUS_DAYS: OPERATOR_CENSUS_DAYS,
       operatorPageHtml: operatorPageHtml,
       OPERATOR_SETTLE_MIN: OPERATOR_SETTLE_MIN,
       // cch-w36-s4: the fault classifier + the ONE card funnel it feeds.
@@ -26085,6 +26388,8 @@
       trialTagline: trialTagline,
       trialCardHtml: trialCardHtml,
       tierCardHtml: tierCardHtml,
+      checkoutCapability: checkoutCapability,
+      testModeDisclosure: TEST_MODE_DISCLOSURE,
       billingChipModel: billingChipModel,
       billingPortalFlag: billingPortalFlag,
       // gr-p2 launch theater (GR18): the price-before-charge fold — pure model

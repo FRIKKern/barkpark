@@ -523,6 +523,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/release", BarkparkWeb.TasksController, :release, auth: :token_root},
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
+      {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
@@ -556,6 +557,30 @@ defmodule Barkpark.Plugins.Tasks do
       # `config :barkpark, :plugins, []` kill switch (fresh-install invariant).
     ]
   end
+
+  # The command-level `views` descriptor for the two task commands that support
+  # the brief/full projection (wave axi-brief-views): `task.ready` and
+  # `task.prime`. Emitted only under `?views=1`.
+  #
+  # DECLARED HERE, deliberately — this used to call the capabilities plugin's
+  # `agent_views_descriptor/0`, which bought a plugin→core `tasks→capabilities`
+  # architecture edge (the cqv8 boundary gate named it) for a four-key
+  # constant. The shared CALL was never the guarantee it was documented to be:
+  # a plugin can only reach a core module, so the core `search.query`
+  # descriptor could never have been pinned by it either.
+  #
+  # What actually pins `task.ready` / `task.prime` / `search.query` to the
+  # byte-identical shape is the WIRE-level contract test —
+  # test/barkpark_web/contract/capabilities_manifest_test.exs, describe
+  # "command-level `views` descriptor", `@frozen_views` — which asserts all
+  # three against a frozen literal over the real `?views=1` response. Edit this
+  # map without editing that one and the test reds, whatever module the map
+  # lives in. Keep them in step.
+  @agent_views %{
+    "supported" => ["brief", "full"],
+    "default" => "full",
+    "default_for_agents" => "brief"
+  }
 
   @doc """
   The CLI verbs Tasks contributes to the `/v1/capabilities` manifest (M3),
@@ -620,13 +645,24 @@ defmodule Barkpark.Plugins.Tasks do
         args: [],
         flags: [
           # default MUST match the server's actual page size (tasks_controller
-          # do_index: Params.parse_limit(params["limit"], 1000, 1000)). It was
+          # do_index: Params.parse_limit(params["limit"], 100, 1000)). It was
           # born as 50 — false from day one — and the CLI reads this field to
           # calibrate its "page may be truncated" warning (internal/cli/run.go
           # defaultPageLimit), so every `bp task ls` over a >=50-row corpus
           # printed a false "more may be available" even when the server had
           # returned everything.
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 1000},
+          #
+          # NOW 100, tracking the index default down from 1000
+          # (task-e2f5ecca0be9a6d1). Note that this field is NEVER SENT: run.go
+          # applyQuery adds `?limit=` only when `g.limitSet`, so a bare
+          # `bp task ls` transmits no limit and the server's own default is what
+          # bounds the page. Its ONE job is calibrating defaultPageLimit — which
+          # is why leaving it at 1000 would have been the quiet half of this
+          # defect: the server would page at 100 and the CLI, comparing 100 rows
+          # against a believed limit of 1000, would conclude the page was
+          # complete and say nothing. A wrong number here does not truncate
+          # anything; it makes a truncation UNANNOUNCED, which is worse.
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 100},
           %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
@@ -640,7 +676,24 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.ready",
         noun: "task",
         verb: "ready",
-        summary: "List executable, unblocked tasks (priority order by default).",
+        # WHAT `ready` RETURNS, said out loud (task tgw10-bl-drafts-in-ready-pool).
+        # The old summary — "List executable, unblocked tasks" — was wrong twice.
+        # (a) `blocked` IS claimable: Tasks.Validation.claimable_statuses/0 is
+        #     ~w(open blocked) by DECISION (spd-b24) — blocking is advisory
+        #     metadata; the blocks-edge and content.dependencies gates are what
+        #     actually hold work back. So a lifecycle-`blocked` row in the queue
+        #     is the design, not a leak.
+        # (b) `ready` carries NO documents.status predicate, so an UNPAIRED
+        #     `drafts.<id>` row is admitted as itself. That too is deliberate:
+        #     `bp task create` lands a draft by default, and excluding drafts
+        #     would hide every unpublished task from the queue agents claim from.
+        #     Only a draft whose published twin exists in the same scope is
+        #     collapsed away (Tasks.Queue axis 3, published-wins).
+        # The pin in cli_commands_manifest_test.exs holds this sentence.
+        summary:
+          "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), " <>
+            "dependencies and queue gate cleared, published or unpaired draft, " <>
+            "twin-collapsed to the published row — priority order by default.",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],
@@ -663,7 +716,7 @@ defmodule Barkpark.Plugins.Tasks do
         # a token-thrifty card list by default, humans the full envelope.
         # Emitted only under ?views=1 — Capabilities.maybe_gate_views strips it
         # otherwise, so the default wire shape is byte-identical to today.
-        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
+        views: @agent_views,
         scoped_prefix: nil
       },
       %{
@@ -702,7 +755,7 @@ defmodule Barkpark.Plugins.Tasks do
         # Supports the brief/full projection (wave axi-brief-views): the brief
         # prime response is the ≤5 KB resume card an agent gets by default.
         # Emitted only under ?views=1 (Capabilities.maybe_gate_views).
-        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
+        views: @agent_views,
         scoped_prefix: nil
       },
       %{
@@ -806,7 +859,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Three honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), and a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override), and none of them discharges another; see the set flag.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Four honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "write",
         args: [
@@ -826,7 +879,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Optimistic concurrency guard; a stale value is refused 409 fenced_off."
           },
           %{
             name: "lifecycle_status",
@@ -857,7 +911,19 @@ defmodule Barkpark.Plugins.Tasks do
                 "flipping a neighbouring criterion, and a text that does not match the row at that index " <>
                 "is REJECTED too (409 criteria_mismatch). An entry with met=false needs no text. Optional " <>
                 "evidence is presence-sensitive: omit the key to preserve stored evidence, or " <>
-                "send evidence:\"\" to clear it. THE CRITERIA GATE (close honesty, PDS-D289): a " <>
+                "send evidence:\"\" to clear it. THE RUBRIC SHAPE (no index): an entry may instead " <>
+                "name its row by wording alone — --set 'criteria:=[{\"criterion\":\"<the exact stored " <>
+                "wording>\",\"met\":true,\"evidence\":\"PR #1234\"}]' — which is the row exactly as " <>
+                "`bp task get <id>` prints it, so you can flip the rubric you just read without " <>
+                "reconstructing 0-based indices. The server resolves it by EXACT text match inside the " <>
+                "same close write; the text is its own guard. It must hit exactly one row: no match is " <>
+                "REJECTED (409 criterion_not_found), two or more rows sharing that wording are REJECTED " <>
+                "(409 criterion_ambiguous — use the indexed shape for those). A text-keyed entry with " <>
+                "met=true REQUIRES non-empty evidence (400) — the indexed shape pays for a met-flip with " <>
+                "its text guard, and a rubric row read back from the task already carries its evidence. " <>
+                "ONE SHAPE PER COMMAND: mixing indexed and text-keyed entries in the same criteria list " <>
+                "is REJECTED (400). An entry carrying BOTH index and criterion is the indexed shape with " <>
+                "its guard, not a mix. THE CRITERIA GATE (close honesty, PDS-D289): a " <>
                 "done close over unmet acceptance criteria is REFUSED — 409 criteria_unmet, naming " <>
                 "the 0-based unmet indices. Unmet is measured on the task AS STORED (criteria " <>
                 "flipped in this very close command do not count), and a criterion the merge-gate " <>
@@ -878,8 +944,19 @@ defmodule Barkpark.Plugins.Tasks do
                 "way through is --set ack_override=\"<why the reporter is not being told>\", " <>
                 "recorded as close_override.acknowledgement. criteria_override does NOT discharge " <>
                 "it, and blocked closes are EXEMPT by name (cancelled deliberately is not — a " <>
-                "cancel is when silence hurts most). A blank reason is NOT an override for any of " <>
-                "the three keys. " <>
+                "cancel is when silence hurts most). THE CLOSE ARTIFACT GATE (PDS-D291): a done " <>
+                "close of a kind:task row carrying ZERO acceptance criteria is REFUSED — 409 " <>
+                "close_reason_needs_artifact — unless the reason names a PR number AND a 7-40 hex " <>
+                "sha, or pastes a run (a ``` fence or a line starting with \"$ \"). D289 above " <>
+                "measures the criteria a row HAS, so on a row with none it is vacuously satisfied " <>
+                "and a bare prose reason used to close done unchallenged. A landed digest naming " <>
+                "both a PR and a commit counts as the artifact. Goals and decisions (kind other " <>
+                "than task, a decision/goal label segment, or a row WITH children) are EXEMPT by " <>
+                "name, as are cancelled and blocked closes. The way through is --set " <>
+                "close_reason_override=\"<why it is done with no artifact>\", recorded as " <>
+                "close_override.close_reason; criteria_override does NOT discharge it. " <>
+                "A blank reason is NOT an override for any of " <>
+                "the four keys. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },
@@ -921,10 +998,73 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Optimistic concurrency guard; a stale value is refused 409 fenced_off."
           }
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.landed",
+        noun: "task",
+        verb: "landed",
+        summary:
+          "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. " <>
+            "This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a " <>
+            "push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) " <>
+            "and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so " <>
+            "a second landing accumulates a second commit instead of replacing the first, and a close's own land " <>
+            "digest is never clobbered (one merge rule, shared with close). " <>
+            "--criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to " <>
+            "met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries " <>
+            "\"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. " <>
+            "Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met " <>
+            "(409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no " <>
+            "override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a " <>
+            "refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false " <>
+            "on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). " <>
+            "Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: " <>
+            "not lifecycle_status, not the claim, not a second criterion.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/landed"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id the landing is recorded on."
+          }
+        ],
+        flags: [
+          %{
+            name: "commit",
+            type: "string",
+            summary: "The commit sha that landed. Unioned into content.landed.commits."
+          },
+          %{
+            name: "pr",
+            type: "string",
+            summary: "The PR number that merged. Unioned into content.landed.prs."
+          },
+          %{
+            name: "note",
+            type: "string",
+            summary:
+              "The landing sentence. Unioned into content.landed.notes, and REQUIRED with --criterion because it is the evidence written onto that criterion."
+          },
+          %{
+            name: "criterion",
+            type: "int",
+            summary:
+              "ZERO-BASED index into acceptance_criteria — the first criterion is 0, NOT 1. Flips that ONE row to met=true with --note as evidence, and only when the row is merge-shaped and not already met; any other index is a 409 naming why. Omit it to record the landing sentence alone."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,
@@ -957,7 +1097,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (same fence as close)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Same fence as close; a stale value is refused 409 fenced_off."
           }
         ],
         flags: [

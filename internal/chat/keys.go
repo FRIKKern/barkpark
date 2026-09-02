@@ -328,8 +328,15 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Cycle the focus ring to the next pending card. A no-op with 0/1 cards.
 		if n := len(m.answerableCards()); n > 0 {
 			m.cardCursor = (m.cardCursor + 1) % n
+			m.optionCursor = 0 // a different card offers different options
 			m = m.followScroll()
 		}
+		return m, nil
+	case tea.KeyCtrlF:
+		// Expand/collapse every settled turn's fold (task-8f904a88b9bc3d59).
+		// A non-printable key, like ctrl+a/ctrl+r before it, so the composer
+		// stays fully typable (the D14 law).
+		m.foldsExpanded = !m.foldsExpanded
 		return m, nil
 	case tea.KeyCtrlB:
 		return m.leaveSession()
@@ -366,6 +373,18 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.pinScroll(0, blockStarts), nil
 	case tea.KeyEnd:
 		return m.followScroll(), nil // re-enter follow mode
+	case tea.KeyLeft, tea.KeyRight:
+		// Walk the focused QUESTION card's option chips
+		// (ct-bl-question-updatedinput). Deliberately arrows, not digits: the
+		// composer must stay fully typable (the D14 law), and ←/→ were unbound in
+		// the composer grammar. With no focused question card — or a question row
+		// carrying no decodable ask — this stays the no-op it has always been.
+		delta := 1
+		if msg.Type == tea.KeyLeft {
+			delta = -1
+		}
+		m, _ = m.moveOptionCursor(delta)
+		return m, nil
 	case tea.KeyRunes:
 		m.input += string(msg.Runes)
 		return m, nil
@@ -517,6 +536,20 @@ func (m Model) answerFocused(decision string) (tea.Model, tea.Cmd) {
 	m.focus = focusComposer
 	m.wfExpanded = false
 	m.wfAgentDetail = false
+	// An ALLOW on a question card that offers options is not a blanket allow — it
+	// is the picked option, carried on the /answer route
+	// (ct-bl-question-updatedinput, closing D28). A deny is unchanged on every
+	// role (dismissing the questions is a real, honest verb), and a question row
+	// with no decodable ask still falls through to blanket allow, so no card ever
+	// loses its answer path.
+	if decision == "allow" {
+		if choice, ok := m.focusedChoice(); ok {
+			return m.apply(QuestionAnswerEvent{
+				RequestID: card.RequestID(),
+				Answers:   map[string]any{choice.Question: choice.Label},
+			})
+		}
+	}
 	return m.apply(AnswerEvent{RequestID: card.RequestID(), Decision: decision})
 }
 

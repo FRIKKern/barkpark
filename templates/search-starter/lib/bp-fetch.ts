@@ -36,7 +36,8 @@ const bpDispatcher = new Agent({
  *     "Unexpected end of JSON input" the admin panel used to surface).
  *
  * On failure it throws a structured `BpUpstreamError` carrying the upstream HTTP
- * status (0 for network/timeout) and a human message — callers translate that
+ * status (0 for network/timeout), a human message, and the envelope's
+ * machine-readable `code` when the body carried one — callers translate that
  * into whatever envelope their contract owns.
  *
  * Token + base URL come from the server-only env vars (BARKPARK_TOKEN is
@@ -68,13 +69,20 @@ export function authHeaders(): HeadersInit {
  * restart, timeout): definitive errors are NOT retried and carry their real
  * message instead of the generic "restarting" one.
  *
- * `retryAfterMs` carries the upstream's own `Retry-After`, when it sent one, so
- * the retry loop can wait as long as the server said instead of guessing.
+ * `code` carries the envelope's machine-readable code so a caller can branch on
+ * the FAILURE rather than string-matching a human sentence; `retryAfterMs`
+ * carries the upstream's own `Retry-After`, when it sent one, so the retry loop
+ * can wait as long as the server said instead of guessing.
  */
 export class BpUpstreamError extends Error {
   readonly status: number;
   readonly detail: string;
   readonly definitive: boolean;
+  /** Machine-readable error code from the envelope's `{error:{code,message}}`
+   * shape, when the upstream body carried one — undefined for infra blips
+   * (bodyless/HTML 5xx) that never reached a structured envelope. Lets
+   * callers branch on the specific failure instead of only the HTTP status. */
+  readonly code?: string;
   /** Upstream `Retry-After`, in ms — `undefined` when the server sent none. */
   readonly retryAfterMs?: number;
   constructor(
@@ -82,6 +90,7 @@ export class BpUpstreamError extends Error {
     message: string,
     detail = "",
     definitive = false,
+    code?: string,
     retryAfterMs?: number,
   ) {
     super(message);
@@ -89,12 +98,21 @@ export class BpUpstreamError extends Error {
     this.status = status;
     this.detail = detail;
     this.definitive = definitive;
+    this.code = code;
     if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
 }
 
-/** Pull a human message out of an API `{error: string | {message,code}}` body. */
-function errorEnvelopeMessage(body: string): string | null {
+/** Pull a human message + machine code out of an API
+ * `{error: string | {message,code}}` body.
+ *
+ * The code is lifted BEFORE the message fallback below consumes it. Reading it
+ * only as a fallback (the shape this file used to have) means an envelope
+ * carrying BOTH a message and a code surfaces the message and DROPS the code,
+ * leaving a caller nothing to branch on but the sentence. The fallback itself
+ * is unchanged: with no human message the code is still the best display
+ * string there is — it is just no longer the ONLY thing it can be. */
+function errorEnvelope(body: string): { message: string; code?: string } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -103,11 +121,14 @@ function errorEnvelopeMessage(body: string): string | null {
   }
   if (!parsed || typeof parsed !== "object" || !("error" in parsed)) return null;
   const e = (parsed as { error: unknown }).error;
-  if (typeof e === "string" && e.trim() !== "") return e;
+  if (typeof e === "string" && e.trim() !== "") return { message: e };
   if (e && typeof e === "object") {
     const o = e as { message?: unknown; code?: unknown };
-    if (typeof o.message === "string" && o.message.trim() !== "") return o.message;
-    if (typeof o.code === "string" && o.code.trim() !== "") return o.code;
+    const code = typeof o.code === "string" && o.code.trim() !== "" ? o.code : undefined;
+    if (typeof o.message === "string" && o.message.trim() !== "") {
+      return { message: o.message, code };
+    }
+    if (code) return { message: code, code };
   }
   return null;
 }
@@ -156,13 +177,14 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
     // DELIBERATE upstream answer (reindex_failed, 401 unauthorized) — surface its
     // real message and mark it definitive so it is NOT retried. A bodyless/HTML
     // 5xx (LB 502, restart) has no envelope → stays a retryable transient.
-    const enveloped = errorEnvelopeMessage(detail);
+    const enveloped = errorEnvelope(detail);
     if (enveloped) {
       throw new BpUpstreamError(
         res.status,
-        enveloped,
+        enveloped.message,
         detail.slice(0, 200),
         true,
+        enveloped.code,
         retryAfterMs,
       );
     }
@@ -171,6 +193,7 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
       `upstream ${res.status}`,
       detail.slice(0, 200),
       false,
+      undefined,
       retryAfterMs,
     );
   }

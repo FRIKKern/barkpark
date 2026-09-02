@@ -21,6 +21,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { compare, baselineConcepts } from "./ci-boundary.mjs";
+import {
+  isCompositionRootFile,
+  isEntryPoint,
+  isMixTaskFile,
+  isWebLayerFile,
+} from "./entrypoints.mjs";
 
 // A baseline that knows exactly four concepts: kernel `core`, features `alpha`,
 // `beta`, `gamma`. It carries one sideways edge and one wrong-direction edge.
@@ -343,4 +349,50 @@ test("END TO END: the wrapper run inside a planted tree exits 2 with one line an
   assert.match(lines[0], /node tooling\/blast-radius\/build-index\.mjs/);
   assert.doesNotMatch(stderr, /^\s+at /m, "no stack frames");
   assert.doesNotMatch(stderr, /Command failed/);
+});
+
+// ── the ENTRY-POINT predicate itself ──────────────────────────────────────────
+//
+// entrypoints.mjs is the other half of what this workflow step calls "the
+// boundary predicate": compare() decides whether an edge is a REGRESSION, and
+// isEntryPoint() decides whether the edge is counted at all. It is pinned HERE
+// rather than in a file of its own because this is the only concept-map test the
+// architecture workflow executes — a selftest CI never runs defends nothing.
+//
+// Both directions, per the rule at the top of this file: the composition root is
+// an entry-point, and the things next to it in the tree still are not.
+
+test("the OTP composition root is an entry-point; its neighbours are not", () => {
+  assert.equal(isCompositionRootFile("api/lib/barkpark/application.ex"), true);
+  assert.equal(isEntryPoint("api/lib/barkpark/application.ex"), true);
+
+  // It is the COMPOSITION-ROOT rule that admits it, not the web or Mix rule —
+  // otherwise this case would still pass with the new predicate deleted.
+  assert.equal(isWebLayerFile("api/lib/barkpark/application.ex"), false);
+  assert.equal(isMixTaskFile("api/lib/barkpark/application.ex"), false);
+
+  // The RED-WITHOUT half: ordinary domain modules, including the two whose
+  // edges from start/2 prompted the re-banding, stay feature members.
+  for (const f of [
+    "api/lib/barkpark/tasks/compactor.ex",
+    "api/lib/barkpark/sheets/supervisor.ex",
+    "api/lib/barkpark/telemetry.ex",
+    "api/lib/barkpark/vault.ex",
+  ]) {
+    assert.equal(isEntryPoint(f), false, `${f} must NOT be an entry-point`);
+  }
+});
+
+test("the composition-root rule is EXACT-PATH, not a *application.ex pattern", () => {
+  // A pattern would silently re-band a future unrelated file and quietly drop
+  // its edges from the gate. There is one composition root; match only it.
+  for (const f of [
+    "api/lib/barkpark/plugins/tasks/application.ex",
+    "api/lib/other_app/application.ex",
+    "api/lib/barkpark/application/child_spec.ex",
+    "api/lib/barkpark/application_config.ex",
+  ]) {
+    assert.equal(isCompositionRootFile(f), false, `${f} must NOT match the composition root`);
+    assert.equal(isEntryPoint(f), false, `${f} must NOT be an entry-point`);
+  }
 });

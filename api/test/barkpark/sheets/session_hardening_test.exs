@@ -383,7 +383,7 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       # Guards the silent worker default (5_000ms) from regressing: terminate
       # persists through recompute + revisions + embed write-through, and a
       # deploy shutdown must not brutal-kill that flush mid-flight.
-      assert Session.child_spec({@dataset, "any"}).shutdown == 30_000
+      assert Session.child_spec({@dataset, nil, "any"}).shutdown == 30_000
     end
 
     test "a supervisor shutdown (terminate_child) flushes unpersisted ops" do
@@ -395,10 +395,20 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       # debounce is 60s here (setup), so the op is memory-only until terminate
       assert persisted_cell("hd-flush-shutdown", "A1") == nil
 
+      # THE REGISTRY KEY IS `{dataset, workspace_id, published-id}`
+      # (task-f0c064a406e8d363 — it was `{dataset, published-id}`, so two
+      # tenants holding the same slug shared one session process). This sheet
+      # is created with NO scope opts, so its tenant NORMALIZES to the seeded
+      # Default workspace — the same tenant an unscoped read has always landed
+      # in (`WriteScope.resolve_read_dataset_id/2`'s no-scope arm resolves the
+      # Default PROJECT's dataset_id), and the same rule `Content.doc_topic/4`
+      # already applies to a nil workspace.
+      %{id: default_ws_id} = Barkpark.Tenancy.get_default_workspace()
+
       [{pid, _}] =
         Registry.lookup(
           Barkpark.Plugins.Sheets.SessionRegistry,
-          {@dataset, "hd-flush-shutdown"}
+          {@dataset, default_ws_id, "hd-flush-shutdown"}
         )
 
       # :shutdown via the supervisor — the trap_exit + terminate/2 path a

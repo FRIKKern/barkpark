@@ -13,7 +13,13 @@ import (
 //
 //	video: {src, poster?, captions?: [{lang, src}], loop?}
 //
-//	- src       required for a real render; absent -> the honest empty box.
+//	- src       required for a real render; absent -> NOTHING is emitted (nil,
+//	            zero lines — no box, no label, no placeholder). That is the
+//	            cross-surface parity law, not a local shortcut: a src-less video
+//	            renders nothing on EVERY surface (charter D46). This comment used
+//	            to promise "the honest empty box" here, which the code has never
+//	            done and TestVideoRendererEmptyIsSilent has always forbidden;
+//	            reconciled to the code 2026-09-02 (mob-zb-bl-canonical-anchor).
 //	- captions  count only ("· N caption track(s)"), never fetched/parsed.
 //	- poster/loop carry no TUI-visible effect (no image resolver call here —
 //	  poster is a browser-only affordance).

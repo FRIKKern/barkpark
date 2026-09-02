@@ -12,6 +12,17 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
       error at runtime: the call site believes it wrote an audit row and no row
       exists. That is exactly how `site.rolled_back` shipped (slice
       cch-w51-s3) — nothing in this repo compared the two sides.
+    * ARM (c) PRODUCED-SOMEWHERE → PRODUCED-ON-EVERY-LANE, for the ONE verb
+      whose lanes this census got caught not seeing. Arms (a) and (b) are
+      SET arms: they compare two sets of verbs and are satisfied by a single
+      producer anywhere in `cloud/lib`. A verb with two lanes — two different
+      code paths that perform the same act — therefore reads GREEN when only
+      one of them writes. That is not hypothetical: `barkpark.deleted` was
+      produced by the router's NON-live `DELETE /v1/barkparks/:id` arm and by
+      nothing on the LIVE deprovision lane, where every box that actually RAN
+      is deleted (`Registry.succeed_deprovision_job/2`). Both arms were green
+      the whole time, and the console's append-only audit list recorded the
+      removal of every box that never ran and none that did (cch-w57).
 
   ## Why a naive grep is WORSE THAN NOTHING here
 
@@ -45,6 +56,14 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
       discarded at 8 of 12 call sites — filed separately as
       `cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site`.
     * It is a SOURCE scan, not a call graph: dead code counts as a producer.
+    * ARM (c) IS ONE VERB WIDE, ON PURPOSE, AND THAT IS A LIMIT NOT A DESIGN.
+      It pins the lanes of `barkpark.deleted` because that is the pair a wave
+      actually found broken. Every OTHER verb in the vocabulary is still held
+      to arm (a)'s one-producer-anywhere standard, so a second verb losing a
+      second lane would be as invisible tomorrow as this one was yesterday.
+      The general shape — enumerate each DESTRUCTIVE call site in `cloud/lib`
+      and require an audit producer in its transaction — is a bigger
+      instrument than this file, and it is not claimed here.
     * It says nothing about whether a produced action is LABELLED in the
       console. Charter D582 ruled the unlabelled verbs UGLY, NOT FALSE —
       `humanAction(a) { return ACTION_LABELS[a] || a; }` is a documented
@@ -244,6 +263,21 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   end
 
   defp sorted(set), do: set |> MapSet.to_list() |> Enum.sort()
+
+  # ARM (c)'s reader: which FILES under cloud/lib literally write `verb`.
+  # Comments and heredocs are stripped first (`code_lines/1`), so a doc comment
+  # naming the verb can never stand in for a producer — which matters here more
+  # than anywhere else in this file, because both lanes' source is thick with
+  # prose about the other one.
+  defp producer_files(verb) do
+    for path <- lib_files(),
+        line <- code_lines(path),
+        [_, found] <- Regex.scan(@action_literal, line),
+        found == verb,
+        uniq: true,
+        into: MapSet.new(),
+        do: Path.relative_to(path, @lib_root)
+  end
 
   # Every CODE line in cloud/lib matching `regex`, as "<relpath>: <line>".
   # Comments and heredocs are stripped first, so an anchor must resolve in code
@@ -563,6 +597,60 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
              Ecto.Changeset.action, a parameter) — add its trimmed line to @accounted_indirection
              with a one-line reason.
              """
+    end
+  end
+
+  # THE LANE ARM (cch-w57). Arms (a) and (b) compare SETS OF VERBS, so both were
+  # green while the only lane that deletes a box that actually ran wrote nothing.
+  # This arm asks a different question of one verb: not "does it have a
+  # producer", but "does EACH LANE THAT PERFORMS THE ACT have one".
+  describe "ARM (c) — barkpark.deleted is produced on BOTH lanes that delete the row" do
+    @deleted_lanes %{
+      "barkpark_cloud/web/router.ex" =>
+        "the NON-LIVE arm of DELETE /v1/barkparks/:id — a box that never came up, " <>
+          "removed inside Accounts.audit/3.",
+      "barkpark_cloud/registry.ex" =>
+        "the LIVE lane — succeed_deprovision_job/2 deletes the row the deprovision " <>
+          "worker just tore the real box out from under, and stamps the verb in the " <>
+          "SAME transaction."
+    }
+
+    test "both lanes produce the verb" do
+      produced_on = producer_files("barkpark.deleted")
+      missing = Enum.reject(Map.keys(@deleted_lanes), &MapSet.member?(produced_on, &1))
+
+      assert missing == [],
+             """
+             These lanes delete a barkpark row and no longer write `barkpark.deleted`:
+
+                 #{Enum.map_join(Enum.sort(missing), "\n    ", &"#{&1} — #{@deleted_lanes[&1]}")}
+
+             Arms (a) and (b) CANNOT see this: they are satisfied by one producer anywhere in
+             cloud/lib, and the other lane still has one. That is exactly the blackout wave 57
+             found — the audit list showed the removal of every box that never ran and was
+             silent about every box that did.
+
+             If a lane genuinely stopped deleting rows, remove its entry here WITH the diff that
+             removed the delete. Do not remove it to make this green.
+             """
+    end
+
+    test "the arm can lose — a verb produced on only one lane is DETECTED, not waved through" do
+      # NON-VACUITY. `producer_files/1` must actually discriminate, or the test
+      # above passes because the reader returns everything (or nothing useful).
+      files = producer_files("barkpark.deleted")
+
+      assert MapSet.size(files) >= 2,
+             "barkpark.deleted resolves to #{MapSet.size(files)} producer file(s): " <>
+               "#{inspect(sorted(files))}. The lane arm above needs at least the two."
+
+      refute MapSet.member?(producer_files("barkpark.go_live"), "barkpark_cloud/registry.ex"),
+             "producer_files/1 reports registry.ex as a producer of barkpark.go_live, which it " <>
+               "is not — the reader is matching something other than the verb, and the arm " <>
+               "above would pass for any pair of files."
+
+      assert MapSet.size(producer_files("no.such_verb")) == 0,
+             "producer_files/1 found a producer for a verb that does not exist."
     end
   end
 end

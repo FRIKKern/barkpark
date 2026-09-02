@@ -1007,7 +1007,7 @@ func TestCloseKeyDoublePressFiresWithObservedEpoch(t2 *testing.T) {
 
 	var gotDoc, gotWorker string
 	var gotEpoch int
-	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int) ActionResult {
+	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int, _ string) ActionResult {
 		gotDoc, gotWorker, gotEpoch = docID, worker, epoch
 		return ActionResult{OK: true, Message: "closed · epoch 7"}
 	}
@@ -1045,7 +1045,7 @@ func TestCloseGuardDisarmsOnOtherKey(t2 *testing.T) {
 	fired := false
 	m := testModel(activeOrphans(claimedTask("c1", 7)))
 	m.ui.Cursor = 1 // c1 (row 0 is the loose-bucket header)
-	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
+	m.doClose = func(*apiclient.Client, string, string, int, string) ActionResult {
 		fired = true
 		return ActionResult{}
 	}
@@ -1166,7 +1166,7 @@ func TestSnapshotDisarmsCloseGuard(t2 *testing.T) {
 	m.build = func(Snapshot, RepoContext, time.Time) Board {
 		return activeOrphans(claimedTask("c1", 7))
 	}
-	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
+	m.doClose = func(*apiclient.Client, string, string, int, string) ActionResult {
 		fired = true
 		return ActionResult{}
 	}

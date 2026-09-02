@@ -42,7 +42,9 @@ import { DATASET, WS_SCOPE } from "@/lib/config";
  * absolute URL through untouched and the WebSocket constructor normalizes
  * http(s) → ws(s). The THIRD derived var is the dataset (see `lib/config`): the
  * topic below is `search:<ws>:<proj>:<dataset>`, and a browser without the real
- * dataset joins the default topic GREEN and gets count=0 on every keystroke.
+ * dataset asks for the default topic and has the join REFUSED with reason
+ * "unknown_dataset" — the `.receive("error")` arm below, so `ready` never
+ * flips, the LIVE badge stays dark, and search silently stays on HTTP.
  *
  * Stale-reply safety: every `search()` stamps a monotonic `seq`. A reply whose
  * `seq` isn't the latest is rejected as an `AbortError` — which the finder's

@@ -69,7 +69,7 @@ func TestCloseInCmuxPaneUsesPaneWorkerID(t *testing.T) {
 
 	var gotWorker string
 	var gotEpoch int
-	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int) ActionResult {
+	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int, _ string) ActionResult {
 		gotWorker, gotEpoch = worker, epoch
 		return ActionResult{OK: true, Message: "closed"}
 	}
@@ -122,7 +122,7 @@ func TestClaimCloseOutsideCmuxUnchanged(t *testing.T) {
 	mx := testModel(activeOrphans(claimedTask("c1", 3)))
 	mx.ui.Cursor = 1
 	var closeWorker string
-	mx.doClose = func(_ *apiclient.Client, _, worker string, _ int) ActionResult {
+	mx.doClose = func(_ *apiclient.Client, _, worker string, _ int, _ string) ActionResult {
 		closeWorker = worker
 		return ActionResult{OK: true}
 	}

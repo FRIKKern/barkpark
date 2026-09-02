@@ -321,15 +321,16 @@ defmodule BarkparkWeb.PluginScopeSession do
   # revoked after the dead render fails here on the next mount.
   #
   # Socket twin of `BarkparkWeb.Plugs.RequireShareScope`'s conn-side check
-  # (`maybe_grant_item_token/4` + `link_matches_route_resource?/2`). Kept local
-  # rather than shared because the plug is fenced to a sibling lane this cycle;
-  # unifying both onto one predicate is filed as follow-up work.
+  # (`maybe_grant_item_token/4`). The per-resource binding is now decided by the
+  # ONE owner both sides delegate to — `Links.binds_route_resource?/2`
+  # (@canonical capability:share-link-route-binding) — so a kind added there
+  # reaches the dead render and the socket mount together (task-3ba103f76393b04e).
   defp item_token_binds?(params, session) when is_map(params) do
     with {:ok, link} <- Links.resolve(session[@session_share_token]),
          true <- link.workspace_id == session[@session_ws_id],
          true <- link.project_id == session[@session_proj_id],
          true <- link.dataset == (params["dataset"] || @default_dataset) do
-      binds_route_resource?(link, params)
+      Links.binds_route_resource?(link, params)
     else
       _ -> false
     end
@@ -338,20 +339,6 @@ defmodule BarkparkWeb.PluginScopeSession do
   # `:not_mounted_at_router` (or any non-map params) addresses no single
   # resource, and an item link can only ever open a single-resource route.
   defp item_token_binds?(_params, _session), do: false
-
-  # Mirrors the plug's per-kind binding: paper reader → slug; doc read →
-  # doc_id (compared exactly as minted); media → file id. Any other param
-  # shape is NOT a single-resource route → never item-granted (fail closed).
-  defp binds_route_resource?(link, %{"slug" => slug}),
-    do: link.kind == "doc" and link.ref_type == "paper" and link.ref_id == slug
-
-  defp binds_route_resource?(link, %{"doc_id" => doc_id}),
-    do: link.kind == "doc" and link.ref_id == doc_id
-
-  defp binds_route_resource?(link, %{"id" => id}),
-    do: link.kind == "media" and link.ref_id == id
-
-  defp binds_route_resource?(_link, _params), do: false
 
   defp section_shared?(session, params) when is_map(params),
     do: shared_for_dataset?(session, params["dataset"] || @default_dataset)

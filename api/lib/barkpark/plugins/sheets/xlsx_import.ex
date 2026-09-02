@@ -48,11 +48,31 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     * tab color → tab `"color"`: a `<sheetPr><tabColor rgb="AARRGGBB"/>` maps to
       lowercase `#rrggbb` (the `FF` alpha dropped); only an explicit `rgb=`
       round-trips — a theme/indexed tabColor is ignored (the v1 cap)
+    * `<conditionalFormatting>`/`<cfRule>` → tab `"cond_formats"` (CF-X), in
+      `<cfRule priority>` order, each in `CondFormat`'s canonical stored shape
+      (`id`/`range`/`when`/`style`). `cellIs` with `greaterThan`/`lessThan`/
+      `equal`/`between` maps to `gt`/`lt`/`eq`/`between`, `containsText` to
+      `contains`; the `when` value(s) are decoded from the `<formula>` children
+      as TYPED xlsx literals (a bare number → a number, `"…"` → a string,
+      `TRUE`/`FALSE` → a boolean), so `XlsxExport`'s rules come back
+      byte-identical. The rule's `style` comes from the `<dxf>` its `dxfId`
+      points at (bold / italic / a solid `bgColor` or `fgColor` → `#rrggbb`).
+      The stored `"id"` rides in `<cfRule><extLst>` on a Barkpark-written file;
+      a FOREIGN file has none, so the import synthesizes a per-tab-unique
+      `cf<N>` (the storage gate requires an id — a rule it would reject is
+      worse than a synthesized name). Every candidate rule is then run past
+      that gate (`Barkpark.Plugins.Sheets.cond_format_list_errors/2`) and the
+      list deduped by range/id and cut to `cond_format_cap/0`, so an import can
+      never produce cond_formats the save path would 409 on.
 
   ## Dropped on import (documented, never an error)
 
-  Charts, pivot tables, images, conditional formatting, data validation —
-  plus auto-fit row heights (a `<row>` without `customHeight="1"`),
+  Charts, pivot tables, images, data validation — plus the conditional-format
+  rule KINDS Barkpark has no model for (`colorScale`, `dataBar`, `iconSet`,
+  `expression`, `top10`, …, and any `cellIs`/`containsText` rule whose formula
+  is not a plain literal — a cell reference, an expression): an unknown
+  `cfRule` is skipped, never an import error. Also dropped:
+  auto-fit row heights (a `<row>` without `customHeight="1"`),
   fonts beyond bold/italic, borders, theme/indexed fill
   colors, number formats outside the `Fmt` vocabulary, merged ranges
   that exceed the area cap after clipping (dropped deterministically),
@@ -80,13 +100,24 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   `Barkpark.Media.ImageBackend.Vix`'s `guard_dimensions/1` for images. The
   MECHANISM: `:zip.list_dir/1` reports each member's declared UNCOMPRESSED size
   straight from the central directory WITHOUT inflating anything, so the guard
-  sums those declared sizes and rejects up front with
+  sums those sizes and rejects up front with
   `{:error, :xlsx_decompressed_size_exceeded}` when the total exceeds the
   ceiling — BEFORE `open_package/1` (covering a bomb hidden in a member
   `XlsxReader` itself reads, e.g. a huge `xl/sharedStrings.xml`) and before the
   raw extract in `parse_layout/1`. The ceiling defaults to 256 MiB and is
   overridable per-env via
   `config :barkpark, Barkpark.Plugins.Sheets.XlsxImport, max_decompressed_bytes: N`.
+
+  A declared size is ATTACKER-AUTHORED, though, so it is trusted only when it is
+  a positive integer. A member declaring `0` (or anything non-integer) while
+  carrying real compressed bytes used to contribute `0` to the sum — a package
+  declaring `0` everywhere cleared the ceiling and was then fully inflated
+  anyway, since `:zip.extract` and `XlsxReader` read the LOCAL headers and the
+  actual deflate streams. Such a member is now bounded by `comp_size × 1032`,
+  deflate's theoretical maximum ratio, which is a fact about the bytes present
+  rather than a claim about them. Legitimate packages are untouched: their
+  declarations are positive and honest. A member-count cap (10_000) closes the
+  companion shape, a central directory of hundreds of thousands of tiny members.
   """
 
   alias Barkpark.Plugins.Sheets.Fmt
@@ -101,6 +132,25 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   # backend's `@default_max_decode_bytes`. Overridable per-env for tests via
   # `config :barkpark, __MODULE__, max_decompressed_bytes: N`.
   @default_max_decompressed_bytes 256 * 1024 * 1024
+
+  # Deflate's theoretical maximum compression ratio is 1032:1 — RFC 1951 §3.2.5
+  # lets a single length/distance pair reproduce a 258-byte match, and the
+  # cheapest such pair costs ~2 bits, so 258 bytes out per ~0.25 bytes in. Used
+  # ONLY for a member whose declared uncompressed size is not a positive integer
+  # (`member_bound/2`): the declaration is attacker-authored, the compressed
+  # length is a physical fact about the bytes actually present, and 1032× it is
+  # the most that member could possibly inflate to.
+  @deflate_max_ratio 1032
+
+  # A central directory naming hundreds of thousands of tiny members is its own
+  # resource attack: `parse_layout/1`'s `:zip.extract(binary, [:memory])`
+  # materialises one binary per member and folds them all into a map, and the
+  # controller's 15 MB compressed cap still leaves room for ~190k ~80-byte
+  # entries. A real xlsx carries tens of members, so 10_000 is generous by three
+  # orders of magnitude. (`:zip.list_dir/1` has already walked the directory by
+  # the time this is counted — the cap bounds the DOWNSTREAM inflate and fold,
+  # not the directory read itself.)
+  @max_zip_members 10_000
 
   # xlsx column widths are in "character" units; Excel's default char is
   # ~7px. round(px / 7 * 7) is exact for integers, so widths round-trip.
@@ -172,49 +222,91 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     _ -> {:error, "invalid xlsx: not an xlsx package"}
   end
 
-  # Pre-extract decompression-bomb guard: sum every member's DECLARED
-  # uncompressed size from the zip central directory — `:zip.list_dir/1` reads
-  # only the directory, it does NOT inflate — and reject before any member is
+  # Pre-extract decompression-bomb guard: bound every member's uncompressed
+  # size from the zip central directory — `:zip.list_dir/1` reads only the
+  # directory, it does NOT inflate — and reject before any member is
   # materialised when the total exceeds the ceiling. Sits ahead of BOTH inflate
-  # vectors (`open_package/1` and `parse_layout/1`). A binary whose central
-  # directory does not read as a zip is NOT rejected here — `:ok` lets
-  # `open_package/1` produce the canonical `"invalid xlsx"` error instead of
-  # masking a plain not-a-zip as a size violation.
+  # vectors (`open_package/1` and `parse_layout/1`).
+  #
+  # The DECLARED size stays the primary bound, but the central directory is
+  # written by whoever built the archive, so a declaration is only trusted when
+  # it is a positive integer. A member that declares nothing usable while
+  # carrying real compressed bytes is bounded by what deflate could physically
+  # produce from those bytes instead (`member_bound/2`) — the shape that used to
+  # walk straight through: a package declaring `0` everywhere summed to `0`,
+  # cleared the ceiling, and was then fully inflated.
+  #
+  # A binary whose central directory does not read as a zip is NOT rejected
+  # here — `:ok` lets `open_package/1` produce the canonical `"invalid xlsx"`
+  # error instead of masking a plain not-a-zip as a size violation. That
+  # abstention is the `:not_a_zip` arm below; the rescue that used to wrap this
+  # WHOLE function is gone, so a fault in the sizing arithmetic can no longer
+  # silently skip the guard.
   defp guard_decompressed_size(binary) do
-    case :zip.list_dir(binary) do
+    case list_dir(binary) do
       {:ok, entries} ->
-        if declared_uncompressed_bytes(entries) > max_decompressed_bytes() do
-          {:error, :xlsx_decompressed_size_exceeded}
-        else
-          :ok
+        cond do
+          member_count(entries) > @max_zip_members ->
+            {:error, :xlsx_decompressed_size_exceeded}
+
+          bounded_uncompressed_bytes(entries) > max_decompressed_bytes() ->
+            {:error, :xlsx_decompressed_size_exceeded}
+
+          true ->
+            :ok
         end
 
-      _ ->
+      :not_a_zip ->
         :ok
     end
+  end
+
+  # `:zip.list_dir/1` traps its own failures and returns `{:error, {:EXIT, _}}`
+  # for garbage bytes rather than raising (pinned by `XlsxZipbombTest`, so an
+  # OTP change that starts raising reds a test instead of turning a 422 into a
+  # 500). Both error shapes mean the same thing here: no readable central
+  # directory, so the guard abstains. Scoped to THIS call on purpose.
+  defp list_dir(binary) do
+    case :zip.list_dir(binary) do
+      {:ok, entries} -> {:ok, entries}
+      _ -> :not_a_zip
+    end
   rescue
-    _ -> :ok
+    _ -> :not_a_zip
   end
 
   # `:zip.list_dir/1` yields `{:zip_comment, _}` plus one
-  # `{:zip_file, name, file_info, comment, offset, comp_size}` per member;
-  # `elem(file_info, 1)` is the uncompressed size record field.
-  defp declared_uncompressed_bytes(entries) do
+  # `{:zip_file, name, file_info, comment, offset, comp_size}` per member.
+  defp member_count(entries) do
+    Enum.count(entries, &match?({:zip_file, _n, _fi, _c, _o, _z}, &1))
+  end
+
+  defp bounded_uncompressed_bytes(entries) do
     Enum.reduce(entries, 0, fn
-      {:zip_file, _name, file_info, _comment, _offset, _comp}, acc ->
-        acc + uncompressed_size(file_info)
+      {:zip_file, _name, file_info, _comment, _offset, comp}, acc ->
+        acc + member_bound(file_info, comp)
 
       _entry, acc ->
         acc
     end)
   end
 
-  defp uncompressed_size(file_info) do
+  # `elem(file_info, 1)` is the uncompressed size record field. A positive
+  # integer is the archive's own declaration and is used as-is — a legitimate
+  # xlsx declares honest positive sizes, so this branch carries every real
+  # package and the ceiling behaves exactly as before. Anything else is an
+  # UNTRUSTED declaration: fall back to the worst case deflate could produce.
+  defp member_bound(file_info, comp) do
     case elem(file_info, 1) do
       n when is_integer(n) and n > 0 -> n
-      _ -> 0
+      _ -> worst_case_bytes(comp)
     end
   end
+
+  defp worst_case_bytes(comp) when is_integer(comp) and comp > 0,
+    do: comp * @deflate_max_ratio
+
+  defp worst_case_bytes(_comp), do: 0
 
   defp max_decompressed_bytes do
     :barkpark
@@ -270,6 +362,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
             "merges",
             sanitize_merges(Map.get(sheet_layout, :merges, []), cells)
           )
+          |> put_unless_empty("cond_formats", Map.get(sheet_layout, :cond_formats, []))
           |> put_frozen("frozen_rows", Map.get(sheet_layout, :frozen_rows, 0))
           |> put_frozen("frozen_cols", Map.get(sheet_layout, :frozen_cols, 0))
           |> put_color(Map.get(sheet_layout, :tab_color))
@@ -451,7 +544,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
         files = Map.new(entries, fn {name, content} -> {to_string(name), content} end)
         workbook = simple_form(files["xl/workbook.xml"])
         rels = parse_rels(simple_form(files["xl/_rels/workbook.xml.rels"]))
-        xfs = parse_styles(simple_form(files["xl/styles.xml"]))
+        styles = simple_form(files["xl/styles.xml"])
+        xfs = parse_styles(styles)
+        dxfs = parse_dxfs(styles)
         date_base = if date_1904?(workbook), do: @epoch_1904, else: @epoch_1900
 
         # An ORDERED list in workbook order — `to_content` attaches it to the
@@ -462,7 +557,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           |> workbook_sheets()
           |> Enum.map(fn {_name, rid} ->
             xml = files[resolve_target(Map.get(rels, rid))]
-            parse_worksheet(simple_form(xml), xfs)
+            parse_worksheet(simple_form(xml), xfs, dxfs)
           end)
 
         {:ok, %{sheets: sheets, date_base: date_base}}
@@ -625,9 +720,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   defp put_if(map, _cond, _key, _value), do: map
 
   # One worksheet's layout: per-cell xf lookup, col widths, merges, panes.
-  defp parse_worksheet(nil, _xfs), do: %{}
+  defp parse_worksheet(nil, _xfs, _dxfs), do: %{}
 
-  defp parse_worksheet(root, xfs) do
+  defp parse_worksheet(root, xfs, dxfs) do
     rows = root |> child_named("sheetData") |> children_named("row")
 
     cell_styles =
@@ -655,7 +750,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           attr(f, "t") == "shared",
           si = attr(f, "si"),
           is_binary(si),
-          text = shared_text(f),
+          text = element_text(f),
           text != "",
           into: %{},
           do: {si, {ref, text}}
@@ -670,7 +765,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           attr(f, "t") == "shared",
           si = attr(f, "si"),
           is_binary(si),
-          shared_text(f) == "",
+          element_text(f) == "",
           into: %{},
           do: {ref, si}
 
@@ -726,7 +821,8 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       merges: merges,
       frozen_rows: frozen_rows,
       frozen_cols: frozen_cols,
-      tab_color: parse_tab_color(root)
+      tab_color: parse_tab_color(root),
+      cond_formats: parse_cond_formats(root, dxfs)
     }
   end
 
@@ -746,9 +842,282 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     end
   end
 
-  # Joined text of an `<f>` element's character children (a shared master
-  # carries its formula here; a follower is empty).
-  defp shared_text({_n, _attrs, children}) do
+  # ── conditional formatting (CF-X) ──────────────────────────────────────────
+  #
+  # `<conditionalFormatting sqref><cfRule …>` → the tab's `"cond_formats"`, the
+  # mirror of `XlsxExport`'s emitter. Three lookups feed one rule: the `sqref`
+  # (the range), the `cfRule`'s type/operator/`<formula>` (the `when`), and the
+  # `<dxf>` its `dxfId` points at (the `style`). A rule kind Barkpark has no
+  # model for — `colorScale`, `dataBar`, `iconSet`, an `expression`, or a
+  # `cellIs` whose formula is not a plain literal — is SKIPPED, never an error:
+  # the drop posture the moduledoc documents for every other unrepresentable
+  # feature.
+
+  # xlsx `cellIs` operator → the Barkpark op. `containsText` is handled apart
+  # (its needle rides in a SEARCH formula, not as a bare literal).
+  @cf_cell_is %{
+    "greaterThan" => "gt",
+    "lessThan" => "lt",
+    "equal" => "eq",
+    "between" => "between"
+  }
+
+  # The needle of the canonical `containsText` formula
+  # `NOT(ISERROR(SEARCH(<literal>,<ref>)))`. Greedy on the literal so a needle
+  # containing a comma still binds to the LAST `,<ref>)` — a foreign formula
+  # whose needle is a cell reference simply fails to decode and falls back to
+  # the `text` attribute.
+  @cf_search_re ~r/SEARCH\((.*),[^,()]*\)/s
+
+  defp parse_cond_formats(root, dxfs) do
+    for cf <- children_named(root, "conditionalFormatting"),
+        sqref = attr(cf, "sqref"),
+        is_binary(sqref),
+        rule <- children_named(cf, "cfRule"),
+        built = build_cond_format(sqref, rule, dxfs),
+        built != nil do
+      built
+    end
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
+    |> gate_legal_cond_formats()
+  end
+
+  # The import must never hand the save path content `before_save` would then
+  # reject — a 409 on the whole upload, over a rule nobody asked for. So each
+  # candidate is run past the ONE shared storage validator
+  # (`Barkpark.Plugins.Sheets.cond_format_list_errors/2` — no fourth copy of
+  # the rules here), then the list is deduped by range and by id and cut to
+  # `cond_format_cap/0`, the three list-level constraints the same gate makes.
+  # Real-world drops this catches: Excel's "Bold red text" preset (a dxf with a
+  # FONT color and no fill — the gate requires `style.bg`), a sheet with more
+  # than the cap's worth of rules, and two rules over one range.
+  defp gate_legal_cond_formats(rules) do
+    rules
+    # A foreign rule has no `"id"` yet and the gate requires the key, so the
+    # per-rule check runs against a placeholder; the survivors are named after
+    # the drops, so the ids the tab ends up with are tight (`cf1`, `cf2`, …).
+    |> Enum.filter(&(Barkpark.Plugins.Sheets.cond_format_list_errors([id_stub(&1)], 0) == []))
+    |> Enum.uniq_by(&Map.get(&1, "range"))
+    |> Enum.take(Barkpark.Plugins.Sheets.cond_format_cap())
+    |> fill_cond_format_ids()
+    |> Enum.uniq_by(&Map.get(&1, "id"))
+  end
+
+  defp id_stub(rule), do: Map.put_new(rule, "id", "cf")
+
+  # `{priority, rule}` — the priority orders the tab's list, which IS the
+  # CF-D4 first-match precedence on the Barkpark side.
+  defp build_cond_format(sqref, rule, dxfs) do
+    with {:ok, range} <- cond_format_range(sqref),
+         {:ok, when_map} <- cond_format_when(rule),
+         style when style != %{} <- cond_format_style(rule, dxfs) do
+      built =
+        %{"range" => range, "when" => when_map, "style" => style}
+        |> maybe_put("id", cond_format_ext_id(rule))
+
+      {to_int(attr(rule, "priority")) || 0, built}
+    else
+      _ -> nil
+    end
+  end
+
+  # An `sqref` may list several ranges ("A1:B2 D5"); a Barkpark rule holds ONE,
+  # so the first is taken and the rest dropped (documented with the other
+  # unrepresentable features). Normalized to canonical A1 form via `parse_ref`,
+  # exactly as the storage gate normalizes for its duplicate-range check.
+  defp cond_format_range(sqref) do
+    with [first | _] <- String.split(sqref, ~r/\s+/, trim: true),
+         [a, b] <- cond_format_corners(first),
+         {:ok, {c1, r1}} <- SheetCore.parse_ref(a),
+         {:ok, {c2, r2}} <- SheetCore.parse_ref(b) do
+      lo = SheetCore.format_ref({min(c1, c2), min(r1, r2)})
+      hi = SheetCore.format_ref({max(c1, c2), max(r1, r2)})
+      {:ok, if(lo == hi, do: lo, else: lo <> ":" <> hi)}
+    else
+      _ -> :error
+    end
+  end
+
+  defp cond_format_corners(ref) do
+    case String.split(ref, ":") do
+      [a] -> [a, a]
+      [a, b] -> [a, b]
+      _ -> :error
+    end
+  end
+
+  defp cond_format_when(rule) do
+    formulas = for f <- children_named(rule, "formula"), do: element_text(f)
+
+    case {attr(rule, "type"), attr(rule, "operator")} do
+      {"cellIs", "between"} -> cond_format_between(formulas)
+      {"cellIs", operator} -> cond_format_cell_is(Map.get(@cf_cell_is, operator), formulas)
+      {"containsText", _} -> cond_format_contains(rule, formulas)
+      _ -> :error
+    end
+  end
+
+  defp cond_format_cell_is(nil, _formulas), do: :error
+
+  defp cond_format_cell_is(op, [formula | _]) do
+    case decode_cf_literal(formula) do
+      :error -> :error
+      value -> {:ok, %{"op" => op, "value" => value}}
+    end
+  end
+
+  defp cond_format_cell_is(_op, _formulas), do: :error
+
+  defp cond_format_between([lo, hi | _]) do
+    with value when value != :error <- decode_cf_literal(lo),
+         value2 when value2 != :error <- decode_cf_literal(hi) do
+      {:ok, %{"op" => "between", "value" => value, "value2" => value2}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp cond_format_between(_formulas), do: :error
+
+  # The needle: from the SEARCH formula when it decodes (that carries the
+  # TYPE, which the string-only `text` attribute cannot), else the `text`
+  # attribute — the shape an Excel-authored rule takes.
+  defp cond_format_contains(rule, formulas) do
+    needle =
+      case cf_search_needle(formulas) do
+        :error -> attr(rule, "text")
+        value -> value
+      end
+
+    if is_nil(needle), do: :error, else: {:ok, %{"op" => "contains", "value" => needle}}
+  end
+
+  defp cf_search_needle([formula | _]) do
+    case Regex.run(@cf_search_re, formula) do
+      [_, literal] -> decode_cf_literal(String.trim(literal))
+      _ -> :error
+    end
+  end
+
+  defp cf_search_needle(_formulas), do: :error
+
+  # An xlsx formula literal → the Elixir term `XlsxExport` encoded: `"…"` (with
+  # `""` escaping) → a string, `TRUE`/`FALSE` → a boolean, a bare numeral → an
+  # integer or float. Anything else (a cell ref, an expression) → `:error`, and
+  # the rule is skipped rather than imported with a guessed threshold. `:error`
+  # is the miss marker because `nil` is not a value any literal decodes to.
+  defp decode_cf_literal("\"" <> _ = literal) do
+    if String.ends_with?(literal, "\"") and byte_size(literal) >= 2 do
+      literal |> binary_part(1, byte_size(literal) - 2) |> String.replace(~s(""), ~s("))
+    else
+      :error
+    end
+  end
+
+  defp decode_cf_literal("TRUE"), do: true
+  defp decode_cf_literal("FALSE"), do: false
+
+  defp decode_cf_literal(literal) when is_binary(literal) do
+    case Integer.parse(literal) do
+      {n, ""} ->
+        n
+
+      _ ->
+        case Float.parse(literal) do
+          {f, ""} -> f
+          _ -> :error
+        end
+    end
+  end
+
+  defp decode_cf_literal(_literal), do: :error
+
+  # The rule's style is the `<dxf>` its `dxfId` indexes; a rule with no dxfId,
+  # or one pointing past the table, carries no style and is skipped by
+  # `build_cond_format/3` (`CondFormat` drops a styleless rule too).
+  defp cond_format_style(rule, dxfs) do
+    case to_int(attr(rule, "dxfId")) do
+      nil -> %{}
+      index when index >= 0 -> Enum.at(dxfs, index) || %{}
+      _ -> %{}
+    end
+  end
+
+  # The stored `"id"`, from the Barkpark `<extLst><ext><bp:id>` the export half
+  # writes (`local/1` strips the `bp:` prefix). Absent on a foreign file.
+  defp cond_format_ext_id(rule) do
+    Enum.find_value(children_named(rule, "extLst"), fn ext_lst ->
+      Enum.find_value(children_named(ext_lst, "ext"), fn ext ->
+        case ext |> children_named("id") |> List.first() |> element_text() do
+          "" -> nil
+          id -> id
+        end
+      end)
+    end)
+  end
+
+  # Every stored rule needs an `"id"` (the storage gate requires the key), and
+  # a foreign file has none. Fill the gaps with the first free `cf<N>` so a
+  # re-save is legal, without ever colliding with an id the file DID carry.
+  defp fill_cond_format_ids(rules) do
+    taken = MapSet.new(for r <- rules, is_binary(Map.get(r, "id")), do: Map.get(r, "id"))
+
+    rules
+    |> Enum.map_reduce(taken, fn rule, taken ->
+      if is_binary(Map.get(rule, "id")) do
+        {rule, taken}
+      else
+        id = next_cond_format_id(taken, 1)
+        {Map.put(rule, "id", id), MapSet.put(taken, id)}
+      end
+    end)
+    |> elem(0)
+  end
+
+  defp next_cond_format_id(taken, n) do
+    id = "cf#{n}"
+    if MapSet.member?(taken, id), do: next_cond_format_id(taken, n + 1), else: id
+  end
+
+  # styles.xml `<dxfs>` → one sanitized style map per `<dxf>`, positionally
+  # indexed by `cfRule`'s `dxfId`. DIFFERENTIAL formatting normally carries its
+  # fill color in `bgColor`; some producers write `fgColor`, so both are read.
+  defp parse_dxfs(nil), do: []
+
+  defp parse_dxfs(root) do
+    for dxf <- root |> child_named("dxfs") |> children_named("dxf"), do: dxf_style(dxf)
+  end
+
+  defp dxf_style(dxf) do
+    font = child_named(dxf, "font")
+    bg = dxf |> child_named("fill") |> dxf_fill_bg()
+
+    %{}
+    |> put_if(font_flag?(font, "b"), "b", true)
+    |> put_if(font_flag?(font, "i"), "i", true)
+    |> put_if(is_binary(bg), "bg", bg)
+  end
+
+  defp dxf_fill_bg(nil), do: nil
+
+  defp dxf_fill_bg(fill) do
+    pattern = child_named(fill, "patternFill")
+    color = child_named(pattern, "bgColor") || child_named(pattern, "fgColor")
+
+    with rgb when is_binary(rgb) and byte_size(rgb) >= 6 <- attr(color, "rgb"),
+         hex = rgb |> String.slice(-6, 6) |> String.downcase(),
+         true <- hex =~ ~r/^[0-9a-f]{6}$/ do
+      "#" <> hex
+    else
+      _ -> nil
+    end
+  end
+
+  # Joined text of an element's character children — an `<f>` (a shared master
+  # carries its formula there; a follower is empty), a `<formula>`, a
+  # `<bp:id>`.
+  defp element_text({_n, _attrs, children}) do
     children
     |> Enum.map(fn
       t when is_binary(t) -> t
@@ -758,7 +1127,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     |> String.trim()
   end
 
-  defp shared_text(_), do: ""
+  defp element_text(_), do: ""
 
   defp frozen_panes(root) do
     pane =

@@ -195,9 +195,13 @@ scripts/gate-announces-skips.test.sh'
 # listing individual files would rot on the next cloud test added.
 #   cloud/test/**  <- scripts/async_env_seam_scan.exs default_roots/0
 #                     <- api/test/barkpark/async_global_seam_guard_test.exs
+#   api/assets/sheet-grid/**  <- api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs
+#                                System.cmd("node", [__*.test.mjs], cd: api/assets/sheet-grid) (#15196);
+#                                redundant with api/** in the compile set, declared per task-509410 crit 4.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
+api/assets/sheet-grid/**
 cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh

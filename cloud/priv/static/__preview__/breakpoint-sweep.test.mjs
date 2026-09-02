@@ -775,6 +775,16 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // merge base, never carried from the brief. (That sha is deliberately not
 // spelled here: a merge base is stale the day after it is written, and this is
 // the file that exists to stop typed numerals rotting.)
+// cch-w29-bl-deploy-rail-live-site-open-still-nowrap moved it by ONE:
+// `site-deploy-rail-live` — the first fixture in this harness able to render
+// `.deploy-rail-live`, the rail's OTHER footer, and so the first that can measure
+// the site URL inside it — is the 120th scenario and the 94th residue entry. It
+// refused exactly as designed: the bare sweep exited 2 with `UNLISTED scenario
+// "site-deploy-rail-live" (family hash:#site)` and this test exited 1 on 119/93
+// before the numbers below were RE-READ from `scenarioReport`. They are NOT
+// 109/84: several scenarios landed between the block above and this one without
+// writing a chronicle block, so the last typed ordinal is never the next slot —
+// only the measured census is.
 //
 // cch-w47-s4 (D527) DERIVED THE TITLE. It used to carry the same five integers
 // as a second copy that "no assertion can red" — true, and the reason the
@@ -797,13 +807,13 @@ const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 119);
+  assert.equal(r.total, 121);
   assert.equal(r.cells, 27);
   assert.equal(r.distinctCovered, 26, "mixed-fleet is used twice — 27 cells cover 26 DISTINCT scenarios");
-  assert.equal(r.residue, 93, "93 is the RESIDUE, not the census");
+  assert.equal(r.residue, 95, "95 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 93, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 95, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

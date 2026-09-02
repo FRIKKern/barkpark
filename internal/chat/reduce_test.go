@@ -1113,3 +1113,69 @@ func TestTailCap_MatchesTheMobileConstant(t *testing.T) {
 		t.Fatalf("MaxTailBytes = %d, but the mobile twin uses 262144", MaxTailBytes)
 	}
 }
+
+// ── live ledger transitions (tlv-bl-chat-live-transition-stream) ─────────────
+
+func taskFrame(eventID, taskID, title, status, mutation, verb string) FrameEvent {
+	label := title + " → " + status + " (" + verb + ")"
+	return FrameEvent{
+		Name: "task",
+		Data: []byte(`{"event_id":"` + eventID + `","task_id":"` + taskID +
+			`","title":"` + title + `","status":"` + status +
+			`","mutation":"` + mutation + `","verb":"` + verb +
+			`","label":"` + label + `"}`),
+	}
+}
+
+// TestTaskFrameAppendsTransitionNoEffect proves the `event: task` frame lands in
+// the transcript log and asks for NO IO — the whole point is that the transcript
+// learns about a mid-conversation lifecycle move WITHOUT an MCP re-fetch.
+func TestTaskFrameAppendsTransitionNoEffect(t *testing.T) {
+	st, effs := drive(State{SessionID: "s1", Phase: TurnStreaming}, t0,
+		taskFrame("ev-1", "task-a", "Mend the fence", "in_progress", "task.claimed", "claimed"))
+
+	if len(effs) != 0 {
+		t.Fatalf("a task frame does no IO (that missing refetch IS the feature), got %d effects", len(effs))
+	}
+	if len(st.TaskTransitions) != 1 {
+		t.Fatalf("want 1 transition, got %d", len(st.TaskTransitions))
+	}
+	got := st.TaskTransitions[0]
+	if got.TaskID != "task-a" || got.Status != "in_progress" || got.Verb != "claimed" {
+		t.Fatalf("transition decoded wrong: %+v", got)
+	}
+	if got.Label != "Mend the fence → in_progress (claimed)" {
+		t.Fatalf("the label must ride the wire verbatim, got %q", got.Label)
+	}
+}
+
+// TestTaskFrameDedupesOnEventIDKeepingOrder is the idempotency contract
+// (criterion 3): a duplicate or replayed frame renders once, and the rows
+// already logged keep their positions.
+func TestTaskFrameDedupesOnEventIDKeepingOrder(t *testing.T) {
+	claim := taskFrame("ev-claim", "task-a", "Dig the trench", "in_progress", "task.claimed", "claimed")
+	closed := taskFrame("ev-close", "task-a", "Dig the trench", "done", "task.closed", "closed")
+
+	st, _ := drive(State{SessionID: "s1"}, t0, claim, closed, claim)
+
+	if len(st.TaskTransitions) != 2 {
+		t.Fatalf("a replayed event must not append twice: got %d rows %+v",
+			len(st.TaskTransitions), st.TaskTransitions)
+	}
+	if st.TaskTransitions[0].EventID != "ev-claim" || st.TaskTransitions[1].EventID != "ev-close" {
+		t.Fatalf("arrival order must survive the dedupe, got %+v", st.TaskTransitions)
+	}
+}
+
+// TestTaskFrameToleratesMalformedAndUnkeyable: a frame that will not decode, or
+// that carries no event_id to dedupe on, is INERT — never a crash, and never a
+// row that could render twice.
+func TestTaskFrameToleratesMalformedAndUnkeyable(t *testing.T) {
+	st, _ := drive(State{SessionID: "s1"}, t0,
+		FrameEvent{Name: "task", Data: []byte(`not json`)},
+		FrameEvent{Name: "task", Data: []byte(`{"task_id":"task-a","status":"done"}`)})
+
+	if len(st.TaskTransitions) != 0 {
+		t.Fatalf("malformed/unkeyable task frames must be inert, got %+v", st.TaskTransitions)
+	}
+}

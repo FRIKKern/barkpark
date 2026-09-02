@@ -413,6 +413,26 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
 
+  # A block list carrying an element that is not an object. `render_blocks/2`
+  # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
+  # (`is_map`), so `{"body":{"blocks":["notamap"]}}` used to clear the outer
+  # guard and raise FunctionClauseError inside the WRITE projection — an
+  # uncaught 500 whose body was an HTML debug page, violating §9 ("all errors
+  # are {code, message, request_id}") and leaving the caller no request_id to
+  # correlate. Refused at the writer door instead (Content.Writer
+  # `refuse_non_map_block_elements/1`), under the EXISTING `malformed` code —
+  # this is a request-body shape error, not a schema validation failure, and
+  # reusing the registered code keeps `known_codes/0` (and therefore the
+  # OpenAPI `Error.code` enum + docs/api-v1.md §9) unchanged. `details.blocks`
+  # names every offending path so a client can fix the exact element.
+  defp build({:error, {:malformed_blocks, details}}),
+    do: %{
+      code: "malformed",
+      message: "block list contains an element that is not an object",
+      status: 400,
+      details: details
+    }
+
   # A multi-op batch mutation carried an HTTP If-Match header. One ETag cannot
   # unambiguously gate N potentially-different documents, and silently dropping
   # it (the pre-fix behavior) discarded the caller's optimistic-lock intent →
@@ -557,18 +577,42 @@ defmodule Barkpark.Content.Errors do
   # into a permanently dropped GitHub issue, logged as a policy refusal that
   # never happened. The tag split is what lets Intake route the two apart.
   #
-  # ON THE WIRE it deliberately keeps `halted` / 409, unchanged from before this
-  # wave. A new public code must be registered in `@hints`, which puts it in
-  # `known_codes/0`, which `errors_doc_coverage_test` requires in
-  # `docs/api-v1.md` §9 — a file sitting on 3 bytes of headroom against a
-  # CI-enforced cap that PDS wave 24 spent its last cheap dedup to clear. So the
-  # honest 503 `dedup_unavailable` is deferred to a slice that can pay those
-  # bytes, and is NOT claimed here. What ships is the part that fixes the
-  # unattended data loss; the residual imperfection is that an external client
-  # still reads a transient outage as a 409 whose registered hint talks about
-  # plugin vetoes. The MESSAGE is exact either way.
+  # ON THE WIRE it is a 503 carrying its OWN hint — the same transient shape
+  # `storage_unavailable` (below) already uses, and the answer a caller can act
+  # on: the scan never ran, so nothing was written and nothing was refused on
+  # the merits, and the correct move is to RESEND THE IDENTICAL REQUEST. It
+  # shipped as a 409 whose code-keyed `halted` hint reads "adjust the document
+  # to satisfy it" — an OUTAGE described to the caller as a policy decision,
+  # sending an author to edit a document that is fine (charter D542). 409 also
+  # told every generic client the opposite of the truth: a 4xx is the caller's
+  # fault and terminal, while this is the server's and retryable.
+  #
+  # WHY THE `code` IS "storage_unavailable" AND NOT "halted". One public code
+  # maps to ONE status: the CLI's exit-code table (internal/cli/errors.go) is
+  # keyed on `code`, and internal/cli/errors_api_parity_test.go refuses a code
+  # that this file emits at two statuses — `halted` at 409 (the plugin veto)
+  # AND 503 (this arm) reddened main on 2026-09-02. Minting `dedup_unavailable`
+  # as a new code is blocked too: a code must be registered in `@hints`, which
+  # puts it in `known_codes/0`, which drives the served OpenAPI `Error.code`
+  # enum (docs/openapi.json, behind a CI drift gate) and `docs/api-v1.md` §9
+  # (errors_doc_coverage_test) under a cap with 3 bytes of headroom. So the arm
+  # wears the code that already IS the transient-storage shape — public, 503,
+  # exit 8, retry-is-the-right-reflex — and `reason: "dedup_unavailable"`
+  # discriminates it from a media-volume fault, exactly as `:replay` does under
+  # "unauthorized". The arm carries its OWN `hint`, so `put_hint/1` never
+  # reaches the media-volume sentence for this term.
   defp build({:error, {:dedup_unavailable, reason}}),
-    do: %{code: "halted", message: halt_message(reason), status: 409}
+    do: %{
+      code: "storage_unavailable",
+      message: halt_message(reason),
+      status: 503,
+      reason: "dedup_unavailable",
+      hint:
+        "Transient: the duplicate-scan could not complete, so this write was " <>
+          "neither stored nor refused on its merits. Resend the identical " <>
+          "request. If it keeps failing the database is degraded — this is an " <>
+          "outage to report, not a document to fix."
+    }
 
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the

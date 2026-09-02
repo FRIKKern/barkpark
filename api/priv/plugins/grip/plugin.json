@@ -1,0 +1,9 @@
+{
+  "plugin_name": "grip",
+  "version": "0.1.0",
+  "description": "Grip — the source-of-truth grip layer as content. Registers the `fact` document type (subject/quantity/claim/evidence/rerun/level/observed_at/deps) and walls its PUBLISH path: a fact whose `rerun` command fails the fail-closed screen, or whose claimed `level` sits above the level that command derives, cannot publish. Schemas-only: the generic query endpoint serves it, no bespoke routes.",
+  "capabilities": ["schemas"],
+  "module": "Barkpark.Plugins.Grip",
+  "nouns": ["fact"],
+  "schemas": [{ "name": "fact", "version": "1", "file": "schemas/fact.json" }]
+}

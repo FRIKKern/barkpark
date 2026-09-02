@@ -16,7 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
        pre-built human prose. NOTE the row's brief says the key is
        "lifecycle_status"; the emitters also use "claim" and
        "acceptance_criteria", so the render must not key on one field name.
-    4. A raw `%Ecto.Changeset{}` — `Repo.rollback(cs)` at `lifecycle.ex:184-185`.
+    4. A raw `%Ecto.Changeset{}` — `Repo.rollback(cs)` inside `publish_after_gate/5` (lifecycle.ex).
 
   A REFUTED fifth: plugin exceptions cannot reach `do_action` — `Hooks.fire`
   coerces a raising `before_*` hook to `:ok`.

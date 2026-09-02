@@ -155,9 +155,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       same-shape rectangles and sums (text/booleans/blanks count `0`; a shape
       mismatch or non-range argument is `#VALUE!`). `ADDRESS(row, col, [abs],
       [a1])` is pure string construction (`"$C$2"`; abs `1..4`, falsy `a1` →
-      R1C1 style). `INDIRECT`/`OFFSET`/`TRANSPOSE` stay out: a runtime-computed
-      reference can't join the statically-collected dependency graph, and
-      spill has no home in one-value-per-cell.
+      R1C1 style). `INDIRECT`/`OFFSET` stay out: a runtime-computed reference
+      can't join the statically-collected dependency graph. (`TRANSPOSE` was in
+      that exclusion list until spill shipped — it takes a LITERAL range, so its
+      dependencies collect statically like any other; it now lives in the array
+      tier below.)
     * Statistics — `MEDIAN`, `SMALL`/`LARGE` (kth smallest/largest),
       `PERCENTILE`/`QUARTILE` (linear interpolation between order statistics),
       `MODE` (most frequent value; `#N/A` when nothing repeats, ties broken by
@@ -195,11 +197,61 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       `rows*cols` beyond the array cap is `#NUM!`.
     * `COUNTUNIQUE(args…)` — the count of distinct non-blank values across its
       arguments (ranges, arrays and scalars).
+    * `TRANSPOSE(range)` — the genuinely 2-D one: rows become columns. Where
+      `UNIQUE`/`SORT`/`FILTER` flatten their source to a vector, `TRANSPOSE`
+      reads a RECTANGULAR grid, keeps blanks, and keeps an element error IN
+      PLACE (Excel transposes an error cell like any other value). An empty
+      source is `#VALUE!` and a result past the array cap is `#NUM!`.
+    * `VSTACK(range…)` / `HSTACK(range…)` — append grids down / across. A
+      ragged edge pads with `#N/A` (Excel), and those pads are GENERATED
+      element values — distinct from a source error, which rides through in
+      place. An argument that materialises to nothing contributes nothing;
+      all-empty is `#VALUE!`, past the cap is `#NUM!`.
 
   Blanks inside the array are dropped exactly as an aggregate drops blank
   range cells; an error value anywhere in the source propagates, as it does
   from a range. Consumed by every aggregate (`SUM`/`COUNTA`/…), by `AND`/`OR`,
   and by `TEXTJOIN` with the same flatten rules those apply to a range today.
+  The 2-D tier (`TRANSPOSE`/`VSTACK`/`HSTACK`) is the deliberate exception on
+  both counts: dropping a blank or collapsing on an error would change the
+  SHAPE, which is the only thing those three exist to preserve, so they keep
+  blanks and element errors positioned and let the consumer apply its own rule.
+
+  ## Aggregate selection and range-flattened text
+
+    * `CONCAT(value…)` — `CONCATENATE`'s modern replacement: identical text
+      coercion, but a RANGE or array argument is legal and flattens ROW-MAJOR
+      (`CONCATENATE` keeps its legacy `#VALUE!`-on-a-range rule). Blank cells
+      contribute `""` rather than being skipped — there is no delimiter to
+      double up, which is precisely why `TEXTJOIN` carries an ignore-empty flag
+      and `CONCAT` does not. An error in a source propagates; a result past
+      Excel's 32,767-character cell limit is `#VALUE!`.
+    * `SUBTOTAL(function_code, ref…)` — one of eleven aggregates chosen by
+      code: `1` AVERAGE, `2` COUNT, `3` COUNTA, `4` MAX, `5` MIN, `6` PRODUCT,
+      `7` STDEV, `8` STDEVP, `9` SUM, `10` VAR, `11` VARP; `101`-`111` are the
+      same eleven. A code outside both bands is `#VALUE!`.
+
+      **Two documented gaps, both structural, neither an oversight.** (1) In
+      Excel the `101`-`111` band additionally skips MANUALLY HIDDEN rows; this
+      engine has no row-visibility input at all, so `101`-`111` evaluate
+      IDENTICALLY to `1`-`11`. (2) Excel also skips a nested `SUBTOTAL` found
+      inside the referenced range, so stacked subtotals don't double-count;
+      `ctx.formulas` carries only the COORDINATES of formula cells, never their
+      formula text, so a nested `SUBTOTAL` is invisible here and IS counted.
+      Closing either needs a new input to `recompute/1`, not a new clause.
+
+      iex> cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}, "A3" => %{"v" => 3},
+      ...>   "B1" => %{"f" => "SUBTOTAL(9, A1:A3)"}, "B2" => %{"f" => "SUBTOTAL(109, A1:A3)"}}
+      iex> cells = Barkpark.Plugins.Sheets.Engine.recompute(%{"tabs" => [%{"cells" => cells}]})
+      ...>         |> get_in(["tabs", Access.at(0), "cells"])
+      iex> {cells["B1"]["v"], cells["B2"]["v"]}
+      {6, 6}
+
+      iex> cells = %{"A1" => %{"v" => "a"}, "B1" => %{"v" => "b"}, "A2" => %{"v" => "c"}}
+      iex> content = %{"tabs" => [%{"cells" => Map.put(cells, "D1", %{"f" => "CONCAT(A1:B2)"})}]}
+      iex> Barkpark.Plugins.Sheets.Engine.recompute(content)
+      ...> |> get_in(["tabs", Access.at(0), "cells", "D1", "v"])
+      "abc"
 
   **Spill.** A formula whose TOP-LEVEL result is an array spills into a
   rows×cols rectangle anchored at the formula cell: the anchor keeps its `f`
@@ -256,7 +308,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   ## Errors, cycles, stale
 
-  Seven error values, written with `"t" => "e"`:
+  Eight error values, written with `"t" => "e"`:
 
     * `#CYCLE!` — every formula on a reference cycle, and every formula that
       (transitively) depends on one. Dependencies are collected from the full
@@ -275,16 +327,30 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     * `#SPILL!` — a dynamic-array formula whose spill rectangle is obstructed
       by existing content (or would fall off the grid); nothing but the anchor
       is written.
+    * `#NAME?` — a formula naming a function this engine does not implement,
+      in a cell with NOTHING cached to fall back on (see the stale rule below).
 
   Errors propagate through references: a formula reading a cell whose value
   is an error yields that error. A literal cell whose `"v"` is one of the
   six error strings (or whose `"t"` is `"e"`) propagates the same way.
 
-  A call to an UNKNOWN function never errors: the cell keeps its existing
-  `"v"`/`"t"` untouched and gains `"stale" => true` (xlsx-import
-  compatibility — the imported cached value keeps rendering). Dependents
-  read that cached value. Any decisive recompute — a computed value or a
-  computed error — clears the flag.
+  A call to an UNKNOWN function splits on whether the cell has anything
+  cached (main's ruling 2026-09-02 — import fidelity beats purity, and the
+  loud style is the honesty):
+
+    * NO cached `"v"` (a formula typed in the grid, or one edited to a name
+      the engine lacks) — there is nothing honest to show, so the cell
+      becomes `#NAME?` (`"t" => "e"`) and dependents propagate it like any
+      other error. A plausible-looking blank behind a quiet dot was the bug.
+    * A cached `"v"` (an xlsx import — Excel really computed that number)
+      keeps rendering: `"v"`/`"t"` stay untouched and the cell gains
+      `"stale" => true` PLUS `"stale_fn" => "FOO"`, the first unsupported
+      name in formula order. Dependents read that cached value. Surfaces
+      turn the pair into an ERROR-STYLED cell titled `not evaluated: FOO is
+      not supported` — never a quiet dot.
+
+  Any decisive recompute — a computed value or a computed error — clears both
+  flags.
 
   ## Values
 
@@ -303,9 +369,24 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   ## Complexity
 
   One topological pass (Kahn) over the formula-dependency graph — O(cells +
-  edges), no per-cell rescans. Range dependencies intersect the formula set
-  instead of expanding the rectangle; range evaluation iterates
-  min(rectangle, occupied cells).
+  edges), no per-cell rescans.
+
+  Graph BUILD resolves a range dependency through a formula-position index
+  (per column, rows sorted; built once per recompute in O(F log F)), so a
+  range costs O(log F + hits) — never the rectangle, and never a scan of the
+  formula set. Resolving the whole graph is therefore O(cells + edges + F log
+  F). Before that index every range filtered the entire formula set, which
+  made a document with one row-local `SUM(A_r:J_r)` per row cost O(n^2) to
+  BUILD — quadratic on a workload whose evaluation is linear, and the reason
+  a measured log-log sweep on that shape fitted k ~ 2.0 against this
+  paragraph's promise.
+
+  Range EVALUATION iterates min(rectangle, occupied cells).
+
+  A formula whose own reads grow with the sheet is still quadratic and
+  correctly so: `=SUM($A$1:A_r)` on every row reads Sum(r) cells by
+  definition, in this engine and in Excel alike. `mix barkpark.sheets.bench`
+  sweeps both families and labels which is which.
 
   ## Examples
 
@@ -406,10 +487,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 SUMSQ GCD LCM DATEDIF WEEKNUM TIME DAYS WORKDAY NETWORKDAYS
                 XLOOKUP SUMPRODUCT ADDRESS
                 AVERAGEA MAXA MINA GEOMEAN HARMEAN MROUND QUOTIENT JOIN
-                NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC)
+                NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC
+                TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
 
   # 2^1024 — the first magnitude past the float64 range (max double < 2^1024).
   # An integer this big or bigger cannot survive `/`/`*` coercion to float
@@ -738,6 +820,31 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         "Counts the number of unique values in a dataset."
       ),
       fspec(
+        "TRANSPOSE",
+        [farg("range")],
+        "Flips a range's rows and columns."
+      ),
+      fspec(
+        "VSTACK",
+        [farg("range1"), frest("range2")],
+        "Stacks ranges vertically, padding short rows with #N/A."
+      ),
+      fspec(
+        "HSTACK",
+        [farg("range1"), frest("range2")],
+        "Stacks ranges horizontally, padding short columns with #N/A."
+      ),
+      fspec(
+        "CONCAT",
+        [farg("value1"), frest("value2")],
+        "Joins the text of its arguments, ranges flattened row by row."
+      ),
+      fspec(
+        "SUBTOTAL",
+        [farg("function_code"), farg("range1"), frest("range2")],
+        "Applies one of eleven aggregates, selected by a function code."
+      ),
+      fspec(
         "MOD",
         [farg("dividend"), farg("divisor")],
         "Returns the remainder after dividing two numbers."
@@ -967,8 +1074,32 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   hold. Surfaces that mark error cells (Studio's `sheet-err` class, the web
   grid, PortableDoc's html render) read THIS single list instead of hand-
   copying it, so a new code (e.g. `#NUM!`) lights up every surface at once.
+
+  ## Where the mirrors are — ADD A CODE HERE, THEN UPDATE ALL OF THESE
+
+  Surfaces that cannot call this function at runtime keep a local mirror. Each
+  is held EQUAL to this list by a named test, so the duplication is a CHECKED
+  invariant, never a silent fork:
+
+    * `Barkpark.PortableDoc.Render.Walk` `@error_values` (`error_vocab/0`)
+      — `api/test/barkpark/sheets_parity_test.exs`
+    * `BarkparkWeb.Studio.SheetGrid.Cells` `@error_values` (`error_vocab/0`)
+      — `api/test/barkpark/sheets_parity_test.exs`
+    * `web/__tests__/fixtures/engine-errors.json` — the generated fixture the
+      two TS surfaces read; `sheets_parity_test.exs` asserts it EQUALS this
+      list, so regenerating it is step one of any vocabulary change
+    * `web/lib/sheets.ts` `ENGINE_ERRORS` — `web/__tests__/sheets-errors.test.ts`
+      (against the fixture above)
+    * `js/packages/react/src/blocks/sheet.ts` `ERROR_VALUES` — the FIFTH mirror,
+      unguarded until #15376; now
+      `js/packages/react/tests/sheet-error-vocabulary.test.ts` (against the same
+      fixture)
+
+  NOT yet checked: `apps/mobile/src/papers/portabledoc/blocks/sheet.tsx`
+  `ERROR_VALUES` is a SIXTH copy with no drift test of its own — update it by
+  hand until it earns one.
   """
-  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,spill,sheet-err,error_values
+  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,#NAME?,name-error,unknown-function,stale_fn,spill,sheet-err,error_values
   @spec error_values() :: [String.t()]
   def error_values, do: @error_values
 
@@ -1159,7 +1290,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {in_deg, out_edges} = build_graph_unified(node_asts, node_set)
 
       computed0 =
-        for {key, {_ti, _addr, :invalid}} <- parsed, into: %{}, do: {key, err(:ref)}
+        Enum.reduce(parsed, %{}, fn {key, {_ti, _addr, result}}, acc ->
+          case parse_error(result, Map.get(values, key)) do
+            nil -> acc
+            e -> Map.put(acc, key, e)
+          end
+        end)
 
       base = %{
         unified: true,
@@ -1224,11 +1360,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp walk_qualified(_literal, _own, acc), do: acc
 
   defp build_graph_unified(node_asts, node_set) do
+    index = build_pos_index_unified(MapSet.to_list(node_set))
+
     Enum.reduce(node_asts, {%{}, %{}}, fn {key, {_ast, pts, rgs}}, {in_deg, out} ->
       deps =
         pts
         |> Enum.filter(&MapSet.member?(node_set, &1))
-        |> Kernel.++(range_node_deps_unified(rgs, node_set))
+        |> Kernel.++(range_node_deps_unified(rgs, index))
         |> Enum.uniq()
 
       in_deg = Map.put(in_deg, key, length(deps))
@@ -1237,13 +1375,18 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
-  # Range deps intersect the formula set of the range's OWN tab (bounded by the
-  # formula count, never the rectangle) — the per-tab guarantee, tab-qualified.
-  defp range_node_deps_unified(ranges, node_set) do
+  # Range deps hit the formula-position index of the range's OWN tab (never the
+  # rectangle, never a full scan) — the per-tab guarantee, tab-qualified. An
+  # absent tab has no index entry and contributes nothing.
+  defp range_node_deps_unified(ranges, index) do
     Enum.flat_map(ranges, fn {{t, c1, r1}, {t, c2, r2}} ->
-      Enum.filter(node_set, fn {tt, c, r} ->
-        tt == t and c >= c1 and c <= c2 and r >= r1 and r <= r2
-      end)
+      case index do
+        %{^t => tab_index} ->
+          Enum.map(index_band(tab_index, c1, r1, c2, r2), fn {c, r} -> {t, c, r} end)
+
+        _ ->
+          []
+      end
     end)
   end
 
@@ -1331,9 +1474,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       # No spill this tab, ever — the legacy byte-identical unified write.
       new =
         Enum.reduce(entries, cells, fn {key, {_ti, addr, result}}, acc ->
-          case result do
-            :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
-            _decisive -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+          if kept_stale?(result, computed, key) do
+            Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+          else
+            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
           end
         end)
 
@@ -1345,9 +1489,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         entries
         |> Enum.reduce(strip_engine_spills(cells), fn {key, {_ti, addr, result}}, acc ->
           cond do
-            MapSet.member?(anchor_addrs, addr) -> acc
-            result == :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
-            true -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+            MapSet.member?(anchor_addrs, addr) ->
+              acc
+
+            kept_stale?(result, computed, key) ->
+              Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+
+            true ->
+              Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
           end
         end)
 
@@ -1391,7 +1540,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {in_deg, out_edges} = build_graph(node_asts, node_set)
 
       computed0 =
-        for {pos, {_addr, :invalid}} <- parsed, into: %{}, do: {pos, err(:ref)}
+        Enum.reduce(parsed, %{}, fn {pos, {_addr, result}}, acc ->
+          case parse_error(result, Map.get(values, pos)) do
+            nil -> acc
+            e -> Map.put(acc, pos, e)
+          end
+        end)
 
       # `formulas` carries every formula-cell coordinate (valid, invalid or
       # stale parse alike) — ISFORMULA's single read.
@@ -1433,11 +1587,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp build_graph(node_asts, node_set) do
+    index = build_pos_index(MapSet.to_list(node_set))
+
     Enum.reduce(node_asts, {%{}, %{}}, fn {pos, {_ast, points, ranges}}, {in_deg, out} ->
       deps =
         points
         |> Enum.filter(&MapSet.member?(node_set, &1))
-        |> Kernel.++(range_node_deps(ranges, node_set))
+        |> Kernel.++(range_node_deps(ranges, index))
         |> Enum.uniq()
 
       in_deg = Map.put(in_deg, pos, length(deps))
@@ -1446,12 +1602,74 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
-  # Range deps intersect the FORMULA set (bounded by formula count), never
-  # the rectangle — a SUM over a million-cell range stays cheap.
-  defp range_node_deps(ranges, node_set) do
-    Enum.flat_map(ranges, fn {{c1, r1}, {c2, r2}} ->
-      Enum.filter(node_set, fn {c, r} -> c >= c1 and c <= c2 and r >= r1 and r <= r2 end)
+  # Range deps hit the FORMULA-position index (§Complexity), never the
+  # rectangle and never a full scan of the formula set: a binary search per
+  # covered column yields only the formula positions actually inside the
+  # rectangle, so one range costs O(log F + hits) instead of O(F). A SUM over a
+  # million-cell range stays cheap AND n row-local SUMs stay O(n) in total.
+  defp range_node_deps(ranges, index) do
+    Enum.flat_map(ranges, fn {{c1, r1}, {c2, r2}} -> index_band(index, c1, r1, c2, r2) end)
+  end
+
+  # ── formula-position index (the §Complexity range bound) ────────────────────
+  #
+  # Built ONCE per recompute in O(F log F) and queried once per range. Shape:
+  # `{cols, %{col => rows}}` where `cols` is a tuple of the distinct formula
+  # columns in ascending order and each `rows` is a tuple of that column's
+  # formula rows in ascending order. Tuples (not lists) because `elem/2` is
+  # O(1), which is what makes the binary search a binary search.
+  #
+  # Before this index each range ran `Enum.filter` over the WHOLE formula set,
+  # so a document with one row-local `SUM` per row cost O(ranges x formulas) =
+  # O(n^2) to merely BUILD the graph — quadratic on a workload whose real work
+  # is linear, and directly contrary to the O(cells + edges) contract above.
+
+  defp build_pos_index(positions) do
+    by_col =
+      positions
+      |> Enum.group_by(fn {c, _r} -> c end, fn {_c, r} -> r end)
+      |> Map.new(fn {c, rows} -> {c, rows |> Enum.sort() |> List.to_tuple()} end)
+
+    {by_col |> Map.keys() |> Enum.sort() |> List.to_tuple(), by_col}
+  end
+
+  # One index per tab, keyed by tab index; corners carry their tab, so a
+  # cross-tab range never touches another tab's positions.
+  defp build_pos_index_unified(keys) do
+    keys
+    |> Enum.group_by(fn {t, _c, _r} -> t end, fn {_t, c, r} -> {c, r} end)
+    |> Map.new(fn {t, pairs} -> {t, build_pos_index(pairs)} end)
+  end
+
+  # Every indexed position inside the rectangle, as {col, row}. Cost:
+  # O(log C + covered_cols x log R + hits) — bounded by the ANSWER, not by the
+  # formula count and not by the rectangle area.
+  defp index_band({cols, by_col}, c1, r1, c2, r2) do
+    cols
+    |> tuple_band(c1, c2)
+    |> Enum.flat_map(fn c ->
+      by_col |> Map.fetch!(c) |> tuple_band(r1, r2) |> Enum.map(&{c, &1})
     end)
+  end
+
+  # Ascending-sorted tuple -> the elements in [lo, hi], in order.
+  defp tuple_band(t, lo, hi), do: take_band(t, lower_bound(t, lo), tuple_size(t), hi, [])
+
+  # Smallest 1-based index i with elem(t, i - 1) >= v; tuple_size(t) + 1 if none.
+  defp lower_bound(t, v), do: lower_bound(t, v, 1, tuple_size(t) + 1)
+
+  defp lower_bound(_t, _v, lo, hi) when lo >= hi, do: lo
+
+  defp lower_bound(t, v, lo, hi) do
+    mid = div(lo + hi, 2)
+    if elem(t, mid - 1) < v, do: lower_bound(t, v, mid + 1, hi), else: lower_bound(t, v, lo, mid)
+  end
+
+  defp take_band(_t, i, size, _hi, acc) when i > size, do: :lists.reverse(acc)
+
+  defp take_band(t, i, size, hi, acc) do
+    v = elem(t, i - 1)
+    if v > hi, do: :lists.reverse(acc), else: take_band(t, i + 1, size, hi, [v | acc])
   end
 
   defp topo([], computed, in_deg, _out, _node_asts, _base), do: {computed, in_deg}
@@ -1501,12 +1719,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       new_cells
     else
       Enum.reduce(parsed, cells, fn {pos, {addr, result}}, acc ->
-        case result do
-          :stale ->
-            Map.update!(acc, addr, &Map.put(&1, "stale", true))
-
-          _decisive ->
-            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+        if kept_stale?(result, computed, pos) do
+          Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+        else
+          Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
         end
       end)
     end
@@ -1648,9 +1864,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       parsed
       |> Enum.reduce(strip_engine_spills(cells), fn {pos, {addr, result}}, acc ->
         cond do
-          MapSet.member?(anchor_addrs, addr) -> acc
-          result == :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
-          true -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+          MapSet.member?(anchor_addrs, addr) ->
+            acc
+
+          kept_stale?(result, computed, pos) ->
+            Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+
+          true ->
+            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
         end
       end)
 
@@ -1723,6 +1944,38 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     cell |> write_value(err(:spill)) |> Map.delete("spill") |> Map.delete("spill_dims")
   end
 
+  # A formula the engine cannot evaluate seeds the graph with its error BEFORE
+  # the topo pass, so every dependent propagates it like a computed error
+  # instead of reading around it:
+  #
+  #   :invalid                       → #REF!  (unparseable / unknown tab)
+  #   {:stale, fn} and nothing cached → #NAME? (nothing honest to render)
+  #   {:stale, fn} over a cached value → nil — the imported value stays
+  #     authoritative, dependents keep reading it, and `mark_unsupported/2`
+  #     makes the cell itself loud at write-back.
+  #
+  # `literal` is the cell's own pre-recompute value (`literal_value/1`);
+  # `:blank` is exactly "no `v`, or an empty one".
+  defp parse_error(:invalid, _literal), do: err(:ref)
+  defp parse_error({:stale, _fn}, :blank), do: err(:name)
+  defp parse_error(_result, _literal), do: nil
+
+  # True for the one result the write-back must NOT write a value for: an
+  # unsupported function over a cell that kept its cached value (so nothing was
+  # seeded into `computed`). A `{:stale, _}` cell WITH a seeded #NAME? falls
+  # through to the ordinary decisive write, which is what makes it an error
+  # cell.
+  defp kept_stale?({:stale, _fn}, computed, key), do: not is_map_key(computed, key)
+  defp kept_stale?(_result, _computed, _key), do: false
+
+  # The import-fidelity arm: keep `v`/`t` exactly as Excel computed them, but
+  # say so LOUDLY — `stale => true` plus the name the engine could not
+  # evaluate. Surfaces turn the pair into an error-styled cell titled
+  # "not evaluated: FOO is not supported" (never a quiet dot).
+  defp mark_unsupported(cell, fname) do
+    cell |> Map.put("stale", true) |> Map.put("stale_fn", fname)
+  end
+
   defp write_value(cell, value) do
     {v, t} = output(value)
 
@@ -1730,6 +1983,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     |> Map.put("v", v)
     |> Map.put("t", t)
     |> Map.delete("stale")
+    |> Map.delete("stale_fn")
   end
 
   # A top-level array result implicitly intersects to its top-left element.
@@ -1809,7 +2063,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # ── parsing ─────────────────────────────────────────────────────────────────
   #
-  # parse_formula/1 → {:ok, ast, points, ranges} | :stale | :invalid
+  # parse_formula/1 → {:ok, ast, points, ranges} | {:stale, fname} | :invalid
+  #
+  # `{:stale, fname}` carries the FIRST unsupported function name in formula
+  # order — the write-back layer needs it to name the function in the cell's
+  # "not evaluated" title, and the seeding layer needs the tag to tell an
+  # unsupported call apart from an unparseable one.
 
   # The fast path parses with an EMPTY name index: a formula with no `!` is
   # unchanged, and any `!` qualifier is unresolvable → :invalid → #REF! (the
@@ -1829,10 +2088,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
          {:ok, ast} <- resolve_tabs(ast0, name_index) do
       {points, ranges, fns} = walk(ast, {[], [], []})
 
-      if Enum.all?(fns, &(&1 in @functions)) do
-        {:ok, ast, points, ranges}
-      else
-        :stale
+      # `walk` prepends outermost-first, so reversing reads the formula
+      # left-to-right: `FOO(BAR(1))` names FOO, the one a human typed.
+      case Enum.find(Enum.reverse(fns), &(&1 not in @functions)) do
+        nil -> {:ok, ast, points, ranges}
+        unsupported -> {:stale, unsupported}
       end
     else
       _ -> :invalid
@@ -2951,6 +3211,27 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end)
   end
 
+  # CONCAT(value…) — CONCATENATE's modern replacement: same text coercion, but a
+  # RANGE or an intermediate array argument is legal and flattens ROW-MAJOR
+  # (CONCATENATE's `#VALUE!`-on-a-range rule is the legacy behaviour Excel kept
+  # for back-compat). Blank cells contribute "" (they are NOT skipped — there is
+  # no delimiter to double up, which is exactly why TEXTJOIN has an ignore-empty
+  # flag and CONCAT does not). An error anywhere in a source propagates, as it
+  # does from a range. A result past Excel's 32,767-character cell limit is
+  # #VALUE!.
+  defp call("CONCAT", args, ctx) when args != [] do
+    Enum.reduce_while(args, "", fn arg, acc ->
+      case concat_texts(arg, ctx) do
+        {:error, _} = e -> {:halt, e}
+        texts -> {:cont, acc <> Enum.join(texts)}
+      end
+    end)
+    |> case do
+      {:error, _} = e -> e
+      s when is_binary(s) -> if String.length(s) > 32_767, do: err(:value), else: s
+    end
+  end
+
   defp call("TEXTJOIN", [delim_ast, ignore_ast | rest], ctx) when rest != [] do
     with delim when is_binary(delim) <- eval_text(delim_ast, ctx),
          {:ok, ignore?} <- bool_arg(ignore_ast, ctx),
@@ -3685,6 +3966,32 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # SUBTOTAL(function_code, ref1, …) — the eleven aggregates behind one code.
+  # The whole point in Excel is the 1-11 / 101-111 split (101-111 additionally
+  # skip MANUALLY HIDDEN rows) plus the rule that a nested SUBTOTAL inside a ref
+  # is not counted twice. NEITHER is implementable here and both are DOCUMENTED
+  # GAPS, not oversights (see the moduledoc): the engine has no row-visibility
+  # input at all, and `ctx.formulas` carries only the COORDINATES of formula
+  # cells — never their formula text — so a nested SUBTOTAL inside a range is
+  # invisible to this clause and IS double-counted. Codes 1-11 and 101-111 are
+  # therefore evaluated identically. A code outside both bands (or a text code)
+  # is #VALUE!, as Excel does.
+  defp call("SUBTOTAL", [code_ast | refs], ctx) when refs != [] do
+    case eval_number(code_ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      n when is_number(n) ->
+        case subtotal_target(trunc(n)) do
+          nil -> err(:value)
+          name -> call(name, refs, ctx)
+        end
+
+      _ ->
+        err(:value)
+    end
+  end
+
   # SPARKLINE(range | scalar) -> a unicode block-bar string (`▁▂▃▄▅▆▇█` scaled
   # over min..max). Reads numeric cells in reading order (row-major), skipping
   # blanks and text exactly like the aggregates; any error in the range
@@ -3777,6 +4084,33 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       _ -> err(:value)
     end
   end
+
+  # TRANSPOSE(range | array) — flip rows and columns. Unlike UNIQUE/SORT/FILTER
+  # (which flatten to a vector) this is genuinely 2-D, so it reads the argument
+  # through `array_grid/2`: a rectangular, row-major grid that KEEPS blanks and
+  # keeps element errors IN PLACE (Excel transposes an error cell like any other
+  # value, and the spill writer types each element through `output/1`). An empty
+  # source — an all-blank range has no occupied cells to bound a rectangle with
+  # — is #VALUE!, and a result past the array cap is #NUM!.
+  defp call("TRANSPOSE", [ast], ctx) do
+    with {:ok, rows} <- array_grid(ast, ctx) do
+      cond do
+        rows == [] -> err(:value)
+        grid_area(rows) > @array_cap -> err(:num)
+        true -> {:array, Enum.zip_with(rows, & &1)}
+      end
+    end
+  end
+
+  # VSTACK(range…) / HSTACK(range…) — append grids along one axis. Excel pads a
+  # ragged edge with #N/A, and those pads are GENERATED element values (they ride
+  # into the spilled rectangle as error cells), distinct from a source error,
+  # which propagates in place like every other array element. An argument that
+  # materialises to nothing (an all-blank range) contributes no rows/columns;
+  # all-empty is #VALUE!, and a result past the array cap is #NUM!.
+  defp call("VSTACK", args, ctx) when args != [], do: stack(args, ctx, :vertical)
+
+  defp call("HSTACK", args, ctx) when args != [], do: stack(args, ctx, :horizontal)
 
   defp call("COUNTUNIQUE", args, ctx) when args != [] do
     Enum.reduce_while(args, [], fn ast, acc ->
@@ -4823,6 +5157,110 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp sort_key(s) when is_binary(s), do: {1, String.downcase(s)}
   defp sort_key(b) when is_boolean(b), do: {2, bool_rank(b)}
   defp sort_key(other), do: {3, other}
+
+  # ── 2-D array helpers (TRANSPOSE / HSTACK / VSTACK / CONCAT) ────────────────
+  #
+  # `array_grid/2` is the 2-D counterpart of `raw_flat`/`array_vector`: it
+  # materialises an argument as a RECTANGULAR row-major grid instead of a
+  # vector, so the shape survives (that is the whole point of TRANSPOSE and the
+  # stackers). Blanks stay as the `:blank` sentinel and element errors stay in
+  # place; only a whole-argument error (an unevaluable non-range AST) short-
+  # circuits, matching how `eval` already reports one. An empty range answers
+  # `{:ok, []}` — the caller decides whether that is #VALUE! or simply nothing
+  # to append.
+
+  defp array_grid({:range, p1, p2, _bounds}, ctx), do: array_grid({:range, p1, p2}, ctx)
+
+  defp array_grid({:range, p1, p2}, ctx), do: {:ok, range_grid(p1, p2, ctx)}
+
+  defp array_grid({:ref, pos}, ctx), do: {:ok, [[cell_at(pos, ctx)]]}
+
+  defp array_grid(ast, ctx) do
+    case eval(ast, ctx) do
+      {:error, _} = e -> e
+      {:array, rows} -> {:ok, rows}
+      :blank -> {:ok, [[:blank]]}
+      other -> {:ok, [[other]]}
+    end
+  end
+
+  defp grid_width([]), do: 0
+  defp grid_width([row | _]), do: length(row)
+
+  defp grid_area(rows), do: length(rows) * grid_width(rows)
+
+  # HSTACK/VSTACK's shared core. Empty grids drop out (nothing to append), a
+  # ragged edge pads with #N/A, and the assembled rectangle is cap-checked.
+  defp stack(args, ctx, axis) do
+    grids = Enum.map(args, &array_grid(&1, ctx))
+
+    case Enum.find(grids, &match?({:error, _}, &1)) do
+      {:error, _} = e ->
+        e
+
+      nil ->
+        case grids |> Enum.map(fn {:ok, g} -> g end) |> Enum.reject(&(&1 == [])) do
+          [] -> err(:value)
+          kept -> assemble(kept, axis)
+        end
+    end
+  end
+
+  defp assemble(grids, :vertical) do
+    width = grids |> Enum.map(&grid_width/1) |> Enum.max()
+    capped(Enum.flat_map(grids, fn g -> Enum.map(g, &pad_row(&1, width)) end))
+  end
+
+  defp assemble(grids, :horizontal) do
+    height = grids |> Enum.map(&length/1) |> Enum.max()
+
+    grids
+    |> Enum.map(fn g -> pad_grid(g, height) end)
+    |> Enum.zip_with(&Enum.concat/1)
+    |> capped()
+  end
+
+  defp capped(rows), do: if(grid_area(rows) > @array_cap, do: err(:num), else: {:array, rows})
+
+  defp pad_row(row, width), do: row ++ List.duplicate(err(:na), width - length(row))
+
+  defp pad_grid(grid, height) do
+    grid ++ List.duplicate(List.duplicate(err(:na), grid_width(grid)), height - length(grid))
+  end
+
+  # CONCAT's per-argument text list: the argument's grid read ROW-MAJOR, blanks
+  # rendered "" (never skipped), a source error short-circuiting the whole call.
+  defp concat_texts(ast, ctx) do
+    case array_grid(ast, ctx) do
+      {:error, _} = e ->
+        e
+
+      {:ok, rows} ->
+        vals = List.flatten(rows)
+
+        case Enum.find(vals, &match?({:error, _}, &1)) do
+          {:error, _} = e -> e
+          nil -> Enum.map(vals, &to_text/1)
+        end
+    end
+  end
+
+  # SUBTOTAL's function-code table. 1-11 and 101-111 both land on the same
+  # aggregate: the 100-band's hidden-row exclusion needs a row-visibility input
+  # the engine does not have (documented gap, moduledoc §Aggregate selection).
+  defp subtotal_target(code) when code in 101..111, do: subtotal_target(code - 100)
+  defp subtotal_target(1), do: "AVERAGE"
+  defp subtotal_target(2), do: "COUNT"
+  defp subtotal_target(3), do: "COUNTA"
+  defp subtotal_target(4), do: "MAX"
+  defp subtotal_target(5), do: "MIN"
+  defp subtotal_target(6), do: "PRODUCT"
+  defp subtotal_target(7), do: "STDEV"
+  defp subtotal_target(8), do: "STDEVP"
+  defp subtotal_target(9), do: "SUM"
+  defp subtotal_target(10), do: "VAR"
+  defp subtotal_target(11), do: "VARP"
+  defp subtotal_target(_), do: nil
 
   # SEQUENCE's optional cols/start/step, each defaulting when absent.
   defp seq_arg(rest, idx, default, ctx) do
@@ -6024,4 +6462,5 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp err(:na), do: {:error, "#N/A"}
   defp err(:num), do: {:error, "#NUM!"}
   defp err(:spill), do: {:error, "#SPILL!"}
+  defp err(:name), do: {:error, "#NAME?"}
 end
