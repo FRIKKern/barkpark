@@ -202,6 +202,15 @@ func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, [
 		// on the wire this returns renderTail's bytes unchanged.
 		push(renderLiveTail(chatRegistry, width, m.st)...)
 	}
+	// Live ledger transitions (tlv-bl-chat-live-transition-stream) close the
+	// transcript. They are pushed LAST, in arrival order, because they are the
+	// newest thing that happened and they carry no seq to interleave by — a
+	// live-only frame has no persisted row to sit beside. This is the honest
+	// MVP the charter allows: one line per transition, no chip rendering (the
+	// TUI has none for tasks at all today).
+	if ls := renderTaskTransitions(w, m.st.TaskTransitions); len(ls) > 0 {
+		push(ls...)
+	}
 	if len(lines) == 0 {
 		lines = []string{dimStyle.Render("No messages yet — type below and press Enter.")}
 		blockStarts = []int{0}
@@ -526,6 +535,53 @@ func cardResolutionBadge(status string) string {
 		return dimStyle.Render("— canceled (no runtime to answer)")
 	default:
 		return dimStyle.Render(status)
+	}
+}
+
+// ── live ledger transitions (tlv-bl-chat-live-transition-stream) ─────────────
+
+// renderTaskTransitions renders the session's live ledger transitions: one dim
+// mono line per transition, oldest first, each printed as `<glyph> <label>`.
+// The label string comes STRAIGHT off the wire — Elixir's
+// `Barkpark.StudioChat.TaskTransition.label/3` built it, the same function
+// Studio's transcript row renders — so the two surfaces cannot word a
+// transition differently. The glyph carries the state the GUI carries in a
+// `--life-*` tint: a terminal has no colour token to borrow.
+//
+// Only the last maxTaskTransitions are shown, with an honest "+N earlier"
+// header above them: a long session accumulates them, and a transcript that is
+// mostly ledger noise is the firehose the scoping rule exists to refuse.
+func renderTaskTransitions(w int, ts []TaskTransition) []string {
+	if len(ts) == 0 {
+		return nil
+	}
+	const maxTaskTransitions = 6
+	var out []string
+	start := 0
+	if len(ts) > maxTaskTransitions {
+		start = len(ts) - maxTaskTransitions
+		out = append(out, dimStyle.Render(fmt.Sprintf("… +%d earlier task transitions", start)))
+	}
+	for _, t := range ts[start:] {
+		out = append(out, truncate(taskTransitionGlyph(t.Status)+" "+dimStyle.Render(t.Label), w))
+	}
+	return out
+}
+
+// taskTransitionGlyph is the terminal's stand-in for Studio's `--life-*` tint:
+// a settled task reads ✓, a cancelled/blocked one ✕, live work ●, anything else
+// the neutral ◆. It mirrors railGlyph's vocabulary so the two live bands in this
+// TUI do not teach two different alphabets.
+func taskTransitionGlyph(status string) string {
+	switch status {
+	case "done", "closed":
+		return allowStyle.Render("✓")
+	case "cancelled", "blocked":
+		return noticeStyle.Render("✕")
+	case "in_progress":
+		return badgeStyle.Render("●")
+	default:
+		return dimStyle.Render("◆")
 	}
 }
 

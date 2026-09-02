@@ -1790,6 +1790,44 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert data == %{"type" => "assistant", "text" => "hi"}
     end
 
+    test "task frame is the compact transition JSON with NO SSE id (tlv)" do
+      # A live ledger transition (tlv-bl-chat-live-transition-stream): id-less
+      # like chat/workflow/permission/exit, so it is never a Last-Event-ID
+      # resume cursor. Its OWN `event_id` field is the reducer's dedupe key —
+      # a payload field, deliberately NOT the SSE frame id.
+      transition = %{
+        event_id: "ev-9",
+        task_id: "task-tlv-1",
+        title: "Sweep the yard",
+        status: "done",
+        mutation: "task.closed",
+        verb: "closed",
+        label: "Sweep the yard → done (closed)"
+      }
+
+      frame = ChatController.sse_task_frame(transition)
+      assert String.starts_with?(frame, "event: task\ndata: ")
+      assert String.ends_with?(frame, "\n\n")
+      refute frame =~ "id:"
+
+      data =
+        frame
+        |> String.split("data: ", parts: 2)
+        |> List.last()
+        |> String.trim()
+        |> Jason.decode!()
+
+      assert data == %{
+               "event_id" => "ev-9",
+               "task_id" => "task-tlv-1",
+               "title" => "Sweep the yard",
+               "status" => "done",
+               "mutation" => "task.closed",
+               "verb" => "closed",
+               "label" => "Sweep the yard → done (closed)"
+             }
+    end
+
     test "workflow frame is the compact summary JSON with NO id (live delta, D23)" do
       # The COMPACT workflow_summary map, byte-identical to the list wire; a live
       # delta like chat/permission/exit — unreplayable, so NO `id:` seq.

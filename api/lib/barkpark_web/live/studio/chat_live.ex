@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
+  alias Barkpark.StudioChat.TaskTransition
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -289,6 +290,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
          hand_tasks: %{},
+         # Live task transitions (tlv-bl-chat-live-transition-stream). The
+         # STICKY set of published task ids this session has touched — grown
+         # from the session worker's claims (see StudioChat.TaskTransition's
+         # scoping rule) and seeded from its held claims on open — plus the
+         # idempotency set of already-rendered mutation_event ids, so a
+         # duplicate or Last-Event-ID-replayed lifecycle event renders once.
+         touched_tasks: MapSet.new(),
+         seen_task_events: MapSet.new(),
          # The ready-task picker: nil (closed) or the ready head as lean rows.
          # Loaded fresh on every open — never a cached queue.
          task_picker: nil,
@@ -1960,7 +1969,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
           do: Map.put(socket.assigns.hand_tasks, id, hand_task_row(msg.doc.title, content)),
           else: Map.delete(socket.assigns.hand_tasks, id)
 
-      {:noreply, assign(socket, hand_tasks: hand_tasks)}
+      {:noreply,
+       socket
+       |> assign(hand_tasks: hand_tasks)
+       |> fold_task_transition(msg, worker)}
     end
   end
 
@@ -2367,6 +2379,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span aria-hidden="true">✻</span> <%= @message.text %>
           </div>
         <% end %>
+      <% :task_transition -> %>
+        <%!-- A live ledger transition (tlv): one quiet mono row, tinted with the
+              row's `--life-*` lifecycle token so a chip and a transition agree on
+              what "done" or "blocked" looks like. Live-only chrome — never
+              persisted, so a replay of this conversation carries the settled
+              task_prime snapshot instead, unchanged. --%>
+        <div
+          class="text-xs text-dim"
+          style="font-family: var(--font-mono); display: flex; gap: 6px; align-items: baseline;"
+          data-task-transition={@message[:task_id]}
+          data-task-status={@message[:task_status]}
+          data-event-key={@message[:event_key]}
+        >
+          <span style={"color: #{@message[:task_color]}; flex: none;"} aria-hidden="true">◆</span>
+          <span style="min-width: 0; overflow-wrap: anywhere;"><%= @message.text %></span>
+        </div>
       <% _ -> %>
         <div class="text-xs text-dim" style="font-family: var(--font-mono);">
           <span aria-hidden="true">✻</span> <%= @message.text %>
@@ -4576,6 +4604,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: nil,
       # No session → no worker → no held claims; the picker is per-view UI.
       hand_tasks: %{},
+      # A new chat is a new conversation: it has touched no task and rendered
+      # no transition, so BOTH the scope set and the idempotency set reset.
+      touched_tasks: MapSet.new(),
+      seen_task_events: MapSet.new(),
       task_picker: nil,
       mode: "plan",
       provider: "claude",
@@ -5516,6 +5548,50 @@ defmodule BarkparkWeb.Studio.ChatLive do
     [workspace_id: ws && ws.id, project_id: proj && proj.id]
   end
 
+  # ── live task transitions in the transcript (tlv) ─────────────────────────
+  #
+  # The Doing strip above shows WHAT this session holds; this shows WHEN it
+  # changed. A lifecycle mutation of a task this session has touched appends one
+  # tinted mono row to the transcript, so a claim, a stage, a close, a release,
+  # or a lead's kill lands in the conversation within PubSub latency instead of
+  # waiting for the agent's next MCP re-fetch.
+  #
+  # No new bus and no new subscription: this rides the SAME
+  # `documents:<dataset>` stream `subscribe_hand_tasks/1` already joined, and
+  # the SAME `{:document_changed, …}` message the Doing strip folds. The scope
+  # rule, the idempotency key, and the label all live in
+  # `StudioChat.TaskTransition` — the ONE derivation `Recorder` re-broadcasts to
+  # `bp chat` from, so the two surfaces cannot drift.
+  #
+  # Idempotency (criterion 3): the mutation_events row id is the key. A
+  # duplicate broadcast, or a Last-Event-ID replay of the same event, is
+  # dropped BEFORE the append — so it renders exactly once and the rows that
+  # came after it keep their positions. The transition row is live-only chrome:
+  # it is never persisted, so the separate `task_prime` snapshot contract (the
+  # MCP chip renderer) is untouched.
+  defp fold_task_transition(socket, msg, worker) do
+    case TaskTransition.project(msg, worker, socket.assigns.touched_tasks) do
+      {:ok, transition, touched} ->
+        socket = assign(socket, touched_tasks: touched)
+
+        if MapSet.member?(socket.assigns.seen_task_events, transition.key) do
+          socket
+        else
+          socket
+          |> update(:seen_task_events, &MapSet.put(&1, transition.key))
+          |> append_message(:task_transition, transition.label,
+            task_id: transition.task_id,
+            task_status: transition.status,
+            task_color: transition.color,
+            event_key: transition.key
+          )
+        end
+
+      {:skip, touched} ->
+        assign(socket, touched_tasks: touched)
+    end
+  end
+
   # Re-read the session worker's held claims off the ledger (reopen/mount).
   # No session → no worker → empty strip, no query.
   defp hydrate_hand_tasks(%{assigns: %{store_session_id: nil}} = socket),
@@ -5531,7 +5607,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
       end)
 
-    assign(socket, hand_tasks: rows)
+    # SEED the transition scope off the SAME read (tlv, no second query): every
+    # claim this worker already holds is a task this session has touched, so a
+    # release/reap/kill arriving AFTER the reopen — which carries no
+    # claim.worker to match on — still renders as a transition.
+    socket
+    |> assign(hand_tasks: rows)
+    |> update(:touched_tasks, fn set ->
+      Enum.reduce(Map.keys(rows), set, &MapSet.put(&2, &1))
+    end)
   end
 
   defp hand_task_row(title, content) when is_map(content) do
