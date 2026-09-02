@@ -39,7 +39,7 @@ func runAllVsSingle(t *testing.T, body string) (allOut, singleOut string, allCod
 	var allStdout, allStderr bytes.Buffer
 	out := newWriter(&allStdout, &allStderr)
 	out.output = "json"
-	allCode = runPaginatedAll(out, cmd, srv.URL, map[string]string{})
+	allCode = runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{})
 
 	var singleStdout, singleStderr bytes.Buffer
 	sout := newWriter(&singleStdout, &singleStderr)
@@ -116,7 +116,7 @@ func TestRunPaginatedAll_MultiPageStillRendersArray(t *testing.T) {
 	out := newWriter(&stdout, &stderr)
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}, Paginated: true}
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 		t.Fatalf("exit = %d; stderr=%q", code, stderr.String())
 	}
 	var got map[string][]json.RawMessage

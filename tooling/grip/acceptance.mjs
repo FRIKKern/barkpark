@@ -527,7 +527,13 @@ if (isMain) {
   } else {
     console.log(report(outcome));
   }
-  process.exit(outcome.ok ? 0 : 1);
+  // NO process.exit HERE (charter D92). The report above is this epic's own
+  // evidence, and process.exit() drops any of it still queued for an
+  // asynchronous pipe — so `acceptance.mjs --json | jq` could hand back a
+  // JSON.parse error, and `| tee` a report ending mid-line, while the same run
+  // redirected to a file was whole. exitCode keeps the exit STATUS identical
+  // (0 on PASS, 1 on FAIL) and lets stdout drain on the natural exit.
+  process.exitCode = outcome.ok ? 0 : 1;
 }
 
 export { READ_LEVEL_PROBES, EXPECTED, SCREEN_EXPECTED, DECLARED_DIVERGENCES, FIXTURE, report };
