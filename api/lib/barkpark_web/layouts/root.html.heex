@@ -210,6 +210,9 @@
       --text-base: 14px; --text-base-lh: 1.5;
       --text-sm: 13px; --text-sm-lh: 1.45;
       --text-xs: 12px; --text-xs-lh: 1.4;
+      --dur-1: 0.15s;
+      --dur-2: 0.18s;
+      --dur-3: 0.28s;
       --life-in_progress: #2563eb;
       --life-blocked: #d97706;
       --life-done: #0d9488;
@@ -673,7 +676,7 @@
       height: 32px; padding: 0 12px;
       border-radius: var(--radius-sm); font-size: var(--text-sm); font-weight: 500;
       border: 1px solid var(--border); background: transparent; color: var(--fg);
-      transition: all 0.15s; white-space: nowrap;
+      transition: all var(--dur-1); white-space: nowrap;
     }
     .btn:hover { background: var(--bg-accent); }
     /* WCAG 2.4.7 — the house ring for the shared button family. `.btn` had
@@ -721,7 +724,7 @@
       max-width: 860px; margin: 0 auto;
       border: 1px solid var(--border-muted); border-radius: 14px;
       background: var(--surface);
-      transition: border-color 0.15s;
+      transition: border-color var(--dur-1);
     }
     .bp-composer:focus-within { border-color: var(--border); }
     .bp-composer-input {
@@ -761,7 +764,7 @@
       display: inline-flex; align-items: center; justify-content: center;
       width: 28px; height: 28px; padding: 0; border: none; border-radius: 999px;
       background: transparent; color: var(--fg-muted); cursor: pointer;
-      transition: background 0.15s, color 0.15s;
+      transition: background var(--dur-1), color var(--dur-1);
     }
     .bp-iconbtn:hover { background: var(--bg-accent); color: var(--fg); }
     .bp-iconbtn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
@@ -795,7 +798,7 @@
       font-size: var(--text-sm);
       font-family: inherit;
       white-space: nowrap;
-      transition: color 0.1s, border-color 0.1s;
+      transition: color var(--dur-1), border-color var(--dur-1);
     }
     .bp-tab:hover { color: var(--fg); }
     .bp-tab.is-active {
@@ -880,7 +883,7 @@
       display: flex; align-items: center; gap: 14px;
       padding: 12px 20px;
       border-bottom: 1px solid var(--border-muted);
-      transition: background 0.1s;
+      transition: background var(--dur-1);
     }
     .doc-list-item:last-child { border-bottom: none; }
     .doc-list-item:hover { background: var(--bg-muted); }
@@ -900,7 +903,7 @@
       padding: 20px;
       background: var(--bg-card); border: 1px solid var(--border-muted);
       border-radius: var(--radius-lg);
-      transition: all 0.15s;
+      transition: all var(--dur-1);
     }
     .schema-card:hover { border-color: var(--primary); background: var(--bg-muted); }
     .schema-card-icon { font-size: 28px; }
@@ -918,7 +921,7 @@
       background: var(--bg); border: 1px solid var(--input);
       border-radius: var(--radius-sm); color: var(--fg);
       font-size: var(--text-base); font-family: var(--font);
-      transition: border-color 0.15s, box-shadow 0.15s;
+      transition: border-color var(--dur-1), box-shadow var(--dur-1);
     }
     .form-input:focus {
       outline: none; border-color: var(--ring);
@@ -953,13 +956,13 @@
     .form-switch-track {
       width: 34px; height: 20px; border-radius: 10px;
       background: var(--bg-muted); border: 1px solid var(--border);
-      position: relative; transition: background 0.15s, border-color 0.15s;
+      position: relative; transition: background var(--dur-1), border-color var(--dur-1);
       flex: 0 0 auto;
     }
     .form-switch-track::after {
       content: ""; position: absolute; top: 2px; left: 2px;
       width: 14px; height: 14px; border-radius: 50%;
-      background: var(--fg-muted); transition: transform 0.15s, background 0.15s;
+      background: var(--fg-muted); transition: transform var(--dur-1), background var(--dur-1);
     }
     .form-switch input:checked + .form-switch-track {
       background: var(--primary); border-color: var(--primary);
@@ -989,7 +992,7 @@
       height: 28px; padding: 0 12px; border: none;
       border-radius: 4px; font-size: var(--text-xs); font-weight: 500;
       background: transparent; color: var(--fg-muted); cursor: pointer;
-      transition: all 0.15s;
+      transition: all var(--dur-1);
     }
     .perspective-tab:hover { color: var(--fg); }
     .perspective-tab.active { background: var(--bg-card); color: var(--fg); box-shadow: 0 1px 2px hsl(var(--bp-shadow-hsl) / 0.2); }
@@ -1009,7 +1012,7 @@
       letter-spacing: 0.02em; line-height: 1;
       display: inline-flex; align-items: center;
       background: transparent; color: var(--fg-muted); cursor: pointer;
-      transition: all 0.15s; white-space: nowrap;
+      transition: all var(--dur-1); white-space: nowrap;
     }
     .mode-tab:hover { color: var(--fg); }
     .mode-tab.active { background: var(--bg-card); color: var(--fg); box-shadow: 0 1px 2px hsl(var(--bp-shadow-hsl) / 0.2); }
@@ -1027,7 +1030,7 @@
     .media-card {
       background: var(--bg-card); border: 1px solid var(--border-muted);
       border-radius: var(--radius); overflow: hidden;
-      transition: border-color 0.15s;
+      transition: border-color var(--dur-1);
     }
     .media-card:hover { border-color: var(--border); }
     .media-thumb {
@@ -1061,7 +1064,7 @@
     .upload-zone {
       padding: 24px; border: 2px dashed var(--border);
       border-radius: var(--radius); text-align: center;
-      color: var(--fg-muted); transition: all 0.15s;
+      color: var(--fg-muted); transition: all var(--dur-1);
     }
     .upload-zone:hover { border-color: var(--primary); background: hsl(var(--primary-hsl) / 0.03); }
 
@@ -1088,7 +1091,7 @@
     .studio-tab {
       display: inline-flex; align-items: center; justify-content: center;
       width: 32px; height: 32px; padding: 0; border-radius: var(--radius-sm);
-      color: var(--fg-muted); transition: color 0.1s, background 0.1s;
+      color: var(--fg-muted); transition: color var(--dur-1), background var(--dur-1);
     }
     .studio-tab-icon { display: inline-flex; align-items: center; justify-content: center; }
     .studio-tab:hover { color: var(--fg); background: var(--bg-muted); text-decoration: none; }
@@ -1144,7 +1147,7 @@
     .bp-update-btn {
       height: 24px; padding: 0 12px; border: none; border-radius: 5px;
       font-size: var(--text-xs); font-weight: 600; color: var(--warn-fg); background: var(--warning);
-      cursor: pointer; transition: filter 0.1s;
+      cursor: pointer; transition: filter var(--dur-1);
     }
     .bp-update-btn:hover { filter: brightness(1.06); }
     .bp-update-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
@@ -1224,11 +1227,13 @@
          44px; without a transition the row teleports and reads as a glitch
          (measured live: transitionDuration 0s on every desk element).
          Both states declare the same box transition so the morph plays in
-         BOTH directions. 0.15s is a hardcoded literal on purpose:
-         design/tokens.json carries motion.dur-* but the emitter emits no
-         --dur-* variable anywhere in api/, so a var() here would resolve to
-         nothing and silently kill the animation. */
-      transition: width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
+         BOTH directions. The duration was a hardcoded 0.15s until spd-b21:
+         design/tokens.json carried motion.dur-* but design/emit.mjs emitted
+         no --dur-* variable anywhere in api/, so a var() here would have
+         resolved to nothing and silently killed the animation. The emitter
+         now ships the ladder in the GENERATED block above, so this reads
+         --dur-1 and retunes with the token. */
+      transition: width var(--dur-1) ease, min-width var(--dur-1) ease, max-width var(--dur-1) ease;
     }
     /* The rightmost (focus/active) pane rides the raised surface so the drilled-to
        column reads as the elevated plane — visible depth, not decoration. */
@@ -1539,7 +1544,7 @@
       background: transparent; color: var(--fg-muted);
       font-size: 11px; font-weight: 500;
       text-decoration: none; cursor: pointer;
-      transition: background 0.1s, color 0.1s, border-color 0.1s;
+      transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
       white-space: nowrap;
     }
     .bp-desk-chip:hover { color: var(--fg); border-color: var(--fg-dim); }
@@ -1584,7 +1589,7 @@
       display: flex; align-items: center; gap: 10px;
       padding: 8px 16px; cursor: pointer;
       border-left: 3px solid transparent; color: var(--fg-muted);
-      transition: all 0.1s; font-size: var(--text-sm);
+      transition: all var(--dur-1); font-size: var(--text-sm);
     }
     .pane-item:hover { background: var(--bg-muted); color: var(--fg); }
     .pane-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -1594,7 +1599,7 @@
     /* Drill chevron, hover-revealed (matches .pane-doc-chevron): the affordance
        appears when the row is hovered or already the drilled/selected ancestor,
        so the resting pane reads as clean navigation, not a wall of glyphs. */
-    .pane-item-chevron { color: var(--fg-dim); font-size: var(--text-base); opacity: 0; transition: opacity 0.1s; }
+    .pane-item-chevron { color: var(--fg-dim); font-size: var(--text-base); opacity: 0; transition: opacity var(--dur-1); }
     .pane-item:hover .pane-item-chevron,
     .pane-item.selected .pane-item-chevron { opacity: 1; }
 
@@ -1614,7 +1619,7 @@
     .pane-section-header-chevron {
       display: inline-flex; align-items: center; justify-content: center;
       width: 10px; height: 10px;
-      transition: transform 0.1s;
+      transition: transform var(--dur-1);
       transform: rotate(90deg);
     }
     .pane-section-header-chevron.collapsed { transform: rotate(0deg); }
@@ -1653,7 +1658,7 @@
 
     .pane-doc-item {
       cursor: pointer;
-      border-left: 3px solid transparent; transition: all 0.1s;
+      border-left: 3px solid transparent; transition: all var(--dur-1);
     }
     .pane-doc-item:hover { background: var(--bg-muted); }
     .pane-doc-item:hover .pane-doc-title { color: var(--fg); }
@@ -1708,7 +1713,7 @@
     .pane-column--collapsed {
       width: 44px; min-width: 44px; max-width: 44px;
       flex-shrink: 0; cursor: pointer;
-      transition: background 0.1s, width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
+      transition: background var(--dur-1), width var(--dur-1) ease, min-width var(--dur-1) ease, max-width var(--dur-1) ease;
     }
     .pane-column--collapsed:hover { background: var(--bg-muted); }
     /* PRE-PROVISIONED for spd-s6, which converts this strip from a <div
@@ -1762,11 +1767,11 @@
       from { opacity: 0; }
       to { opacity: 1; }
     }
-    .pane-column--collapsed > * { animation: bp-pane-strip-in 0.15s ease-out both; }
+    .pane-column--collapsed > * { animation: bp-pane-strip-in var(--dur-1) ease-out both; }
     /* Honour the OS setting: the negotiation still HAPPENS, it just happens
        instantly. Nulls the transition, not only the animation. */
     @media (prefers-reduced-motion: reduce) {
-      .pane-column, .pane-column--collapsed { transition: background 0.1s; }
+      .pane-column, .pane-column--collapsed { transition: background var(--dur-1); }
       .pane-column--collapsed > * { animation: none; }
     }
     .pane-column--collapsed .pane-header {
@@ -2404,7 +2409,7 @@
        admin LVs sharing studio.html.heex render modals and presence
        chrome correctly without first visiting StudioLive. ───────────── */
 
-    .save-status { font-size: var(--text-xs); color: var(--success); opacity: 0.8; transition: opacity 0.3s; }
+    .save-status { font-size: var(--text-xs); color: var(--success); opacity: 0.8; transition: opacity var(--dur-3); }
 
     /* Image field */
     .image-field { position: relative; }
@@ -2414,7 +2419,7 @@
     .image-upload-zone {
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
       padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-sm);
-      cursor: pointer; color: var(--fg-muted); transition: all 0.15s;
+      cursor: pointer; color: var(--fg-muted); transition: all var(--dur-1);
     }
     .image-upload-zone:hover { border-color: var(--primary); color: var(--fg); background: hsl(var(--primary-hsl) / 0.03); }
     .image-upload-icon { font-size: 24px; font-weight: 300; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
@@ -2431,7 +2436,7 @@
     .image-upload-entry { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
     .image-upload-entry img { border-radius: 4px; object-fit: cover; }
     .image-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 16px; overflow-y: auto; }
-    .image-picker-item { cursor: pointer; border: 2px solid transparent; border-radius: var(--radius-sm); overflow: hidden; transition: border-color 0.1s; }
+    .image-picker-item { cursor: pointer; border: 2px solid transparent; border-radius: var(--radius-sm); overflow: hidden; transition: border-color var(--dur-1); }
     .image-picker-item:hover { border-color: var(--primary); }
     .image-picker-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
     .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2519,7 +2524,7 @@
       display: flex; flex-direction: column; align-items: stretch;
       padding: 0; border: 2px solid transparent; background: var(--bg-subtle);
       cursor: pointer; text-align: left;
-      transition: border-color 0.15s ease, transform 0.15s ease;
+      transition: border-color var(--dur-1) ease, transform var(--dur-1) ease;
     }
     .bp-ab-card:hover { border-color: var(--primary); transform: translateY(-2px); }
     .bp-ab-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
@@ -2549,7 +2554,7 @@
       border: 1px dashed var(--border); border-radius: var(--radius-sm);
       color: var(--fg-muted); font-size: var(--text-sm); text-align: center;
       cursor: pointer; user-select: none;
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      transition: border-color var(--dur-1), color var(--dur-1), background var(--dur-1);
     }
     .bp-mp-empty:hover, .bp-mp-empty:focus-visible {
       border-color: var(--primary); color: var(--fg);
@@ -2650,7 +2655,7 @@
     }
     .bp-ae-card {
       padding: 0; cursor: pointer; text-align: left;
-      border: 2px solid transparent; transition: border-color 0.15s, transform 0.15s;
+      border: 2px solid transparent; transition: border-color var(--dur-1), transform var(--dur-1);
     }
     .bp-ae-card:hover { border-color: var(--border); transform: translateY(-2px); }
     .bp-ae-card.is-selected { border-color: var(--primary); }
@@ -2701,7 +2706,7 @@
       background: var(--bg-card); border: 1px solid var(--border);
       box-shadow: 0 8px 32px hsl(var(--bp-shadow-hsl) / 0.24); font-size: var(--text-sm); font-weight: 500;
       z-index: 200; pointer-events: none;
-      animation: bp-ae-toast-in 0.2s ease-out;
+      animation: bp-ae-toast-in var(--dur-2) ease-out;
     }
     @keyframes bp-ae-toast-in {
       from { opacity: 0; transform: translateX(-50%) translateY(8px); }
@@ -2771,7 +2776,7 @@
       display: grid; grid-template-columns: 48px 1fr 72px minmax(100px, 1.2fr) 72px;
       align-items: center; gap: 12px; width: 100%; text-align: left;
       padding: 8px 12px; border: 1px solid transparent; border-radius: var(--radius-sm);
-      background: var(--bg-card); cursor: pointer; transition: background 0.1s, border-color 0.1s;
+      background: var(--bg-card); cursor: pointer; transition: background var(--dur-1), border-color var(--dur-1);
     }
     .bp-ae-list-row:hover { background: var(--bg-subtle); border-color: var(--border-muted); }
     .bp-ae-list-row.is-selected { border-color: var(--primary); background: var(--primary-soft); }
@@ -2818,8 +2823,8 @@
     .bp-ae-pill:hover {
       background: var(--bg-accent); border-color: var(--border); color: var(--fg);
     }
-    .bp-ae-grid-wrap.is-loading .bp-ae-grid { opacity: 0.45; transition: opacity 0.15s; }
-    .bp-ae-grid-wrap.is-loaded .bp-ae-grid { opacity: 1; transition: opacity 0.2s ease-out; }
+    .bp-ae-grid-wrap.is-loading .bp-ae-grid { opacity: 0.45; transition: opacity var(--dur-1); }
+    .bp-ae-grid-wrap.is-loaded .bp-ae-grid { opacity: 1; transition: opacity var(--dur-2) ease-out; }
     .bp-ae-load-more-wrap {
       display: flex; justify-content: center; padding: 16px 0 8px;
     }
@@ -2920,7 +2925,7 @@
     .ref-candidate {
       display: flex; align-items: center; justify-content: space-between;
       padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border-muted);
-      transition: background 0.1s;
+      transition: background var(--dur-1);
     }
     .ref-candidate:hover { background: var(--bg-muted); }
     .ref-candidate:last-child { border-bottom: none; }
@@ -3017,7 +3022,7 @@
     .presence-me-group {
       display: flex; align-items: center; gap: 8px; cursor: pointer;
       padding: 2px 4px 2px 10px; border-radius: 20px;
-      transition: background 0.1s; margin-left: 4px;
+      transition: background var(--dur-1); margin-left: 4px;
     }
     .presence-me-group:hover { background: var(--bg-muted); }
     /* Sanity-style: the bar shows ONLY the avatar; name/location live in
@@ -3055,7 +3060,7 @@
     .profile-color-option.selected .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
     .profile-color-swatch {
       display: block; width: 28px; height: 28px; border-radius: 50%;
-      border: 3px solid transparent; transition: all 0.1s;
+      border: 3px solid transparent; transition: all var(--dur-1);
     }
     .profile-color-swatch:hover { border-color: var(--fg-muted); }
 
@@ -3248,7 +3253,7 @@
       font-family: inherit;
       display: inline-flex; align-items: center; justify-content: center;
       min-width: 32px; height: 28px; flex: 0 0 auto;
-      transition: color 0.1s, border-color 0.1s, background 0.1s;
+      transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
     }
     .bp-overflow-trigger:hover {
       color: var(--fg); border-color: var(--border); background: var(--bg-muted);
@@ -3323,7 +3328,7 @@
       background: var(--bg); border: 1px solid var(--input);
       border-radius: var(--radius-sm); color: var(--fg);
       font-size: var(--text-sm); font-family: var(--font);
-      transition: border-color 0.15s, box-shadow 0.15s;
+      transition: border-color var(--dur-1), box-shadow var(--dur-1);
     }
     .bp-input:focus {
       outline: none; border-color: var(--ring);
@@ -3386,7 +3391,7 @@
       background: transparent; border: 1px solid var(--border);
       border-radius: var(--radius-sm); color: var(--fg-muted);
       font-size: var(--text-xs); font-family: inherit; cursor: pointer;
-      transition: all 0.15s;
+      transition: all var(--dur-1);
     }
     .bp-tree-search-clear:hover {
       background: var(--bg-accent); color: var(--fg); border-color: var(--fg-muted);
@@ -3470,7 +3475,7 @@
       background: transparent; border: 1px solid var(--border);
       border-radius: var(--radius-sm); color: var(--fg-muted);
       font-size: var(--text-xs); font-family: inherit; line-height: 1;
-      transition: all 0.15s;
+      transition: all var(--dur-1);
     }
     .bp-array-btn:hover:not(:disabled) { background: var(--bg-accent); color: var(--fg); border-color: var(--border); }
     .bp-array-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -3521,7 +3526,7 @@
     /* Drill chevron, revealed on row hover (structure rows already show one). */
     .pane-doc-chevron {
       flex-shrink: 0; display: inline-flex; align-items: center;
-      color: var(--fg-dim); opacity: 0; transition: opacity 0.1s;
+      color: var(--fg-dim); opacity: 0; transition: opacity var(--dur-1);
     }
     .pane-doc-item:hover .pane-doc-chevron,
     .pane-doc-item.selected .pane-doc-chevron { opacity: 1; }
@@ -3541,7 +3546,7 @@
       border-radius: 3px; background: var(--bg);
       display: inline-flex; align-items: center; justify-content: center;
       font-size: 10px; line-height: 1; color: var(--bg);
-      transition: background 0.1s, border-color 0.1s;
+      transition: background var(--dur-1), border-color var(--dur-1);
     }
     .bp-doc-checkbox-box.is-checked {
       background: var(--primary); border-color: var(--primary); color: var(--primary-fg);
@@ -3651,7 +3656,7 @@
     .bp-secondary-candidate {
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 10px; border-radius: 4px; cursor: pointer;
-      transition: background 0.1s;
+      transition: background var(--dur-1);
     }
     .bp-secondary-candidate:hover { background: var(--bg-muted); }
     .bp-secondary-candidate-id {
@@ -3857,7 +3862,7 @@
     .bp-press-answer:empty { display: none; }
 
     /* Selected state transition (only the highlight animates, not the layout) */
-    .pane-item, .pane-doc-item { transition: background 0.1s, border-color 0.1s; }
+    .pane-item, .pane-doc-item { transition: background var(--dur-1), border-color var(--dur-1); }
 
     /* Prevent layout shift on LiveView patch */
     [data-phx-main] { min-height: 100%; }
@@ -4071,17 +4076,18 @@
     .bp-paper-edit-block:focus-within { outline: 1px solid var(--paper-edit-hover); outline-offset: 10px; border-radius: 2px; }
     /* The chrome cluster floats in the block's LEFT MARGIN, hidden until the
        block is hovered/active, then fades in (Portable-Doc `.paper-floating-
-       chrome` contract: ~150ms in / 300ms out, transparent bg, ink-faint
+       chrome` contract: quick in / slow out, transparent bg, ink-faint
        glyphs that warm to ink-soft on hover). The default (resting) transition
-       carries the SLOWER 300ms so a mouse-leave fades out gently; the
-       hover/focus rule swaps in the QUICKER 150ms so the chrome appears
-       promptly when you arrive. */
+       carries the SLOWEST rung (--dur-3) so a mouse-leave fades out gently; the
+       hover/focus rule swaps in the QUICKEST (--dur-1) so the chrome appears
+       promptly when you arrive. Both were hand-typed (0.30s / 0.15s) until
+       spd-b21 emitted the ladder; the ratio survives the retune to 0.28s. */
     .bp-paper-edit-toolbar {
       position: absolute; top: 4px; left: -10px;
       transform: translateX(-100%);
       display: flex; flex-direction: column; align-items: center; gap: 2px;
       margin: 0; opacity: 0; pointer-events: none;
-      transition: opacity 0.30s ease-out;
+      transition: opacity var(--dur-3) ease-out;
       /* A4: the original's floating-chrome PILL (warm chrome surface, hairline
          border, soft shadow) — replaces the bare transparent strip. Themed via
          the `--paper-chrome-*` tokens so it reads warm in light AND dark. */
@@ -4094,7 +4100,7 @@
     .bp-paper-edit-block:hover .bp-paper-edit-toolbar,
     .bp-paper-edit-block:focus-within .bp-paper-edit-toolbar {
       opacity: 1; pointer-events: auto;
-      transition: opacity 0.15s ease-out;
+      transition: opacity var(--dur-1) ease-out;
     }
     /* Type label is dropped from view — kept in DOM for tests/a11y only. */
     .bp-paper-edit-kind {

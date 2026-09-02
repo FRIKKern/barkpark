@@ -55,7 +55,22 @@
 # missing internal/cli silently fell back to scanning only those 2 fixed FILES
 # and printed "PASS — 2 Go file(s) scanned", exit 0, over a scan of the whole
 # CLI tree that never happened. MIN_GO_FILES closes it — see the floor's own
-# failure text below. Usage: scripts/go-literal-check.sh   (check; CI + merge gate)
+# failure text below.
+#
+# The SECOND way to reach a zero/near-zero corpus is a RELOCATED copy of this
+# script: ROOT comes from `dirname $0`, so a copy run outside the repo finds
+# neither cmd/barkpark nor internal/cli (spd-w19r — the sibling of the
+# studio-literal-check.sh vacuous green closed in #8071). It is the FLOOR, not
+# an incidental crash, that must refuse that run: before spd-w19r the relocated
+# copy died with a FileNotFoundError traceback the moment it tried to open the
+# first fixed FILES path, so the count was never consulted and the failure text
+# never named the floor. The corpus is therefore ENUMERATED and counted BEFORE
+# anything is opened. A genuinely renamed theme.go is untouched by that reorder
+# — the count is then 166, far above the floor, so the run proceeds and still
+# raises loudly at scan time. Nothing is skipped, nothing is softened.
+#
+# Usage: scripts/go-literal-check.sh             (check; CI + merge gate)
+#        scripts/go-literal-check.sh --selftest  (tripwire; CI, see below)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -91,7 +106,7 @@ GO
         echo "$out"
         exit 1
     fi
-    if ! printf '%s' "$out" | grep -q 'planted_cmd.go:5'; then
+    if ! grep -q 'planted_cmd.go:5' <<<"$out"; then
         echo "go-literal-check --selftest: FAIL — RED did not name the planted file:line."
         echo "$out"
         exit 1
@@ -133,12 +148,34 @@ GO
         echo "$out"
         exit 1
     fi
-    if ! printf '%s' "$out" | grep -q 'file(s) were scanned'; then
+    if ! grep -q 'file(s) were scanned' <<<"$out"; then
         echo "go-literal-check --selftest: FAIL — the narrowed-ROOTS run failed for the wrong reason."
         echo "$out"
         exit 1
     fi
-    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex, and REFUSES to pass vacuously from narrowed ROOTS."
+    # 5) A RELOCATED copy of this script MUST NOT pass vacuously, and must be
+    #    refused BY THE FLOOR — naming it — rather than by an incidental crash.
+    #    Reproduced on origin/main (spd-w19r): ROOT comes from `dirname $0`, so a
+    #    copy outside the repo finds no cmd/barkpark and no internal/cli; it then
+    #    died with a FileNotFoundError traceback on the first fixed FILES path,
+    #    so MIN_GO_FILES was never consulted and nothing told the reader which
+    #    class of failure this was. Enumerating the corpus before opening it puts
+    #    the floor first. This case is the only thing that keeps that ordering
+    #    honest — with MIN_GO_FILES=0 the run reverts to the traceback and the
+    #    'file floor' assertion below REDs.
+    mkdir -p "$tmp/relocated/scripts"
+    cp "$0" "$tmp/relocated/scripts/go-literal-check.sh"
+    if out="$(bash "$tmp/relocated/scripts/go-literal-check.sh" 2>&1)"; then
+        echo "go-literal-check --selftest: FAIL — a RELOCATED copy scanning no CLI tree PASSED (vacuous green)."
+        echo "$out"
+        exit 1
+    fi
+    if ! grep -q 'file floor' <<<"$out"; then
+        echo "go-literal-check --selftest: FAIL — the relocated-copy RED did not name the corpus floor."
+        echo "$out"
+        exit 1
+    fi
+    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex, and REFUSES to pass vacuously from narrowed ROOTS or from a relocated copy (the floor names itself in both)."
     exit 0
 fi
 
@@ -262,33 +299,44 @@ def go_files():
         yield f
 
 
-# A gate that scans nothing PASSES. Reproduced: os.walk over a missing/renamed
-# ROOTS directory yields zero files and raises nothing, so a renamed
-# internal/cli fell back to scanning only the 2 fixed FILES and printed
-# "PASS — 2 Go file(s) scanned", exit 0, over a scan that never happened. So
-# the real run asserts a NON-ZERO, PLAUSIBLE corpus before it is allowed to
-# pass. 164 Go files scanned today; the floor is set far below that so
-# ordinary deletions never trip it, and far above the degenerate 2 (the fixed
-# FILES alone) so that vacuous-pass path can't either.
+# A gate that scans nothing PASSES. Two ways to reach it, both real and both
+# reproduced: os.walk over a missing/renamed ROOTS directory yields zero files
+# and raises nothing, so a renamed internal/cli fell back to scanning only the
+# 2 fixed FILES and printed "PASS — 2 Go file(s) scanned", exit 0, over a scan
+# that never happened; and ROOT derives from `dirname $0`, so a RELOCATED copy
+# finds neither ROOTS directory and is left with the same degenerate 2. So the
+# real run asserts a NON-ZERO, PLAUSIBLE corpus before it is allowed to pass.
+# 167 Go files scanned today (re-measured spd-w19r; it was 164 when the floor
+# landed); the floor is set far below that so ordinary deletions never trip it,
+# and far above the degenerate 2 (the fixed FILES alone) so neither
+# vacuous-pass path can either.
 MIN_GO_FILES = 140
 
-failures = []
-scanned = 0
-for path in go_files():
-    rel = os.path.relpath(path, root)
-    scanned += 1
-    for ln, text in scan(path):
-        failures.append((rel, ln, text))
+# ENUMERATE first, scan second. FILES are fixed paths that exist by
+# construction in a real checkout but not in a relocated copy, and `scan` opens
+# what it is given — so counting inside the scan loop let a FileNotFoundError
+# traceback pre-empt the floor for the whole relocated-copy class (spd-w19r).
+# The floor is a statement about the CORPUS, so it is asserted against the
+# corpus, before a single file is read.
+paths = list(go_files())
+scanned = len(paths)
 
 if not _selftest and scanned < MIN_GO_FILES:
     print(f"go-literal-check: FAILED — only {scanned} Go file(s) were scanned, "
           f"below the {MIN_GO_FILES}-file floor.\n")
     print(f"  Scanned roots: {', '.join(ROOTS) if ROOTS else '(none)'}")
-    print("  A gate that scans nothing PASSES, so this refuses to. Either cmd/barkpark")
+    print("  A gate that scans nothing PASSES, so this refuses to. Either the script was")
+    print("  run from a relocated copy (ROOT comes from `dirname $0`), or cmd/barkpark")
     print("  or internal/cli was renamed/moved, or GO_LIT_SELFTEST_EMPTY_ROOTS leaked")
     print("  into the real gate step, or the CLI tree genuinely shrank — in which case")
     print("  lower MIN_GO_FILES deliberately, in the same commit.")
     sys.exit(1)
+
+failures = []
+for path in paths:
+    rel = os.path.relpath(path, root)
+    for ln, text in scan(path):
+        failures.append((rel, ln, text))
 
 if not failures:
     print(f"go-literal-check: PASS — {scanned} Go file(s) scanned, "
