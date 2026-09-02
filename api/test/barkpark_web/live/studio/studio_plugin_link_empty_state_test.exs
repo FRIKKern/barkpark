@@ -85,8 +85,16 @@ defmodule BarkparkWeb.Studio.StudioPluginLinkEmptyStateTest do
   # The desk really did walk to the plugin link — asserted alongside every
   # absence claim so "no notice" can never mean "no page".
   defp assert_on_the_plugin_link(html) do
-    assert [link] = query(html, "#plugin-link-media-library"),
-           "fixture must reach the Media Library :plugin_link row"
+    # Bound first, then asserted as a BOOLEAN. Written as
+    # `assert [link] = query(...), "message"` the message is dead code: the
+    # pattern match raises MatchError before `assert/2` ever runs, so the
+    # explanation never reaches the failure output.
+    links = query(html, "#plugin-link-media-library")
+
+    assert match?([_], links),
+           "fixture must reach the Media Library :plugin_link row, got #{inspect(links)}"
+
+    [link] = links
 
     assert LazyHTML.attribute(link, "aria-current") == ["page"],
            "the URL must name the plugin link as the destination"
