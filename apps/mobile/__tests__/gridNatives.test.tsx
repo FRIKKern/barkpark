@@ -33,6 +33,15 @@ const chat: BlockCtx = { theme, register: 'chat' }
 
 const REPO = join(__dirname, '..', '..', '..')
 
+/** The engine error vocabulary, read from the fixture
+ * `api/test/barkpark/sheets_parity_test.exs` holds equal to
+ * `Barkpark.Plugins.Sheets.Engine.error_values/0` — the same file the web and
+ * react mirrors consume. See `sheetErrorVocabulary.test.ts` for the drift
+ * guard that pins the renderer's own set to it. */
+const ENGINE_ERRORS: string[] = JSON.parse(
+  readFileSync(join(REPO, 'web', '__tests__', 'fixtures', 'engine-errors.json'), 'utf8'),
+)
+
 /* ── element-tree helpers ───────────────────────────────────────────────────── */
 
 type Props = Record<string, unknown>
@@ -337,17 +346,24 @@ describe('sheet — per-cell styles, engine errors, alignment, URLs', () => {
     expect(cells[2]?.bg).toBe('#AbCdEf')
   })
 
-  it('paints all SEVEN engine-error values red + bold, and nothing else', () => {
-    const errors = ['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!']
+  it('paints EVERY engine-error value red + bold, and nothing else', () => {
+    // The list is read from the engine-generated fixture, NOT hand-written
+    // here. A hand-written copy was the defect this test used to carry: it
+    // named seven codes and went stale the moment #15374 added `#NAME?`
+    // engine-side, so the suite stayed green over a value mobile painted as
+    // plain text. Reading ENGINE_ERRORS means a code added engine-side is
+    // exercised through the real renderer the same day it lands.
+    const errors = ENGINE_ERRORS
+    expect(errors.length).toBeGreaterThanOrEqual(8)
     const cells = cellsIn(render(sheetOf({ rows: [[...errors, '#OTHER!', 'REF!']] })))
-    expect(cells).toHaveLength(9)
+    expect(cells).toHaveLength(errors.length + 2)
     for (const [i] of errors.entries()) {
       expect(`${errors[i]}: ${String(cells[i]?.color)}`).toBe(`${errors[i]}: ${theme.danger}`)
       expect(cells[i]?.weight).toBe('700')
     }
-    expect(cells[7]?.color).toBe(theme.text)
-    expect(cells[7]?.weight).toBeUndefined()
-    expect(cells[8]?.color).toBe(theme.text)
+    expect(cells[errors.length]?.color).toBe(theme.text)
+    expect(cells[errors.length]?.weight).toBeUndefined()
+    expect(cells[errors.length + 1]?.color).toBe(theme.text)
   })
 
   it('right-aligns numeric + temporal, centres booleans, leaves prose alone', () => {
