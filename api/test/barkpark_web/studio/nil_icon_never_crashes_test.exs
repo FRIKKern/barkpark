@@ -77,9 +77,57 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
          %{conn: conn} do
       # No fixtures on purpose: `plugin_group_node/2` emitted `icon: nil`
       # unconditionally, so this crashed on an empty database.
+      #
+      # `assert html =~ "pane-layout"` ALONE would be a proof that cannot fail
+      # for the reason it claims: the desk chrome renders whether or not a
+      # single plugin-group row materialised, so an empty Plugins column would
+      # pass it. The row assertions below are what make this render
+      # load-bearing (spd-plugins-render-assert-weak) — the same discipline the
+      # …Rest test applies with its `orphan_thing` assertion.
       {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/plugins"))
 
       assert html =~ "pane-layout"
+
+      doc = LazyHTML.from_document(html)
+
+      rows = LazyHTML.query(doc, ~s(button[id^="item-plugin-grp-"].pane-item))
+
+      assert Enum.count(rows) > 0,
+             "the Plugins column rendered no plugin-group row at all — this render proves nothing"
+
+      # A NAMED row, not just "some row": `onixedit` is an installed plugin in
+      # every env (`:barkpark, :plugins`), and the desk resolves its column
+      # under `gating: :none`, so its group row is present on a clean DB.
+      row = LazyHTML.query(doc, ~s(button#item-plugin-grp-onixedit.pane-item))
+
+      assert Enum.count(row) == 1,
+             "the Plugins column must carry the onixedit group row; it rendered " <>
+               inspect(plugin_group_ids(rows))
+
+      label =
+        row |> LazyHTML.query("span.pane-item-label") |> LazyHTML.text() |> String.trim()
+
+      assert label == "Onix",
+             "the onixedit group row must wear its display name, got #{inspect(label)}"
+
+      # THE ICON, DRAWN. The call site is `<.icon name={Icons.drawable_name(item.icon)} />`,
+      # which collapses a nil to the neutral "file" glyph — so a nil icon can
+      # never RAISE here, and a render test that only checks presence stays
+      # green while every plugin row silently degrades to a document glyph.
+      # Assert the picture: the row must carry the "puzzle" paths the emitter
+      # names, not the fallback. This is the assertion that reds when
+      # `plugin_group_node/2` drops `icon:` AND `PaneBuilder`s `|| "file"` goes.
+      drawn = path_shapes(row, "span.pane-item-icon svg")
+
+      assert drawn == glyph_shapes("puzzle"),
+             "the onixedit group row drew a different glyph than the emitters " <>
+               "\"puzzle\" — a plugin row that fell back to " <>
+               "#{inspect(fallback_glyph_name(drawn))} is the nil-icon defect wearing " <>
+               "a fail-safe costume"
+
+      refute drawn == glyph_shapes("file"),
+             "the onixedit group row drew the neutral \"file\" fallback — the emitter " <>
+               "stopped naming a glyph, or the PaneBuilder forwarding lost it"
     end
   end
 
@@ -248,6 +296,30 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
       end
     end
   end
+
+  # ── Render helpers (element/attribute assertions, never substring greps) ──
+
+  # The `d` attributes an svg actually painted, in order.
+  defp path_shapes(fragment, selector) do
+    fragment |> LazyHTML.query(selector <> " path") |> LazyHTML.attribute("d")
+  end
+
+  # The same shapes for a NAMED glyph, read from the icon library rather than
+  # pasted here, so a glyph redraw updates both sides at once.
+  defp glyph_shapes(name) do
+    name
+    |> BarkparkWeb.Icons.resolve_paths(:warn)
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("path")
+    |> LazyHTML.attribute("d")
+  end
+
+  # Name the glyph a row actually drew, for the failure message.
+  defp fallback_glyph_name(shapes) do
+    Enum.find(BarkparkWeb.Icons.icon_names(), "an unknown glyph", &(glyph_shapes(&1) == shapes))
+  end
+
+  defp plugin_group_ids(rows), do: LazyHTML.attribute(rows, "id")
 
   # Walk the desk tree for a node id (the tree is nested; …Rest and Plugins
   # both sit at the top level today, but the walk keeps this honest if a

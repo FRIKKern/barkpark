@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "child_count": 2,
+  "children": [
+    {
+      "doc_id": "a-done-row",
+      "title": "done",
+      "lifecycle_status": "done",
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "doc_id": "a-cancelled-row",
+      "title": "cancelled",
+      "lifecycle_status": "cancelled",
+      "criteria_progress": {
+        "met": 0,
+        "total": 2
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "doc": {
+    "doc_id": "fixture-epic",
+    "kind": "task",
+    "type": "task",
+    "title": "fixture epic",
+    "lifecycle_status": "in_progress",
+    "content": {
+      "kind": "task"
+    }
+  }
+}

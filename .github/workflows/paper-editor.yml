@@ -9,6 +9,12 @@ name: paper-editor
 # but the bundle didn't). This workflow catches both classes:
 #   1. convert.js round-trip regressions  -> npm run smoke
 #   2. stale committed bundle             -> rebuild + git diff --exit-code
+#   3. stale committed stylesheet         -> rebuild + git diff --exit-code
+# `npm run build` emits TWO artifacts from src/ -- the IIFE bundle and
+# bp-paper-editor.css (the stylesheet the LiveView editor and the web demo
+# load). The css was ungated until 2026-09-01 and went stale once (#11816
+# added framed rules to src/styles.css that the committed css never got).
+# Both artifacts are diffed here, and both are trigger paths below.
 # The freshness check is deterministic: `npm ci` pins esbuild via the
 # lockfile, and esbuild's minified output is reproducible per version.
 #
@@ -29,12 +35,14 @@ on:
       # the reading surface several src/ suites assert against — see the header
       - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
+      - "api/priv/static/assets/bp-paper-editor.css"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
       - "api/assets/paper-editor/**"
       - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
+      - "api/priv/static/assets/bp-paper-editor.css"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
@@ -66,9 +74,15 @@ jobs:
       - name: Rebuild bundle
         run: npm run build
 
-      - name: Assert committed bundle is fresh
+      - name: Assert committed bundle and stylesheet are fresh
         run: |
+          stale=0
           if ! git diff --exit-code ../../priv/static/assets/bp-paper-editor.bundle.js; then
             echo "::error file=api/priv/static/assets/bp-paper-editor.bundle.js::Committed bundle is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
-            exit 1
+            stale=1
           fi
+          if ! git diff --exit-code ../../priv/static/assets/bp-paper-editor.css; then
+            echo "::error file=api/priv/static/assets/bp-paper-editor.css::Committed stylesheet is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
+            stale=1
+          fi
+          exit "$stale"

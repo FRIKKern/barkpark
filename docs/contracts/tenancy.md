@@ -1,9 +1,7 @@
 <!-- doc-tier: agent | canonical-for: tenancy-model | budget: 2000tok -->
 # Tenancy — workspace · project · dataset · membership
 
-How Barkpark isolates data across tenants and scopes every read/write. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
-
-**This doc owns the model + scoping** — auth enforcement and URL shapes live in Canonical homes below.
+How Barkpark's **API layer** isolates data across tenants and scopes every read/write; cloud-side team/barkpark object authz is `docs/contracts/cloud-object-authz.md`. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
 
 ## The hierarchy
 
