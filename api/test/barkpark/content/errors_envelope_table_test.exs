@@ -72,6 +72,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # PRE-EXISTING GAP, closed here rather than worked around: #15202 landed
+      # this arm on 2026-09-02 without a row, so the non-vacuity count below was
+      # already red on origin/main (48 clauses, 47 rows) before the
+      # connection_unavailable arm existed. It reuses the public `malformed`
+      # code at the SAME 400 the bare atom uses — one code, one status — and
+      # adds `details.blocks` naming each offending path.
+      {"malformed_blocks", {:error, {:malformed_blocks, %{blocks: ["content.blocks[0]"]}}},
+       "malformed", 400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
@@ -96,6 +104,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # transient-storage code (one code = one status: `halted` stays 409),
       # `reason` discriminating it from a media-volume fault.
       {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}},
+       "storage_unavailable", 503, [:reason]},
+      # THE OTHER OUTAGE (task-a0ce4e18f6776400) — the connection dropped
+      # MID-WRITE on the create path rather than during the dedup scan, so
+      # unlike the arm above the write is AMBIGUOUS. Same public code, same 503,
+      # its own `reason` and its own hint (which says to check for the debris
+      # before resending). Pinned here so a later status edit to either transient
+      # arm cannot move the other one silently.
+      {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
        "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
