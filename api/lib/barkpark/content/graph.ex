@@ -32,8 +32,9 @@ defmodule Barkpark.Content.Graph do
 
   `:drafts` is a token-gated, slower LIVE extract handled by a SEPARATE path
   (`traverse_drafts/2`): it folds `Content.extract_edges/2` PLUS the plugin
-  `resolve_extract_edges` chain (`Registry.collect_edge_extractors/1` — the
-  lvw-t12 fold, so draft papers' valueref/wikilink edges surface pre-publish)
+  `resolve_extract_edges` chain reached through the INVERTED extractor seam
+  (`:edge_extractor_collector`, see `collect_plugin_edges/2` — the lvw-t12
+  fold, so draft papers' valueref/wikilink edges surface pre-publish)
   over the drafts corpus (`list_documents(type, dataset, perspective:
   :drafts)`), builds an in-memory edge index keyed by published-coalesced
   slug, and runs the SAME BFS bound (depth clamp, 1000-node budget, 200/level
@@ -78,7 +79,13 @@ defmodule Barkpark.Content.Graph do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Edge, Scope}
-  alias Barkpark.Plugins.Registry
+
+  # The INVERTED plugin edge-extractor seam. The kernel (`content`) must hold no
+  # compile-time reference to a feature concept, and `Barkpark.Plugins.Registry`
+  # is one — so the drafts fold no longer calls the registry. Instead the
+  # composition root (`Barkpark.Application.start/2`, the ONE installer) hands
+  # the fan-out DOWN into this key, and `collect_plugin_edges/2` only reads it.
+  @edge_extractor_collector_key :edge_extractor_collector
 
   @node_budget 1000
   @fan_out 200
@@ -362,12 +369,40 @@ defmodule Barkpark.Content.Graph do
     dataset = Map.get(doc, :dataset) || Map.get(doc, "dataset") || Keyword.get(opts, :dataset)
     core = Content.extract_edges(doc, opts)
 
-    Registry.collect_edge_extractors(baseline: core, ctx: %{doc: doc, dataset: dataset})
+    core
+    |> collect_plugin_edges(%{doc: doc, dataset: dataset})
     |> Enum.map(fn
       # Core edges arrive fully formed (dangling/field/refType resolved).
       %{dangling: _} = edge -> edge
       edge -> normalize_plugin_drafts_edge(edge, corpus_slugs)
     end)
+  end
+
+  # ── The inverted extractor seam ────────────────────────────────────────────
+  # Reads the collector the composition root installed under
+  # `:edge_extractor_collector` and drives it with the SAME `[baseline:, ctx:]`
+  # contract `Barkpark.Plugins.Registry.collect_edge_extractors/1` publishes —
+  # the kernel just never names that module. Two installable shapes:
+  #
+  #   * a 1-arity fun (what the boot installer captures), and
+  #   * a `{module, function}` pair, so a release/config can wire the seam
+  #     without the app having booted.
+  #
+  # UNSET (a fresh install, a plugin-free host, a script or a test that never
+  # started the OTP app) returns the core baseline UNCHANGED — core edges only,
+  # never a crash. Same for a garbage value: the seam degrades, it does not
+  # take the drafts graph down with it.
+  defp collect_plugin_edges(core, ctx) do
+    case Application.get_env(:barkpark, @edge_extractor_collector_key) do
+      collector when is_function(collector, 1) ->
+        collector.(baseline: core, ctx: ctx)
+
+      {mod, fun} when is_atom(mod) and is_atom(fun) ->
+        apply(mod, fun, [[baseline: core, ctx: ctx]])
+
+      _ ->
+        core
+    end
   end
 
   # Plugin edges arrive as `%{from_id, to_id, kind, plugin_source}` —

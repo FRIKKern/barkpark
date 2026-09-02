@@ -6450,6 +6450,193 @@
     return cell ? "vs main: " + cell : "";
   }
 
+  // ── slot_units (#14886): IS THE BLUE/GREEN DEPLOY PAIR INTACT ───────────────
+  //
+  // The one fact on a fleet row that is not about the host at all, and the one
+  // nothing else on the row can say. On 2026-08-06 `barkpark-slot@blue` sat in
+  // `failed` (an 8m30s stop-sigterm timeout, SIGKILLed) while every operator
+  // surface read `ok` — because the verdict was computed from host vitals and
+  // had ZERO unit-state inputs. It would have read `ok` with either half dead,
+  // and with both.
+  //
+  // THREE STATES, KEPT THREE. `slot_units` absent / non-array is UNMEASURED (no
+  // systemd, no dbus, an agent predating the probe); a present-but-empty array
+  // is MEASURED AND INTACT; a populated array is the units themselves.
+  // `length === 0` is true of the first two, so a reader that means "we looked
+  // and it is clean" must test for the ARRAY, not for emptiness — rendering
+  // unmeasured as intact re-creates the exact silence the field exists to break.
+  //
+  // These are systemd's OWN properties, relayed, never a verdict: whether a
+  // failed half matters depends on whether the OTHER half is serving, and that
+  // is the consumer's call. Ported from the Go CLI's shipped reader
+  // (internal/cli/cloud_status_cmd.go: slotUnitMarker / slotUnitFailureClause /
+  // slotUnitReason / slotUnitShortName) — same semantics, this surface's layout.
+  var SLOT_UNIT_PREFIX = "barkpark-slot@";
+
+  // "barkpark-slot@green.service" → "green"; "barkpark-site@search__b.service"
+  // → "search__b". A unit matching neither shape is carried VERBATIM rather
+  // than mangled — an operator acts on a name systemd would recognise.
+  function slotUnitShortName(unit) {
+    var name = String(unit || "");
+    if (name.slice(-8) === ".service") name = name.slice(0, -8);
+    var at = name.indexOf("@");
+    return at >= 0 ? name.slice(at + 1) : name;
+  }
+
+  // "is this slot serving": systemd says active AND a main process exists. An
+  // `active` unit with MainPID 0 has no process (a oneshot that exited), and
+  // counting it as serving is how a box with nothing running reads healthy. A
+  // MISSING pid is UNKNOWN and does NOT vouch — unmeasured never becomes
+  // evidence for the reassuring answer.
+  function slotUnitServing(u) {
+    return u.activeState === "active" && typeof u.mainPid === "number" && u.mainPid > 0;
+  }
+
+  // WHY systemd calls a unit failed: Result and ExecMainStatus read TOGETHER or
+  // not at all. Measured on guerrilla 2026-09-01: barkpark-site@search__b reads
+  // result "exit-code" with exec_main_status 143 — 128+15, i.e. Next.js exiting
+  // on the SIGTERM of its own retire, filed as an exit code only because the
+  // unit lacks SuccessExitStatus=143 (PR #14863). `result` alone reports that
+  // deliberate stop as a crash.
+  function slotUnitReason(u) {
+    var result = u.result === null ? "" : String(u.result);
+    if (u.execMainStatus === null) return result;
+    if (result === "") return "status " + u.execMainStatus;
+    return result + " " + u.execMainStatus;
+  }
+
+  // Pure: the render-ready deploy-pair model. TOTAL over any row — a fleet row
+  // from an older control plane (no `pressure` block at all) folds to
+  // "unmeasured", never to a fabricated intact pair.
+  function slotUnitsModel(bp) {
+    var p = (bp && bp.pressure && typeof bp.pressure === "object") ? bp.pressure : null;
+    var raw = p ? p.slot_units : null;
+    var truncated = (p && typeof p.slot_units_truncated === "number" &&
+      isFinite(p.slot_units_truncated) && p.slot_units_truncated >= 0) ? p.slot_units_truncated : null;
+    if (!Array.isArray(raw)) {
+      return { state: "unmeasured", slots: [], serving: [], failedSlots: [], failedSites: [], truncated: truncated };
+    }
+    var rows = raw.filter(function (u) {
+      return u && typeof u === "object" && typeof u.unit === "string" && u.unit !== "";
+    }).map(function (u) {
+      return {
+        unit: u.unit,
+        name: slotUnitShortName(u.unit),
+        activeState: typeof u.active_state === "string" ? u.active_state : "",
+        subState: typeof u.sub_state === "string" ? u.sub_state : "",
+        result: typeof u.result === "string" && u.result !== "" ? u.result : null,
+        // A pid/status is a NUMBER or it is unknown. The wire's -1 and every
+        // non-number land as null, so no arm reads a sentinel as a process.
+        mainPid: (typeof u.main_pid === "number" && isFinite(u.main_pid)) ? u.main_pid : null,
+        execMainStatus: (typeof u.exec_main_status === "number" && isFinite(u.exec_main_status) &&
+          u.exec_main_status >= 0) ? u.exec_main_status : null,
+        // systemd's own timestamp string, VERBATIM — reformatting it here would
+        // be a second source of truth for a fact systemd already states.
+        stateSince: (typeof u.state_since === "string" && u.state_since.trim() !== "")
+          ? u.state_since.trim() : null,
+      };
+    });
+    var slots = [], serving = [], failedSlots = [], failedSites = [];
+    rows.forEach(function (u) {
+      // A unit that does not carry the template prefix is a spawned SITE unit —
+      // a different story on the same list.
+      if (u.unit.indexOf(SLOT_UNIT_PREFIX) >= 0) {
+        slots.push(u);
+        if (slotUnitServing(u)) serving.push(u);
+        else if (u.activeState === "failed") failedSlots.push(u);
+        return;
+      }
+      if (u.activeState === "failed") failedSites.push(u);
+    });
+    // A truncation is not a formatting detail: `slot_units_truncated` counts
+    // FAILED site units the agent's cap HID, so a positive count is evidence of
+    // failures this list does not show. Folding it into the failed state is what
+    // stops a capped list from reading intact.
+    var state = "intact";
+    if (failedSlots.length || failedSites.length || (truncated !== null && truncated > 0)) state = "failed";
+    else if (!rows.length) state = "empty";
+    else if (slots.length && !serving.length) state = "idle";
+    else if (serving.length) state = "serving";
+    return {
+      state: state, slots: slots, serving: serving,
+      failedSlots: failedSlots, failedSites: failedSites, truncated: truncated,
+    };
+  }
+
+  // Pure: the failed slot(s) named with the two facts that decide what an
+  // operator does next — WHY systemd calls it failed, and SINCE WHEN.
+  function slotUnitFailureClause(failed) {
+    return failed.map(function (u) {
+      var s = u.name + " slot FAILED";
+      var why = slotUnitReason(u);
+      if (why) s += " (" + why + ")";
+      if (u.stateSince) s += " since " + u.stateSince;
+      return s;
+    }).join(", ");
+  }
+
+  // Pure: the failed SITE units, with the cap stated. The agent caps this list
+  // and reports what the cap HID, so a short list says it is short rather than
+  // passing for a whole one. The blue/green pair is never truncated, so this
+  // can never hide a slot unit.
+  function slotUnitSitesClause(m) {
+    if (m.failedSites.length) {
+      var s = m.failedSites.length + " site unit(s) failed: " +
+        m.failedSites.map(function (u) { return u.name; }).join(", ");
+      if (m.truncated !== null && m.truncated > 0) {
+        s += " (+" + m.truncated + " more, TRUNCATED by the agent's cap)";
+      }
+      return s;
+    }
+    if (m.truncated !== null && m.truncated > 0) {
+      return m.truncated + " failed site unit(s) TRUNCATED by the agent's cap";
+    }
+    return "";
+  }
+
+  // Pure: the deploy pair as ONE sentence, complete over all three states. This
+  // is the readout that ALWAYS renders (the instance rail), so the unmeasured
+  // arm has to say "not reported" out loud — an empty green here would be the
+  // most reassuring lie this payload can tell.
+  function slotUnitsText(m) {
+    if (m.state === "unmeasured") {
+      return "not reported — no systemd reading reached the control plane, so nothing here says " +
+        "whether the blue/green pair is intact";
+    }
+    var parts = [];
+    if (m.failedSlots.length && m.serving.length) {
+      // THE CASE THE WHOLE FIELD IS ABOUT, and the reason a box like this still
+      // grades ok: it IS serving. The sentence says half the pair is down
+      // anyway, because the next deploy has nowhere to cut over TO.
+      parts.push("serving on " + m.serving.map(function (u) { return u.name; }).join("+") +
+        "; " + slotUnitFailureClause(m.failedSlots));
+    } else if (m.failedSlots.length) {
+      parts.push("NO slot is serving; " + slotUnitFailureClause(m.failedSlots));
+    } else if (m.serving.length) {
+      parts.push("serving on " + m.serving.map(function (u) { return u.name; }).join("+"));
+    } else if (m.slots.length) {
+      // Nothing failed and nothing serving: every slot is inactive/activating.
+      // A mid-cutover beat looks exactly like this for a few seconds.
+      parts.push("no blue/green slot is active");
+    }
+    var sites = slotUnitSitesClause(m);
+    if (sites) parts.push(sites);
+    // MEASURED AND EMPTY, which is not the same sentence as "not reported" —
+    // one is a box we looked at, the other is a box nobody looked at.
+    return parts.length ? parts.join(" · ") : "measured — systemd reported no barkpark-slot units on this box";
+  }
+
+  // Pure: the FLEET-LIST segment. It renders ONLY a failure — the same rule the
+  // Go table keeps (slotUnitMarker returns "" for both unmeasured and intact),
+  // and for the same reason: neither of those has a failure to NAME, and a list
+  // a person scans must not grow a segment on every row to say nothing. The
+  // three-state completeness lives on the instance rail, where it is a readout
+  // rather than a scan.
+  function fleetSlotUnitsText(bp) {
+    var m = slotUnitsModel(bp);
+    return m.state === "failed" ? slotUnitsText(m) : "";
+  }
+
   function fleetMetaHtml(bp) {
     bp = bp || {};
     var parts = [];
@@ -6463,6 +6650,10 @@
     if (vt) parts.push(esc(vt));
     var cd = fleetCommitDistanceText(bp);
     if (cd) parts.push(esc(cd));
+    // #14886: a FAILED half of the blue/green pair, at a glance in the list a
+    // person scans first. Silent on every other state — see fleetSlotUnitsText.
+    var su = fleetSlotUnitsText(bp);
+    if (su) parts.push(esc(su));
     return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
   }
 
@@ -8060,7 +8251,12 @@
             railRow("Health", railValue(cap(health), hasHost)) +
             railRow("Agent", railValue(cap(agent), hasHost)) +
             railRow("Version", bp.version ? "v" + bp.version : "—") +
-            railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—")) +
+            railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
+            // #14886: the deploy pair. ALWAYS rendered, all three states — a
+            // box whose agent sent no systemd reading says "not reported"
+            // rather than sitting silently beside a green Health row, which is
+            // exactly how a `failed` blue went eight hours unnoticed.
+            railRowPlain("Deploy pair", slotUnitsText(slotUnitsModel(bp)))) +
           // S13 (azure-hetzner hosting): the Domain rail row GROWS into the live
           // per-host DNS/TLS checklist. The slot renders the static value first
           // (no layout jump); loadInstanceDomains replaces it with the checklist
@@ -22069,8 +22265,56 @@
           // can name what the floor is short by.
           degraded: status === "degraded" ? strList(r.degraded) : null,
           degradedCount: status === "degraded" ? num(r.degraded_count) : null,
+          // WHY this root's bytes were held out of the residual subtraction.
+          // INDEPENDENT of status, and that is the whole point: an overlay
+          // mount is a COMPLETE, CORRECT reading ("read", real bytes) of a tree
+          // that is not on the root filesystem, so it cannot be subtracted from
+          // it. Gating this on status would silently drop the exclusion on
+          // exactly the roots that carry it most often.
+          excludedReason: (typeof r.excluded_reason === "string" && r.excluded_reason.trim() !== "")
+            ? r.excluded_reason.trim() : null,
         };
       });
+    }
+
+    // The residual: what the reading did NOT measure, or a stated refusal.
+    //
+    // THE -1 SENTINEL LIVES IN THIS MODEL, ON PURPOSE, AND IS THE ONE PLACE IN
+    // THIS FILE THAT IS TRUE OF A FOLD. `status: "undefined"` is the refusal a
+    // NEGATIVE arithmetic result becomes on the agent, and the wire keeps -1 in
+    // `bytes` there (see MetricsSpaceResidual in internal/cloudclient/client.go:
+    // "A view must word it, never print it"). Nulling it HERE would look safer
+    // and would be worse: every arm would then render the same em-dash, the
+    // view's refusal branch would be indistinguishable from an absent reading,
+    // and deleting that branch would change nothing on screen — an unloseable
+    // guard, which is to say no guard. So the clamp is ONE branch in the view
+    // (spaceResidualHead), where reverting it prints "-1" and a test can catch
+    // it. A clamp to 0 would be worse still: "0 B unaccounted" is the strongest
+    // claim this axis can make, and it must not be reachable by arithmetic
+    // going wrong.
+    //
+    // `ofBytes` is the DENOMINATOR (the root filesystem's USED total) and it
+    // travels with the value so no arm can render a share without the volume
+    // behind it. It is never df's capacity percent — that is a share of a
+    // different whole.
+    //
+    // null (no `residual` key at all) is an agent that PREDATES the field, and
+    // the panel words that differently from a refusal: neither is a number, but
+    // one is "we did not compute" and the other is "we computed and refuse".
+    function residual(row) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+      var status = (row.status === "computed" || row.status === "undefined" || row.status === "unmeasured")
+        ? row.status : "unmeasured";
+      return {
+        status: status,
+        bytes: (typeof row.bytes === "number" && isFinite(row.bytes)) ? row.bytes : null,
+        ofBytes: num(row.of_bytes),
+        measuredBytes: num(row.measured_bytes),
+        countedRoots: num(row.counted_roots),
+        excludedRoots: num(row.excluded_roots),
+        reason: typeof row.reason === "string" && row.reason !== "" ? row.reason : null,
+        pgSource: (row.pg_source === "du-root" || row.pg_source === "pg-size-bytes") ? row.pg_source : null,
+      };
     }
 
     return {
@@ -22078,6 +22322,7 @@
       dbSize: num(payload.db_size),
       topRelations: rows(payload.top_relations),
       consumerRoots: consumerRoots(payload.consumer_roots),
+      residual: residual(payload.residual),
       sites: {
         dir: typeof sites.dir === "string" ? sites.dir : "",
         bytes: num(sites.bytes),
@@ -22091,6 +22336,138 @@
       reportedAt: typeof payload.reported_at === "string" ? payload.reported_at : null,
       ageSeconds: spaceAgeSeconds(collectedAt, payload.reported_at),
     };
+  }
+
+  // Pure: the machine-readable exclusion slug, worded for THIS surface. The
+  // slug is the contract; every surface words it for its own reader and none of
+  // them parses prose back into a decision. Ported from the Go CLI's
+  // wordExclusion (internal/cli/cloud_instance_top_cmd.go) — the sentences are
+  // Go's, so the two surfaces cannot drift into two different meanings for one
+  // slug. An UNKNOWN slug is carried verbatim rather than dropped: a reason we
+  // do not have a sentence for is still a reason, and vanishing is the one
+  // rendering that turns "held out, because X" into "counted".
+  function spaceExclusionText(reason) {
+    if (reason === "cross-mount")
+      return "NOT subtracted: on a different filesystem than /, so these bytes are not in this box's root-filesystem total";
+    if (reason === "device-unverified")
+      return "NOT subtracted: this agent could not tell which filesystem it is on, and unknown is not the same as same";
+    if (reason.indexOf("under:") === 0)
+      return "NOT subtracted: already counted inside " + reason.slice(6);
+    return "NOT subtracted: " + reason;
+  }
+
+  // Pure: the exclusion note beside a root, or "" when the root was subtracted
+  // normally. An absent key adds NOTHING — the note is a fact about this root,
+  // never a slot that has to be filled.
+  function spaceExclusionHtml(r) {
+    if (!r || !r.excludedReason) return "";
+    return '<span class="space-note dim">' + esc(spaceExclusionText(r.excludedReason)) + "</span>";
+  }
+
+  // Pure: a share as a one-decimal percent. A non-positive denominator yields
+  // the em-dash — never a divide-by-zero, never an invented share.
+  function spaceSharePct(part, whole) {
+    if (typeof part !== "number" || typeof whole !== "number" || !isFinite(part) || !isFinite(whole) || whole <= 0) return "—";
+    return (Math.round(part / whole * 1000) / 10).toFixed(1) + "%";
+  }
+
+  // Pure: the residual's HEAD — the short verdict that sits where a size would.
+  // Four words for four states, and only ONE of them is a number. Split out so
+  // the "never print bytes on the undefined arm" rule is one branch a reader
+  // can check, not a property of a paragraph.
+  function spaceResidualHead(res) {
+    if (!res) return "not reported";
+    // THE CLAMP. This one line is the whole reason a -1 never reaches an eye:
+    // the model carries the wire's sentinel verbatim and this branch refuses to
+    // print it. Revert it to print bytes and the panel reads "-1 B unaccounted".
+    if (res.status === "undefined") return "not computable";
+    if (res.status === "unmeasured") return "not computed";
+    if (res.bytes === null || res.bytes < 0 || res.ofBytes === null) return "not reported";
+    return metricsBytesText(res.bytes);
+  }
+
+  // Pure: the residual's SENTENCE — why the head says what it says.
+  //
+  // COVERAGE IS ALWAYS THIS BOX'S, NEVER THE FLEET'S, and the wording says so
+  // in as many words. That is not pedantry: coverage is ANTI-CORRELATED with
+  // trouble — the same two roots cover 81.66% of one box at 96% disk and 34.86%
+  // of another, a 47-point spread — so a fleet-wide average reads highest
+  // exactly where it is least true. There is no such thing as "the fleet's
+  // coverage" on this axis, only one box's at a time.
+  function spaceResidualNote(res) {
+    // NO `residual` KEY AT ALL. An agent predating the field, which is a
+    // different fact from a refusal and must not be worded as one — and above
+    // all is not "0 B unaccounted", which would claim the roots above are the
+    // whole disk.
+    if (!res) {
+      // The head already says "not reported"; this is the WHY, and repeating the
+      // verdict here would read as two findings instead of one.
+      return "this agent predates the residual, so the roots above are a SUBSET of this box's " +
+        "disk and nothing says how large a subset";
+    }
+    if (res.status === "undefined") {
+      // THE CLAMP, WORDED. The wire carries a -1 sentinel in `bytes` here and
+      // this arm never reaches it: no figure, and no percentage of one either.
+      // A zero would be worse than the -1 — "0 B unaccounted" is the strongest
+      // claim this axis can make, and it must not be reachable by arithmetic
+      // going wrong.
+      var s = "";
+      if (res.measuredBytes !== null && res.ofBytes !== null) {
+        s = "the measured roots total " + metricsBytesText(res.measuredBytes) +
+          " against this box's " + metricsBytesText(res.ofBytes) + " used. ";
+      }
+      return s + "Disjoint trees on one filesystem cannot exceed its used total, so the roots " +
+        "overlap or cross a mount. No figure is reported rather than a negative one";
+    }
+    if (res.status === "unmeasured") {
+      if (res.reason === "root-used-unmeasured") {
+        return "this box reported no root-filesystem used total, and there is nothing to subtract " +
+          "from (df's capacity percent is a share of a different whole and is not a substitute)";
+      }
+      if (res.reason === "root-device-unverified") {
+        return "this agent could not verify which filesystem its roots are on, and roots that " +
+          "cannot be placed cannot be subtracted";
+      }
+      return "this agent reported no residual for this reading";
+    }
+    if (res.bytes === null || res.bytes < 0 || res.ofBytes === null) {
+      return "the agent sent a computed residual without the volume behind it, and a share with " +
+        "no denominator is not a reading";
+    }
+    // The value, its share, AND the denominator that produced the share — all
+    // three, so nothing here can be quoted as a percentage nobody can check.
+    var note = spaceSharePct(res.bytes, res.ofBytes) + " of this box's " +
+      metricsBytesText(res.ofBytes) + " used — THIS box's coverage, never the fleet's";
+    if (res.countedRoots !== null) {
+      var total = res.countedRoots + (res.excludedRoots === null ? 0 : res.excludedRoots);
+      note += " · measured " + res.countedRoots + " of " + total + " root(s) on this box";
+      if (res.excludedRoots !== null && res.excludedRoots > 0) {
+        note += " (the rest are named above with the reason they were not subtracted)";
+      }
+    }
+    if (res.pgSource === "du-root") note += " · postgres counted once, via its du root";
+    else if (res.pgSource === "pg-size-bytes") note += " · postgres counted once, via pg_database_size";
+    return note;
+  }
+
+  // Pure: the residual block. ALWAYS rendered — including on a payload with no
+  // residual key — because the absence is itself the load-bearing fact: without
+  // this line the roots above are a subset of the disk with nothing saying how
+  // large a subset, which is the silence the whole axis exists to end.
+  function spaceResidualHtml(res) {
+    // A REAL figure takes the plain bytes rule (it is a size, like every other
+    // size in this panel); every refusal/absence word takes the dim one. Both
+    // class attributes are complete static literals — a class finished by
+    // concatenation is the dynamic-composition shape __css_check E3 refuses.
+    var isFigure = !!res && res.status === "computed" &&
+      res.bytes !== null && res.bytes >= 0 && res.ofBytes !== null;
+    var headOpen = isFigure
+      ? '<span class="space-group-bytes">'
+      : '<span class="space-group-bytes dim">';
+    return '<div class="space-group">' +
+      '<div class="space-group-head"><span class="space-group-name">Unaccounted</span>' +
+      headOpen + esc(spaceResidualHead(res)) + "</span></div>" +
+      '<span class="space-note dim">' + esc(spaceResidualNote(res)) + "</span></div>";
   }
 
   // Pure: the "what is eating the disk" panel — the answer that used to need an
@@ -22129,6 +22506,13 @@
     // indistinguishable from a tree that holds nothing, which is the same lie
     // in a quieter form.
     function rootGroup(r) {
+      // WHY this root was held out of the residual subtraction, if it was. It
+      // rides EVERY arm, on purpose: `excluded_reason` is independent of
+      // `status`, so an overlay mount reads perfectly ("read", real bytes) and
+      // still is not subtractable. Gating it on a status would drop the
+      // exclusion on exactly the roots that carry it. An absent key adds
+      // nothing at all — never an empty note slot.
+      var excl = spaceExclusionHtml(r);
       // Both non-read arms reuse the EXISTING .space-group / .dim rules rather
       // than minting a modifier class. The words carry the distinction, and a
       // new rule head would have to move the CSS ratchet for styling nobody
@@ -22136,7 +22520,7 @@
       if (r.status === "absent") {
         return '<div class="space-group">' +
           '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
-          '<span class="space-group-bytes dim">not on this box</span></div></div>';
+          '<span class="space-group-bytes dim">not on this box</span></div>' + excl + "</div>";
       }
       // A DEGRADED root: the walk finished and printed a REAL total, but du
       // could not descend into the named subtrees, so the number is a FLOOR —
@@ -22164,7 +22548,7 @@
         return '<div class="space-group">' +
           '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
           '<span class="space-group-bytes">' + floorBytes + "</span></div>" +
-          dnote + names +
+          dnote + names + excl +
           (r.top && r.top.length
             ? '<ul class="space-consumers">' + r.top.map(spaceConsumerHtml).join("") + "</ul>"
             : "") +
@@ -22173,14 +22557,14 @@
       if (r.status !== "read") {
         return '<div class="space-group">' +
           '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
-          '<span class="space-group-bytes dim">not measured</span></div></div>';
+          '<span class="space-group-bytes dim">not measured</span></div>' + excl + "</div>";
       }
       var note = "";
       if (r.count !== null && r.top !== null && r.count > r.top.length) {
         note = '<span class="space-note dim">top ' + esc(String(r.top.length)) +
           " of " + esc(String(r.count)) + "</span>";
       }
-      return group(r.path, r.bytes, r.top, note);
+      return group(r.path, r.bytes, r.top, note + excl);
     }
 
     var rootsHtml = "";
@@ -22192,6 +22576,10 @@
       '<h3 class="space-title">What\u2019s using the disk<span class="dim">' + esc(age) + "</span></h3>" +
       group(model.sites.dir || "Sites", model.sites.bytes, model.sites.top, sitesNote) +
       rootsHtml +
+      // The line this panel was missing: what the roots above did NOT measure.
+      // It sits directly under them because it is a statement ABOUT them — the
+      // roots are a subset of the disk, and this is how large a subset.
+      spaceResidualHtml(model.residual) +
       group("Database", model.dbSize, model.topRelations, "") +
       group("Journal", model.journalBytes, null, "") +
       "</div>";
@@ -25370,6 +25758,16 @@
       pressureSignalText: pressureSignalText,
       spaceModel: spaceModel, spacePanelHtml: spacePanelHtml,
       spaceAgeSeconds: spaceAgeSeconds, metricsBytesText: metricsBytesText,
+      // #14795: the residual (what the roots did NOT measure) and the per-root
+      // exclusion reason. The head/note split is exported SEPARATELY from the
+      // block so the "undefined never carries a figure" rule is assertable as
+      // one branch rather than by grepping a paragraph.
+      spaceResidualHead: spaceResidualHead, spaceResidualNote: spaceResidualNote,
+      spaceResidualHtml: spaceResidualHtml, spaceExclusionText: spaceExclusionText,
+      spaceSharePct: spaceSharePct,
+      // #14886: the blue/green deploy pair off a fleet row's pressure block.
+      slotUnitsModel: slotUnitsModel, slotUnitsText: slotUnitsText,
+      fleetSlotUnitsText: fleetSlotUnitsText, slotUnitShortName: slotUnitShortName,
       // S14 (azure-hetzner hosting): the archives panel. Only the pure projection
       // (archivesModel) + its render helpers are node-pinned; the DOM mount
       // (loadArchives) is browser-verified.
