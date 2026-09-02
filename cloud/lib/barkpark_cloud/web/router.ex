@@ -525,6 +525,8 @@ defmodule BarkparkCloud.Web.Router do
     beam_pid: nil,
     beam_slot: nil,
     runaway_procs: nil,
+    slot_units: nil,
+    slot_units_truncated: nil,
     reported_at: nil
   }
 
@@ -10837,6 +10839,25 @@ defmodule BarkparkCloud.Web.Router do
       # QUIET. Collapsing those would re-enact the incident exactly — "we did not
       # look" rendered as "nothing to see".
       runaway_procs: runaway_procs(Map.get(payload, "runaway_procs")),
+      # WHETHER THE DEPLOY PAIR IS INTACT — the one fact on this block that is
+      # not about the host at all, and the one nothing here could say. On
+      # 2026-08-06 `barkpark-slot@blue` sat in `failed` (an 8m30s stop-sigterm
+      # timeout, SIGKILLed) while every operator surface read `ok`, because the
+      # verdict was computed from the vitals above and had ZERO unit-state
+      # inputs — it would have read `ok` with either half dead, and with both.
+      #
+      # These are systemd's OWN properties, relayed, never a verdict: whether a
+      # failed half matters depends on whether the OTHER half is serving, and
+      # that is the consumer's call to make (bp cloud status makes it in
+      # slotUnitMarker). Same three-state law as runaway_procs, and for the same
+      # reason: `nil` is UNMEASURED (no systemd, no dbus, an agent predating the
+      # probe) and `[]` is MEASURED AND INTACT. Rendering the first as the second
+      # would re-create the exact silence the field exists to break.
+      slot_units: slot_units(Map.get(payload, "slot_units")),
+      # How many failed SITE units the agent's cap hid. A measured 0 means the
+      # list is complete; nil means unmeasured (absent key, or the agent's -1
+      # sentinel) — so a short list can never pass for a whole one.
+      slot_units_truncated: measured_or_nil(Map.get(payload, "slot_units_truncated")),
       reported_at: at
     })
   end
@@ -10879,6 +10900,45 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp runaway_proc(_), do: []
+
+  # The agent's `slot_units` rows, in the agent's own order (the blue/green pair
+  # first, then the failed site units), reduced to the six properties a surface
+  # renders. Same non-list-is-nil law as runaway_procs above: absent key, JSON
+  # null or garbage is NOT MEASURED, which is not the same as measured and intact.
+  defp slot_units(rows) when is_list(rows), do: Enum.flat_map(rows, &slot_unit/1)
+  defp slot_units(_), do: nil
+
+  # A row survives on its THREE NAMING fields — the unit, and the two systemd
+  # state axes. main_pid / exec_main_status / state_since are OPTIONAL and render
+  # nil when unreadable, because dropping the whole row over an unparseable pid
+  # would delete the `failed` that is the point of the row.
+  #
+  # `result` and `exec_main_status` are kept as a PAIR on purpose: measured
+  # 2026-09-01, barkpark-site@search__b reads Result=exit-code with
+  # ExecMainStatus=143 — 128+15, a clean SIGTERM retire that systemd files as an
+  # exit code (PR #14863 adds SuccessExitStatus=143). A consumer handed `result`
+  # alone would read a deliberate stop as a crash.
+  defp slot_unit(row) when is_map(row) do
+    with unit when is_binary(unit) <- named_or_nil(Map.get(row, "unit")),
+         active when is_binary(active) <- named_or_nil(Map.get(row, "active_state")),
+         sub when is_binary(sub) <- named_or_nil(Map.get(row, "sub_state")) do
+      [
+        %{
+          unit: unit,
+          active_state: active,
+          sub_state: sub,
+          result: named_or_nil(Map.get(row, "result")),
+          main_pid: measured_or_nil(Map.get(row, "main_pid")),
+          exec_main_status: measured_or_nil(Map.get(row, "exec_main_status")),
+          state_since: named_or_nil(Map.get(row, "state_since"))
+        }
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  defp slot_unit(_), do: []
 
   # The fleet-ops row shape (GET/POST /v1/internal/barkparks): the identity +
   # placement fields the `bp cloud hetzner instance` verbs cross-check, plus

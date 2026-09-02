@@ -1345,7 +1345,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # Go struct decodes it yet — see its :unread row). MEASURED by the
   # 999-technique on this branch: the refusal printed "159 emitted key(s)
   # collected", never derived from the diff.
-  @emitted_pinned 159
+  #
+  # 159 -> 161 (dr-bl-w5-failed-slot-unit-is-invisible): `merge_pressure/2` gains
+  # `slot_units` and `slot_units_truncated` — the box's blue/green SYSTEMD UNIT
+  # state, which no field on this payload could express. TWO names on ONE pair,
+  # so the two barkpark-family pins below move by two as well. Unlike
+  # `suspended_at` above, the Go-tag floor DOES move here, by NINE: the pair's
+  # own two names plus the seven the `SlotUnit` row declares
+  # (`unit`, `active_state`, `sub_state`, `result`, `main_pid`,
+  # `exec_main_status`, `state_since`) — all nine new to
+  # `internal/cloudclient`, so `@go_tag_sites` does not move at all. MEASURED by
+  # the PIN CO-EDIT arm's own expression on this tree ("159 -> 161"), never
+  # derived from the diff.
+  @emitted_pinned 161
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1438,7 +1450,30 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #
   # Measured by the scanner's own expression on this tree (names 303 -> 313,
   # sites 566 -> 584), never summed.
-  @go_tag_pinned 313
+  # dr-bl-w5-failed-slot-unit-is-invisible: 313 -> 322, on top of the space
+  # residual's baseline directly above (this branch rebased onto it). NINE new
+  # names land in `internal/cloudclient`: `slot_units` + `slot_units_truncated`
+  # on `Pressure`, and the seven of the `SlotUnit` row it points at — `unit`,
+  # `active_state`, `sub_state`, `result`, `main_pid`, `exec_main_status`,
+  # `state_since`.
+  #
+  # This is the D260 blind spot NOT biting, and it is bought rather than lucky:
+  # the timestamp field is called `state_since` and not `since` PRECISELY because
+  # `since` is already declared in this package. Had it been `since`, the name
+  # would have ridden free on the NAME union, `@go_tag_pinned` would not have
+  # moved, and `json.Unmarshal` would have dropped the field in silence — the
+  # exact laundering the register's header warns about, one line from the block
+  # above where it is warned about again.
+  #
+  # So all nine are new NAMES at one site each and `@go_tag_sites` does not move.
+  # 322 is MEASURED by the PIN CO-EDIT arm on the MERGED tree (all four scalars
+  # probed at 999 in one run), never the arithmetic 313 + 9. That it AGREES with
+  # the arithmetic is the measurement's answer, not its premise: the two slices
+  # touch the same scanner and only the scanner can say their name sets are
+  # disjoint. `@emitted_pinned` and both barkpark-family pins came back
+  # UNCHANGED across the same rebase — the space residual added Go tags and no
+  # emitted key, so its baseline moved only the one pin it said it moved.
+  @go_tag_pinned 322
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1702,7 +1737,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # tracking each other: the INVARIANT below (`seeing - blind == 14`, the
   # vitals behind the `:when` unwrap) is unchanged by this key, and it is the
   # invariant, not the equality of the deltas, that the arm checks.
-  @barkpark_family_keys 65
+  # 65 -> 67 (dr-bl-w5-failed-slot-unit-is-invisible), and `blind` does NOT move:
+  # `slot_units` and `slot_units_truncated` land in `merge_pressure/2`, whose
+  # clause is `when is_map(payload)` — exactly the guarded clause the blind
+  # walker drops. So this is the OPPOSITE case to `suspended_at` above and the
+  # one the pair exists to distinguish: the two counts move INDEPENDENTLY, which
+  # is the whole reason they are two attributes. `blind` tracking `seeing` here
+  # would have destroyed the blind-spot measurement silently and in the green
+  # direction — the pressure block is exactly what the blind walker cannot see.
+  @barkpark_family_keys 67
   @barkpark_family_keys_blind 48
 
   # ---------------------------------------------------------------------------
