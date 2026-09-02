@@ -77,10 +77,35 @@
 // ── PER-ROW BINDING IS IMPORTED, NEVER RE-DERIVED (charter D73/D74) ───────────
 //
 // Every row declares its binding class (content-addressed / shared-ref /
-// per-worktree / cwd-bound / foreign-tree-pinned) and its portable scope,
-// computed by `classifyBinding` from binding.mjs — the ONE grammar for ref
-// identity. leads does not carry a second regex; a divergent answer here would
-// be exactly the copy-paste-the-grammar defect this epic exists to abolish.
+// per-worktree / cwd-bound / foreign-tree-pinned), its portable scope, the
+// ANCHOR the verdict was decided on, and whether the command's exit status is
+// MASKED — all four computed by `classifyBinding` from binding.mjs, the ONE
+// grammar for ref identity. leads does not carry a second regex; a divergent
+// answer here would be exactly the copy-paste-the-grammar defect this epic
+// exists to abolish.
+//
+// The anchor is what makes two rows of DIFFERENT class visibly different rather
+// than merely differently-labelled: a shared-ref row names the ref it reads
+// (`origin/main`), a foreign-tree-pinned row names the checkout it is nailed to
+// (`/…/worktrees/spill-janitor-wt`) — and the second answer silently becomes a
+// lie the moment that tree is pruned, which a class name alone does not convey.
+//
+// `exit_masked` is the other half. 49 of the live store's 62 recipes pipe a git
+// read into a counter, so in a clone where the read FAILS the pipeline prints
+// `0` and exits `0` (D76): a fabricated quantity with no error anywhere. A
+// reader who is handed such a recipe must be told before they run it, so the
+// dense line carries a marker and the `--full` block carries the mask rule's
+// own sentence — read from `EXIT_MASK_RULES`, never re-worded here.
+//
+// ── THE RESULT CARRIES THE TREE THAT PRODUCED IT ─────────────────────────────
+//
+// The human render inherits `ledger.mjs`'s one stderr provenance banner. A
+// MACHINE consumer cannot read a banner, so `--json` carries the same measured
+// object as a `provenance` field: tree root, HEAD, and whether HEAD differs
+// from origin/main. It is PASSED IN, never computed here — `emitProvenance`
+// already measured it for the banner and returns it precisely so the four git
+// calls are paid for once. leads spawns nothing; a second measurement here
+// would be a second implementation of the very thing provenance.mjs owns.
 //
 // ── THE LEVEL IS RE-DERIVED AT RENDER TIME, NEVER READ FROM STORAGE ──────────
 //
@@ -98,7 +123,18 @@
 import { readFileSync } from "node:fs";
 
 import { deriveLevel } from "./level.mjs";
-import { classifyBinding } from "./binding.mjs";
+import { classifyBinding, EXIT_MASK_RULES } from "./binding.mjs";
+
+// The mask rule's own sentence, looked up rather than re-worded. A second
+// phrasing of "a failed read prints 0 AND exits 0" would drift from the rule
+// registry the day someone corrects one of them.
+const EXIT_MASK_WHAT = new Map(EXIT_MASK_RULES.map((entry) => [entry.rule, entry.what]));
+
+/** The one-phrase consequence of a row's exit mask, or null when it is loud. */
+export function exitMaskNote(row) {
+  if (!row?.exit_masked) return null;
+  return EXIT_MASK_WHAT.get(row.exit_mask_rule) ?? "a failed read does not reach the caller as a failure";
+}
 
 // A subject minted from the `cmd:<head>` fallback rather than from a path
 // token. One constant, one place to re-point.
@@ -280,7 +316,7 @@ export function matchesQuery(entry, recipe, needle, { cmd = false } = {}) {
  * for every recipe, because the count of what the wider mode would add is what
  * keeps the narrow mode's empty honest — see `cmd_only_recipes`.
  */
-export function selectLeads(folded, query, { census = null, cmd = false } = {}) {
+export function selectLeads(folded, query, { census = null, cmd = false, provenance = null } = {}) {
   const entries = Array.isArray(folded?.entries) ? folded.entries : [];
   const needle = String(query ?? "").trim().toLowerCase();
 
@@ -322,6 +358,8 @@ export function selectLeads(folded, query, { census = null, cmd = false } = {}) 
       // RE-DERIVED HERE, EVERY TIME. Never trusted from storage.
       const derived = deriveLevel(rerun);
       // BINDING: imported from binding.mjs, never a second regex here (D73/D74).
+      // All four consumer-facing fields come off this ONE verdict — the class,
+      // the scope, the anchor it was decided on, and the exit-mask finding.
       const binding = classifyBinding(rerun);
       rows.push({
         subject: String(entry.subject ?? ""),
@@ -332,6 +370,22 @@ export function selectLeads(folded, query, { census = null, cmd = false } = {}) 
         level_restated: stored !== null && stored !== derived,
         binding_class: binding.binding_class ?? null,
         portable_scope: binding.portable_scope ?? null,
+        // The ref/path the verdict was decided on: `origin/main` for a
+        // shared-ref read, the pinned checkout for a foreign-tree row, null
+        // where the rule named nothing (a bare relative-path read).
+        binding_rule: binding.rule ?? null,
+        anchor: binding.anchor ?? null,
+        // WHETHER A FAILED READ WOULD BE SILENT (D76). Always a boolean here:
+        // `null` would read as "not measured" when it was in fact measured and
+        // came back false.
+        exit_masked: binding.exit_masked === true,
+        exit_mask_rule: binding.exit_mask_rule ?? null,
+        // The directory a `cd`/`git -C` prefix supplies. It does NOT decide the
+        // class (ref identity does — D73), but it decides whether the command
+        // RUNS AT ALL: the store's `cd …/.claude/worktrees/spill-janitor-wt`
+        // rows read origin/main, so they are honestly shared-ref, and they will
+        // still die the day that ephemeral worktree is pruned.
+        cd_prefix: binding.cd_prefix ?? null,
         deps: Array.isArray(recipe?.deps) ? recipe.deps : [],
         observed_at: recipe?.observed_at ?? null,
         run_id: recipe?.run_id ?? null,
@@ -357,6 +411,12 @@ export function selectLeads(folded, query, { census = null, cmd = false } = {}) 
     query: String(query ?? "").trim(),
     match_mode: cmd ? "subject+command" : "subject",
     match_rule: MATCH_RULE,
+    // WHICH TREE ANSWERED. The human render gets this as ledger.mjs's one
+    // stderr banner; a `| JSON.parse` consumer gets it here or not at all.
+    // Carried through verbatim from `emitProvenance`'s return — the field is
+    // `null` for a library caller that measured nothing, which is an honest
+    // "unmeasured", never a fabricated clean reading.
+    provenance: provenance ?? null,
     rows,
     cmd_only_recipes: cmdOnlyRecipes,
     unreadable: unreadable.length,
@@ -384,12 +444,29 @@ function methodsNote(row) {
   return `  (${row.methods_on_key} methods on this key — run all ${row.methods_on_key} and compare)`;
 }
 
-// ONE physical line per recipe (the default): subject, quantity, binding class,
-// and the re-runnable command. Everything a reader needs to re-derive the fact,
-// nothing they have to scroll past.
+// The class, plus the ANCHOR it was decided on when the rule named one. This is
+// what makes `shared-ref@origin/main` and
+// `foreign-tree-pinned@/…/spill-janitor-wt` different ANSWERS on the page and
+// not merely different adjectives: the reader sees the ref one re-runs against
+// and the doomed checkout the other is nailed to, in the same glance.
+function bindingTag(row) {
+  const cls = row.binding_class ?? "unknown";
+  return row.anchor ? `${cls}@${row.anchor}` : cls;
+}
+
+// The exit-mask marker for the dense line. Short — the full sentence lives in
+// the `--full` block — but never absent, because a row whose failure mode is
+// "prints 0, exits 0" must not look like a row that fails loudly.
+function maskTag(row) {
+  return row.exit_masked ? "  ⚠ exit-masked" : "";
+}
+
+// ONE physical line per recipe (the default): subject, quantity, binding class
+// with its anchor, the exit-mask marker, and the re-runnable command.
+// Everything a reader needs to re-derive the fact — and to know what the fact
+// is about — with nothing they have to scroll past.
 function denseLine(row) {
-  const binding = row.binding_class ?? "unknown";
-  return `  ${row.subject}  ${row.quantity}  ${binding}  $ ${row.rerun}${methodsNote(row)}`;
+  return `  ${row.subject}  ${row.quantity}  ${bindingTag(row)}${maskTag(row)}  $ ${row.rerun}${methodsNote(row)}`;
 }
 
 // The per-row BLOCK, restored by --full: level provenance, binding scope, deps,
@@ -401,7 +478,19 @@ function fullBlock(row, out) {
     ? `  ← stored ${row.stored_level}, NOT trusted: re-derived from the command`
     : "  (re-derived from the command at render time, never read from storage)";
   out(`       level        ${row.derived_level}${restated}`);
-  out(`       binding      ${row.binding_class ?? "unknown"} · portable to ${row.portable_scope ?? "unknown"}`);
+  const anchoredOn = row.anchor ? ` · anchored on ${row.anchor}` : " · anchored on nothing the grammar names";
+  out(`       binding      ${row.binding_class ?? "unknown"} · portable to ${row.portable_scope ?? "unknown"}${anchoredOn} · rule ${row.binding_rule ?? "unknown"}`);
+  // Stated on EVERY row, masked or not. A warning that appears only on the bad
+  // rows leaves the reader unable to tell "checked and loud" from "never
+  // checked" — and the whole point of the line is that the reader can trust a
+  // `0` from the loud ones.
+  const note = exitMaskNote(row);
+  out(note
+    ? `       exit status  MASKED — ${note}; in a clone where the read fails you get a fabricated answer, not an error`
+    : "       exit status  reaches the caller — a failed read is loud here");
+  if (row.cd_prefix) {
+    out(`       runs from    ${row.cd_prefix} — a \`cd\`/\`-C\` prefix; the command needs that directory to exist, whatever its binding class`);
+  }
   out(`       deps         ${row.deps.length ? row.deps.join(", ") : "(none recorded)"}`);
   out(`       observed_at  ${row.observed_at ?? "(none)"} · ${censusLine(row)}`);
   out("");

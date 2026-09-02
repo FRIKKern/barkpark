@@ -1377,7 +1377,13 @@ async function prescreenCommand(rest) {
 
 // ── the leads verb ───────────────────────────────────────────────────────────
 
-async function leadsCommand(rest) {
+// `provenance` is the object `emitProvenance` already measured for the stderr
+// banner in `main`, handed down rather than re-measured: the banner and the
+// `--json` field must describe the SAME reading, and provenance.mjs owns the
+// four git calls that produce it. A caller that passes nothing gets `null` in
+// the JSON — an honest "unmeasured", never a second measurement that could
+// disagree with the banner the reader just saw.
+async function leadsCommand(rest, provenance = null) {
   const args = [...rest];
   const takeFlag = (name) => {
     const i = args.indexOf(name);
@@ -1417,7 +1423,7 @@ async function leadsCommand(rest) {
   }
 
   const folded = foldLedger(dirArg ? resolve(dirArg) : DEFAULT_LEDGER_DIR, await cliBounds());
-  const result = selectLeads(folded, query, { census, cmd: withCmd });
+  const result = selectLeads(folded, query, { census, cmd: withCmd, provenance });
   process.stdout.write(asJson ? `${JSON.stringify(result, null, 2)}\n` : renderLeads(result));
   // An honest empty is an ANSWER, not an error — exit 0. A nonzero here would
   // teach callers to treat "nobody has checked this yet" as a failure.
@@ -1439,13 +1445,16 @@ async function main(argv) {
   // leads, fold, prescreen and write all inherit "here is which tree answered".
   // stderr, never stdout: stdout is the verb's answer and a banner in it would
   // corrupt a piped `| JSON.parse`. emitProvenance swallows a broken stderr.
-  emitProvenance();
+  // The RETURN is kept, not discarded: `leads --json` carries this same
+  // measured object as its `provenance` field, so the machine reader and the
+  // human reader are told about the same tree from the same four git calls.
+  const provenance = emitProvenance();
 
   const [cmd = "fold", ...rest] = argv;
   if (cmd === "--selftest" || cmd === "selftest") return selftest();
   if (cmd === "write") return writeCommand(rest);
   if (cmd === "prescreen") return prescreenCommand(rest);
-  if (cmd === "leads") return leadsCommand(rest);
+  if (cmd === "leads") return leadsCommand(rest, provenance);
   if (cmd === "fold") {
     const positional = rest.filter((a) => !a.startsWith("--"));
     const scopeArg = rest.find((a) => a.startsWith("--scope="));
