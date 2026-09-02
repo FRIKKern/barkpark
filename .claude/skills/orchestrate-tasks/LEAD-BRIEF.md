@@ -61,8 +61,13 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 8. **Stamp + close** (you): `bp task stamp <id> lead-<lane> <epoch> --criterion N
    --criterion-text "<exact text>" --met --evidence "PR #… merged <sha>"` per met criterion
    (index is ZERO-based; a merge-gate criterion needs `--merge-gated`); then
-   `bp task close <id> lead-<lane> <epoch> --yes`. A 409 `doc_changed_since_claim` means
-   re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
+   `bp task close <id> lead-<lane> <epoch> done "<reason>" --yes` — the lifecycle word
+   `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
+   slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
+   means re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
+   TRAP: the merge-gate guard matches the WORD "gate" anywhere in a criterion's prose, so a
+   criterion ending "gate green: CC=clang mix test" refuses a plain stamp and demands
+   `--merge-gated` (measured 2026-09-02 on task-33f02a058cede6b3).
 
 - **Hold the claim until the PR MERGES, not just until it opens.** The lease (~40 min) lapses while a PR
   waits in a deep CI queue and the required task gate then fails "carries no claim" (measured 2026-09-02
