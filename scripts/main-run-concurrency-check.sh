@@ -118,7 +118,6 @@ research-coverage-suite.yml
 scaffy-catalog-drift.yml
 sdk-tests.yml
 search-starter-smoke.yml
-security.yml
 sheet-grid-js.yml
 shell-harnesses.yml
 stale-verdict-watch.yml

@@ -46,15 +46,17 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Sharing}
   alias Barkpark.Sharing.Share
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @dataset "production"
   @admin "shares-receipt-admin"
 
   setup %{conn: conn} do
-    {:ok, _} =
+    {:ok, admin_tok} =
       Auth.create_token(@admin, "shares receipt admin", "production", ["read", "write", "admin"])
 
     prior_shares = Application.get_env(:barkpark, :shares)
@@ -67,11 +69,36 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
       restore(:shares_env, prior_env)
     end)
 
-    {:ok, conn: conn}
+    {:ok, conn: conn, admin_tok: admin_tok}
   end
 
   defp restore(key, nil), do: Application.delete_env(:barkpark, key)
   defp restore(key, value), do: Application.put_env(:barkpark, key, value)
+
+  # A REAL workspace the @admin token administers.
+  #
+  # These scopes used to be bare invented slugs — `dualws`, `storedws`,
+  # `ghost` — with no workspace row behind them. That stopped being reachable
+  # when the Shares panel went fail-closed on an unresolvable workspace
+  # (lead-security ruling, 2026-09-02, task-9e9b49d5787a90be: "the Studio
+  # shares handler must REFUSE a declare or remove whose scope names a
+  # workspace that does not exist, with the SAME generic denial a foreign scope
+  # gets"). THE RULING NAMES REMOVE EXPLICITLY, so narrowing the refusal to the
+  # add half to keep these fixtures alive would have undone it.
+  #
+  # The receipt is what this file is about, and the receipt is slug-agnostic —
+  # so the fixtures move onto a workspace that EXISTS and that this actor
+  # genuinely administers. That is also STRONGER than the old spelling: the
+  # scope stays FOREIGN to the mounted workspace, so these tests now drive the
+  # resolve-and-authorize arm rather than a slug the clamp could never resolve.
+  defp receipt_scope!(admin_tok) do
+    n = System.unique_integer([:positive])
+    ws = create_workspace!("shares-receipt-#{n}")
+    proj = create_project!(ws, "shares-receipt-proj-#{n}")
+    {:ok, _} = TenancyAuth.create_membership(ws.id, admin_tok.id, "admin", "api_token")
+    assert TenancyAuth.workspace_admin?(admin_tok, ws.id)
+    {ws.slug, proj.slug, "#{ws.slug}/#{proj.slug}/#{@dataset}"}
+  end
 
   defp admin_view(conn) do
     conn
@@ -97,14 +124,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
 
   describe "the removal receipt agrees with the store" do
     test "a scope shared via BOTH the env baseline and a stored row is reported as STILL shared",
-         %{conn: conn} do
-      scope = "dualws/default/production"
+         %{conn: conn, admin_tok: admin_tok} do
+      {ws, proj, scope} = receipt_scope!(admin_tok)
       put_env_baseline("#{scope}:papers:read")
       {:ok, _} = Sharing.add_share("#{scope}:papers:read")
 
       # Both halves are live, and the scope really is publicly readable.
-      assert %Share{} = Enum.find(Sharing.shares_env(), &(&1.workspace_slug == "dualws"))
-      assert Sharing.shared?("dualws", "default", "production", :papers)
+      assert %Share{} = Enum.find(Sharing.shares_env(), &(&1.workspace_slug == ws))
+      assert Sharing.shared?(ws, proj, @dataset, :papers)
 
       {:ok, view, _html} = admin_view(conn)
       open_panel(view)
@@ -113,7 +140,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
       html = view |> remove_button(scope) |> render_click()
 
       # The store is the authority, and the receipt says what it says.
-      assert Sharing.shared?("dualws", "default", "production", :papers),
+      assert Sharing.shared?(ws, proj, @dataset, :papers),
              "the env baseline survives remove_share/3 — the scope is still public"
 
       assert html =~ "is STILL shared"
@@ -124,23 +151,34 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
       assert Sharing.list_stored() == []
     end
 
-    test "a purely stored share is removed and reported as no longer shared", %{conn: conn} do
-      scope = "storedws/default/production"
+    test "a purely stored share is removed and reported as no longer shared", %{
+      conn: conn,
+      admin_tok: admin_tok
+    } do
+      {ws, proj, scope} = receipt_scope!(admin_tok)
       {:ok, _} = Sharing.add_share("#{scope}:papers:read")
-      assert Sharing.shared?("storedws", "default", "production", :papers)
+      assert Sharing.shared?(ws, proj, @dataset, :papers)
 
       {:ok, view, _html} = admin_view(conn)
       open_panel(view)
 
       html = view |> remove_button(scope) |> render_click()
 
-      refute Sharing.shared?("storedws", "default", "production", :papers)
+      refute Sharing.shared?(ws, proj, @dataset, :papers)
       assert html =~ "Stopped sharing #{scope}"
       assert html =~ "no longer shared"
       refute html =~ "is STILL shared"
     end
 
-    test "removing a scope that was never shared does not claim a removal", %{conn: conn} do
+    test "removing a scope that was never shared does not claim a removal", %{
+      conn: conn,
+      admin_tok: admin_tok
+    } do
+      # A workspace this actor really administers, with NOTHING shared under it
+      # — so the refusal arm cannot be what answers, and the "nothing to
+      # remove" receipt is what is under test.
+      {ws, proj, scope} = receipt_scope!(admin_tok)
+
       {:ok, view, _html} = admin_view(conn)
       open_panel(view)
 
@@ -149,11 +187,42 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
       # exactly the shape that used to flash success.
       refute has_element?(view, ~s(button.share-row-remove))
 
-      html = render_hook(view, "shares-remove", %{"scope" => "ghost/default/production"})
+      html = render_hook(view, "shares-remove", %{"scope" => scope})
 
-      refute Sharing.shared?("ghost", "default", "production", :papers)
-      assert html =~ "ghost/default/production was not shared"
-      refute html =~ "Stopped sharing ghost/default/production"
+      refute Sharing.shared?(ws, proj, @dataset, :papers)
+      assert html =~ "#{scope} was not shared"
+      refute html =~ "Stopped sharing #{scope}"
+    end
+
+    # THE COST OF THE FAIL-CLOSED RULING, RECORDED AT THE RECEIPT SURFACE.
+    #
+    # A stored row whose workspace has no row (an operator-planted ghost, or a
+    # workspace deleted after the share was declared) is no longer removable
+    # from this panel: `target_workspace_admits?/2` refuses BEFORE
+    # `remove_share/3` runs, so there is no receipt at all — an authorization
+    # error, not a "Stopped sharing" sentence that would be a lie either way.
+    # `DELETE /v1/shares` still declines to confine an unresolvable workspace,
+    # and that is the cleanup path. Asserted rather than assumed, so a future
+    # change to the ruling has to come back and rewrite this test.
+    test "a stored row on a workspace that does not exist is refused, not silently kept", %{
+      conn: conn
+    } do
+      ghost = "receipt-ghost-#{System.unique_integer([:positive])}"
+      scope = "#{ghost}/default/#{@dataset}"
+      assert is_nil(Barkpark.Tenancy.get_workspace_by_slug(ghost))
+      {:ok, _} = Sharing.add_share("#{scope}:papers:read")
+
+      {:ok, view, _html} = admin_view(conn)
+      open_panel(view)
+
+      html = view |> remove_button(scope) |> render_click()
+
+      assert html =~ "not an admin of that scope&#39;s workspace"
+      refute html =~ "Stopped sharing #{scope}"
+
+      # The row survives the refusal — the panel is not the cleanup path.
+      assert Sharing.shared?(ghost, "default", @dataset, :papers)
+      assert [_still_there] = Sharing.list_stored()
     end
 
     test "an unparseable scope still reports a parse error and mutates nothing", %{conn: conn} do

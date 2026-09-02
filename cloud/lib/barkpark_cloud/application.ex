@@ -7,6 +7,20 @@ defmodule BarkparkCloud.Application do
 
   @impl true
   def start(_type, _args) do
+    # gh-9531 residual FAIL-CLOSED (task-eeabfd9bf3ed8371): resolve the two
+    # deployment values that used to be compile-time module attributes once,
+    # HERE, so a malformed PLATFORM_BASE_DOMAIN / TEMPLATES_REPO_URL refuses the
+    # node at boot. Both readers RAISE rather than falling back to the
+    # barkpark.cloud / upstream-repo defaults — a silent fallback IS the defect
+    # in a new costume (the operator believes their zone/fork is set while the
+    # plane keeps minting `*.barkpark.cloud` FQDNs and handing out OUR clone
+    # URL). Without this the first observation of a typo would be a customer's
+    # wrong site URL or a stranger's failed deploy. Unset env keeps the
+    # historical literals, so this is a no-op for every deployment that has not
+    # opted in.
+    _ = BarkparkCloud.Registry.Barkpark.base_domain()
+    _ = BarkparkCloud.Templates.repo()
+
     children =
       [
         # The control plane's only stateful dependency: its own Postgres,

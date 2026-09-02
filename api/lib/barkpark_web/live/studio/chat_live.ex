@@ -7181,7 +7181,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Agent-row glyph + color: a failed agent is ✕ in --danger (its error string in
   # the title=), a settled one ✓, a live one ●. A non-terminal agent on a DEAD
   # (interrupted) entry reads --life-open (stalled) and never breathes.
-  defp rail_agent_glyph(node) do
+  # PUBLIC (and only) so the cross-surface glyph lock can call it directly:
+  # api/test/support/fixtures/chat_rail_agent_glyphs.json pins this truth table
+  # and is read by BOTH chat_rail_agent_glyph_test.exs and the TUI's
+  # internal/chat/rail_glyph_lock_test.go, so a glyph — or an ARM ORDER — edit
+  # on either surface reds the other surface's test.
+  @doc false
+  def rail_agent_glyph(node) do
     cond do
       StudioChat.workflow_node_failed?(node) -> "✕"
       StudioChat.workflow_node_terminal?(node) -> "✓"

@@ -36,7 +36,6 @@ defmodule BarkparkCloud.Registry do
     AgentToken,
     Barkpark,
     Deployment,
-    EnvVar,
     FleetSettings,
     Provider,
     ProvisionJob,
@@ -602,10 +601,9 @@ defmodule BarkparkCloud.Registry do
   incomplete-credentials provider and the job fails with an honest error, never a
   crash).
 
-  Mirrors `resolved_env_for_barkpark/1`: resolved at CLAIM time so a ROTATED
-  credential is always the one handed to the worker, and it is the single
-  sanctioned plaintext crossing — sent ONLY over the worker-token internal channel
-  (TLS in prod), never serialized to a user surface. Newest connected Azure
+  Resolved at CLAIM time so a ROTATED credential is always the one handed to the
+  worker, and it is the single sanctioned plaintext crossing — sent ONLY over the
+  worker-token internal channel (TLS in prod), never serialized to a user surface. Newest connected Azure
   provider wins (mirrors the router's `provider_of_kind/2`).
   """
   @spec resolved_azure_credentials_for_barkpark(Barkpark.t()) :: map() | nil
@@ -5210,235 +5208,6 @@ defmodule BarkparkCloud.Registry do
     |> Repo.update()
   end
 
-  ## Env vars — shared / per-instance secrets injected into a Team's instances.
-  ##
-  ## All reads/writes are Team-scoped: an env var belongs to a Team, and a write
-  ## can never touch another team's row. The resolve path is the injection seam —
-  ## `resolved_env_for_barkpark/1` is folded into the provision claim payload so
-  ## the decrypted values reach the box's runtime env.
-
-  @doc """
-  List a Team's env vars, newest first. Returns BOTH team-scoped and
-  instance-scoped (barkpark) rows. Scoped — never crosses teams.
-  """
-  @spec list_env_vars(Team.t() | binary()) :: [EnvVar.t()]
-  def list_env_vars(team) do
-    tid = team_id(team)
-
-    EnvVar
-    |> where([e], e.team_id == ^tid)
-    |> order_by([e], desc: e.inserted_at)
-    |> Repo.all()
-  end
-
-  @doc """
-  List the env vars in effect for one `barkpark`: its Team's team-scoped vars
-  plus the instance's own `barkpark`-scoped overrides. Scoped — never crosses
-  teams.
-  """
-  @spec list_env_vars(Team.t() | binary(), Barkpark.t() | binary()) :: [EnvVar.t()]
-  def list_env_vars(team, barkpark) do
-    tid = team_id(team)
-    bid = barkpark_id(barkpark)
-
-    EnvVar
-    |> where([e], e.team_id == ^tid)
-    |> where([e], is_nil(e.barkpark_id) or e.barkpark_id == ^bid)
-    |> order_by([e], desc: e.inserted_at)
-    |> Repo.all()
-  end
-
-  @doc """
-  Create-or-update an env var for `team`. `attrs` carries `:key`, `:value`
-  (PLAINTEXT — encrypted here via `Vault.encrypt/1`), `:scope` (`team`|`barkpark`),
-  optional `:barkpark_id`, `:is_secret`, `:is_shown_once`, `:comment`. Both
-  string- and atom-keyed attrs are accepted.
-
-  Upsert key is `(key, scope-instance)`: writing the same key+scope twice updates
-  the existing row in place rather than tripping the partial-unique index. A write
-  to an existing `is_shown_once` var is REFUSED (`{:error, :write_once}`) — the
-  only way to change a write-once secret is delete + recreate (Coolify's
-  masked-bulk-update rule).
-
-  ALWAYS filters by `team_id`, so a write can never touch another team's row.
-  OWNERSHIP: a supplied `barkpark_id` MUST belong to `team` — the FK only enforces
-  existence, not ownership, so a client that supplies another team's instance id
-  is REJECTED (`{:error, :barkpark_not_in_team}`) BEFORE any write. Fail closed:
-  the cross-tenant write never lands.
-  """
-  @spec put_env_var(Team.t() | binary(), map()) ::
-          {:ok, EnvVar.t()}
-          | {:error, :write_once | :barkpark_not_in_team | Ecto.Changeset.t()}
-  def put_env_var(team, %{} = attrs) do
-    tid = team_id(team)
-    key = attrs[:key] || attrs["key"]
-    scope = attrs[:scope] || attrs["scope"] || "team"
-    bid = attrs[:barkpark_id] || attrs["barkpark_id"]
-    plaintext = attrs[:value] || attrs["value"] || ""
-
-    existing =
-      case scope do
-        # A barkpark-scoped write with NO barkpark_id is malformed — skip the
-        # lookup (Ecto forbids `barkpark_id: nil` in get_by) and let the
-        # changeset surface the scope-shape error.
-        "barkpark" when is_nil(bid) ->
-          nil
-
-        "barkpark" ->
-          # A non-UUID barkpark_id would make get_by raise Ecto.Query.CastError;
-          # skip the lookup so the ownership gate below returns
-          # `:barkpark_not_in_team` (no 500 on a malformed id).
-          case uuid_or_nil(bid) do
-            nil -> nil
-            _ -> Repo.get_by(EnvVar, team_id: tid, key: key, barkpark_id: bid)
-          end
-
-        _ ->
-          # is_nil/1, NOT `barkpark_id: nil` — Ecto forbids a nil comparison in a
-          # keyword get_by (nil-safety), so the team-scope lookup must be explicit.
-          EnvVar
-          |> where([e], e.team_id == ^tid and e.key == ^key and is_nil(e.barkpark_id))
-          |> Repo.one()
-      end
-
-    cond do
-      # OWNERSHIP GATE (security): a supplied barkpark_id must be one of THIS
-      # team's instances. Checked before any write so a caller cannot smuggle a
-      # secret onto another team's box by guessing / harvesting its instance id.
-      not is_nil(bid) and not barkpark_in_team?(tid, bid) ->
-        {:error, :barkpark_not_in_team}
-
-      match?(%EnvVar{is_shown_once: true}, existing) ->
-        {:error, :write_once}
-
-      true ->
-        # TOCTOU NOTE (intentional, fails closed): the ownership gate above
-        # (`barkpark_in_team?`) reads the barkpark row, then this branch writes —
-        # a concurrent `delete_barkpark/1` landing in that narrow check-to-write
-        # window would insert against a now-missing FK target. This is NOT locked
-        # or wrapped in a txn on purpose (improvement-only; no live defect): the
-        # `assoc_constraint(:barkpark)` net on EnvVar.changeset (env_var.ex:95 —
-        # the repo-wide convention agent_event/agent_token/provision_job/site all
-        # carry) turns that lost race into `{:error, %Ecto.Changeset{}}` at
-        # `Repo.insert_or_update` below. The cross-tenant/dangling write never
-        # lands; the caller gets a changeset error, not a 500.
-        #
-        # Required/derived columns always set; the optional flags are carried
-        # only when the caller actually supplied them (presence-checked, so an
-        # explicit `is_secret: false` is honoured and isn't confused with absent),
-        # leaving the schema defaults / existing row values intact otherwise.
-        changeset_attrs =
-          %{
-            team_id: tid,
-            key: key,
-            scope: scope,
-            barkpark_id: bid,
-            value_encrypted: Vault.encrypt(plaintext)
-          }
-          |> put_if_present(attrs, :is_secret)
-          |> put_if_present(attrs, :is_shown_once)
-          |> put_if_present(attrs, :comment)
-
-        (existing || %EnvVar{})
-        |> EnvVar.changeset(changeset_attrs)
-        |> Repo.insert_or_update()
-    end
-  end
-
-  @doc """
-  Delete an env var by id, Team-scoped. `{:ok, EnvVar} | {:error, :not_found}`.
-  A non-existent id, an invalid (non-UUID) id, or a row owned by another team all
-  return `{:error, :not_found}` (an existence-leak protection — the caller cannot
-  distinguish "wrong team" from "no such var").
-  """
-  @spec delete_env_var(Team.t() | binary(), binary()) ::
-          {:ok, EnvVar.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def delete_env_var(team, id) do
-    tid = team_id(team)
-
-    case uuid_or_nil(id) && Repo.get_by(EnvVar, id: id, team_id: tid) do
-      %EnvVar{} = ev -> Repo.delete(ev)
-      _ -> {:error, :not_found}
-    end
-  end
-
-  # A per-row reveal helper lived here and refused an `is_shown_once` row with
-  # `{:error, :write_once}`. It was DELETED in wave 56 — not because write-once is
-  # wrong, but because no production caller could ever reach the guard: it had zero
-  # non-test callers, and the env-var HTTP surface is exactly three routes
-  # (`GET /v1/env-vars`, which never returns values; POST; DELETE) with no reveal
-  # route at all. The only thing that could make the refusal fire was the test that
-  # asserted it. A guard that cannot lose is worse than no guard — it reads as
-  # protection the system does not actually provide, and it makes the write-once
-  # posture look enforced on a read path that does not exist. Write-once is still
-  # enforced where a caller can actually hit it: `put_env_var/2` refuses a rewrite
-  # of an `is_shown_once` row. If a reveal path is ever wanted, it arrives with the
-  # route that needs it, and the guard becomes losable again.
-
-  @doc """
-  The resolved, DECRYPTED env map for a provisioned `barkpark`: its Team's
-  team-scoped vars, with the instance's own `barkpark`-scoped vars layered on top
-  (most-specific-wins). Keys are env var names, values are plaintext.
-
-  Called at provision-claim time and folded into the Go worker's `claim_json`
-  under the `env` key.
-
-  RETRACTED ON REVIEW (wave 56): this paragraph used to open "This is the
-  injection payload" and end "so the values reach the box's runtime env". It is
-  not an injection payload and the values reach nothing.
-  `internal/provisioner.JobSpec` declares no `env` field and every claim decode
-  is a bare `json.Unmarshal`, so the key is silently dropped by the only process
-  that could act on it. The console retracted the same claim in cch-w53-s1
-  ("Values are not delivered to any instance yet"); `lib` was still asserting the
-  opposite in two places, of which this was one. Building delivery is filed
-  separately — until it exists, this function resolves a map nobody consumes.
-
-  ALWAYS
-  team-filtered (the never-leak-across-tenants invariant); a barkpark belongs to
-  exactly one team, so resolution can only ever surface that team's secrets.
-
-  Resolved at CLAIM time (not enqueue time), so a retry / stale-claim re-pick
-  carries the latest values automatically — rotate once, the next provision
-  carries the new value.
-
-  A row whose ciphertext fails to decrypt (tampered / key-rotated-away) is
-  SKIPPED with a logged warning rather than crashing the provision — fail-open on
-  a single bad row, never hand the worker a half-map silently corrupted by a raise.
-  """
-  @spec resolved_env_for_barkpark(Barkpark.t()) :: %{String.t() => String.t()}
-  def resolved_env_for_barkpark(%Barkpark{id: bid, team_id: tid}) do
-    rows =
-      EnvVar
-      |> where([e], e.team_id == ^tid)
-      |> where([e], is_nil(e.barkpark_id) or e.barkpark_id == ^bid)
-      # team-scope first, instance-scope last → Map.put lets instance shadow team.
-      |> order_by([e], asc: fragment("? IS NOT NULL", e.barkpark_id))
-      |> Repo.all()
-
-    Enum.reduce(rows, %{}, fn ev, acc ->
-      case Vault.decrypt(ev.value_encrypted) do
-        {:ok, plaintext} ->
-          Map.put(acc, ev.key, plaintext)
-
-        :error ->
-          Logger.warning("resolved_env_for_barkpark: undecryptable env var #{ev.id}, skipped")
-
-          acc
-      end
-    end)
-  end
-
-  # True when `bid` is one of `tid`'s Barkparks. Guards the env-var ownership
-  # gate — a non-UUID, a non-existent, or another team's id all return false
-  # (fail closed). Ownership is enforced here, NOT by the FK (which only checks
-  # existence).
-  defp barkpark_in_team?(tid, bid) do
-    case uuid_or_nil(bid) && Repo.get(Barkpark, bid) do
-      %Barkpark{team_id: ^tid} -> true
-      _ -> false
-    end
-  end
-
   ## Agent tokens
 
   @doc """
@@ -8937,23 +8706,6 @@ defmodule BarkparkCloud.Registry do
   defp uuid_or_nil(id), do: Repo.uuid_or_nil(id)
 
   defp generate_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
-
-  # Carry an optional attr (`field`) from a string- or atom-keyed source map into
-  # `acc` ONLY when the source actually has it — so an explicit falsy value (e.g.
-  # `is_secret: false`) survives while a genuinely-absent key falls through to the
-  # schema default / existing row value. `nil` and `false` are distinct here.
-  defp put_if_present(acc, source, field) do
-    cond do
-      Map.has_key?(source, field) ->
-        Map.put(acc, field, Map.get(source, field))
-
-      Map.has_key?(source, to_string(field)) ->
-        Map.put(acc, field, Map.get(source, to_string(field)))
-
-      true ->
-        acc
-    end
-  end
 
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id

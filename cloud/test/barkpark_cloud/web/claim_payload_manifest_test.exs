@@ -163,11 +163,13 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       Side-A extractor reads `claim_json/2` perfectly but returns ONE key for each
       DERIVED claim (`support`, `bundle_ref`), because its one-level pipe walk
       cannot follow a pipe whose SOURCE is a function call — so both derived
-      claims would lose all 11 inherited keys and the arm would report phantoms
+      claims would lose all 10 inherited keys and the arm would report phantoms
       instead of divergences. Fixtures exercise the OPTIONAL keys (an azure
-      barkpark for `kind`+`credentials`, a resurrect job for `bundle_ref`, a team
-      env var for `env`, a template for `template`) or the arm goes vacuous on
-      exactly the keys most likely to drift.
+      barkpark for `kind`+`credentials`, a resurrect job for `bundle_ref`, a
+      template for `template`) or the arm goes vacuous on exactly the keys most
+      likely to drift. The `env` fixture that stood beside them went with the team
+      env-var feature (cch-w53-bl Option A, 2026-09-02) — the plane no longer
+      emits the key on any claim.
     * SIDE B — PER-DECODE-SITE (see `ClaimPayloadManifest.Go`), never a package
       union and never a bare per-struct map.
 
@@ -341,23 +343,18 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   }
 
   # ---------------------------------------------------------------------------
-  # @known_open — FIVE rows. A key the plane emits and the worker DISCARDS, which
-  # is a DEFECT, tracked at the named bp task. MapSet EQUALITY (ARM 1).
+  # @known_open — THREE rows. A key the plane emits and the worker DISCARDS,
+  # which is a DEFECT, tracked at the named bp task. MapSet EQUALITY (ARM 1).
+  #
+  # FIVE → THREE (cch-w53-bl env-var Option A, ruled 2026-09-02): the provision
+  # and support `env` rows were DELETED because the plane stopped emitting the
+  # key at all — the team env-var feature is gone (prod `env_vars` held zero rows
+  # ever), so `base_claim_json/2` no longer folds in `env` and there is nothing
+  # left for the worker to discard. Shrinking `@known_open` is exactly the
+  # bookkeeping the MapSet equality exists to force, and it is legal here because
+  # the same diff removes the emission the rows tracked.
   # ---------------------------------------------------------------------------
   @known_open [
-    %{
-      claim: "provision",
-      key: "env",
-      site: "internal/provisioner/worker.go:917 → provisioner.JobSpec",
-      tracker:
-        "cch-w52-bl-team-env-vars-are-shipped-in-the-provision-claim-and-nothing-on-the-box-consumes-them"
-    },
-    %{
-      claim: "support",
-      key: "env",
-      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
-      tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
-    },
     %{
       claim: "support",
       key: "template",
@@ -387,16 +384,14 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   #
   # SIX → FIVE (cch-w53-bl-…-a-live-agent-token): the support claim's
   # `agent_token` row was deleted when the mint was removed from
-  # `support_provision_claim_json/2`. Shrinking `@known_open` is exactly the
-  # bookkeeping the equality exists to force, and it is only ever legal in the
-  # same diff that fixes the defect it tracked.
+  # `support_provision_claim_json/2`. FIVE → THREE followed when the env-var
+  # feature was deleted. Shrinking `@known_open` is exactly the bookkeeping the
+  # equality exists to force, and it is only ever legal in the same diff that
+  # fixes the defect it tracked.
+  # cch-w53-bl env-var Option A: TWO → ONE. The resurrect `env` row went with the
+  # emission (the resurrect claim is `claim_json/2` plus `bundle_ref`, so it lost
+  # the key at the same seam). `template` is untouched and still tracked.
   @resurrect_known_open [
-    %{
-      claim: "resurrect",
-      key: "env",
-      site: "internal/provisioner/worker.go:1460 → resurrectClaimSpec",
-      tracker: "cch-w53-bl-the-resurrect-claim-discards-env-and-template"
-    },
     %{
       claim: "resurrect",
       key: "template",
@@ -427,6 +422,11 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   # the same commit that adds the row it unblocks. A key whose value is a
   # USER-SUPPLIED SECRET is INELIGIBLE FOR RESERVATION AT ALL: custody keys must
   # be consumed or removed, never allowlisted as "shipped ahead of the worker".
+  # `env` STAYS on this list after cch-w53-bl deleted the feature that produced
+  # it. The list is a ban on RESERVING a key, not a claim that the key is in
+  # flight: if a delivery slice ever re-adds `env`, it must be consumed or
+  # removed, never allowlisted. Shrinking the list is the diff that lets the
+  # crown recur, and deleting the emission is not a reason to shrink it.
   @custody_ineligible ["env", "agent_token", "credentials"]
 
   # ---------------------------------------------------------------------------
@@ -444,8 +444,6 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     {:ok, _} = Billing.subscribe(team, "supporter")
     # azure → the claim carries `kind` + the decrypted `credentials` 4-tuple.
     {:ok, _} = Registry.connect_provider(team, "azure", Jason.encode!(@azure_creds), label: "p")
-    # a team env var → `env` is a NON-EMPTY map, so the crown's key is real bytes.
-    {:ok, _} = Registry.put_env_var(team, %{key: "FOO", value: "bar", scope: "team"})
     team
   end
 
@@ -457,7 +455,8 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   end
 
   # The provision claim at its WIDEST: azure (kind + credentials), pinned
-  # region/size, a template, and a non-empty env.
+  # region/size and a template. (`env` was the fifth optional key until
+  # cch-w53-bl deleted the team env-var feature; the claim no longer carries it.)
   defp provision_claim_body! do
     team = team!()
     n = System.unique_integer([:positive])
@@ -595,7 +594,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   # ---------------------------------------------------------------------------
 
   describe "ARM 1 — every claim key the worker discards is an ALLOWLISTED, TRACKED row" do
-    test "the PROVISION claim discards exactly {env}" do
+    test "the PROVISION claim discards NOTHING" do
       src = go_sources()
       body = provision_claim_body!()
       got = discarded(body, src, "provision")
@@ -606,7 +605,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert_discarded("provision", got, want, body, src)
     end
 
-    test "the SUPPORT claim discards exactly {env, template, kind, credentials}" do
+    test "the SUPPORT claim discards exactly {template, kind, credentials}" do
       src = go_sources()
       body = support_claim_body!()
       got = discarded(body, src, "support")
@@ -617,7 +616,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert_discarded("support", got, want, body, src)
     end
 
-    test "the RESURRECT claim discards exactly {env, template}" do
+    test "the RESURRECT claim discards exactly {template}" do
       src = go_sources()
       body = resurrect_claim_body!()
       got = discarded(body, src, "resurrect")
@@ -1098,13 +1097,18 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   # ---------------------------------------------------------------------------
 
   describe "ANTI-VACUITY — the fixtures exercise the keys most likely to drift" do
-    test "the provision claim carries kind + credentials + a NON-EMPTY env + template" do
+    test "the provision claim carries kind + credentials + template, and NO env key" do
       body = provision_claim_body!()
 
       assert body["kind"] == "azure"
       assert body["credentials"] == @azure_creds
-      assert body["env"] == %{"FOO" => "bar"}
       assert body["template"] == "blog"
+
+      # cch-w53-bl (env-var Option A): the key is GONE, not merely empty. An
+      # `env: %{}` would still be a key the worker discards — this asserts the
+      # emission was removed at `base_claim_json/2`, which is what the ruling
+      # ordered and what makes the deleted @known_open rows honest.
+      refute Map.has_key?(body, "env")
 
       # A LIVE token: minted and hash-persisted at claim time, and the provision
       # worker HAS a field for it (provisioner.JobSpec.AgentToken → the configure
@@ -1120,16 +1124,16 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
 
       assert is_binary(body["bundle_ref"]) and body["bundle_ref"] != ""
       assert body["kind"] == "azure"
-      assert body["env"] == %{"FOO" => "bar"}
+      refute Map.has_key?(body, "env")
     end
 
-    test "the support claim carries the nested support map AND the four discarded keys" do
+    test "the support claim carries the nested support map AND the three discarded keys" do
       body = support_claim_body!()
 
       assert is_map(body["support"])
       assert body["support"]["dataset"] == "production"
 
-      for key <- ~w(env template kind credentials) do
+      for key <- ~w(template kind credentials) do
         assert Map.has_key?(body, key),
                "the support claim no longer emits #{key} — the @known_open row for it is " <>
                  "measuring nothing, and this arm has gone vacuous on the key that matters most"
@@ -1156,13 +1160,14 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   # ---------------------------------------------------------------------------
 
   describe "the allowlists are bookkeeping, not a junk drawer" do
-    test "@known_open holds exactly five rows, each naming its decode site and bp task" do
-      assert length(@known_open) == 5
+    test "@known_open holds exactly three rows, each naming its decode site and bp task" do
+      # FIVE → THREE with cch-w53-bl's env-var Option A: the two `env` rows are
+      # gone because the plane no longer EMITS the key, not because a worker grew
+      # a field for it. See the @known_open header.
+      assert length(@known_open) == 3
 
       assert MapSet.new(@known_open, &{&1.claim, &1.key}) ==
                MapSet.new([
-                 {"provision", "env"},
-                 {"support", "env"},
                  {"support", "template"},
                  {"support", "kind"},
                  {"support", "credentials"}

@@ -3604,16 +3604,43 @@ type TeamInvitation struct {
 
 // MembersResult is the parsed + raw members list. Raw is the `members` array
 // BYTES verbatim so `-o json` re-emits the contract without reshaping.
+//
+// DecodeErr carries the INNER array decode failure (see decodeRows): the raw
+// bytes are still the contract, but Members no longer describes them, so a
+// human renderer must NOT present the parsed slice as the roster.
 type MembersResult struct {
-	Raw     json.RawMessage
-	Members []TeamMember
+	Raw       json.RawMessage
+	Members   []TeamMember
+	DecodeErr error
 }
 
 // InvitationsResult is the parsed + raw pending-invitations list. Raw is the
-// `invitations` array bytes verbatim.
+// `invitations` array bytes verbatim. DecodeErr carries the inner array decode
+// failure, same contract as MembersResult.
 type InvitationsResult struct {
 	Raw         json.RawMessage
 	Invitations []TeamInvitation
+	DecodeErr   error
+}
+
+// decodeRows parses an inner array from a list envelope and REPORTS the failure
+// instead of swallowing it.
+//
+// The swallow this replaces was a silent-empty machine: `_ = json.Unmarshal(raw,
+// &rows)` left `rows` nil whenever the server sent a shape that is not an array
+// of the row struct (an object, a string), and the human renderer printed
+// "(no members)" — byte-identical to a genuinely empty roster. A per-FIELD type
+// skew is worse still: encoding/json keeps the element and blanks only the bad
+// field, so the table renders a row with a dash where a real value was.
+//
+// An ABSENT or null key is NOT a failure — it is a well-formed empty result, and
+// it must keep reading as zero (that is the whole point of separating the two).
+func decodeRows(raw json.RawMessage, dst any) error {
+	s := bytes.TrimSpace(raw)
+	if len(s) == 0 || bytes.Equal(s, []byte("null")) {
+		return nil
+	}
+	return json.Unmarshal(s, dst)
 }
 
 // TeamMembers lists a team's seats via GET /v1/teams/:id/members (Bearer). The
@@ -3634,8 +3661,8 @@ func (c *Client) TeamMembers(ctx context.Context, teamID string) (MembersResult,
 		return MembersResult{}, fmt.Errorf("decode members response: %w", err)
 	}
 	var members []TeamMember
-	_ = json.Unmarshal(env.Members, &members)
-	return MembersResult{Raw: env.Members, Members: members}, nil
+	derr := decodeRows(env.Members, &members)
+	return MembersResult{Raw: env.Members, Members: members, DecodeErr: derr}, nil
 }
 
 // TeamInvitations lists a team's PENDING invitations via
@@ -3658,8 +3685,8 @@ func (c *Client) TeamInvitations(ctx context.Context, teamID string) (Invitation
 		return InvitationsResult{}, fmt.Errorf("decode invitations response: %w", err)
 	}
 	var invitations []TeamInvitation
-	_ = json.Unmarshal(env.Invitations, &invitations)
-	return InvitationsResult{Raw: env.Invitations, Invitations: invitations}, nil
+	derr := decodeRows(env.Invitations, &invitations)
+	return InvitationsResult{Raw: env.Invitations, Invitations: invitations, DecodeErr: derr}, nil
 }
 
 // AutoupdatePolicy is the isu-w4 fleet-autoupdate POLICY the control plane echoes

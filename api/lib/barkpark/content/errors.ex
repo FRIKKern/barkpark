@@ -594,8 +594,12 @@ defmodule Barkpark.Content.Errors do
   # AND 503 (this arm) reddened main on 2026-09-02. Minting `dedup_unavailable`
   # as a new code is blocked too: a code must be registered in `@hints`, which
   # puts it in `known_codes/0`, which drives the served OpenAPI `Error.code`
-  # enum (docs/openapi.json, behind a CI drift gate) and `docs/api-v1.md` §9
-  # (errors_doc_coverage_test) under a cap with 3 bytes of headroom. So the arm
+  # enum (docs/openapi.json, behind a CI drift gate) and the documented
+  # vocabulary `docs/api-v1.md` §9 UNION `docs/api/error-codes.md`
+  # (errors_doc_coverage_test). PDS wave 25's relocation freed the §9 bytes
+  # that used to make that unaffordable, so minting the code is now a cheap
+  # change filed on its own row — what stays unaffordable is a SECOND status
+  # for `halted`, which is the constraint this arm actually answers. So the arm
   # wears the code that already IS the transient-storage shape — public, 503,
   # exit 8, retry-is-the-right-reflex — and `reason: "dedup_unavailable"`
   # discriminates it from a media-volume fault, exactly as `:replay` does under

@@ -2498,7 +2498,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .set-matrix-ack { font-size: var(--text-sm); margin-top: var(--space-2); min-height: 1em; }
 
 /* GR33 roster grammar — the settings-list ROW inside a .set-section (G-06
-   Members + the greenfield env-vars page). One idiom for both: an optional
+   Members; the sibling env-vars page it was cut for was deleted with the team
+   env-var feature, ruled 2026-09-02). The idiom: an optional
    leading avatar/glyph, a name + mono meta stack, and a trailing chip/action
    cluster. Rows are hairline-separated inside their card (never a second card
    family). Every fg/bg here is an existing CONTRAST_PAIRS pairing (--text /
@@ -2529,18 +2530,21 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    whatever did not fit — measured at 77px of "rex@acme.com" gone at 390px,
    with no cue, on the row whose Remove button destroys that person's access.
    `anywhere` also lowers this column's min-content contribution, which is what
-   lets `min-width: 0` on `.set-row-main` above actually yield. Same idiom the
-   sibling `.set-row-key` below already uses. */
+   lets `min-width: 0` on `.set-row-main` above actually yield. (The sibling
+   `.set-row-key` that used the same idiom went with the team env-var page,
+   ruled 2026-09-02; `.set-row-note` below is the surviving twin.) */
 .set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
-.set-row-key { font-size: var(--text-sm); font-weight: 600; color: var(--text); font-family: var(--mono); overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
-/* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`,
-   and it is the only render host of an env var's free-text comment (app.js
-   `envVarRowHtml`). A comment is user-typed prose, so it can arrive as ONE
+/* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`.
+   Its render host at the time was an env var's free-text comment; that page was
+   deleted with the team env-var feature (ruled 2026-09-02), and the RULE is kept
+   because the note still hosts server- and user-shaped prose elsewhere (the
+   invitation-link note, the deploy-signal notes). Prose can arrive as ONE
    unbreakable token; `min-width: 0` on `.set-row-main` cannot help, because a
    flex item's min-content contribution is the longest unbreakable run.
-   MEASURED on `?scen=env-populated#settings/env` with a 255-char single-token
-   comment, every `.set-row-note` written (light and dark identical):
+   MEASURED (on the now-deleted `?scen=env-populated#settings/env`) with a
+   255-char single-token comment, every `.set-row-note` written (light and dark
+   identical):
      @320  note scrollWidth 1554 / clientWidth 246, page 1591/320 — 1271px of
            sideways scroll on the whole document, ink to x=1591, i.e. 1367px
            past Delete's left edge (224), and `overflow` is `visible` so it is
@@ -2556,7 +2560,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    siblings above and, unlike `break-word`, also lowers the min-content
    contribution — which is what lets the flex column actually yield. */
 .set-row-note { font-size: var(--text-xs); color: var(--dim); margin-top: 2px; overflow-wrap: anywhere; }
-.set-row-tags { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: 2px; }
 .set-row-side { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
 /* A bordered metadata chip (scope · secret · write-once). Text-only tint keeps
    it on the existing --muted-text/--surface pairing — no new contrast pair. */
