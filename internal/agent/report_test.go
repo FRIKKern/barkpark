@@ -668,13 +668,13 @@ func TestPGProbesUnwiredWithoutCheckout(t *testing.T) {
 // exactly what it reports today.
 func TestPGSizeProbeShellOut(t *testing.T) {
 	t.Run("happy path parses the size and carries the bounds", func(t *testing.T) {
-		var gotArgs []string
+		var gotArgs, gotEnv []string
 		dir := writeEnv(t, "DATABASE_URL=ecto://bp@localhost/barkpark_prod\n")
-		probe := newPGSizeProbeWith(func(name string, args ...string) (string, error) {
+		probe := newPGSizeProbeWith(func(env []string, name string, args ...string) (string, error) {
 			if name != "psql" {
 				t.Errorf("ran %q, want psql", name)
 			}
-			gotArgs = args
+			gotArgs, gotEnv = args, env
 			return "3477617687\n", nil
 		}, dir)
 
@@ -686,17 +686,21 @@ func TestPGSizeProbeShellOut(t *testing.T) {
 			t.Errorf("size = %d, want 3477617687", got)
 		}
 		joined := strings.Join(gotArgs, " ")
-		if !strings.Contains(joined, "postgres://bp@localhost/barkpark_prod") {
-			t.Errorf("argv %q missing the rewritten connection url", joined)
-		}
 		if !strings.Contains(joined, "statement_timeout") {
 			t.Errorf("argv %q missing the server-side statement_timeout bound", joined)
+		}
+		// The connection travels in the ENVIRONMENT, not argv — and it is the
+		// rewritten one (ecto:// in, libpq pieces out).
+		for _, want := range []string{"PGHOST=localhost", "PGUSER=bp", "PGDATABASE=barkpark_prod"} {
+			if !envHas(gotEnv, want) {
+				t.Errorf("child env missing %q — psql would fall back to a DEFAULT connection", want)
+			}
 		}
 	})
 
 	t.Run("psql absent leaves the sentinel", func(t *testing.T) {
 		dir := writeEnv(t, "DATABASE_URL=ecto://bp@localhost/barkpark_prod\n")
-		probe := newPGSizeProbeWith(func(string, ...string) (string, error) {
+		probe := newPGSizeProbeWith(func([]string, string, ...string) (string, error) {
 			return "", errors.New(`exec: "psql": executable file not found in $PATH`)
 		}, dir)
 
@@ -714,7 +718,7 @@ func TestPGSizeProbeShellOut(t *testing.T) {
 	})
 
 	t.Run("unreadable .env leaves the sentinel", func(t *testing.T) {
-		probe := newPGSizeProbeWith(func(string, ...string) (string, error) {
+		probe := newPGSizeProbeWith(func([]string, string, ...string) (string, error) {
 			t.Fatal("psql must not run when the .env is unreadable")
 			return "", nil
 		}, t.TempDir())
@@ -725,11 +729,32 @@ func TestPGSizeProbeShellOut(t *testing.T) {
 
 	t.Run("unparseable output errors rather than inventing a number", func(t *testing.T) {
 		dir := writeEnv(t, "DATABASE_URL=postgres://bp@localhost/db\n")
-		probe := newPGSizeProbeWith(func(string, ...string) (string, error) {
+		probe := newPGSizeProbeWith(func([]string, string, ...string) (string, error) {
 			return "ERROR:  permission denied\n", nil
 		}, dir)
 		if got, err := probe(); err == nil || got != -1 {
 			t.Errorf("got (%d, %v), want (-1, an error)", got, err)
+		}
+	})
+
+	// THE ENV PATH is a failure path of its own now: moving the connection out
+	// of argv means a URL that cannot become a COMPLETE environment must error
+	// exactly like the others. Handing psql a partial environment is the one
+	// outcome worse than -1 — libpq fills the gaps from its own defaults and
+	// the probe returns a real number measured against the WRONG database.
+	t.Run("a url that cannot become a complete env leaves the sentinel", func(t *testing.T) {
+		dir := writeEnv(t, "DATABASE_URL=postgres:///barkpark_prod\n") // no host, no user
+		probe := newPGSizeProbeWith(func([]string, string, ...string) (string, error) {
+			t.Fatal("psql must not run when the url cannot be turned into a complete connection env")
+			return "", nil
+		}, dir)
+		got, err := probe()
+		if err == nil || got != -1 {
+			t.Errorf("got (%d, %v), want (-1, an error)", got, err)
+		}
+		r := gatherReport(ReportConfig{PGSizeProbe: probe})
+		if r.PGSizeBytes != -1 {
+			t.Errorf("PGSizeBytes = %d, want -1 through gatherReport", r.PGSizeBytes)
 		}
 	})
 }
@@ -740,7 +765,7 @@ func TestPGTopRelationsProbe(t *testing.T) {
 	dir := writeEnv(t, "DATABASE_URL=ecto://bp@localhost/barkpark_prod\n")
 
 	t.Run("names the consumers", func(t *testing.T) {
-		probe := newPGTopRelationsProbeWith(func(_ string, args ...string) (string, error) {
+		probe := newPGTopRelationsProbeWith(func(_ []string, _ string, args ...string) (string, error) {
 			joined := strings.Join(args, " ")
 			if !strings.Contains(joined, "LIMIT 10") {
 				t.Errorf("query %q missing the LIMIT bound", joined)
@@ -768,7 +793,7 @@ func TestPGTopRelationsProbe(t *testing.T) {
 		for i := 0; i < 50; i++ {
 			lines = append(lines, "t|1")
 		}
-		probe := newPGTopRelationsProbeWith(func(string, ...string) (string, error) {
+		probe := newPGTopRelationsProbeWith(func([]string, string, ...string) (string, error) {
 			return strings.Join(lines, "\n"), nil
 		}, dir)
 		rows, err := probe()
@@ -782,12 +807,193 @@ func TestPGTopRelationsProbe(t *testing.T) {
 	})
 
 	t.Run("probe failure leaves PGTopRelations nil", func(t *testing.T) {
-		probe := newPGTopRelationsProbeWith(func(string, ...string) (string, error) {
+		probe := newPGTopRelationsProbeWith(func([]string, string, ...string) (string, error) {
 			return "", errors.New("psql: connection refused")
 		}, dir)
 		r := gatherReport(ReportConfig{PGTopRelationsProbe: probe})
 		if r.PGTopRelations != nil {
 			t.Errorf("PGTopRelations = %+v, want nil on probe error", r.PGTopRelations)
+		}
+	})
+
+	t.Run("a url that cannot become a complete env leaves PGTopRelations nil", func(t *testing.T) {
+		bad := writeEnv(t, "DATABASE_URL=postgres:///barkpark_prod\n") // no host, no user
+		probe := newPGTopRelationsProbeWith(func([]string, string, ...string) (string, error) {
+			t.Fatal("psql must not run when the url cannot be turned into a complete connection env")
+			return "", nil
+		}, bad)
+		rows, err := probe()
+		if err == nil || rows != nil {
+			t.Errorf("got (%+v, %v), want (nil, an error)", rows, err)
+		}
+		r := gatherReport(ReportConfig{PGTopRelationsProbe: probe})
+		if r.PGTopRelations != nil {
+			t.Errorf("PGTopRelations = %+v, want nil when the env cannot be built", r.PGTopRelations)
+		}
+	})
+}
+
+// envHas reports whether env carries the exact KEY=VALUE entry.
+func envHas(env []string, kv string) bool {
+	for _, e := range env {
+		if e == kv {
+			return true
+		}
+	}
+	return false
+}
+
+// envValue returns the value libpq would see for key — os/exec keeps the LAST
+// duplicate, so the lookup walks backwards.
+func envValue(env []string, key string) (string, bool) {
+	for i := len(env) - 1; i >= 0; i-- {
+		if name, val, ok := strings.Cut(env[i], "="); ok && name == key {
+			return val, true
+		}
+	}
+	return "", false
+}
+
+// TestPGProbeArgvCarriesNoCredential is the whole point of moving the
+// connection into the environment: argv is world-readable. Any local user can
+// read /proc/<pid>/cmdline or run a plain `ps` and, for the lifetime of the
+// child — twice per beat — see the database password. The environment of a
+// process is readable only by its owner.
+//
+// The assertion is deliberately SUBSTRING-shaped rather than "argv[0] is not
+// the url": a leak does not have to be the whole url to be a leak, and a future
+// edit that appends `--dbname=postgres://…` or a bare password must fail here.
+func TestPGProbeArgvCarriesNoCredential(t *testing.T) {
+	const (
+		password = "s3cr3t-pw"
+		envBody  = "SECRET_KEY_BASE=xyz\nexport DATABASE_URL=\"ecto://bp:" + password + "@db.internal:5433/barkpark_prod\"\n"
+	)
+	// Every substring that must never reach argv: the scheme (either spelling),
+	// the credential itself, and the joined url in any form.
+	leaks := []string{
+		"://",
+		"ecto:",
+		"postgres:",
+		"postgresql:",
+		password,
+		"bp:" + password,
+	}
+
+	for _, c := range []struct {
+		name string
+		out  string // a well-formed answer for THIS probe's parser
+		run  func(dir string, seam probeRunner) error
+	}{
+		{
+			name: "pg_size_bytes",
+			out:  "3477617687\n",
+			run: func(dir string, seam probeRunner) error {
+				_, err := newPGSizeProbeWith(seam, dir)()
+				return err
+			},
+		},
+		{
+			name: "pg_top_relations",
+			out:  "mutation_events|1510000000\n",
+			run: func(dir string, seam probeRunner) error {
+				_, err := newPGTopRelationsProbeWith(seam, dir)()
+				return err
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := writeEnv(t, envBody)
+			var gotArgs, gotEnv []string
+			var ran bool
+			seam := func(env []string, name string, args ...string) (string, error) {
+				ran = true
+				gotArgs, gotEnv = args, env
+				return c.out, nil
+			}
+			if err := c.run(dir, seam); err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+			if !ran {
+				t.Fatal("the probe never shelled out — this test would pass vacuously")
+			}
+
+			joined := strings.Join(gotArgs, " ")
+			for _, leak := range leaks {
+				if strings.Contains(joined, leak) {
+					t.Errorf("argv leaks %q — argv is world-readable (/proc/<pid>/cmdline, ps).\nargv = %q",
+						leak, joined)
+				}
+			}
+
+			// ...and the connection really is carried, so the argv above is
+			// clean because the credential MOVED, not because it vanished.
+			for key, want := range map[string]string{
+				"PGHOST":     "db.internal",
+				"PGPORT":     "5433",
+				"PGUSER":     "bp",
+				"PGDATABASE": "barkpark_prod",
+				"PGPASSWORD": password,
+			} {
+				got, ok := envValue(gotEnv, key)
+				if !ok || got != want {
+					t.Errorf("child env %s = %q (present=%v), want %q", key, got, ok, want)
+				}
+			}
+		})
+	}
+}
+
+// TestPGConnEnv pins the url -> environment translation, and above all that it
+// is COMPLETE or an ERROR. A partial environment is the dangerous outcome:
+// libpq fills every gap from its own defaults (the OS user, a unix socket, a
+// database named after the user), so a probe handed half a connection returns a
+// plausible number measured against a database nobody asked about.
+func TestPGConnEnv(t *testing.T) {
+	t.Run("splits the url into libpq's variables", func(t *testing.T) {
+		env, err := pgConnEnv("postgres://bp:pw@localhost:5432/barkpark_prod?sslmode=require")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		for key, want := range map[string]string{
+			"PGHOST":     "localhost",
+			"PGPORT":     "5432",
+			"PGUSER":     "bp",
+			"PGPASSWORD": "pw",
+			"PGDATABASE": "barkpark_prod",
+			"PGSSLMODE":  "require",
+		} {
+			if got, ok := envValue(env, key); !ok || got != want {
+				t.Errorf("%s = %q (present=%v), want %q", key, got, ok, want)
+			}
+		}
+	})
+
+	t.Run("an inherited PG variable cannot redirect the probe", func(t *testing.T) {
+		t.Setenv("PGDATABASE", "some_other_db")
+		t.Setenv("PGHOST", "attacker.example")
+		env, err := pgConnEnv("postgres://bp@localhost/barkpark_prod")
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if got, _ := envValue(env, "PGDATABASE"); got != "barkpark_prod" {
+			t.Errorf("PGDATABASE = %q, want barkpark_prod — an ambient value must never win", got)
+		}
+		if got, _ := envValue(env, "PGHOST"); got != "localhost" {
+			t.Errorf("PGHOST = %q, want localhost — an ambient value must never win", got)
+		}
+	})
+
+	t.Run("an incomplete or unsupported url is an error, never a default connection", func(t *testing.T) {
+		for _, c := range []struct{ name, url string }{
+			{"no host", "postgres:///barkpark_prod"},
+			{"no database", "postgres://bp@localhost"},
+			{"no user", "postgres://localhost/barkpark_prod"},
+			{"not a postgres scheme", "ecto://bp@localhost/barkpark_prod"},
+			{"unsupported parameter", "postgres://bp@localhost/barkpark_prod?ssl=true"},
+		} {
+			if env, err := pgConnEnv(c.url); err == nil {
+				t.Errorf("%s: err = nil for %q, want an error (env = %v)", c.name, c.url, env)
+			}
 		}
 	})
 }
@@ -809,7 +1015,7 @@ func TestPGProbeTimeoutIsShort(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := boundedPGRunner("sleep", "5")
+		_, err := boundedPGRunner(nil, "sleep", "5")
 		done <- err
 	}()
 
@@ -853,7 +1059,7 @@ type spaceFakeRunner struct {
 	calls [][]string
 }
 
-func (f *spaceFakeRunner) run(name string, args ...string) (string, error) {
+func (f *spaceFakeRunner) run(_ []string, name string, args ...string) (string, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
 	return f.out[name], f.err[name]
 }
@@ -1018,7 +1224,7 @@ func TestSitesProbeNonZeroExitDiscardsPartialOutput(t *testing.T) {
 		{name: "killed with a parseable total row", out: partial + "4194304\t/opt/barkpark/sites\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			probe := newSitesSpaceProbeWith(func(string, ...string) (string, error) {
+			probe := newSitesSpaceProbeWith(func([]string, string, ...string) (string, error) {
 				// Exactly what runBounded hands back on a killed du: real
 				// output AND an error, indistinguishable in shape from a
 				// completed run.
@@ -1386,7 +1592,7 @@ func TestSpaceProbeTimeoutsAreShortAndSeparate(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, err := run("sleep", "5")
+		_, err := run(nil, "sleep", "5")
 		if err == nil {
 			t.Error("err = nil, want a timeout error")
 		}
@@ -1704,7 +1910,7 @@ const (
 // returned exactly this text with rc=1.
 func buildPlaneRunner(t *testing.T) probeRunner {
 	t.Helper()
-	return func(name string, args ...string) (string, error) {
+	return func(_ []string, name string, args ...string) (string, error) {
 		dir := args[len(args)-1]
 		if out, ok := realBuildPlaneDu[dir]; ok {
 			return out, nil
@@ -2291,7 +2497,7 @@ func TestParseDuTreeRoutesDuDiagnosticsToDegraded(t *testing.T) {
 // size) and never as `unmeasured` (we have a floor and can say what is missing
 // from it).
 func TestConsumerRootDegradedLandsTheFloorAndNamesTheShortfall(t *testing.T) {
-	probe := newConsumerRootProbeWith(func(string, ...string) (string, error) {
+	probe := newConsumerRootProbeWith(func([]string, string, ...string) (string, error) {
 		// Exactly what runBounded hands back: full combined output AND rc=1.
 		return duDegradedGNU, errors.New("exit status 1")
 	})
@@ -2344,7 +2550,7 @@ func TestConsumerRootDegradedNamesAreCappedButCounted(t *testing.T) {
 	for i := 0; i < found; i++ {
 		fmt.Fprintf(&b, "du: cannot read directory '/opt/barkpark/sites/locked-%02d': Permission denied\n", i)
 	}
-	probe := newConsumerRootProbeWith(func(string, ...string) (string, error) {
+	probe := newConsumerRootProbeWith(func([]string, string, ...string) (string, error) {
 		return b.String(), errors.New("exit status 1")
 	})
 	s := gatherSpace(SpaceConfig{
@@ -2407,7 +2613,7 @@ func TestConsumerRootDiscardsWhatWasCutShort(t *testing.T) {
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			probe := newConsumerRootProbeWith(func(string, ...string) (string, error) { return c.out, c.err })
+			probe := newConsumerRootProbeWith(func([]string, string, ...string) (string, error) { return c.out, c.err })
 			total, children, degraded, err := probe(dir)
 			if err == nil {
 				t.Fatalf("probe returned nil error — %s", c.why)
