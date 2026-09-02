@@ -629,7 +629,8 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 
 // ── task-board ───────────────────────────────────────────────────────────────
 // {snapshot: [row]}. Group rows by roleForStatus(status) into the FIXED column
-// order open · ready · progress · blocked · done (empty columns omitted). The
+// order of the full status ladder — open · ready · progress · blocked · done ·
+// cancelled · considering · researching (empty columns omitted). The
 // `open` lane mirrors the web reader's white-ladder column set so a populated
 // `open` bucket is never silently dropped (bug-taskboard-drops-open-tasks). Where every
 // lane clears MinWidth the lanes draw SIDE-BY-SIDE as bordered columns (the P9
@@ -641,10 +642,20 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 // → placeholder; empty → "No tasks yet."
 type taskBoardRenderer struct{}
 
-// boardColumns is the board's column ROLES in white-ladder order. The header
-// label is DERIVED (the canonical roleLabel, sentence-cased via boardLabel) —
-// NOT a second hardcoded copy (the fold — shares gridblocks.go's roleLabel).
-var boardColumns = []string{"open", "ready", "progress", "blocked", "done"}
+// boardColumns is the board's column ROLES in white-ladder order — the FULL
+// ladder, aliased to the one canonical slug list rather than re-typed. A short
+// hand-written copy is exactly how rows disappear: this was a 5-entry literal
+// while statusLadder carried 8, so roleForStatus resolved `considering` and
+// `researching` (and `cancelled`) to roles no lane collected and the board
+// dropped those rows SILENTLY — no column, no count, no notice. Aliasing makes
+// that class of drift impossible: a new rung reaches the board the moment it
+// reaches the ladder. Empty lanes are still omitted at render time, so a board
+// with no thought-state rows looks exactly as it did.
+//
+// The header label is DERIVED (the canonical roleLabel, sentence-cased via
+// boardLabel) — NOT a second hardcoded copy (the fold — shares gridblocks.go's
+// roleLabel).
+var boardColumns = statusLadder
 
 // boardLabel is a lane's sentence-cased column header, folded from the ONE
 // canonical lowercase label: "in progress" → "In progress".

@@ -281,3 +281,59 @@ func TestTaskDetailTimeline(t *testing.T) {
 		t.Errorf("detailTimeline with no `timeline` key must return nil, got %#v", got)
 	}
 }
+
+// TestTaskBoardCollectsEveryLadderRung is criterion 5: boardColumns was a
+// 5-entry hand-written literal while statusLadder carried 8, so roleForStatus
+// resolved `considering`, `researching` and `cancelled` onto roles no lane
+// collected — the board dropped those rows SILENTLY. No column, no count, no
+// notice: a reader could not tell a board with three hidden rows from one
+// without them.
+//
+// The test drives one row per ladder rung and asserts BOTH halves: every rung's
+// title reaches the render, and every rung's derived header label does too.
+// Reverting boardColumns to the 5-entry literal reds it on the first thought
+// state.
+func TestTaskBoardCollectsEveryLadderRung(t *testing.T) {
+	reg := testRegistry()
+	// One row per ladder rung, keyed by the STORED status roleForStatus maps.
+	rows := []struct{ status, role, title string }{
+		{"open", "open", "backlog groom"},
+		{"ready", "ready", "claim it"},
+		{"in_progress", "progress", "in flight"},
+		{"blocked", "blocked", "await review"},
+		{"done", "done", "shipped"},
+		{"cancelled", "cancel", "superseded by a newer plan"},
+		{"considering", "considering", "weigh the cutover"},
+		{"researching", "researching", "read the ONIX spec"},
+	}
+	var snapshot []any
+	for _, r := range rows {
+		snapshot = append(snapshot, map[string]any{"title": r.title, "status": r.status})
+	}
+	b := Block{Type: "task-board", Attrs: map[string]any{"snapshot": snapshot}}
+
+	// Rendered narrow so the lanes STACK: eight bordered boxes side-by-side would
+	// fall below MinWidth and the titles would be truncated into the borders. The
+	// stacked fallback is verbatim, which is what makes the assertion exact.
+	got := renderBlock(reg, b, 100)
+
+	for _, r := range rows {
+		if !strings.Contains(got, r.title) {
+			t.Errorf("the %q row (role %q) was DROPPED by the board:\n%s", r.status, r.role, got)
+		}
+		if want := boardLabel(r.role); !strings.Contains(got, want) {
+			t.Errorf("the %q lane header (%q) is missing:\n%s", r.role, want, got)
+		}
+	}
+
+	// The board's column set IS the ladder — one list, not two. A future rung
+	// added to statusLadder reaches the board without a second edit.
+	if len(boardColumns) != len(statusLadder) {
+		t.Fatalf("boardColumns must be the full ladder: %d columns vs %d rungs", len(boardColumns), len(statusLadder))
+	}
+	for i := range statusLadder {
+		if boardColumns[i] != statusLadder[i] {
+			t.Fatalf("boardColumns[%d] = %q, ladder has %q", i, boardColumns[i], statusLadder[i])
+		}
+	}
+}
