@@ -4665,6 +4665,24 @@
       padding-top: var(--bp-section-gap);
     }
     .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+    /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
+       (paper-surface.css carries the measurement: `--paper-accent-soft` as a
+       border-bottom computed to 1.14–1.35:1 over the reading ground, so the old
+       at-rest treatment drew no line at all). The decoration is tinted to 80% of
+       the accent — the measured floor that clears 3:1 in all ten theme×scheme
+       pairs. Keep byte-aligned with paper-surface.css AND
+       assets/paper-editor/src/styles.css; view_edit_parity_test.exs pins `a` and
+       `a:focus-visible` in @parity_elements (§2) and @mirror_elements (§5). */
+    .bp-paper-editor-body a  {
+      color: var(--paper-accent); text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--paper-accent) 80%, transparent);
+      text-decoration-thickness: 1px; text-underline-offset: 0.18em;
+      text-decoration-skip-ink: auto;
+    }
+    .bp-paper-editor-body a:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 2px;
+    }
+    .bp-paper-editor-body ::selection { background: var(--paper-accent-soft); color: inherit; }
     .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
     .bp-paper-editor-body ul,
     .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
