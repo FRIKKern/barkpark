@@ -65,6 +65,12 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
    slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
    means re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
+   **The real cap is FILE saturation, not the PR count.** When the open PRs in your fence
+   already touch the same handful of files, an extra PR is a guaranteed green-apart /
+   red-together collision no matter how much WIP headroom you have. A lane that is saturated
+   is not out of ideas — say so and hold the next slice until the blocking PR merges. And a
+   non-draft PR that is only safe because it is CONFLICTING is a trap: one `update-branch` by
+   anyone makes it 4/4-eligible and the sweep will land it out of order. Draft it instead.
    **A worker's green is scoped to the tests the worker CHOSE.** Three PRs on 2026-09-02 needed
    lead intervention after a builder reported green, and every one of the three defects sat
    outside the builder's own selection: a rebase conflict, a census refusal on an inline
