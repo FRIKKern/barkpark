@@ -740,8 +740,24 @@ defmodule BarkparkWeb.TasksController do
       # task) so rail_changed reflects only concurrent actors, not this close.
       baseline_rev = pre_write_rail_rev(task, conn)
 
-      case Tasks.close(task.id, worker_id, opts) do
-        {:ok, %Document{} = doc} ->
+      case Barkpark.Tasks.Close.close_with_receipt(task.id, worker_id, opts) do
+        # THE REPLAY (task-17224f58d3bda3bd). This worker's close already
+        # landed; the response it got for it did not come back. Answer 200 with
+        # the stored row and say so in one field, so a caller can tell "my write
+        # landed earlier" from "my write landed just now" without a re-read —
+        # and, above all, so it stops reading a landed write as a failure.
+        {:ok, %Document{} = doc, :already_closed} ->
+          json(
+            conn,
+            close_response(doc, worker_id, conn)
+            |> Map.put(:already_closed, true)
+            |> Map.put(
+              :message,
+              "already closed by #{worker_id} — this call changed nothing and the stored close_reason is unchanged"
+            )
+          )
+
+        {:ok, %Document{} = doc, :closed} ->
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).

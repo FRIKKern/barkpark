@@ -533,6 +533,83 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["doc"]["lifecycle_status"] == "done"
     end
 
+    test "a REPLAY of the same worker's close is 200 already_closed, not a failure",
+         %{conn: conn, scope: scope} do
+      # task-17224f58d3bda3bd. Measured on five real closes: attempt 1 commits,
+      # its response is lost under load, attempt 2 read the now-terminal row and
+      # was told `stale_claim` — so a worker reported a correctly-closed row as
+      # uncloseable, and re-claiming it then failed `not_ready`.
+      phase = uniq("phase-replay")
+      doc_id = uniq("replay-a")
+      _task = mk_task!(doc_id, scope, %{"parent_id" => phase})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-1", phase_id: phase})
+      claim_resp = conn |> authed() |> post("/v1/tasks/claim", claim_body)
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      claimed_doc_id = claim_payload["doc"]["doc_id"]
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      close_body =
+        Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch, reason: "first close"})
+
+      first = conn |> authed() |> post("/v1/tasks/#{claimed_doc_id}/close", close_body)
+      assert first.status == 200
+      first_payload = Jason.decode!(first.resp_body)
+      assert first_payload["already_closed"] == nil
+
+      replay = conn |> authed() |> post("/v1/tasks/#{claimed_doc_id}/close", close_body)
+      assert replay.status == 200
+
+      payload = Jason.decode!(replay.resp_body)
+      assert payload["ok"] == true
+      assert payload["already_closed"] == true
+      assert payload["doc"]["lifecycle_status"] == "done"
+      assert payload["message"] =~ "already closed by worker-1"
+      # The replay echoes the STORED row, unchanged. Comparing the whole
+      # rendered doc rather than one field is the stronger assertion: a replay
+      # that wrote anything at all — a new rev, a new closed_at, an overwritten
+      # reason — reds here.
+      assert payload["doc"] == first_payload["doc"]
+    end
+
+    test "a replay by a DIFFERENT worker is still refused as a lost race",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-race")
+      doc_id = uniq("race-a")
+      _task = mk_task!(doc_id, scope, %{"parent_id" => phase})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-1", phase_id: phase})
+      claim_resp = conn |> authed() |> post("/v1/tasks/claim", claim_body)
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      claimed_doc_id = claim_payload["doc"]["doc_id"]
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      first =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{claimed_doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+        )
+
+      assert first.status == 200
+
+      second =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{claimed_doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-2",
+            observed_epoch: epoch,
+            holder_override: "second closer racing the first"
+          })
+        )
+
+      assert second.status == 409
+      assert Jason.decode!(second.resp_body)["reason"] == "stale_claim"
+    end
+
     test "error path: returns ok=false reason=fenced_off on epoch mismatch",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-fenced")
