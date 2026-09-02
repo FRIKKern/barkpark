@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.PlanPapers
+  alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
@@ -5933,44 +5934,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
-  # Normalize the AskUserQuestion input into a render-ready question list. Each
-  # question: prompt string, optional header, multiSelect flag, and option chips
-  # (label + optional description). Tolerant of options given as bare strings.
-  defp parse_questions(%{"questions" => qs}) when is_list(qs) do
-    Enum.map(qs, fn q ->
-      %{
-        question: to_string(Map.get(q, "question", "")),
-        header: nonempty(Map.get(q, "header")),
-        multi: Map.get(q, "multiSelect", false) == true,
-        options: parse_options(Map.get(q, "options"))
-      }
-    end)
-  end
-
-  defp parse_questions(_), do: []
-
-  defp parse_options(opts) when is_list(opts) do
-    opts
-    |> Enum.map(fn
-      %{"label" => label} = o ->
-        %{label: to_string(label), description: nonempty(Map.get(o, "description"))}
-
-      label when is_binary(label) ->
-        %{label: label, description: nil}
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp parse_options(_), do: []
-
-  defp nonempty(s) when is_binary(s) do
-    if String.trim(s) == "", do: nil, else: s
-  end
-
-  defp nonempty(_), do: nil
+  # Normalize the AskUserQuestion input into a render-ready question list.
+  # Delegated to StudioChat.QuestionAnswer, which is the SAME parse the `/answer`
+  # transport validates against (ct-bl-question-updatedinput): what the human sees
+  # on this card and what the server will accept from the terminal cannot drift,
+  # because there is one parse.
+  defp parse_questions(input), do: QuestionAnswer.parse_questions(input)
 
   # Seed an empty answer form when a question card first arrives, so the render
   # never reads a missing map. Idempotent (put_new): a co-viewing replay never
@@ -5998,29 +5967,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # Collapse the form scratch state into the wire answer map (charter D32):
   # keyed by the QUESTION STRING; a non-empty custom field wins; multiSelect =
-  # comma-joined labels; unanswered questions are omitted.
-  defp build_answers(questions, form) do
-    questions
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {q, qidx}, acc ->
-      case answer_value(q, Map.get(form.selections, qidx, []), Map.get(form.custom, qidx)) do
-        nil -> acc
-        "" -> acc
-        value -> Map.put(acc, q.question, value)
-      end
-    end)
-  end
-
-  defp answer_value(q, selections, custom) do
-    trimmed = if is_binary(custom), do: String.trim(custom), else: ""
-
-    cond do
-      trimmed != "" -> trimmed
-      q.multi and selections != [] -> Enum.join(selections, ", ")
-      selections != [] -> List.first(selections)
-      true -> nil
-    end
-  end
+  # comma-joined labels; unanswered questions are omitted. Owned by
+  # StudioChat.QuestionAnswer so Studio and the `/answer` transport speak ONE
+  # answer dialect to the CLI (ct-bl-question-updatedinput).
+  defp build_answers(questions, form), do: QuestionAnswer.build_answers(questions, form)
 
   # Render helpers for the question form: is a chip selected, is a question
   # answered at all, and how many of N are answered (the N/M progress).

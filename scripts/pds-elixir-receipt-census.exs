@@ -658,6 +658,18 @@ defmodule PDS.Census do
     {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat, :status_only_receipt},
     {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate, :status_only_receipt},
     {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create, :status_only_receipt},
+    # THE ASKUSERQUESTION ANSWER SUBMIT (ct-bl-question-updatedinput). Same class,
+    # and for the same reason, as its /approval twin's siblings above: the success
+    # arm is a bare 204 — `send_resp(conn, :no_content, "")` after the scoped
+    # session read, the pending-question read, the per-question option validation
+    # and the `{:allow, updated}` forward — so there is no body at all, and in
+    # particular not the `ok: true` key this lens greps for, which is exactly what
+    # `status_only_receipt` names post-wave-40. The class is assigned on that
+    # predicate alone; whether the 204 is EARNED is a judgement the roster row on
+    # ChatController.approval/2 already carries for the shared
+    # `StudioChat.update_approval_status/3` fold, and this row does not restate it.
+    {:post, "/v1/chat/sessions/:id/answer", "BarkparkWeb.ChatController", :answer,
+     :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive, :status_only_receipt},
     # THE CHAT-OWNED ATTACHMENT UPLOAD (ct-bl-chat-attachments). Same class, and
     # for the same reason, as every sibling /v1/chat/sessions write above: the 201

@@ -70,6 +70,17 @@ type Transport interface {
 	// rail-carrying full GetSession + this verb are the seam the interactive
 	// cards slice (ct-bl-cards-interactive) answers approvals through — no fork.
 	Approve(id, requestID, decision string) error
+	// AnswerQuestion answers an AskUserQuestion card with the option label(s) the
+	// operator actually picked: POST /v1/chat/sessions/:id/answer
+	// {request_id, answers} → 204 (ct-bl-question-updatedinput). `answers` is a
+	// CONSTRAINED map — question string → a label the SERVER persisted — and the
+	// server re-validates it against the stored ask before rebuilding
+	// `updatedInput` itself, so this widens what the terminal can SAY without
+	// widening what it can INJECT (D22 intact). Unlike Approve, it is not
+	// idempotent: a second answer to the same question is a 404, because the row
+	// is no longer pending. Approve stays the verb for approval/plan cards and
+	// for a question card the operator wants to blanket-allow or deny.
+	AnswerQuestion(id, requestID string, answers map[string]any) error
 	// Events opens the per-session SSE stream and hands every frame to
 	// onFrame(event, data). Replayed persisted rows arrive as event "message"
 	// (carrying an id: line the shared parser uses for Last-Event-ID resume);
@@ -199,6 +210,10 @@ func (t *clientTransport) UploadAttachment(sessionID, path string) (Attachment, 
 
 func (t *clientTransport) Approve(id, requestID, decision string) error {
 	return t.c.RespondChatApproval(id, requestID, decision)
+}
+
+func (t *clientTransport) AnswerQuestion(id, requestID string, answers map[string]any) error {
+	return t.c.AnswerChatQuestion(id, requestID, answers)
 }
 
 func (t *clientTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(event string, data []byte)) error {

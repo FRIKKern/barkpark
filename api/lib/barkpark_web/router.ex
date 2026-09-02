@@ -2388,6 +2388,14 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
 
+    # The AskUserQuestion answer route (D28 backlog ct-bl-question-updatedinput).
+    # A SEPARATE path from /approval on purpose: /approval keeps its allow|deny
+    # body with no map-shaped surface, while /answer carries the CONSTRAINED
+    # answers map (question string -> a label the server itself persisted) that
+    # the controller re-expands into updatedInput. D22 is intact — the caller
+    # selects among the model's own options, it never supplies input.
+    post("/sessions/:id/answer", ChatController, :answer)
+
     # Archive shelf flips (charter D28): POST verbs (NOT a PATCH key — archived
     # is lifecycle, not a continuity field), same tenant oracle as every other
     # id route. They ride THIS :require_chat_access scope, never the

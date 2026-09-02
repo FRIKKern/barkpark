@@ -175,10 +175,24 @@ func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, [
 	if card, ok := m.focusedCard(); ok {
 		focusRID = card.RequestID()
 	}
+	// The option ctrl+a would submit on the focused question card — read from the
+	// SAME clamped accessor the keystroke reads (Model.focusedChoice), so the
+	// footer can never name a label the answer would not send
+	// (ct-bl-question-updatedinput).
+	pickLabel := ""
+	if choice, ok := m.focusedChoice(); ok {
+		pickLabel = choice.Label
+	}
+	pickOf := func(focused bool) string {
+		if focused {
+			return pickLabel
+		}
+		return ""
+	}
 	for _, msg := range m.st.Messages {
 		focused := focusRID != "" && msg.RequestID() == focusRID && answerable(msg)
 		inflight := m.st.AnswerInFlight[msg.RequestID()]
-		r := renderMessage(width, msg, focused, inflight)
+		r := renderMessage(width, msg, focused, inflight, pickOf(focused))
 		if len(r) == 0 {
 			continue
 		}
@@ -223,8 +237,10 @@ func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, [
 // plan render as interactive cards (answerable when pending, resolution badge
 // when terminal); other structural rows collapse to one dim provenance line.
 // Assistant is the ONLY role in golden parity's scope. focused marks the card
-// the answer keys act on; inflight is the decision POSTed but not yet confirmed.
-func renderMessage(width int, msg Message, focused bool, inflight string) []string {
+// the answer keys act on; inflight is the decision POSTed but not yet confirmed;
+// pick is the option label ctrl+a would submit on a focused question card ("" on
+// every other card, and on a question row carrying no decodable ask).
+func renderMessage(width int, msg Message, focused bool, inflight, pick string) []string {
 	w := bodyWidth(width)
 	switch {
 	case msg.Role == "assistant":
@@ -232,7 +248,7 @@ func renderMessage(width int, msg Message, focused bool, inflight string) []stri
 	case msg.Role == "user":
 		return append(renderUserEcho(w, msg.SourceMarkdown), renderAttachments(w, msg.Attachments)...)
 	case cardRoles[msg.Role] != "":
-		return cardView(w, msg, focused, inflight)
+		return cardView(w, msg, focused, inflight, pick)
 	case msg.Role == "tool":
 		return renderToolRow(chatRegistry, width, msg)
 	case blockRoles[msg.Role]:
@@ -480,7 +496,7 @@ func renderTail(w int, tail string) []string {
 //
 // A focused pending card wears a bold top bar so the operator sees which card a
 // keystroke acts on. Excluded from golden parity (assistant-reply-only).
-func cardView(w int, msg Message, focused bool, inflight string) []string {
+func cardView(w int, msg Message, focused bool, inflight, pick string) []string {
 	bar := cardBar.Render("│ ")
 	title := cardRoles[msg.Role]
 	topBar := cardBar.Render("┌ ")
@@ -501,9 +517,15 @@ func cardView(w int, msg Message, focused bool, inflight string) []string {
 		foot = badgeStyle.Render(answeringNotice(inflight))
 	case answerable(msg):
 		allow, deny := cardVerbs(msg.Role)
-		if focused {
+		switch {
+		case focused && pick != "":
+			// A focused question card with a picked chip: ctrl+a submits THAT
+			// option (ct-bl-question-updatedinput), so the footer names it rather
+			// than the generic verb — the affordance and the POST agree.
+			foot = dimStyle.Render(fmt.Sprintf("ctrl+a answer %q · ←/→ pick · ctrl+r %s · tab next", pick, deny))
+		case focused:
 			foot = dimStyle.Render(fmt.Sprintf("ctrl+a %s · ctrl+r %s · tab next", allow, deny))
-		} else {
+		default:
 			foot = dimStyle.Render(fmt.Sprintf("tab to focus · ctrl+a %s · ctrl+r %s", allow, deny))
 		}
 	default:
@@ -516,7 +538,9 @@ func cardView(w int, msg Message, focused bool, inflight string) []string {
 
 // cardVerbs names the allow/deny actions per card role. A plan proposal reads
 // approve / keep planning (charter: plan-approve=allow, plan-keep=deny); an
-// approval or a question reads allow / deny (scope is allow/deny only this wave).
+// approval reads allow / deny. A question card whose ask carries option chips
+// overrides the allow verb in the footer with the picked label
+// (ct-bl-question-updatedinput); one with no decodable ask keeps plain allow.
 func cardVerbs(role string) (allow, deny string) {
 	if role == "plan" {
 		return "approve", "keep planning"

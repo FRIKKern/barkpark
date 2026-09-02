@@ -77,7 +77,7 @@ func TestAssistantEmptyBlocksFallBackToSource(t *testing.T) {
 func TestCardRolesRenderLabels(t *testing.T) {
 	for role, label := range cardRoles {
 		m := Message{Role: role, SourceMarkdown: "please approve running rm -rf"}
-		out := strings.Join(renderMessage(80, m, false, ""), "\n")
+		out := strings.Join(renderMessage(80, m, false, "", ""), "\n")
 		if !strings.Contains(out, label) {
 			t.Fatalf("%s row must carry its card label %q, got:\n%s", role, label, out)
 		}
@@ -106,7 +106,7 @@ func pendingCard(role string) Message {
 // keystroke acts on. Plan cards read approve/keep-planning; the others allow/deny.
 func TestPendingCardShowsAnswerAffordance(t *testing.T) {
 	for role := range cardRoles {
-		out := strings.Join(renderMessage(80, pendingCard(role), false, ""), "\n")
+		out := strings.Join(renderMessage(80, pendingCard(role), false, "", ""), "\n")
 		if !strings.Contains(out, "ctrl+a") || !strings.Contains(out, "ctrl+r") {
 			t.Fatalf("%s pending card must advertise the answer keys, got:\n%s", role, out)
 		}
@@ -118,13 +118,13 @@ func TestPendingCardShowsAnswerAffordance(t *testing.T) {
 			t.Fatalf("%s card must name its verbs %q/%q, got:\n%s", role, allow, deny, out)
 		}
 		// A focused card is visibly marked.
-		fout := strings.Join(renderMessage(80, pendingCard(role), true, ""), "\n")
+		fout := strings.Join(renderMessage(80, pendingCard(role), true, "", ""), "\n")
 		if !strings.Contains(fout, "focused") {
 			t.Fatalf("%s focused card must be marked focused, got:\n%s", role, fout)
 		}
 	}
 	// Plan cards specifically read approve / keep planning (charter D27).
-	plan := strings.Join(renderMessage(80, pendingCard("plan"), true, ""), "\n")
+	plan := strings.Join(renderMessage(80, pendingCard("plan"), true, "", ""), "\n")
 	if !strings.Contains(plan, "approve") || !strings.Contains(plan, "keep planning") {
 		t.Fatalf("plan card must read approve/keep-planning, got:\n%s", plan)
 	}
@@ -139,7 +139,7 @@ func TestResolvedCardShowsBadge(t *testing.T) {
 	for status, want := range cases {
 		m := pendingCard("approval")
 		m.Metadata["approval_status"] = status
-		out := strings.Join(renderMessage(80, m, false, ""), "\n")
+		out := strings.Join(renderMessage(80, m, false, "", ""), "\n")
 		if !strings.Contains(out, want) {
 			t.Fatalf("a %s card must show its resolution badge, got:\n%s", status, out)
 		}
@@ -153,7 +153,7 @@ func TestResolvedCardShowsBadge(t *testing.T) {
 // whose answer is POSTed but not yet confirmed reads "answering…" rather than the
 // affordance or a premature terminal badge.
 func TestInFlightCardShowsAnsweringState(t *testing.T) {
-	out := strings.Join(renderMessage(80, pendingCard("approval"), true, "allow"), "\n")
+	out := strings.Join(renderMessage(80, pendingCard("approval"), true, "allow", ""), "\n")
 	if !strings.Contains(out, "allowing") {
 		t.Fatalf("an in-flight allow must read 'allowing…', got:\n%s", out)
 	}
@@ -1881,7 +1881,7 @@ func TestToolRowKeepsItsBlockBelowTheGutter(t *testing.T) {
 		Metadata:       map[string]any{"turn_settled": true, "output": "ok"},
 	}
 
-	out := strings.Join(renderMessage(80, msg, false, ""), "\n")
+	out := strings.Join(renderMessage(80, msg, false, "", ""), "\n")
 	if !strings.Contains(out, "✓") {
 		t.Fatalf("a settled diff row must wear its ✓ gutter:\n%s", out)
 	}

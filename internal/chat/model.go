@@ -94,6 +94,12 @@ type Model struct {
 	input      string // the composer draft (charter D14 continuity — PATCHed on quit/switch)
 	scroll     int    // -1 = follow mode (bottom); >=0 = pinned top line
 	cardCursor int    // focus ring index into the pending answerable cards (Tab cycles)
+	// optionCursor is the picked option on the focused QUESTION card, as an index
+	// into that card's FLATTENED (question, option) pairs — ←/→ move it. One int
+	// of state, keyed by nothing: it is re-clamped against the focused card's own
+	// options every read, so a card flip, a resolve, or a refetch can never leave
+	// it pointing at an option that no longer exists (ct-bl-question-updatedinput).
+	optionCursor int
 
 	// anchor is what scroll >= 0 actually MEANS (charter D80): the content the
 	// pinned top row was showing, as (block ordinal, intra-block line offset),
@@ -353,6 +359,13 @@ func (m Model) execEffect(e Effect) tea.Cmd {
 		return func() tea.Msg {
 			return answerDoneMsg{requestID: rid, err: tr.Approve(id, rid, dec)}
 		}
+	case AnswerQuestionEffect:
+		// The SAME answerDoneMsg the allow/deny path lands on — one settle grammar
+		// for both answer shapes (ct-bl-question-updatedinput).
+		rid, answers := e.RequestID, e.Answers
+		return func() tea.Msg {
+			return answerDoneMsg{requestID: rid, err: tr.AnswerQuestion(id, rid, answers)}
+		}
 	}
 	return nil
 }
@@ -394,6 +407,7 @@ func (m Model) openSession(s Session) Model {
 	m.scroll = -1
 	m.anchor = scrollAnchor{}
 	m.cardCursor = 0
+	m.optionCursor = 0
 	m.focus = focusComposer
 	m.wfExpanded = false
 	m.wfPhase = 0
@@ -454,6 +468,71 @@ func (m Model) focusedCard() (Message, bool) {
 		i = 0
 	}
 	return cards[i], true
+}
+
+// questionChoice is ONE selectable (question, option) pair on a question card —
+// the unit ←/→ walk and Ctrl+A submits.
+type questionChoice struct {
+	Question string
+	Label    string
+}
+
+// cardChoices flattens a question card's server-held ask into the ordered choice
+// list. Empty for an approval/plan card, for a row carrying no decodable ask, and
+// for a legacy row with no `input` — which is exactly why the answer footer falls
+// back to plain allow/deny there: an absent ask must degrade, never break the
+// card's existing answer path.
+func cardChoices(msg Message) []questionChoice {
+	if msg.Role != "question" {
+		return nil
+	}
+	var out []questionChoice
+	for _, q := range msg.Questions() {
+		for _, label := range q.Options {
+			out = append(out, questionChoice{Question: q.Question, Label: label})
+		}
+	}
+	return out
+}
+
+// focusedChoice resolves the option the operator has picked on the focused card.
+// The cursor is clamped HERE rather than on every key, so what the footer paints
+// and what Ctrl+A submits are read from one place and cannot disagree.
+func (m Model) focusedChoice() (questionChoice, bool) {
+	card, ok := m.focusedCard()
+	if !ok {
+		return questionChoice{}, false
+	}
+	choices := cardChoices(card)
+	if len(choices) == 0 {
+		return questionChoice{}, false
+	}
+	i := m.optionCursor
+	if i < 0 || i >= len(choices) {
+		i = 0
+	}
+	return choices[i], true
+}
+
+// moveOptionCursor walks the focused question card's choices by delta, wrapping.
+// A no-op (and NOT a key the caller should treat as handled) when the focused
+// card offers no options.
+func (m Model) moveOptionCursor(delta int) (Model, bool) {
+	card, ok := m.focusedCard()
+	if !ok {
+		return m, false
+	}
+	n := len(cardChoices(card))
+	if n == 0 {
+		return m, false
+	}
+	i := m.optionCursor
+	if i < 0 || i >= n {
+		i = 0
+	}
+	m.optionCursor = ((i+delta)%n + n) % n
+	m = m.followScroll() // picking a chip re-follows (#14901's anchor grammar)
+	return m, true
 }
 
 // leaveSession PATCHes the writable continuity set (draft/mode/model/effort)
