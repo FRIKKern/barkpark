@@ -1297,6 +1297,13 @@ func tickGlyph(state string) string {
 func (m Model) renderPicker() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("bp chat") + dimStyle.Render("  ·  "+serverHost(m.cfg.BaseURL)) + "\n")
+	// The context identity band (context.go): which host, which server, which
+	// workspace/project/dataset, which repo root. It sits ABOVE the rule so it
+	// reads as part of the client's own identity rather than as a roster row,
+	// and pickerAvail charges the roster budget for however many lines it took.
+	for _, l := range m.contextLines(m.width) {
+		b.WriteString(l + "\n")
+	}
 	b.WriteString(dimStyle.Render(strings.Repeat("─", clamp(m.width, 8, 80))) + "\n\n")
 
 	rows := m.pickerRows()
@@ -1412,7 +1419,10 @@ func rowLineCounts(rows []string) []int {
 // so a pathologically short terminal still paints the cursor row — never an
 // empty list.
 func (m Model) pickerAvail() int {
-	chrome := 6
+	// The context band is variable-height (it packs to the terminal width), so
+	// the budget asks it how tall it is rather than assuming a line. Same
+	// measure the paint uses — a divergence here is how a frame overflows.
+	chrome := 6 + len(m.contextLines(m.width))
 	if m.fleetNotice != "" {
 		chrome++
 	}
@@ -2140,6 +2150,63 @@ func relAge(t, now time.Time) string {
 }
 
 // serverHost reduces a base URL to host[:port] for the chrome line.
+// contextLines paints the launch screen's context identity band: one segment
+// per field — `host <name>`, `server <url>`, `workspace/project/dataset`, and
+// `repo <root>` — packed greedily onto as many lines as the width needs. It
+// PACKS rather than truncating because every field is load-bearing: a band that
+// drops "dataset" off the right edge at 80 columns answers the question wrong
+// by omission. Only a single segment wider than the whole line is truncated,
+// and then the ellipsis says so.
+//
+// A field whose config claim and actual connection DISAGREE (ContextField.
+// Mismatch) leads with ⚠ and wears the warn style, and its Display() carries
+// both values — the disagreement is the most important thing on the screen when
+// it exists, and invisible when it does not.
+//
+// An UNRESOLVED identity (the zero Model literal a unit test builds by hand)
+// paints NO band at all rather than a row of empty markers about nothing. Every
+// path that reaches a terminal is built by newModel, which always resolves.
+func (m Model) contextLines(width int) []string {
+	if len(m.ctxid.Fields) == 0 {
+		return nil
+	}
+	w := clamp(width, 24, 120)
+	const sep = " · "
+
+	var lines []string
+	plain, styled := "", ""
+	flush := func() {
+		if plain != "" {
+			lines = append(lines, styled)
+			plain, styled = "", ""
+		}
+	}
+	for _, f := range m.ctxid.Fields {
+		seg := f.Name + " " + f.Display()
+		style := dimStyle
+		if f.Mismatch {
+			seg = "⚠ " + seg
+			style = warnStyle
+		}
+		if plain != "" && lipgloss.Width(plain)+lipgloss.Width(sep)+lipgloss.Width(seg) > w {
+			flush()
+		}
+		if plain == "" {
+			// A lone segment wider than the whole line is truncated — visibly,
+			// with an ellipsis — rather than pushed past the frame edge.
+			if lipgloss.Width(seg) > w {
+				seg = truncate(seg, w)
+			}
+			plain, styled = seg, style.Render(seg)
+			continue
+		}
+		plain += sep + seg
+		styled += dimStyle.Render(sep) + style.Render(seg)
+	}
+	flush()
+	return lines
+}
+
 func serverHost(baseURL string) string {
 	s := strings.TrimSpace(baseURL)
 	s = strings.TrimPrefix(s, "https://")
