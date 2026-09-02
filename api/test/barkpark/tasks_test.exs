@@ -497,7 +497,7 @@ defmodule Barkpark.TasksTest do
       # The worker tries to "refresh" the way the OLD hint implies — a same-worker
       # re-claim (renewal). It mints a FRESH epoch (so a later close clears the
       # epoch fence) but do_renew DELIBERATELY keeps the ORIGINAL work_digest
-      # (claim.ex:357). The re-read/renewal reconciled nothing the fence compares.
+      # (`do_renew/3` in claim.ex). The re-read/renewal reconciled nothing the fence compares.
       assert {:ok, renewed} = Tasks.claim_by_id(doc_id, "w", scope)
       fresh_epoch = renewed.content["claim"]["epoch"]
       assert fresh_epoch != epoch

@@ -173,7 +173,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   end
 
   # The divider is a self-closing leaf — the kernel's one rule (<hr/>). Web
-  # (compose.ex :439 → PdHr) and TUI (pdrender.go) legs already ship; this is
+  # (render/compose.ex `compose_block` divider arm → PdHr) and TUI (pdrender.go) legs already ship; this is
   # the BPML leg that dominates the one-blocker-away set (82 of 93 papers).
   defp block(%{"type" => "divider"} = b, d), do: pad(d) <> "<hr#{attr_str(b, ["id"])}/>"
 
