@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  116 scenarios, 26 rendered, 90 in a COMMITTED residue literal.
+//   SCENARIO  119 scenarios, 26 rendered, 93 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -417,7 +417,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 85
 // name-keyed entries below, which is what makes a 112th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 23 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 11 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 10 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
@@ -550,7 +550,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 23
+  // hash:#instance — 26
   "sites-on-instance": "hash:#instance",
   "panel-overview-member": "hash:#instance",
   "instance-cruel-detail": "hash:#instance",
@@ -574,6 +574,18 @@ export const SCENARIO_RESIDUE = {
   "offload-working": "hash:#instance",
   "offload-done": "hash:#instance",
   "offload-blocked": "hash:#instance",
+  // cch-w45-bl — the three instance states no cell renders and no scenario used
+  // to produce: a box one release BEHIND (#inst-update), a teardown that FAILED
+  // (#inst-remove-retry) and a /verify that answers 404 no_admin_token
+  // ([data-vf-reprovision]). They are RENDER-STATE fixtures for smoke.mjs's
+  // shim, not geometry: each one paints the same instance-detail layout every
+  // hash:#instance cell above already walks at every declared breakpoint, so a
+  // cell here would re-measure a geometry this sweep has 23 samples of and add
+  // nothing. What they carry that no cell can score is a BUTTON that exists,
+  // which is smoke.mjs's axis.
+  "instance-behind": "hash:#instance",
+  "instance-remove-failed": "hash:#instance",
+  "verify-no-credentials": "hash:#instance",
   // hash:#overview — 11
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",

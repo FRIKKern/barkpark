@@ -81,6 +81,11 @@ export const IDS = {
   suspendedInstance: "5b2c1e00-0000-4000-8000-0000000000a5",
   // cch-w61-s2: the box that answered our stored admin credential with a 401.
   refusedInstance: "5b2c1e00-0000-4000-8000-0000000000a6",
+  // cch-w45-bl: the box whose TEARDOWN failed. `deprovision_status:"failed"` is
+  // the ONLY state instanceLifecycle() folds to removeFailed, and it was null on
+  // every row in this file, so the header's whole removeFailed arm — the Retry
+  // removal CTA and the deprovision_error banner beside it — rendered nowhere.
+  removeFailedInstance: "5b2c1e00-0000-4000-8000-0000000000a7",
   // The single-instance provisioning / failed scenarios reuse their own ids.
   soloProvisioning: "5b2c1e00-0000-4000-8000-0000000000b1",
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
@@ -334,6 +339,38 @@ const credentialRefusedInstance = bpBase({
   update_unavailable_reason: "identity_refused",
   update_checked_at: tMinus(45 * 60),
   provision_status: "succeeded",
+});
+
+// cch-w45-bl — THE BOX WHOSE TEARDOWN FAILED. `Registry.mark_deprovision_failed`
+// writes deprovision_status "failed" + the worker's verbatim deprovision_error,
+// and `barkpark_json` serializes both. instanceLifecycle() folds exactly that
+// pair to `removeFailed`, which is the ONE state that paints
+// `id="inst-remove-retry"` (DELETE /v1/barkparks/:id, `admin`) — and it was
+// unreachable from the committed corpus, so the guard on it was green by
+// construction.
+//
+// `host` stays SET on purpose: a teardown that failed is a teardown that left
+// the server standing, and removeFailed wins over every other fold in
+// instanceLifecycle regardless — a hostless row would render the same header and
+// hide that the box is still up. NOT `status:"remove_failed"`: measured, that
+// renders nothing at all; the fold reads deprovision_status and only that.
+const removeFailedInstance = bpBase({
+  id: IDS.removeFailedInstance,
+  name: "Retired",
+  slug: "retired",
+  url: "https://retired-5b2c1e.barkpark.cloud",
+  host: "retired-5b2c1e.barkpark.cloud",
+  health_status: "down",
+  agent_status: "offline",
+  version: "0.9.2",
+  last_seen_at: tMinus(3 * 3600),
+  update_state: "current",
+  update_running_release: "0.9.2",
+  update_latest_release: "0.9.2",
+  update_checked_at: tMinus(3 * 3600),
+  provision_status: "succeeded",
+  deprovision_status: "failed",
+  deprovision_error: "hcloud: server delete returned 409 (a volume is still attached)",
 });
 
 // ── sites (site_json) ────────────────────────────────────────────────────────
@@ -4618,6 +4655,60 @@ export const SCENARIOS = {
       instanceRollback: { status: 409, body: { ok: false, error: { code: "identity_refused" } } },
     },
   },
+  // ── cch-w45-bl: the three instance-lifecycle verbs no committed scenario
+  // could paint. Each one is a STATE the corpus never produced, not a control
+  // that was missing — so every guard over them was green by construction (the
+  // epic's own fourth clause). Measured on origin/main dea37e8d19 by booting all
+  // 116 scenarios through smoke.mjs's shim: `id="inst-update"` 0 hits,
+  // `id="inst-remove-retry"` 0 hits, `data-vf-reprovision` 0 hits.
+  //
+  // Every one carries the corpus's OWNER actor, because the affordance these
+  // scenarios exist to render is the LIVE one — the member arm of all seven
+  // verbs is already pinned in both directions by __app.test.mjs's cch-w38-s1
+  // eleven-offer table, and `panel-overview-member` pins the disable-and-explain
+  // bytes in the real DOM.
+  "instance-behind": {
+    label: "Instance header — a live box one release BEHIND: the one-click self-update CTA (#inst-update) beside Open Studio",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, behindInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "instance-remove-failed": {
+    label: "Instance header — a teardown that FAILED: the Retry removal CTA (#inst-remove-retry) and the server's verbatim deprovision_error",
+    authed: true,
+    deepLink: "#instance/" + IDS.removeFailedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, removeFailedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "verify-no-credentials": {
+    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEventsNoVerify },
+      // The 404 the control plane answers for an instance with no stored admin
+      // credential. Without it POST /verify is a blanket 200 in every scenario,
+      // so verifyNoteHtml("no_admin_token", …) — and the [data-vf-reprovision]
+      // mount inside it — was unreachable from this harness at all.
+      instanceVerify: { status: 404, body: { error: "no_admin_token" } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -5107,6 +5198,11 @@ export function route(name, method, path, state) {
   // C8: "Check now" — the synchronous verify suite answers a fresh all-pass
   // envelope so the preview's button exercises the full render path.
   if (method === "POST" && /^\/v1\/barkparks\/[^/]+\/verify$/.test(p)) {
+    // cch-w45-bl: a scenario overrides via d.instanceVerify to drive one of the
+    // two CODED refusals (409 not_live, 404 no_admin_token) — the instanceRollback
+    // seam, same shape. The default stays the all-pass 200 below, so every
+    // scenario written before this line is byte-identical through it.
+    if (d.instanceVerify) return d.instanceVerify;
     return {
       status: 200,
       body: {
