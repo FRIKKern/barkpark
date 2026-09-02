@@ -133,6 +133,12 @@ type stampRequest struct {
 	evidence string
 	miss     bool
 	note     string
+	// withdraw is the D745 lowering outcome: met goes FALSE, the evidence is
+	// preserved, and a signed record lands on the criterion's withdrawals list.
+	// It is confirmed by a DIFFERENT read-back shape than --met (see
+	// stampMismatches): a withdrawal that "landed" while met is still true is
+	// exactly the class of lie this verb exists to end.
+	withdraw bool
 }
 
 // stampRequestOf re-resolves the stamp invocation through the SAME splitArgs +
@@ -173,6 +179,7 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 		evidence: last("evidence"),
 		miss:     last("miss") == "true",
 		note:     last("note"),
+		withdraw: last("withdraw") == "true",
 	}, true
 }
 
@@ -281,6 +288,12 @@ func storedCriterionSummary(stored taskboard.CriterionItem) string {
 	if n := len(stored.Attempts); n > 0 {
 		s += fmt.Sprintf("  attempts=%d", n)
 	}
+	// Withdrawals are named LOUDLY and last, because their presence changes how
+	// the evidence above must be read: on a withdrawn row that text is the
+	// SUPERSEDED proof, kept readable on purpose, not a current claim.
+	if n := len(stored.Withdrawals); n > 0 {
+		s += fmt.Sprintf("  WITHDRAWN×%d (evidence above is the superseded proof)", n)
+	}
 	return s
 }
 
@@ -331,7 +344,32 @@ func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string 
 			out = append(out, "the store carries no recorded attempt with that note — the miss did not land")
 		}
 	}
+	// A WITHDRAWAL is confirmed by BOTH halves, and the first one is the whole
+	// point: the lock must actually be DOWN in the store. A withdrawal that
+	// records its reason while met stays true would reproduce the exact defect
+	// the verb was built to end — a board reading MET with the correction
+	// visible only to someone who opens the row and reads prose.
+	if req.withdraw {
+		if stored.Met {
+			out = append(out, "met is still TRUE in the store — the withdrawal did not lower the lock, so every board still counts this criterion as proven")
+		}
+		if note := strings.TrimSpace(req.note); note != "" && !hasWithdrawalNote(stored, note) {
+			out = append(out, "the store carries no withdrawal record with that note — the correction is unsigned, so nothing says who withdrew it or why")
+		}
+	}
 	return out
+}
+
+// hasWithdrawalNote reports whether the stored row carries a withdrawal record
+// with this note. The server keeps every withdrawal (the list is unbounded), so
+// a just-written one is always present.
+func hasWithdrawalNote(stored taskboard.CriterionItem, note string) bool {
+	for _, w := range stored.Withdrawals {
+		if strings.TrimSpace(w.Note) == note {
+			return true
+		}
+	}
+	return false
 }
 
 // hasAttemptNote reports whether the stored row carries an attempt with this
@@ -355,6 +393,7 @@ type stampArgs struct {
 	criterionText string
 	met           bool
 	miss          bool
+	withdraw      bool
 	mergeGated    bool
 }
 
@@ -392,6 +431,8 @@ func parseStampArgs(tail []string, mergeGatedDeclared bool) (stampArgs, []string
 			sa.met = true
 		case "--miss":
 			sa.miss = true
+		case "--withdraw":
+			sa.withdraw = true
 		case "--criterion":
 			if n, err := strconv.Atoi(strings.TrimSpace(spaceVal())); err == nil {
 				sa.criterion = &n
@@ -412,6 +453,9 @@ func parseStampArgs(tail []string, mergeGatedDeclared bool) (stampArgs, []string
 // it sees only the `--criterion-text` the caller typed, so it cannot honour the
 // structural flag in EITHER direction. Delete it once no supported server
 // predates the declared flag.
+// A WITHDRAWAL is never caught by it: `sa.met` is false on that path, which is
+// correct and load-bearing — lowering a merge gate's lock cannot fabricate a
+// done before the PR exists, which is the only harm this tripwire guards.
 func stampMergeGateFallback(sa stampArgs) bool {
 	return sa.met && !sa.mergeGated && isMergeGatedText(sa.criterionText)
 }
@@ -456,6 +500,11 @@ func stampEchoLine(sa stampArgs) string {
 		outcome = "met"
 	case sa.miss:
 		outcome = "miss (attempt)"
+	case sa.withdraw:
+		// Spelled out because a withdrawal is the one outcome that makes the
+		// board's number go DOWN, and an operator who typed the wrong index
+		// should see that before the write, not after.
+		outcome = "WITHDRAW (met → false; the evidence is kept, the lock is lowered)"
 	}
 	line := fmt.Sprintf("→ criterion index %d (0-based) = criterion #%d as boards/rubric number them → %s", idx, idx+1, outcome)
 	if t := strings.TrimSpace(sa.criterionText); t != "" {
