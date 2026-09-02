@@ -132,9 +132,13 @@ defmodule Barkpark.Content.AfterWriteListenerSeamTest do
       assert {:ok, published} = publish_paper!(id, "seamsilent")
       assert published.status == "published"
 
-      assert [] = all_enqueued(worker: FindabilityPosttest),
+      # Bind first, then assert on a boolean: `assert [] = expr, msg` raises
+      # MatchError before assert/2 runs, so the message below could never print.
+      enqueued = all_enqueued(worker: FindabilityPosttest)
+
+      assert enqueued == [],
              "a job was enqueued with the listener list EMPTY — content is calling the " <>
-               "worker directly again (the content → workers edge is back)"
+               "worker directly again (the content → workers edge is back): #{inspect(enqueued)}"
     end
 
     test "an unset key (deleted env) behaves like an empty list", ctx do
