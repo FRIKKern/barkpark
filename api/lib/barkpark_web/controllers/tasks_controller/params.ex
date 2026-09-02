@@ -999,10 +999,33 @@ defmodule BarkparkWeb.TasksController.Params do
   def criteria_hint(:observed_rev_required, :stamp),
     do:
       ~s|this row carries no live claim (it is closed, cancelled or released), so there is no epoch to fence | <>
-        ~s|a withdrawal against. Pin the rev you read instead: re-read with `bp task get <id> -o json`, take | <>
-        ~s|.doc.rev, and re-run the withdrawal with --observed-rev <rev>. Nothing was written. A withdrawal | <>
-        ~s|never touches the seal, the close_reason or the original evidence — it lowers the met flag and | <>
-        ~s|appends a signed record naming who withdrew it and why.|
+        ~s|a withdrawal or a post-close --miss against. Pin the rev you read instead: re-read with | <>
+        ~s|`bp task get <id> -o json`, take .doc.rev, and re-run with --observed-rev <rev>. Nothing was | <>
+        ~s|written. Neither verb touches the seal, the close_reason or the original evidence: a withdrawal | <>
+        ~s|lowers the met flag and appends a signed record naming who withdrew it and why, and a --miss | <>
+        ~s|appends an attempt while PINNING met to whatever it already was.|
+
+  # THE POST-CLOSE REFUSAL (task-d68754135a6a9f66). This is the message that
+  # decides whether a closer reaches for the sanctioned instrument or for a raw
+  # /v1/data/mutate — the substitution that pasted one evidence blob across
+  # every remaining criterion on ~43-57 rows. It therefore has to name the verb
+  # that DOES work here and the exact flags it needs, not just the wall.
+  def criteria_hint({:not_in_progress, status}, :stamp) when status in ["done", "cancelled"],
+    do:
+      ~s|this row is #{status} — its verdict is sealed by close, so --met is refused here permanently: a | <>
+        ~s|met-flip after close rewrites the claim the close sealed AND overwrites the criterion's evidence. | <>
+        ~s|Nothing was written. What DOES work on a sealed row is the append-only pair: --miss --note "..." | <>
+        ~s|records an honest observation (it pins met to its stored value and touches neither evidence nor | <>
+        ~s|the criterion text), and --withdraw --note "..." lowers a met flag review has refuted. Both need | <>
+        ~s|the rev you read instead of an epoch: `bp task get <id> -o json`, take .doc.rev, pass | <>
+        ~s|--observed-rev <rev>. Do NOT patch criteria through /v1/data/mutate — that leaves no attribution | <>
+        ~s|and is what this instrument exists to replace.|
+
+  def criteria_hint({:not_in_progress, status}, :stamp),
+    do:
+      ~s|this row is #{status}, not in_progress — a stamp writes under a LIVE claim. Nothing was written. | <>
+        ~s|Claim it first (`bp task claim <id> <worker>`) and stamp with the epoch that returns. The | <>
+        ~s|post-close --miss / --withdraw exemption applies only to a done or cancelled row.|
 
   def criteria_hint(:criterion_not_met, :stamp),
     do:
@@ -1387,7 +1410,9 @@ defmodule BarkparkWeb.TasksController.Params do
   # fails closed exactly as raising it does). The bp CLI sends flags as query strings ("true",
   # "0"); curl sends typed JSON — both shapes are accepted. Exactly one of
   # met/miss; --met REQUIRES non-empty evidence (evidence or nothing, D3);
-  # --miss REQUIRES a non-empty note (an honest attempt has words).
+  # --miss REQUIRES a non-empty note (an honest attempt has words). --miss is
+  # ALSO the one verb accepted on a DONE / CANCELLED row (with --observed-rev),
+  # because it pins met and writes no evidence; --met never is.
   # `criterion_text` is the OPTIONAL 0-based/off-by-one guard: the criterion's
   # expected stored text, threaded into the stamp's criteria-grain CAS so a
   # wrong (in-range) index is rejected (`:criteria_mismatch`) instead of

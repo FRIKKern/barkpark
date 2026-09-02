@@ -1470,6 +1470,133 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert r2.status == 409
       assert Jason.decode!(r2.resp_body)["reason"] == "not_holder"
     end
+
+    # ─── THE POST-CLOSE ATTEMPT ON THE WIRE (task-d68754135a6a9f66) ────────
+    #
+    # Criterion 4 of the row: the --miss path must work end to end, CLI wire
+    # shape → controller → Stamp, against a REAL done row. These use the exact
+    # bp CLI shape (positional worker_id + observed_epoch in the JSON body,
+    # flags as kebab query params) so a green here is a green for `bp task
+    # stamp <id> <worker> 0 --criterion N --miss --note "…" --observed-rev <rev>`.
+
+    # Claim, then close into `status`, returning {doc_id, closed_rev}.
+    defp closed_with_criteria!(conn, scope, criteria, status \\ "done") do
+      {doc_id, epoch} = claim_with_criteria!(conn, scope, criteria)
+
+      close_body =
+        Jason.encode!(%{
+          worker_id: "worker-1",
+          observed_epoch: epoch,
+          lifecycle_status: status,
+          criteria_override: "closing with criteria unproven on purpose"
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{doc_id}/close", close_body)
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["doc"]["lifecycle_status"] == status
+      {doc_id, payload["doc"]["rev"]}
+    end
+
+    test "--miss on a DONE row lands 200 through the wire, --met on it is still 409",
+         %{conn: conn, scope: scope} do
+      {doc_id, rev} =
+        closed_with_criteria!(conn, scope, [
+          %{"criterion" => "gate green", "met" => false, "evidence" => ""},
+          %{"criterion" => "docs updated", "met" => true, "evidence" => "PR #1 body"}
+        ])
+
+      # A closed row has no live epoch; the CLI still sends the positional 0.
+      body = Jason.encode!(%{worker_id: "reconciler", observed_epoch: "0"})
+
+      miss =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=re-read+after+close%3A+the+gate+log+is+gone" <>
+            "&observed-rev=#{URI.encode_www_form(rev)}",
+          body
+        )
+
+      assert miss.status == 200
+      doc = Jason.decode!(miss.resp_body)["doc"]
+      assert doc["lifecycle_status"] == "done", "the seal survives the annotation"
+
+      [c0, c1] = doc["content"]["acceptance_criteria"]
+      assert [%{"note" => "re-read after close: the gate log is gone"}] = c0["attempts"]
+      assert c0["met"] == false
+      assert c0["evidence"] == "", "an attempt writes no evidence — ever"
+
+      # The met=true neighbour is byte-identical: not lowered, not re-evidenced.
+      assert c1 == %{"criterion" => "docs updated", "met" => true, "evidence" => "PR #1 body"}
+
+      # And the RAISE is still walled, WITH the same rev pinned. The message is
+      # load-bearing: it is what stops a blocked closer reaching for a raw
+      # /v1/data/mutate, which is the substitution this whole change removes.
+      met =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=gate+green&met=true" <>
+            "&evidence=verified+CI-green+after+the+close&observed-rev=#{URI.encode_www_form(rev)}",
+          body
+        )
+
+      assert met.status == 409
+      payload = Jason.decode!(met.resp_body)
+      assert payload["reason"] == "not_in_progress:done"
+      assert payload["message"] =~ "--miss --note"
+      assert payload["message"] =~ "--observed-rev"
+      assert payload["message"] =~ "/v1/data/mutate"
+    end
+
+    test "a post-close --miss with no --observed-rev is 409 and names the read it needs",
+         %{conn: conn, scope: scope} do
+      {doc_id, _rev} =
+        closed_with_criteria!(conn, scope, [%{"criterion" => "gate green", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "reconciler", observed_epoch: "0"})
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=no+rev+pinned", body)
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "observed_rev_required"
+      assert payload["message"] =~ "--observed-rev"
+      assert payload["message"] =~ "post-close --miss"
+
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      [c0] = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert Map.get(c0, "attempts") == nil, "a refused attempt writes nothing"
+    end
+
+    test "a CANCELLED row takes the attempt on the same fence", %{conn: conn, scope: scope} do
+      {doc_id, rev} =
+        closed_with_criteria!(
+          conn,
+          scope,
+          [%{"criterion" => "gate green", "met" => false}],
+          "cancelled"
+        )
+
+      body = Jason.encode!(%{worker_id: "reconciler", observed_epoch: "0"})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=cancelled+before+this+ran" <>
+            "&observed-rev=#{URI.encode_www_form(rev)}",
+          body
+        )
+
+      assert resp.status == 200
+      [c0] = Jason.decode!(resp.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert [%{"note" => "cancelled before this ran"}] = c0["attempts"]
+    end
   end
 
   describe "criteria_progress surfacing (lvw-t6 — read & surface, no gate)" do
