@@ -640,7 +640,24 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.ready",
         noun: "task",
         verb: "ready",
-        summary: "List executable, unblocked tasks (priority order by default).",
+        # WHAT `ready` RETURNS, said out loud (task tgw10-bl-drafts-in-ready-pool).
+        # The old summary — "List executable, unblocked tasks" — was wrong twice.
+        # (a) `blocked` IS claimable: Tasks.Validation.claimable_statuses/0 is
+        #     ~w(open blocked) by DECISION (spd-b24) — blocking is advisory
+        #     metadata; the blocks-edge and content.dependencies gates are what
+        #     actually hold work back. So a lifecycle-`blocked` row in the queue
+        #     is the design, not a leak.
+        # (b) `ready` carries NO documents.status predicate, so an UNPAIRED
+        #     `drafts.<id>` row is admitted as itself. That too is deliberate:
+        #     `bp task create` lands a draft by default, and excluding drafts
+        #     would hide every unpublished task from the queue agents claim from.
+        #     Only a draft whose published twin exists in the same scope is
+        #     collapsed away (Tasks.Queue axis 3, published-wins).
+        # The pin in cli_commands_manifest_test.exs holds this sentence.
+        summary:
+          "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), " <>
+            "dependencies and queue gate cleared, published or unpaired draft, " <>
+            "twin-collapsed to the published row — priority order by default.",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],

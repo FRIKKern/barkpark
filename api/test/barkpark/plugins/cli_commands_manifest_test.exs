@@ -16,6 +16,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit, Tasks}
+  alias Barkpark.Tasks.Validation
 
   # The flat plugin paths these plugins actually register (Bulldocs +
   # OnixEdit `register_routes/1`), prefixed with the host's `/v1/plugins` mount.
@@ -381,6 +382,54 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
         assert order.type == "string"
         refute Map.has_key?(order, :default)
       end
+    end
+
+    test "task.ready's summary says what the query returns — claimable, draft-tolerant, twin-collapsed" do
+      # WORDING PIN (task tgw10-bl-drafts-in-ready-pool). The summary this
+      # manifest ships is the ONLY sentence most agents ever read about the
+      # ready queue — it flows to `bp task ready --help`, to docs/openapi.json,
+      # and (restated) to the MCP task_ready tool. It said "List executable,
+      # unblocked tasks", which was wrong on BOTH of the row's findings:
+      #
+      #   * lifecycle `blocked` rows ARE listed — Validation.claimable_statuses/0
+      #     is ~w(open blocked) by decision, and Tasks.Queue binds exactly that
+      #     list. "unblocked" told a reader the opposite.
+      #   * an UNPAIRED `drafts.<id>` row is listed as itself — Tasks.Queue
+      #     carries no `documents.status` predicate; only a draft with a
+      #     same-scope published twin is collapsed away.
+      #
+      # The ruling was to correct the SENTENCE, not the query (excluding drafts
+      # would hide every `bp task create` row from the queue). This test is what
+      # stops the sentence from silently regressing to the comfortable lie:
+      # reverting the summary reds it by name.
+      ready = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ready"))
+      summary = ready.summary
+
+      refute summary =~ "unblocked",
+             "task.ready's summary claims the queue is `unblocked`, but " <>
+               "Validation.claimable_statuses/0 is #{inspect(Validation.claimable_statuses())} " <>
+               "— lifecycle `blocked` rows are listed by design. Got: #{summary}"
+
+      assert summary =~ "claimable",
+             "task.ready's summary must name what the queue actually holds " <>
+               "(claimable rows), not a promise the query does not keep. Got: #{summary}"
+
+      assert summary =~ "blocked is claimable by design",
+             "task.ready's summary must state that lifecycle `blocked` is in the " <>
+               "queue on purpose (Validation @claimable_statuses). Got: #{summary}"
+
+      assert summary =~ "published or unpaired draft",
+             "task.ready's summary must state that an unpaired `drafts.` row is " <>
+               "listed — Tasks.Queue has no documents.status filter. Got: #{summary}"
+
+      assert summary =~ "twin-collapsed to the published row",
+             "task.ready's summary must state the twin-collapse rule, or a reader " <>
+               "cannot tell WHICH of a draft/published pair the queue yields. " <>
+               "Got: #{summary}"
+
+      # Non-vacuity: the two lifecycle words the sentence commits to are the two
+      # the code actually allows, so this pin cannot drift away from the query.
+      assert Validation.claimable_statuses() == ~w(open blocked)
     end
 
     test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do
