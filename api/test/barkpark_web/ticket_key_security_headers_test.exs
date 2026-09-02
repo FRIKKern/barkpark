@@ -199,11 +199,14 @@ defmodule BarkparkWeb.TicketKeySecurityHeadersTest do
 
   # The attachment fixture inserts the ticket ROW directly, exactly as
   # `attachments_test.exs` and `tickets_attachments_session_pipeline_test.exs`
-  # do. `Thread.create/2` writes a `drafts.`-prefixed row while
-  # `TicketsAttachmentsController.owned_ticket/2` resolves the PUBLISHED id, so
-  # a ticket filed over HTTP is not reachable by the attachment routes — a real,
-  # separate defect and not this test's subject. The REQUESTS below still go
-  # through the endpoint; only the ticket row is seeded.
+  # do — the REQUESTS below still go through the endpoint; only the ticket row is
+  # seeded, because this suite is about response HEADERS.
+  #
+  # That seeding used to be load-bearing: `Thread.create/2` writes a `drafts.`-
+  # prefixed row while `TicketsAttachmentsController.owned_ticket/2` resolved the
+  # PUBLISHED id, so a ticket filed over HTTP was NOT reachable by its own
+  # attachment routes. That defect is fixed (task-0d7d25398ee8dfde) and covered
+  # by `tickets_attachments_http_created_ticket_test.exs`, which seeds nothing.
   defp insert_ticket!(%{key: key, ws: ws, project: project}) do
     doc_id = "ticket-" <> Integer.to_string(System.unique_integer([:positive]))
 

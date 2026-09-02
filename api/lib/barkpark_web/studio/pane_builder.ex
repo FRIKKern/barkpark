@@ -297,10 +297,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         {panes ++ [doc_pane], editor}
 
-      # Plugin-contributed link row — terminal node, no pane to add. The
-      # LV inspects `nav_path` and turns this into outbound navigation
-      # via `push_navigate`. Returning the unchanged pane stack keeps the
-      # parent list pane visible while the navigation flushes.
+      # Plugin-contributed link row — terminal node, no pane to add.
+      # Returning the unchanged pane stack keeps the parent list pane visible
+      # with this link as its selection.
+      #
+      # This comment used to say "the LV inspects `nav_path` and turns this
+      # into outbound navigation via `push_navigate`". It does not, and never
+      # did: no arm of StudioLive reads `nav_path` for a `:plugin_link`, the
+      # rows are plain `<a href>` anchors the BROWSER follows, and mounting
+      # such a path directly issues no redirect at all
+      # (`studio_plugin_link_empty_state_test.exs` drives `assert_redirect/2`
+      # to "but got none"). So the render this branch produces is not an
+      # intermediate frame that a navigate is about to replace — it is the
+      # page, for as long as the URL stands. That is why
+      # `Shared.empty_editor_state/2` must suppress the unresolved-document
+      # notice for this shape rather than tolerate it as a one-frame flash
+      # (task-554a33ca42c0c45a).
       %{type: :plugin_link} ->
         {panes, nil}
 

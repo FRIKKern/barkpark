@@ -82,6 +82,16 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	source := attrStrFirst(b.Attrs, "code", "value")
 	lang := attrStrFirst(b.Attrs, "language", "lang") // usually absent; tolerated.
 
+	// A blank or whitespace-only source renders NOTHING — no lines, no accent
+	// bar. This mirrors the Elixir composer since #14806 (a sourceless code
+	// block composes to nothing, not an empty box); before this guard the Go
+	// readers painted a lone "▌" where the web rendered nothing, a View/TUI
+	// parity break on the same block (task-841c27ea82903f48). Checked before
+	// the cache key so the empty case never occupies a slot.
+	if strings.TrimSpace(source) == "" {
+		return nil
+	}
+
 	key := codeKey{
 		hash:    hashStrings(source, lang),
 		width:   ctx.Width,

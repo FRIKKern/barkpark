@@ -28,6 +28,14 @@
 #   * a real failing assertion must red                       (case 5)
 #   * a forwarded --test-reporter must be refused BY NAME     (case 6)
 #   * per-file TAP blocks must stay whole and ordered         (case 7)
+#   * a COMMITTED --floor must red on a shrunk suite          (case 10) — and
+#     case 8 runs the identical gutted tree WITHOUT the floor and asserts it
+#     goes GREEN, so the pair is a red-before/green-after on the same fixture:
+#     the only variable is the literal. Every other assertion in this runner is
+#     derived from the tree it measures and so agrees with a gutted tree.
+#   * a --floor the runner cannot read must red, BY NAME       (case 12) — a
+#     floor that silently parses to nothing is a call site that LOOKS floored
+#     and is not, the exact shape of gate this whole file exists to refuse
 # A harness with only green cases is the defect, not the proof.
 
 set -euo pipefail
@@ -179,16 +187,99 @@ if has "ran $survivor_n tests from 1 files" "$out"; then
 else
   no "the summary did not track the gutted tree: $out"
 fi
-# ...AND it exits 0, which is the runner's honest LIMIT: every pattern matched
-# and the survivor registers tests. Catching "shrank but non-empty" needs a
-# committed baseline or a judgement literal (apps/hundesteder's MIN_TESTS),
-# because anything computed from the current tree agrees with a gutted tree by
-# construction. Asserted so nobody deletes that second floor as redundant.
+# ...AND it exits 0 WITH NO --floor, which is the runner's honest LIMIT: every
+# pattern matched and the survivor registers tests. Anything computed from the
+# current tree agrees with a gutted tree by construction, so catching "shrank
+# but non-empty" needs a committed literal — `--floor N` (case 10 below runs
+# this very shape with one) or a judgement floor like apps/hundesteder's
+# MIN_TESTS. Asserted so nobody deletes those second floors as redundant.
 if [ "$rc" -eq 0 ]; then
-  ok "exit 0 on a gutted-but-non-empty suite — the DOCUMENTED limit; a count floor is what catches this"
+  ok "exit 0 on a gutted-but-non-empty suite WITHOUT --floor — the DOCUMENTED limit; a committed floor is what catches this"
 else
-  no "the runner now reds on a shrink (rc=$rc); if that is deliberate, update apps/hundesteder's MIN_TESTS rationale"
+  no "the runner now reds on a shrink with no floor (rc=$rc); if that is deliberate, update apps/hundesteder's MIN_TESTS rationale"
 fi
+
+# ── case 9 — --floor EQUAL to the discovered count is a plain green. ────────
+# The steady state at every call site. It must not cost anything, and the
+# summary must SHOW the literal, so a reader of a green log can tell a floored
+# call site from an unfloored one without opening the workflow.
+FX9="$TMPROOT/c9"; mkdir -p "$FX9"
+mk_tests "$FX9/a.test.mjs" 3
+mk_tests "$FX9/b.test.mjs" 2
+mk_tests "$FX9/c.test.mjs" 4
+out="$(cd "$FX9" && node "$RUNNER" --floor 3 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "exit 0 when the discovered count EQUALS the floor"; else no "an exactly-met floor red (rc=$rc): $out"; fi
+if has "[floor 3 files]" "$out"; then ok "the summary shows the committed floor"; else no "a green log does not say the call site is floored: $out"; fi
+if has "raise the floor" "$out"; then no "an exactly-met floor printed the grow hint: $out"; else ok "no grow hint when the count is exactly the floor"; fi
+
+# ── case 10 — THE ONE THIS FLAG EXISTS FOR: a shrunk suite must RED. ────────
+# Same gutted-tree shape case 8 proves goes green unfloored. The ONLY variable
+# is the committed literal, which is why the pair is the proof and either half
+# alone is not. The message must name BOTH numbers: a reader who sees only
+# "floor is 5" cannot tell a deletion from a floor someone typed too high.
+FX10="$TMPROOT/c10"; mkdir -p "$FX10"
+fx10_n=1
+for fx10_count in 3 1 4 1 5; do
+  mk_tests "$FX10/g$(printf '%02d' "$fx10_n").test.mjs" "$fx10_count"
+  fx10_n=$((fx10_n + 1))
+done
+out="$(cd "$FX10" && node "$RUNNER" --floor 5 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "the 5-file control is green at --floor 5"; else no "the pre-deletion control red (rc=$rc): $out"; fi
+
+rm "$FX10/g03.test.mjs" "$FX10/g04.test.mjs"
+out="$(cd "$FX10" && node "$RUNNER" '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "RED-BEFORE reconfirmed — the gutted 3-of-5 tree is GREEN with no floor"
+else
+  no "the unfloored gutted tree now reds (rc=$rc) — case 8's premise moved; re-derive both"
+fi
+
+out="$(cd "$FX10" && node "$RUNNER" --floor 5 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then ok "exit $rc on a 3-of-5 partial deletion at --floor 5"; else no "A PARTIAL DELETION PASSED WITH A FLOOR — the flag does nothing: $out"; fi
+if has "3 test files discovered, floor is 5" "$out"; then
+  ok "names BOTH numbers (discovered 3, floor 5)"
+else
+  no "the refusal does not name both numbers: $out"
+fi
+if has "must lower the floor deliberately" "$out"; then
+  ok "says the legitimate way out is an edit to the call site"
+else
+  no "the refusal does not say a deliberate deletion means lowering the literal: $out"
+fi
+# The floor is checked BEFORE any test process spawns, so a shrunk suite fails
+# on the shrink and not on whatever the survivors happen to do.
+if has "node-test floor: ran " "$out"; then no "the suite ran anyway; the floor should short-circuit: $out"; else ok "reds before spawning a single test process"; fi
+
+# ── case 11 — ABOVE the floor REPORTS, never fails. ─────────────────────────
+# A grown suite is not a defect, and failing on growth is how a floor gets
+# deleted for being annoying. It must still say the new number out loud, or the
+# literal quietly stops covering the files added after it.
+out="$(cd "$FX9" && node "$RUNNER" --floor 2 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "exit 0 when the suite is ABOVE its floor"; else no "growth was treated as a failure (rc=$rc): $out"; fi
+if has "raise the floor to 3" "$out"; then ok "names the number to commit (raise the floor to 3)"; else no "the grow hint does not name the new count: $out"; fi
+
+# ── case 12 — an UNREADABLE --floor reds BY NAME, never silently unfloored. ─
+# Failing open here is the worst outcome available: the call site LOOKS floored
+# and is not, which is the exact shape of gate the rest of this file refuses.
+out="$(cd "$FX9" && node "$RUNNER" --floor abc '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then ok "exit $rc on a non-integer --floor"; else no "a non-integer floor was ignored and the run passed unfloored: $out"; fi
+if has "--floor needs an integer file count" "$out"; then ok "names the flag, not a symptom"; else no "the refusal does not name --floor: $out"; fi
+out="$(cd "$FX9" && node "$RUNNER" --floor 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then ok "exit $rc on --floor with no value"; else no "a valueless --floor passed: $out"; fi
+out="$(cd "$FX9" && node "$RUNNER" --floor 0 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then ok "exit $rc on --floor 0 — a floor an empty tree satisfies"; else no "--floor 0 was accepted: $out"; fi
+out="$(cd "$FX9" && node "$RUNNER" --floor 3 --floor 1 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then ok "exit $rc on a duplicated --floor"; else no "two floors were accepted; the weaker one silently wins: $out"; fi
+
+# ── case 13 — --floor is never forwarded to node, on either side of `--`. ───
+# It is the runner's own flag. Leaking it through would make node reject the
+# run with an unrelated message, and a caller would file that against their
+# own test suite.
+out="$(cd "$FX9" && node "$RUNNER" --floor 3 -- '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "exit 0 with --floor BEFORE the -- separator"; else no "--floor leaked into node's argv before -- (rc=$rc): $out"; fi
+out="$(cd "$FX9" && node "$RUNNER" -- --floor 3 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "exit 0 with --floor AFTER the -- separator (not read as a glob)"; else no "--floor after -- was treated as a pattern (rc=$rc): $out"; fi
+if has "[floor 3 files]" "$out"; then ok "the floor is honoured from after the separator"; else no "--floor after -- was dropped instead of applied: $out"; fi
 
 echo
 echo "----"

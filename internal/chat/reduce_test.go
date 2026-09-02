@@ -499,6 +499,39 @@ func TestWorkflowFrameUpdatesLiveWorkflowNoEffect(t *testing.T) {
 	}
 }
 
+// TestTitleFrameUpdatesTitleNoEffect proves ct-bl-recorder-titles on the client
+// half: the `event: title` push renames the header mid-session and asks for NO
+// IO — that MISSING session GET is the D15 poll retired. An empty or malformed
+// frame is inert (the last-known title stands), and a later turn-boundary fetch
+// carrying the same persisted title converges rather than fighting it.
+func TestTitleFrameUpdatesTitleNoEffect(t *testing.T) {
+	data := []byte(`{"session_id":"s1","title":"Fix the flaky login test"}`)
+	st, effs := drive(State{SessionID: "s1", Title: "New chat", Phase: TurnStreaming}, t0, FrameEvent{Name: "title", Data: data})
+
+	if len(effs) != 0 {
+		t.Fatalf("a title frame does no IO (the D15 poll retired), got %d effects", len(effs))
+	}
+	if st.Title != "Fix the flaky login test" {
+		t.Fatalf("Title = %q, want the pushed title", st.Title)
+	}
+
+	// Malformed and empty-title frames are inert — never a blanked header.
+	for _, bad := range [][]byte{[]byte(`not json`), []byte(`{"session_id":"s1","title":"   "}`), []byte(`{}`)} {
+		next, _ := drive(st, t0, FrameEvent{Name: "title", Data: bad})
+		if next.Title != "Fix the flaky login test" {
+			t.Fatalf("a %q title frame must leave the last title intact, got %q", bad, next.Title)
+		}
+	}
+
+	// Reconnect convergence: the frame is unreplayable by design, so a client
+	// that dropped it learns the SAME title from the turn-boundary session read.
+	// The two paths must agree — otherwise a reconnect visibly reverts the header.
+	settled, _ := drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1", Title: "Fix the flaky login test"}})
+	if settled.Title != "Fix the flaky login test" {
+		t.Fatalf("a settled fetch must converge on the pushed title, got %q", settled.Title)
+	}
+}
+
 // pendingCardRow builds a persisted, pending approval-family row (the shape the
 // Recorder writes via persist_approval_ask): request_id + pending status in the
 // raw metadata map.

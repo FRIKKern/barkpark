@@ -222,6 +222,23 @@ export function adjudicateCorpus(rows, recipes = [], opts = {}) {
   const admission = adjudicateAll(facts, { execute: false });
 
   // ── EXECUTION, ONE RECIPE AT A TIME, INSIDE THE BUDGET ────────────────────
+  // PDS-BLIND-SPOT-METER: `Date.now()`, WALL CLOCK inside this Node process,
+  // around the recipe-execution loop. Placement is (a) of PDS-D633's law — an
+  // OS-level clock OUTSIDE every BEAM — and it is the only placement available,
+  // since the reruns are child processes this module shells out to. THE UNIT IS
+  // NOT A PRICE AND MUST NEVER BE QUOTED AS ONE: this is a BUDGET ODOMETER whose
+  // whole job is to decide when to stop spending, so it charges each child's
+  // WAITING as well as its work, and PDS-D605 forbids a wall-clock second
+  // standing in for CPU (wall swung 2.5x on an unchanged census where user CPU
+  // moved 9%). A CPU price for a rerun comes from an OS meter around a SHELL
+  // (`pds-door-census.sh --measure`); a regression ratchet would take
+  // `Process.info(pid, :reductions)`, which has no Node equivalent at all.
+  //
+  // PDS-BLIND-SPOT-EMITTER: tooling/pds/verdict.mjs
+  // This module computes the figure; verdict.mjs is the only thing that PRINTS
+  // it, and that is where the sentence rides. Declared here so the check can
+  // follow the figure to its own output path rather than demanding the sentence
+  // in a module that prints nothing.
   const started = Date.now();
   const executed = new Map();
   let overspent = null;

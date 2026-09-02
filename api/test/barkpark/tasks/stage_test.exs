@@ -70,6 +70,26 @@ defmodule Barkpark.Tasks.StageTest do
 
   defp reload(%Document{id: id}), do: Repo.get!(Document, id)
 
+  # A REAL engagement lease, minted by the REAL verb (PDS wave 27). The lease
+  # fixture is never hand-written: a scratch open row is staged to
+  # `considering` through `Tasks.stage/3` and the map it wrote is returned
+  # byte-for-byte, so "the lease survived byte-identical" is a claim about the
+  # shape the minter actually produces (object/ts/lapse_ttl_seconds/lapses_at/
+  # holder), not about a literal that could drift away from it.
+  defp mint_lease!(scope, opts \\ []) do
+    seed = mk_task!(uniq("stage-lease-mint"), scope)
+
+    {:ok, doc} =
+      Tasks.stage(seed.id, "considering",
+        object: Keyword.get(opts, :object, "build"),
+        holder: Keyword.get(opts, :holder, "thinker-1")
+      )
+
+    lease = doc.content["engagement"]
+    assert is_map(lease), "mint_lease!/2 did not mint a lease"
+    lease
+  end
+
   # The task.stage verb summary as `/v1/capabilities` (and `bp task stage
   # --help`) advertise it — the single source we assert the reopen edges into.
   defp stage_verb_summary do
@@ -487,7 +507,15 @@ defmodule Barkpark.Tasks.StageTest do
       # place — and still cannot be MOVED anywhere new by this door.
       for state <- ~w(blocked in_progress) do
         doc_id = uniq("stage-same-#{state}")
-        task = mk_task!(doc_id, scope, %{"lifecycle_status" => state})
+
+        # PDS wave 27: the row carries a LIVE engagement lease into the
+        # adjudication door. Wave 25 widened `check_stageable/2` without
+        # revisiting `apply_engagement/5`, whose catch-all returned
+        # `{Map.delete(content, "engagement"), nil}` for every non-thought
+        # target — so this same-state stage DESTROYED the lease. RED WITHOUT
+        # THE FIX: the engagement assertion below fails with `nil` on the left.
+        lease = mint_lease!(scope, holder: "thinker-#{state}")
+        task = mk_task!(doc_id, scope, %{"lifecycle_status" => state, "engagement" => lease})
 
         resp =
           stage(conn, doc_id, %{
@@ -504,7 +532,85 @@ defmodule Barkpark.Tasks.StageTest do
         assert row.content["lifecycle_status"] == state
         assert row.content["disposition"] == "parked"
         assert row.content["reopen_trigger"] == "when an ARM CI runner exists"
+
+        # THE RULING (PDS wave 27): a same-state stage ADJUDICATES, it does not
+        # MOVE — so the lease survives BYTE-IDENTICAL, exactly as the claim map
+        # does one test above. Not "still present": the same map, key for key.
+        assert row.content["engagement"] == lease,
+               "same-state adjudication on #{state} ALTERED the lease: " <>
+                 inspect(row.content["engagement"])
       end
+    end
+
+    # ─── The reachability, exercised END TO END (PDS wave 27, criterion 2) ───
+    #
+    # Not argued — RUN. Every transition below goes through a sanctioned verb;
+    # nothing writes `content` behind the primitives' backs except the initial
+    # fixture, whose lease is itself minted by `Tasks.stage/3` (`mint_lease!/2`).
+    #
+    # THE CHAIN: `blocked` is claimable (`Validation.claimable_statuses/0` ==
+    # ~w(open blocked)) and `claim.ex` never mentions `engagement` — so a lease
+    # on a blocked row rides the REAL claim into `in_progress` untouched, and
+    # lands on the adjudication door still live. That is the destroy path.
+    test "END TO END: a lease rides a real claim into in_progress and survives the adjudication there",
+         %{conn: conn, scope: scope} do
+      lease = mint_lease!(scope, object: "build", holder: "thinker-e2e")
+      doc_id = uniq("stage-lease-e2e")
+
+      task =
+        mk_task!(doc_id, scope, %{"lifecycle_status" => "blocked", "engagement" => lease})
+
+      # 1. THE REAL CLAIM VERB — no engagement handling anywhere in it.
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "builder-e2e", scope)
+      assert claimed.content["lifecycle_status"] == "in_progress"
+      assert claimed.content["claim"]["worker"] == "builder-e2e"
+
+      assert claimed.content["engagement"] == lease,
+             "the claim verb altered the lease: " <> inspect(claimed.content["engagement"])
+
+      epoch = claimed.content["claim"]["epoch"]
+
+      # 2. THE REAL STAGE VERB, same-state, on the live-claimed row. This is
+      #    the door PDS-D348 asserted "mints or alters no claim or LEASE". The
+      #    claim half was true; the lease half was not, until wave 27.
+      resp =
+        stage(conn, doc_id, %{
+          state: "in_progress",
+          worker: "reconciler",
+          disposition: "parked",
+          note: "parked mid-flight; the lease is the holder's, not the adjudicator's",
+          "reopen-trigger": "when the builder returns"
+        })
+
+      assert resp.status == 200
+
+      row = reload(task)
+      assert row.content["lifecycle_status"] == "in_progress"
+      assert row.content["disposition"] == "parked"
+
+      assert row.content["engagement"] == lease,
+             "the in_progress adjudication ate the lease a real claim carried in: " <>
+               inspect(row.content["engagement"])
+
+      # …and the claim the REAL verb minted is still byte-identical, so this
+      # test also re-pins the half of PDS-D348 that always held.
+      assert row.content["claim"]["worker"] == "builder-e2e"
+      assert row.content["claim"]["epoch"] == epoch
+    end
+
+    test "the MOVEMENT door still clears the lease — the fix is scoped to from == to",
+         %{scope: scope} do
+      # The other side of the ruling, stated so a future edit cannot quietly
+      # widen it: `considering → open` MOVES the row, resolves the thought, and
+      # must still CLEAR the lease. Delete the `when from == to` guard from the
+      # new clause and this reds.
+      seed = mk_task!(uniq("stage-lease-movement"), scope)
+      {:ok, thinking} = Tasks.stage(seed.id, "considering", object: "research")
+      assert is_map(thinking.content["engagement"])
+
+      {:ok, opened} = Tasks.stage(seed.id, "open", note: "promoted to backlog")
+      assert opened.content["lifecycle_status"] == "open"
+      refute Map.has_key?(opened.content, "engagement")
     end
 
     test "the adjudication door is not a movement door: open → done is STILL a 422",

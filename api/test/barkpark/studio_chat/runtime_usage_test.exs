@@ -1020,9 +1020,46 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
           Task.await(holder, 10_000)
         end
       after
+        park_unboxed_sessions!(workspace)
         assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
       end
     end)
+  end
+
+  # ── the unboxed drive's committed residue (wave-26 pollution class) ─────────
+  #
+  # `unboxed_run` COMMITS — that is the point (two real connections have to block
+  # each other), but it also means every row the drive writes OUTLIVES the test.
+  # `prepare_runtime_attempt/2` mints a chat_sessions row for the attempt, and
+  # the teardown above does NOT reach it: `Tenancy.delete_workspace/1` returns
+  # `{:ok, _}` and leaves the session behind. Measured on main (2026-09-01):
+  # running this file against an empty `chat_sessions` leaves exactly ONE
+  # committed row, cleaned by nothing, forever.
+  #
+  # A committed session escapes every LATER test's sandbox rollback and rides
+  # `list_sessions/2`'s recency-desc ordering ahead of that test's own pinned
+  # fixtures — the class #12041 named: an extra row reddens `StudioChatTest`'s
+  # list_sessions recency/cap tests and (for a NULL-owner row) the sidebar
+  # byte-lock in `ChatRenderGoldenTest`, which renders it as an EXTRA session
+  # card (region 7783 vs golden 6554 — no render change at all). Those two files
+  # answer it with a setup-time purge of their own; a victim-side belt protects
+  # only its own file, and only against rows committed BEFORE its setup ran.
+  #
+  # DELETING the residue is not available: `epic_assignment_runtime_attempts` is
+  # an append-only ledger (a DELETE raises `barkpark_epic_ledger_immutable`) and
+  # it carries an ON DELETE RESTRICT FK to `chat_sessions`, so the attempt row
+  # pins the session row in place. Archive it instead — `list_sessions/2` filters
+  # `archived_at IS NULL` on every default listing, so the parked residue can
+  # never reach a later test's sidebar again while the ledger stays intact.
+  defp park_unboxed_sessions!(workspace) do
+    Repo.update_all(
+      from(s in Session,
+        where: s.owner_workspace_id == ^workspace.id and is_nil(s.archived_at)
+      ),
+      set: [archived_at: DateTime.utc_now() |> DateTime.truncate(:second)]
+    )
+
+    :ok
   end
 
   defp event(session_id, turn_id, total_tokens, counters \\ []) do

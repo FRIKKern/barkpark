@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: cch-w70-ledger-hygiene-rederivation | budget: 1200tok -->
 # cch-w70 ledger-hygiene re-derivation (verifier, 2026-08-17)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Re-derive the ledger state Decide files against for wave 70. All rows read at d020382.
 
 ## Spine + candidate rows — status/claim/parent (all OPEN, UNCLAIMED unless noted)

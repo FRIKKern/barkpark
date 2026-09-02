@@ -1,0 +1,94 @@
+name: Landed mark — task rows learn their merge sha
+
+# THE HOLE THIS CLOSES. The merge path writes NOTHING to the ledger. A PR lands
+# on main with `Task: <id>` in its squash body; pr-task-gate read that trailer on
+# the way IN, as a presence check, and nothing read it on the way OUT. The
+# builder was told to report rather than close, so the claim is released or
+# lapses, and the row sits lifecycle-open with a worker name for an assignee and
+# no claim — forever. Measured 2026-09-01 across the P1 ready backlog: 14 of the
+# first 18 Task-trailer rows on main were in exactly that state, 27 were sealed
+# by hand in one session, 9 more part-stamped. The next lane then spends a
+# worker re-triaging a row whose work shipped days ago.
+#
+# The push to main is the one event that happens exactly once per landing,
+# needs nobody awake, and already knows both halves of the fact. It marks; a
+# lead still seals. The full decision — why the other side (a louder lead brief)
+# was rejected, why `bp task stamp` cannot be the verb from CI, why the generic
+# /v1/data/mutate door was built against and then rejected on evidence (it
+# writes the DRAFT, which the task API never reads), and the one server-side
+# verb still missing — is recorded in scripts/landed-mark.sh's header, next to
+# the code it governs.
+#
+# NEVER A GATE. This runs AFTER the merge, so a red here cannot unland anything,
+# and a red on main is a red nobody can push a fix through. A ledger outage is a
+# ::warning and exit 0. A commit with no trailer is silence. The ONE non-zero
+# arm is 401/403: a broken secret makes every future run a silent no-op, which
+# is the defect above reintroduced with a green check-mark on top.
+
+on:
+  push:
+    branches: [main]
+    # NO `paths:` filter, deliberately. The subject is the COMMIT MESSAGE, not
+    # any file — a landing that touches only docs names its task exactly as a
+    # code landing does, and a path filter would make the mark depend on which
+    # files a PR happened to edit. Every push to main is in scope.
+
+permissions:
+  contents: read
+
+concurrency:
+  # PER-SHA, and that is the whole point. `landed-mark-${{ github.ref }}` would
+  # be one group for all of main, and a concurrency group holds at most one
+  # running plus one PENDING run: the arrival of a newer push EVICTS the older
+  # pending one (measured on elixir.yml — 36 of 100 main runs concluded
+  # `cancelled` having materialised zero jobs, 35 of 35 within 5 seconds of the
+  # next run's created_at). `cancel-in-progress: false` does not stop that; it
+  # only spares a run that already started. For a suite, that costs bisection
+  # granularity. HERE IT WOULD COST THE MARK ITSELF: the evicted run's sha is
+  # the only run that would ever have marked its rows, so a fast burst of merges
+  # would silently strand exactly the rows this workflow exists to un-strand.
+  #
+  # A per-sha group cannot collide with itself, so nothing is ever evicted. The
+  # objection that killed the same remedy on elixir.yml — N concurrent 7-job
+  # suites against the account concurrency cap — does not apply: this is ONE job
+  # of a few seconds that makes at most a handful of small HTTP calls.
+  group: landed-mark-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  landed-mark:
+    name: Mark the task rows this push landed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # FULL history. The walk is `${{ github.event.before }}..${{ github.sha }}`
+      # — a push can carry more than one commit, and each may name its own task.
+      # A shallow checkout cannot resolve `before`, and the script degrades to
+      # marking only the tip with a ::warning rather than inventing a range.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: landed-mark.sh syntax check
+        run: bash -n scripts/landed-mark.sh
+
+      - name: Mark every task row named by this push
+        env:
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          # The same secret pr-task-gate.yml and reland-check.yml read. It now
+          # carries read,write, which is exactly the scope POST
+          # /v1/tasks/:id/labels needs and no more: that verb takes no claim and
+          # no epoch, unions the add-list server-side, and this job never sends
+          # `remove`. Nothing here can close, claim or re-stage a row.
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          if [ -z "${LEDGER_TOKEN:-}" ]; then
+            echo "::error title=Landed mark cannot write — BARKPARK_TASK_TOKEN is not set::No ledger token on this run, so every row this push landed stays open with a stale assignee and no claim. That is the exact state this workflow exists to remove, so it is a failure and not a skip. Provision the secret (see docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # 2>&1 so the credential refusal reaches the STEP SUMMARY too, not just
+          # the raw log — stderr does not flow through a stdout pipe, and the one
+          # arm that must never be missed was the one arm written to stderr.
+          bash scripts/landed-mark.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

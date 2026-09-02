@@ -243,10 +243,18 @@ defmodule BarkparkWeb.ShareController do
   the count removed (0 if none / if the scope was env-only). 422 on a malformed
   scope; 403 when the caller is not a workspace admin of the SCOPE's workspace.
 
-  THIS VERB IS DESTRUCTIVE BEYOND THE ROW: `Sharing.remove_share/3` also calls
-  `Auth.revoke_share_tokens/3`, which stamps `revoked_at` on EVERY live edit
-  token under the scope. Unconfined, one request hard-revoked another tenant's
-  editing credentials — the cross-tenant DoS this closes.
+  THIS VERB IS DESTRUCTIVE BEYOND THE ROW, and `removed` counts only the row.
+  `Sharing.remove_share/3` also stamps `revoked_at` on EVERY live scoped-share
+  edit token under the scope (`Auth.revoke_share_tokens/3`) AND on EVERY live
+  ITEM SHARE LINK under it (`Sharing.Links.revoke_scope/3`) — the `/s/<token>`
+  URLs. Both revocations run whether or not a row was deleted, so `removed: 0`
+  does NOT mean nothing was revoked. Unconfined, one request hard-revoked
+  another tenant's editing credentials — the cross-tenant DoS this closes.
+
+  THE ITEM-LINK CASCADE IS RULED (lead-security-r, 2026-09-02), not incidental:
+  an operator who removes a share believes access is withdrawn, and item links
+  derive their authority from the share they were minted under. A link in a
+  SIBLING project or dataset is a different scope and survives.
 
   UNRESOLVABLE WORKSPACE IS NOT A DENIAL HERE (asymmetric with `create/2`, on
   purpose): a scope whose workspace does not exist has no tenant to protect,

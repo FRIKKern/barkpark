@@ -24,8 +24,10 @@ defmodule Barkpark.Tasks.Stage do
     3. **Engagement map** (charter D3) — a `→ considering`/`→ researching`
        stage WRITES `content.engagement = %{object, holder, ts,
        lapse_ttl_seconds, lapses_at}` (`object ∈ {"research","build"}`, how a
-       thought "carries its object"); a `→ open` stage CLEARS it (the thought
-       resolved into ready backlog).
+       thought "carries its object"); a MOVEMENT to `→ open` CLEARS it (the
+       thought resolved into ready backlog). A same-state ADJUDICATION
+       (`from == to`, PDS wave 25/27) leaves it byte-identical — it moves
+       nothing, so it resolves no thought.
     3b. **Durable reason** (PDS wave 23) — a `:note` does NOT ride the
        engagement map. It lands in `content.disposition_reason`, a key no
        sweeper owns. See "The durable/ephemeral split" below.
@@ -626,7 +628,7 @@ defmodule Barkpark.Tasks.Stage do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    {new_content, engagement} = apply_engagement(content, to, object, holder, ts_iso)
+    {new_content, engagement} = apply_engagement(content, from, to, object, holder, ts_iso)
 
     # THE NOTE THIS STAGE IS ABOUT TO SUPERSEDE. `apply_durable_reason` is a
     # plain `Map.put` — one disposition holds ONE reason, so a second annotator
@@ -678,15 +680,16 @@ defmodule Barkpark.Tasks.Stage do
     end
   end
 
-  # `→ considering`/`→ researching` writes the engagement companion map;
-  # everything else (i.e. `→ open`) CLEARS it. Returns `{new_content,
-  # engagement_or_nil}` so the event payload can echo what was written.
+  # `→ considering`/`→ researching` writes the engagement companion map; every
+  # other MOVEMENT (i.e. `→ open`) CLEARS it; a same-state ADJUDICATION leaves
+  # it alone (see the ruling below). Returns `{new_content, engagement_or_nil}`
+  # so the event payload can echo what this stage WROTE.
   #
   # LEASE FIELDS ONLY (PDS wave 23). The map carries what the sweeper's lease
   # semantics need — object, holder, ts — plus the two honesty fields that make
   # the receipt state its own half-life: `lapse_ttl_seconds` and the derived
   # `lapses_at`. Nothing durable rides here; the sweeper deletes this whole map.
-  defp apply_engagement(content, to, object, holder, ts_iso) when to in @thought do
+  defp apply_engagement(content, _from, to, object, holder, ts_iso) when to in @thought do
     ttl = engagement_ttl_seconds()
 
     engagement =
@@ -701,7 +704,30 @@ defmodule Barkpark.Tasks.Stage do
     {Map.put(content, "engagement", engagement), engagement}
   end
 
-  defp apply_engagement(content, _to, _object, _holder, _ts_iso) do
+  # THE ADJUDICATION DOOR DOES NOT CLEAR THE LEASE (PDS wave 27).
+  #
+  # The lead's ruling, verbatim: "a same-state stage (from == to) that clears a
+  # live engagement lease is a DEFECT. `apply_engagement/5`'s catch-all clause
+  # in api/lib/barkpark/tasks/stage.ex [line reference elided] returns
+  # `{Map.delete(content, \"engagement\"), nil}` for every non-thought target.
+  # When from == to the row is being ADJUDICATED, not MOVED, so the engagement
+  # map must survive byte-identical. Movement (from != to, to not in @thought)
+  # still clears it, as documented. A thought→same-thought stage
+  # (considering→considering) keeps its current re-lease behaviour."
+  #
+  # That last sentence is why this clause sits BELOW the `to in @thought` one:
+  # a considering→considering stage matches the thought clause first and
+  # re-leases exactly as it did before.
+  #
+  # The returned `nil` is not "the lease is gone" — it is "this stage wrote no
+  # lease". `staged_payload/6` echoes what this stage WROTE, and an
+  # adjudication writes nothing to `content.engagement`, so the event payload
+  # for a same-state stage is byte-identical to what it was before this fix.
+  defp apply_engagement(content, from, to, _object, _holder, _ts_iso) when from == to do
+    {content, nil}
+  end
+
+  defp apply_engagement(content, _from, _to, _object, _holder, _ts_iso) do
     {Map.delete(content, "engagement"), nil}
   end
 

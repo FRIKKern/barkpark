@@ -168,14 +168,15 @@ defmodule Barkpark.StudioChat.Titles do
   Fire-and-forget: generate a title for `session_id` off the request path (a
   supervised task under `Barkpark.TaskSupervisor`), hand it to the store's
   clobber guard (`maybe_set_ai_title/2` — a human rename is never overwritten),
-  and, only if the store accepted the write, broadcast
-  `{:chat_title, session_id, title}` on `Recorder.activity_topic/0` (charter
-  D69h). ONE broadcast serves every consumer — the on-screen LiveView (already
-  subscribed, refreshes its sidebar) AND the `FleetHub` (re-projects the title
-  onto the fleet SSE as an id-less frame, so a held `GET /v1/chat/events`
-  stream sees the title without reconnect); there is no parallel per-pid
-  delivery fork. A refusal or any error is silent — the default title simply
-  stands (`broadcast/3` cannot raise, so the fire-and-forget guard holds).
+  and, only if the store accepted the write, hand it to
+  `Recorder.broadcast_title/2` (ct-bl-recorder-titles), which publishes
+  `{:chat_title, session_id, title}` on the activity topic (Studio's sidebar +
+  the `FleetHub`, which re-projects it onto `GET /v1/chat/events`) AND on
+  `Recorder.topic/1` (the per-session SSE forwarder — `bp chat` and any other
+  headless client). There is no per-pid delivery fork anywhere: every surface
+  learns the title from the Recorder's topics, never from a `send/2` to the
+  caller. A refusal or any error is silent — the default title simply stands
+  (`broadcast/3` cannot raise, so the fire-and-forget guard holds).
   Returns the started task's `{:ok, pid}` (or `{:error, reason}` if the
   supervisor rejects it).
   """
@@ -216,8 +217,8 @@ defmodule Barkpark.StudioChat.Titles do
   end
 
   @doc """
-  Call-site-stability head: delivery rides the activity topic now (D69h), so
-  the `notify_pid` is ignored — a caller that subscribes the topic (the chat
+  Call-site-stability head: delivery rides the Recorder's topics now, so the
+  `notify_pid` is ignored — a caller that subscribes either topic (the chat
   LiveView does, at mount) receives the same `{:chat_title, ...}` tuple it
   always handled.
   """
@@ -228,16 +229,15 @@ defmodule Barkpark.StudioChat.Titles do
 
   # ── Internals ────────────────────────────────────────────────────────────
 
-  # The accepted-write notify step (D69h): one PubSub broadcast on the activity
-  # topic, reaching the LiveView and the FleetHub alike. `broadcast/3` with no
-  # subscribers returns `:ok` and cannot raise — safe inside the fire-and-forget
-  # try/rescue above.
+  # The accepted-write notify step. Publishing is the RECORDER's job now
+  # (ct-bl-recorder-titles): `Recorder.broadcast_title/2` owns which topics the
+  # event rides — the activity topic for Studio/FleetHub (D69h) AND the
+  # per-session topic the SSE forwarder holds (D22 shape), so headless clients
+  # stop polling. This module keeps only the decision of WHEN to publish: after
+  # the store's clobber guard accepted the write, never before. It cannot raise
+  # (PubSub with no subscribers is `:ok`), so the fire-and-forget guard holds.
   defp broadcast_title(session_id, title) do
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      Barkpark.StudioChat.Recorder.activity_topic(),
-      {:chat_title, session_id, title}
-    )
+    Barkpark.StudioChat.Recorder.broadcast_title(session_id, title)
   end
 
   # Returns a binary title on success, or :error to fall to the next layer.

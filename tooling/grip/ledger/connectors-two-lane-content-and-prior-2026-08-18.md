@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: connectors-audit-two-lane-content-and-prior-rederivation | budget: 2000tok -->
 # Connectors done-set audit — two-lane content + prior false-done re-derivation (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 VERIFIER lane `two-lane-content-and-prior`. origin/main = e21bf409893d9de66542a31b06716e3c33d8f102.
 Verdict: 6/6 rows TRUE-DONE, content landed in BOTH directions; the 4 non-ancestor SHAs are branch-tip/pre-squash commits whose content is on origin/main — correctly NOT reopens. Zero false-done in this lane.
 

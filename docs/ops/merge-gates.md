@@ -434,14 +434,17 @@ means that gate does not emit, because it is not path-gated at all.
 | `Elixir gate` | `.github/workflows/elixir.yml` | yes |
 | `Security gate` | `.github/workflows/security.yml` | no |
 | `Compose smoke` | `.github/workflows/compose-smoke.yml` | no |
+| `Go gate` | `.github/workflows/go-tests.yml` | no |
 | `PR references an active task` | — | yes |
 
 So three of the four required contexts can go green having dispatched nothing.
 The fourth, `PR references an active task`, is **exempt by construction** in the
 path-gating sense: its workflow carries no `paths:` filter and no `changes`
-dispatcher, so it executes on every PR. `Security gate` and `Compose smoke` emit
-the same notice but are not required — a red one of either cannot block a merge,
-so those two greens are the weakest on this roster. If `Compose smoke` is ever
+dispatcher, so it executes on every PR. `Security gate`, `Compose smoke` and `Go
+gate` emit the same notice but are not required — a red one of the three cannot
+block a merge, so those greens are the weakest on this roster. `Go gate` is step 2
+of the sequence in go-tests.yml's header; step 3 (register `Go gate`, never the
+leaf `go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever
 promoted to a required context, its `no` above must flip to `yes` in the same PR:
 clause 3 of §21 parses the required set from `.github/required-checks.json` and
 reds on any disagreement in either direction.

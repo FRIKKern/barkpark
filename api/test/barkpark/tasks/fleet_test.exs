@@ -16,7 +16,10 @@ defmodule Barkpark.Tasks.FleetTest do
     4. Fail-closed staleness: `last_seen` older than the row's OWN `ttl_s`
        reads "offline"; fresh reads the stored status; nil last_seen reads
        "offline"; per-row ttl_s is honored (same age, different budgets).
-    5. Roster is per-dataset (a listener in another dataset never leaks in).
+    5. Roster is per-dataset (a listener in another dataset never leaks in)
+       AND per-WORKSPACE (the 2026-09-01 ruling on task-4e2986e8609670d7);
+       the cross-tenant half is proved end-to-end in
+       `BarkparkWeb.FleetRosterTenancyTest`.
     6. Read-time task join: claim.worker first, assignee fallback.
     7. Beat input honesty: missing worker / invalid status / invalid ttl.
     8. Manifest wiring: /v1/fleet routes + fleet.roster/fleet.beat CLI verbs
@@ -70,10 +73,21 @@ defmodule Barkpark.Tasks.FleetTest do
     }
   end
 
+  # Every roster read here is WORKSPACE-SCOPED now (the 2026-09-01 ruling on
+  # task-4e2986e8609670d7): `Fleet.roster/2` fails CLOSED on an absent
+  # `:workspace_id`, so a read with no scope would return [] and make every
+  # assertion below vacuously nil. The fixtures create their listeners in the
+  # seeded Default workspace, so the reads name it. A caller that means "every
+  # tenant" must now say `global: true` out loud.
   defp roster_row(dataset, worker, opts \\ []) do
     dataset
-    |> Fleet.roster(opts)
+    |> Fleet.roster(Keyword.put_new(opts, :workspace_id, default_workspace_id()))
     |> Enum.find(&(&1["worker"] == worker))
+  end
+
+  defp default_workspace_id do
+    {ws, _project} = TenancyFixtures.ensure_default_scope!()
+    ws.id
   end
 
   # Direct listener fixture for roster staleness cases — bypasses the beat so

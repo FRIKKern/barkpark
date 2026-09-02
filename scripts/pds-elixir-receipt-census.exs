@@ -111,6 +111,25 @@ defmodule PDS.Census do
     "for the plain census, which spawns nobody, that is the whole price."
   ]
 
+  # PDS-D633'S SENTENCE, VERBATIM, AS A CONSTANT — the epic-wide one, distinct
+  # from @blind_spot above, which is THIS instrument's own fan-out caveat. Both
+  # print; only this one is byte-compared across the whole epic.
+  #
+  # IT IS A COPY, AND THE COPY IS CHECKED. The canonical text lives in
+  # scripts/pds-blind-spot.sh as `$PDS_BLIND_SPOT`; a .exs run standalone from a
+  # mutated tmp copy (which is exactly what `--selftest` does — it writes this
+  # file into a scratch dir and runs it there with `cd:` set) cannot read a
+  # sibling shell file, so a runtime read would refuse on every selftest case.
+  # scripts/pds-blind-spot-check.sh instead REDS if this literal has drifted one
+  # byte from the shell constant. A byte-compared copy is as close to one
+  # constant as a shell file and a build-free BEAM script can get, and the
+  # comparison — not anyone's discipline — is the mechanism.
+  @blind_spot_sentence ":erlang.statistics(:runtime) is a VM-GLOBAL sum of BEAM scheduler + " <>
+                         "async-thread CPU. It is accurate to <1% for pure in-BEAM work, blind to port " <>
+                         "children (2.58 s read as 6 ms), blind to I/O wait and to Postgres' own CPU, " <>
+                         "floored at 1 ms, and inflated by any concurrent process in the same VM (5.0x " <>
+                         "under 8 siblings)."
+
   @moduledoc """
   A build-free AST census of the `api/lib` success surface. See the header comment
   above `defmodule` for the lens, the exits, and what this is NOT (it is not a gate).
@@ -118,6 +137,10 @@ defmodule PDS.Census do
   ## Price, and the blind spot in measuring it
 
   #{Enum.map_join(@blind_spot, "\n  ", & &1)}
+
+  ## The blind spot itself, verbatim (PDS-D633)
+
+  #{@blind_spot_sentence}
   """
 
   # ---------------------------------------------------------------- constants
@@ -303,13 +326,45 @@ defmodule PDS.Census do
   # already write-routed through Content.upsert_document/4 -- adding scope opts to a
   # call that already reached a write verb changes no class. Naming the two doors that
   # did NOT move is the half a diff-reader skips.
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, :binary.matches/2, depth 6, @write_verbs without
+  # `transaction`, corpus api/lib/**/*.ex = 827 files, CORPUS-INTACT this run); engine
+  # of this re-derivation: Elixir 1.19.5 . Erlang/OTP 28 (erts 16.3.1) .
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-02.
+  #
+  # WHAT MOVED IT: pds-w39-literal-receipt-residue repaired TWO receipts that answered
+  # with a bare success literal. PluginSettingsController.update/2 and
+  # SecretController.update/2 now render the persisted row their context already
+  # returned, so BOTH STOPPED SPELLING THE LITERAL and left this lens's population.
+  # Same shape as the correction-receipt wave: the receipt got MORE honest and the lens
+  # lost a member, which is the lens working — it keys on the literal.
+  #
+  #   textual   108 -> 106  the two occurrences are gone; LENS-LOSES-NOTHING holds
+  #                         (106 == ast 97 + phantom 9).
+  #   ast        99 ->  97  the same two, as AST-literal pairs.
+  #   emitted    95 ->  93  neither site emits a literal on the wire any more.
+  #   write      57 ->  55  put /v1/plugins/settings/:plugin_name and
+  #                         put /v1/secrets/:name leave the LITERAL write set. They do
+  #                         NOT leave the ROUTED-WRITE population — all three route
+  #                         arrivals (the secret's scoped mirror included) are disposed
+  #                         `status_only_receipt` in @routed_excluded above.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 16, unrouted 22 read `==` in the
+  # same run. `phantom` holding at 9 is the tell that the repair's own comments do NOT
+  # spell the needle — deliberately, so an explanation cannot inflate the population it
+  # explains. THE THIRD REPAIRED SITE MOVES NOTHING HERE, and that is worth naming:
+  # WebauthnController.delete/2 was repaired in the same commit but KEPT its `ok` key
+  # true beside the store fields it now renders, so it stays in the literal population
+  # with its register key intact. A row that did not move is evidence too.
   @rederived %{
-    textual: 108,
-    ast: 99,
+    textual: 106,
+    ast: 97,
     phantom: 9,
     consumer: 4,
-    emitted: 95,
-    write: 57,
+    emitted: 93,
+    write: 55,
     read: 16,
     unrouted: 22
   }
@@ -678,7 +733,22 @@ defmodule PDS.Census do
     {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace, :status_only_receipt},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings, :status_only_receipt},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings, :status_only_receipt},
+    # THE THREE WAVE-39-RESIDUE ARRIVALS, 2026-09-02 (pds-w39-literal-receipt-residue).
+    # These are NOT unrepaired doors. PluginSettingsController.update/2 and
+    # SecretController.update/2 STOPPED spelling the bare success literal: each now
+    # renders the persisted row its context already returned (a store `updated_at`,
+    # and for the secret the store's surrogate binary_id — the ciphertext never).
+    # Leaving the lens's literal population is what dropped their register rows and
+    # put their route arrivals here, exactly as the correction-receipt wave did to
+    # SearchController.correction/2. The CLASS ASSIGNMENT is correct on its own
+    # predicate — the lens keys `ok: true`, and there is no longer a literal to key —
+    # and the class prose says only that, having retired the "claims success by STATUS
+    # alone" clause at wave 40. Their receipts are pinned against stored state by
+    # api/test/barkpark_web/contract/pds_w39_residue_receipt_differential_test.exs.
+    {:put, "/v1/plugins/settings/:plugin_name", "BarkparkWeb.PluginSettingsController", :update, :status_only_receipt},
+    {:put, "/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
   ]
 
@@ -704,7 +774,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{483, 483}],
+      basis_spans: [{501, 501}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -712,7 +782,9 @@ defmodule PDS.Census do
         "inline comment :483 — \"Always 200 — never reveal whether the email is registered.\" " <>
           "RE-ANCHORED off :439 on the self-service-PAT-mint lane (PR #14245): that PR inserts " <>
           "the PAT workspace-binding code above this def, pushing every line below down by 44 — " <>
-          "the span slid, the comment did not move relative to the def.",
+          "the span slid, the comment did not move relative to the def. RE-ANCHORED again off " <>
+          ":483 on the PAT admin-mint cap lane (PR #14933): the workspace-binding resolver above " <>
+          "this def grew by 18 lines — +18, the comment still sits on the def's first body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -721,7 +793,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{498, 503}],
+      basis_spans: [{516, 521}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -731,7 +803,9 @@ defmodule PDS.Census do
           "trace-skipped-notifications, PR #13902): that PR inserts a NotificationWithhold.record/2 " <>
           "else-branch above request_reset/2's json/2 call, pushing every line below down by 6 — the " <>
           "span slid, the sentence did not move relative to the def. RE-ANCHORED again off :454-459 " <>
-          "on the self-service-PAT-mint lane (PR #14245): +44 lines inserted above the span.",
+          "on the self-service-PAT-mint lane (PR #14245): +44 lines inserted above the span. " <>
+          "RE-ANCHORED again off :498-503 on the PAT admin-mint cap lane (PR #14933): +18 lines " <>
+          "inserted above (the token `anti-enumeration` now on :519).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -1310,13 +1384,17 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
             "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/plugin_settings_controller.ex:53
-    %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
-            "BarkparkWeb.PluginSettingsController.update/2", "52263610", "17468236"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251",
-      attestation:
-        "mutation: drop one key from the stored settings map — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251` reds",
-    },
+    # barkpark_web/controllers/plugin_settings_controller.ex — update/2 LEFT THIS
+    # REGISTER at the wave-39-residue repair (pds-w39-literal-receipt-residue).
+    # Its row read 52263610/17468236 — the bare success map — and it is REMOVED
+    # rather than re-keyed: the receipt no longer spells the literal this lens
+    # keys on, so there is no emitted site for a register row to name and
+    # REGISTER-COMPLETE reds on the orphan. The site did NOT leave the
+    # ROUTED-WRITE population; its arrival is disposed `status_only_receipt` in
+    # @routed_excluded above, exactly as the correction-receipt wave disposed
+    # SearchController.correction/2. Its Group C post-condition still stands,
+    # and the receipt is now pinned by
+    # api/test/barkpark_web/contract/pds_w39_residue_receipt_differential_test.exs.
     # barkpark_web/controllers/plugin_settings_controller.ex:65
     %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
             "BarkparkWeb.PluginSettingsController.delete/2", "52373358", "17468236"},
@@ -1355,13 +1433,10 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/secret_controller.ex:67
-    %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
-            "BarkparkWeb.SecretController.update/2", "4060754", "17468236"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195",
-      attestation:
-        "mutation: store the PREVIOUS ciphertext — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195` reds on the decode-back",
-    },
+    # barkpark_web/controllers/secret_controller.ex — update/2 LEFT THIS REGISTER
+    # at the same repair, for the same reason (its row read 4060754/17468236).
+    # Both of its route arrivals — flat and scoped — are disposed
+    # `status_only_receipt` in @routed_excluded above.
     # barkpark_web/controllers/secret_controller.ex:80
     %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
             "BarkparkWeb.SecretController.delete/2", "115609568", "17468236"},
@@ -1521,10 +1596,20 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
             "BarkparkWeb.WebauthnController.step_up/2", "118230159", "123849466"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/webauthn_controller.ex:212
+    # barkpark_web/controllers/webauthn_controller.ex — delete/2. RE-KEYED at the
+    # wave-39-residue repair (pds-w39-literal-receipt-residue): its expr_fp moved
+    # 17468236 -> 84283662 because the receipt STOPPED being the bare success map and
+    # now renders the row `Webauthn.delete_credential/2` was widened to return. The
+    # head hash is unchanged — the def head never moved — so this is the SMALLEST row
+    # change that clears the basis_stale demotion the repair caused. It is also
+    # UPGRADED off `:unexamined` in the same edit, because the repair shipped the
+    # differential that judges it: this is the one register row this change touches.
     %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
-            "BarkparkWeb.WebauthnController.delete/2", "99456611", "17468236"},
-      verdict: "UNJUDGED", basis: :unexamined}
+            "BarkparkWeb.WebauthnController.delete/2", "99456611", "84283662"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/webauthn_controller_test.exs:438",
+      attestation:
+        "mutation: revert the receipt to the bare success map — `mix test api/test/barkpark_web/controllers/webauthn_controller_test.exs:438` reds on created_at being nil",
+    }
   ]
 
 
@@ -1578,6 +1663,19 @@ defmodule PDS.Census do
     # the blind spot above, scoped to this process. The FIRST element is total runtime
     # since VM start; the second is time-since-last-call, which is GLOBAL STATE — reading
     # a delta of the first perturbs nothing a later caller depends on.
+    # PDS-BLIND-SPOT-METER: `:erlang.statistics(:runtime)`, IN-BEAM, inside this
+    # very process's own VM. This is the placement PDS-D633's law (a) calls the
+    # WRONG one for a PRICE — an OS meter around a SHELL is the right one — and it
+    # is used here anyway, deliberately and narrowly: the plain census spawns NO
+    # port children, so for THIS path the in-BEAM sum is the whole cost and is
+    # sound to <1% against an independent OS delta (338 ms vs 340 ms on D633's
+    # 40M-op reduce). The moment a path fans out — `--selftest`, which spawns one
+    # child BEAM per case — this meter goes blind by ~50x and the figure below
+    # stops being a price, which is why the fan-out is metered leaf-by-leaf and
+    # never from here. It is also VM-GLOBAL (5.0x inflation under 8 siblings) and
+    # floored at 1 ms, so it is a FIGURE WITH A LOAD STAMP, never a ratchet: a
+    # regression ratchet under a required gate takes `Process.info(pid,
+    # :reductions)`, byte-identical at 0, 4 and 8 noise processes.
     {cpu0, _since_last} = :erlang.statistics(:runtime)
     show_sites? = opts.sites?
     files = corpus(opts)
@@ -7518,6 +7616,11 @@ defmodule PDS.Census do
     # hand-typing it into @blind_spot is the substance of PDS-D633; keeping it on this
     # line is what stops that fix from breaking a neighbouring one.
     p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: 9 x #{ms} = #{9 * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
+    # THE SENTENCE, BESIDE THE FIGURE, ON A NON-VOLATILE LINE. It is a constant,
+    # so D605's "byte-identical except the volatile line" recipe still holds: the
+    # volatile line count stays at ONE.
+    p("meter     :erlang.statistics(:runtime), IN-BEAM, this process only — sound here because the plain census spawns no port children; the fan-out `--selftest` takes is metered leaf-by-leaf, never from inside this VM (PDS-D633 placement (a) is an OS meter around a SHELL)")
+    p("blind spot #{@blind_spot_sentence}")
 
     if Enum.all?(checks, &elem(&1, 1)) do
       p("CENSUS OK")
