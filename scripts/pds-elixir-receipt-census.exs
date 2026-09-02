@@ -358,13 +358,41 @@ defmodule PDS.Census do
   # WebauthnController.delete/2 was repaired in the same commit but KEPT its `ok` key
   # true beside the store fields it now renders, so it stays in the literal population
   # with its register key intact. A row that did not move is evidence too.
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, substring counts, route depth 6, `transaction` NOT
+  # a write verb, corpus api/lib/**/*.ex = 833 files, CORPUS-INTACT this run); engine
+  # printed live by report_engine/0 on the same run.
+  #
+  # WHAT MOVED IT: task-59fe7b40b719b379 added ONE routed-write receipt —
+  # TasksController.landed/2's `ok: true` success arm, the emission that makes the
+  # non-holder landing mark auditable instead of an UNDISPOSED ARRIVAL. One emission
+  # moves four rows, exactly as the app-token revoke-by-id arrival did:
+  #
+  #   textual   106 -> 107  the new `ok: true` occurrence
+  #                         (107 == ast 98 + phantom 9).
+  #   ast        97 ->  98  the same one, as an AST-literal pair.
+  #   emitted    93 ->  94  the site emits on the wire.
+  #   write      55 ->  56  post /v1/tasks/:doc_id/landed joins the routed-write set;
+  #                         the depth-6 relation reaches Tasks.Landed.record/2's
+  #                         Repo write through the Tasks facade. Its ROUTED-WRITE
+  #                         arrival is disposed by the register row authored for it,
+  #                         not by an @routed_excluded entry — a judged site needs no
+  #                         exclusion.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 16, unrouted 22 read `==` in the
+  # same run. `read` holding at 16 is the tell that this arrival is a POST only — the
+  # verb adds no sibling GET — and `phantom` holding at 9 is the same tell as last
+  # wave: the receipt's own comments deliberately do not spell the needle, so an
+  # explanation cannot inflate the population it explains.
   @rederived %{
-    textual: 106,
-    ast: 97,
+    textual: 107,
+    ast: 98,
     phantom: 9,
     consumer: 4,
-    emitted: 93,
-    write: 55,
+    emitted: 94,
+    write: 56,
     read: 16,
     unrouted: 22
   }
@@ -1516,6 +1544,23 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3631"},
+    # barkpark_web/controllers/tasks_controller.ex:963 — the NON-HOLDER landing
+    # mark (task-59fe7b40b719b379). AUTHORED, not inherited: POST
+    # /v1/tasks/:doc_id/landed is a new routed-write arrival, and this row is what
+    # disposes it — a judged site needs no @routed_excluded entry.
+    # WHY end_to_end AND WHY `_unmutated`. The cited block drives the real route
+    # with a plain write-tier bearer and then reads the STORED row back
+    # (`stored/1` -> `Repo.get!`), asserting the response envelope only insofar as
+    # the store agrees with it — so both halves of end_to_end's falsifier hold on
+    # the citation itself. What was NOT exercised is a mutation of the RECEIPT: the
+    # branch's three mutation proofs move `Tasks.Landed`'s refusal guards, not this
+    # `json(conn, %{ok: true, doc: …})` arm, so the weaker `_unmutated` sibling is
+    # the honest one. Upgrading it needs a mutation that breaks the emission, not a
+    # better argument.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.landed/2", "128978084", "84462998"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated,
+      evidence: "api/test/barkpark_web/controllers/tasks_landed_test.exs:92"},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},

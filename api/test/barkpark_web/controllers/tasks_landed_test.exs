@@ -18,7 +18,8 @@ defmodule BarkparkWeb.TasksLandedTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
+  alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Document
 
   @token "barkpark-test-tasks-landed-token"
   @dataset "production"
@@ -64,6 +65,14 @@ defmodule BarkparkWeb.TasksLandedTest do
     doc
   end
 
+  # THE STORE, NOT THE ENVELOPE. A 2xx is not a landed write — this ledger has
+  # watched a task verb return exit 0 on a stamp the store did not hold — so the
+  # receipt assertions below are made against the row the store hands back, and
+  # the response body is checked for AGREEING with it rather than trusted on its
+  # own. This is also what earns the receipt census's `end_to_end` basis: the
+  # cited block drives the route AND reads the stored row.
+  defp stored(task), do: Repo.get!(Document, task.id)
+
   defp authed(conn) do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
@@ -94,6 +103,9 @@ defmodule BarkparkWeb.TasksLandedTest do
                "prs" => ["14993"],
                "notes" => ["merged to main"]
              }
+
+      # The receipt is only true if the store agrees with it.
+      assert stored(task).content["landed"] == body["doc"]["content"]["landed"]
     end
 
     test "a second call ACCUMULATES on the same row", %{conn: conn, scope: scope} do

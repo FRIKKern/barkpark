@@ -918,6 +918,15 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # TasksController.landed — the NON-HOLDER landing mark (task-59fe7b40b719b379).
+    # Dropping the holder/epoch gate does NOT widen tenancy: the doc_id still
+    # resolves through find_task_by_doc_id/2, which is scope_opts/1-scoped, so a
+    # caller can only mark a landing on a row its own credential already reaches.
+    {"POST", "/v1/tasks/:doc_id/landed"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
+         "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
+         "from the token before AssignDefaultScope can stamp Default."},
     # TasksController.relabel
     {"POST", "/v1/tasks/:doc_id/labels"} =>
       {:workspace_derived,
