@@ -71,8 +71,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
 
     with {:ok, request_id} <- fetch_request_id(params),
          :ok <- check_batch_size(ops),
-         :ok <- authorize_sheet(conn, slug, dataset),
-         {:ok, result} <- Session.apply_ops(slug, dataset, ops, request_id) do
+         {:ok, doc} <- authorize_sheet(conn, slug, dataset),
+         {:ok, result} <-
+           Session.apply_ops(slug, dataset, ops, request_id, doc.workspace_id) do
       json(conn, %{
         ok: true,
         slug: slug,
@@ -132,13 +133,17 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   # byte-identical and a cross-tenant caller gets the same 404 an unknown slug
   # has always produced.
   #
-  # RESIDUAL, declared rather than papered over: the session REGISTRY key is
-  # `{dataset, published-id}` with no workspace in it, so two tenants holding
-  # the SAME slug in the same dataset still share one session process (today
-  # that surfaces as an `Ecto.MultipleResultsError` inside the session's own
-  # unscoped load, not as a silent cross-tenant write). Re-keying the registry
-  # reaches the session, its supervisor, the delta topics and the LiveView
-  # reader — a separate change with its own proof.
+  # THE RESIDUAL THIS GATE DECLARED IS NOW CLOSED (task-f0c064a406e8d363). The
+  # session registry key was `{dataset, published-id}` with no workspace in it,
+  # so two tenants holding the SAME slug in the same dataset shared one session
+  # process. It is now `{dataset, workspace_id, published-id}`, and the door
+  # feeds it the workspace of the row IT authorized — so a cross-tenant caller
+  # cannot attach to another tenant's live session even by naming its slug, and
+  # the session's own load is scoped to the same tenant this gate admitted.
+  #
+  # The gate therefore RETURNS the resolved doc instead of a bare `:ok`; the
+  # `{:error, :not_found}` → 404 arm is unchanged, so an out-of-scope caller
+  # still gets the 404 an unknown slug has always produced.
   defp authorize_sheet(conn, slug, dataset) do
     scope = scope_opts(conn)
 
@@ -147,8 +152,6 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
          {:error, :not_found} <-
            Content.get_document(Content.published_id(slug), "sheet", dataset, scope) do
       {:error, :not_found}
-    else
-      {:ok, _doc} -> :ok
     end
   end
 

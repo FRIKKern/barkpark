@@ -101,7 +101,11 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
           assign(socket, rev: rev)
 
         true ->
-          case Session.peek(socket.assigns.slug, socket.assigns.dataset) do
+          case Session.peek(
+                 socket.assigns.slug,
+                 socket.assigns.dataset,
+                 GridData.session_workspace_id(socket)
+               ) do
             {:ok, content} -> assign(socket, content: content, rev: rev)
             {:error, :no_session} -> assign(socket, rev: rev)
           end
@@ -434,7 +438,13 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
       ops
       |> Enum.chunk_every(Session.max_ops_per_call())
       |> Enum.reduce_while({:ok, []}, fn chunk, {:ok, errors} ->
-        case Session.apply_ops(socket.assigns.slug, socket.assigns.dataset, chunk) do
+        case Session.apply_ops(
+               socket.assigns.slug,
+               socket.assigns.dataset,
+               chunk,
+               nil,
+               GridData.session_workspace_id(socket)
+             ) do
           {:ok, %{errors: chunk_errors}} ->
             acc = errors ++ chunk_errors
 
