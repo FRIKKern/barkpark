@@ -1,3 +1,4 @@
+agent-backup-state	NewBackupProbe
 audit-emit	emit
 chat-stable-boundary	advance
 chat-stable-segments	advance

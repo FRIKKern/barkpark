@@ -138,6 +138,7 @@ defmodule BarkparkCloud.Web.RouterHealthTest do
         Registry.record_event(bp, "health", %{
           "disk_used_percent" => 42,
           "pg_size_bytes" => 123_456_789,
+          "backup_state" => "ok",
           "backup_ok" => true,
           "backup_detail" => "daily backup 2h ago",
           "dirty_tree" => false,
@@ -153,7 +154,14 @@ defmodule BarkparkCloud.Web.RouterHealthTest do
 
       assert t["disk"] == %{"used_pct" => 42}
       assert t["db_size"] == 123_456_789
-      assert t["backup"] == %{"ok" => true, "detail" => "daily backup 2h ago"}
+      # `state` rides the HTTP envelope beside the legacy bool: it is the only
+      # field that can tell an unwired probe from a measured failure, so a
+      # consumer of this route must be able to read it here.
+      assert t["backup"] == %{
+               "state" => "ok",
+               "ok" => true,
+               "detail" => "daily backup 2h ago"
+             }
 
       assert t["checks"] == %{
                "pass" => 1,

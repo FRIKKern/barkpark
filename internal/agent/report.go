@@ -114,6 +114,60 @@ func resolveAgentVersion(injected string, readBuildInfo func() (*debug.BuildInfo
 	return AgentVersionUnknown
 }
 
+// BackupState is the beat's three-valued-and-then-some backup verdict: the one
+// field on the wire that can tell "nobody ever looked" from "we looked and the
+// backup is not there". It exists because `backup_ok bool` cannot — a plain
+// bool has one false and this measurement has four ways to not be "ok", and the
+// only discriminator the beat ever carried was a free-text detail string no
+// consumer is allowed to parse.
+type BackupState string
+
+// The WHOLE set of BackupState values. A consumer may switch on these
+// exhaustively; anything else on the wire is a producer newer than the reader
+// and must be treated as unknown, never as a backup fact.
+const (
+	// BackupStateUnmeasured — no BackupProbe was wired into this agent, so
+	// nobody looked. This is the state every beat in the fleet carried as a
+	// bare `false` before this field existed. It is NOT a statement about
+	// backups; a surface that words it as "no backup" is inventing a
+	// measurement.
+	BackupStateUnmeasured BackupState = "unmeasured"
+	// BackupStateUnconfigured — the probe RAN and this box has no backup
+	// location at all. Distinct from failed on purpose: "you never set backups
+	// up" and "your backups are broken" are different sentences with different
+	// next actions, and only the probe can tell them apart.
+	BackupStateUnconfigured BackupState = "unconfigured"
+	// BackupStateOK — measured: a backup artifact is present and fresh.
+	BackupStateOK BackupState = "ok"
+	// BackupStateFailed — measured: the backup location exists and a fresh
+	// backup does not. This, and only this, is the state a surface may render
+	// as "the backup failed".
+	BackupStateFailed BackupState = "failed"
+	// BackupStateError — the probe itself failed (timeout, unreadable dir).
+	// The box's backup state is UNKNOWN; this is a fact about the instrument.
+	BackupStateError BackupState = "error"
+)
+
+// Valid reports whether s is one of the five states above. GatherReport uses it
+// to refuse a probe's answer it cannot render, so an out-of-set string lands as
+// BackupStateError with its value quoted rather than travelling to a console
+// that will switch on it and fall through to a default nobody designed.
+func (s BackupState) Valid() bool {
+	switch s {
+	case BackupStateUnmeasured, BackupStateUnconfigured, BackupStateOK, BackupStateFailed, BackupStateError:
+		return true
+	}
+	return false
+}
+
+// Measured reports whether s is a statement about BACKUPS (ok / failed) rather
+// than about the MEASUREMENT (unmeasured / unconfigured / error). It is the
+// predicate a renderer wants: only when it is true has anything been observed
+// about this box's backups at all.
+func (s BackupState) Measured() bool {
+	return s == BackupStateOK || s == BackupStateFailed
+}
+
 // Report is the payload the agent POSTs to /v1/agent/report. It is the honest
 // superset of the cloud-9 registry's health columns
 // (health_status/version/git_commit/agent_status/last_seen_at) plus the
@@ -333,8 +387,32 @@ type Report struct {
 	// pair is never truncated, so this can never hide a slot unit.
 	SlotUnitsTruncated int `json:"slot_units_truncated"`
 
+	// BackupState is the DISCRIMINATOR BackupOK cannot be. A plain bool has one
+	// false and this field has four distinct realities to report, so for the
+	// whole life of the beat `backup_ok:false` meant "no probe was ever wired"
+	// (the Go zero value), "the probe ran and the backup is not there", and
+	// "the probe itself blew up" — indistinguishable except by reading English
+	// out of BackupDetail, which no consumer may parse. A console rendering
+	// that false as "No backup" states a measurement that never happened.
+	//
+	// The five values, and they are the WHOLE set (BackupState*, below):
+	//
+	//	"unmeasured"   no BackupProbe wired — nobody looked. NOT a backup fact.
+	//	"unconfigured" the probe ran; this box has no backup location at all.
+	//	"ok"           measured: a fresh backup artifact is present.
+	//	"failed"       measured: the location is there and the backup is not.
+	//	"error"        the probe itself failed; the box's state is unknown.
+	//
+	// It is ADDITIVE beside BackupOK, never a replacement: a control plane that
+	// predates it keeps reading the same bool it always read, and BackupOK
+	// stays exactly `state == "ok"` so the two can never disagree. Only "ok"
+	// and "failed" are BACKUP facts; the other three are facts about the
+	// MEASUREMENT, and a surface must word them as such.
+	BackupState BackupState `json:"backup_state"`
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
-	// recent backup present and scheduled?
+	// recent backup present and scheduled? BackupOK is DERIVED from BackupState
+	// (true iff "ok") and kept for consumers older than the state field; read
+	// BackupState instead, because a false here is three different realities.
 	BackupOK     bool   `json:"backup_ok"`
 	BackupDetail string `json:"backup_detail"`
 
@@ -888,8 +966,14 @@ type ReportConfig struct {
 	// thousands of partitions may lose the breakdown while still reporting the
 	// cheap total. Wire it with NewPGTopRelationsProbe(checkout).
 	PGTopRelationsProbe func() ([]RelationSize, error)
-	// BackupProbe returns (ok, human-detail). nil → BackupOK=false, detail noted.
-	BackupProbe func() (bool, string, error)
+	// BackupProbe returns (state, human-detail). The state is the probe's own
+	// verdict, not a bool the caller has to interpret: only the probe can tell
+	// "this box has no backup location configured" (BackupStateUnconfigured)
+	// from "the location is there and the backup is not" (BackupStateFailed),
+	// and collapsing those two into one false is the defect this seam exists to
+	// close. nil probe → BackupStateUnmeasured, never a false; a non-nil error
+	// → BackupStateError.
+	BackupProbe func() (BackupState, string, error)
 
 	// HealthGate is the injected health-gate runner (defaults to
 	// setup.RunHealthGate). BaseURL/Token/probe-URLs/RootCAs configure it; when
@@ -1043,17 +1127,28 @@ func gatherReport(cfg ReportConfig) Report {
 		}
 	}
 
-	// Backup status.
+	// Backup status. The state is set on EVERY arm — including the nil-probe
+	// arm, whose whole point is that "nobody looked" is now a value on the wire
+	// instead of a zero value indistinguishable from a failure. BackupOK is
+	// derived last, from the state, so the legacy bool can never drift.
 	if cfg.BackupProbe != nil {
-		ok, detail, err := cfg.BackupProbe()
-		if err != nil {
-			r.BackupOK, r.BackupDetail = false, "backup probe error: "+err.Error()
-		} else {
-			r.BackupOK, r.BackupDetail = ok, detail
+		state, detail, err := cfg.BackupProbe()
+		switch {
+		case err != nil:
+			r.BackupState, r.BackupDetail = BackupStateError, "backup probe error: "+err.Error()
+		case state.Valid():
+			r.BackupState, r.BackupDetail = state, detail
+		default:
+			// A probe that answered with a state outside the set has told us
+			// nothing we may render. That is a broken probe, not a backup
+			// verdict, so it lands as an error and SAYS what it answered.
+			r.BackupState = BackupStateError
+			r.BackupDetail = fmt.Sprintf("backup probe returned unknown state %q", string(state))
 		}
 	} else {
-		r.BackupDetail = "no backup probe wired"
+		r.BackupState, r.BackupDetail = BackupStateUnmeasured, "no backup probe wired"
 	}
+	r.BackupOK = r.BackupState == BackupStateOK
 
 	// Health gate (websocket-not-403 / TLS / capabilities / studio / pg-via-api).
 	if cfg.HealthBaseURL != "" {
@@ -2472,6 +2567,90 @@ var runawayProbeTimeout = 5 * time.Second
 //     runaway orphans that leaks a runaway orphan is not a joke worth risking.
 func psRunawayArgs() []string {
 	return []string{"-e", "-o", "ppid=,pid=,etimes=,pcpu=,args="}
+}
+
+// BackupMaxAge is how stale the newest backup artifact may be before the probe
+// calls the backup FAILED. 26 hours = a daily backup plus a two-hour grace, so
+// a cron that ran late is not reported as a broken backup and a cron that has
+// not run since yesterday is.
+const BackupMaxAge = 26 * time.Hour
+
+// NewBackupProbe is the production BackupProbe: it reads ONE directory — the
+// box's backup location — and answers what it actually found. It is the first
+// backup probe this agent has ever had; before it, ReportConfig.BackupProbe was
+// declared and wired NOWHERE, so every beat in the fleet carried the Go zero
+// value `backup_ok:false` and a console had no way to know that "false" was the
+// absence of a probe rather than the absence of a backup.
+//
+// It never returns a bare bool, and that is the point. The five answers:
+//
+//   - dir == "" or the dir does not exist → BackupStateUnconfigured. Nobody set
+//     backups up on this box. That is a true statement and it is NOT "the
+//     backup failed" — different sentence, different next action.
+//   - the dir is unreadable → BackupStateError, with the error. The instrument
+//     broke; the box's backup state is unknown and must be worded that way.
+//   - the dir holds no regular file, or the newest one is 0 bytes →
+//     BackupStateFailed. The location exists and the backup does not: a real,
+//     measured failure.
+//   - the newest artifact is older than BackupMaxAge → BackupStateFailed, and
+//     the detail SAYS the age, because "stale" is the failure operators
+//     actually hit and a bare "failed" would send them looking for a crash.
+//   - otherwise → BackupStateOK with the artifact's name, age and size.
+//
+// The walk is one non-recursive ReadDir: no du, no shell-out, bounded by the
+// entry count of a directory that holds dumps. Subdirectories are skipped
+// rather than descended — a backup artifact is a file.
+//
+// @canonical capability:agent-backup-state aka:backup_ok,backup-tristate,BackupProbe,no backup probe wired,BackupState
+func NewBackupProbe(dir string) func() (BackupState, string, error) {
+	return func() (BackupState, string, error) {
+		d := strings.TrimSpace(dir)
+		if d == "" {
+			return BackupStateUnconfigured, "no backup location configured on this box", nil
+		}
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return BackupStateUnconfigured, fmt.Sprintf("no backup location on this box: %s does not exist", d), nil
+			}
+			return BackupStateError, "", fmt.Errorf("read backup dir %s: %w", d, err)
+		}
+
+		var (
+			newestName string
+			newestMod  time.Time
+			newestSize int64
+		)
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				// A file that vanished mid-walk (a dump being rotated) is not
+				// an instrument failure; skip it and judge the rest.
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				continue
+			}
+			if newestName == "" || info.ModTime().After(newestMod) {
+				newestName, newestMod, newestSize = e.Name(), info.ModTime(), info.Size()
+			}
+		}
+
+		if newestName == "" {
+			return BackupStateFailed, fmt.Sprintf("backup dir %s exists but holds no backup artifact", d), nil
+		}
+		if newestSize == 0 {
+			return BackupStateFailed, fmt.Sprintf("newest backup %s in %s is 0 bytes", newestName, d), nil
+		}
+		age := time.Since(newestMod)
+		if age > BackupMaxAge {
+			return BackupStateFailed, fmt.Sprintf("newest backup %s in %s is %s old (limit %s)", newestName, d, age.Truncate(time.Minute), BackupMaxAge), nil
+		}
+		return BackupStateOK, fmt.Sprintf("newest backup %s in %s is %s old, %d bytes", newestName, d, age.Truncate(time.Minute), newestSize), nil
+	}
 }
 
 // NewRunawayProbe builds the production RunawayProbe: one bounded `ps` per beat.

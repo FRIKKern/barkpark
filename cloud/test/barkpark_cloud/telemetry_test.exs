@@ -41,6 +41,7 @@ defmodule BarkparkCloud.TelemetryTest do
       "cpu_cores" => 2,
       "req_per_s" => 12,
       "p95_ms" => 140,
+      "backup_state" => "ok",
       "backup_ok" => true,
       "backup_detail" => "daily backup 2h ago",
       "dirty_tree" => false,
@@ -73,7 +74,7 @@ defmodule BarkparkCloud.TelemetryTest do
                cores: 2,
                req_per_s: 12,
                p95_ms: 140,
-               backup: %{ok: true, detail: "daily backup 2h ago"},
+               backup: %{state: :ok, ok: true, detail: "daily backup 2h ago"},
                checks: %{pass: 3, skipped: 0, total: 3, failing: []},
                dirty_tree: false,
                reported_at: nil
@@ -88,7 +89,7 @@ defmodule BarkparkCloud.TelemetryTest do
 
       assert env.disk == %{used_pct: nil}
       assert env.db_size == 123_456_789
-      assert env.backup == %{ok: true, detail: "daily backup 2h ago"}
+      assert env.backup == %{state: :ok, ok: true, detail: "daily backup 2h ago"}
       assert env.checks == %{pass: 3, skipped: 0, total: 3, failing: []}
       assert env.dirty_tree == false
     end
@@ -133,7 +134,7 @@ defmodule BarkparkCloud.TelemetryTest do
                cores: nil,
                req_per_s: nil,
                p95_ms: nil,
-               backup: %{ok: nil, detail: nil},
+               backup: %{state: :unknown, ok: nil, detail: nil},
                checks: %{pass: 0, skipped: 0, total: 0, failing: []},
                dirty_tree: nil,
                reported_at: nil
@@ -185,7 +186,7 @@ defmodule BarkparkCloud.TelemetryTest do
                cores: nil,
                req_per_s: nil,
                p95_ms: nil,
-               backup: %{ok: nil, detail: nil},
+               backup: %{state: :unknown, ok: nil, detail: nil},
                checks: %{pass: 0, skipped: 0, total: 0, failing: []},
                dirty_tree: nil,
                reported_at: nil
@@ -501,4 +502,86 @@ defmodule BarkparkCloud.TelemetryTest do
       assert Telemetry.normalize(event).reported_at == nil
     end
   end
+
+  describe "normalize/1 — backup_state is the discriminator backup_ok cannot be" do
+    # THE POINT OF THIS BLOCK. `backup_ok:false` was, for the whole life of the
+    # beat, three different realities: no probe wired (the Go zero value — the
+    # only thing any production box has ever sent), the probe ran and the backup
+    # is missing, and the probe itself errored. `backup_state` (report.go
+    # `BackupState`) separates them, and every arm below pins a payload a REAL
+    # producer emits — the agent marshals `backup_state` on every beat, so none
+    # of these arms needs an absent key to be reached.
+    #
+    # Contrast the pre-existing `ok: nil` arm, which is reachable ONLY by
+    # deleting `backup_ok` from the payload: the agent always marshals that key,
+    # so no agent in the fleet can produce it. It is pinned above as a totality
+    # guarantee over a corrupt/absent payload, not as an agent contract.
+
+    test "each state the agent can emit normalizes to its own atom — five payloads, five answers" do
+      states = ~w(unmeasured unconfigured ok failed error)
+
+      got =
+        Map.new(states, fn state ->
+          payload = %{
+            "backup_state" => state,
+            "backup_ok" => state == "ok",
+            "backup_detail" => "detail for #{state}"
+          }
+
+          {state, Telemetry.normalize(payload).backup.state}
+        end)
+
+      assert got == %{
+               "unmeasured" => :unmeasured,
+               "unconfigured" => :unconfigured,
+               "ok" => :ok,
+               "failed" => :failed,
+               "error" => :error
+             }
+
+      # Non-vacuity: five inputs must have produced five DISTINCT answers, or a
+      # normalizer that collapsed them all would still satisfy a looser check.
+      assert got |> Map.values() |> Enum.uniq() |> length() == 5
+    end
+
+    test "an unwired probe and a measured failure are distinguishable WITHOUT reading the detail string" do
+      unwired = Telemetry.normalize(%{"backup_state" => "unmeasured", "backup_ok" => false})
+      failed = Telemetry.normalize(%{"backup_state" => "failed", "backup_ok" => false})
+
+      # Identical on the legacy bool …
+      assert unwired.backup.ok == failed.backup.ok
+      # … and separable on the state alone, with no detail string in sight.
+      assert unwired.backup.state == :unmeasured
+      assert failed.backup.state == :failed
+      refute unwired.backup.state == failed.backup.state
+    end
+
+    test "an OLD agent's backup_ok:false is :unknown, NEVER :failed" do
+      # The fleet-skew arm, and it must stay pessimistic. Every box in
+      # production runs an agent that predates `backup_state` and sends
+      # `backup_ok:false` because no BackupProbe was ever wired. Reading that as
+      # a failure would have this normalizer report a backup failure on every
+      # instance it has — manufacturing the exact false measurement the state
+      # field exists to kill. The payload here is a REAL captured beat.
+      env = Telemetry.normalize(RealAgentBeats.guerrilla())
+
+      assert env.backup.ok == false
+      assert env.backup.state == :unknown
+    end
+
+    test "an OLD agent's backup_ok:true is unambiguous and maps to :ok" do
+      # Only a wired probe that measured a backup can emit true, so the legacy
+      # true arm loses nothing. The asymmetry is deliberate: false is ambiguous,
+      # true is not.
+      assert Telemetry.normalize(%{"backup_ok" => true}).backup.state == :ok
+    end
+
+    test "a state string this reader does not know is :unknown, never a backup fact" do
+      for unknown <- ["encrypted", "partial", "OK", "", 42, nil, %{}] do
+        env = Telemetry.normalize(%{"backup_state" => unknown, "backup_ok" => false})
+        assert env.backup.state == :unknown, "#{inspect(unknown)} leaked a backup fact"
+      end
+    end
+  end
+
 end
