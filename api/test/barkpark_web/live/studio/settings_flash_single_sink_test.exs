@@ -67,12 +67,15 @@ defmodule BarkparkWeb.Studio.SettingsFlashSingleSinkTest do
       msg = "Workspace theme set to evergreen"
       html = set_theme(view, "evergreen")
 
-      assert [only] = announcements(html, msg),
+      found = announcements(html, msg)
+
+      assert length(found) == 1,
              """
              expected EXACTLY ONE element announcing the :info flash, got \
-             #{length(announcements(html, msg))}: \
-             #{inspect(announcements(html, msg))}
+             #{length(found)}: #{inspect(found)}
              """
+
+      [only] = found
 
       # …and it is the LAYOUT sink (nav.ex studio_flash), not a page-local copy.
       assert only.role == "status"
@@ -84,12 +87,15 @@ defmodule BarkparkWeb.Studio.SettingsFlashSingleSinkTest do
       msg = "Unknown theme"
       html = set_theme(view, "forged-9000")
 
-      assert [only] = announcements(html, msg),
+      found = announcements(html, msg)
+
+      assert length(found) == 1,
              """
              expected EXACTLY ONE element announcing the :error flash, got \
-             #{length(announcements(html, msg))}: \
-             #{inspect(announcements(html, msg))}
+             #{length(found)}: #{inspect(found)}
              """
+
+      [only] = found
 
       assert only.role == "alert"
       assert only.aria_live == "assertive"
