@@ -53,6 +53,53 @@
   // commit does not.
   const WRITE_RIDE_KEYS = ["commit", "bar_commit"];
 
+  // ── SHARED CLIPBOARD KERNEL (hoisted, wave 43 reader half) ────────────────
+  //
+  // These two were methods on the Studio hook. They are module-scope functions
+  // now so the Studio hook AND the public reader's client-only selection layer
+  // (window.BarkparkSheetReaderSelect, at the bottom of this file) encode the OS
+  // clipboard through ONE implementation — a fork would let the two grids drift
+  // apart on the Excel/Sheets quoting rule. Both objects still expose
+  // `_tsvEncode`, delegating here; the harness pins are unchanged.
+
+  // Quote-aware TSV (RFC-4180-ish, tab-delimited). Excel/Sheets quote any field
+  // containing a tab, newline, or double-quote and double the inner quotes; a
+  // naive split on \n/\t shatters such a cell across rows/columns. This is the
+  // round-trip twin of the hook's _tsvParse: _tsvParse(tsvEncode(x)) === x.
+  function tsvEncode(rows) {
+    return rows
+      .map((cols) =>
+        cols
+          .map((v) => {
+            const s = v == null ? "" : String(v);
+            return /[\t\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+          })
+          .join("\t")
+      )
+      .join("\n");
+  }
+
+  // Row-major grid of the SELECTED <td>s, walked ascending row then column —
+  // the shape tsvEncode consumes. Reads `data-v` (the computed raw value the
+  // server stamps on every td, the reader's included) and falls back to the
+  // rendered text. Class-agnostic on purpose: Studio hands it `td.sheet-sel`,
+  // the reader hands it its own `td.sheet-rsel`.
+  function selectionGrid(tds) {
+    const rows = new Map();
+    Array.prototype.forEach.call(tds, (td) => {
+      const r = parseInt(td.dataset.r, 10);
+      const c = parseInt(td.dataset.c, 10);
+      if (!rows.has(r)) rows.set(r, new Map());
+      rows.get(r).set(c, td.dataset.v != null ? td.dataset.v : td.textContent.trim());
+    });
+    const rKeys = Array.from(rows.keys()).sort((a, b) => a - b);
+    return rKeys.map((r) => {
+      const cols = rows.get(r);
+      const cKeys = Array.from(cols.keys()).sort((a, b) => a - b);
+      return cKeys.map((c) => cols.get(c));
+    });
+  }
+
   window.BarkparkSheetGrid = {
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
@@ -1783,20 +1830,7 @@
     _selectionTsv() {
       const tds = this.el.querySelectorAll("td.sheet-sel");
       if (!tds.length) return null;
-      const rows = new Map();
-      tds.forEach((td) => {
-        const r = parseInt(td.dataset.r, 10);
-        const c = parseInt(td.dataset.c, 10);
-        if (!rows.has(r)) rows.set(r, new Map());
-        rows.get(r).set(c, td.dataset.v != null ? td.dataset.v : td.textContent.trim());
-      });
-      const rKeys = Array.from(rows.keys()).sort((a, b) => a - b);
-      const grid = rKeys.map((r) => {
-        const cols = rows.get(r);
-        const cKeys = Array.from(cols.keys()).sort((a, b) => a - b);
-        return cKeys.map((c) => cols.get(c));
-      });
-      return this._tsvEncode(grid);
+      return tsvEncode(selectionGrid(tds));
     },
 
     // ── formula clipboard (QL-D5, client-owned) ───────────────────────────────
@@ -1870,23 +1904,12 @@
     },
 
     // ── quote-aware TSV (RFC-4180-ish, tab-delimited) ─────────────────────────
-    // Pure helpers, driven directly by the node harness. Excel/Sheets quote any
-    // field containing a tab, newline, or double-quote and double the inner
-    // quotes; a naive split on \n/\t shatters such a cell across rows/columns.
+    // Pure helpers, driven directly by the node harness. The encoder now lives
+    // at module scope (`tsvEncode`, top of this file) because the reader hook
+    // shares it; this stays the hook's public name so every existing pin holds.
     // These are the round-trip twins: _tsvParse(_tsvEncode(x)) deep-equals x.
 
-    _tsvEncode(rows) {
-      return rows
-        .map((cols) =>
-          cols
-            .map((v) => {
-              const s = v == null ? "" : String(v);
-              return /[\t\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-            })
-            .join("\t")
-        )
-        .join("\n");
-    },
+    _tsvEncode: tsvEncode,
 
     _tsvParse(text) {
       const rows = [];
@@ -1944,5 +1967,261 @@
       if (rows.length > 1 && last.length === 1 && last[0] === "") rows.pop();
       return rows;
     }
+  };
+
+  // ══ PUBLIC READER: client-only selection + copy (wave 43, reader half) ═════
+  //
+  // THE RULING (main, 2026-09-02 10:52Z), verbatim:
+  //
+  //   "(b): client-only selection + copy layer in bp-sheet-grid.js for :reader
+  //   — paints its own class, pushes ZERO events, reads data-v already on
+  //   reader tds. An anonymous principal never round-trips selection and gains
+  //   no authority. Add one test that the reader socket receives no event
+  //   during select/copy. (a) rejected: it widens the server surface for a
+  //   purely local affordance."
+  //
+  // So this is a SEPARATE, smaller hook — not BarkparkSheetGrid behind a flag.
+  // sheet_grid.ex mounts it as `phx-hook="SheetReaderSelect"` where
+  // `chrome == :reader`; `@hookable` (chrome == :studio) still decides
+  // "SheetGrid", so the Studio path is byte-identical.
+  //
+  // THE SERVER IS UNTOUCHED, WHICH IS THE POINT. `Geometry.grid_sel(_, _,
+  // :reader)` still returns {0,0,0,0} and sheet_grid.ex still refuses
+  // select-all / nav-edge / nav-corner for `chrome: :reader`. That policy is
+  // wave 42's, and option (a) — reversing it — was rejected. The reader's
+  // anchor/active pair therefore lives ONLY in this object.
+  //
+  // ZERO EVENTS BY CONSTRUCTION, NOT BY ALLOWLIST. Unlike the Studio hook's
+  // READ_MODE_EVENTS filter (a list that could be edited open again), there is
+  // no `pushEvent` / `pushEventTo` identifier anywhere in this object. The node
+  // harness pins that twice: it stubs both push functions to THROW, and it
+  // greps this section of the shipped file for the identifiers.
+  //
+  // IT PAINTS ITS OWN CLASS. `sheet-rsel`, deliberately NOT `sheet-sel` — the
+  // Studio harness pins `td.sheet-sel` and aliasing would make those checks
+  // ambiguous about which grid produced the highlight.
+  const READER_SEL_CLASS = "sheet-rsel";
+  const READER_PAGE_ROWS = 20;
+
+  function clampInt(n, lo, hi) {
+    return n < lo ? lo : n > hi ? hi : n;
+  }
+
+  window.BarkparkSheetReaderSelect = {
+    mounted() {
+      this._anchor = null; // {c, r} — where the gesture started
+      this._active = null; // {c, r} — where it is now
+      this._dragging = false;
+
+      // Marks the grid as JS-selection-driven. The reader stylesheet suppresses
+      // the browser's own text selection ONLY under this class, so a no-JS
+      // reader keeps native select-and-copy instead of losing both.
+      if (this.el.classList) this.el.classList.add("sheet-rsel-on");
+
+      this._onMousedown = (e) => {
+        if (e.button != null && e.button !== 0) return;
+        const cell = this._cellOf(e.target);
+        if (!cell) return;
+        // Suppress the native text-drag so the painted rect is the only
+        // selection the reader sees.
+        if (e.preventDefault) e.preventDefault();
+        this._dragging = true;
+        this._select(e.shiftKey && this._anchor ? this._anchor : cell, cell);
+        if (this.el.focus) this.el.focus();
+      };
+
+      this._onMouseover = (e) => {
+        if (!this._dragging) return;
+        const cell = this._cellOf(e.target);
+        if (cell) this._select(this._anchor, cell);
+      };
+
+      // On window: a drag that ends outside the grid must still end.
+      this._onMouseup = () => {
+        this._dragging = false;
+      };
+
+      this._onKeydown = (e) => {
+        if (e.target && e.target.matches && e.target.matches("input, textarea, select")) return;
+        const key = e.key;
+        const mod = !!(e.metaKey || e.ctrlKey);
+        const bounds = this._bounds();
+        if (!bounds) return;
+
+        // Ctrl/Cmd+A — the whole RENDERED grid (this page of rows), never the
+        // logical sheet: the reader pages its rows and the off-page cells are
+        // not in the DOM to copy.
+        if (mod && (key === "a" || key === "A")) {
+          if (e.preventDefault) e.preventDefault();
+          this._select(
+            { c: bounds.minC, r: bounds.minR },
+            { c: bounds.maxC, r: bounds.maxR }
+          );
+          return;
+        }
+        if (key === "Escape") {
+          this._clear();
+          return;
+        }
+
+        const cur = this._active || { c: bounds.minC, r: bounds.minR };
+        let next;
+        switch (key) {
+          case "ArrowUp":
+            next = { c: cur.c, r: cur.r - 1 };
+            break;
+          case "ArrowDown":
+            next = { c: cur.c, r: cur.r + 1 };
+            break;
+          case "ArrowLeft":
+            next = { c: cur.c - 1, r: cur.r };
+            break;
+          case "ArrowRight":
+            next = { c: cur.c + 1, r: cur.r };
+            break;
+          case "Home":
+            next = { c: bounds.minC, r: mod ? bounds.minR : cur.r };
+            break;
+          case "End":
+            next = { c: bounds.maxC, r: mod ? bounds.maxR : cur.r };
+            break;
+          case "PageUp":
+            next = { c: cur.c, r: cur.r - READER_PAGE_ROWS };
+            break;
+          case "PageDown":
+            next = { c: cur.c, r: cur.r + READER_PAGE_ROWS };
+            break;
+          default:
+            return;
+        }
+        // Ctrl/Cmd + an arrow is the browser's (word/document jump); leave it.
+        if (mod && key.indexOf("Arrow") === 0) return;
+        if (e.preventDefault) e.preventDefault();
+        next = {
+          c: clampInt(next.c, bounds.minC, bounds.maxC),
+          r: clampInt(next.r, bounds.minR, bounds.maxR)
+        };
+        this._select(e.shiftKey && this._anchor ? this._anchor : next, next);
+      };
+
+      // Cmd/Ctrl+C arrives here as the browser's own `copy` event — the OS
+      // clipboard is written synchronously in-gesture and nothing else happens.
+      this._onCopy = (e) => {
+        if (e.target && e.target.matches && e.target.matches("input, textarea")) return;
+        const tsv = this._selectionTsv();
+        if (tsv == null) return;
+        if (e.preventDefault) e.preventDefault();
+        if (e.clipboardData) e.clipboardData.setData("text/plain", tsv);
+      };
+
+      this.el.addEventListener("mousedown", this._onMousedown);
+      this.el.addEventListener("mouseover", this._onMouseover);
+      this.el.addEventListener("keydown", this._onKeydown);
+      this.el.addEventListener("copy", this._onCopy);
+      window.addEventListener("mouseup", this._onMouseup);
+    },
+
+    destroyed() {
+      this.el.removeEventListener("mousedown", this._onMousedown);
+      this.el.removeEventListener("mouseover", this._onMouseover);
+      this.el.removeEventListener("keydown", this._onKeydown);
+      this.el.removeEventListener("copy", this._onCopy);
+      window.removeEventListener("mouseup", this._onMouseup);
+    },
+
+    // Every rendered data cell. The reader stamps data-ref/data-r/data-c/data-v
+    // on each one already (Cells.data_v), which is exactly what makes a
+    // client-only layer possible without a single server change.
+    _cells() {
+      return this.el.querySelectorAll("td[data-ref]");
+    },
+
+    _cellOf(target) {
+      const td = target && target.closest && target.closest("td[data-ref]");
+      if (!td || !td.dataset) return null;
+      const c = parseInt(td.dataset.c, 10);
+      const r = parseInt(td.dataset.r, 10);
+      return Number.isNaN(c) || Number.isNaN(r) ? null : { c: c, r: r };
+    },
+
+    // Derived from the DOM, never from a server assign: the reader pages rows,
+    // so the navigable box is whatever is rendered right now.
+    _bounds() {
+      let b = null;
+      Array.prototype.forEach.call(this._cells(), (td) => {
+        const c = parseInt(td.dataset.c, 10);
+        const r = parseInt(td.dataset.r, 10);
+        if (Number.isNaN(c) || Number.isNaN(r)) return;
+        if (!b) {
+          b = { minC: c, maxC: c, minR: r, maxR: r };
+          return;
+        }
+        if (c < b.minC) b.minC = c;
+        if (c > b.maxC) b.maxC = c;
+        if (r < b.minR) b.minR = r;
+        if (r > b.maxR) b.maxR = r;
+      });
+      return b;
+    },
+
+    _select(anchor, active) {
+      this._anchor = anchor;
+      this._active = active;
+      this._paint();
+    },
+
+    _clear() {
+      this._anchor = null;
+      this._active = null;
+      this._paint();
+    },
+
+    _rect() {
+      const a = this._anchor;
+      const b = this._active;
+      if (!a || !b) return null;
+      return {
+        c1: Math.min(a.c, b.c),
+        c2: Math.max(a.c, b.c),
+        r1: Math.min(a.r, b.r),
+        r2: Math.max(a.r, b.r)
+      };
+    },
+
+    _paint() {
+      const rect = this._rect();
+      let activeTd = null;
+      Array.prototype.forEach.call(this._cells(), (td) => {
+        const c = parseInt(td.dataset.c, 10);
+        const r = parseInt(td.dataset.r, 10);
+        const inRect =
+          !!rect && c >= rect.c1 && c <= rect.c2 && r >= rect.r1 && r <= rect.r2;
+        if (td.classList) td.classList[inRect ? "add" : "remove"](READER_SEL_CLASS);
+        if (this._active && c === this._active.c && r === this._active.r) activeTd = td;
+      });
+      // a11y: the wrapper stays role="region" on the reader (role="application"
+      // is edit-only — it muted a screen reader's own table-nav commands, see
+      // sheets_reader_live_test.exs "grid a11y semantics"). Pointing
+      // aria-activedescendant at the moving cell still lets AT follow the
+      // selection. Set from the CLIENT, so the server render is unchanged.
+      if (this.el.setAttribute && this.el.removeAttribute) {
+        if (activeTd && activeTd.id) this.el.setAttribute("aria-activedescendant", activeTd.id);
+        else this.el.removeAttribute("aria-activedescendant");
+      }
+    },
+
+    // The SAME kernel the Studio hook copies through (module-scope tsvEncode /
+    // selectionGrid at the top of this file) — reused, not forked, so a reader
+    // copy quotes an embedded tab/newline/quote exactly as Studio does.
+    _selectionTsv() {
+      const sel = [];
+      Array.prototype.forEach.call(this._cells(), (td) => {
+        if (td.classList && td.classList.contains(READER_SEL_CLASS)) sel.push(td);
+      });
+      if (!sel.length) return null;
+      return tsvEncode(selectionGrid(sel));
+    },
+
+    _tsvEncode: tsvEncode
   };
 })();

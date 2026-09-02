@@ -2841,6 +2841,358 @@ check("read mode: a forged editing key on a presence frame is narrowed away", ()
   assert.equal(h._push("nav", { key: "ArrowDown", shift: false }), true);
 });
 
+// ══ PUBLIC READER: the client-only selection + copy layer ══════════════════
+//
+// window.BarkparkSheetReaderSelect — mounted as phx-hook="SheetReaderSelect"
+// where `chrome == :reader` (sheet_grid.ex). Main's ruling, 2026-09-02 10:52Z:
+//
+//   "(b): client-only selection + copy layer in bp-sheet-grid.js for :reader —
+//   paints its own class, pushes ZERO events, reads data-v already on reader
+//   tds. An anonymous principal never round-trips selection and gains no
+//   authority. Add one test that the reader socket receives no event during
+//   select/copy. (a) rejected: it widens the server surface for a purely local
+//   affordance."
+//
+// So the load-bearing assertion in this section is the NEGATIVE one, and it is
+// pinned twice over: mountReaderHook stubs BOTH push functions to THROW (a
+// push cannot merely be recorded — it fails the check where it happens), and a
+// source-level check greps the shipped reader section for the identifiers with
+// comments stripped. `_pushed` stays an ARRAY so the criterion's "empty push
+// list" is a literal deepEqual against [].
+
+const READER_SRC = fs.readFileSync(
+  new URL("../../priv/static/assets/bp-sheet-grid.js", import.meta.url),
+  "utf8",
+);
+
+function colLetters(c) {
+  let s = "";
+  let n = c;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+// A reader <td id data-ref data-r data-c data-v> with an observable classList.
+// This is the SHIPPED reader markup: sheet_grid.ex stamps id/data-ref/data-r/
+// data-c/data-v on every cell in BOTH modes (data-v via Cells.data_v), which
+// is exactly why a client-only layer needs no server change.
+function readerTd({ id, ref, r, c, v }) {
+  const classes = new Set(["sheet-cell"]);
+  const cell = {
+    id,
+    dataset: { ref, r: String(r), c: String(c) },
+    textContent: v == null ? "" : String(v),
+    classes,
+    classList: {
+      add: (k) => classes.add(k),
+      remove: (k) => classes.delete(k),
+      contains: (k) => classes.has(k),
+    },
+    matches: () => false,
+  };
+  if (v != null) cell.dataset.v = String(v);
+  cell.closest = (sel) => (sel === "td[data-ref]" ? cell : null);
+  return cell;
+}
+
+// The .sheet-grid-wrap the reader hook mounts on. Only the surface the hook
+// actually touches: listeners, classList, get/setAttribute, focus, and a
+// querySelectorAll that answers "td[data-ref]".
+function fakeReaderEl(cells) {
+  const listeners = {};
+  const classes = new Set(["sheet-grid-wrap"]);
+  const attrs = {};
+  const el = {
+    listeners,
+    attrs,
+    classes,
+    focused: false,
+    classList: {
+      add: (k) => classes.add(k),
+      remove: (k) => classes.delete(k),
+      contains: (k) => classes.has(k),
+    },
+    focus() {
+      el.focused = true;
+    },
+    setAttribute(k, v) {
+      attrs[k] = v;
+    },
+    removeAttribute(k) {
+      delete attrs[k];
+    },
+    addEventListener(type, fn) {
+      (listeners[type] ||= []).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const a = listeners[type];
+      if (!a) return;
+      const i = a.indexOf(fn);
+      if (i >= 0) a.splice(i, 1);
+    },
+    dispatch(type, e) {
+      (listeners[type] || []).slice().forEach((fn) => fn(e));
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(sel) {
+      return sel === "td[data-ref]" ? cells : [];
+    },
+  };
+  return el;
+}
+
+// Mount the reader hook over a rows×cols grid of value cells. `values` keys are
+// "c,r"; anything unnamed gets its own A1-style ref as the value so a copied
+// block is self-describing.
+//
+// THE PUSH STUBS THROW. "Zero events" must not depend on a list nobody reads:
+// if the hook ever calls pushEvent/pushEventTo, the check that drove the
+// gesture fails at that call site with the payload in the message.
+function mountReaderHook({ rows = 3, cols = 3, values = {} } = {}) {
+  sandbox.window._listeners = {};
+  const cells = [];
+  for (let r = 1; r <= rows; r++) {
+    for (let c = 1; c <= cols; c++) {
+      const ref = colLetters(c) + r;
+      const v = Object.prototype.hasOwnProperty.call(values, `${c},${r}`)
+        ? values[`${c},${r}`]
+        : ref;
+      cells.push(readerTd({ id: `sheet-reader-s-view-cell-${c}-${r}`, ref, r, c, v }));
+    }
+  }
+  const hook = Object.create(sandbox.window.BarkparkSheetReaderSelect);
+  hook.el = fakeReaderEl(cells);
+  hook.cells = cells;
+  hook._pushed = [];
+  const forbid = (...args) => {
+    hook._pushed.push(args);
+    throw new Error(`the reader hook pushed a server event: ${JSON.stringify(args)}`);
+  };
+  hook.pushEvent = forbid;
+  hook.pushEventTo = forbid;
+  hook.mounted();
+  return hook;
+}
+
+// mousedown / mouseover on a cell.
+function readerMouse(hook, c, r, opts = {}) {
+  const td = hook.cells.find((x) => x.dataset.c === String(c) && x.dataset.r === String(r));
+  return { button: 0, shiftKey: false, ...opts, target: td, preventDefault() {} };
+}
+
+function readerKey(key, opts = {}) {
+  return {
+    key,
+    shiftKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    ...opts,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    target: { matches: () => false, closest: () => null },
+  };
+}
+
+// A clipboard `copy` event; `written` collects what the hook put on it.
+function readerCopyEvent({ input = false } = {}) {
+  const written = {};
+  return {
+    written,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    target: { matches: (sel) => input && /input|textarea/.test(sel) },
+    clipboardData: {
+      setData(kind, text) {
+        written[kind] = text;
+      },
+    },
+  };
+}
+
+function readerSelectedRefs(hook) {
+  return hook.cells.filter((td) => td.classList.contains("sheet-rsel")).map((td) => td.dataset.ref);
+}
+
+check("reader: a click selects one cell, paints sheet-rsel and never sheet-sel", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 2, 2));
+  assert.deepEqual(readerSelectedRefs(h), ["B2"]);
+  // The Studio class must never appear — the grid harness pins td.sheet-sel.
+  assert.equal(h.cells.some((td) => td.classList.contains("sheet-sel")), false);
+  assert.deepEqual(h._pushed, []);
+});
+
+check("reader: a drag paints the whole rect and the copy is the TSV block", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  h.el.dispatch("mouseover", readerMouse(h, 2, 2));
+  assert.deepEqual(readerSelectedRefs(h), ["A1", "B1", "A2", "B2"]);
+  const e = readerCopyEvent();
+  h.el.dispatch("copy", e);
+  assert.equal(e.prevented, true);
+  assert.equal(e.written["text/plain"], "A1\tB1\nA2\tB2");
+  assert.deepEqual(h._pushed, []);
+});
+
+check("reader: a drag that ends off-grid stops on the window mouseup", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  dispatchWindow("mouseup", {});
+  // Moving over another cell after the release must NOT keep extending.
+  h.el.dispatch("mouseover", readerMouse(h, 3, 3));
+  assert.deepEqual(readerSelectedRefs(h), ["A1"]);
+});
+
+check("reader: shift+arrow extends from the anchor, plain arrow re-anchors", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  h.el.dispatch("keydown", readerKey("ArrowRight", { shiftKey: true }));
+  h.el.dispatch("keydown", readerKey("ArrowDown", { shiftKey: true }));
+  assert.deepEqual(readerSelectedRefs(h), ["A1", "B1", "A2", "B2"]);
+  // A plain arrow collapses the range onto the new cell.
+  h.el.dispatch("keydown", readerKey("ArrowRight"));
+  assert.deepEqual(readerSelectedRefs(h), ["C2"]);
+  assert.deepEqual(h._pushed, []);
+});
+
+check("reader: shift+click extends from the existing anchor", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  h.el.dispatch("mousedown", readerMouse(h, 3, 2, { shiftKey: true }));
+  assert.deepEqual(readerSelectedRefs(h), ["A1", "B1", "C1", "A2", "B2", "C2"]);
+});
+
+check("reader: ctrl/cmd+A selects the whole RENDERED grid (this row page)", () => {
+  const h = mountReaderHook({ rows: 2, cols: 2 });
+  const e = readerKey("a", { metaKey: true });
+  h.el.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(readerSelectedRefs(h), ["A1", "B1", "A2", "B2"]);
+  const c = readerCopyEvent();
+  h.el.dispatch("copy", c);
+  assert.equal(c.written["text/plain"], "A1\tB1\nA2\tB2");
+  assert.deepEqual(h._pushed, []);
+});
+
+check("reader: arrows clamp at the rendered bounds instead of falling off", () => {
+  const h = mountReaderHook({ rows: 2, cols: 2 });
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  h.el.dispatch("keydown", readerKey("ArrowUp"));
+  h.el.dispatch("keydown", readerKey("ArrowLeft"));
+  assert.deepEqual(readerSelectedRefs(h), ["A1"]);
+  h.el.dispatch("keydown", readerKey("End"));
+  h.el.dispatch("keydown", readerKey("PageDown"));
+  assert.deepEqual(readerSelectedRefs(h), ["B2"]);
+});
+
+check("reader: copy quotes a tab / newline / quote — the SAME kernel as Studio", () => {
+  const h = mountReaderHook({
+    rows: 1,
+    cols: 3,
+    values: { "1,1": 'say "hi"', "2,1": "a\tb", "3,1": "x\ny" },
+  });
+  h.el.dispatch("keydown", readerKey("a", { ctrlKey: true }));
+  const e = readerCopyEvent();
+  h.el.dispatch("copy", e);
+  const tsv = e.written["text/plain"];
+  assert.equal(tsv, '"say ""hi"""\t"a\tb"\t"x\ny"');
+  // Reused, not forked: the Studio hook's own encoder produces the same bytes,
+  // and its parser round-trips them back to the three cells.
+  assert.equal(sandbox.window.BarkparkSheetGrid._tsvEncode([['say "hi"', "a\tb", "x\ny"]]), tsv);
+  // (JSON round-trip: the parser returns vm-realm arrays, whose foreign
+  // prototype deepEqual/strict rejects — the same normalization mountHook does.)
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.window.BarkparkSheetGrid._tsvParse(tsv))), [
+    ['say "hi"', "a\tb", "x\ny"],
+  ]);
+  assert.deepEqual(h._pushed, []);
+});
+
+check("reader: an empty-valued cell copies as an empty field, not as its text", () => {
+  const h = mountReaderHook({ rows: 1, cols: 2, values: { "2,1": null } });
+  h.el.dispatch("keydown", readerKey("a", { metaKey: true }));
+  const e = readerCopyEvent();
+  h.el.dispatch("copy", e);
+  assert.equal(e.written["text/plain"], "A1\t");
+});
+
+check("reader: Escape clears the selection and copy goes back to the browser", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  h.el.dispatch("keydown", readerKey("Escape"));
+  assert.deepEqual(readerSelectedRefs(h), []);
+  const e = readerCopyEvent();
+  h.el.dispatch("copy", e);
+  assert.equal(e.prevented, false);
+  assert.deepEqual(e.written, {});
+});
+
+check("reader: a copy raised from a text input is left to the browser", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  const e = readerCopyEvent({ input: true });
+  h.el.dispatch("copy", e);
+  assert.equal(e.prevented, false);
+  assert.deepEqual(e.written, {});
+});
+
+check("reader: aria-activedescendant follows the active cell, and clears with it", () => {
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 2, 3));
+  assert.equal(h.el.attrs["aria-activedescendant"], "sheet-reader-s-view-cell-2-3");
+  h.el.dispatch("keydown", readerKey("ArrowUp"));
+  assert.equal(h.el.attrs["aria-activedescendant"], "sheet-reader-s-view-cell-2-2");
+  h.el.dispatch("keydown", readerKey("Escape"));
+  assert.equal("aria-activedescendant" in h.el.attrs, false);
+});
+
+check("reader: mount marks the grid sheet-rsel-on; destroyed() unbinds everything", () => {
+  const h = mountReaderHook();
+  assert.equal(h.el.classList.contains("sheet-rsel-on"), true);
+  h.destroyed();
+  assert.deepEqual(
+    Object.keys(h.el.listeners).filter((k) => h.el.listeners[k].length),
+    [],
+  );
+  assert.deepEqual(
+    Object.keys(sandbox.window._listeners).filter((k) => sandbox.window._listeners[k].length),
+    [],
+  );
+});
+
+// THE RULING'S OWN CHECK, at the source level. The gesture checks above prove
+// no push HAPPENED; this proves none CAN — the shipped reader section contains
+// no pushEvent / pushEventTo identifier for a later edit to reach for. Comments
+// are stripped first (the ruling is quoted verbatim in them, and it names both).
+check("reader: the shipped hook holds no pushEvent/pushEventTo code path at all", () => {
+  const start = READER_SRC.indexOf("window.BarkparkSheetReaderSelect = {");
+  assert.ok(start > 0, "the reader hook is missing from the shipped file");
+  const code = READER_SRC.slice(start)
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
+    .join("\n");
+  assert.ok(code.length > 500, "the reader section stripped to nothing — check the comment filter");
+  assert.equal(/pushEvent/.test(code), false, "the reader hook must never push a server event");
+  assert.equal(/pushEventTo/.test(code), false);
+  // …and the empty push list the criterion asks to quote, after a full
+  // select-then-copy gesture.
+  const h = mountReaderHook();
+  h.el.dispatch("mousedown", readerMouse(h, 1, 1));
+  h.el.dispatch("mouseover", readerMouse(h, 2, 2));
+  h.el.dispatch("keydown", readerKey("ArrowDown", { shiftKey: true }));
+  h.el.dispatch("copy", readerCopyEvent());
+  assert.deepEqual(h._pushed, []);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
