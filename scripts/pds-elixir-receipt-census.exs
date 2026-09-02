@@ -303,13 +303,45 @@ defmodule PDS.Census do
   # already write-routed through Content.upsert_document/4 -- adding scope opts to a
   # call that already reached a write verb changes no class. Naming the two doors that
   # did NOT move is the half a diff-reader skips.
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, :binary.matches/2, depth 6, @write_verbs without
+  # `transaction`, corpus api/lib/**/*.ex = 827 files, CORPUS-INTACT this run); engine
+  # of this re-derivation: Elixir 1.19.5 . Erlang/OTP 28 (erts 16.3.1) .
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-02.
+  #
+  # WHAT MOVED IT: pds-w39-literal-receipt-residue repaired TWO receipts that answered
+  # with a bare success literal. PluginSettingsController.update/2 and
+  # SecretController.update/2 now render the persisted row their context already
+  # returned, so BOTH STOPPED SPELLING THE LITERAL and left this lens's population.
+  # Same shape as the correction-receipt wave: the receipt got MORE honest and the lens
+  # lost a member, which is the lens working — it keys on the literal.
+  #
+  #   textual   108 -> 106  the two occurrences are gone; LENS-LOSES-NOTHING holds
+  #                         (106 == ast 97 + phantom 9).
+  #   ast        99 ->  97  the same two, as AST-literal pairs.
+  #   emitted    95 ->  93  neither site emits a literal on the wire any more.
+  #   write      57 ->  55  put /v1/plugins/settings/:plugin_name and
+  #                         put /v1/secrets/:name leave the LITERAL write set. They do
+  #                         NOT leave the ROUTED-WRITE population — all three route
+  #                         arrivals (the secret's scoped mirror included) are disposed
+  #                         `status_only_receipt` in @routed_excluded above.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 16, unrouted 22 read `==` in the
+  # same run. `phantom` holding at 9 is the tell that the repair's own comments do NOT
+  # spell the needle — deliberately, so an explanation cannot inflate the population it
+  # explains. THE THIRD REPAIRED SITE MOVES NOTHING HERE, and that is worth naming:
+  # WebauthnController.delete/2 was repaired in the same commit but KEPT its `ok` key
+  # true beside the store fields it now renders, so it stays in the literal population
+  # with its register key intact. A row that did not move is evidence too.
   @rederived %{
-    textual: 108,
-    ast: 99,
+    textual: 106,
+    ast: 97,
     phantom: 9,
     consumer: 4,
-    emitted: 95,
-    write: 57,
+    emitted: 93,
+    write: 55,
     read: 16,
     unrouted: 22
   }
@@ -678,7 +710,22 @@ defmodule PDS.Census do
     {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace, :status_only_receipt},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings, :status_only_receipt},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings, :status_only_receipt},
+    # THE THREE WAVE-39-RESIDUE ARRIVALS, 2026-09-02 (pds-w39-literal-receipt-residue).
+    # These are NOT unrepaired doors. PluginSettingsController.update/2 and
+    # SecretController.update/2 STOPPED spelling the bare success literal: each now
+    # renders the persisted row its context already returned (a store `updated_at`,
+    # and for the secret the store's surrogate binary_id — the ciphertext never).
+    # Leaving the lens's literal population is what dropped their register rows and
+    # put their route arrivals here, exactly as the correction-receipt wave did to
+    # SearchController.correction/2. The CLASS ASSIGNMENT is correct on its own
+    # predicate — the lens keys `ok: true`, and there is no longer a literal to key —
+    # and the class prose says only that, having retired the "claims success by STATUS
+    # alone" clause at wave 40. Their receipts are pinned against stored state by
+    # api/test/barkpark_web/contract/pds_w39_residue_receipt_differential_test.exs.
+    {:put, "/v1/plugins/settings/:plugin_name", "BarkparkWeb.PluginSettingsController", :update, :status_only_receipt},
+    {:put, "/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
   ]
 
@@ -1310,13 +1357,17 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
             "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/plugin_settings_controller.ex:53
-    %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
-            "BarkparkWeb.PluginSettingsController.update/2", "52263610", "17468236"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251",
-      attestation:
-        "mutation: drop one key from the stored settings map — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251` reds",
-    },
+    # barkpark_web/controllers/plugin_settings_controller.ex — update/2 LEFT THIS
+    # REGISTER at the wave-39-residue repair (pds-w39-literal-receipt-residue).
+    # Its row read 52263610/17468236 — the bare success map — and it is REMOVED
+    # rather than re-keyed: the receipt no longer spells the literal this lens
+    # keys on, so there is no emitted site for a register row to name and
+    # REGISTER-COMPLETE reds on the orphan. The site did NOT leave the
+    # ROUTED-WRITE population; its arrival is disposed `status_only_receipt` in
+    # @routed_excluded above, exactly as the correction-receipt wave disposed
+    # SearchController.correction/2. Its Group C post-condition still stands,
+    # and the receipt is now pinned by
+    # api/test/barkpark_web/contract/pds_w39_residue_receipt_differential_test.exs.
     # barkpark_web/controllers/plugin_settings_controller.ex:65
     %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
             "BarkparkWeb.PluginSettingsController.delete/2", "52373358", "17468236"},
@@ -1355,13 +1406,10 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/secret_controller.ex:67
-    %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
-            "BarkparkWeb.SecretController.update/2", "4060754", "17468236"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195",
-      attestation:
-        "mutation: store the PREVIOUS ciphertext — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195` reds on the decode-back",
-    },
+    # barkpark_web/controllers/secret_controller.ex — update/2 LEFT THIS REGISTER
+    # at the same repair, for the same reason (its row read 4060754/17468236).
+    # Both of its route arrivals — flat and scoped — are disposed
+    # `status_only_receipt` in @routed_excluded above.
     # barkpark_web/controllers/secret_controller.ex:80
     %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
             "BarkparkWeb.SecretController.delete/2", "115609568", "17468236"},
@@ -1521,10 +1569,20 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
             "BarkparkWeb.WebauthnController.step_up/2", "118230159", "123849466"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/webauthn_controller.ex:212
+    # barkpark_web/controllers/webauthn_controller.ex — delete/2. RE-KEYED at the
+    # wave-39-residue repair (pds-w39-literal-receipt-residue): its expr_fp moved
+    # 17468236 -> 84283662 because the receipt STOPPED being the bare success map and
+    # now renders the row `Webauthn.delete_credential/2` was widened to return. The
+    # head hash is unchanged — the def head never moved — so this is the SMALLEST row
+    # change that clears the basis_stale demotion the repair caused. It is also
+    # UPGRADED off `:unexamined` in the same edit, because the repair shipped the
+    # differential that judges it: this is the one register row this change touches.
     %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
-            "BarkparkWeb.WebauthnController.delete/2", "99456611", "17468236"},
-      verdict: "UNJUDGED", basis: :unexamined}
+            "BarkparkWeb.WebauthnController.delete/2", "99456611", "84283662"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/webauthn_controller_test.exs:438",
+      attestation:
+        "mutation: revert the receipt to the bare success map — `mix test api/test/barkpark_web/controllers/webauthn_controller_test.exs:438` reds on created_at being nil",
+    }
   ]
 
 
