@@ -216,4 +216,56 @@ defmodule Barkpark.Plugins.OnixEdit.Codelists.StalenessCheckerTest do
       assert %{added: [], removed: [], changed: []} = StalenessChecker.revalidate(doc, registry)
     end
   end
+
+  describe "corpus_coverage/1 — non-vacuity" do
+    # THE POINT OF THIS BLOCK. Every fixture above hand-builds a map carrying
+    # BOTH "codelistId" and "issue_version" — a shape a real `book` document
+    # cannot hold, because `Barkpark.Content.Validation` rejects any `codelist`
+    # field whose value is not a plain string. So the green tests above prove
+    # the classifier's arithmetic and nothing about whether it ever SEES a ref
+    # in production. `corpus_coverage/1` is the assertion that closes that gap:
+    # it lets a caller distinguish "no drift" from "recognized nothing".
+
+    test "an empty corpus is :empty, not :blind" do
+      assert StalenessChecker.corpus_coverage([]) == :empty
+    end
+
+    test "a corpus where every document yields zero refs is :blind" do
+      assert StalenessChecker.corpus_coverage([[], [], []]) == :blind
+    end
+
+    test "one recognized ref anywhere makes the corpus :instrumented" do
+      doc =
+        doc_with_refs(%{
+          "notificationType" => %{
+            "codelistId" => "onixedit:notification_type",
+            "issue_version" => "73"
+          }
+        })
+
+      refs = StalenessChecker.detect_stale(doc, "73")
+      assert refs != []
+      assert StalenessChecker.corpus_coverage([[], refs, []]) == :instrumented
+    end
+
+    test "PRODUCTION-SHAPED content reads as :blind — a plain-string codelist value" do
+      # This is what a real book carries: `codelist` field values are plain
+      # strings (Content.Validation: "codelist value must be a string"), never
+      # a nested ref map. detect_stale/2 therefore recognizes nothing, and the
+      # corpus must report :blind rather than letting a caller conclude
+      # "all current".
+      book = %{
+        content: %{
+          "notificationType" => "03",
+          "productForm" => "BB",
+          "subjects" => [%{"scheme" => "thema", "code" => "FBA"}]
+        }
+      }
+
+      refs = StalenessChecker.detect_stale(book, "74")
+
+      assert refs == []
+      assert StalenessChecker.corpus_coverage([refs]) == :blind
+    end
+  end
 end

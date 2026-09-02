@@ -119,6 +119,51 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
                ~s|tr[data-test-doc-id="plain-row"] [data-test-codelist-count="0"]|
              )
     end
+
+    test "a book with no recognized refs reads `unmeasured`, never `current`", %{conn: conn} do
+      # Production-shaped content: a `codelist` field's value is a plain string
+      # (Content.Validation refuses anything else), so the walker recognizes no
+      # refs. Before this assertion existed, the row rendered a GREEN `current`
+      # pill — a blind detector wearing a clean bill of health.
+      seed_book("unmeasured-row", %{"notificationType" => "03"})
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @url)
+
+      assert has_element?(
+               view,
+               ~s|tr[data-test-doc-id="unmeasured-row"] [data-test-pill="unmeasured"]|
+             )
+
+      refute has_element?(
+               view,
+               ~s|tr[data-test-doc-id="unmeasured-row"] [data-test-pill="current"]|
+             )
+    end
+
+    test "a corpus where nothing is recognized renders the BLIND banner", %{conn: conn} do
+      seed_book("blind-a", %{"notificationType" => "03"})
+      seed_book("blind-b", %{"productForm" => "BB"})
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, @url)
+
+      assert has_element?(view, ~s|[data-test-id="onixedit-staleness-blind"]|)
+      assert html =~ "UNMEASURED"
+    end
+
+    test "one recognized ref anywhere suppresses the BLIND banner", %{conn: conn} do
+      seed_book("blind-none", %{"notificationType" => "03"})
+
+      seed_book("blind-seen", %{
+        "f" => %{"codelistId" => "onixedit:notification_type", "issue_version" => "73"}
+      })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @url)
+
+      refute has_element?(view, ~s|[data-test-id="onixedit-staleness-blind"]|)
+    end
   end
 
   describe "re-validate button" do
