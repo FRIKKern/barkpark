@@ -2767,6 +2767,63 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/chat/sessions/{id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "chat.get_attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one chat attachment back by its opaque id (base64 payload; never served through any media route).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/auth/app-tokens": {
       "delete": {
         "operationId": "app_token.revoke",
@@ -6244,6 +6301,75 @@
           "cycle"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/chat/sessions/{id}/attachments": {
+      "post": {
+        "operationId": "chat.upload_attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: data.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upload an image attachment to a chat session's chat-owned store (png|jpeg|gif|webp; base64 body).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay": {
@@ -16934,7 +17060,7 @@
       "name": "cycle"
     },
     {
-      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
+      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive, plus chat-owned attachment upload/read (never the media plugin). Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
       "name": "chat"
     },
     {

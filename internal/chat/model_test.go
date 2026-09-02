@@ -18,6 +18,8 @@ import (
 
 // fakeTransport records every call and returns canned data. It is the whole IO
 // seam, so the shell drives deterministically.
+type uploadCall struct{ id, path string }
+
 type fakeTransport struct {
 	summaries []SessionSummary
 	full      Session
@@ -30,6 +32,9 @@ type fakeTransport struct {
 	interrupted bool
 	approvals   []approvalCall
 	approveErr  error
+	uploads     []uploadCall
+	uploadRef   Attachment
+	uploadErr   error
 	listErr     error
 	getErr      error
 
@@ -77,6 +82,16 @@ func (f *fakeTransport) SendMessage(id, content string) error {
 	return nil
 }
 func (f *fakeTransport) Interrupt(id string) error { f.interrupted = true; return nil }
+
+// UploadAttachment records the (session, path) pair the shell asked for. The
+// fake never touches the filesystem: the seam under test is "what the shell
+// asks the transport to do", and the real read+POST is covered against a live
+// httptest server in internal/apiclient.
+func (f *fakeTransport) UploadAttachment(sessionID, path string) (Attachment, error) {
+	f.uploads = append(f.uploads, uploadCall{id: sessionID, path: path})
+	return f.uploadRef, f.uploadErr
+}
+
 func (f *fakeTransport) Approve(id, requestID, decision string) error {
 	f.approvals = append(f.approvals, approvalCall{id: id, requestID: requestID, decision: decision})
 	return f.approveErr

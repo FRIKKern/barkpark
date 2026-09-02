@@ -26,6 +26,7 @@ package apiclient
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,6 +112,40 @@ type ChatMessage struct {
 	Blocks         json.RawMessage `json:"blocks,omitempty"`
 	Metadata       map[string]any  `json:"metadata,omitempty"`
 	InsertedAt     string          `json:"inserted_at,omitempty"`
+
+	// Attachments is the chat-owned attachment REFERENCE list
+	// (ct-bl-chat-attachments). It is a sibling of Metadata, not a key inside
+	// it, because the server LIFTS it out: the persisted jsonb pointer carries
+	// the server's store path and the wire projection drops that, so the only
+	// attachment shape a client ever sees is this one — an opaque id, the
+	// sniffed media type, the byte size, and the chat-owned read URL. No local
+	// path, no bearer token, no bytes.
+	Attachments []ChatAttachment `json:"attachments,omitempty"`
+}
+
+// ChatAttachment is the ONE attachment shape on the wire — the same JSON Studio
+// projects onto a transcript row and the same JSON the upload/read routes
+// answer with. Data is populated ONLY by GetChatAttachment (the read route);
+// on a transcript row it is empty, because raw bytes never ride a message
+// (charter D7/D25).
+//
+// URL is deliberately RELATIVE and token-free: the caller attaches its own
+// Authorization header, so a bearer can never be baked into a stored transcript.
+type ChatAttachment struct {
+	ID        string `json:"id"`
+	MediaType string `json:"media_type,omitempty"`
+	ByteSize  int    `json:"byte_size,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Data      string `json:"data,omitempty"`
+}
+
+// Bytes decodes the base64 payload a read returned. It is empty (with no error)
+// for a transcript-row reference, which never carries bytes.
+func (a ChatAttachment) Bytes() ([]byte, error) {
+	if a.Data == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(a.Data)
 }
 
 // metaString reads a string field off the row's raw metadata map — "" when the
@@ -454,6 +489,64 @@ func (c *Client) SendChatMessage(id, content string) error {
 	payload := map[string]string{"content": content}
 	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/messages"), payload, http.StatusAccepted, http.StatusOK)
 	return err
+}
+
+// UploadChatAttachment stores one attachment in a session's CHAT-OWNED store
+// and returns its reference (charter D16, ct-bl-chat-attachments).
+//
+// It posts to /v1/chat/sessions/:id/attachments — never to /media/upload. That
+// is the whole point of the verb: `GET /media/files/*` is any-token-public, so
+// an attachment that rode the media plugin would be readable by a token class
+// that cannot reach the conversation. These bytes are gated by the same chat
+// tenant oracle as every other /v1/chat/sessions/:id call.
+//
+// The body is base64 JSON rather than multipart, and the server SNIFFS the media
+// type from the bytes themselves — a client-declared content type is not part of
+// the contract, so there is nothing here to spoof.
+func (c *Client) UploadChatAttachment(sessionID string, data []byte) (ChatAttachment, error) {
+	payload := map[string]string{"data": base64.StdEncoding.EncodeToString(data)}
+	body, err := c.chatSend(
+		http.MethodPost,
+		c.chatURL("/sessions/"+url.PathEscape(sessionID)+"/attachments"),
+		payload,
+		http.StatusCreated, http.StatusOK,
+	)
+	if err != nil {
+		return ChatAttachment{}, err
+	}
+	return decodeChatAttachment(body)
+}
+
+// GetChatAttachment reads one attachment back by its opaque id. The returned
+// ChatAttachment carries Data (base64); use Bytes() for the decoded payload.
+func (c *Client) GetChatAttachment(sessionID, attachmentID string) (ChatAttachment, error) {
+	body, err := c.chatSend(
+		http.MethodGet,
+		c.chatURL("/sessions/"+url.PathEscape(sessionID)+"/attachments/"+url.PathEscape(attachmentID)),
+		nil,
+		http.StatusOK,
+	)
+	if err != nil {
+		return ChatAttachment{}, err
+	}
+	return decodeChatAttachment(body)
+}
+
+// decodeChatAttachment unwraps the {"attachment": {...}} envelope both routes
+// answer with. A 2xx whose body carries no id is an error rather than a
+// zero-valued success — a silently empty reference would be indistinguishable
+// from a working upload at every later call site.
+func decodeChatAttachment(body []byte) (ChatAttachment, error) {
+	var wrapper struct {
+		Attachment ChatAttachment `json:"attachment"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		return ChatAttachment{}, err
+	}
+	if wrapper.Attachment.ID == "" {
+		return ChatAttachment{}, fmt.Errorf("chat attachment response carried no id")
+	}
+	return wrapper.Attachment, nil
 }
 
 // InterruptChat requests a mid-turn interrupt (202 {request_id}). The control

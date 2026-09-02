@@ -2396,6 +2396,14 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/unarchive", ChatController, :unarchive)
 
     get("/sessions/:id/events", ChatController, :events)
+
+    # Chat-owned attachments (charter D16, `ct-bl-chat-attachments`). They ride
+    # THIS scope deliberately: attachment bytes are private conversation content,
+    # so their read gate must be the same `chat_scope` + `fetch_scoped` tenant
+    # oracle as every other /sessions/:id route — never the media plugin, whose
+    # `GET /media/files/*` is any-token-public by design.
+    post("/sessions/:id/attachments", ChatAttachmentController, :create)
+    get("/sessions/:id/attachments/:attachment_id", ChatAttachmentController, :show)
   end
 
   scope "/w/:workspace_slug/v1/chat-hosts", BarkparkWeb do

@@ -2357,9 +2357,18 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "sending an image stores a pointer (no base64 in the DB), renders inline, no /media route",
          %{view: view} do
+      # A REAL PNG, not a stand-in string: the composer now stores through
+      # `Attachments.put/2` (ct-bl-chat-attachments), the ONE store seam the
+      # `/v1/chat` upload route also writes through, and that seam derives the
+      # media type from the bytes' own magic prefix instead of trusting the
+      # browser-declared `client_type`. Bytes that are not one of the four
+      # accepted images are refused — which is what keeps an SVG/HTML payload out
+      # of a store whose contents are served back to other clients.
+      png = png_fixture()
+
       avatar =
         file_input(view, "#chat-composer-form", :attachments, [
-          %{name: "pic.png", content: "PNGDATA", type: "image/png"}
+          %{name: "pic.png", content: png, type: "image/png"}
         ])
 
       render_upload(avatar, "pic.png")
@@ -2372,7 +2381,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
 
       # Live bubble inlines the image server-side as a data-URI — never /media.
-      assert html =~ "data:image/png;base64,#{Base.encode64("PNGDATA")}"
+      assert html =~ "data:image/png;base64,#{Base.encode64(png)}"
       assert html =~ "look at this"
       refute html =~ "/media/files"
 
@@ -2383,11 +2392,38 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert [ptr] = user_msg.metadata["attachments"]
       assert ptr["media_type"] == "image/png"
-      assert ptr["sha256"] == :sha256 |> :crypto.hash("PNGDATA") |> Base.encode16(case: :lower)
-      assert ptr["byte_size"] == byte_size("PNGDATA")
+      assert ptr["sha256"] == :sha256 |> :crypto.hash(png) |> Base.encode16(case: :lower)
+      assert ptr["byte_size"] == byte_size(png)
       # the jsonb pointer carries NO base64 / bytes
       refute Map.has_key?(ptr, "data")
       refute Map.has_key?(ptr, "bytes")
+    end
+
+    test "a non-image payload is refused by the shared store seam, never persisted",
+         %{view: view} do
+      # The browser can call anything image/png. The store seam does not take its
+      # word for it — so the turn sends, and NO attachment pointer is written.
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{
+            name: "evil.png",
+            content: "<svg xmlns='http://www.w3.org/2000/svg'/>",
+            type: "image/png"
+          }
+        ])
+
+      render_upload(avatar, "evil.png")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "look at this"})
+      html = render(view)
+
+      assert html =~ "look at this"
+      refute html =~ "data:image/png;base64,"
+
+      user_msg =
+        view |> store_id() |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+
+      refute Map.has_key?(user_msg.metadata, "attachments"),
+             "a refused payload must not land a pointer on the message row"
     end
 
     test "replay inlines the stored image as a data-URI, server-side (no route)", %{conn: conn} do
@@ -2435,6 +2471,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "data:image/png;base64,"
       assert Process.alive?(view.pid)
     end
+  end
+
+  # A genuine 1x1 PNG — the chat attachment store sniffs the media type from
+  # these magic bytes, so a fixture that merely CLAIMS to be a PNG is refused.
+  defp png_fixture do
+    Base.decode64!(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
   end
 
   defp attachment_json(ptr) do

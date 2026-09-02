@@ -77,7 +77,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{FleetHub, Recorder, Runtime}
+  alias Barkpark.StudioChat.{Attachments, FleetHub, Recorder, Runtime}
   alias BarkparkWeb.ErrorResponse
 
   # Wire bounds (charter "Security, validation, and transport verification
@@ -1470,19 +1470,36 @@ defmodule BarkparkWeb.ChatController do
   without a live SSE loop.
   """
   def message_json(%StudioChat.Message{} = m) do
+    metadata = m.metadata || %{}
+
     base = %{
       seq: m.seq,
       role: m.role,
       source_markdown: m.source_markdown,
-      metadata: m.metadata || %{},
+      # `attachments` is LIFTED OUT of metadata and re-projected below — the
+      # persisted pointer carries the store `path` (`<session_id>/<sha256>`),
+      # and a filesystem path must never reach a client (ct-bl-chat-attachments).
+      # Dropping the key here makes that structural rather than a convention: the
+      # only attachment representation on the wire is the reference shape.
+      metadata: Map.delete(metadata, "attachments"),
       inserted_at: m.inserted_at
     }
 
-    case toolrow_blocks(m) do
-      nil -> base
-      blocks -> Map.put(base, :blocks, blocks)
-    end
+    base
+    |> put_attachments(Attachments.references(metadata, m.session_id))
+    |> put_blocks(toolrow_blocks(m))
   end
+
+  # The ONE wire attachment shape both surfaces speak: `{id, media_type,
+  # byte_size, url}` — an opaque content-addressed id and the chat-owned read
+  # URL, with no store path, no bearer token, and no bytes. Absent entirely when
+  # the row has none, so an attachment-free transcript is byte-identical to
+  # before.
+  defp put_attachments(json, nil), do: json
+  defp put_attachments(json, refs), do: Map.put(json, :attachments, refs)
+
+  defp put_blocks(json, nil), do: json
+  defp put_blocks(json, blocks), do: Map.put(json, :blocks, blocks)
 
   # The `blocks` a settled row projects, or nil (no blocks key). An assistant row
   # converts its markdown; the three chat rows emit ONE typed chat block each,

@@ -221,7 +221,7 @@ func renderMessage(width int, msg Message, focused bool, inflight string) []stri
 	case msg.Role == "assistant":
 		return renderAssistantDoc(chatRegistry, width, msg)
 	case msg.Role == "user":
-		return renderUserEcho(w, msg.SourceMarkdown)
+		return append(renderUserEcho(w, msg.SourceMarkdown), renderAttachments(w, msg.Attachments)...)
 	case cardRoles[msg.Role] != "":
 		return cardView(w, msg, focused, inflight)
 	case msg.Role == "tool":
@@ -393,6 +393,47 @@ func renderUserEcho(w int, src string) []string {
 		out = append(out, marker+ln)
 	}
 	return out
+}
+
+// renderAttachments draws a user row's chat-owned attachment references
+// (ct-bl-chat-attachments) as one dim chip per file: the media type and a human
+// byte size, under the prompt echo.
+//
+// It renders the REFERENCE and nothing else. The terminal never fetches or
+// draws the bytes, and there is deliberately nothing here to print a local path
+// or a URL with a token in it — the wire shape carries neither, so this renderer
+// structurally cannot leak one. That is the same reference Studio renders from,
+// which is what makes "one shape, both surfaces" true rather than parallel.
+func renderAttachments(w int, atts []Attachment) []string {
+	if len(atts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(atts))
+	for _, a := range atts {
+		label := a.MediaType
+		if label == "" {
+			label = "attachment"
+		}
+		if a.ByteSize > 0 {
+			label += " · " + humanBytes(a.ByteSize)
+		}
+		out = append(out, "  "+dimStyle.Render(truncate("⎘ "+label, w-2)))
+	}
+	return out
+}
+
+// humanBytes formats a byte count for an attachment chip. Deliberately coarse —
+// a chip says "how big, roughly", and a precise count would be noise next to a
+// media type.
+func humanBytes(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 // renderLocalSend paints an optimistic, not-yet-settled user send. A mid-turn
