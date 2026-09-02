@@ -144,15 +144,15 @@ defmodule BarkparkCloud.Web.AuthRequireTeamRoleMinRoleTest do
   end
 
   # Every route that reaches `Auth.require_team_role/3` via the router's private
-  # `with_team_role/3`, with the min_role literal it passes. Line numbers as of
-  # this commit — the GATE is what is pinned, not the line:
+  # `with_team_role/3`, with the min_role literal it passes. Cited by ROUTE, not
+  # by router.ex line — the GATE is what is pinned, and line numbers rot:
   #
-  #   router.ex:5988  "member"  GET    /v1/teams/:id/members
-  #   router.ex:6002  "admin"   POST   /v1/teams/:id/invitations
-  #   router.ex:6058  "admin"   GET    /v1/teams/:id/invitations
-  #   router.ex:6067  "admin"   DELETE /v1/teams/:id/invitations/:inv_id
-  #   router.ex:6097  "admin"   PATCH  /v1/teams/:id/members/:user_id
-  #   router.ex:6167  "admin"   DELETE /v1/teams/:id/members/:user_id
+  #   "member"  GET    /v1/teams/:id/members
+  #   "admin"   POST   /v1/teams/:id/invitations
+  #   "admin"   GET    /v1/teams/:id/invitations
+  #   "admin"   DELETE /v1/teams/:id/invitations/:inv_id
+  #   "admin"   PATCH  /v1/teams/:id/members/:user_id
+  #   "admin"   DELETE /v1/teams/:id/members/:user_id
   @routes [
     :members_list,
     :invite,
