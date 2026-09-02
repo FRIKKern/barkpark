@@ -333,6 +333,79 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
     end
   end
 
+  # ── the turn fold (task-8f904a88b9bc3d59) ───────────────────────────────────
+  #
+  # A settled turn's tool rows collapse under ONE header row. The three
+  # functions below are that fold's whole vocabulary, and the Go twin
+  # (`internal/chat/render.go` turnFoldKey/foldLabel/formatDuration) is a
+  # line-for-line mirror of them, pinned byte-for-byte by the SHARED fixture
+  # `api/test/support/fixtures/chat_fold_labels.json` which both suites read.
+  # A label change that lands on one surface only reds the other surface's test.
+  # (Search vocabulary: turn fold / fold-on-settle / "Worked for" header /
+  # collapse tool rows / "You stopped after".)
+
+  @doc """
+  The fold GROUP KEY for one tool row — the turn it belongs to, or `nil` when
+  the row's turn has not settled.
+
+  `turn_settled_at` IS the identity: every row of one turn is stamped by ONE
+  `settle_tool_rows/2` UPDATE, so they all carry the same instant, and the next
+  turn's UPDATE carries a different one. Nothing is re-derived and no turn id
+  had to be invented — a LIVE turn simply has no key, which is exactly why a
+  live turn can never fold.
+  """
+  @spec turn_fold_key(map()) :: String.t() | nil
+  def turn_fold_key(message) when is_map(message) do
+    with true <- Map.get(message, :turn_settled) == true,
+         key when is_binary(key) and key != "" <- Map.get(message, :turn_settled_at) do
+      key
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The fold header's label: `"Worked for 3m 12s"` for a turn that ran to its own
+  end, `"You stopped after 42s"` for one a Stop ended. Reads `turn_outcome` and
+  `turn_duration_ms` — both SERVER-stamped (`StudioChat.turn_settle_stamp/1`) —
+  and never classifies anything itself.
+  """
+  @spec fold_label(map()) :: String.t()
+  def fold_label(message) when is_map(message) do
+    fold_label(Map.get(message, :turn_outcome), Map.get(message, :turn_duration_ms))
+  end
+
+  @doc """
+  The label formatter, by outcome + duration. THE one place Studio builds this
+  string (`internal/chat.foldLabel` is the one place `bp chat` builds it).
+  """
+  @spec fold_label(String.t() | nil, integer() | nil) :: String.t()
+  def fold_label("interrupted", duration_ms),
+    do: "You stopped after " <> format_duration(duration_ms)
+
+  def fold_label(_outcome, duration_ms), do: "Worked for " <> format_duration(duration_ms)
+
+  @doc """
+  A turn duration as the fold header spells it: `42s`, `3m 12s`, `1h 4m 5s`.
+  Sub-second and missing//negative durations read `0s` — an honest zero beats a
+  blank header or a crash on a thinner frame.
+  """
+  @spec format_duration(integer() | nil) :: String.t()
+  def format_duration(ms) when is_integer(ms) and ms > 0 do
+    total = div(ms, 1000)
+    h = div(total, 3600)
+    m = rem(div(total, 60), 60)
+    s = rem(total, 60)
+
+    cond do
+      h > 0 -> "#{h}h #{m}m #{s}s"
+      m > 0 -> "#{m}m #{s}s"
+      true -> "#{s}s"
+    end
+  end
+
+  def format_duration(_ms), do: "0s"
+
   @doc "The lifecycle color token for a tool row's settle state (tokens only)."
   @spec settle_color(map()) :: String.t()
   def settle_color(message) when is_map(message) do
