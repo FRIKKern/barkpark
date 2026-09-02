@@ -1,7 +1,7 @@
 {
   "name": "fact",
   "title": "Facts",
-  "icon": "anchor",
+  "icon": "check-circle",
   "visibility": "private",
   "fields": [
     {
