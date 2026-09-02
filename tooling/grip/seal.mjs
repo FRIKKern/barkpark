@@ -95,6 +95,8 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { screenedRerun } from "./adjudicate.mjs";
 import { admitsAbsenceClaim, admitsPassClaim } from "./rerun.mjs";
 import { deriveLevel } from "./level.mjs";
@@ -561,7 +563,20 @@ export function main(argv = process.argv.slice(2), out = console.log) {
   return code;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// THE ENTRY GUARD. The old form here string-compared `import.meta.url` against
+// `file://${process.argv[1]}`, which is NOT the same test: import.meta.url is a
+// URL and percent-encodes anything URL-special in the path (a space becomes
+// %20, a `#` becomes %23), while the concatenation does not — so the two differ
+// for any such path and the guard reads FALSE. The failure is SILENT: main()
+// never runs, nothing is adjudicated, and the process exits 0, which is exactly
+// what a HOLDS verdict looks like from the outside. This command is the seal
+// predicate for the epic's own root, so a false-quiet exit 0 here is a vacuous
+// green at the close. Worktrees, CI temp dirs and scratch paths routinely carry
+// such characters. Use the same resolve()-based guard as cli.mjs, census.mjs,
+// screen.mjs, ledger.mjs, backfill.mjs and acceptance.mjs — this is propagation
+// of an already-fixed defect class, not a new one.
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (isMain) {
   // NO process.exit HERE (charter D92). main() buffers the whole seal report
   // and writes it in ONE out() call on the line above, and the VERDICT-TOKEN is
   // the LAST line of it — so a torn pipe eats the verdict first and leaves
