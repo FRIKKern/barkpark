@@ -1,0 +1,60 @@
+{
+  "_comment": "A considering row that IS forwarded under the successor. Clause (a) asks for a named forwarding address and this row has one, so it seals — the wave-28 bucket split is a re-labelling of UNNAMED residue, never a new way for unfinished work to red. The row is still printed by name (charter D90), on the re-disclosure line, proving the disclosure does not depend on which bucket the row landed in.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    {
+      "_id": "gr-fixture-done-1",
+      "lifecycle_status": "done"
+    },
+    {
+      "_id": "gr-fixture-considering-1",
+      "lifecycle_status": "considering"
+    }
+  ],
+  "forwarded": [
+    "gr-fixture-considering-1"
+  ],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": [
+    "CCH-D5-rate-limiter-sees-every-user-as-one"
+  ],
+  "defectCommits": {}
+}
