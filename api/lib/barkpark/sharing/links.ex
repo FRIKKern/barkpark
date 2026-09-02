@@ -94,6 +94,56 @@ defmodule Barkpark.Sharing.Links do
   def published_ref_id(ref_id), do: ref_id
 
   @doc """
+  Does this item link BIND the resource the CURRENT route addresses?
+
+  ONE owner for the item-link route-binding decision. Two gates ask it, on the
+  two sides of the HTTP→WebSocket boundary, and they MUST agree:
+
+    * `BarkparkWeb.Plugs.RequireShareScope.maybe_grant_item_token/4` — the
+      conn-side gate, passing `conn.path_params`;
+    * `BarkparkWeb.PluginScopeSession.on_mount(:scope, …)` — the socket-side
+      gate, passing the mount params, re-derived on EVERY mount because a
+      `live_redirect` / reconnect replays no router pipeline
+      (task-9e74fdbdf0242c22).
+
+  They carried BYTE-IDENTICAL private copies until this promotion. The named
+  failure mode (task-3ba103f76393b04e) is a kind — or a change to how a kind is
+  compared — added to ONE copy: the dead render and the socket mount would then
+  disagree about what a share link opens, and the socket is the half with no
+  plug behind it. Adding a kind HERE reaches both, or neither.
+
+  An item link is bound to ONE resource, so it opens only a route addressing
+  exactly that resource:
+
+    * `%{"slug" => slug}` — the paper reader → a `doc` link with
+      `ref_type: "paper"` on that slug;
+    * `%{"doc_id" => doc_id}` — a doc read → a `doc` link on that id, compared
+      EXACTLY as minted. `published_ref_id/1` is deliberately NOT applied: a
+      link is minted against a published id already, and canonicalising the
+      ROUTE's id here would let `drafts.<id>` open the link bound to `<id>`.
+    * `%{"id" => id}` — media meta/renditions → a `media` link on that file id.
+
+  FAIL-CLOSED, and the clause ORDER is part of the contract. Any other params
+  shape addresses no single resource (a list route, a file path,
+  `:not_mounted_at_router`, or any non-map) and is never item-granted; and
+  `slug` is decided BEFORE `doc_id`/`id`, so a params map carrying two of them
+  (the socket side is handed the MERGED mount params, not path params alone)
+  cannot be opened by the looser of the two.
+  """
+  @spec binds_route_resource?(ShareLink.t(), term()) :: boolean()
+  # @canonical capability:share-link-route-binding aka:item link binding,ref_id match,link_matches_route_resource
+  def binds_route_resource?(link, %{"slug" => slug}),
+    do: link.kind == "doc" and link.ref_type == "paper" and link.ref_id == slug
+
+  def binds_route_resource?(link, %{"doc_id" => doc_id}),
+    do: link.kind == "doc" and link.ref_id == doc_id
+
+  def binds_route_resource?(link, %{"id" => id}),
+    do: link.kind == "media" and link.ref_id == id
+
+  def binds_route_resource?(_link, _params), do: false
+
+  @doc """
   Is `principal` an ADMIN MEMBER of `workspace_id`?
 
   `principal` is an already-extracted `%ApiToken{}` / `%User{}`, or a LIST of
