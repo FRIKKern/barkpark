@@ -131,6 +131,38 @@ defmodule Barkpark.Plugins.Sheets.XlsxZipbombTest do
       assert [%{"name" => "Data"}] = content["tabs"]
     end
 
+    test "a REAL conditional-formatting export (dxfs + cfRule XML) still passes the guard" do
+      # CF-X made the exporter add `<dxfs>` to styles.xml and
+      # `<conditionalFormatting>` to each worksheet, both through an extra
+      # unzip/rezip. Those bytes must not push a legitimate sheet over the
+      # ceiling, and the rezip must not disturb the central directory the guard
+      # reads: the SAME low ceiling the bombs trip lets this through.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "cond_formats" =>
+              for i <- 1..50 do
+                %{
+                  "id" => "r#{i}",
+                  "range" => "A#{i}:D#{i}",
+                  "when" => %{"op" => "gt", "value" => i},
+                  "style" => %{"bg" => "#ff0000", "b" => true}
+                }
+              end,
+            "cells" => %{"A1" => %{"v" => 150}, "B1" => %{"v" => "text"}}
+          }
+        ]
+      }
+
+      assert {:ok, binary} = Barkpark.Plugins.Sheets.XlsxExport.to_binary(content)
+
+      with_low_ceiling(fn ->
+        assert {:ok, imported} = XlsxImport.to_content(binary)
+        assert length(hd(imported["tabs"])["cond_formats"]) == 50
+      end)
+    end
+
     test "a non-zip binary still yields the canonical invalid-xlsx error, not the size atom" do
       # The guard must not mask a plain not-a-zip: `:zip.list_dir` fails to read a
       # central directory, the guard returns :ok, and open_package/1 produces the
