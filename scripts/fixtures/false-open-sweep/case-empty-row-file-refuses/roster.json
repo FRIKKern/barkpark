@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "child_count": 2,
+  "children": [
+    {
+      "doc_id": "cch-w41-bl-row-one",
+      "title": "row one",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 1,
+        "total": 2
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "doc_id": "cch-w41-bl-row-two",
+      "title": "row two",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 1,
+        "total": 2
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "doc": {
+    "doc_id": "fixture-epic",
+    "kind": "task",
+    "type": "task",
+    "title": "fixture epic",
+    "lifecycle_status": "in_progress",
+    "content": {
+      "kind": "task"
+    }
+  }
+}

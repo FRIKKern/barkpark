@@ -35,7 +35,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,10 +43,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   CMD_SUBJECT_PREFIX, MATCH_RULE, NO_VALUE_FOOTER, STRUCTURAL_MISSES, SUBSYSTEM_BAND,
-  ancestorPrefixCount, censusIndex, childBreakdown, isCommandShapeSubject, matchesQuery,
+  ancestorPrefixCount, censusIndex, childBreakdown, exitMaskNote, isCommandShapeSubject, matchesQuery,
   renderLeads, selectLeads, subjectSegmentMatch, subsystemBand,
 } from "../leads.mjs";
 import { foldLedger, DEFAULT_LEDGER_DIR } from "../ledger.mjs";
+import { classifyBinding } from "../binding.mjs";
+import { PROVENANCE_PREFIX } from "../provenance.mjs";
 import { screenCommand } from "../screen.mjs";
 
 const LEDGER_CLI = fileURLToPath(new URL("../ledger.mjs", import.meta.url));
@@ -61,6 +63,18 @@ function tempStore(rows, { run_id = "grip-20260721T000000Z" } = {}) {
   writeFileSync(join(dir, `${run_id}-test.json`), `${JSON.stringify({ run_id, recipes: rows }, null, 2)}\n`);
   return dir;
 }
+
+// ── THE ARMING THESE FIXTURES ARE FOLDED UNDER ──────────────────────────────
+//
+// `foldLedger` DEFAULTS its screen on (see its ARMING header): a library read
+// and the `fold` CLI read of one store now return the same counts. leads is a
+// FILTER OVER entries[], and three fixtures below deliberately carry commands
+// screenCommand refuses — `go build` (it writes artifacts) and `git grep -c …`
+// (the screen reads git's `-c` as its config flag and refuses what it cannot
+// bound). Neither refusal is what those tests measure, so they fold under the
+// EXPLICIT opt-out and say so, rather than being quietly re-specimened to dodge
+// the screen. `UNSCREENED` is that opt-out with a name on it.
+const UNSCREENED = { screen: null };
 
 function row(subject, quantity, rerun, extra = {}) {
   return {
@@ -134,7 +148,7 @@ test("the rerun substring narrows a multi-row bucket UNDER --cmd — real number
     row("internal/cli", "grep:-n", "grep -n 'bp task' internal/cli/task_cmd.go"),
     row("internal/cli", "wc:-l", "wc -l internal/cli/task_cmd.go"),
   ];
-  const folded = foldLedger(tempStore(bucket));
+  const folded = foldLedger(tempStore(bucket), UNSCREENED);
   const cmd = { cmd: true };
   const all = selectLeads(folded, "internal/cli");
   const narrowed = selectLeads(folded, "grep", cmd);
@@ -213,7 +227,7 @@ test("THE MEASURED SPECIMEN — `origin/main` returns ZERO by default, and --cmd
     row("api/lib/barkpark.ex", "wc:-l", "git show origin/main:api/lib/barkpark.ex | wc -l"),
     row("internal/cli", "grep:-c", "git grep -c 'func ' origin/main -- internal/cli"),
     row("js/packages/core", "ls-tree", "git ls-tree origin/main js/packages/core"),
-  ]));
+  ]), UNSCREENED);
 
   // FAIL-FIRST: the OLD concatenated haystack, re-implemented here, over the
   // same corpus. It returns all four — that is the behaviour being fixed, and
@@ -244,7 +258,7 @@ test("THE HONEST EMPTY CARRIES THE NUMBER — how many --cmd would return, and t
     row("tooling/grip/leads.mjs", "wc:-l", "git show origin/main:tooling/grip/leads.mjs | wc -l"),
     row("api/lib/barkpark.ex", "wc:-l", "git show origin/main:api/lib/barkpark.ex | wc -l"),
     row("internal/cli", "grep:-c", "git grep -c 'func ' origin/main -- internal/cli"),
-  ]));
+  ]), UNSCREENED);
   const rendered = renderLeads(selectLeads(folded, "origin/main"));
 
   assert.ok(rendered.includes("HONEST EMPTY"), "still an ANSWER, not a blank");
@@ -536,7 +550,11 @@ test("a deliberately STALE stored derived_level is contradicted, not printed", (
   const dir = tempStore([row("cmd-free/subject.mjs", "curl:-s", rerun, { derived_level: "L3" })]);
   // `curl` is a command-text query against this subject, so --cmd is how it is
   // reached — the re-derivation under test is unaffected by the haystack width.
-  const result = selectLeads(foldLedger(dir), "curl", { cmd: true });
+  // UNSCREENED for the same reason the arming note above gives: the L1 command
+  // that makes this test meaningful (it reaches a running system) is exactly
+  // what the screen's host bound refuses, so a screened fold would reject the
+  // row before leads ever saw it. The subject here is the LEVEL, not admission.
+  const result = selectLeads(foldLedger(dir, UNSCREENED), "curl", { cmd: true });
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].stored_level, "L3", "the stored value is carried, so the disagreement is visible");
   assert.notEqual(result.rows[0].derived_level, "L3", "…and it is NOT what gets rendered as the level");
@@ -865,4 +883,140 @@ test("EVERY row declares its binding class, IMPORTED from binding.mjs and never 
     parsed.rows.every((r) => typeof r.binding_class === "string" && typeof r.portable_scope === "string"),
     "--json carries binding_class + portable_scope per row",
   );
+});
+
+// ── 13. the CONSUMER surface: anchor, exit_masked, and the tree that answered ─
+//
+// The three obligations this section pins are the ones a reader of the OUTPUT
+// depends on, and each fails in a way that looks like success:
+//
+//   · A row that names its class but not its ANCHOR reads as informative while
+//     leaving "which ref?" unanswered — and a foreign-tree row and a shared-ref
+//     row then differ only by an adjective.
+//   · A row whose exit status is masked prints a fabricated `0` in a clone where
+//     the read fails, with no error anywhere. Silence is the defect.
+//   · `--json` with no provenance hands a machine an answer with no tree
+//     attached. The human reader gets the stderr banner; the machine reader gets
+//     nothing at all, which is the asymmetry this section closes.
+
+test("every row carries anchor + exit_masked, and they are the CLASSIFIER's own values, not a second reading", () => {
+  const specimens = [
+    ["api/lib/y.ex", "git show origin/main:api/lib/y.ex | wc -l"],                 // shared-ref, wc-masked
+    ["api/lib/x.ex", "wc -l api/lib/x.ex"],                                        // cwd-bound, loud
+    ["api/lib/gate.ex", "grep -n 'worker' /Volumes/SATECHI/github/barkpark/scripts/pr-task-gate.sh"], // foreign-tree-pinned
+    ["api/lib/z.ex", "git show 4f3a91c:api/lib/z.ex | grep -c defmodule"],         // content-addressed, grep -c masked
+  ];
+  const dir = tempStore(specimens.map(([subject, rerun], i) => row(subject, `q${i}`, rerun)));
+  const result = selectLeads(foldLedger(dir), "api/lib");
+  const byRerun = Object.fromEntries(result.rows.map((r) => [r.rerun, r]));
+
+  // FIELD-BY-FIELD AGAINST classifyBinding ITSELF. This is the assertion that
+  // makes a re-implementation impossible to hide: a private copy of the grammar
+  // in leads.mjs could still produce plausible-looking classes, and only a
+  // comparison against the imported function catches the day the two disagree.
+  for (const [, rerun] of specimens) {
+    const verdict = classifyBinding(rerun);
+    const carried = byRerun[rerun];
+    assert.ok(carried, `${rerun} produced a row`);
+    assert.equal(carried.binding_class, verdict.binding_class, `class carried verbatim for ${rerun}`);
+    assert.equal(carried.portable_scope, verdict.portable_scope, `scope carried verbatim for ${rerun}`);
+    assert.equal(carried.anchor, verdict.anchor ?? null, `anchor carried verbatim for ${rerun}`);
+    assert.equal(carried.exit_masked, verdict.exit_masked === true, `exit_masked carried verbatim for ${rerun}`);
+    assert.equal(carried.exit_mask_rule, verdict.exit_mask_rule ?? null, `mask rule carried verbatim for ${rerun}`);
+  }
+
+  // And the values are DISCRIMINATING, not uniformly null — an all-null column
+  // would satisfy the loop above while telling a reader nothing.
+  assert.equal(byRerun["git show origin/main:api/lib/y.ex | wc -l"].anchor, "origin/main");
+  assert.equal(byRerun["git show origin/main:api/lib/y.ex | wc -l"].exit_masked, true);
+  assert.equal(byRerun["wc -l api/lib/x.ex"].exit_masked, false, "a single unpiped read is LOUD, and says so");
+  assert.equal(byRerun["git show 4f3a91c:api/lib/z.ex | grep -c defmodule"].binding_class, "content-addressed");
+  assert.ok(
+    byRerun["grep -n 'worker' /Volumes/SATECHI/github/barkpark/scripts/pr-task-gate.sh"].anchor.startsWith("/"),
+    "a foreign-tree row's anchor is the absolute checkout it is nailed to",
+  );
+
+  // exit_masked is a BOOLEAN on every row, never null: `null` reads as "not
+  // measured" when the classifier did measure it and found the read loud.
+  assert.ok(result.rows.every((r) => typeof r.exit_masked === "boolean"), "exit_masked is measured on every row");
+});
+
+test("the dense line makes a foreign-tree-pinned row VISIBLY different from a shared-ref row, and flags a masked exit", () => {
+  const dir = tempStore([
+    row("scripts/a.sh", "git:show", "git show origin/main:scripts/a.sh"),
+    row("scripts/b.sh", "grep:-n", "grep -n 'worker' /Volumes/SATECHI/github/barkpark/scripts/b.sh"),
+    row("scripts/c.sh", "wc:-l", "git show origin/main:scripts/c.sh | wc -l"),
+  ]);
+  const dense = renderLeads(selectLeads(foldLedger(dir), "scripts"));
+
+  // The ANCHOR is on the line, so the two rows differ by WHAT THEY READ and not
+  // merely by which adjective was printed.
+  assert.match(dense, /scripts\/a\.sh\s+git:show\s+shared-ref@origin\/main\s+\$ git show/);
+  assert.match(dense, /scripts\/b\.sh\s+grep:-n:worker\s+foreign-tree-pinned@\/Volumes\/SATECHI\/github\/barkpark\/scripts\/b\.sh/);
+  const sharedLine = dense.split("\n").find((l) => l.includes("scripts/a.sh"));
+  const foreignLine = dense.split("\n").find((l) => l.includes("scripts/b.sh"));
+  assert.notEqual(sharedLine.trim(), foreignLine.trim(), "the two rows do not render identically");
+  assert.ok(!sharedLine.includes("foreign-tree-pinned"), "…and neither borrows the other's label");
+
+  // THE MASK MARKER, on the masked row and ONLY on it. Asserting both halves is
+  // the point: a marker printed on every row is decoration, not a warning.
+  assert.match(dense, /scripts\/c\.sh\s+wc:-l\s+shared-ref@origin\/main\s+⚠ exit-masked\s+\$/);
+  assert.ok(!sharedLine.includes("exit-masked"), "an unpiped read is not flagged — the flag discriminates");
+
+  // --full carries the mask rule's OWN sentence, read from EXIT_MASK_RULES.
+  const full = renderLeads(selectLeads(foldLedger(dir), "scripts"), { full: true });
+  assert.match(full, /exit status  MASKED — piped into wc — a failed read prints 0 AND exits 0/);
+  assert.match(full, /exit status  reaches the caller — a failed read is loud here/);
+  assert.match(full, /binding      shared-ref · portable to any worktree of this clone · anchored on origin\/main · rule REMOTE-TRACKING-REF/);
+  assert.equal(exitMaskNote({ exit_masked: false }), null, "a loud row has no mask note at all");
+});
+
+test("`leads --json` carries a PROVENANCE object naming the tree root, HEAD, and whether HEAD differs from origin/main", () => {
+  const dir = tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")]);
+  const run = spawnSync("node", [LEDGER_CLI, "leads", "api", "--json", "--dir", dir], { encoding: "utf8" });
+  const parsed = JSON.parse(run.stdout);
+
+  assert.ok(parsed.provenance && typeof parsed.provenance === "object", "--json carries a provenance object");
+  const p = parsed.provenance;
+  assert.equal(typeof p.root, "string", "it names the tree root");
+  assert.equal(typeof p.head, "string", "…and HEAD");
+  assert.ok(Object.prototype.hasOwnProperty.call(p, "differs_from_origin"), "…and whether HEAD differs from origin/main");
+  assert.ok([true, false, null].includes(p.differs_from_origin), "which is a measured tri-state, never a guess");
+
+  // THE SAME READING THE BANNER DESCRIBES. A second measurement here would be a
+  // second implementation, and its first symptom would be a JSON field that
+  // disagrees with the banner printed one line earlier in the same run.
+  assert.ok(run.stderr.includes(p.head.slice(0, 8)), "the stderr banner and the JSON field name the same HEAD");
+  assert.ok(run.stderr.includes(p.root), "…and the same tree root");
+
+  // The library caller who measured nothing gets an honest null, never a
+  // fabricated clean reading.
+  assert.equal(selectLeads(foldLedger(dir), "api").provenance, null);
+});
+
+test("the provenance banner is on STDERR for every verb, and STDOUT stays machine-parseable (D78)", () => {
+  const dir = tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")]);
+
+  // leads --json: stdout parses as JSON, and the banner is nowhere in it.
+  const leadsJson = spawnSync("node", [LEDGER_CLI, "leads", "api", "--json", "--dir", dir], { encoding: "utf8" });
+  assert.doesNotThrow(() => JSON.parse(leadsJson.stdout), "leads --json stdout is pure JSON");
+  assert.ok(!leadsJson.stdout.includes(PROVENANCE_PREFIX), "the banner never lands on leads' stdout");
+  assert.ok(leadsJson.stderr.includes(PROVENANCE_PREFIX), "…it lands on stderr");
+
+  // fold: the other verb that JSON.parses its own stdout.
+  const fold = spawnSync("node", [LEDGER_CLI, "fold", dir], { encoding: "utf8" });
+  assert.doesNotThrow(() => JSON.parse(fold.stdout), "fold's stdout is pure JSON");
+  assert.ok(!fold.stdout.includes(PROVENANCE_PREFIX), "the banner never lands on fold's stdout");
+  assert.ok(fold.stderr.includes(PROVENANCE_PREFIX), "…it lands on stderr");
+
+  // prescreen inherits it from the same one call site in main(argv).
+  const factsPath = join(mkdtempSync(join(tmpdir(), "grip-leads-facts-")), "facts.json");
+  writeFileSync(factsPath, `${JSON.stringify([{ claim: "x", evidence: "1", rerun: "wc -l api/lib/x.ex" }])}\n`);
+  const prescreen = spawnSync("node", [LEDGER_CLI, "prescreen", factsPath], { encoding: "utf8" });
+  assert.ok(prescreen.stderr.includes(PROVENANCE_PREFIX), "prescreen inherits the banner too");
+
+  // ONE call site, so a sixth verb cannot be added without it.
+  assert.equal((LEDGER_SRC.match(/^\s*(?:const \w+ = )?emitProvenance\(\)/gm) || []).length, 1, "emitProvenance is called exactly once");
+  assert.match(LEDGER_SRC, /const provenance = emitProvenance\(\);/, "…and its return is KEPT, not discarded");
+  assert.match(LEDGER_SRC, /leadsCommand\(rest, provenance\)/, "…and handed to leads rather than re-measured");
 });
