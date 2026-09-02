@@ -1,0 +1,119 @@
+name: Task lease renew — an open PR keeps its row's claim alive
+
+# ADVISORY, AND NOT A GATE. This workflow is absent from
+# .github/required-checks.json and must stay absent: it is not required, it
+# never blocks a landing, and a red here would refuse a pull request for a
+# LEDGER state — which is the exact confusion task-16e56d05b809dd39 was filed
+# against. Its subject is a claim on the ledger; its verdict is a ::notice.
+# The required `PR references an active task` context is a different file
+# (pr-task-gate.yml) and this change leaves it byte-unchanged, as ruled.
+#
+# THE HOLE THIS CLOSES. The ledger's claim lease is 2700s (45 min). MEASURED
+# 2026-09-02: the CI queue ran 60-90 min (390 queued runs at 04:15Z), so a PR
+# that waited out the queue met a row whose lease the TTL sweeper had already
+# reaped — "still open and carries no claim". Ten PRs failed that way in one
+# night and one lane re-claimed the same rows three times. The orchestrator
+# ruled the fix belongs on the LEDGER side and that the strict context stays
+# strict, so cli/lease-pr-extension built
+# `POST /v1/tasks/:doc_id/renew` (Barkpark.Tasks.Renew) — a non-holder,
+# write-tier verb that stamps a bounded, self-expiring
+# `content.claim.lease_extension.until` the sweeper honours, WITHOUT touching
+# the claim epoch (a bump would stale every lead's stamp/close CAS).
+#
+# That verb is INERT until something calls it. This is the caller.
+#
+# SILENCE RELEASES, and that is the safety property. Nothing here writes a
+# latch: the window expires on its own, so a deleted workflow, a revoked
+# token, a CI outage or an abandoned PR all degrade to today's behaviour —
+# the row lapses on the normal lease. The `closed` arm is the FAST path, not
+# the mechanism.
+#
+# IDEMPOTENT BY THE SERVER'S ARITHMETIC. A repeated `synchronize` renews the
+# same bounded window; the API computes the boundary and caps total extension
+# at 21600s from the first grant. Nothing in this file reasons about time.
+#
+# The shell lives in scripts/task-lease-renew.sh — its header carries the full
+# API contract — so scripts/task-lease-renew.test.sh exercises the SAME code
+# this workflow runs, with a stub curl on PATH. A predicate that only exists
+# inside a YAML `run:` block is a predicate no harness can reach; that is how
+# pr-task-gate silently dropped every backtick-wrapped trailer for weeks.
+
+on:
+  pull_request:
+    # No `paths:` filter: the subject is the PR's own body, not any file. A
+    # docs-only PR waits in the same queue and holds the same claim.
+    #
+    # The four non-closed actions are the heartbeat. `opened` starts the
+    # window, `synchronize` re-arms it on every push, `reopened` revives it,
+    # and `ready_for_review` covers a draft promoted after a long sit — a
+    # draft's checks queue too. `closed` is the clear, and it fires for BOTH a
+    # merge and an abandon; the API is told which, and clears either way.
+    #
+    # `edited` is deliberately absent. A body edit that ADDS a trailer is
+    # followed by a push in practice, and firing on every keystroke-save of a
+    # description would spend renewals against the cap for no queue time.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+
+# `pull_request`, never `pull_request_target` — the repo's stance, copied from
+# pr-task-gate.yml. A fork PR therefore receives no secret and the script says
+# so in a ::warning and exits 0; the row lapses on the normal lease exactly as
+# it does today. `pull_request_target` would run with the base repo's secrets
+# on a head this job cannot vet, which is a token given away to buy a courtesy.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  # PER PR NUMBER. A newer `synchronize` supersedes an older one: both would
+  # renew the same bounded window, so the older run has nothing left to say.
+  # A bare `true` is honest here (never-cancel-main-check.sh: a
+  # pull_request-only workflow cannot self-cancel a main run, because
+  # github.ref is never refs/heads/main on this trigger).
+  group: task-lease-renew-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  task-lease-renew:
+    name: Keep the claim alive while this PR is open
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Shallow is enough: this job reads the PR BODY out of the event payload
+      # and never walks history. It checks out only to reach the two scripts.
+      - uses: actions/checkout@v4
+
+      - name: task-lease-renew.sh syntax check
+        run: bash -n scripts/task-lease-renew.sh
+
+      # NO `continue-on-error` here. It launders a red into a green job
+      # conclusion, and the ONE arm that can red — a refused BARKPARK_TASK_TOKEN
+      # — is the one arm that must never be laundered: a broken secret makes
+      # every future run a silent no-op, which is the defect above reintroduced
+      # with a green tick on top. Every ledger STATE is already exit 0 inside
+      # the script, so this job is advisory by construction, not by a flag.
+      - name: Renew (or clear) the lease this PR bought
+        env:
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          # The same secret pr-task-gate.yml, landed-mark.yml and
+          # reland-check.yml read: a least-privilege app token scoped
+          # read,write, which is exactly what POST /v1/tasks/:doc_id/renew
+          # needs and no more. That verb takes no worker_id and no epoch, and
+          # writes exactly ONE key (content.claim.lease_extension), so nothing
+          # here can claim, close, stamp or re-stage a row.
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+          # PR-controlled text arrives via env, never interpolated into the
+          # script body, so it cannot inject shell.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+        run: |
+          # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
+          # so a bare invocation on a non-zero exit would abort the step here
+          # with no output but the runner's own "Process completed with exit
+          # code N" — the anonymous red this repo has spent whole slices
+          # removing. `|| rc=$?` is the -e-safe form.
+          set -uo pipefail
+          rc=0
+          bash scripts/task-lease-renew.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
+          exit "$rc"
