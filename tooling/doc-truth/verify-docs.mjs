@@ -1055,8 +1055,14 @@ function verifyLinerefAgainst(claim, rel) {
   // check", never "stale". Deliberately scoped to the SOLE-needle case: where a
   // real anchor exists too, the stem rides along exactly as before, which is
   // what keeps this from re-scoring 14 confirmed citations into novel findings.
+  // SCOPED TO THE SOLE-BASIS CASE, exactly as the stem rule is: where a real
+  // anchor exists alongside them these tokens ride along unchanged, so this
+  // cannot re-score a citation that had genuine evidence. It can only move a
+  // verdict from `stale` to `unverifiable` — never to `confirmed`, since
+  // `anchors` is read by nothing but the emptiness guard below.
   const stem = basenameStem(t);
-  const anchors = needles.filter((n) => n !== stem);
+  const frags = pathFragments(t);
+  const anchors = needles.filter((n) => n !== stem && !frags.has(n));
   if (needles.length === 0 || anchors.length === 0) {
     // nothing concrete to check against — leave as low-conf unverifiable
     return tag(claim, "unverifiable", "low", `lineref has no checkable anchor near :${t.lines.join("/")}`);
@@ -1345,6 +1351,36 @@ function selfDerived(s, t) {
 // harvested (the route-segment rule reaches it too, via `content/dedup_wall.ex`).
 function basenameStem(t) {
   return String(t.base || "").replace(/\.[A-Za-z0-9]+$/, "");
+}
+
+// EVERY SEPARATOR-DELIMITED FRAGMENT OF THE CITED PATH. `deploy/site-deploy-node.sh`
+// yields {deploy, site, node, sh} — each of them a word the citation itself
+// supplied, and none of them a word the cited FILE is obliged to contain.
+//
+// THIS IS THE SAME CLASS `basenameStem` AND THE PATH-SEGMENT FILTER ALREADY
+// CLOSED, reached by a third route: the HYPHEN. The needle harvester's
+// route-segment rule reads a leading `/site` out of `deploy/site-deploy-node.sh`
+// and yields `site`, while the post-harvest filter only knows the whole
+// segment `site-deploy-node` — so the fragment walks straight between them.
+// Slash-separated segments are covered (selftest arm j), the bare stem is
+// covered (arm g), and a hyphenated fragment of either was not.
+//
+// MEASURED on main at 861e211c43: three NOVEL findings whose entire anchor set
+// was the word `site`, against a 2243-line target where the cited line is
+// perfectly in range. The gate reddened on a word that names nothing, and the
+// remedy it printed — re-point to a symbol — was right for the wrong reason.
+//
+// THE TELL THAT THIS IS THE GUARD'S OWN BUG, not a judgement call: `selfDerived`
+// ALREADY rejects `site`, because the token is a substring of the cited path. So
+// the confirm side of this function knows the anchor is worthless while the
+// stale side spends it as evidence. A token that cannot ever confirm a citation
+// must not be allowed to condemn one.
+function pathFragments(t) {
+  const out = new Set();
+  for (const tok of [t.file, t.base]) {
+    for (const part of String(tok || "").split(/[/\\.\-_]+/)) if (part) out.add(part);
+  }
+  return out;
 }
 
 // Pull checkable anchors out of a lineref claim's raw text.
