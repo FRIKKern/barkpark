@@ -7040,6 +7040,15 @@ test("C8: instanceDetailHtml leaves the Timeline panel blank (filled after mount
 
 // ── mergeTimeline: ordering / interleaving / dedup / empty (the table test) ──
 
+// EVERY `type` PASSED TO `EV` MUST BE ONE AgentEvent CAN ACTUALLY WRITE — i.e. a
+// literal 2nd argument of some `Registry.record_event(` under cloud/lib. Eight rows
+// here manufactured "backup" and "tls" long after #14670 dropped both from
+// AgentEvent's @types, so this suite asserted timeline grammar over traffic the
+// control plane can no longer emit, and a dead render branch looked exercised.
+// __agent_event_vocabulary_census.mjs's arm C now READS THIS FILE and reds on it
+// (its `fixture-manufactures-unproducible` failure mode) — before this commit it
+// read only __preview__/scenarios.mjs, so the violation sat in the census's own
+// declared blind spot. Producible today: health, status, space, verify.
 const EV = (id, type, secs, payload) => ({
   id, type, payload: payload || {}, inserted_at: new Date(Date.UTC(2026, 6, 3, 12, 0, secs)).toISOString(),
 });
@@ -7058,7 +7067,7 @@ test("C8: mergeTimeline interleaves both feeds newest-first", () => {
 });
 
 test("C8: equal timestamps order stably — event before audit, then key (repaint-stable)", () => {
-  const events = [EV(2, "health", 10), EV(1, "backup", 10)];
+  const events = [EV(2, "health", 10), EV(1, "space", 10)];
   const audits = [AU("a1", "site.created", 10)];
   const once = hooks.mergeTimeline(events, audits).map((e) => e.key);
   const twice = hooks.mergeTimeline(events, audits).map((e) => e.key);
@@ -7095,7 +7104,7 @@ test("C8: dedup — same-second + action dot-suffix == event type drops the audi
 test("C8: mergeTimeline is total over junk — empty, null, garbled stamps", () => {
   assert.deepEqual([...hooks.mergeTimeline([], [])], []);
   assert.deepEqual([...hooks.mergeTimeline(null, undefined)], []);
-  const merged = hooks.mergeTimeline([EV(1, "health", 10), { id: 2, type: "backup", inserted_at: "garbage" }], []);
+  const merged = hooks.mergeTimeline([EV(1, "health", 10), { id: 2, type: "space", inserted_at: "garbage" }], []);
   assert.equal(merged.length, 2);
   assert.equal(merged[1].key, "e:2"); // garbled stamp sinks to the bottom, never NaN-throws
 });
@@ -7158,7 +7167,7 @@ test("C8: tlvRowHtml — badge + expandable detail honouring the expanded flag",
   assert.match(open, /aria-expanded="true"/);
   assert.match(open, /<pre class="tlv-detail">/);
   // A payload-less entry gets no dead Details button.
-  const bare = hooks.mergeTimeline([EV(2, "tls", 10, {})], [])[0];
+  const bare = hooks.mergeTimeline([EV(2, "space", 10, {})], [])[0];
   assert.doesNotMatch(hooks.tlvRowHtml(bare, false), /data-tlv-toggle/);
 });
 
@@ -7215,7 +7224,7 @@ test("C8: an audit 403 degrades to ONE quiet line, not an error state", () => {
 });
 
 test("C8: expandedKeys re-open exactly the remembered rows across a repaint", () => {
-  const entries = hooks.mergeTimeline([EV(1, "health", 10, { a: 1 }), EV(2, "backup", 20, { b: 2 })], []);
+  const entries = hooks.mergeTimeline([EV(1, "health", 10, { a: 1 }), EV(2, "space", 20, { b: 2 })], []);
   const html = hooks.timelineFeedHtml(entries, { expandedKeys: ["e:2"] });
   const rows = html.split('data-tlv-key="');
   assert.match(rows[1], /^e:2/); // newest first
@@ -15733,7 +15742,7 @@ const BURST = Array.from({ length: 10 }, (_, i) =>
 
 test("D-04: coalesceEntries folds consecutive same-key runs; singletons pass through UNCHANGED", () => {
   const entries = hooks.mergeTimeline(
-    [...BURST, EV(5, "status", 30, { transition: "offline" }), EV(4, "backup", 20, { status: "ok" })],
+    [...BURST, EV(5, "status", 30, { transition: "offline" }), EV(4, "space", 20, { used_pct: 61 })],
     [],
   );
   const items = hooks.coalesceEntries(entries);
@@ -15751,7 +15760,7 @@ test("D-04: coalesceEntries folds consecutive same-key runs; singletons pass thr
 test("D-04: a run of two folds; interleaving breaks the run (consecutive-only, never feed-wide)", () => {
   const entries = hooks.mergeTimeline(
     [EV(4, "health", 40, { health: "up" }), EV(3, "health", 30, { health: "up" }),
-     EV(2, "backup", 20, { status: "ok" }), EV(1, "health", 10, { health: "up" })],
+     EV(2, "space", 20, { used_pct: 61 }), EV(1, "health", 10, { health: "up" })],
     [],
   );
   const items = hooks.coalesceEntries(entries);
@@ -15815,10 +15824,15 @@ test("D-04: worst-verdict summary — unanimous says 'all …', mixed states the
     [],
   );
   assert.equal(hooks.tlvGroupVerdictText(verifies), "1 of 3 failed");
-  // Verdict-less types (tls) omit the segment rather than inventing one.
-  const tls = hooks.mergeTimeline(
-    [EV(2, "tls", 20, { domain: "a" }), EV(1, "tls", 10, { domain: "b" })], []);
-  assert.equal(hooks.tlvGroupVerdictText(tls), "");
+  // Verdict-less types (space) omit the segment rather than inventing one.
+  // `space` is chosen because tlvVerdictOf returns null for it — the property under
+  // test — AND it is a type the control plane can actually write (router.ex's
+  // `Registry.record_event(..., "space", ...)`). This pair used to be typed `tls`,
+  // which #14670 removed from AgentEvent's @types: verdict-less, but only because
+  // no producer could ever send it.
+  const spaces = hooks.mergeTimeline(
+    [EV(2, "space", 20, { domain: "a" }), EV(1, "space", 10, { domain: "b" })], []);
+  assert.equal(hooks.tlvGroupVerdictText(spaces), "");
 });
 
 test("D-04: cadence copy — 'every ~1m for 9m' from the members' own stamps; same-second bursts stay silent", () => {

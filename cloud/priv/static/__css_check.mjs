@@ -130,6 +130,27 @@
 //       `node __css_check.mjs --citation-inventory`, which also crosses the set
 //       with the RULED alternation so the E11 widening's cost is a run, never a
 //       quoted number.
+//   E18 an unpainted DOMAIN-CHECKLIST ROLE, and a deriver that went blind.
+//       FOURTH in the E13/E15/E16 family: `dom-rung dom-rung--` is an E3
+//       allowlist entry, so the role half was unmeasured and its trailing comment
+//       was the only statement of the value space — a comment that named FIVE
+//       roles for a SIX-role fold, omitting `unknown` (which has a rule) and
+//       listing `pending` (which had none). Wrong in both directions at once,
+//       and unfailable. The set is DERIVED from domainStageRows' ternary arms and
+//       its `active` promotion, diffed against DOM_RUNG_ROLES both ways.
+//       WEAKER THAN E16's DEFECT, AND SAID SO: the bare .dom-rung is not a
+//       separately shipped state, so ruleless `pending` fell through to the right
+//       muted paint by COINCIDENCE rather than impersonating anything. The remedy
+//       is still a written rule — arm (d) pins that .dom-rung--pending mirrors a
+//       base that still exists.
+//   E19 a WAIVER THAT ABSOLVES NOTHING: an ALLOW_PREFIXES entry no dynamic
+//       composition site in app.js or index.html actually has. The general form
+//       of E15's stale-consent arm, applied to the E3 allowlist itself. A waiver
+//       for an unemitted head can never red, so it is indistinguishable from one
+//       doing real work — and it silently PRE-EXEMPTS the family if that name
+//       ever returns, at which point the gate reports green over a family it has
+//       never checked. Compared against `allowlistedHits`, the walker's own
+//       record, so the arm and the waiver are judged on the same evidence.
 //   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
 //
 //         A rule whose selector is WRAPPER-SCOPED onto the pill
@@ -358,8 +379,15 @@ const ALLOW_PREFIXES = [
   "new-console",       // + (collapsed ? " is-collapsed" : "")
   "new-step ",         // + cls (done | active | failed)
   "status-pill status-pill--", // statusPill(): + role (ok | info | warn | danger | neutral)
-  "rollup-card rollup-card--",  // rollupCard(): + bucket (attention | inflight | healthy)
-  "bp-tl-step bp-tl-step--",    // timelineHtml(): + role (ok | active | failed | pending)
+  // cch: `rollup-card rollup-card--` and `bp-tl-step bp-tl-step--` stood here and
+  // were REMOVED. Neither head is emitted by app.js any more (rollupCard() and the
+  // bp-tl-step row family are both gone — app.css:  ".bp-tl-step family is GONE";
+  // __app.test.mjs asserts `doesNotMatch(/bp-tl-step/)`), and none of the modifiers
+  // their comments named had a rule anywhere. A waiver for a head nobody emits can
+  // never red, so it is indistinguishable from one doing real work — and it would
+  // silently pre-exempt the family the day the name came back. E18 below now makes
+  // that shape red on its own, which is the durable half: this pair was found by
+  // hand, the next one is found by the gate.
   "bp-console",                 // timelineConsoleHtml(): + (collapsed ? " is-collapsed" : "")
   "inst-tab",                   // instanceTabStripHtml(): + (on ? " is-active" : "")
   "wh-del-status wh-del-status--", // delivery status pill: + tone — the value space is NOT this comment's; it is WH_DEL_TONES below, and E15 checks it
@@ -386,7 +414,7 @@ const ALLOW_PREFIXES = [
   "instance-card-stat-v",          // + (warn ? " is-warn" : "") (.instance-card-stat-v / .is-warn)
   "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
   // gr-p3 SITE DETAIL (E-02): the v4 domain-checklist rung pill.
-  "dom-rung dom-rung--",           // domainRungChip(): + role (ok | failed | active | pending | proxied) (.dom-rung / .dom-rung-- rules)
+  "dom-rung dom-rung--",           // domainRungChip(): + role — the value space is NOT this comment's; it is DOM_RUNG_ROLES below, and E18 checks it
   // gr-p5r5-css-families: the three var-then-concat sites rewritten to inline
   // concat, so the walker finally reads a literal head instead of "". These were
   // never missing CSS — every composed class below has had a rule all along; the
@@ -536,6 +564,80 @@ function emittedFreshnessDots(js) {
   }
   const assigns = [...body.matchAll(/\bdot\s*=(?!=)/g)].length;
   return { dots, literal, assigns };
+}
+
+// ── E18: the .dom-rung-- ROLE SET, derived instead of described ─────────────
+// `"dom-rung dom-rung--"` in ALLOW_PREFIXES waives the dynamic head, and until
+// now the only statement about what it composes was that entry's own trailing
+// comment. That comment named FIVE roles — ok | failed | active | pending |
+// proxied — and domainStageRows emits SIX: it omitted `unknown`, which HAS had a
+// rule since cch-w29, and it listed `pending`, which had NONE. So the comment was
+// wrong in both directions at once, and nothing could tell you: a comment cannot
+// fail. The set below is a DECLARATION only; emittedDomainRungRoles() reads the
+// arms and E18 reds if the two disagree either way.
+//
+// WHY THIS ONE GETS NO CONSENT ARM EITHER, and the reason differs from E16's. On
+// the fresh-badge family, a rule-less modifier IMPERSONATED a real state, because
+// the bare .fresh-badge is itself the "never deployed" badge. Here the bare
+// .dom-rung had no other consumer at all — `pending` was the only one of the six
+// roles that ever reached it — so the fall-through was landing on the correct
+// muted paint by luck, not by statement. That is a weaker defect than cch-w64's
+// and it is recorded as such, but the remedy is the same: .dom-rung--pending is
+// now authored explicitly, and arm (c) requires a rule for all six. Nothing is
+// permitted to rely on an unwritten fall-through again.
+const DOM_RUNG_ROLES = ["ok", "failed", "proxied", "pending", "unknown", "active"];
+
+// The roles domainStageRows actually produces. Derived, never enumerated. The
+// initializer is a ternary CHAIN, so the roles are read out of the RESULT
+// positions only (`? "x"` arms and the trailing `: "x";` default) — never every
+// string in the expression, which would also scoop up the `status === "…"`
+// comparands and hand E17 a set wider than the code's. Reassignments (`role =
+// "active"`, the markNextStep promotion) are read separately. Returns null when
+// the function cannot be located or brace-matched; reports arm/assignment COUNTS
+// beside the literals so an arm this reader cannot follow is a hard error rather
+// than a silently shorter set — an empty scan is not a clean scan.
+function emittedDomainRungRoles(js) {
+  const start = js.indexOf("function domainStageRows(");
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  if (i === -1) return null;
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open, i);
+
+  const initStart = body.search(/\bvar\s+role\s*=/);
+  if (initStart === -1) return null;
+  const initEnd = body.indexOf(";", initStart);
+  if (initEnd === -1) return null;
+  const init = body.slice(initStart, initEnd + 1);
+
+  const roles = new Set();
+  // Ternary result arms: `? "ok"`.
+  const armLits = [...init.matchAll(/\?\s*"([a-z][a-z0-9-]*)"/g)];
+  for (const m of armLits) roles.add(m[1]);
+  // The chain's trailing default: `: "unknown";`.
+  const tail = init.match(/:\s*"([a-z][a-z0-9-]*)"\s*;\s*$/);
+  if (tail) roles.add(tail[1]);
+  const arms = (init.match(/\?/g) || []).length;
+
+  // Reassignments elsewhere in the body (the `active` promotion).
+  const reassigns = [...body.slice(initEnd).matchAll(/(?:^|[^.\w$])role\s*=(?!=)/g)].length;
+  const reassignLits = [...body.slice(initEnd).matchAll(/(?:^|[^.\w$])role\s*=\s*"([a-z][a-z0-9-]*)"/g)];
+  for (const m of reassignLits) roles.add(m[1]);
+
+  return {
+    roles,
+    arms,
+    armLiterals: armLits.length,
+    tail: !!tail,
+    reassigns,
+    reassignLiterals: reassignLits.length,
+  };
 }
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
@@ -2458,6 +2560,121 @@ for (const st of DEPLOY_STATUSES) {
         "list on the strength of that badge existing (the never-deployed state the base look " +
         "belongs to). Re-decide: either restore the emission, or add a named consent list here " +
         "the way WH_DEL_BASE_TONES does for E15.",
+    );
+  }
+}
+
+// E18 — every domain-checklist ROLE is painted. Same four failure shapes as E16:
+// the deriver cannot read domainStageRows, it read it but could not follow an arm,
+// the declared set drifted from the arms, or a role has no rule. Arm (d) pins the
+// premise that makes the no-consent decision above reviewable rather than inherited.
+{
+  const derived = emittedDomainRungRoles(jsRaw);
+  if (derived === null) {
+    errors.push(
+      "E18 app.js  domainStageRows() could not be located, brace-matched, or its `var role =` " +
+        "initializer found — the dom-rung-- role set is DERIVED from that fold, so a rename or " +
+        "a rewrite must come with an update here, never a silently skipped check.",
+    );
+  } else {
+    // (a) DERIVER BLINDNESS, both halves of the fold. Every ternary arm and every
+    //     later `role =` must be a string literal, or this reader returns a set
+    //     narrower than the code's and (c) goes quietly vacuous.
+    if (derived.arms !== derived.armLiterals) {
+      errors.push(
+        `E18 app.js  domainStageRows()'s role ternary has ${derived.arms} arm(s) but only ` +
+          `${derived.armLiterals} yield a string literal — emittedDomainRungRoles reads literals ` +
+          `ONLY, so the derived set would be short by ${derived.arms - derived.armLiterals}. Keep ` +
+          `the arms literal, or teach the deriver the new form; do not let it report a set it cannot see.`,
+      );
+    }
+    if (!derived.tail) {
+      errors.push(
+        "E18 app.js  domainStageRows()'s role ternary chain no longer ends in a literal default " +
+          "(`: \"unknown\";`). That default is the arm that catches every status the server invents, " +
+          "so a non-literal there is exactly the role most likely to reach the DOM unpainted.",
+      );
+    }
+    if (derived.reassigns !== derived.reassignLiterals) {
+      errors.push(
+        `E18 app.js  domainStageRows() reassigns \`role\` ${derived.reassigns} time(s) but only ` +
+          `${derived.reassignLiterals} to a string literal — the markNextStep promotion is how ` +
+          `\`active\` enters the set at all, and a computed one is invisible to this reader.`,
+      );
+    }
+    // (b) DRIFT, both directions: DOM_RUNG_ROLES and the fold must name one set.
+    //     This is the arm that would have caught the ALLOW_PREFIXES comment, which
+    //     was wrong in BOTH directions simultaneously (it omitted `unknown` and it
+    //     listed `pending` as though painted).
+    for (const r of derived.roles) {
+      if (DOM_RUNG_ROLES.includes(r)) continue;
+      errors.push(
+        `E18 __css_check.mjs  domainStageRows() produces role "${r}", which is not in ` +
+          `DOM_RUNG_ROLES — add it there, then paint .dom-rung--${r}. There is no consent to ` +
+          `the base pill on this family.`,
+      );
+    }
+    for (const r of DOM_RUNG_ROLES) {
+      if (derived.roles.has(r)) continue;
+      errors.push(
+        `E18 __css_check.mjs  DOM_RUNG_ROLES names "${r}", which domainStageRows() no longer ` +
+          `produces — a value space wider than reality is how the entry's old comment came to ` +
+          `name five roles for a six-role fold. Remove it.`,
+      );
+    }
+  }
+
+  // (c) UNPAINTED: `cssClasses` is built from comment-stripped CSS, so a selector
+  //     surviving only inside a comment does not count. This is the arm that reds
+  //     on the filed defect: before this commit .dom-rung--pending had no rule.
+  for (const r of DOM_RUNG_ROLES) {
+    if (cssClasses.has(`dom-rung--${r}`)) continue;
+    errors.push(
+      `E18 app.css  domain role "${r}" has no .dom-rung--${r} rule — the ` +
+        `dom-rung dom-rung-- head emits it, so the chip falls through to the BARE ` +
+        `.dom-rung and paints whatever that happens to say. Add a rule beside the ` +
+        `other .dom-rung--* rules, even when the base already looks right: an ` +
+        `unwritten fall-through is not a treatment, it is a coincidence.`,
+    );
+  }
+
+  // (d) PREMISE: (c)'s "even when the base already looks right" and the decision to
+  //     ship no consent list both rest on the bare .dom-rung being a real authored
+  //     rule that pending's own rule mirrors. If the base goes, the mirroring rule
+  //     is stranded and the reasoning must be re-opened rather than left as prose.
+  if (!cssClasses.has("dom-rung")) {
+    errors.push(
+      "E18 app.css  the base .dom-rung rule is gone, but .dom-rung--pending is authored as an " +
+        "EXACT restatement of it (see its comment in app.css). Re-decide: either restore the " +
+        "base, or give pending a treatment that stands on its own.",
+    );
+  }
+}
+
+// E19 — a waiver must absolve something. Every ALLOW_PREFIXES entry is a standing
+// consent for a dynamic class head, and consent for a head nobody emits is consent
+// absolving nothing: it can never red, so it is indistinguishable from an entry
+// doing real work, and it silently pre-exempts the family the day that name comes
+// back — the gate would then report green over a family it had never checked.
+//
+// THIS IS THE GENERAL FORM OF WHAT E15's CONSENT ARM DOES FOR ONE LIST. It found
+// nothing new when it was written (the two dead entries it was built for —
+// `rollup-card rollup-card--` and `bp-tl-step bp-tl-step--` — were removed in the
+// same commit), and that is the intended steady state: this arm exists so the NEXT
+// one is found by the gate instead of by a person reading the list.
+//
+// `allowlistedHits` is the walker's own record of entries it actually used, so this
+// compares the list against the same evidence the E3 waiver is granted on — not
+// against a second, differently-shaped grep that could disagree with it.
+{
+  const used = new Set(allowlistedHits.map((h) => h.head));
+  for (const head of ALLOW_PREFIXES) {
+    if (used.has(head)) continue;
+    errors.push(
+      `E19 __css_check.mjs  ALLOW_PREFIXES entry "${head}" waived nothing on this run — no ` +
+        `dynamic class composition in app.js or index.html has that head. A waiver for an ` +
+        `unemitted head can never fail, so it reads as live consent forever and pre-exempts ` +
+        `the family if the name returns. Delete the entry; re-add it with the emission.`,
     );
   }
 }

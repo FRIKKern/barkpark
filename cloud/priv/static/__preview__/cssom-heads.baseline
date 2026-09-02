@@ -624,4 +624,27 @@
 # printed "!! BASELINE MISMATCH: 1342 authored rule heads, sidecar baseline is 1340
 # (+2)" with "MISSES 0" and "flattened selectors 1288 authored / 1288 CSSOM" on the
 # same run. Both numbers are copied from that printout, never from arithmetic.
-1342
+#
+# Re-measured 2026-09-02 (console/dead-census-vocabulary, the census+waiver batch):
+# 1334 authored heads, a NET -8 from 1342. MEASURED, never arithmetic: the count is
+# the return of `authoredHeads(app.css).length` from cssom-parity.mjs's own exported
+# resolver, run on this branch's app.css (node v22.22.0) — the same function the gate
+# calls, so the number cannot disagree with the gate that reads it.
+#
+# The move is -9 +1, and both halves are DELIBERATE:
+#   -9  the dead provider-picker block. cch-w26-s4 deleted openProviderPicker and left
+#       its CSS behind (app.css was outside that slice's fence): .choice-list, .choice,
+#       .choice:hover:not(:disabled), .choice:disabled, .choice-main, .choice-name,
+#       .choice-sub, .choice-chev, .choice-tag — 0 producers each, grepped one token at
+#       a time across app.js, index.html and styleguide.html. .choice-ico and
+#       .choice-ico.sm STAY (3 live producers: the credential dialog's .modal-head tile
+#       and the providers roster mini-tile), and so does .modal-head .choice-ico.
+#   +1  .dom-rung--pending, the sixth domain-checklist role finally getting a rule of
+#       its own. It restates the .dom-rung base EXACTLY, so this ADD paints nothing new.
+#
+# MISSES stays 0 WITHOUT a browser run, and this is the one claim here not taken from
+# Chrome: MISSES counts authored heads absent from the CSSOM. Deleting whole authored
+# rules cannot manufacture one, and the single ADD is a flat class selector with three
+# plain declarations — no at-rule, no nesting, no selector Chrome could drop. There is
+# no shape in this diff that can move MISSES off 0.
+1334

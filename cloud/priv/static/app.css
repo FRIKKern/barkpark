@@ -1347,25 +1347,26 @@ select.form-input {
 }
 .toast-close:hover { color: var(--text); }
 
-/* ===================================================== PROVIDER PICKER */
-.choice-list { display: flex; flex-direction: column; gap: 8px; }
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 14px;
-  text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font: inherit;
-  color: var(--text);
-  transition: border-color var(--t), background var(--t);
-}
-.choice:hover:not(:disabled) { border-color: var(--dim); background: var(--muted-surface); }
-.choice:disabled { opacity: 0.5; cursor: not-allowed; }
+/* ============================================ PROVIDER BRAND TILE (.choice-ico)
+   cch-w26-s4 deleted `openProviderPicker` — #cred-back was rewired to the launch
+   wizard, and the picker sheet has had no forward caller since. That function was
+   the ONLY producer of .choice-list, .choice (+ :hover/:disabled), .choice-main,
+   .choice-name, .choice-sub, .choice-chev and .choice-tag, so those NINE rule
+   heads were removed here: a `grep -o` of each token across app.js, index.html
+   and styleguide.html returned 0 producers for every one of them.
+
+   .choice-ico SURVIVES ON PURPOSE and is the reason this block still exists.
+   It is NOT picker residue: openProviderCredential's .modal-head tile
+   (`class="choice-ico " + p.cls`) and the providers roster mini-tile
+   (`class="choice-ico sm " + m.cls`) both still paint through it — 3 producers,
+   which is also what keeps the `choice-ico ` / `choice-ico sm ` ALLOW_PREFIXES
+   entries in __css_check.mjs honest rather than stale.
+
+   THE BARE `.choice` WENT TOO, and it was not on the filing's list. The row named
+   seven -ico-excluded tokens; the DERIVED set — every `.choice*` selector actually
+   authored in this file — is nine heads, because `.choice`, `.choice:hover` and
+   `.choice:disabled` are the button chrome the deleted picker rows wore. A sibling
+   list is what somebody CHECKED, not what EXISTS. */
 .choice-ico {
   width: 32px; height: 32px;
   flex: 0 0 auto;
@@ -1374,11 +1375,6 @@ select.form-input {
   color: #fff; font-weight: 700; font-size: 13px;
 }
 .choice-ico.sm { width: 24px; height: 24px; font-size: 11px; display: inline-grid; vertical-align: middle; margin-right: 8px; }
-.choice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.choice-name { font-size: 14px; font-weight: 600; }
-.choice-sub { font-size: 12px; color: var(--muted-text); margin-top: 1px; }
-.choice-chev { color: var(--dim); font-size: 18px; line-height: 1; }
-.choice-tag { font-size: 11px; color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
 
 /* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
    the shared --provider-* identity tokens (S4) so the picker tile, the fleet
@@ -6222,6 +6218,24 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
 .dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
 .dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* A rung nobody has reached yet. Its treatment IS the muted base pill above, and
+   this rule restates it EXACTLY — same three tokens, byte-for-byte the same paint
+   — so adding it changes no pixel. It is here because `domainStageRows` emits
+   `pending` as one of SIX closed roles and this was the only one of the six with
+   no rule of its own: the modifier resolved to nothing and the chip fell through
+   to `.dom-rung`.
+   THIS IS NOT THE cch-w64 IMPERSONATION SHAPE, and the difference is the finding.
+   There, a BARE .fresh-badge was deliberately shipped as its own meaningful state,
+   so a rule-less modifier rendered byte-identical to a DIFFERENT state. Here the
+   bare base has no other consumer — `pending` is the only role that ever reached
+   it (ok/failed/active/proxied/unknown all carry rules), so the fall-through was
+   landing on the right paint by luck rather than by statement. Writing the rule
+   turns that luck into an invariant E17 can then require of all six roles. */
+.dom-rung--pending {
+  color: var(--muted-text);
+  background: var(--muted-surface);
+  border-color: var(--border);
+}
 /* A rung the control plane ATTEMPTED and could not measure. It must not look
    like a rung we are still waiting on (the default muted pill): amber, and a
    DASHED border — the shape says "no reading taken", not "in flight". Same
