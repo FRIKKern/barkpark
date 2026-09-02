@@ -1197,9 +1197,10 @@ export const LEDGER_CORPUS_NAME = "the durable recipe ledger (tooling/grip/ledge
  *
  * DEDUPED TO ONE RECIPE PER (subject, quantity) BY DEFAULT, because a key's
  * rival recipes re-derive THE SAME QUANTITY and running all of them buys
- * repetition rather than coverage. Measured on a 400-row store: 17,343ms over
- * every recipe against 5,043ms one-per-key — ~3.4x the wall clock for a 37%
- * larger set.
+ * repetition rather than coverage. Measured at ee49d2b7f2 (2026-07-21) on a
+ * synthetic 400-row store: 17,343ms over every recipe against 5,043ms
+ * one-per-key — ~3.4x the wall clock for a 37% larger set. The ratio is the
+ * durable claim; the corpus size is a stated snapshot, not the live store.
  *
  * BUT THE RIVALS ARE NOT SILENTLY DISCARDED. `summarise`'s report has no field
  * for `rival_methods` or `unreadable`, so flattening to a bare string[] would
@@ -1263,10 +1264,12 @@ export function renderLedgerPreamble(source) {
   // than trusting the row, because the mint's grammar moved after the rows were
   // written and the store is immutable. Absorbing that silently would make the
   // clean "0 rival methods" above look like a property of the DATA when it is a
-  // property of the READ — 57 of the 62 committed rows carry a stored key today's
-  // mint no longer produces. A FALLBACK is the one that bites: it is the only way
-  // the fold can still be keying on a stale value, so it prints even at zero once
-  // any restatement happened.
+  // property of the READ — at e8bbba5919 (2026-07-21), 57 of the 62 committed
+  // rows carried a stored key that commit's mint no longer produced. That is a
+  // named past snapshot, not a live count: the store grows without touching this
+  // file, so the figure is never restated with a fresh total (D102). A FALLBACK
+  // is the one that bites: it is the only way the fold can still be keying on a
+  // stale value, so it prints even at zero once any restatement happened.
   if (s.quantity_restated > 0 || s.level_restated > 0 || s.quantity_fallbacks > 0 || s.level_fallbacks > 0) {
     L.push(
       `  key re-derived   ${s.quantity_restated ?? 0} quantity, ${s.level_restated ?? 0} level` +
