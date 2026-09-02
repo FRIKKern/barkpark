@@ -797,8 +797,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
     test "dropping your own in_progress card on Done closes it (lifecycle flips to done)",
          %{conn: conn, ws: ws} do
+      # PDS-D291: a MET criterion, because a DRAG sends no close reason at all
+      # and the close-artifact gate refuses a `done` close of a criteria-less row
+      # whose reason names no PR+sha. This test is about the drag write-through;
+      # the criteria-less drag is its own test, below.
       scoped_task("dr-wip", "Ship it by drag", ws.id,
         lifecycle: "in_progress",
+        criteria: [%{"criterion" => "shipped", "met" => true}],
         claim: %{"worker" => "studio:admin", "epoch" => 1}
       )
 
@@ -813,6 +818,29 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       doc = Repo.get_by(Document, doc_id: "dr-wip")
       assert doc.content["lifecycle_status"] == "done"
+    end
+
+    # PDS-D291 through the board. A drag carries no reason, so a criteria-less
+    # row can NEVER be finished by dragging — and the message has to say that.
+    # Before the dedicated clause this fell to the catch-all "its claim moved
+    # under you", which names a cause that did not happen and sends the reader
+    # to re-claim a lease nobody took.
+    test "dragging a CRITERIA-LESS card to Done is refused, and says why",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-bare", "No criteria, no artifact", ws.id,
+        lifecycle: "in_progress",
+        claim: %{"worker" => "studio:admin", "epoch" => 1}
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-bare", "to_col" => "done"})
+
+      assert html =~ "names no acceptance criteria"
+      refute html =~ "its claim moved under you"
+
+      # And the row did NOT move: the optimistic hop rolled back.
+      doc = Repo.get_by(Document, doc_id: "dr-bare")
+      assert doc.content["lifecycle_status"] == "in_progress"
     end
 
     test "dropping your own in_progress card on Open RELEASES it (wave 17 unclaim)",
@@ -2475,6 +2503,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     content =
       %{"lifecycle_status" => Keyword.fetch!(opts, :lifecycle)}
       |> put_some("priority", opts[:priority])
+      # PDS-D291: a drag carries no close reason, so a card that must survive a
+      # drop on Done needs acceptance criteria — `task/3` above already takes
+      # `:criteria`, and this twin silently DROPPED it, which reads as "the
+      # option had no effect" rather than as a missing key.
+      |> put_some("acceptance_criteria", opts[:criteria])
       |> put_some("claim", opts[:claim])
 
     Repo.insert!(%Document{

@@ -1047,6 +1047,24 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|To close anyway, on the record: --set ack_override="<why the reporter is not being told>". | <>
         ~s|criteria_override does NOT discharge this: they are different admissions.|
 
+  # The CLOSE ARTIFACT refusal (PDS-D291). The hint QUOTES the ruling, because the
+  # ruling is the whole content of the refusal: without it the caller reads
+  # "needs an artifact" as a formatting nit rather than as "this is not done".
+  # It must also name the honest exit the ruling itself names (add criteria, or
+  # cancel) BEFORE the override, so the override is the third choice and not the
+  # first — reflexive overriding is what emptied `criteria_override` of meaning.
+  def criteria_hint(:close_reason_needs_artifact, :close),
+    do:
+      ~s|this row carries ZERO acceptance criteria, and main ruled (task-ce0c0ffff6edde23, 2026-09-02): | <>
+        ~s|"a row with ZERO acceptance criteria may close done only when its close_reason names the merged PR | <>
+        ~s|number + sha (or the run output) that discharged its title; if no such artifact exists it is NOT done | <>
+        ~s|— add criteria or cancel with the reason. A merge condition written only in prose does not bind." | <>
+        ~s|So: put the artifact IN the reason — a PR number AND its sha (e.g. "landed #14383 @ 63b89bef30") or a | <>
+        ~s|pasted run (a ``` fence, or a line starting with "$ ") — or add the acceptance criteria this row should | <>
+        ~s|have carried and stamp them, or close it `cancelled` with the reason. Goals, decisions and rows with | <>
+        ~s|children are exempt. To close done anyway, on the record: --set close_reason_override="<why it is done | <>
+        ~s|with no artifact>".|
+
   def criteria_hint({:sentinel_worker_id, worker}, _surface),
     do:
       ~s|"#{worker}" is not a worker id — it is a missing value wearing a worker's clothes (empty, "None", | <>

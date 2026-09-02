@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -125,5 +127,45 @@ func TestTaskCloseExit_RetryableAndPermanentRefusalsDiffer(t *testing.T) {
 	}
 	if criteria == exitUsage {
 		t.Fatalf("criteria_unmet is back on exit %d — the malformed-command-line code", exitUsage)
+	}
+}
+
+// The close-artifact gate (PDS-D291). Two claims, and the second is the one a
+// codeExit assertion cannot make: the refusal must reach the caller as
+// VALIDATION (5) — not as the exit 2 an unknown {"ok":false,"reason":…} token
+// falls back to, which is byte-identical to a malformed command line — and the
+// server's hint must reach stderr VERBATIM, because the hint is where the
+// ruling lives. A caller who sees only `close_reason_needs_artifact` learns
+// that something is missing but never that the row is not done.
+func TestTaskCloseExit_CloseReasonNeedsArtifactIsValidationWithTheRulingVerbatim(t *testing.T) {
+	const hint = `this row carries ZERO acceptance criteria, and main ruled ` +
+		`(task-ce0c0ffff6edde23, 2026-09-02): "a row with ZERO acceptance criteria may close done ` +
+		`only when its close_reason names the merged PR number + sha (or the run output) that ` +
+		`discharged its title". To close done anyway, on the record: ` +
+		`--set close_reason_override="<why it is done with no artifact>".`
+
+	body, err := json.Marshal(map[string]any{
+		"ok":      false,
+		"reason":  "close_reason_needs_artifact",
+		"message": hint,
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	taxonomyClosingServer(t, http.StatusConflict, string(body))
+
+	out, code := captureExecuteCode(t, []string{
+		"task", "close", "bp-task-x", "w", "1", "done", "shipped it", "--yes",
+	})
+
+	if code != exitValidation {
+		t.Errorf("close_reason_needs_artifact exited %d, want exitValidation (%d)", code, exitValidation)
+	}
+	if code == exitUsage {
+		t.Errorf("close_reason_needs_artifact landed on exit %d — the malformed-command-line code, "+
+			"which means the codeExit row is missing", exitUsage)
+	}
+	if !strings.Contains(out, hint) {
+		t.Errorf("the server's hint did not reach the caller VERBATIM.\n got: %s\nwant substring: %s", out, hint)
 	}
 }
