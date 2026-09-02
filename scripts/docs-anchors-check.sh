@@ -25,6 +25,13 @@
 #   8. @canonical capability:<slug> markers are unique repo-wide, sit on a
 #      PUBLIC entry point, and their optional doc: backlink resolves — checked
 #      only AFTER a planted fixture proves the scan can still find a defect.
+#  11. docs/auth.md's "## Plug pipelines (HTTP)" section agrees with
+#      api/lib/barkpark_web/router.ex, both directions: every pipeline whose
+#      body plugs RequireAdmin must be named there (the required set is DERIVED
+#      from the router, never hand-listed), and every pipeline the section names
+#      must still exist. Numbered 11 because 9 and 10 are reserved for two PRs
+#      in flight. Nothing read this page's CONTENT before: deleting the whole
+#      section left both doc gates at exit 0.
 #
 # WARN-only (never fails the gate):
 #   7. Duplication tripwires — prod IP literal, webhook signature literal,
@@ -247,6 +254,133 @@ if [ "$MODE" = selftest ]; then
     printf -- "// @canonical capability:fixture-async\nexport async function fixtureAsyncFn(a) { return a; }\n" > "$FIX/api/lib/y.ts"
     printf -- "fixture-async\tfixtureAsyncFn\n" > "$FIX/pin"
     export CANON_PIN="$FIX/pin"'
+
+  # §12 COLD-DOC BANNER. Two RED arms — one per fence shape — because keying only
+  # on a bash-tagged fence would have covered 16 of 47 real cases (see §12's own
+  # comment). Fixtures are built with QUOTED heredocs, never printf: a fence is
+  # three backticks, and in the double-quoted printf these arms first used, bash
+  # read them as command substitution. The files came out empty of fences, §12
+  # scanned 0, and the two SILENT arms below passed on mangled input — a vacuous
+  # green that a heredoc makes structurally impossible.
+  st_case "cold doc with a bash-tagged fence and no banner REDS, naming the file" 1 "docs/cold-a.md is doc-tier: cold and carries runnable commands" '
+    cat > "$FIX/docs/cold-a.md" <<"CASEA"
+<!-- doc-tier: cold | canonical-for: fixture-cold-a | budget: 100tok -->
+# Cold A
+
+```bash
+git status
+```
+CASEA'
+
+  st_case "cold doc with an UNTAGGED fence of commands and no banner REDS" 1 "docs/cold-b.md is doc-tier: cold and carries runnable commands" '
+    cat > "$FIX/docs/cold-b.md" <<"CASEB"
+<!-- doc-tier: cold | canonical-for: fixture-cold-b | budget: 100tok -->
+# Cold B
+
+```
+bp task close x w 1 done "s"
+```
+CASEB'
+
+  # SILENT ARMS — §12 must bite ONLY where it should, or the banner becomes noise
+  # that gets waived. Each of these three is a GREEN the gate has to earn, and
+  # each asserts the COUNT, so a detector that has gone blind cannot pass them.
+  st_case "the banner satisfies §12, and the doc is COUNTED" 0 "§12 scanned 1 cold doc(s) carrying runnable commands; 0 missing" '
+    cat > "$FIX/docs/cold-c.md" <<"CASEC"
+<!-- doc-tier: cold | canonical-for: fixture-cold-c | budget: 100tok -->
+# Cold C
+
+> HISTORICAL RECORD (2026-01-02) — the commands below were run on that date.
+
+```bash
+git status
+```
+CASEC'
+
+  st_case "an untagged fence of OUTPUT is not a command block" 0 "§12 scanned 0 cold doc(s)" '
+    cat > "$FIX/docs/cold-d.md" <<"CASED"
+<!-- doc-tier: cold | canonical-for: fixture-cold-d | budget: 100tok -->
+# Cold D
+
+```
+cond_b=OK ok=1
+total 42
+```
+CASED'
+
+  st_case "an agent-tier doc with commands is out of scope for 12" 0 "§12 scanned 0 cold doc(s)" '
+    cat > "$FIX/docs/warm-e.md" <<"CASEE"
+<!-- doc-tier: agent | canonical-for: fixture-warm-e | budget: 100tok -->
+# Warm E
+
+```bash
+git status
+```
+CASEE'
+
+  # §11 docs/auth.md pipeline list vs router.ex. The fixture plants BOTH halves
+  # — a two-pipeline router and an auth page that documents them — because the
+  # real defect is a DISAGREEMENT between two files, which a one-file fixture
+  # cannot express. st_auth_fixture is a shell function, not a heredoc per arm,
+  # so five arms cannot drift apart from each other.
+  st_auth_fixture() {
+    mkdir -p "$1/api/lib/barkpark_web"
+    printf -- "%s\n" \
+      "defmodule Fixture.Router do" \
+      "  pipeline :api do" \
+      "    plug(:accepts)" \
+      "  end" \
+      "" \
+      "  pipeline :fixture_admin_api do" \
+      "    plug(BarkparkWeb.Plugs.RequireToken)" \
+      "    plug(BarkparkWeb.Plugs.RequireAdmin)" \
+      "  end" \
+      "end" > "$1/api/lib/barkpark_web/router.ex"
+    printf -- "%s\n" \
+      "<!-- doc-tier: agent | canonical-for: fixture-auth | budget: 100tok -->" \
+      "# Auth fixture" \
+      "" \
+      "## Plug pipelines (HTTP)" \
+      "" \
+      "\140:fixture_admin_api\140 replaces the :api pipeline." \
+      "" \
+      "## After" > "$1/docs/auth.md"
+  }
+
+  # The SILENT arm. Without it every arm below could be satisfied by a section
+  # that reds on everything, and the count proves the derivation actually ran.
+  st_case "auth pipeline pair agrees and is COUNTED" 0 "§11 derived 1 RequireAdmin pipeline(s)" '
+    st_auth_fixture "$FIX"'
+
+  # The row's own mutation: deleting the WHOLE section left both doc gates at
+  # exit 0. That is the defect; this is the arm that ends it.
+  st_case "deleting the whole pipelines section reds" 1 "docs/auth.md has lost its" '
+    st_auth_fixture "$FIX"
+    grep -v "^## Plug pipelines (HTTP)$" "$FIX/docs/auth.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/auth.md"'
+
+  # The :flat_admin_api shape: an admin pipeline the page stops naming.
+  st_case "undocumented RequireAdmin pipeline reds by name" 1 "router pipeline :fixture_admin_api plugs RequireAdmin but" '
+    st_auth_fixture "$FIX"
+    sed "s/:fixture_admin_api/the admin pipeline/" "$FIX/docs/auth.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/auth.md"'
+
+  # The other direction — prose that describes a pipeline the router dropped.
+  st_case "documented pipeline the router no longer has reds by name" 1 "documents pipeline :gone_pipeline, which" '
+    st_auth_fixture "$FIX"
+    sed "s/the :api pipeline/the :gone_pipeline pipeline/" "$FIX/docs/auth.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/auth.md"'
+
+  # NON-VACUITY. A router that plugs no RequireAdmin makes the required set
+  # empty, and an empty required set would let every check above pass on
+  # nothing. It must red instead of printing ok.
+  st_case "zero derived admin pipelines reds instead of passing on nothing" 1 "derived ZERO RequireAdmin pipelines" '
+    st_auth_fixture "$FIX"
+    sed "s/RequireAdmin/RequireNothing/" "$FIX/api/lib/barkpark_web/router.ex" > "$FIX/r.tmp" && mv "$FIX/r.tmp" "$FIX/api/lib/barkpark_web/router.ex"'
+
+  # FAIL-CLOSED ON A RENAME. §11 skips a tree holding NEITHER file (every other
+  # fixture root); a tree holding exactly one is a rename that would otherwise
+  # disarm the section silently.
+  st_case "one half of the pair present reds rather than skipping" 1 "needs BOTH docs/auth.md and api/lib/barkpark_web/router.ex" '
+    st_auth_fixture "$FIX"
+    rm -f "$FIX/api/lib/barkpark_web/router.ex"'
 
   echo ""
   if [ "$ST_FAIL" -ne 0 ]; then
@@ -916,6 +1050,182 @@ else
     FAIL=1
   fi
   rm -f "$MG_OUT"
+fi
+
+# --- 12. a `cold` doc that still carries RUNNABLE COMMANDS must say so --------
+# (task-fed001f6174e5c4c)
+#
+# CLAUDE.md tiers `cold` as finished work an agent must not LOAD to learn how the
+# repo works. It never meant "unreachable": `git grep` does not read tier headers,
+# and a recipe is found by grepping for the command in it. So the one thing a
+# cold doc must not be is a page of copyable commands with nothing on it saying
+# when they ran. tooling/grip/ledger/pds-w27-bare30-content-recheck-2026-07-31
+# was exactly that — a census recipe whose `cd /tmp` was still being copied
+# months after the tier said nobody reads the file (defused in #13772).
+#
+# THE RULE, and why it is a banner rather than a deletion. §7 above already
+# records the answer for the biggest cohort: tooling/grip/ledger/ is a
+# "shared append-only commons … of dated, immutable evidence rows", and "a record
+# must quote what it observed". Those records are CONSULTED — that is their whole
+# job — so `cold` is right about "do not load this to learn the system" and wrong
+# about "nobody reads it". The banner reconciles the two: the doc stays, the
+# commands stay re-runnable (grip's ledger is an index of HOW TO VERIFY), and the
+# reader is told the OUTPUT is pinned to a date and is not current.
+#
+# WHY BARE FENCES COUNT. Keying only on ```bash would have covered 16 of the 47
+# command-carrying cold docs in this repo at the time of writing; the other 31
+# hold their commands in an untagged ``` fence — including
+# `bp task close <id> <worker> <epoch>`, a PROD WRITE. A tripwire that sees a
+# third of its class is not a tripwire, so an untagged fence whose body opens a
+# line with an executing verb counts too. The verb list is deliberately narrow:
+# a false positive costs one banner line, a false negative is the defect above.
+CMD_VERBS='git|gh|bp|curl|mix|cd|ssh|make|npm|npx|node|python3?|psql|bash|sh|jq|for|while|grep|awk|sed|find|rm|mkdir|export|sudo|systemctl|docker|go|cargo|pnpm|yarn'
+COLD_N=0
+COLD_BAD=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  # Tier lives on line 1 by contract ("First line of every active doc").
+  head -1 "$f" 2>/dev/null | grep -q 'doc-tier: *cold' || continue
+  awk -v verbs="$CMD_VERBS" '
+    BEGIN { inf = 0; runnable = 0 }
+    /^[[:space:]]*```/ {
+      if (inf == 0) {
+        lang = $0; sub(/^[[:space:]]*```/, "", lang); gsub(/[[:space:]]/, "", lang)
+        inf = 1; cur = lang; body = ""
+      } else {
+        inf = 0
+        if (cur ~ /^(bash|sh|shell|zsh|console)$/) runnable = 1
+        else if (cur == "" && body ~ ("(^|\n)[ \t]*(" verbs ")[ \t]")) runnable = 1
+      }
+      next
+    }
+    { if (inf == 1) body = body "\n" $0 }
+    END { exit (runnable ? 0 : 1) }
+  ' "$f" || continue
+  COLD_N=$((COLD_N + 1))
+  # The banner must be near the top — a reader who opens the file sees it before
+  # the first fence. Ten lines covers "marker, blank, H1, blank, banner" with room.
+  if ! head -10 "$f" | grep -q '^> HISTORICAL RECORD ('; then
+    COLD_BAD="$COLD_BAD $f"
+  fi
+done <<COLDEOF
+$(prune_find -name '*.md' -type f -print | sed 's|^\./||' | grep -v '^_attic/' | LC_ALL=C sort)
+COLDEOF
+
+for f in $COLD_BAD; do
+  echo "FAIL: $f is doc-tier: cold and carries runnable commands, but has no '> HISTORICAL RECORD (<date>)' banner in its first 10 lines."
+  echo "      A cold doc is not unreachable — git grep finds recipes by their commands, not by their tier."
+  echo "      Add, directly under the title: > HISTORICAL RECORD (YYYY-MM-DD) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current."
+  FAIL=1
+done
+# Stated out loud every run, like §8: this section is otherwise an absence proof,
+# and a detector that has gone blind prints the same nothing as a clean tree. The
+# count is the non-vacuity signal — if it collapses toward zero while the ledger
+# keeps growing, the fence walker broke, not the corpus.
+echo "ok:   §12 scanned $COLD_N cold doc(s) carrying runnable commands; $(printf '%s' "$COLD_BAD" | wc -w | tr -d ' ') missing the HISTORICAL RECORD banner"
+
+# --- 11. docs/auth.md pipeline list vs the router ----------------------------
+#
+# NUMBERED 11 ON PURPOSE. §9 (roster-drift) and §10 (merge-gates anchors) are
+# reserved for two PRs in flight; taking the next free integer would have put
+# three sections in one region of this file and turned three independent doc
+# fixes into one merge conflict.
+#
+# THE HOLE THIS CLOSES. Nothing read the CONTENT of docs/auth.md. It was a
+# byte-cap row in check-doc-budgets.sh and a routing-table target here, and
+# that is all: PROVED BY MUTATION while landing task-3b0cadbbf7acf865 —
+# deleting the ENTIRE "## Plug pipelines (HTTP)" section left BOTH doc gates
+# at exit 0. That is how the `:flat_admin_api` omission survived; the page went
+# stale in the one way that reopens a P0 tenancy class and every gate stayed
+# green.
+#
+# WHAT IS DERIVED, AND WHY NOT THE WHOLE LIST. router.ex defines 43 pipelines.
+# Requiring all 43 in this section would be a cap-busting doc rewrite (auth.md
+# sits within a handful of bytes of its committed cap — measure it, never trust
+# a figure typed here) and would bury the two that carry the invariant. So the required set is DERIVED FROM THE ROUTER, not hand-listed:
+# every pipeline whose body plugs RequireAdmin. Two today, `:require_admin`
+# and `:flat_admin_api` — and a new admin pipeline added tomorrow enrols
+# itself, which a hand-maintained list could never do. That is the exact shape
+# `BarkparkWeb.FlatAdminTenancyTest` cannot cover: it pins the EXISTING flat
+# admin scopes by path and is structurally blind to a new one.
+#
+# BOTH DIRECTIONS. A pipeline the doc names must still EXIST in the router, so
+# the page cannot quietly describe a pipeline that was deleted or renamed.
+#
+# NON-VACUITY. If the derivation finds ZERO admin pipelines the section FAILS
+# rather than passing on an empty set — an awk that stops matching is exactly
+# how this check would go quiet while printing ok.
+echo "== §11 docs/auth.md pipeline list vs router.ex =="
+AUTH_DOC="docs/auth.md"
+AUTH_ROUTER="api/lib/barkpark_web/router.ex"
+AUTH_SECTION_HEADING='## Plug pipelines (HTTP)'
+if [ ! -f "$AUTH_DOC" ] && [ ! -f "$AUTH_ROUTER" ]; then
+  # Neither half present: a --selftest fixture root, not this repo. Skipping is
+  # safe ONLY because the two-of-two case below is fail-CLOSED — a rename that
+  # moves one of them reds instead of silently disarming the section.
+  echo "ok:   §11 skipped — neither $AUTH_DOC nor $AUTH_ROUTER in this tree"
+elif [ ! -f "$AUTH_DOC" ] || [ ! -f "$AUTH_ROUTER" ]; then
+  echo "FAIL: §11 needs BOTH $AUTH_DOC and $AUTH_ROUTER; one is missing." \
+       "A rename that leaves one behind would otherwise disarm this section silently."
+  FAIL=1
+else
+  AUTH_SECTION=$(awk -v h="$AUTH_SECTION_HEADING" '
+    $0 == h { inside = 1; next }
+    inside && /^## / { inside = 0 }
+    inside { print }' "$AUTH_DOC")
+  if ! grep -qxF "$AUTH_SECTION_HEADING" "$AUTH_DOC"; then
+    echo "FAIL: §11 $AUTH_DOC has lost its '$AUTH_SECTION_HEADING' section." \
+         "Deleting it used to leave both doc gates green; that is the defect this section exists for."
+    FAIL=1
+  else
+    # Router pipelines: every `pipeline :name do`, and the subset whose body
+    # plugs RequireAdmin. A pipeline body ends at the first `end` at or below
+    # its own indent, which is how this file is formatted throughout.
+    AUTH_ALL_PIPELINES=$(awk '
+      /^[[:space:]]*pipeline :/ {
+        name = $0; sub(/^[[:space:]]*pipeline :/, "", name); sub(/[^A-Za-z0-9_].*/, "", name)
+        print name
+      }' "$AUTH_ROUTER" | sort -u)
+    AUTH_ADMIN_PIPELINES=$(awk '
+      /^[[:space:]]*pipeline :/ {
+        name = $0; sub(/^[[:space:]]*pipeline :/, "", name); sub(/[^A-Za-z0-9_].*/, "", name)
+        inbody = 1; admin = 0; next
+      }
+      inbody && /RequireAdmin/ { admin = 1 }
+      inbody && /^[[:space:]]*end[[:space:]]*$/ {
+        if (admin) print name
+        inbody = 0
+      }' "$AUTH_ROUTER" | sort -u)
+    AUTH_ADMIN_N=$(printf '%s\n' "$AUTH_ADMIN_PIPELINES" | grep -c '[a-z]' || true)
+    if [ "$AUTH_ADMIN_N" -eq 0 ]; then
+      echo "FAIL: §11 derived ZERO RequireAdmin pipelines from $AUTH_ROUTER." \
+           "Either the router stopped plugging RequireAdmin, or the derivation stopped matching —" \
+           "and an empty required set would make every check below pass on nothing."
+      FAIL=1
+    else
+      for auth_p in $AUTH_ADMIN_PIPELINES; do
+        if printf '%s\n' "$AUTH_SECTION" | grep -qF ":$auth_p"; then
+          echo "ok:   §11 admin pipeline :$auth_p is documented"
+        else
+          echo "FAIL: §11 router pipeline :$auth_p plugs RequireAdmin but '$AUTH_SECTION_HEADING'" \
+               "in $AUTH_DOC never names it. An admin gate nobody documents is how the" \
+               ":flat_admin_api omission survived — document it there, do not delete this check."
+          FAIL=1
+        fi
+      done
+      echo "ok:   §11 derived $AUTH_ADMIN_N RequireAdmin pipeline(s) from $AUTH_ROUTER"
+      for auth_d in $(printf '%s\n' "$AUTH_SECTION" | grep -oE ':[a-z][a-z0-9_]*' | sed 's/^://' | sort -u); do
+        if printf '%s\n' "$AUTH_ALL_PIPELINES" | grep -qx "$auth_d"; then
+          echo "ok:   §11 documented :$auth_d still exists in the router"
+        else
+          echo "FAIL: §11 $AUTH_DOC documents pipeline :$auth_d, which $AUTH_ROUTER no longer defines." \
+               "Either it was renamed or deleted — update the section, or write the atom without a" \
+               "leading colon if it was never a pipeline."
+          FAIL=1
+        fi
+      done
+    fi
+  fi
 fi
 
 # --- summary ------------------------------------------------------------------

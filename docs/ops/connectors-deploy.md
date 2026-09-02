@@ -20,9 +20,8 @@ provider webhook ──► https://guerrilla.barkpark.cloud/connectors/<provider
 
 **Why a path, not `connectors.barkpark.cloud`.** There is no wildcard DNS on
 `barkpark.cloud`; a subdomain would re-arm the separate Hetzner DNS-token human
-gate for nothing. The MCP endpoint already proves the pattern
-(`curl -i https://guerrilla.barkpark.cloud/mcp` → `405` via Caddy, answered by a
-non-Elixir loopback process on `:4010`). `:4020`, like `:4010`, sits **outside**
+gate for nothing. The MCP endpoint already proves the pattern (`GET /mcp` → `405` via Caddy, from
+a non-Elixir loopback process on `:4010`). `:4020`, like `:4010`, sits **outside**
 the blue/green slot ports `{4000,4001}` on purpose: the deploy's port-flip `sed`
 and `ACTIVE_PORT` greps match slot ports exactly and pass over both routes.
 
@@ -37,9 +36,8 @@ provider, and re-enabling it is a manual console trip.
 Order every time:
 
 1. Merge the bridge code → the deploy runs (see below) → the unit is up.
-2. `curl -i https://guerrilla.barkpark.cloud/connectors/health` — the **bridge**
-   must answer `200 {"status":"ok"}`. A `503` with the "Back in a moment" body
-   means *Caddy* is answering, i.e. the bridge is down. Do **not** proceed.
+2. `bash deploy/mcp-reachability-smoke.sh` — its `connectors-health` leg must be
+   GREEN. A `503` there is *Caddy*, i.e. the bridge is down. Do **not** proceed.
 3. Only then paste the URL into Slack's Event Subscriptions / Meta's webhook
    config / the Azure Bot messaging endpoint.
 
@@ -159,13 +157,13 @@ breaks — the routing rows survive, the secrets they point at do not.
 ```bash
 systemctl status barkpark-connectors
 journalctl -u barkpark-connectors -n 50 --no-pager
-curl -sS -i http://127.0.0.1:4020/connectors/health          # on the box
-curl -sS -i https://guerrilla.barkpark.cloud/connectors/health   # through Caddy
+curl -sS -i http://127.0.0.1:4020/connectors/health   # the bridge, on the box
+bash deploy/mcp-reachability-smoke.sh guerrilla.barkpark.cloud   # 4 public legs
 ```
 
-`via: 1.1 Caddy` + a bridge response = the path route works. A `503` +
-"Back in a moment" = the unit is down; check the deploy log for the WARN that
-names which guard refused.
+The smoke is the deploy's own last step, advisory there: one verdict line per
+leg with the code it saw, a RED leg logging a WARN rather than failing a live
+app. A `503` = that unit is down; the WARN names which guard refused.
 
 ## Roll it back
 
@@ -174,6 +172,6 @@ The Caddy route stays armed (harmless — it serves the maintenance 503) and the
 app's blue/green slots are untouched. A full app `instance-deploy.sh --rollback`
 also leaves `:4020` alone; the flip `sed` only rewrites slot ports.
 
-Offline proof of all of the above: `bash deploy/instance-deploy_test.sh`
-(Case 1 + Case 12 cover the route, the env-file mode, the no-token invariant,
-and every install guard).
+Offline proof: `bash deploy/instance-deploy_test.sh` (Cases 1 + 12: the route,
+the env-file mode, the no-token invariant, every install guard) and `bash
+deploy/mcp-reachability-smoke_test.sh` (all four public legs).

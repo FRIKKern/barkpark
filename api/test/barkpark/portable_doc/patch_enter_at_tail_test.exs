@@ -27,7 +27,11 @@ defmodule Barkpark.PortableDoc.PatchEnterAtTailTest do
   defp pad(n), do: "pp-" <> String.pad_leading(Integer.to_string(n), 3, "0")
 
   defp para(n) do
-    %{"id" => pad(n), "type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body #{n}."}]}
+    %{
+      "id" => pad(n),
+      "type" => "paragraph",
+      "content" => [%{"type" => "text", "value" => "Body #{n}."}]
+    }
   end
 
   # The run the canvas mounted: 12 paragraphs + an opaque/atom node-view tail carrying

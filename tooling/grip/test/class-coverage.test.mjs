@@ -55,13 +55,23 @@
 //     as covered here. Mention is not control — proven by mutation in the survey:
 //     renaming FORGE-API-READ to another same-class rule left binding.test.mjs at
 //     63/62/1 unchanged, and renaming the else branch collapsed DEFAULT-CWD-BOUND
-//     29 → 2 while IMPROVING the epic's flagship else-share 4.8% → 0.6% with
-//     nothing going red (binding.test.mjs registers rules through
+//     29 → 2 while IMPROVING the epic's flagship else-share with nothing going
+//     red (binding.test.mjs registers rules through
 //     `assert.ok(registered.has(…))`, a subset check that cannot fail for an
 //     unexercised rule). So absence here is a PROOF of no control; presence is
 //     only an INVITATION to check. The controls in part (B) below are the real
 //     thing: each one fires the class on an input that must trigger it and
 //     withholds it on a neighbour that must not.
+//
+//     RE-MEASURED, AND THE FIGURE NOW CARRIES ITS SHA (D102). At binding.mjs
+//     blob a87ab60eb78693c6ee7dc30bbd9983e027370c26 over
+//     fixtures/evidence-corpus.json blob f0d6b6cbdb50490889e4489ef782eaca7737e86c
+//     the else share is 31 of 652 = 4.8% against the naive 3-way rule's 580 of
+//     652 = 89.0%; re-running that rename drops it to 2 of 652 = 0.3%. The
+//     survey wrote 0.6% for the mutated figure, which is the shape of the finding
+//     but not this corpus's number. The aggregate guard that let the mutation
+//     through is now two-sided and counted off the ARM rather than the rule name
+//     — see binding.test.mjs's ELSE_BRANCH_FLOOR/ELSE_BRANCH_CEILING.
 //   * IT DOES NOT COUNT ITS OWN DECLARATIONS. This file names classes in prose —
 //     the paragraph above is itself an example — and a tripwire that reads its
 //     own commentary as coverage grades its own homework. So THIS file
@@ -630,8 +640,11 @@ test("DEFAULT-CWD-BOUND fires when no rule matched, and says so as a FLOOR", () 
 
 test("DEFAULT-CWD-BOUND never cries wolf: a fired cwd-bound rule is NOT the else branch", () => {
   // The survey's mutation: renaming the else branch collapsed DEFAULT-CWD-BOUND
-  // 29 → 2 and IMPROVED the flagship else-share 4.8% → 0.6% with nothing red.
-  // Both halves are pinned here — the name AND its default-ness.
+  // 29 → 2 and IMPROVED the flagship else-share (4.8% → 0.3% at binding.mjs blob
+  // a87ab60eb78693c6ee7dc30bbd9983e027370c26) with nothing red.
+  // Both halves are pinned here — the name AND its default-ness — and
+  // binding.test.mjs now bounds the arrival count from both sides as well, so
+  // the aggregate figure the rename moved is no longer undefended.
   for (const [cmd, rule] of [
     ["curl -s http://localhost:4000/api/schemas", "NETWORK-READ-NO-TREE"],
     ["wc -l tooling/grip/mint.mjs", "RELATIVE-PATH-READ"],

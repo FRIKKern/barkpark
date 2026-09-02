@@ -46,6 +46,12 @@ type ActionResult struct {
 	OK      bool
 	Message string
 	Role    Role
+	// Epoch is the fencing epoch the server wrote, on the verbs that write one
+	// (DoClaim). It is the same number Message renders, carried as data so a
+	// caller that must HOLD the epoch — the cmux hook stamps it for the close
+	// that runs in a later process — does not have to parse the sentence back
+	// apart. Zero on every failure and on verbs that write no epoch.
+	Epoch int
 	// Help is the server's help[] next-command templates the claim/close 2xx
 	// envelope carried (charter D18) — parity with the CLI's stderr help: lines so
 	// the board/hook no longer silently drops them. It rides the struct as
@@ -65,7 +71,7 @@ func DoClaim(c *apiclient.Client, docID, worker string) ActionResult {
 	if err != nil {
 		return ActionResult{OK: false, Message: "claim failed: " + humanizeReason(err)}
 	}
-	res := ActionResult{OK: true, Message: fmt.Sprintf("claimed as %s · epoch %d", worker, epoch)}
+	res := ActionResult{OK: true, Message: fmt.Sprintf("claimed as %s · epoch %d", worker, epoch), Epoch: epoch}
 	return foldHelp(withTopNotice(res, notices), help)
 }
 

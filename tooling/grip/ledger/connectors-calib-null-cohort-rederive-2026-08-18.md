@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: connectors-calib-null-cohort-rederivation | budget: 1200tok -->
 # Connectors NULL/reconcile calibration cohort — re-derivation recipe (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verifier lane **calib-null-cohort** on the Connectors false-done audit wave.
 7 NULL/reconcile calibration rows mutate-checked against `origin/main` = `e21bf409893d9de66542a31b06716e3c33d8f102`.
 VERDICT: **7/7 TRUE-DONE, zero false-done, zero reopens.** Each named capability is PRESENT on origin/main and does what its criterion claims.

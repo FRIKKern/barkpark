@@ -61,6 +61,11 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
+  # The RESOURCE fence (`--resources`) — NOT the epoch fence. `Tasks.Fence` and
+  # `Tasks.ClaimFence` own the epoch/lease fence, so a cold `grep fence` lands
+  # there and never finds this. This is the one that refuses with
+  # `resource_conflict`.
+  # @canonical capability:task-resource-fence aka:resources,resource_conflict,fence,claim fence,--resources,resource overlap,holders doc:docs/setup/TASK-SYSTEM.md
   def claim_by_id(doc_id, worker_id, opts \\ [])
       when is_binary(doc_id) and is_binary(worker_id) do
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -185,6 +190,37 @@ defmodule Barkpark.Tasks.Claim do
   # refuses with `resource_conflict` + holders when any requested string is held
   # by another LIVE (in_progress) claim in the same tenancy. Resources live
   # INSIDE content.claim, so close + the TTL sweep free them for free.
+  #
+  # ─── RULING: when is a fenced resource freed? ──────────────────────────────
+  # (task-fence-lifecycle-three-defects, 2026-09-02. Pinned by
+  # `test/barkpark/tasks/fence_lifecycle_test.exs`.)
+  #
+  # The fence is held by the LIFECYCLE, not by the claim map. `A holds R` is
+  # true iff A's `lifecycle_status` is exactly `"in_progress"` AND R is in
+  # `A.content.claim.resources` — the two `where` clauses below, and nowhere
+  # else. Consequences, each one a test:
+  #
+  #   * REFUSAL frees nothing because it takes nothing. The scan runs BEFORE
+  #     `do_claim/4` inside the one `Repo.transaction`, and a `with` miss
+  #     returns `{:error, {:resource_conflict, _}}` without ever reaching a
+  #     write — the refused caller's row keeps its rev, its `"open"` status,
+  #     and gains no `claim`/`assignee` key and no mutation_event.
+  #   * CLOSE frees it, for every terminal status (done / cancelled / blocked)
+  #     — the lifecycle leaves `"in_progress"`, so the scan stops seeing it.
+  #     `Tasks.Close` deliberately KEEPS `claim.resources` on the map: on a
+  #     terminal row it is audit ("what this work fenced"), not a live fence.
+  #   * RELEASE frees it (lands `"open"`) and DELETES the key, because the row
+  #     is claimable again and a live-looking fence on a claimable row is a lie.
+  #   * REAP frees it identically — `TtlSweeper.apply_reap/1` is release's
+  #     timeout twin and deletes the key for the same reason.
+  #
+  # Therefore there is NO unfreeable state: every path out of `in_progress` is
+  # one of those four, and each one drops the fence. `Release.release/3`
+  # refusing a terminal task with `{:not_in_progress, "done"}` is CORRECT and
+  # is NOT a deadlock — release is a LEASE verb, and a done task has no lease
+  # (and no fence) left to release. Do not "fix" it by letting release reopen
+  # terminal rows; that would hand any caller a lifecycle rewind through a
+  # cleanup verb, to free something already free.
 
   # Accepts a list, or a single comma-separated string (what
   # `bp task claim … --set resources=a.go,b.go` delivers).

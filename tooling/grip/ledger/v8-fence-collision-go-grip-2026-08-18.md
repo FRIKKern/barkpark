@@ -2,6 +2,8 @@
 
 # V8 fence-collision recheck — Go/grip security sweep (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verdict: the 3 fix loci are collision-CLEAR against every open PR; zero open PR touches `tooling/grip/*.mjs`.
 
 ## Re-derivation recipe

@@ -10,18 +10,48 @@
 // ships green. Every one of those five is a named case below, and the 652 proofs
 // are run in full.
 //
-// Two numbers are REPORTED rather than asserted, because they are the ones that
-// tell a reviewer whether the grammar discriminates or merely absorbs:
-//   * the share of verdicts arriving via a DEFAULT/else rule, and
+// Two numbers tell a reviewer whether the grammar discriminates or merely
+// absorbs:
+//   * the share of verdicts arriving via an ELSE branch, and
 //   * the share whose CLASS equals what a trivial always-cwd-bound classifier
 //     would have said anyway.
 // A low first number with a high second one means the rule names are carrying
 // the signal, not the classes — which is exactly what a reader must be able to
-// see. They are printed by the run.
+// see. Both are printed by the run. The SECOND is reported only. The FIRST is
+// ASSERTED, from both sides, and the rest of this paragraph is why.
+//
+// ── THE ELSE-SHARE GUARD USED TO BE SATISFIABLE BY RENAMING ─────────────────
+//
+// It was one line, `assert.ok(defaultShare < 0.2)`, over a count derived from
+// the rule REGISTRY: `isDefaultRule(name)` asks whether the entry for that NAME
+// carries `is_default: true`. Point the else arm at any already-registered rule
+// whose entry says `false` — `RELATIVE-PATH-READ` will do, same class, no
+// behaviour change — and the count collapses 31 → 2 while the epic's published
+// figure "improves" 4.8% → 0.3%. The grammar classified not one command
+// differently. Reproduced in this branch; see the PR.
+//
+// Those figures are measured at binding.mjs blob
+// a87ab60eb78693c6ee7dc30bbd9983e027370c26 over fixtures/evidence-corpus.json
+// blob f0d6b6cbdb50490889e4489ef782eaca7737e86c, and the unmutated pair is
+// recomputed and printed with the live blob sha by the corpus test below (D102:
+// the sha travels with the figure, so a stale comment cannot masquerade as a
+// measurement).
+//
+// A one-sided ceiling cannot see that, because gaming moves the number DOWN.
+// So the guard is now:
+//   * counted off `else_branch`, the stamp the ARM sets when it mints a verdict
+//     (binding.mjs's elseBranchVerdict is the only constructor that sets it), so
+//     the count survives any rename;
+//   * asserted with a FLOOR as well as a CEILING, both pinned to the measured
+//     count, so a number that moves in EITHER direction has to be re-derived on
+//     purpose; and
+//   * cross-checked against the registry reading, so the two must agree — which
+//     is the assertion the rename mutation reds.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +100,22 @@ function ledgerRows(files) {
 
 function corpusProofs() {
   return JSON.parse(readFileSync(resolve(GRIP, "fixtures", "evidence-corpus.json"), "utf8")).proofs;
+}
+
+// The git blob sha of a file, computed without spawning git: sha1 over
+// `blob <bytelength>\0<bytes>`, which is git's own object header. Verified
+// against `git hash-object` on the two files it is used on.
+//
+// WHY A FIGURE CARRIES ONE (charter D102). A published number with no sha is a
+// bare present-tense claim: it describes whatever the classifier happened to be
+// when someone last ran it, and it goes silently wrong the next time the
+// classifier changes. Stamping the classifier's blob sha beside the figure makes
+// the pairing re-derivable — anyone can check out that blob and get that number
+// — and it is printed on every green run, so it can never be the stale copy in
+// a comment.
+function blobSha(path) {
+  const bytes = readFileSync(path);
+  return createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 }
 
 // --- export shape and purity -------------------------------------------------
@@ -189,18 +235,22 @@ test("the table covers every one of the five classes", () => {
 
 // --- the verdict shape ------------------------------------------------------
 
-test("a verdict carries the six contract keys plus cd_prefix and the mask severity", () => {
+test("a verdict carries the six contract keys plus cd_prefix, the mask severity and the else-branch stamp", () => {
   const verdict = classifyBinding("cd /Volumes/SATECHI/github/barkpark && git show origin/main:x | wc -l");
   assert.deepEqual(Object.keys(verdict).sort(), [
     "anchor",
     "binding_class",
     "cd_prefix",
+    "else_branch",
     "exit_mask_rule",
     "exit_masked",
     "portable_scope",
     "reason",
     "rule",
   ]);
+  // The stamp is on EVERY verdict, not only on the else arms', so a caller can
+  // ask the question without knowing which rules the registry calls defaults.
+  assert.equal(verdict.else_branch, false, "a fired rule is not an else branch");
 });
 
 // --- the cd prefix is INERT (D73's whole point) ------------------------------
@@ -404,7 +454,10 @@ test("classifyAll over the 62 committed rows reproduces the D73 ref-identity cen
     "foreign-tree-pinned": 2,
   });
   assert.equal(census.unclassified, 0);
-  assert.equal(census.default_rule.count, 0, "not one stored row reaches an else branch");
+  // Both readings, because the claim is about ARRIVAL: no stored row reaches an
+  // arm that was entered by exhaustion. A rename cannot make this one pass.
+  assert.equal(census.else_branch.count, 0, "not one stored row reaches an else branch");
+  assert.equal(census.default_rule.count, 0, "and the registry reading agrees");
 
   // D73's three-way census, re-derived from the same verdicts:
   //   51 shared-ref | 1 per-worktree HEAD | 10 working-tree (2 absolute)
@@ -428,7 +481,7 @@ test("classifyAll over the 62 committed rows reproduces the D73 ref-identity cen
     `\n  [ledger census] 62 rows → ${JSON.stringify(census.by_class)}\n` +
       `  [ledger census] D73 three-way re-derivation: shared-ref 51 | per-worktree HEAD ${headBound} | working-tree ${workingTree} (of which foreign-tree-pinned 2)\n` +
       `  [ledger census] 44 shared-ref rows carry a cd prefix — a path screen would refuse all 44 and admit the 9 decided by cwd\n` +
-      `  [ledger census] else-branch verdicts: ${census.default_rule.count}\n`,
+      `  [ledger census] else-branch verdicts: ${census.else_branch.count} (registry reading: ${census.default_rule.count})\n`,
   );
 });
 
@@ -487,7 +540,7 @@ test("the WHOLE ledger directory stays internally consistent, however many runs 
   // test.
   console.log(
     `\n  [ledger dir] scope=owned — walked ${owned.length} of ${shape.runs} run file(s), ${census.total} rows → ${JSON.stringify(census.by_class)}` +
-      `, unclassified ${census.unclassified}, else-branch ${census.default_rule.count}` +
+      `, unclassified ${census.unclassified}, else-branch ${census.else_branch.count}` +
       `\n  [ledger dir] declined: ${shape.foreign} foreign run file(s) with no run_id, ${shape.not_a_run} NOT-A-RUN document(s), ${shape.malformed_run} MALFORMED-RUN, ${shape.unparseable} UNPARSEABLE\n`,
   );
 });
@@ -510,22 +563,104 @@ test("classifyAll over the 652-proof corpus classifies every real command and RE
     assert.ok(BINDING_CLASSES.includes(verdict.binding_class));
   }
 
-  const defaultShare = census.default_rule.count / census.total;
+  const elseShare = census.else_branch.count / census.total;
   const trivialAgreement = census.by_class["cwd-bound"] / census.total;
+
+  // THE FIGURE AND THE SHA TRAVEL TOGETHER (D102). Printed on every green run,
+  // so the published number is never a comment someone forgot to update.
+  const classifierSha = blobSha(resolve(GRIP, "binding.mjs"));
+  const corpusSha = blobSha(resolve(GRIP, "fixtures", "evidence-corpus.json"));
 
   console.log(
     `\n  [corpus 652] by_class ${JSON.stringify(census.by_class)} + ${census.unclassified} prose/placeholder rows (NO-COMMAND)\n` +
-      `  [corpus 652] DEFAULT/else verdicts: ${census.default_rule.count} of 652 = ${(defaultShare * 100).toFixed(1)}%\n` +
+      `  [corpus 652] ELSE-BRANCH verdicts: ${census.else_branch.count} of 652 = ${(elseShare * 100).toFixed(1)}%` +
+      ` @ binding.mjs blob ${classifierSha} over evidence-corpus.json blob ${corpusSha}\n` +
+      `  [corpus 652] the same count read off the rule REGISTRY (is_default by NAME): ${census.default_rule.count} — the two must agree\n` +
       `  [corpus 652] verdicts whose CLASS a trivial always-cwd-bound classifier would also have produced: ` +
       `${census.by_class["cwd-bound"]} of 652 = ${(trivialAgreement * 100).toFixed(1)}% — the rule names, not the class, carry the signal here\n` +
       `  [corpus 652] rules fired: ${JSON.stringify(census.by_rule)}\n` +
       `  [corpus 652] exit_masked: ${census.exit_masked}; cd/-C prefixed: ${census.cd_prefixed}\n`,
   );
 
-  // Asserted as a CEILING, not as a score: if a future edit pushes the else
-  // branch back above a fifth of the corpus, the grammar has stopped
-  // discriminating and this test says so.
-  assert.ok(defaultShare < 0.2, `else-branch share ${defaultShare} must stay under 20%`);
+  // ── THE TWO-SIDED, BRANCH-KEYED ELSE-SHARE GUARD ──────────────────────────
+  //
+  // (i) THE REGISTRY MUST AGREE WITH THE ARMS. `else_branch` is stamped by the
+  //     arm; `default_rule` is looked up by rule NAME. They measure the same
+  //     thing two ways, so a divergence is never a legitimate state — it means
+  //     an else arm now mints a rule the registry does not call a default (a
+  //     rename), or a non-else arm mints one it does. This is the assertion the
+  //     rename mutation reds, and the only one that can see it.
+  assert.equal(
+    census.else_branch.count,
+    census.default_rule.count,
+    `the arms stamped ${census.else_branch.count} else verdicts and the registry counts ${census.default_rule.count} — ` +
+      `an else arm has been renamed onto a rule marked is_default:false, or a fired rule onto one marked true. ` +
+      `Renaming is not classifying: fix the arm or fix BINDING_RULES, never this number`,
+  );
+
+  // (ii) BOTH BOUNDS, PINNED TO THE MEASURED COUNT. A ceiling alone is
+  //      one-sided: every way of gaming this figure moves it DOWN, so a ceiling
+  //      waves the gaming through and only catches honest decay.
+  //
+  //      MOVING THE CEILING UP means the grammar has stopped discriminating —
+  //      more commands now fall through every rule. That is the decay the old
+  //      `< 0.2` line was written for, and it still is a real failure: the fix
+  //      is a rule, not a bound.
+  //
+  //      MOVING THE FLOOR DOWN means fewer commands reach an else arm. That is
+  //      EITHER a genuine improvement — a new rule that fires where nothing did
+  //      — OR the gaming. The two are indistinguishable from the number alone,
+  //      which is exactly why lowering it must be a deliberate edit: whoever
+  //      lowers it re-derives the published figure at their sha, names the rule
+  //      that earned it, and updates every place the old figure is quoted
+  //      (binding.mjs's header and class-coverage.test.mjs both carry it).
+  const ELSE_BRANCH_FLOOR = 31;
+  const ELSE_BRANCH_CEILING = 31;
+  assert.ok(
+    census.else_branch.count <= ELSE_BRANCH_CEILING,
+    `else-branch verdicts rose to ${census.else_branch.count} (ceiling ${ELSE_BRANCH_CEILING}): the grammar is absorbing more than it did — add a rule, do not raise the ceiling`,
+  );
+  assert.ok(
+    census.else_branch.count >= ELSE_BRANCH_FLOOR,
+    `else-branch verdicts fell to ${census.else_branch.count} (floor ${ELSE_BRANCH_FLOOR}): if a NEW RULE earned that, lower the floor and re-derive the published figure with this sha; if a rule was merely RENAMED, the classifier is unchanged and the number is a lie`,
+  );
+
+  // The charter-level statement, kept as the coarse backstop the bounds above
+  // subsume — it is what a reader quoting the epic is quoting.
+  assert.ok(elseShare < 0.2, `else-branch share ${elseShare} must stay under 20%`);
+});
+
+test("the else-branch stamp comes from the ARM, and every rule that carries it is registered as a default", () => {
+  // (a) THE ARM SETS IT. These three commands reach an arm entered because
+  //     nothing above it matched, one per else arm in the module: a head no
+  //     rule claims, a git subcommand naming no ref, and a command in which no
+  //     statement reads anything at all.
+  for (const cmd of ["date -u +%s", "git log --oneline -5", "echo hello"]) {
+    assert.equal(classifyBinding(cmd).else_branch, true, `${cmd} arrives via an else arm`);
+  }
+
+  // (b) A FIRED RULE NEVER CARRIES IT — including fired rules of the SAME class
+  //     as the else arm, which is where a class-level check goes blind.
+  for (const cmd of [
+    "wc -l tooling/grip/mint.mjs",
+    "curl -s http://localhost:4000/api/schemas",
+    "node tooling/grip/ledger.mjs --selftest",
+    "git show origin/main:tooling/grip/mint.mjs",
+    "git show 45c34d3d:tooling/grip/level.mjs",
+  ]) {
+    assert.equal(classifyBinding(cmd).else_branch, false, `${cmd} matched a rule — it is a finding, not a floor`);
+  }
+
+  // (c) THE TWO READINGS ARE THE SAME SET, not merely the same count. Over the
+  //     whole corpus, the rule names observed on stamped verdicts must be
+  //     exactly the names BINDING_RULES marks `is_default: true`. A rename
+  //     breaks this even if it happened to preserve the count; a registry edit
+  //     breaks it even if no arm moved.
+  const census = classifyAll(corpusProofs());
+  const stamped = new Set(census.verdicts.filter((v) => v.else_branch).map((v) => v.rule));
+  const registered = new Set(BINDING_RULES.filter((entry) => entry.is_default).map((entry) => entry.rule));
+  assert.deepEqual([...stamped].sort(), [...registered].sort());
+  assert.ok(stamped.size > 0, "an empty set would make the comparison vacuous");
 });
 
 test("the five resisting forms are PRESENT in the 652-proof corpus and absent from the 62-row store", () => {
@@ -608,11 +743,12 @@ test("MUTATION: the naive rule's answers arrive overwhelmingly via its else bran
   const elseShare = elseCount / proofs.length;
 
   const census = classifyAll(proofs);
-  const ourElseShare = census.default_rule.count / census.total;
+  const ourElseShare = census.else_branch.count / census.total;
 
   console.log(
     `\n  [mutation] naive 3-way: ${elseCount} of ${proofs.length} = ${(elseShare * 100).toFixed(1)}% of its answers come from the ELSE branch\n` +
-      `  [mutation] this grammar: ${census.default_rule.count} of ${census.total} = ${(ourElseShare * 100).toFixed(1)}%\n`,
+      `  [mutation] this grammar: ${census.else_branch.count} of ${census.total} = ${(ourElseShare * 100).toFixed(1)}%` +
+      ` @ binding.mjs blob ${blobSha(resolve(GRIP, "binding.mjs"))}\n`,
   );
 
   assert.ok(elseShare > 0.7, "the naive rule really is an else-branch machine");
@@ -661,6 +797,8 @@ test("classifyAll over nothing is empty, not a crash", () => {
   const census = classifyAll([]);
   assert.equal(census.total, 0);
   assert.equal(census.default_rule.share, 0);
+  assert.equal(census.else_branch.share, 0);
+  assert.equal(census.else_branch.count, 0);
   assert.deepEqual(census.verdicts, []);
   assert.equal(classifyAll(null).total, 0);
 });

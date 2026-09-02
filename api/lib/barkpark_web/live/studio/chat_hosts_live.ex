@@ -59,7 +59,14 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
     authorized? =
       is_map(workspace) and not is_nil(principal) and
         case action do
-          :enroll -> TenancyAuth.membership_role(principal, workspace.id) == "owner"
+          # Both arms ask a NAMED predicate on the Tenancy.Auth chokepoint, and
+          # the pair is the whole point: enrolling a machine is an OWNER
+          # decision, revoking one is an admin decision. :enroll used to spell
+          # its rule as a literal `membership_role(...) == "owner"` — here and
+          # again in `ChatHostController.create_enrollment/2` — so the seat rule
+          # existed in two places and could diverge under a one-sided loosening
+          # (`arpss-w10-bl-chat-hosts-owner-literal-seat-fork`).
+          :enroll -> TenancyAuth.workspace_owner?(principal, workspace.id)
           :revoke -> TenancyAuth.workspace_admin?(principal, workspace.id)
         end
 

@@ -22,6 +22,22 @@
 // serves the same envelope filtered to in_progress rows — required by the
 // board once ttw19-bl-drafts-now-drop merges, cheap to serve unconditionally.
 //
+// Plus the KEYSET EVENT FEED: GET …/v1/tasks/events?since=<id>&limit=<n> — the
+// route the board polls instead of re-listing on a timer (internal/taskboard/
+// events.go, task-e2f5ecca0be9a6d1). The fixture serves an EXHAUSTED feed by
+// default: whatever `since` is asked for, the answer is
+// {"ok":true,"events":[],"cursor":<since>,"has_more":false}. That is not a stub,
+// it IS the assertion — a hermetic run has a still corpus, so an honest feed
+// says "nothing moved", and the board must therefore issue its list+prime pair
+// exactly ONCE (the initial load) for the whole run no matter how long it is
+// held open. -emit-event-after <d> flips one event into the feed after d, so the
+// harness can also drive the other half of the contract: a delta produces
+// exactly one re-list.
+//
+// GET /__counts returns the per-route request tally as JSON. That is what turns
+// "the board polls the feed instead of re-listing" from a claim into a
+// measurement drive.sh can assert on.
+//
 // Paths are matched by SUFFIX (never a hardcoded /w/default/p/default): the
 // board issues /v1/tasks flat but the SSE listen rides the workspace/project-
 // scoped URL, and the scope segments are config-dependent.
@@ -41,7 +57,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -161,13 +179,80 @@ func serveListen(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// requestLog is the fixture's measurement instrument: a per-route tally the
+// harness reads back over GET /__counts. It exists because the board's whole
+// contract after task-e2f5ecca0be9a6d1 is about HOW MANY requests it makes, and
+// a shape assertion on the rendered pane cannot see that. Guarded by a mutex —
+// the SSE stream is held open on its own goroutine while the polls arrive.
+type requestLog struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+func newRequestLog() *requestLog { return &requestLog{n: map[string]int{}} }
+
+func (l *requestLog) count(route string) {
+	l.mu.Lock()
+	l.n[route]++
+	l.mu.Unlock()
+}
+
+func (l *requestLog) snapshot() map[string]int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make(map[string]int, len(l.n))
+	for k, v := range l.n {
+		out[k] = v
+	}
+	return out
+}
+
+// eventsBody answers one keyset poll. `cursor` echoes `since` on an empty page —
+// the SAME contract the real controller has (tasks_controller.ex events/2 →
+// `case rows do [] -> max(since, 0)`), so a caught-up board's poll is idempotent
+// and its cursor never moves on its own.
+//
+// tip is the id of the single synthetic event this fixture will emit once
+// -emit-event-after has elapsed (0 = never). Serving it exactly once, on the
+// first poll whose since is below it, is what lets drive.sh assert the OTHER
+// half of the contract: one delta → exactly one re-list, not one per poll.
+func eventsBody(since, tip int64) []byte {
+	type ev struct {
+		ID    int64  `json:"id"`
+		Event string `json:"event"`
+		DocID string `json:"doc_id"`
+		Rev   string `json:"rev"`
+		At    string `json:"at"`
+	}
+	events := []ev{}
+	cursor := since
+	if tip > since {
+		events = append(events, ev{ID: tip, Event: "task.claim", DocID: "fx-hb-bollards", Rev: "fixture", At: "2026-08-10T09:00:00Z"})
+		cursor = tip
+	}
+	body, err := json.Marshal(struct {
+		OK      bool   `json:"ok"`
+		Events  []ev   `json:"events"`
+		Cursor  int64  `json:"cursor"`
+		HasMore bool   `json:"has_more"`
+		Note    string `json:"-"`
+	}{OK: true, Events: events, Cursor: cursor, HasMore: false})
+	if err != nil {
+		log.Fatalf("tbfixture: events marshal: %v", err)
+	}
+	return body
+}
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:4799", "listen address")
+	emitAfter := flag.Duration("emit-event-after", 0, "emit one task event into /v1/tasks/events after this long (0 = never; the feed stays exhausted)")
 	flag.Parse()
 
 	all, inProgress := mustCorpus()
 	fullBody := envelope(all)
 	inProgressBody := envelope(inProgress)
+	logbook := newRequestLog()
+	started := time.Now()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -177,14 +262,33 @@ func main() {
 		// workspace/project scope (/w/<ws>/p/<proj>/v1/data/listen/<dataset>)
 		// and the scope segments are config-dependent.
 		case strings.Contains(path, "/v1/data/listen/"):
+			logbook.count("listen")
 			serveListen(w, r)
+		case strings.HasSuffix(path, "/__counts"):
+			body, err := json.Marshal(logbook.snapshot())
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, []byte(`{"ok":false}`))
+				return
+			}
+			writeJSON(w, http.StatusOK, body)
+		case strings.HasSuffix(path, "/v1/tasks/events"):
+			logbook.count("events")
+			since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+			var tip int64
+			if *emitAfter > 0 && time.Since(started) >= *emitAfter {
+				tip = 1
+			}
+			writeJSON(w, http.StatusOK, eventsBody(since, tip))
 		case strings.HasSuffix(path, "/v1/tasks/prime"):
+			logbook.count("prime")
 			writeJSON(w, http.StatusOK, []byte(primeJSON))
 		case strings.HasSuffix(path, "/v1/tasks"):
 			if r.URL.Query().Get("lifecycle_status") == "in_progress" {
+				logbook.count("tasks_in_progress")
 				writeJSON(w, http.StatusOK, inProgressBody)
 				return
 			}
+			logbook.count("tasks")
 			writeJSON(w, http.StatusOK, fullBody)
 		default:
 			writeJSON(w, http.StatusNotFound, []byte(`{"ok":false,"error":{"type":"not_found","message":"tbfixture serves only the board's live-pinned surface"}}`))

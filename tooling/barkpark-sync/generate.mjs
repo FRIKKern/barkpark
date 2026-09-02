@@ -16,6 +16,11 @@ const rd = (p, d) => existsSync(join(ROOT, p)) ? JSON.parse(readFileSync(join(RO
 const read = (f) => { try { return readFileSync(join(ROOT, f), "utf8"); } catch { return ""; } };
 
 const sig = Object.fromEntries(rd("tooling/file-importance/file-signals.json", { signals: [] }).signals.map(s => [s.path, s]));
+// The evidence tier merge.mjs computes per file. Until it emitted JSON this was
+// spreadsheet-only, so importance below fell through to the deterministic prior
+// while the published paper still called the number "importance". Read it here,
+// stamp the basis explicitly, and push.mjs refuses anything it cannot label.
+const impChart = Object.fromEntries(rd("tooling/file-importance/importance-chart.json", { rows: [] }).rows.map(r => [r.path, r]));
 const comb = Object.fromEntries(rd("tooling/combined/combined-report.json", { rows: [] }).rows.map(r => [r.path, r]));
 const risk = rd("tooling/risk/risk-report.json", { files: {} }).files;
 const erg = Object.fromEntries(rd("tooling/ergonomics/ergonomics-report.json", { files: [] }).files.map(f => [f.path, f]));
@@ -119,17 +124,41 @@ function depsFor(f) {
 const CONTENT_CAP = 60000; // chars of file content stored on the doc
 const nodes = universe.map(p => {
   const s = sig[p] || {}, c = comb[p] || {}, rk = risk[p] || {}, e = erg[p] || {}, l = ledger[p] || {};
+  const m = impChart[p] || null;
   const body = read(p);
+  // BASIS, stated rather than implied. `blended` means merge.mjs actually mixed
+  // an agent criticality into the prior (45/55) and m.score is that mix;
+  // `prior` means the number is the deterministic priorScore and nothing else,
+  // and push.mjs will render it under the name `prior`. combined-report.json has
+  // no `importance` key at all, which is how every published number became a
+  // prior wearing the word "importance" — so it is no longer consulted for it.
+  const blended = !!(m && m.agentCrit !== "" && m.agentCrit != null);
+  const importance = blended ? m.score : (s.prior ?? 0);
   return {
     id: idOf(p), path: p, title: p,
     fields: {
       path: p, basename: basename(p), dir: dirname(p), ext: extname(p).slice(1),
-      stack: s.stack || "", importance: c.importance ?? s.prior ?? 0, priority: c.priority ?? 0,
+      stack: s.stack || "", importance, importanceBasis: blended ? "blended" : "prior", priority: c.priority ?? 0,
+      provenance: {
+        tier: m?.tier ?? (s.prior != null ? "auto" : ""),
+        prior: m?.prior ?? s.prior ?? null,
+        agentCrit: m?.agentCrit ?? "",
+        votes: m?.votes ?? 0, agreement: m?.agreement ?? "", contested: !!m?.contested,
+        confidence: m?.confidence ?? "",
+        // role/description/whatBreaks come off the research ledger, which stamps
+        // its own tier per file ("agent" when an agent wrote it, "auto" when a
+        // parser did). Prose and score are judged separately because they are.
+        proseTier: l.tier || (c.role ? "auto" : ""),
+      },
       role: c.role || l.role || "", description: l.description || "",
       tokens: e.tokens ?? 0, loc: s.loc ?? 0, sizeClass: e.sizeClass || "", defs: e.defs ?? 0,
       churn: s.churn ?? 0, fanIn: s.fanIn ?? 0, seam: !!s.seam,
       testScore: rk.testScore ?? null, hasTest: !!rk.hasTest, defectDensity: rk.defectDensity ?? 0,
-      consistency: c.status || "clean", whatBreaks: l.whatBreaks || "",
+      // combine.mjs suffixes an UNVERIFIED issue candidate with "?" (layering?,
+      // dup?). That suffix was published verbatim and read as punctuation.
+      consistency: c.status || "clean", consistencyUnverified: /\?$/.test(c.status || ""),
+      severity: c.severity ?? 0,
+      whatBreaks: l.whatBreaks || "",
       // reach = pure programmatic normalized transitive-dependent count (formerly "usefulness").
       // `why` is the agent prose kept as a DESCRIPTION, not a score.
       reach: useful[p]?.reachScore ?? useful[p]?.usefulness ?? null, why: useful[p]?.why || useful[p]?.why_useful || "",
@@ -165,7 +194,9 @@ for (const n of nodes) {
 // ---- intention hub nodes (objectives that cluster cross-cutting files) ----
 const intentNodes = (intents.taxonomy || []).filter(t => (intents.hubs[t.id] || []).length).map(t => ({
   id: intId(t.id), path: intId(t.id), title: t.title, kind: "intention",
-  fields: { kind: "intention", scale: t.scale, title: t.title, description: t.description, members: (intents.hubs[t.id] || []).length },
+  // A hub's title and description are an agent taxonomy, so the hub declares a
+  // register too — `taxonomy` — rather than riding along unmarked.
+  fields: { kind: "intention", scale: t.scale, title: t.title, description: t.description, members: (intents.hubs[t.id] || []).length, provenance: { proseTier: "taxonomy" } },
   content: `${t.title}\n\n${t.description}\n\nScale: ${t.scale}\n\nFiles advancing this intention (${(intents.hubs[t.id] || []).length}):\n` + (intents.hubs[t.id] || []).map(p => "  • " + p).join("\n"),
   deps: [], depPaths: [], intentRefs: [],
 }));

@@ -10,19 +10,24 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { UNTESTED_SCORE } from "../lib/thresholds.mjs";
+import { readCoverageReport, coverageLabel, lastFullResearchLabel,
+         readQualityReport, qualityLabel, findingsLabel, qualityOrEmpty } from "./measured.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
 const rd = (p, d) => existsSync(join(ROOT, p)) ? JSON.parse(readFileSync(join(ROOT, p), "utf8")) : d;
 
-const q = rd("tooling/quality/quality-report.json", { grade: "?", overall: 0, dimensions: [], findings: [], totalFindings: 0, effortUnits: 0 });
+const qRep = readQualityReport(ROOT);
+const q = qualityOrEmpty(qRep);
 const comb = rd("tooling/combined/combined-report.json", { rows: [], quad: {} });
 const risk = rd("tooling/risk/risk-report.json", { files: {} }).files;
 const ergRep = rd("tooling/ergonomics/ergonomics-report.json", { files: [], summary: {}, splitCandidates: [], thresholds: {} });
 const erg = Object.fromEntries(ergRep.files.map(f => [f.path, f]));
 const sig = Object.fromEntries(rd("tooling/file-importance/file-signals.json", { signals: [] }).signals.map(s => [s.path, s]));
 const ledger = rd("tooling/research-coverage/research-ledger.json", { files: {}, meta: {} });
-const cov = rd("tooling/research-coverage/coverage-report.json", { pct: 0, lastFullResearch: null });
+// Both reports are derived + gitignored; a numeric default rendered "coverage 0%"
+// and "0/100" in the header of every clean-checkout report. See ./measured.mjs.
+const cov = readCoverageReport(ROOT);
 const crep = rd("tooling/consistency/consistency-report.json", { groups: [], layering: [], duplication: [], deadGoPackages: [] });
 const vc = rd("tooling/consistency/verdict-cache.json", { groups: {}, layering: [], dup: [] });
 
@@ -90,9 +95,9 @@ const html = `<!doctype html><meta charset=utf-8><title>Barkpark — Status Quo<
  .norm b{font-family:ui-monospace,monospace;font-size:12px}.norm .p{color:#0369a1;font-size:12px}
 </style>
 <header>
- <div><div class=grade>${q.grade}</div><div class=meta>${q.overall}/100</div></div>
+ <div><div class=grade>${E(q.grade)}</div><div class=meta>${E(qualityLabel(qRep))}</div></div>
  <div><div style="font-size:16px;font-weight:700">Barkpark — Status Quo</div>
- <div class=meta>${rows.length} files · coverage ${cov.pct}% · ${q.totalFindings} findings · last full research ${cov.lastFullResearch ? cov.lastFullResearch.slice(0,10) : "—"}</div></div>
+ <div class=meta>${rows.length} files · coverage ${E(coverageLabel(cov))} · ${E(findingsLabel(qRep))} · last full research ${E(lastFullResearchLabel(cov))}</div></div>
  <nav><a href=#overview>Overview</a><a href=#plan>Plan</a><a href=#files>Files</a><a href=#norms>Consistency</a><a href=#arch>Architecture</a><a href=#erg>Ergonomics</a></nav>
 </header>
 
@@ -103,7 +108,7 @@ const html = `<!doctype html><meta charset=utf-8><title>Barkpark — Status Quo<
 <div class=sub>code size-class: ${pill(bySize)} <span class=meta>(ideal ${ergRep.thresholds?.idealCeil}tok ceiling · bloat &gt;${ergRep.thresholds?.bloat}tok)</span></div>
 </section>
 
-<section id=plan><h2>Improvement plan</h2><div class=sub>${q.totalFindings} findings · ~${q.effortUnits} effort units · impact = reach × severity × defect-amplifier</div>
+<section id=plan><h2>Improvement plan</h2><div class=sub>${E(findingsLabel(qRep))} · ~${q.effortUnits} effort units · impact = reach × severity × defect-amplifier</div>
 <table><thead><tr><th>#</th><th>Impact</th><th>Reach</th><th>Kind</th><th>Dimension</th><th>Effort</th><th>Target</th><th>Action</th></tr></thead>
 <tbody>${q.findings.map(findRow).join("")}</tbody></table></section>
 
@@ -137,4 +142,4 @@ ${norms.map(n => `<div class=norm><b>${E(n.dir)}/</b><div class=p>${E(n.pattern)
  let dir=-1;function sb(ci,num){dir=-dir;all.sort((a,b)=>{let x=a.cells[ci].innerText,y=b.cells[ci].innerText;if(num){x=parseFloat(x.replace(/[^0-9.\\-]/g,''))||0;y=parseFloat(y.replace(/[^0-9.\\-]/g,''))||0;return (x-y)*dir}return x.localeCompare(y)*dir});all.forEach((r,i)=>{r.cells[0].textContent=i+1;tb.appendChild(r)})}
 </script>`;
 writeFileSync(join(HERE, "status-report.html"), html);
-process.stderr.write(`[report] comprehensive status-report.html — ${rows.length} files, ${q.totalFindings} findings, ${norms.length} norms\n`);
+process.stderr.write(`[report] comprehensive status-report.html — ${rows.length} files, ${findingsLabel(qRep)}, ${norms.length} norms\n`);

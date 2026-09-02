@@ -2,6 +2,8 @@
 
 # CCH wave 66 — concurrency re-check at dispatch (2026-08-10 ~00:52 local / 22:52Z)
 
+> HISTORICAL RECORD (2026-08-10) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Re-derivation recipes for the collision-surface measurement. Run from the repo root.
 
 ## 1. Which worktrees hold the contested files DIRTY

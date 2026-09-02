@@ -949,7 +949,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "write",
         args: [
@@ -1005,7 +1005,20 @@ defmodule Barkpark.Plugins.Tasks do
           %{
             name: "note",
             type: "string",
-            summary: "What was tried and why it missed — required with --miss, non-empty."
+            summary:
+              "What was tried and why it missed — required with --miss, non-empty. ALSO required with --withdraw, where it is the REASON the criterion is being withdrawn (it is persisted on the withdrawals record and is the only place the why survives)."
+          },
+          %{
+            name: "withdraw",
+            type: "bool",
+            summary:
+              "WITHDRAW a met criterion that review refuted: met goes to FALSE (criteria_progress drops), the original evidence is LEFT IN PLACE, and a {note,ts,worker,superseded_evidence} record is appended to the criterion's withdrawals list — so the board stops lying without the proof being erased. Requires --note (why) and --criterion-text (the same off-by-one guard --met carries: lowering the wrong neighbour is as much a lie as raising it). Unlike --met/--miss this is allowed on a SEALED row (done/cancelled/released), because a review that refutes a proof normally lands after the close — on an in_progress row it is holder-only + epoch-fenced as usual, and on any other row it requires --observed-rev. Refused with 409 criterion_not_met if the criterion is already met=false."
+          },
+          %{
+            name: "observed-rev",
+            type: "string",
+            summary:
+              "The doc rev you read, from `bp task get <id> -o json` .doc.rev. REQUIRED for a --withdraw on any row that is NOT in_progress (409 observed_rev_required otherwise): such a row has no LIVE lease to fence against — a closed row keeps its claim only as a receipt (closed_at stamped on it) — so the rev is the read-before-write proof instead, the same idea as close's --set observed_rev=<rev>. Ignored on an in_progress row, where the epoch fence applies."
           },
           %{
             name: "merge-gated",

@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: swarm-notifications-email | budget: 4000tok -->
 # notifications-email — provenance note
 
+> HISTORICAL RECORD (2026-06-29) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 **Slug:** `notifications-email` · **Target app:** `cloud/` (`BarkparkCloud`) · **Status:** candidate (judge before merge)
 
 ## What this adds

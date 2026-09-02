@@ -1,7 +1,15 @@
 defmodule Barkpark.Sharing.Links do
   @moduledoc """
   ITEM sharing (P7) — Google-Docs-style direct links to ONE document or media
-  file, independent of `Barkpark.Sharing` SECTION shares.
+  file, minted and resolved WITHOUT a `Barkpark.Sharing` SECTION share.
+
+  INDEPENDENT AT RESOLVE, SUBORDINATE AT REVOKE (arpss-w8, RULED CASCADE):
+  `resolve/1` never consults `Sharing.shared?/4`, so a link works whether or not
+  the scope is section-shared — but `Sharing.remove_share/3` calls
+  `revoke_scope/3`, so removing the section share KILLS every live link under
+  the same `(workspace, project, dataset)` triple. The older wording here said
+  only "independent of SECTION shares", and reading it as independent in BOTH
+  directions is what let a removed share leave `/s/<token>` URLs serving.
 
   A link is an opaque, revocable secret (`/s/<token>`) bound to a single item +
   its tenant scope + an access level (`read`/`edit`). `resolve/1` enforces
@@ -48,6 +56,7 @@ defmodule Barkpark.Sharing.Links do
   alias Barkpark.Content.DraftId
   alias Barkpark.Repo
   alias Barkpark.Sharing.ShareLink
+  alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   # Cap the TTL at one year — mirrors Barkpark.Auth @share_token_max_ttl / the
@@ -209,6 +218,48 @@ defmodule Barkpark.Sharing.Links do
   end
 
   def resolve(_), do: {:error, :not_found}
+
+  @doc """
+  THE CASCADE — revoke every live link minted under one SECTION-share scope.
+
+  Called by `Barkpark.Sharing.remove_share/3`, which is the only place an
+  operator can withdraw a section share. RULED CASCADE (lead-security-r,
+  2026-09-02): item links derive their authority from the share they were
+  minted under, so they fall with it. Revocation is fail-closed — a link that
+  outlives the share it came from is a leak the operator cannot see.
+
+  Takes SLUGS, mirroring `Barkpark.Auth.revoke_share_tokens/3` so the two
+  revocations at that one call site read the same. The rows key on tenant UUIDs,
+  so the slugs are resolved here; that keeps `Barkpark.Sharing` free of any
+  Tenancy dependency.
+
+  MATCHES THE TRIPLE EXACTLY, never a prefix: a link in a sibling project or a
+  sibling dataset is in a DIFFERENT scope and survives untouched. An
+  unresolvable workspace or project revokes nothing (`{:ok, 0}`) — both mint
+  doors resolve real ids, so no link can be bound to a tenant that is not there.
+  Already-revoked rows keep their original `revoked_at`. Never raises.
+  """
+  @spec revoke_scope(term(), term(), term()) :: {:ok, non_neg_integer()}
+  def revoke_scope(ws_slug, proj_slug, dataset)
+      when is_binary(ws_slug) and is_binary(proj_slug) and is_binary(dataset) do
+    with %Tenancy.Workspace{id: ws_id} <- Tenancy.get_workspace_by_slug(ws_slug),
+         %Tenancy.Project{id: proj_id} <- Tenancy.get_project(ws_slug, proj_slug) do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {count, _} =
+        ShareLink
+        |> where([l], l.workspace_id == ^ws_id and l.project_id == ^proj_id)
+        |> where([l], l.dataset == ^dataset)
+        |> where([l], is_nil(l.revoked_at))
+        |> Repo.update_all(set: [revoked_at: now])
+
+      {:ok, count}
+    else
+      _ -> {:ok, 0}
+    end
+  end
+
+  def revoke_scope(_ws_slug, _proj_slug, _dataset), do: {:ok, 0}
 
   @doc "Revoke (stamp `revoked_at`) one link by id. Idempotent."
   @spec revoke(binary()) :: {:ok, ShareLink.t()} | {:error, :not_found}
