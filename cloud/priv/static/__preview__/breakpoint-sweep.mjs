@@ -67,8 +67,14 @@
 //  required set is `Elixir gate` and `PR references an active task` only. So
 //  this leg RUNS on every console-touching PR and its red is VISIBLE, but it
 //  does not block a merge by itself. Say that plainly rather than implying
-//  otherwise. Leg B (--render) is wired to NOTHING and must not be: it costs
-//  MINUTES, not seconds (see COST below).
+//  otherwise. Leg B (--render) is not wired IN FULL and must not be: it costs
+//  MINUTES, not seconds (see COST below). A one-cell one-width SLICE of it is
+//  wired — console-harness.yml's `tier-floor-render` job runs `--render --widths
+//  901 --cell billing-trial` (`grep -n 'breakpoint-sweep' .github/workflows/
+//  console-harness.yml`), which is ~1s. This sentence used to read "wired to
+//  NOTHING", which was true when written and stopped being true the day that job
+//  landed. Leg T (--tiers5) IS wired to nothing, deliberately, and says so in
+//  its own header.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  LEG A — THE COVERAGE REFUSAL (default mode; browserless; ~50ms)
@@ -2037,6 +2043,30 @@ async function legRender(rep) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  LEG T — THE FIVE-TIER SEAM (--tiers5)
 // ─────────────────────────────────────────────────────────────────────────────
+//  NO WORKFLOW INVOKES THIS LEG — IT IS HAND-RUN, AND THAT IS SAID HERE SO A
+//  READER NEVER INFERS OTHERWISE (cch-w16-bl-tiers5-leg-runs-nowhere). Re-derive
+//  in one command: `git grep -n tiers5 -- .github/` exits 1 with no output. The
+//  reason is that this leg guards a catalog that does not exist yet: the shipped
+//  PLAN_CATALOG has THREE plans, the two extra tier cards below are a FIXTURE,
+//  and the leg's own staleness guard REFUSES (exit 2, "the shipped catalog now
+//  has N plans") the day a real fourth plan lands. Wiring a guard whose green
+//  certifies a hypothetical, and whose refusal fires on a routine product
+//  change, would put a red in front of every console PR that had nothing to do
+//  with it — so this is deliberately an instrument you REACH FOR, not one that
+//  reaches for you. The committed job that does run on every console PR is
+//  `tier-floor-render` in console-harness.yml, which drives the REAL three-plan
+//  screen (`--render --widths 901 --cell billing-trial`); this leg answers the
+//  different question of what happens when the catalog GROWS.
+//    RUN IT BY HAND before adding a plan to the catalog, and after any change to
+//  `.tier-grid`'s track floor:
+//      node cloud/priv/static/__preview__/breakpoint-sweep.mjs --tiers5
+//  COST, measured on this tree and not estimated: 5 renders, ~6s wall including
+//  Chrome bring-up (2026-09-02, Chrome 152, node v22.22.0), exit 0 printing
+//  `five tier cards fit at every width in [619,901,1040,1200,1700]`. It is
+//  cheap enough to wire — the objection is the fixture's staleness, not the
+//  seconds — and if the catalog is ever frozen at a known plan count that
+//  objection expires and the step belongs in `tier-floor-render`.
+//
 //  WHY A FIXTURE AT ALL. The shipped catalog has THREE plans, and at wide
 //  viewports a three-plan corpus is BLIND to the `.tier-grid` track floor:
 //  `auto-fit` collapses the surplus tracks to a literal `0px`, so floors 230
