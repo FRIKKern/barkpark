@@ -78,7 +78,9 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    patterns (one shared file both suites read, or copies plus a freshness test that decodes both
    and asserts them term-identical). A mirror is a finding only when NEITHER is present, and you
    VERIFY the lock rather than trusting a comment that says "mirrors X" — that word is the tell
-   for hand-maintained.
+   for hand-maintained. And `grep` searches CONTENT, not FILENAMES: a basename sweep reported
+   "no match" for 13 generator-owned goldens whose sibling copies are addressed by a COMPUTED
+   PATH, so the name appears in zero source bytes. Probe both indexes.
    **A TAUTOLOGY reads exactly like coverage.** A mirror test whose expected list is a second
    HAND-WRITTEN copy asserts the stale set against the stale set: it stays green while the mirror
    is already wrong in production (measured 2026-09-02 — `#NAME?` rendered as ordinary text on
@@ -95,9 +97,10 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    of the producer's output. The producer changes shape, the consumer's suite keeps passing
    against the stale snapshot, production breaks. Only the DATA is copied, so the mirror rule
    cannot see it. Detector, all three parts REQUIRED: (a) the fixture's field names are owned by
-   a producer in our own tree, (b) the consumer DECODES it into a typed struct rather than
-   byte-comparing its own output, (c) nothing on the producer side regenerates or freshness-checks
-   it. Any one part alone is a candidate generator, not a detector — measured 2026-09-02, the
+   a producer in our own REPO (any app in it, not just api/), (b) the consumer DECODES it into a
+   typed struct rather than byte-comparing its own output, (c) nothing on the producer side
+   regenerates it, freshness-checks it, OR asserts CONFORMANCE the other way — a hand-authored
+   fixture that an Elixir test reads to assert the real emitter conforms to it is LOCKED. Any one part alone is a candidate generator, not a detector — measured 2026-09-02, the
    naive "unreferenced fixture" form yields 67 hits of which roughly 90%% are not the hazard
    (a renderer comparing its OWN output fails (a); a third-party API capture fails (b)).
    **A SIBLING LIST IN A FILING IS WHAT WAS CHECKED, NOT WHAT EXISTS.** Three of ten confirmed
