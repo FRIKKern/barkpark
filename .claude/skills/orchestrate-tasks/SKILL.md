@@ -115,6 +115,32 @@ main red for 2.5 h, every open PR's required gate red with it). Playbook, in ord
 5. **Rule broadcast:** a test that asserts a hole is OPEN ships in the same PR as the fix, or
    `@tag :skip` with the row id — never green on its own.
 
+## 2d. CI is the ceiling — measure it before you add lanes
+
+Measured 2026-09-02 on a 30-agent campaign: GitHub executed ~10 JOBS AT ONCE for the repo while
+133 runs queued behind them. An Elixir run took 53 min MEDIAN wall clock for ~3 min of job work —
+the rest was waiting for a machine. Open→merge was 139 min median, 434 p90. Merge throughput
+peaked at 48/hr and that WAS the ceiling: more lanes made the queue longer, not the day faster.
+
+**Measure this on day one**, before deciding how many lanes to run:
+
+    gh run list -R <repo> --status queued  --limit 600 --json databaseId --jq 'length'
+    gh run list -R <repo> --status in_progress --limit 60 --json databaseId --jq 'length'
+    # then per-job minutes across recent runs of your heaviest workflow
+
+Then look at WHAT runs, not just how much. The same measurement showed only 34% of the heaviest
+workflow's minutes were tests; 66% was scaffolding — a path lint that ran on every run and was
+never skipped cost more than everything except the test job. Moving advisory and
+release-shaped jobs off the per-PR path is free throughput; buying runners to carry scaffolding
+is paying for waste.
+
+**Two orchestrator habits that follow from the ceiling:**
+- After a main-red fix, update-branch ONLY the PRs at 3/4 or better. Refreshing all of them
+  turned a 60-run queue into 368 in one step, ~9 hours at the measured rate, and the PRs that
+  were failing their own tests gained nothing from a fresh base.
+- Tell lanes to BATCH small same-file fixes. Every PR costs ~10 job slots whether it changes one
+  line or fifty, so three one-line PRs cost three times a single PR that closes three rows.
+
 ## 3. Improve the system — a standing 1-of-5
 
 Every lead keeps one worker slot for **system improvement**: a trap the lane hit while
