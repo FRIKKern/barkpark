@@ -299,7 +299,12 @@ defmodule Barkpark.Tasks.ClaimTest do
       task = mk_task!(doc_id, scope)
 
       assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-first", scope)
-      assert {:ok, closed} = Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+
+      assert {:ok, closed} =
+               Tasks.close(task.id, "worker-first",
+                 observed_epoch: claimed.content["claim"]["epoch"]
+               )
+
       assert closed.content["lifecycle_status"] == "done"
 
       # The shape the fix has to survive: worker KEPT, close stamped.
@@ -333,7 +338,10 @@ defmodule Barkpark.Tasks.ClaimTest do
 
       assert {:ok, claimed} = Tasks.claim("worker-first", queue_opts)
       assert claimed.id == task.id
-      {:ok, _closed} = Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+
+      {:ok, _closed} =
+        Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+
       {:ok, _reopened} = Tasks.stage(task.id, "open")
 
       # RED BEFORE THE FIX: {:ok, nil} — the queue skipped its own reopened row.
