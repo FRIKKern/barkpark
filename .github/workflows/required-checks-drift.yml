@@ -144,6 +144,49 @@ jobs:
       - name: Prove the toolchain by mutation (hermetic)
         run: bash scripts/required-checks.test.sh --hermetic
 
+      # THE COMMIT PATH. apply.sh floors the WRITE path — it runs the floor
+      # before the protection PUT and is fail-closed on every rc — but nothing
+      # floored the COMMIT: `git grep -n required-checks-floor origin/main --
+      # .github` returns exactly one hit and it is PROSE inside
+      # required-checks.json's own _readme. So a PR that rewrote the spec —
+      # dropping a required context, dropping a hand-authored _readme paragraph,
+      # or flipping enforced back to false, all three of which the floor now
+      # refuses — reddened nothing until someone ran apply by hand afterwards.
+      #
+      # THIS JOB AND NOT THE ADVISORY ONE. `Required-check spec drift
+      # (advisory)` carries `continue-on-error: true`, so a floor breach there
+      # prints and the job still concludes SUCCESS — a guard whose red is
+      # swallowed is the defect class this workflow exists to delete. `spec-gate`
+      # is hermetic (the floor makes no API call and needs no credential),
+      # deliberately path-unfiltered so it renders on EVERY pull request rather
+      # than only on ones that look like CI changes, and its failure is a real
+      # red X. It is not a REQUIRED context today — registering it is a
+      # branch-protection change and a lead call — so this is an unswallowed red
+      # a human must read, which is strictly more than the advisory job can offer,
+      # and it becomes blocking for free the day that name is registered.
+      #
+      # The reference is fetched explicitly: `fetch-depth: 1` leaves no
+      # `origin/main` for the floor's default `git show origin/main:…` to
+      # resolve, and the floor treats an unreadable reference as a REFUSAL, so
+      # without this step the job reds for the wrong reason. On `pull_request`
+      # actions/checkout gives the MERGE commit, so the candidate is the spec as
+      # it would exist on main — a branch that is merely behind main cannot red
+      # this.
+      - name: Fetch the floor's reference (origin/main's committed spec)
+        run: git fetch --depth=1 origin main:refs/remotes/origin/main
+
+      - name: The committed spec holds the floor (contexts, _readme, enforced)
+        run: |
+          set -euo pipefail
+          rc=0
+          bash scripts/required-checks-floor.sh .github/required-checks.json || rc=$?
+          case "$rc" in
+            0) ;;
+            1) echo "::error::FLOOR BREACH — this PR's .github/required-checks.json loses a required context, an _readme entry, or the enforced flag. The floor's own output above names each loss."; exit 1 ;;
+            2) echo "::error::FLOOR GROWTH — this PR ADDS required context(s). Every PR in this repo must render them forever, and a job that is green today and paths-filtered tomorrow deadlocks main (D69). CI never passes --acknowledge-growth on its own: a human decides each added name belongs, and says so in the PR."; exit 1 ;;
+            *) echo "::error::the floor could not be evaluated (exit $rc) — an unreadable reference is a refusal, never a pass."; exit 1 ;;
+          esac
+
   # ── the workflow-file shape ratchet ─────────────────────────────────────────
   # WHY IT LIVES HERE AND NOT IN shell-harnesses.yml, where every other
   # workflow-linting harness in this repo is wired. A PR spliced a job block
