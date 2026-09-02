@@ -542,7 +542,14 @@ cloud_ere="$(set_ere cloud)"
 uncovered=0
 while IFS= read -r p; do
   [ -n "$p" ] || continue
-  if printf '%s\n' "$p" | grep -Eq -- "$cloud_ere"; then
+  # here-string, NOT `printf '%s\n' "$p" | grep -Eq` (honest-gates D37). `grep
+  # -q` exits on the first match; under this script's own `set -o pipefail` the
+  # write side then takes SIGPIPE, the pipeline returns 141, and the `if` falls
+  # to its FALSE branch — a COVERED repo-root read reported UNCOVERED, a
+  # BLOCKING red on the required Cloud gate for a reason foreign to what this
+  # ratchet measures. Only the 64 KiB pipe buffer kept it quiet: one short path
+  # is written before grep can exit. Luck, not correctness.
+  if grep -Eq -- "$cloud_ere" <<<"$p"; then
     continue
   fi
   if is_exempt "$p"; then
