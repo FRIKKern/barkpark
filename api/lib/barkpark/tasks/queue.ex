@@ -37,6 +37,17 @@ defmodule Barkpark.Tasks.Queue do
   # literal. The base `WHERE` below binds this same list via `IN ^…`.
   @ready_lifecycle_statuses Validation.claimable_statuses()
 
+  @doc """
+  The page size `ready/1` applies when the caller names no `:limit`.
+
+  Public because the HTTP layer must be able to REPORT the window it served
+  (`page.limit` on the `/v1/tasks/ready` envelope) even when the request carried
+  no `?limit=`. Reading it here keeps `@ready_default_limit` the single literal;
+  a controller-side copy is the exact drift that made the CLI manifest claim a
+  page size the server never had.
+  """
+  def ready_default_limit, do: @ready_default_limit
+
   def ready(opts \\ []) do
     opts
     |> ready_query()

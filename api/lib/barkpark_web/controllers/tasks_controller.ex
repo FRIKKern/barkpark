@@ -77,17 +77,28 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, filters} <- Params.parse_route_filters(params, :ready),
          {:ok, phase_id} <- Params.ready_phase_id(params, filters),
          {:ok, order} <- Params.parse_ready_order(params["order"]) do
+      # The ready queue was ALREADY paged by default (Queue's 50) — it is the
+      # index, not this route, that shipped default == cap. Resolving the
+      # default HERE instead of letting `put_opt` drop a nil and Queue apply it
+      # downstream changes no query: the same number reaches the same `LIMIT`.
+      # It changes what the ROUTE can say — `page.limit` below is now the limit
+      # the caller actually got, on ready exactly as on index, instead of being
+      # unknowable to the renderer whenever `?limit=` was absent. The literal
+      # stays in Queue (`ready_default_limit/0`); never fork it here.
+      limit = Params.parse_limit(params["limit"], Tasks.Queue.ready_default_limit(), 1000)
+      offset = Params.parse_offset(params["offset"])
+
       opts =
         []
         |> Params.put_opt(:phase_id, phase_id)
-        |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
-        |> Params.put_opt(:offset, Params.parse_offset(params["offset"]))
+        |> Params.put_opt(:limit, limit)
+        |> Params.put_opt(:offset, offset)
         |> Params.put_opt(:order, order)
         |> Keyword.merge(scope_opts(conn))
 
       docs = Tasks.ready(opts)
 
-      json(conn, task_list_response(docs, conn, params))
+      json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
@@ -106,11 +117,26 @@ defmodule BarkparkWeb.TasksController do
   # which has exactly ONE caller) so the claim about the payload and the
   # payload are derived from the SAME list. Sealing first is safe: Params.seal/3
   # rewrites only `content`, and the count helpers read only id/doc_id.
-  defp task_list_response(docs, conn, params) do
+  #
+  # `page` (task-e2f5ecca0be9a6d1) is the truncation-VISIBILITY half of the
+  # default-page-size fix. Shrinking the index default from 1000 to 100 without
+  # it would trade one defect for a worse one: a caller who used to get every
+  # row would silently get a hundred, and a short answer that reads as a
+  # complete one is the failure mode this repo already paid for twice (the
+  # `--all` shift guard, the unreadable-page refusal). So every list response
+  # now states the window it served — `limit`, `offset`, `returned` and
+  # `has_more` — and `has_more` is the CHEAP predicate `returned == limit`, not
+  # a `COUNT(*)`: a second full scan to describe the first would re-earn the
+  # very cost this change exists to remove. It can therefore say `true` on an
+  # exactly-full last page; that errs toward "look again", the safe direction.
+  # ADDITIVE ONLY — `ok`, `docs` and `help` keep their names and shapes, so the
+  # SDK, the Studio and the taskboard read byte-identical fields.
+  defp task_list_response(docs, conn, params, page_opts) do
     docs = seal_docs(docs, conn)
 
     %{ok: true, docs: render_task_list(docs, conn, params)}
     |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
+    |> Map.put(:page, Params.page_meta(docs, page_opts))
   end
 
   # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
@@ -120,7 +146,7 @@ defmodule BarkparkWeb.TasksController do
   # shape with edge counts (the server default STAYS full — SDK/Studio/
   # taskboard untouched).
   # The docs arrive ALREADY sealed (field-visibility seal, fail-closed) — the
-  # seal lives in task_list_response/3, this function's only caller, so the
+  # seal lives in task_list_response/4, this function's only caller, so the
   # truncation-honesty help[] line sees exactly what is rendered here.
   defp render_task_list(docs, conn, params) do
     case Params.parse_view(params["view"]) do
@@ -314,7 +340,19 @@ defmodule BarkparkWeb.TasksController do
     # Clamp into [1, 1000] so a raw value can't reach `limit: ^limit` below:
     # `?limit=-1` would emit `LIMIT -1` (Postgres rejects a negative LIMIT → 500)
     # and `?limit=100000000` would fan the whole task corpus out in one Repo.all.
-    limit = Params.parse_limit(params["limit"], 1000, 1000)
+    #
+    # THE DEFAULT USED TO BE THE CAP (1000, 1000) — so the clamp above bounded
+    # only callers who ASKED for too much, and a bare `GET /v1/tasks` (every
+    # `bp task ls` with no flags, every ad-hoc curl) took the widest page the
+    # route can serve: one `Repo.all` + one batched child-count query + one
+    # render over the whole task corpus, measured at 8,525 rows / ~9 MB on
+    # guerrilla. Six of those concurrently is the shape that put `documents`
+    # at 21.4 billion seq_tup_read and queued the auth plugs behind it
+    # (task-e2f5ecca0be9a6d1). A default is what an UNINFORMED caller gets, so
+    # it must be the cheap answer; the cap is what an informed one may ask for
+    # and stays 1000. `?limit=` is honoured up to that cap exactly as before —
+    # nothing a caller can spell changed, only what silence means.
+    limit = Params.parse_limit(params["limit"], 100, 1000)
 
     # tlv-bl-tasks-ls-offset-broken (D19): offset used to be silently ignored —
     # every page repeated page 0 and `bp task ls --all` self-aborted with
@@ -377,7 +415,7 @@ defmodule BarkparkWeb.TasksController do
       |> Params.apply_index_order(parent)
 
     docs = Repo.all(query)
-    json(conn, task_list_response(docs, conn, params))
+    json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────

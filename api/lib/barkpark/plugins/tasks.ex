@@ -620,13 +620,24 @@ defmodule Barkpark.Plugins.Tasks do
         args: [],
         flags: [
           # default MUST match the server's actual page size (tasks_controller
-          # do_index: Params.parse_limit(params["limit"], 1000, 1000)). It was
+          # do_index: Params.parse_limit(params["limit"], 100, 1000)). It was
           # born as 50 — false from day one — and the CLI reads this field to
           # calibrate its "page may be truncated" warning (internal/cli/run.go
           # defaultPageLimit), so every `bp task ls` over a >=50-row corpus
           # printed a false "more may be available" even when the server had
           # returned everything.
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 1000},
+          #
+          # NOW 100, tracking the index default down from 1000
+          # (task-e2f5ecca0be9a6d1). Note that this field is NEVER SENT: run.go
+          # applyQuery adds `?limit=` only when `g.limitSet`, so a bare
+          # `bp task ls` transmits no limit and the server's own default is what
+          # bounds the page. Its ONE job is calibrating defaultPageLimit — which
+          # is why leaving it at 1000 would have been the quiet half of this
+          # defect: the server would page at 100 and the CLI, comparing 100 rows
+          # against a believed limit of 1000, would conclude the page was
+          # complete and say nothing. A wrong number here does not truncate
+          # anything; it makes a truncation UNANNOUNCED, which is worse.
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 100},
           %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
