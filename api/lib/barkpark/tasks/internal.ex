@@ -204,6 +204,10 @@ defmodule Barkpark.Tasks.Internal do
   #     recent, and PINS `met` to its current stored value — explicitly
   #     written, never inherited from the met→true default above, which would
   #     flip a lock on an honest miss (the proven footgun D8 names).
+  #   * withdrawal (`stamp --withdraw`, D745): `"withdrawal" => %{"note","ts",
+  #     "worker"}` LOWERS `met` to false and APPENDS the record to the entry's
+  #     `withdrawals` list, snapshotting the evidence it supersedes. See the
+  #     WITHDRAWAL block below.
   #
   # The stored `criterion` text is never touched. The `"criterion"` guard is a
   # CAS at criteria grain: it must equal the stored text at that index or the
@@ -230,6 +234,33 @@ defmodule Barkpark.Tasks.Internal do
   # alone now gets a 409 telling it exactly what to pass (see the controller's
   # `criteria_hint/2`). Close's own merge-gate autostamp threads the stored text
   # in (close.ex `autostamp_merge_gate/6`) rather than riding the old hole.
+  #
+  # THE WITHDRAWAL (D745, wave 62). A met flag that review later refutes had no
+  # verb: the write surface offers `--met` and `--miss` only, so a reviewer who
+  # found a stamped proof false could not lower the lock and wrote the
+  # correction into the criterion's own `evidence` prose instead
+  # ("[WITHDRAWN BY WAVE REVIEW … the ledger refuses a met:true -> met:false
+  # patch, so read this evidence, not the flag]"). Twelve criteria across two
+  # rows now carry exactly that, and every board reads them MET. The fix is not
+  # "permit a silent un-flip" — an un-flip that leaves no trace is the same
+  # unaccountable rewrite the append-only instinct exists to refuse. It is to
+  # make the withdrawal FIRST-CLASS:
+  #
+  #   * `met` goes to FALSE, so criteria_progress drops and every board that
+  #     counts locks tells the truth without reading prose.
+  #   * `evidence` is NOT touched. The original stamp stays exactly where it was
+  #     written and stays readable — the append-only guarantee is kept by
+  #     ADDING, never by clearing.
+  #   * a record lands on the entry's `withdrawals` list naming WHO withdrew it,
+  #     WHY, WHEN, and the evidence it supersedes (snapshotted at withdrawal
+  #     time, so a later re-stamp cannot quietly rewrite what was withdrawn).
+  #   * the list is UNBOUNDED, deliberately, unlike `attempts`. A bound is a
+  #     silent drop, and a silent drop of a correction is the defect this verb
+  #     exists to end. Withdrawals are rare; attempts are chatter.
+  #
+  # A withdrawal carries the SAME `"criterion"` text CAS as a met-flip. Lowering
+  # the wrong neighbour is as much a lie as raising it, so both directions fail
+  # closed on a missing guard (`:criterion_text_required`).
   @attempts_bound 5
 
   def merge_criteria(content, []), do: {:ok, content}
@@ -273,6 +304,18 @@ defmodule Barkpark.Tasks.Internal do
           flips_met_true?(update) and not guarded?(guard) ->
             {:error, :criterion_text_required}
 
+          # A withdrawal LOWERS a lock, so it cannot fabricate a done — but an
+          # unguarded index would lower the WRONG row, which is its own lie.
+          # Same guard, same error, one definition for both directions.
+          withdraws?(update) and not guarded?(guard) ->
+            {:error, :criterion_text_required}
+
+          # A withdrawal of a criterion that was never met records a retraction
+          # of nothing. Refuse it rather than write a misleading history entry
+          # onto an already-honest row.
+          withdraws?(update) and Map.get(entry, "met") != true ->
+            {:error, :criterion_not_met}
+
           true ->
             with {:ok, entry} <- apply_entry_update(entry, update) do
               {:ok, List.replace_at(list, index, entry)}
@@ -295,7 +338,14 @@ defmodule Barkpark.Tasks.Internal do
   # met/evidence path, where an ABSENT `"met"` key means true (close's
   # back-compat default), so an index+evidence update flips too.
   defp flips_met_true?(%{"attempt" => %{}}), do: false
+  defp flips_met_true?(%{"withdrawal" => %{}}), do: false
   defp flips_met_true?(update), do: Map.get(update, "met", true) == true
+
+  # A withdrawal is discriminated by its `"withdrawal"` record, never by the
+  # `met: false` it also carries — an honest unmet close writes that too and is
+  # not a withdrawal.
+  defp withdraws?(%{"withdrawal" => %{}}), do: true
+  defp withdraws?(_update), do: false
 
   # Miss path: append the attempt, bound the list, PIN met explicitly to its
   # current stored value (normalized to a boolean — only a stored `true` is
@@ -311,6 +361,28 @@ defmodule Barkpark.Tasks.Internal do
      entry
      |> Map.put("met", Map.get(entry, "met") == true)
      |> Map.put("attempts", Enum.take(attempts ++ [attempt], -@attempts_bound))}
+  end
+
+  # Withdrawal path (D745): lower the lock, append the record, and LEAVE THE
+  # EVIDENCE ALONE. The record snapshots the evidence it supersedes so the
+  # withdrawn proof is legible even if the criterion is later re-stamped, and
+  # the list is unbounded because dropping a correction silently is the whole
+  # defect. Ordered before the met/evidence clause so a withdrawal never falls
+  # through to it.
+  defp apply_entry_update(entry, %{"withdrawal" => %{} = record}) do
+    withdrawals =
+      case Map.get(entry, "withdrawals") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    record =
+      Map.put(record, "superseded_evidence", to_string(Map.get(entry, "evidence") || ""))
+
+    {:ok,
+     entry
+     |> Map.put("met", false)
+     |> Map.put("withdrawals", withdrawals ++ [record])}
   end
 
   # Met/evidence path (close-time semantics — see merge_criteria/2 above).

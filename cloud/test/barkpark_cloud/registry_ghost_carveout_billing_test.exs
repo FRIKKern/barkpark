@@ -22,10 +22,17 @@ defmodule BarkparkCloud.RegistryGhostCarveoutBillingTest do
     * Every signup grants a `trial` subscription (`Billing.grant_trial/1`, run
       from BOTH signup paths — `Accounts.birth_oauth_user!/1` and the router's
       password `register/3`) with `plan: "trial", status: "active"`.
-    * NOTHING ever flips an EXPIRED trial off `active`. `TrialExpiryWorker`
-      enqueues deprovision jobs (`teardown/1`) and writes no subscription
-      status, and `Billing.active_trials/0` keeps returning the row. Expiry is
-      read at CALL TIME off `current_period_end` by `Billing.entitled?/1`.
+    * An EXPIRED trial is not flipped off `active` AT THE MOMENT IT EXPIRES.
+      Until cch-w50 nothing flipped it ever: `TrialExpiryWorker` enqueued
+      deprovision jobs (`teardown/1`) and wrote no subscription status, so 15 of
+      18 live rows sat `active` past their window, the oldest for three weeks.
+      It now writes the terminal status (`Billing.expire_trial/2`) — but only
+      once the teardown has COMPLETED, on the hourly tick after the boxes are
+      gone, so `plan: "trial", status: "active", current_period_end` in the past
+      remains a real, reachable shape and every fixture below still reproduces
+      it. The leg must therefore keep asking `entitled?/1`, which reads expiry at
+      CALL TIME off `current_period_end`, and must never go back to reading
+      `status`.
     * `plan: "free"` is the no-charge signup tier and is likewise `active`.
 
   So `status IN ('active','past_due')` is true, forever, for essentially every

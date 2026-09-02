@@ -269,6 +269,80 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   # ── glyphs + styling (the terminal's checklist marks) ──────────────────────
 
+  # ── the tool row's SETTLE-GATED gutter glyph (transcript tool rows) ─────────
+  #
+  # A transcript tool row's gutter used to be a constant `●` with no completion
+  # semantics — the agents rail already flipped its kind-glyph to ✓/✕ on settle,
+  # the rows never did. Two gates, both required, both provable:
+  #
+  #   SETTLE gate     — the glyph stays NEUTRAL (`●`) for the whole time the row's
+  #                     TURN is live. A `tool_result` that lands mid-turn does NOT
+  #                     flip it: the turn is still running, and a row that reads
+  #                     "done" while its turn can still fail is a lie the terminal
+  #                     never tells. Only the turn's terminal `result` frame
+  #                     settles the row (`turn_settled`).
+  #   PROVENANCE gate — after the settle, ONLY a row that actually carries a
+  #                     `tool_result` may claim ✓. A row whose result never
+  #                     arrived (the CLI died, the turn was interrupted, the frame
+  #                     was dropped) stays NEUTRAL forever — never a fabricated ✓.
+  #
+  # `tool_error` is written only when a `tool_result` block arrived carrying
+  # `is_error: true`, so ✗ is provenance-gated by construction.
+  #
+  # PURE and single-owner: the Studio row (live + replay) and the Go TUI
+  # (`internal/chat` toolRowGlyph) run this SAME truth table over the SAME three
+  # envelope facts — `turn_settled` / `tool_error` / `output` — which
+  # `chat_controller.message_json` already ships verbatim in every row's
+  # `metadata`. The glyph is row-ENVELOPE chrome, not block content (see the PR
+  # body): the majority of tool rows (Bash/Read/Grep) project NO block at all.
+  # (Search vocabulary: the tool row's GUTTER GLYPH / settled tick / tool row
+  # check — this pair is its one owner; the rail's `rail_agent_glyph` and the
+  # checklist's `todo_glyph` are different rows entirely.)
+  #
+  @doc """
+  The settle-gated gutter glyph for one transcript tool row: `●` while the row's
+  turn is live OR its result never arrived, `✓` once the turn settled with a
+  non-error result, `✗` once it settled with an error result.
+
+  Takes the LiveView's tool-row message map (atom keys), which both the live
+  append path and `replay_message/2` build from the same three facts.
+  """
+  @spec settle_glyph(map()) :: String.t()
+  def settle_glyph(message) when is_map(message) do
+    case settle_state(message) do
+      :ok -> "✓"
+      :error -> "✗"
+      :pending -> "●"
+    end
+  end
+
+  @doc """
+  The tool row's settle STATE — `:pending` (neutral), `:ok`, or `:error`. The
+  glyph, the color token, and the `data-tool-state` test hook all derive from
+  this ONE cond, so a surface can never disagree with the glyph it draws.
+  """
+  @spec settle_state(map()) :: :pending | :ok | :error
+  def settle_state(message) when is_map(message) do
+    cond do
+      # SETTLE gate: nothing flips while the turn is still running.
+      Map.get(message, :turn_settled) != true -> :pending
+      Map.get(message, :tool_error) == true -> :error
+      # PROVENANCE gate: ✓ requires a result we actually received.
+      is_binary(Map.get(message, :output)) and Map.get(message, :output) != "" -> :ok
+      true -> :pending
+    end
+  end
+
+  @doc "The lifecycle color token for a tool row's settle state (tokens only)."
+  @spec settle_color(map()) :: String.t()
+  def settle_color(message) when is_map(message) do
+    case settle_state(message) do
+      :ok -> "var(--life-done)"
+      :error -> "var(--danger)"
+      :pending -> "var(--primary)"
+    end
+  end
+
   @doc "The checklist glyph for a todo status (core delegation): ☐ todo · ◐ doing · ☒ done."
   @spec todo_glyph(atom()) :: String.t()
   defdelegate todo_glyph(status), to: ToolRows

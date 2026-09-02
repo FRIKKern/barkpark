@@ -25,10 +25,12 @@
 #
 # THE FOUR REFUSALS
 #
-#   3  SHALLOW REPOSITORY        clause (b) verifies ancestry; a shallow clone has
+#   8  SHALLOW REPOSITORY        clause (b) verifies ancestry; a shallow clone has
 #                                no history to verify it against. `HISTORY-
 #                                UNAVAILABLE` is a fact about the CHECKOUT, never
-#                                about the product.
+#                                about the product. (This refusal was 3 until the
+#                                predicate grew its OWN exit 3 for a `Refusal`;
+#                                see the exit-code table below.)
 #   4  PREDICATE DRIFT           the file about to be executed differs from
 #                                `<origin-ref>:cloud/priv/static/__preview__/seal-
 #                                predicate.mjs`. The primary checkout carries the
@@ -49,17 +51,34 @@
 #   0  SEAL          the predicate exited 0 over a tree this wrapper vouches for
 #   1  NO SEAL       the predicate exited 1 over a tree this wrapper vouches for
 #   2  INFRA FAULT   the predicate exited 2 (or an exit this wrapper cannot map)
-#   3  REFUSED — shallow repository
+#   3  REFUSED — the PREDICATE refused: it measured nothing (its own exit 3)
 #   4  REFUSED — predicate drift
 #   5  REFUSED — HEAD is not the origin ref's tip
 #   6  REFUSED — the token reports unavailable clause-(b) history
 #   7  REFUSED — the inputs are unusable (not a work tree, no predicate, no origin
 #                ref, no parseable token). Nothing was read.
+#   8  REFUSED — shallow repository
 #
-#   0-2 are the predicate's own triad, passed through untouched. 3-7 are this
+#   0-3 are the PREDICATE's own quartet, passed through untouched. 4-8 are this
 #   wrapper's, and NONE of them is a statement about the epic. That separation is
 #   the whole point: an operator who greps for `NO SEAL` must never find one that
 #   actually meant "I was pointed at the wrong checkout".
+#
+# WHY 3 CHANGED HANDS, AND WHY SHALLOW MOVED TO 8 (task-cfa85992568a4bdc)
+#
+#   `seal-predicate.mjs` used to exit 1 for BOTH a measured NO-SEAL and a
+#   `Refusal` (EMPTY-ROSTER, NO-SUCCESSOR, …) where it scored nothing at all. It
+#   now exits 3 for the refusal — and this wrapper, whose switch only knew
+#   0/1/2, swept that 3 into its `*)` arm and re-published it as exit 2, INFRA
+#   FAULT: "the predicate exited 3, which is outside its documented 0/1/2 triad".
+#   The predicate's own honesty was being laundered back into a fault by the only
+#   thing that reads it.
+#
+#   The predicate's 3 is upstream and load-bearing, so it is what passes through;
+#   this wrapper's shallow refusal is the one that moved, to 8 — the next free
+#   code above the 0-7 block. A refusal MUST NOT share a code with a verdict, and
+#   two different refusals MUST NOT share one either, which is exactly what
+#   reusing 3 here would have done.
 #
 # WITHHOLDING. When a post-run refusal fires (5 via the token, or 6), the
 # predicate's reading is NOT printed. A verdict that came out of an unquotable
@@ -189,14 +208,14 @@ if [ -z "$ORIGIN_SHA" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# REFUSAL 3 — SHALLOW REPOSITORY.
+# REFUSAL 8 — SHALLOW REPOSITORY.
 # Clause (b) verifies each registered fix by ANCESTRY of origin/main. A shallow
 # clone does not carry the commits that ancestry is asked about, so the predicate
 # reports HISTORY-UNAVAILABLE — which is true of the checkout and says nothing
 # whatsoever about whether the defect was paid.
 SHALLOW="$(git -C "$REPO" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)"
 if [ "$SHALLOW" = "true" ]; then # MUT:G-SHALLOW
-  refuse 3 "$REPO is a SHALLOW repository — clause (b) ancestry cannot be evaluated here." \
+  refuse 8 "$REPO is a SHALLOW repository — clause (b) ancestry cannot be evaluated here." \
            "git -C $REPO fetch --unshallow   (or point --repo at a full-history worktree)"
 fi
 
@@ -262,6 +281,8 @@ tok() { # <field name> -> value, empty when absent
 
 TOK_HEAD="$(tok head)"
 TOK_BUNAVAIL="$(tok b-unavailable)"
+# Only the REFUSED token carries `reason=`; it is empty on every other verdict.
+TOK_REASON="$(tok reason)"
 
 # ---------------------------------------------------------------------------
 # REFUSAL 5 — post-run leg, read off the token itself.
@@ -317,19 +338,29 @@ fi
 
 # ---------------------------------------------------------------------------
 # VOUCHED. The tree is full-history, parked at the origin ref, running the origin
-# ref's own predicate, and the predicate read everything it needed. The reading
-# below is quotable, and it is the PREDICATE's, not this wrapper's.
+# ref's own predicate, and the predicate read everything it needed. Whatever the
+# predicate said below is quotable, and it is the PREDICATE's, not this wrapper's
+# — including its own REFUSAL (exit 3), which vouching for the TREE cannot turn
+# into a verdict about the epic.
 cat "$OUT_FILE"
 echo
 case "$PRED_EXIT" in
   0) echo "seal-run: VOUCHED — SEAL (predicate exit 0)" ;;
   1) echo "seal-run: VOUCHED — NO SEAL (predicate exit 1)" ;;
   2) echo "seal-run: the predicate reported an INFRA FAULT (exit 2). No verdict was taken." ;;
-  *) echo "seal-run: the predicate exited $PRED_EXIT, which is outside its documented 0/1/2 triad." ;;
+  # NOT "VOUCHED", and NOT an infra fault. The tree is quotable; the PREDICATE
+  # declined to measure it. Its `reason=` token field is the refusal's own name
+  # (EMPTY-ROSTER, NO-SUCCESSOR, …) and is echoed verbatim rather than paraphrased
+  # — an operator who greps for `NO SEAL` must not find this line.
+  3) echo "seal-run: REFUSED — nothing was measured (predicate exit 3): ${TOK_REASON:-<no reason= field>}" ;;
+  *) echo "seal-run: the predicate exited $PRED_EXIT, which is outside its documented 0/1/2/3 quartet." ;;
 esac
 echo "seal-run: read over $REPO at $ORIGIN_REF tip ${ORIGIN_SHA:0:9}; token head=${TOK_HEAD:-<absent>} b-unavailable=${TOK_BUNAVAIL:-0/0}"
 
+# The predicate's refusal (3) is forwarded AS 3, not re-coded: this wrapper adds
+# no judgement of its own to the predicate's verdicts, and a refusal it renamed
+# would be a second name for one fact.
 case "$PRED_EXIT" in
-  0|1|2) exit "$PRED_EXIT" ;;
-  *)     exit 2 ;;
+  0|1|2|3) exit "$PRED_EXIT" ;;
+  *)       exit 2 ;;
 esac

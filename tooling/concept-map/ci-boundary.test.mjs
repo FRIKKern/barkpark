@@ -181,3 +181,166 @@ test("importing this module does not run the gate", () => {
   assert.equal(typeof compare, "function");
   assert.equal(typeof baselineConcepts, "function");
 });
+
+// ── the fresh-tree preflight ────────────────────────────────────────────────
+//
+// A freshly created git worktree has NEITHER of the two artefacts this gate
+// reads: tooling/blast-radius/index.json and tooling/symbol-graph/symbols.json
+// are both gitignored, and this script builds neither. Measured on origin/main
+// 7af839d56a, node v22.22.0, in a worktree seconds old:
+//
+//   ci-boundary.mjs --json               -> a CONFIDENT VERDICT (11 regressions,
+//                                           exit 1) computed from heuristic
+//                                           edges against an exact-edge
+//                                           baseline. CI does not produce that
+//                                           verdict for the same tree.
+//   ci-boundary.mjs --skip-build --json  -> two uncaught stack traces and exit 1
+//                                           — the REGRESSION code, for a tree
+//                                           that could not be READ.
+//
+// The cases below PLANT such a tree (a temp dir with the artefacts absent,
+// empty, malformed, or cold) and pin the refusal: one line, naming the build
+// command, exit 2. As with the growth cases above, every "refuses" case is
+// paired with a "does NOT refuse" case, because a preflight that refused
+// everything would pass every refusal assertion in this file and make the gate
+// unrunnable rather than honest.
+
+import { mkdtempSync, writeFileSync as _write, mkdirSync, copyFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as _join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import { coldIndexReason, preflightRefusal } from "./ci-boundary.mjs";
+
+// Plant a tree: a temp repo root with tooling/blast-radius and
+// tooling/symbol-graph, populated only with what the case asks for.
+function plantTree({ index, symbols } = {}) {
+  const root = mkdtempSync(_join(tmpdir(), "ci-boundary-freshtree-"));
+  mkdirSync(_join(root, "tooling", "blast-radius"), { recursive: true });
+  mkdirSync(_join(root, "tooling", "symbol-graph"), { recursive: true });
+  const indexPath = _join(root, "tooling", "blast-radius", "index.json");
+  const symbolsPath = _join(root, "tooling", "symbol-graph", "symbols.json");
+  if (index !== undefined) _write(indexPath, index);
+  if (symbols !== undefined) _write(symbolsPath, symbols);
+  return { root, indexPath, symbolsPath };
+}
+
+const WARM_INDEX = JSON.stringify({ elixir: { forward: { "api/lib/barkpark/content.ex": [] } } });
+
+test("a planted tree with NO blast-radius index refuses, in one line, naming the build command", () => {
+  const t = plantTree();
+  const msg = preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath });
+  assert.ok(msg, "a tree without the index must not be gated");
+  assert.equal(msg.split("\n").length, 1, "the refusal is ONE line — a stack trace is the thing being replaced");
+  assert.match(msg, /node tooling\/blast-radius\/build-index\.mjs/);
+  assert.match(msg, /tooling\/blast-radius\/index\.json/);
+});
+
+test("the refusal never carries a stack frame", () => {
+  const t = plantTree();
+  const msg = preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath });
+  assert.doesNotMatch(msg, /^\s+at /m);
+  assert.doesNotMatch(msg, /\.mjs:\d+:\d+/);
+});
+
+test("an empty, a malformed, a graph-less and an EMPTY-graph index each refuse by their own reason", () => {
+  // Four distinct cold shapes. build-index.mjs is best-effort by design — it
+  // catches a failed `mix xref` and writes an index with no elixir graph,
+  // exiting 0 — so "the file is there" is NOT the question the gate must ask.
+  const cases = [
+    ["", /is empty/],
+    ["{not json", /not parseable JSON/],
+    [JSON.stringify({ js: {} }), /no elixir\.forward graph/],
+    [JSON.stringify({ elixir: { forward: {} } }), /EMPTY elixir\.forward graph/],
+  ];
+  for (const [body, expected] of cases) {
+    const t = plantTree({ index: body });
+    const reason = coldIndexReason(t.indexPath);
+    assert.ok(reason, `cold shape ${JSON.stringify(body).slice(0, 30)} must be rejected`);
+    assert.match(reason, expected);
+    const msg = preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath });
+    assert.equal(msg.split("\n").length, 1);
+    assert.match(msg, /node tooling\/blast-radius\/build-index\.mjs/);
+  }
+});
+
+test("a WARM index is not refused — the preflight can still say yes", () => {
+  // The non-vacuity arm. Without it every assertion above is satisfied by a
+  // preflight that refuses unconditionally, which would not fix the gate, it
+  // would retire it.
+  const t = plantTree({ index: WARM_INDEX });
+  assert.equal(coldIndexReason(t.indexPath), null);
+  assert.equal(preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath }), null);
+});
+
+test("--skip-build on a tree with no symbol graph refuses, naming build-symbols.mjs", () => {
+  // The shape that produced TWO stack traces and exit 1 on a fresh worktree.
+  const t = plantTree({ index: WARM_INDEX });
+  const msg = preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath, skipBuild: true });
+  assert.ok(msg);
+  assert.equal(msg.split("\n").length, 1);
+  assert.match(msg, /node tooling\/symbol-graph\/build-symbols\.mjs/);
+  assert.doesNotMatch(msg, /^\s+at /m);
+});
+
+test("--skip-build WITH a symbol graph present is not refused", () => {
+  const t = plantTree({ index: WARM_INDEX, symbols: "{}" });
+  assert.equal(
+    preflightRefusal({ indexPath: t.indexPath, symbolsPath: t.symbolsPath, skipBuild: true }),
+    null
+  );
+});
+
+test("--allow-cold-index waives the index check and ONLY the index check", () => {
+  // The override is about index WARMTH. It must not talk a run into reading a
+  // symbol graph that is not in the tree — that is the stack-trace path again.
+  const cold = plantTree({ symbols: "{}" });
+  assert.equal(
+    preflightRefusal({ indexPath: cold.indexPath, symbolsPath: cold.symbolsPath, allowCold: true }),
+    null
+  );
+  const noSymbols = plantTree();
+  const msg = preflightRefusal({
+    indexPath: noSymbols.indexPath,
+    symbolsPath: noSymbols.symbolsPath,
+    skipBuild: true,
+    allowCold: true,
+  });
+  assert.ok(msg, "allowCold must not waive a missing symbol graph under --skip-build");
+  assert.match(msg, /build-symbols\.mjs/);
+});
+
+test("END TO END: the wrapper run inside a planted tree exits 2 with one line and no stack trace", () => {
+  // The whole point, exercised through the real CLI rather than its parts.
+  // ci-boundary.mjs derives its repo root from its OWN location, so copying the
+  // file into a temp tree whose tooling/blast-radius is empty IS a fresh
+  // worktree as far as the script can tell — no symbol graph, no mix, no
+  // network, and none of its sibling scripts present either.
+  //
+  // Against the PRE-FIX wrapper this run reaches rebuildGraph() first and dies
+  // on the absent build-symbols.mjs: a stack trace and exit 1 — the REGRESSION
+  // code. Both assertions below fail there.
+  const root = mkdtempSync(_join(tmpdir(), "ci-boundary-e2e-"));
+  mkdirSync(_join(root, "tooling", "concept-map"), { recursive: true });
+  mkdirSync(_join(root, "tooling", "blast-radius"), { recursive: true });
+  const planted = _join(root, "tooling", "concept-map", "ci-boundary.mjs");
+  copyFileSync(fileURLToPath(new URL("./ci-boundary.mjs", import.meta.url)), planted);
+
+  let status = null;
+  let stderr = "";
+  try {
+    execFileSync(process.execPath, [planted, "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    status = 0;
+  } catch (err) {
+    status = err.status;
+    stderr = String(err.stderr || "");
+  }
+
+  assert.equal(status, 2, "a tree that cannot be gated is a FAULT (2), never a REGRESSION (1)");
+  const lines = stderr.split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 1, `expected exactly one line of output, got:\n${stderr}`);
+  assert.match(lines[0], /node tooling\/blast-radius\/build-index\.mjs/);
+  assert.doesNotMatch(stderr, /^\s+at /m, "no stack frames");
+  assert.doesNotMatch(stderr, /Command failed/);
+});

@@ -292,6 +292,41 @@ defmodule BarkparkCloud.BillingTrialTest do
 
       assert Billing.trial_days_remaining(team) == 0
     end
+
+    # cch-w50 — THE CLAMP HOLDS ALL THE WAY DOWN, AND NO REMEDY MAY ASSUME
+    # OTHERWISE. `sub_days_remaining/1` is `if secs <= 0, do: 0, else: ceil(...)`,
+    # so 0 is a FLOOR and not a crossing point: a trial that lapsed three weeks
+    # ago reads 0, exactly like one that lapsed a minute ago. The lapsed cohort
+    # this wave reconciled was up to 21 days old and the live RPC returned 0 for
+    # the oldest of them.
+    #
+    # This matters to the console, not just to arithmetic. `trialEnded(days)` in
+    # app.js is `days <= 0` — a `< 0` reading would have made the whole
+    # lapsed-trial copy clamp UNREACHABLE, because the negative day count it
+    # would have to key on does not exist. The pin here is the server half of
+    # that; `__app.test.mjs` pins the client half against the same boundary.
+    test "cch-w50: the floor holds at 0 for a DEEPLY lapsed trial — it never goes negative" do
+      team = team_fixture()
+      {:ok, _} = Billing.start_trial(team)
+
+      for days_lapsed <- [1, 21, 90, 365] do
+        past =
+          DateTime.utc_now()
+          |> DateTime.add(-days_lapsed, :day)
+          |> DateTime.truncate(:microsecond)
+
+        sub =
+          Billing.live_subscription(team)
+          |> Subscription.changeset(%{current_period_end: past})
+          |> Repo.update!()
+
+        assert Billing.trial_days_remaining(team) == 0,
+               "#{days_lapsed} days lapsed must still read 0, never a negative count"
+
+        assert Billing.trial_days_remaining(sub) == 0,
+               "and the %Subscription{} arm the router serializes agrees"
+      end
+    end
   end
 
   describe "ADVERSARIAL: a forged webhook cannot extend (or convert) a trial (dwb-13)" do
