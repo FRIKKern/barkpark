@@ -574,11 +574,15 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
         block = %{"type" => "table", "head" => bad, "rows" => [[["a"]]]}
         blocks = BlockOps.normalize_render_shapes([block])
 
-        assert {:error, {:invalid_paper_structure, %{"blocks" => errors}}} =
-                 BlockOps.validate_render_shapes(blocks),
-               "expected a refusal for head #{inspect(bad)}"
+        result = BlockOps.validate_render_shapes(blocks)
 
-        assert "blocks[0].head has no renderable cells" in errors
+        assert match?({:error, {:invalid_paper_structure, %{"blocks" => _}}}, result),
+               "expected a refusal for head #{inspect(bad)}, got: #{inspect(result)}"
+
+        {:error, {:invalid_paper_structure, %{"blocks" => errors}}} = result
+
+        assert "blocks[0].head has no renderable cells" in errors,
+               "expected the no-renderable-cells path for head #{inspect(bad)}, got: #{inspect(errors)}"
       end
     end
   end
