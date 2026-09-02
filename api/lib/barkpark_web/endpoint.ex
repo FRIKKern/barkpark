@@ -24,8 +24,16 @@ defmodule BarkparkWeb.Endpoint do
   # BARKPARK_EXTRA_ORIGINS). Overriding it here is the Past-Mistake-#11 landmine —
   # a private list that drifts from the LiveView one and silently 403s. longpoll
   # off: a search keystroke stream has no use for the fallback transport.
+  # `connect_info` is what makes the per-IP half of `UserSocket`'s connect
+  # budget real: without it `connect/3` receives `%{}` and the budget can only
+  # key on the token row, which every visitor of one flagship site shares.
+  # `:peer_data` is the verified TCP peer and `:x_headers` the forwarded chain;
+  # BOTH are handed to `Barkpark.RateLimiter.client_ip/1`, which decides which
+  # one to believe — the header is never trusted on its own. check_origin
+  # inheritance is unchanged (no per-socket override, Past-Mistake-#11), and
+  # longpoll stays off.
   socket "/socket", BarkparkWeb.UserSocket,
-    websocket: true,
+    websocket: [connect_info: [:peer_data, :x_headers]],
     longpoll: false
 
   # Anonymous realtime socket for Pulse channels (Shared Storm) — subscribe-only
