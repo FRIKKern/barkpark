@@ -413,6 +413,26 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
 
+  # A block list carrying an element that is not an object. `render_blocks/2`
+  # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
+  # (`is_map`), so `{"body":{"blocks":["notamap"]}}` used to clear the outer
+  # guard and raise FunctionClauseError inside the WRITE projection — an
+  # uncaught 500 whose body was an HTML debug page, violating §9 ("all errors
+  # are {code, message, request_id}") and leaving the caller no request_id to
+  # correlate. Refused at the writer door instead (Content.Writer
+  # `refuse_non_map_block_elements/1`), under the EXISTING `malformed` code —
+  # this is a request-body shape error, not a schema validation failure, and
+  # reusing the registered code keeps `known_codes/0` (and therefore the
+  # OpenAPI `Error.code` enum + docs/api-v1.md §9) unchanged. `details.blocks`
+  # names every offending path so a client can fix the exact element.
+  defp build({:error, {:malformed_blocks, details}}),
+    do: %{
+      code: "malformed",
+      message: "block list contains an element that is not an object",
+      status: 400,
+      details: details
+    }
+
   # A multi-op batch mutation carried an HTTP If-Match header. One ETag cannot
   # unambiguously gate N potentially-different documents, and silently dropping
   # it (the pre-fix behavior) discarded the caller's optimistic-lock intent →

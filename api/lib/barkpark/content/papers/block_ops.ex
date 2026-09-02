@@ -1520,6 +1520,78 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def normalize_render_shapes(other), do: other
 
   @doc """
+  Reject a block list holding an ELEMENT that is not an object, at any nesting
+  level the render walk descends.
+
+  ## Why this exists next to `validate_render_shapes/1`
+
+  `validate_render_shapes/1` is the PAPER publish gate: it is deliberately
+  strict (list items, table rows/cells, legacy list dialects) and only runs for
+  `@paper_type`. This one is the TYPE floor every document write needs, and it
+  refuses exactly ONE shape — a non-map element — because that shape is the only
+  one that CRASHES:
+
+      Render.render_blocks/2   # `when is_list(blocks)` — the LIST is guarded
+      |> Enum.map(&render_block(&1, opts))
+      # render_block/2 is `when is_map(block)` — the ELEMENT is not
+
+  so `["notamap"]` clears the list guard and then raises `FunctionClauseError`
+  inside the write projection (`Content.Writer` → `Projection.project/4` →
+  `Projection.project_body/2` → `Render.render_blocks/2`), which reaches the
+  client as an uncaught 500 with an HTML body instead of the v1 JSON envelope.
+  Every OTHER malformed shape the corpus produces already renders to `""`
+  (`Compose.block_to_html/2` and `Compose.figure_html/3` both carry a non-map
+  catch-all), so widening this beyond the element type would REJECT writes that
+  are accepted today.
+
+  ## Descent
+
+  `"blocks"` and `"children"` — the same two container keys
+  `normalize_render_shapes/1` and `render_shape_errors/2` descend, so the three
+  walkers agree on what a nested block list is. A nested non-map is not itself a
+  crash (the compose bridge renders it as `""`), but it is silent content LOSS
+  behind a 200, so it is refused at the same door.
+
+  Returns `:ok`, or `{:error, {:malformed_blocks, %{"blocks" => [path, …]}}}`,
+  which `Barkpark.Content.Errors` renders as a 400 `malformed` envelope.
+  """
+  @spec validate_block_elements(term(), String.t()) ::
+          :ok | {:error, {:malformed_blocks, map()}}
+  def validate_block_elements(blocks, path \\ "blocks")
+
+  def validate_block_elements(blocks, path) when is_list(blocks) and is_binary(path) do
+    case block_element_errors(blocks, path) do
+      [] -> :ok
+      errors -> {:error, {:malformed_blocks, %{"blocks" => errors}}}
+    end
+  end
+
+  # A non-list block root never reaches `render_blocks/2` (its `is_list` guard
+  # holds) — the scaffold falls back to an empty paragraph and the projection
+  # skips it. Nothing to refuse.
+  def validate_block_elements(_blocks, _path), do: :ok
+
+  defp block_element_errors(blocks, path) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {block, index} when is_map(block) ->
+        Enum.flat_map(["blocks", "children"], fn key ->
+          case Map.get(block, key) do
+            children when is_list(children) ->
+              block_element_errors(children, "#{path}[#{index}].#{key}")
+
+            _ ->
+              []
+          end
+        end)
+
+      {_block, index} ->
+        ["#{path}[#{index}] must be an object"]
+    end)
+  end
+
+  @doc """
   Reject a Paper block tree that still contains a reader-incompatible shape
   after normalization. Metadata-bearing wrappers are accepted when every
   reader has a lossless fallback for their content field.
