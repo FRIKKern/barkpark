@@ -99,6 +99,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.Template
+  alias Barkpark.Content.Revisions
   alias Barkpark.PortableDoc.Projection
   alias Barkpark.PortableDoc.Render
 
@@ -478,8 +479,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   #
   # The row `title` is re-derived from the new title block (pdd-t4: one truth).
   # Only `content`/`title`/`rev` are cast, so the row's workspace/project/dataset
-  # columns (and `status`) are preserved. Direct `Repo.update` (no broadcast) —
-  # this is an offline migration, not a live edit.
+  # columns (and `status`) are preserved. No broadcast — this is an offline
+  # migration, not a live edit — but it DOES write history (see below).
   defp persist(%Document{content: content} = doc, new_blocks) do
     style = get_in(content, ["style"])
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -496,9 +497,15 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
 
     title = title_block_text(new_blocks) || doc.title
 
-    doc
-    |> Document.changeset(%{"content" => new_content, "title" => title, "rev" => generate_rev()})
-    |> Repo.update()
+    # HISTORY IS NOT OPTIONAL (task-8d4b1f2c7a0e3591) — see
+    # `Revisions.update_document_with_history/3`. This persist rewrites blocks,
+    # body_html, the projected body, the row title AND both revs of a published
+    # paper; as a bare `Repo.update/1` it left no trace that it had run.
+    Revisions.update_document_with_history(
+      doc,
+      %{"content" => new_content, "title" => title, "rev" => generate_rev()},
+      action: "migrate:doctrine_backfill"
+    )
   end
 
   # The monotonic integer streaming rev (same rule as block_ops' paper_next_rev).

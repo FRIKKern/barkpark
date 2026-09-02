@@ -568,6 +568,15 @@ defmodule Barkpark.Content do
   @doc "Get a single revision by ID, scoped to a dataset and (optionally) workspace/project."
   def get_revision(id, dataset, opts \\ []), do: Revisions.get_revision(id, dataset, opts)
 
+  @doc """
+  Resolve a `_rev` hash to the stored envelope snapshot of that revision.
+
+  The read that makes a cited `_rev` retrievable — see
+  `Barkpark.Content.Revisions.get_revision_by_rev/3`.
+  """
+  def get_revision_by_rev(rev, dataset, opts \\ []),
+    do: Revisions.get_revision_by_rev(rev, dataset, opts)
+
   @doc "Restore a document to a specific revision."
   def restore_revision(revision_id, type, dataset, opts \\ []),
     do: Revisions.restore_revision(revision_id, type, dataset, opts)

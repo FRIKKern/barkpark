@@ -52,9 +52,15 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
     workspace / project / dataset in one Repo pass (no scope filter), and each
     save preserves the row's own `workspace_id` / `project_id` / `dataset_id`
     columns (only `content` is cast), so a multi-tenant corpus is fully covered.
-  * **Minimal save** — only `content["blocks"]` is replaced; the save is a direct
-    `Repo.update/1` (no broadcast, no re-render, no re-projection, no rev bump),
-    because the change is metadata-only and must not re-stream a paper.
+  * **Minimal save** — only `content["blocks"]` is replaced: no broadcast, no
+    re-render, no re-projection, no rev bump, because the change is
+    metadata-only and must not re-stream a paper. It is NOT, however, a bare
+    `Repo.update/1` any more: the save goes through
+    `Barkpark.Content.Revisions.update_document_with_history/3`, so the content
+    write and a `revisions` row stamped `action: "migrate:backfill_block_ids"`
+    commit in ONE transaction. A sweep over published papers that leaves no
+    history entry is exactly what made an accidental clobber indistinguishable
+    from a migration.
 
   ## Usage
 
@@ -70,6 +76,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
   alias Barkpark.Repo
   alias Barkpark.Content.Document
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.Content.Revisions
 
   @paper_type "paper"
 
@@ -245,9 +252,15 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
   defp persist(%Document{content: content} = doc, new_blocks) do
     new_content = Map.put(content, "blocks", new_blocks)
 
-    doc
-    |> Document.changeset(%{"content" => new_content})
-    |> Repo.update()
+    # HISTORY IS NOT OPTIONAL (task-8d4b1f2c7a0e3591). This was a bare
+    # `Repo.update/1`, so a `--apply` sweep rewrote the blocks of every
+    # ALREADY-PUBLISHED paper in the corpus and left `bp doc history` showing
+    # nothing at all between the last human edit and the rewrite. The write and
+    # its revision row now share ONE transaction, so the content cannot commit
+    # without the entry that says this task wrote it.
+    Revisions.update_document_with_history(doc, %{"content" => new_content},
+      action: "migrate:backfill_block_ids"
+    )
   end
 
   # Count how many blocks (top-level + nested) gained an id — the delta between

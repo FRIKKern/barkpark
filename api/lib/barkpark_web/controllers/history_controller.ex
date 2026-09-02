@@ -16,7 +16,64 @@ defmodule BarkparkWeb.HistoryController do
     json(conn, %{revisions: revisions, count: length(revisions)})
   end
 
+  @doc """
+  Read ONE revision, addressed EITHER by its `revisions` row UUID (the original
+  contract) OR by a `_rev` content hash (task-8d4b1f2c7a0e3591).
+
+  The hash arm is what makes a CITED revision retrievable. `_rev` is the token
+  every envelope stamps and every seal / acceptance criterion quotes; a UUID is
+  not. Before this arm a non-UUID `:id` fell straight into `{:error,
+  :invalid_uuid}` → 404, so a caller holding the `_rev` of a sealed paper had no
+  read anywhere in the API that could resolve it to the content it named.
+
+  ADDITIVE, and no new route: `GET /v1/data/revision/:dataset/:id` (and the
+  workspace-scoped `/w/:ws/p/:proj/...` twin) now accept both id shapes. A UUID
+  behaves byte-identically to before — the hash arm is only reached once
+  `validate_uuid/1` has already refused, and only for a 32-char lowercase hex
+  token.
+
+  The two arms differ in payload, honestly rather than by accident:
+
+    * UUID → `content`, the raw `revisions.content` snapshot redacted through
+      `Envelope.redact/3`.
+    * hash → `document`, the stored `mutation_events.document` envelope (the
+      snapshot AS OF that rev) redacted through the SAME `Envelope.redact/3`
+      chokepoint — the same call the SSE delete-replay path makes on that same
+      column. It is an envelope, not raw content, so it carries `_rev` and the
+      caller can see the hash it asked for echoed back.
+  """
   def show(conn, %{"dataset" => dataset, "id" => id}) do
+    with {:error, :invalid_uuid} <- validate_uuid(id),
+         {:ok, snapshot} <- Content.get_revision_by_rev(id, dataset, scope_opts(conn)) do
+      schema =
+        case Content.get_schema(snapshot.type, dataset, scope_opts(conn)) do
+          {:ok, s} -> s
+          _ -> nil
+        end
+
+      json(conn, %{
+        revision: %{
+          rev: snapshot.rev,
+          doc_id: snapshot.doc_id,
+          type: snapshot.type,
+          dataset: snapshot.dataset,
+          action: snapshot.action,
+          # `owner_id` is unknown for a stored snapshot, so an `owner_only`
+          # field conservatively drops for non-admins — fail closed, exactly as
+          # the UUID arm below.
+          document: Envelope.redact(snapshot.document, schema, CallerContext.from_conn(conn)),
+          timestamp: snapshot.timestamp
+        }
+      })
+    else
+      # `:ok` — the id IS a UUID, so this is the original revision-row read.
+      :ok -> show_by_uuid(conn, dataset, id)
+      # A non-UUID that is also not a resolvable `_rev` hash.
+      {:error, :not_found} -> not_found(conn, "revision not found")
+    end
+  end
+
+  defp show_by_uuid(conn, dataset, id) do
     with :ok <- validate_uuid(id),
          {:ok, rev} <- Content.get_revision(id, dataset, scope_opts(conn)) do
       # WS-B (revision-detail leak): the stored snapshot `rev.content` is raw

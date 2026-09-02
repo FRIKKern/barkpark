@@ -487,12 +487,30 @@ defmodule Barkpark.Content.Papers.BlockOps do
     changeset =
       Document.changeset(existing || %Document{}, doc_attrs)
 
-    result =
-      if existing do
-        Repo.update(changeset)
-      else
-        Repo.insert(changeset)
-      end
+    # HISTORY IS NOT OPTIONAL (task-8d4b1f2c7a0e3591). THE HOLE THIS CLOSES:
+    # this is the whole-document paper replace — `bp paper set`, Bulldocs
+    # ingest, the Studio whole-doc save — and it hard-codes `status:
+    # "published"`. It used to be a bare `Repo.update/1` (or `Repo.insert/1`)
+    # with NO revision row: every generic content type gets one for free because
+    # its write result is tapped by `Broadcast.tap_broadcast/7`, but the paper
+    # upsert does not go through that tap, so a paper's ENTIRE `content` — every
+    # block, the cached `body_html`, the title — could be replaced on an
+    # already-published paper and `GET /v1/data/history/:dataset/paper/:slug`
+    # would show NOTHING. After the fact a legitimate re-ingest and an
+    # accidental clobber were indistinguishable, because the corpus held no row
+    # saying either had happened.
+    #
+    # The write and its revision now share ONE transaction (`persist_with_history/3`),
+    # so a writer cannot commit the content and skip the entry. `action` is
+    # "create" on a first save and "update" on a replace — the same vocabulary
+    # `tap_broadcast` stamps for every other type, so the paper history renders
+    # through the existing `HistoryController.index/2` with no client change.
+    # A caller that wants a more specific label (the accept-baseline path) still
+    # overrides it with `opts[:revision_action]`, exactly as
+    # `maybe_save_batch_revision/3` does on the ops path.
+    action = if existing, do: "update", else: "create"
+
+    result = persist_with_history(changeset, existing, dataset, action)
 
     case result do
       {:ok, doc} ->
@@ -512,6 +530,32 @@ defmodule Barkpark.Content.Papers.BlockOps do
       error ->
         error
     end
+  end
+
+  # The transactional content+history write for the whole-document paper upsert.
+  #
+  # Deliberately STRICTER than `Broadcast.save_revision/5`'s own log-and-continue
+  # policy and than `maybe_save_batch_revision/3`'s best-effort tap: those are
+  # right for an incremental edit (losing one audit row is better than failing a
+  # user's keystroke). This is a WHOLESALE REPLACE of a published document — the
+  # exact operation whose unlogged form made a 28-paper sweep unattributable —
+  # so the content write ROLLS BACK if its history entry cannot be written.
+  #
+  # `Repo.transaction/1` returns `{:ok, doc}` / `{:error, reason}`, the same
+  # two-tuple shape the caller's `case` already matched on the bare
+  # `Repo.update`/`Repo.insert`, so error handling downstream is unchanged.
+  defp persist_with_history(changeset, existing, dataset, action) do
+    Repo.transaction(fn ->
+      write = if existing, do: Repo.update(changeset), else: Repo.insert(changeset)
+
+      with {:ok, doc} <- write,
+           {:ok, _revision} <-
+             Broadcast.save_revision(doc, doc.type, dataset, action, nil) do
+        doc
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   # Append a `paper_events` row when this upsert carries a non-empty

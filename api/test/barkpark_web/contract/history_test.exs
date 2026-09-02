@@ -193,6 +193,98 @@ defmodule BarkparkWeb.Contract.HistoryTest do
     assert body["revisions"] == []
   end
 
+  # task-8d4b1f2c7a0e3591 — the `_rev` READ. `_rev` is the token every envelope
+  # stamps and every seal / acceptance criterion cites; before this arm the
+  # ONLY revision read keyed on the `revisions` row UUID, so a non-UUID `:id`
+  # fell straight to 404 and a cited revision was unresolvable through any
+  # surface in the API.
+  describe "GET /v1/data/revision/:dataset/:id addressed by a `_rev` HASH" do
+    test "resolves an OLDER rev hash to the content that rev named", %{conn: conn} do
+      # Two writes to one doc, so the FIRST rev names a state the document has
+      # already moved past.
+      {:ok, first} =
+        Content.upsert_document("post", %{"doc_id" => "revread1", "title" => "OLD"}, "test")
+
+      {:ok, second} =
+        Content.upsert_document("post", %{"doc_id" => "revread1", "title" => "NEW"}, "test")
+
+      assert first.rev != second.rev
+      v2_rev = first.rev
+
+      resp =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/test/#{v2_rev}")
+
+      # RED WITHOUT THE FIX: 404 — a non-UUID id never reached a read.
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert body["revision"]["rev"] == v2_rev
+      assert body["revision"]["type"] == "post"
+      assert body["revision"]["dataset"] == "test"
+      # The snapshot AS OF that rev, not the live document.
+      assert body["revision"]["document"]["title"] == "OLD"
+      assert body["revision"]["document"]["_rev"] == v2_rev
+    end
+
+    test "an unknown hash is 404, and a UUID still takes the original arm", %{
+      conn: conn,
+      doc_id: doc_id
+    } do
+      resp =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/test/#{String.duplicate("a", 32)}")
+
+      assert resp.status == 404
+
+      # The UUID arm is untouched: it still answers with `content`, not `document`.
+      list =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
+
+      [newest | _] = list["revisions"]
+
+      uuid_resp =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/test/#{newest["id"]}")
+
+      assert uuid_resp.status == 200
+      uuid_body = Jason.decode!(uuid_resp.resp_body)
+      assert uuid_body["revision"]["id"] == newest["id"]
+      assert Map.has_key?(uuid_body["revision"], "content")
+    end
+
+    test "a rev minted in another dataset is NOT readable through this one", %{conn: conn} do
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+        "other"
+      )
+
+      {:ok, other} =
+        Content.create_document("post", %{"doc_id" => "xds1", "title" => "Elsewhere"}, "other")
+
+      resp =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/test/#{other.rev}")
+
+      assert resp.status == 404
+
+      ok =
+        conn
+        |> authed()
+        |> get("/v1/data/revision/other/#{other.rev}")
+
+      assert ok.status == 200
+    end
+  end
+
   test "returns 404 for unknown revision", %{conn: conn} do
     fake_uuid = "00000000-0000-0000-0000-000000000000"
 

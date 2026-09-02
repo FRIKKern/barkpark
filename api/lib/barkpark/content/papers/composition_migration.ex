@@ -97,6 +97,7 @@ defmodule Barkpark.Content.Papers.CompositionMigration do
   alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.Content.Papers.Template
+  alias Barkpark.Content.Revisions
   alias Barkpark.PortableDoc.Projection
   alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Render.Components
@@ -672,7 +673,8 @@ defmodule Barkpark.Content.Papers.CompositionMigration do
   # Scope-preserving save — the DoctrineBackfill persist, minus the title recast
   # (this migration never touches the title block): re-render the cached
   # `body_html` with the paper's own style, re-project the body, bump both revs.
-  # Direct `Repo.update` (no broadcast) — an offline migration, not a live edit.
+  # No broadcast — an offline migration, not a live edit — but it DOES write
+  # history (see below).
   defp persist(%Document{content: content} = doc, new_blocks) do
     style = get_in(content, ["style"])
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -687,9 +689,15 @@ defmodule Barkpark.Content.Papers.CompositionMigration do
       |> Map.put("rev", next_content_rev(content))
       |> Projection.project(new_blocks, Labels.render_opts(doc.dataset, scope))
 
-    doc
-    |> Document.changeset(%{"content" => new_content, "rev" => generate_rev()})
-    |> Repo.update()
+    # HISTORY IS NOT OPTIONAL (task-8d4b1f2c7a0e3591) — see
+    # `Revisions.update_document_with_history/3`. Same shape as DoctrineBackfill:
+    # a published paper's blocks, cached render, projected body and both revs
+    # replaced by a bare `Repo.update/1` that wrote no revision row.
+    Revisions.update_document_with_history(
+      doc,
+      %{"content" => new_content, "rev" => generate_rev()},
+      action: "migrate:composition_migration"
+    )
   end
 
   defp next_content_rev(content) do
