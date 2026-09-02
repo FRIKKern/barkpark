@@ -25,7 +25,7 @@ defmodule BarkparkWeb.HistoryController do
       # boundary (the same chokepoint the sibling `restore/2` uses) so a
       # non-authorized token receives the redacted snapshot, never the raw dump.
       schema =
-        case Content.get_schema(rev.type, dataset, scope_opts(conn)) do
+        case Content.Schema.get_schema_for_redaction(rev.type, dataset, scope_opts(conn)) do
           {:ok, s} -> s
           _ -> nil
         end
@@ -45,7 +45,7 @@ defmodule BarkparkWeb.HistoryController do
          {:ok, doc} <-
            Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
       schema =
-        case Content.get_schema(type, dataset, scope_opts(conn)) do
+        case Content.Schema.get_schema_for_redaction(type, dataset, scope_opts(conn)) do
           {:ok, s} -> s
           _ -> nil
         end

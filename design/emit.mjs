@@ -2244,7 +2244,23 @@ function bulldocsBlock(themes = loadThemes()) {
     "    body:has(.bp-paper-article) {",
     "      background: var(--paper-bg-deep);",
     "      color: var(--paper-ink);",
-    "      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;",
+    "      /* THE READING SERIF, on the reader's <body>. This used to be a FOURTH",
+    "         hand-kept copy of the stack (paper-surface.css, root.html.heex and",
+    "         the paper-editor bundle carry the other three). It is now emitted",
+    "         from design/tokens.json `font.reading.stack` like every other",
+    "         `--tok-*`, so the ratified order has ONE source and the eventual",
+    "         Source-Serif-first cutover is still a one-token edit.",
+    "",
+    "         The token is DECLARED here rather than merely consumed: paper-surface.css",
+    "         scopes `--tok-reading-font` to `.bp-paper-surface, .bp-paper-body`, and",
+    "         <body> is neither — the reader's surface class rides the <main> inside",
+    "         it. Declaring it on the reader body makes `var()` below resolve for",
+    "         real instead of silently living on a fallback, and the value is",
+    "         byte-identical to the one .bp-paper-surface re-declares, so the",
+    "         inner scope is a no-op re-statement rather than an override.",
+    "         view_edit_parity_test.exs §10 pins this against the other three. */",
+    `      --tok-reading-font: ${tokens.font.reading.stack};`,
+    "      font-family: var(--tok-reading-font);",
     "    }",
     "    @media (prefers-color-scheme: dark) {",
     "      body:has(.bp-paper-article),",
@@ -2631,7 +2647,10 @@ export function readManifest() {
   catch (e) { throw new Error(`${MANIFEST_PATH} is not valid JSON (${e.message}); repair it or re-bless with: node design/emit.mjs --adopt`); }
 }
 
-function writeManifest(regions) {
+// Exported so the paper-editor mirror CLI (design/paper-editor-mirror.mjs), the
+// OTHER writer of a generated region, records its write in the SAME ledger —
+// one manifest, one fence, no second implementation.
+export function writeManifest(regions) {
   const sorted = {};
   for (const k of Object.keys(regions).sort()) sorted[k] = regions[k];
   writeFileSync(MANIFEST_ABS, JSON.stringify({

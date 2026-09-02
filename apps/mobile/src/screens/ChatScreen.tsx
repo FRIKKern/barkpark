@@ -55,6 +55,7 @@ import {
   type HerdState,
 } from '../chat/herd'
 import type { ChatSessionSummary } from '../chat/wire'
+import type { ConnectionClaim } from '../chat/context'
 import { ChatSessionScreen } from './ChatSessionScreen'
 import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
@@ -148,7 +149,17 @@ export function nextOpenAfterArchive(
   return open
 }
 
-export function ChatScreen({ connection }: { connection: InstanceConnection }) {
+export function ChatScreen({
+  connection,
+  claim,
+}: {
+  connection: InstanceConnection
+  /** The STORED config's claim about this connection — passed through to the
+   * session screen's context band, which reconciles it against the connection
+   * actually dialled. Threaded rather than read from storage here so the screen
+   * stack stays free of IO and every arm is drivable from a fixture. */
+  claim?: ConnectionClaim
+}) {
   const theme = useTheme()
   const [state, setState] = useState<ListState>({ phase: 'loading' })
   const [attempt, setAttempt] = useState(0)
@@ -319,6 +330,7 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
     return (
       <ChatSessionScreen
         connection={connection}
+        claim={claim}
         sessionId={openSession.id}
         sessionTitle={openSession.title}
         onArchive={archive}
