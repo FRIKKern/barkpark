@@ -98,11 +98,22 @@ scan rather than a false red.
 |---|---|
 | `0` | every beat passed — or report mode, which never fails on site content |
 | `1` | a beat was not `PASS` under `--strict` — a fact about the **site** |
-| `2` | GUARD: no Chrome, no Node-22 `WebSocket`, missing `--url`, unknown flag — a fact about the **environment or the invocation**, refused before Chrome is spawned |
+| `2` | GUARD: no Chrome, a `CHROME` that is not an executable, a Chrome that cannot be exec'd, no Node-22 `WebSocket`, missing `--url`, unknown flag — a fact about the **environment or the invocation** |
 
 The 1/2 split is load-bearing. A misconfigured runner must never red a PR with a
 message that reads like a site defect, and a mistyped `--stict` must never sail
 through report mode and certify a broken demo as fine.
+
+`CHROME` is **validated, not trusted** — `accessSync(…, X_OK)`, the same check
+every auto-discovered candidate gets. A typo'd or stale `CHROME` used to be
+returned unchecked and reached `spawn`, whose `ENOENT` arrives as an unhandled
+`'error'` **event**: exit 1 and a Node stack trace, under a CI step named
+"journey smoke" — an environment failure wearing a site failure's exit code.
+It now names the bad path and exits 2. The other door is covered too: a path
+that passes `X_OK` and still cannot be exec'd (wrong architecture, dangling
+symlink) is caught by an `'error'` handler on the child and reported as exit 2
+rather than a stack trace. Both directions are asserted on every `--self-test`
+run — a bad `CHROME` must be refused *and* a good one must still be honoured.
 
 ## `--self-test` is the mutation proof
 

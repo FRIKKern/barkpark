@@ -242,13 +242,10 @@ func ambientTokenShadow(lookup func(string) (string, bool)) (shadowed bool, tail
 	if !ok || strings.TrimSpace(v) == "" {
 		return false, ""
 	}
-	v = strings.TrimSpace(v)
-	if len(v) > 6 {
-		tail = "…" + v[len(v)-4:]
-	} else {
-		tail = "(set)"
-	}
-	return true, tail
+	// tokenTail (tokensource.go) is the ONE redaction rule for a credential in a
+	// diagnostic — this message's original shape, now shared with the whoami /
+	// auth-tier credential labels so all of them show exactly as much and no more.
+	return true, tokenTail(v)
 }
 
 // basePathOK validates a site base path shape: it must start and end with `/`

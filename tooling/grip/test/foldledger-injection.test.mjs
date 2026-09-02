@@ -111,12 +111,14 @@ test("backfill auditLedger injects now+screen: both forged rows counted unreadab
   assert.equal(audit.rows, 1);
 });
 
-test("CONTROL (mutation direction): un-bounded foldLedger(dir) folds both forgeries CLEAN", () => {
-  // This is the shape both callers had before the injection. It proves the rows
-  // are valid apart from the two bounds — so reverting the injection would let
-  // them fold clean again, flipping the two product-path assertions above to red.
+test("CONTROL (mutation direction): the FULLY un-bounded fold — `screen: null`, no now — folds both forgeries CLEAN", () => {
+  // This is the shape both callers had before the injection, and it is now
+  // reachable ONLY by asking for it: `screen: null` is the explicit opt-out.
+  // It proves the rows are valid apart from the two bounds — so reverting the
+  // injection would let them fold clean again, flipping the two product-path
+  // assertions above to red.
   const dir = seedFixture();
-  const unbounded = foldLedger(dir);
+  const unbounded = foldLedger(dir, { screen: null });
   const reasons = reasonsOf(unbounded.unreadable);
   // The two BOUNDED forgeries fold clean without now/screen — this is the exact
   // mutation the product paths guard against; reverting the injection reds the
@@ -127,4 +129,37 @@ test("CONTROL (mutation direction): un-bounded foldLedger(dir) folds both forger
   // the two now-foldable forgeries make three folded rows, one still unreadable.
   assert.deepEqual([...reasons], ["VALUE-STORED"]);
   assert.equal(unbounded.stats.rows, 3);
+  assert.equal(unbounded.arming.screen, "none", "an unscreened count must SAY it is unscreened");
+  assert.equal(unbounded.arming.now, null);
+});
+
+// ── the read-path split this file's CONTROL used to demonstrate ──────────────
+//
+// The control above was, until the arming slice, written as plain
+// `foldLedger(dir)` — and it passed, because a library fold defaulted to NO
+// screen while the CLI fold of the same bytes injected one. That is the whole
+// defect: two reading paths over one store, five subjects apart on the
+// committed directory, both exiting normally. `screen` now defaults ON; `now`
+// still does not (D19 — this module owns no clock). These two tests pin both
+// halves so neither can silently re-open.
+
+test("the library default IS the CLI's screen: an un-bounded fold catches REFUSED-COMMAND and says so", () => {
+  const dir = seedFixture();
+  const byDefault = foldLedger(dir);
+  const reasons = reasonsOf(byDefault.unreadable);
+  assert.ok(reasons.has("REFUSED-COMMAND"), `the default fold must catch the refused row, got ${[...reasons].join(", ") || "none"}`);
+  assert.equal(byDefault.arming.screen, "screen.mjs");
+  // …and the clock is still the caller's business, so the future row is NOT
+  // caught by default. A count taken here and a count taken under a `now` can
+  // legitimately differ — which is precisely why `arming.now` is reported.
+  assert.equal(reasons.has("FUTURE-OBSERVED-AT"), false, "D19: the fold reads no clock, so an un-injected `now` bounds nothing");
+  assert.equal(byDefault.arming.now, null);
+});
+
+test("a malformed screen bound is armed as `invalid`, never as `none` — a broken read is not an unscreened population", () => {
+  const dir = seedFixture();
+  const broken = foldLedger(dir, { screen: 42 });
+  assert.equal(broken.arming.screen, "invalid");
+  assert.equal(broken.stats.rows, 0, "admitRecipe rejects every row BAD-OPTION under a non-function screen");
+  assert.ok(reasonsOf(broken.unreadable).has("BAD-OPTION"));
 });

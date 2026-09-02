@@ -20,7 +20,13 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
   Both halves must hold. A nag that never fires and a nag that never shuts up
   are the same defect wearing different clothes.
   """
-  use ExUnit.Case, async: true
+  # async: false ON PURPOSE. `capture_log/1` is VM-global: while this module's
+  # "stays silent" corpus loop refutes the nag string, ANY concurrently running
+  # async test that saves a leading MERGE-GATED criterion logs that same string
+  # into this capture, and the refute blames whichever corpus case is in flight
+  # (main-green PR #15043 red twice on it, 2026-09-02, with a case the
+  # leading-only regex cannot match). Sync modules run after all async ones.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 

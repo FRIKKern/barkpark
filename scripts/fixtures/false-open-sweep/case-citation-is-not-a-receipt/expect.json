@@ -1,0 +1,21 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [
+    {
+      "row": "cch-w40-bl-a-row-whose-merge-criterion-names-the-same-pr",
+      "arm": "B",
+      "pr": 10005,
+      "class": "FULL"
+    }
+  ],
+  "must_contain": [
+    "RESULT: 1 of 2 open rows carry a merge receipt",
+    "CITATIONS, NOT RECEIPTS",
+    "1 of those rows have NO receipt from any arm.",
+    "cch-w40-bl-billing-is-owner-is-honest-only-by-position-after-10005  <- #10005 (criteria 1,3)"
+  ],
+  "must_not_contain": [
+    "cch-w40-bl-billing-is-owner-is-honest-only-by-position-after-10005   ["
+  ]
+}

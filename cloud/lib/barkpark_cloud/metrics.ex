@@ -74,7 +74,18 @@ defmodule BarkparkCloud.Metrics do
           # a FLOOR and it names the paths (`degraded`/`degraded_count`) it
           # could not read.
           consumer_roots:
-            [%{path: ..., status: ..., bytes: ..., top: [...] | nil, count: ..., degraded: [...] | nil, degraded_count: ... | nil}]
+            [%{path: ..., status: ..., bytes: ..., top: [...] | nil, count: ..., degraded: [...] | nil, degraded_count: ... | nil, excluded_reason: ... | nil}]
+            | nil,
+          # What the reading did NOT measure: `bytes` unaccounted out of
+          # `of_bytes` (the root filesystem's USED total, never df's capacity
+          # percent — those are shares of different wholes). `status` is
+          # "computed" | "undefined" | "unmeasured"; "undefined" is the refusal
+          # a negative result becomes, and it keeps the -1 sentinel rather than
+          # printing a negative gigabyte or clamping to a zero that would read
+          # as "we saw everything". `excluded_roots` > 0 sends a reader to the
+          # per-root `excluded_reason` for the names.
+          residual:
+            %{status: ..., bytes: ..., of_bytes: ..., measured_bytes: ..., counted_roots: ..., excluded_roots: ..., pg_source: ..., reason: ...}
             | nil,
           reported_at: String.t() | nil
         } | nil,

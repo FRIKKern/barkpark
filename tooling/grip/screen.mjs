@@ -2828,22 +2828,35 @@ function selftest() {
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   const mode = process.argv[2] || "--verify";
+  // NO process.exit IN ANY ARM BELOW (charter D92). Every one of these arms has
+  // already written to stdout by the time it decides the status: selftest()
+  // prints a line per named set and census() prints the whole screening table.
+  // Node writes a PIPE asynchronously, so process.exit() drops whatever the
+  // kernel has not taken — `screen.mjs --verify | tee` would come back short of
+  // the FALSE PERMISSION lines that are the entire reason to run it, while the
+  // same run redirected to a file was whole. exitCode leaves the STATUS
+  // identical in all four arms (0 clean, 1 a miss, 2 usage or an unexpected
+  // throw) and lets the loop drain. screen.test.mjs asserts exit 0 on a
+  // --selftest of a copied tree; that assertion is unchanged.
   try {
     if (mode === "--census") await census();
     else if (mode === "--selftest") {
-      if (selftest() > 0) process.exit(1);
-      console.log("PASS: all three named sets hold.");
+      // The PASS line moves under an `else` because it used to be unreachable
+      // by virtue of the exit above it — dropping the exit without this would
+      // print PASS on a run that just failed.
+      if (selftest() > 0) process.exitCode = 1;
+      else console.log("PASS: all three named sets hold.");
     } else if (mode === "--verify") {
       const misses = selftest();
       console.log("");
       await census();
-      if (misses > 0) process.exit(1);
+      if (misses > 0) process.exitCode = 1;
     } else {
       console.error("usage: node tooling/grip/screen.mjs [--verify|--census|--selftest]");
-      process.exit(2);
+      process.exitCode = 2;
     }
   } catch (e) {
     console.error(`ERROR: ${e?.message || e}`);
-    process.exit(2);
+    process.exitCode = 2;
   }
 }

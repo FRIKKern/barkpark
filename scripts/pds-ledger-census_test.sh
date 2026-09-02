@@ -149,6 +149,92 @@ build_bound() {
   page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
 }
 
+# THE CLAUSE-8 REPO. A REAL git repository, built here, with a real
+# refs/remotes/origin/main and a real dangling commit -- not a table of canned
+# answers. The clause shells out to the same `git cat-file` / `merge-base
+# --is-ancestor` / `check-ignore` in this fixture as it does on the live board,
+# so a green here is a property of the clause and not of a second implementation
+# that agrees with it. It is hermetic (its own $TMP dir, its own object store),
+# so nothing it does touches the checkout the selftest runs from.
+#
+# Sets: ON_SHA (a commit origin/main HAS), OFF_SHA (a REAL commit origin/main
+# never saw -- committed on main and then reset away, so the object survives
+# unreachable), BLOB_SHA (a blob, which owes existence and NOT ancestry).
+build_reason_repo() {
+  local dir=$1
+  mkdir -p "$dir"
+  git init -q "$dir" >/dev/null 2>&1
+  git -C "$dir" symbolic-ref HEAD refs/heads/main
+  git -C "$dir" config user.email 'pds-selftest@example.invalid'
+  git -C "$dir" config user.name 'pds selftest'
+  git -C "$dir" config commit.gpgsign false
+  mkdir -p "$dir/scripts" "$dir/docs/api" "$dir/api/lib"
+  printf 'real\n' > "$dir/scripts/real.sh"
+  printf 'real\n' > "$dir/docs/api/real.md"
+  printf 'real\n' > "$dir/api/lib/real.ex"
+  printf 'build/\n' > "$dir/.gitignore"
+  git -C "$dir" add -A >/dev/null
+  git -C "$dir" commit -q -m base
+  git -C "$dir" update-ref refs/remotes/origin/main HEAD
+  ON_SHA=$(git -C "$dir" rev-parse --short=10 HEAD)
+  BLOB_SHA=$(git -C "$dir" rev-parse --short=10 HEAD:scripts/real.sh)
+  printf 'off\n' > "$dir/off.txt"
+  git -C "$dir" add -A >/dev/null
+  git -C "$dir" commit -q -m off
+  OFF_SHA=$(git -C "$dir" rev-parse --short=10 HEAD)
+  git -C "$dir" reset -q --hard "$ON_SHA"
+  mkdir -p "$dir/build"
+  printf 'artifact\n' > "$dir/build/artifact.txt"
+}
+
+# THE CITED CORPUS. Byte-for-byte the healthy board's SHAPE -- same ids, same
+# lifecycles, same dispositions, same single structured trigger -- so it is
+# round-done clean on clauses 1-7 and the ONLY thing that can move is clause 8.
+# What changes is what the reasons CITE:
+#
+# THE CLOSURE IS FIVE ROWS -- the root and `unrelated` are outside it, exactly as
+# in `build_healthy` -- so every count this section asserts is over kid-a, kid-b,
+# kid-c, deep-a and deep-b:
+#
+#   kid-a   a dangling sha AND an absent path, in ONE reason  -> the mutation
+#   kid-b   nothing at all                                    -> thin
+#   kid-c   a live sha, a live path, and a BLOB               -> the positive arm
+#   deep-a  a gitignored path                                 -> ignored
+#   deep-b  `origin/main` and `8/10`                          -> foreign, so thin
+#
+# EVERY REASON IS BYTE-UNIQUE, which is the whole point: clause 1 passes on all
+# five while clause 8 has something to say about one of them.
+build_cited() {
+  local dir=$1
+  local p0 p1
+  p0="$(row "$ROOT_SLUG" 'null' open open 'root row cites nothing. REOPEN: never'),"
+  p0+="$(row kid-a "\"$ROOT_SLUG\"" open open "kid a cites $OFF_SHA and docs/api/absent.md. REOPEN: alpha"),"
+  p0+="$(row kid-b "\"$ROOT_SLUG\"" done closed 'kid b cites nothing whatsoever. REACTIVATE: bravo'),"
+  p0+="$(row kid-c "\"$ROOT_SLUG\"" blocked parked "kid c cites $ON_SHA, scripts/real.sh and blob $BLOB_SHA. REOPEN: charlie" 'TRIGGER: charlie ships')"
+  p1="$(row deep-a '"kid-a"' open open 'deep a cites build/artifact.txt. REOPEN: delta'),"
+  p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b cites origin/main and 8/10. REOPEN: echo'),"
+  p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
+  page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
+  page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+}
+
+# THE FAIL-FIRST CORPUS. The SAME seven rows, except every reason is a stale,
+# wrong or invented citation that is nonetheless BYTE-UNIQUE. This is the row's
+# own finding, made runnable: clause 1 must stay GREEN over it.
+build_invented() {
+  local dir=$1
+  local p0 p1
+  p0="$(row "$ROOT_SLUG" 'null' open open "root re-derived at $OFF_SHA per docs/api/ghost-one.md. REOPEN: never"),"
+  p0+="$(row kid-a "\"$ROOT_SLUG\"" open open "kid a re-derived at $OFF_SHA per docs/api/ghost-two.md. REOPEN: alpha"),"
+  p0+="$(row kid-b "\"$ROOT_SLUG\"" done closed "kid b re-derived at $OFF_SHA per docs/api/ghost-three.md. REACTIVATE: bravo"),"
+  p0+="$(row kid-c "\"$ROOT_SLUG\"" blocked parked "kid c re-derived at $OFF_SHA per docs/api/ghost-four.md. REOPEN: charlie" 'TRIGGER: charlie ships')"
+  p1="$(row deep-a '"kid-a"' open open "deep a re-derived at $OFF_SHA per docs/api/ghost-five.md. REOPEN: delta"),"
+  p1+="$(row deep-b '"kid-b"' cancelled closed "deep b re-derived at $OFF_SHA per docs/api/ghost-six.md. REOPEN: echo"),"
+  p1+="$(row unrelated 'null' open open "unrelated re-derived at $OFF_SHA per docs/api/ghost-seven.md. REOPEN: foxtrot")"
+  page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
+  page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+}
+
 # A well-formed page envelope for the SECOND lens. The perspective it echoes is
 # a PARAMETER, because the interesting failure is a source that answers
 # `published` to a `perspective=drafts` request -- which is what the API does to
@@ -392,6 +478,55 @@ expect_isolated() {
     return 1
   fi
   printf '  ok    %-52s exit %d  (0 strays executed)\n' "$label" "$got"
+}
+
+# THE SUBSET IS PROVEN BY DIFFING TWO RUNS, NEVER BY PINNING AN ID. A pinned id
+# goes stale the moment the fixture gains a row, and a stale pin that still
+# passes is worse than no pin at all -- it asserts a membership nobody rechecked.
+# These two read the census's OWN `sampled:` lines back out and compare them.
+sampled_ids() {
+  "$@" 2>&1 | sed -n 's/^      sampled: //p' | sort
+}
+
+expect_sample_stable() {
+  local label=$1
+  shift
+  CHECKS=$((CHECKS + 1))
+  local a b
+  a=$(sampled_ids run "$@" --reason-sample-seed round-one)
+  b=$(sampled_ids run "$@" --reason-sample-seed round-one)
+  if [[ -z $a ]]; then
+    printf 'SELFTEST FAIL: %s — the run printed NO sampled ids at all, so nothing was compared\n' "$label" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if [[ $a != "$b" ]]; then
+    printf 'SELFTEST FAIL: %s — the same seed selected different rows\n  %s\n  %s\n' "$label" "$a" "$b" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s stable (%s)\n' "$label" "$(echo "$a" | tr '\n' ' ')"
+}
+
+expect_sample_rotates() {
+  local label=$1
+  shift
+  CHECKS=$((CHECKS + 1))
+  local a b
+  a=$(sampled_ids run "$@" --reason-sample-seed round-one)
+  b=$(sampled_ids run "$@" --reason-sample-seed round-two)
+  if [[ -z $a || -z $b ]]; then
+    printf 'SELFTEST FAIL: %s — a run printed NO sampled ids, so nothing was compared\n' "$label" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if [[ $a == "$b" ]]; then
+    printf 'SELFTEST FAIL: %s — two different seeds selected the SAME rows, so the seed does nothing\n  %s\n' "$label" "$a" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s rotates (%s | %s)\n' "$label" \
+    "$(echo "$a" | tr '\n' ' ')" "$(echo "$b" | tr '\n' ' ')"
 }
 
 run() {
@@ -1525,6 +1660,167 @@ expect_status_matching "--anchor and --anchor-from-paper are mutually exclusive"
   run --page-limit 4 --fixture-dir "$HEALTHY" --anchor 2020-01-01T00:00:00Z --anchor-from-paper "$WAVE_SLUG"
 expect_status_matching "an --anchor that is not an instant is a usage error" 3 "not an ISO-8601 instant" \
   run --page-limit 4 --fixture-dir "$HEALTHY" --anchor "last tuesday"
+
+# =============================================================================
+# CLAUSE 8 — A REASON, READ AGAINST ITS OWN CITED ARTIFACTS (the wave-27
+# reviewer's own residual, paid in wave 28).
+#
+# THE DEFECT, STATED AS A RUN. Clause 1 is `reason_hashes_distinct ==
+# reasons_non_empty` and NOTHING ELSE. `$INVENTED` is seven reasons that are
+# stale, wrong and invented -- every one of them re-derived "at" a commit that
+# reached no branch, "per" a document that does not exist -- and every one of
+# them BYTE-UNIQUE. Clause 1 greens on it, 7 == 7, exactly as it greens on a
+# board of honest re-derivations. That is the finding, and the first four checks
+# below are the finding, not a test of the fix.
+#
+# THE MUTATION IS ONE ROW WITH TWO DEFECTS. `kid-a` in `$CITED` cites BOTH a
+# dangling sha AND an absent path, so a clause that stopped at the first failure
+# would name one of them and look correct doing it. Both must appear in ONE run.
+#
+# THE ORACLE IS REAL GIT. `$RREPO` is an actual repository with an actual
+# refs/remotes/origin/main and an actual unreachable commit; the clause runs the
+# same `cat-file` / `merge-base --is-ancestor` / `check-ignore` here that it runs
+# on the live board. A fixture that answered those questions from a table would
+# prove something about the table.
+# =============================================================================
+echo
+echo "clause 8 — a reason, read against what it CITES"
+RREPO="$TMP/reason-repo"
+build_reason_repo "$RREPO"
+
+INVENTED="$TMP/invented"
+build_invented "$INVENTED"
+CITED="$TMP/cited"
+build_cited "$CITED"
+
+# ---- FAIL-FIRST: clause 1 cannot see any of this -----------------------------
+expect_output_contains "FAIL-FIRST: 5 invented reasons are all byte-DISTINCT" \
+  "distinct reason hashes          5" \
+  run --page-limit 4 --fixture-dir "$INVENTED" --reason-repo "$RREPO"
+expect_output_contains "FAIL-FIRST: and clause 1 therefore says PASS over them" \
+  "distinct reason hashes == non-empty reasons   5 == 5   PASS" \
+  run --page-limit 4 --fixture-dir "$INVENTED" --reason-repo "$RREPO" --assert-round-done
+expect_status "FAIL-FIRST: --assert-round-done GREENS on a wholly invented board" 0 \
+  run --page-limit 4 --fixture-dir "$INVENTED" --reason-repo "$RREPO" --assert-round-done
+# ...and clause 8 is the thing that is not fooled. Same corpus, same run.
+expect_status_matching "and CLAUSE 8 reds the same board once armed" 1 \
+  "cite an artifact that does not check out" \
+  run --page-limit 4 --fixture-dir "$INVENTED" --reason-repo "$RREPO" \
+      --assert-round-done --assert-reason-artifacts
+
+# ---- THE MUTATION: BOTH defects, in ONE run, NAMED ---------------------------
+expect_output_contains "the mutation names the DANGLING SHA" \
+  "not-ancestor   kid-a -> $OFF_SHA" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+expect_output_contains "the SAME run names the ABSENT PATH on the SAME row" \
+  "path-missing   kid-a -> docs/api/absent.md" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+expect_output_contains "both ride in --json as one findings list" \
+  '"not-ancestor",' \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --json
+expect_status_matching "armed, the two defects red ONE round" 1 "not-ancestor, path-missing" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" \
+      --assert-round-done --assert-reason-artifacts
+
+# ---- THE POSITIVE ARM: a citation that resolves must not be a finding --------
+# Without this, "reds on everything" and "reds on the right thing" look the same.
+expect_output_lacks "a live sha is NOT a finding" \
+  "-> $ON_SHA" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+expect_output_lacks "and neither is scripts/real.sh" \
+  "-> scripts/real.sh" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+# A BLOB owes EXISTENCE, never ancestry. `merge-base --is-ancestor <blob>` exits
+# 128, so an ancestry-only clause files every `blob <sha>` citation as stale --
+# which is exactly how four live rows were mis-filed before this arm existed.
+expect_output_lacks "a BLOB citation resolves on existence, not ancestry" \
+  "-> $BLOB_SHA" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+
+# ---- HONEST ABOUT WHAT IT CANNOT SEE ----------------------------------------
+# The row records that three of the 30 wave-27 reasons are DELIBERATELY thin and
+# that one is an explicitly PARTIAL check wearing the same dress as the other 29.
+# A clause that cannot tell thin-and-honest from wrong must SAY which it is
+# doing, and must not convert the first into the second.
+expect_output_contains "a reason citing NOTHING is reported as THIN" \
+  "cite NOTHING -- NOT CHECKABLE" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+expect_output_contains "and the thin count is on the PREDICATE line too" \
+  "rows citing NOTHING (thin, NOT CHECKABLE)" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --assert-round-done
+expect_output_contains "thin rows never become findings" \
+  '"thin": [' \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --json
+expect_status "a board whose only unresolved rows are THIN is not red" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --reason-repo "$RREPO" \
+      --assert-round-done --assert-reason-artifacts
+# A GITIGNORED path is correctly absent from HEAD. Calling `build/artifact.txt`
+# a stale citation would be a lie about a real file.
+expect_output_contains "a gitignored path is IGNORED, not missing" \
+  "ignored: deep-a -> build/artifact.txt" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+# `origin/main` and `8/10` are slash-shaped and are not paths. Counted, so the
+# size of what the clause declines to read is visible rather than assumed.
+expect_output_contains "slash-shaped non-paths are FOREIGN and counted" \
+  "slash-token(s) are NOT repo paths at all" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+expect_output_lacks "and origin/main is never filed as a missing path" \
+  "path-missing   deep-b" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+
+# ---- REPORTED BEFORE IT IS ARMED --------------------------------------------
+# The live board carries findings that are a CORPUS finding. Absorbing them into
+# a build failure, or loosening the clause until they vanish, both throw the
+# measurement away -- so the default REPORTS and --assert-reason-artifacts ARMS.
+expect_status "unarmed, a board WITH findings still certifies" 0 \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --assert-round-done
+expect_output_contains "and it says so, in the run that carries them" \
+  "REPORTED, NOT ARMED" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+
+# ---- THE SUBSET IS DETERMINISTIC AND ITS MEMBERSHIP IS PRINTED --------------
+# The row permits a rotating subset. A sample whose membership is invisible
+# restores the disease at one remove: the run names a number instead of the rows
+# behind it.
+expect_output_contains "a subset prints the RULE that selected it" \
+  "rule: sha256(seed + NUL + row_id) ascending, first 2" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --reason-sample 2
+expect_output_contains "a subset says it is a SUBSET, with its size" \
+  "membership  SUBSET 2 of 5 row(s)" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --reason-sample 2
+expect_output_contains "the FULL membership is printed, never elided" \
+  "      sampled: " \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --reason-sample 2
+expect_output_contains "an unsampled run says ALL, so membership needs no list" \
+  "membership  ALL of 5 row(s)" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO"
+# DETERMINISM, PROVEN BY DIFFING TWO RUNS rather than by asserting one id: an
+# id this file pins would go stale the moment the fixture gains a row, and a
+# stale pin that still passes is worse than no pin.
+expect_sample_stable "the SAME seed selects the SAME rows across runs" \
+  --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --reason-sample 2
+expect_sample_rotates "a DIFFERENT seed selects a DIFFERENT subset" \
+  --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --reason-sample 2
+expect_status_matching "--reason-sample 0 is a usage error, not an empty check" 3 "must be >= 1" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$RREPO" --reason-sample 0
+
+# ---- UNAVAILABLE IS A STATE, NEVER A PASS -----------------------------------
+expect_output_contains "no repo means UNAVAILABLE, and it says NOT zero findings" \
+  "This is NOT zero findings" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$TMP"
+expect_status_matching "armed, an unavailable oracle is a REFUSAL" 1 "could check NOTHING" \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$TMP" \
+      --assert-round-done --assert-reason-artifacts
+expect_status "unarmed, an unavailable oracle is reported and does not red" 0 \
+  run --page-limit 4 --fixture-dir "$CITED" --reason-repo "$TMP" --assert-round-done
+
+# ---- THE ORACLE CANNOT BE CHOSEN BY ARGV ------------------------------------
+# Pointed at a repo where every citation happens to resolve, the clause reports
+# zero over a board that has findings -- a green bought by choosing the oracle
+# instead of by fixing the reasons. Same discipline as --anchor.
+expect_status_matching "--reason-repo outside --fixture-dir is REFUSED" 3 \
+  "a repo chosen by argv is a repo where every citation can be made to resolve" \
+  run --page-limit 4 --reason-repo "$RREPO"
 echo
 
 if [[ $FAILURES -ne 0 ]]; then
@@ -1624,6 +1920,25 @@ the same command answers `true` for scripts/pds-door-census.sh: the required
 Elixir gate does NOT dispatch this path, so every check in this file is
 local-only and the census says so in its own output rather than letting a reader
 assume CI coverage.
+
+CLAUSE 8 READS A REASON AGAINST WHAT IT CITES, and the FAIL-FIRST fixture is
+the finding rather than a test of the fix: FIVE wholly invented reasons ("re-
+derived at <a commit that reached no branch> per <a document that does not
+exist>"), each BYTE-UNIQUE, green clause 1 at 5 == 5 and exit 0 under
+--assert-round-done -- exactly as an honest board does. The mutation is ONE row
+citing BOTH a dangling sha AND an absent path, and both must be named in ONE
+run, because a clause that stopped at the first would look correct naming half.
+The oracle is a REAL git repository built here, with a real
+refs/remotes/origin/main and a real unreachable commit, so the clause runs the
+same `cat-file` / `merge-base --is-ancestor` / `check-ignore` it runs live; a
+canned table would have proved something about the table. Both directions are
+pinned: a BLOB citation must NOT be a finding (`merge-base --is-ancestor <blob>`
+exits 128, and an ancestry-only clause files every `blob <sha>` as stale), a
+thin row must NOT be a finding, and a gitignored path must NOT be a finding. The
+subset is proven by DIFFING TWO RUNS rather than by pinning an id -- same seed,
+same rows; different seed, different rows -- and its membership is printed in
+full, because a sample nobody can enumerate names a number instead of the rows
+behind it.
 
 THE PAGED READ HAS A TOTAL ORDER: `order=_createdAt:asc`, reported back as
 `page_order` so the discipline can be read rather than believed. Both traps are

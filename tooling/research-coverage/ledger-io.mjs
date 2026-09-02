@@ -81,6 +81,15 @@ export class LedgerLockTimeoutError extends Error {
   constructor(msg) { super(msg); this.name = "LedgerLockTimeoutError"; }
 }
 
+// Raised by a caller that is asked to MEASURE against a ledger that is not
+// there. Distinct from an empty ledger on purpose: an empty ledger is a real
+// zero, an absent one is the instrument missing. Conflating them is what let
+// `scan` report a flat zero on every clean checkout in the shape of a
+// measurement, with a covered/total pair beside it to make it look counted.
+export class LedgerAbsentError extends Error {
+  constructor(msg) { super(msg); this.name = "LedgerAbsentError"; }
+}
+
 const now = () => new Date().toISOString();
 const newRev = () => randomBytes(8).toString("hex");
 
@@ -111,23 +120,123 @@ export function readLedger(ledgerPath) {
 }
 
 // The rev of what is CURRENTLY on disk. Returns null when the file is absent.
-function diskRev(ledgerPath) {
+function diskRev(ledgerPath, read = readLedger) {
   if (!existsSync(ledgerPath)) return null;
-  try { return readLedger(ledgerPath).meta?.rev ?? null; } catch { return null; }
+  try { return read(ledgerPath).meta?.rev ?? null; } catch { return null; }
 }
 
 // Write via a temp file in the SAME directory, then rename. Same-directory
 // matters: rename is only atomic within one filesystem, and a tmp elsewhere
 // (/tmp, say) degrades silently into a copy on a cross-device move.
-export function writeJsonAtomic(ledgerPath, ledger) {
-  const tmp = join(dirname(ledgerPath), `.${basename(ledgerPath)}.tmp.${process.pid}.${randomBytes(4).toString("hex")}`);
+//
+// `produce` is called INSIDE the try on purpose: a serialiser that throws must
+// leave the prior file untouched and no temp behind, which is the shape the
+// mid-serialise test asserts.
+function writeAtomic(targetPath, produce) {
+  const tmp = join(dirname(targetPath), `.${basename(targetPath)}.tmp.${process.pid}.${randomBytes(4).toString("hex")}`);
   try {
-    writeFileSync(tmp, JSON.stringify(ledger, null, 2));
-    renameSync(tmp, ledgerPath);
+    writeFileSync(tmp, produce());
+    renameSync(tmp, targetPath);
   } catch (e) {
     try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* best effort */ }
     throw e;
   }
+}
+
+export function writeJsonAtomic(ledgerPath, ledger) {
+  writeAtomic(ledgerPath, () => JSON.stringify(ledger, null, 2));
+  return ledger;
+}
+
+// ======================================================================
+// THE CANONICAL, COMMITTED FORM
+// ======================================================================
+//
+// research-ledger.json is pretty-printed JSON: 40,581 lines for 4,508 entries,
+// and it was gitignored. So the identical command at the identical commit
+// measured one figure on the single laptop that held the file and a flat zero
+// on every clean checkout — a machine-local cache with a percentage printed on
+// it, not an instrument. No number is repeated here on purpose: the only
+// durable fact about coverage is the command that re-derives it,
+// `node tooling/research-coverage/coverage.mjs scan`.
+// The fix is not "commit the pretty file": at ~9 lines per entry a
+// single re-recorded file rewrites a nine-line block, and a full `record`
+// rewrites all 40,581 lines, so the diff tracks the FILE COUNT rather than the
+// research activity.
+//
+// The canonical form is the same data in a shape a repository can hold:
+//
+//   line 1      the header — every top-level key EXCEPT `files`, so `meta` and
+//               anything a future build adds survive a round-trip.
+//   line 2..n   ONE LINE PER FILE ENTRY, sorted by path, `path` first, then the
+//               canonical fields in CANONICAL_ENTRY_KEYS order, then any
+//               preserved unknown key in sorted order.
+//
+// `path` is the discriminator: no line but the header lacks it. Key order and
+// entry order are both fixed by the serialiser rather than by object insertion
+// order, so serialise(parse(x)) === x byte for byte and a re-record touches only
+// the lines whose research actually changed.
+
+const sortedObject = (o) => {
+  const out = {};
+  for (const k of Object.keys(o).sort()) out[k] = o[k];
+  return out;
+};
+
+export function serializeCanonical(ledger) {
+  const raw = { ...(ledger || {}) };
+  delete raw.files;
+  if (!raw.meta || typeof raw.meta !== "object" || Array.isArray(raw.meta)) raw.meta = {};
+  raw.meta = sortedObject(raw.meta);
+  const lines = [JSON.stringify(sortedObject(raw))];
+  const files = (ledger && ledger.files) || {};
+  for (const p of Object.keys(files).sort()) {
+    const e = (files[p] && typeof files[p] === "object") ? files[p] : {};
+    const out = { path: p };
+    for (const k of CANONICAL_ENTRY_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(e, k)) out[k] = e[k];
+    }
+    for (const k of Object.keys(e).sort()) {
+      if (k === "path" || CANONICAL_ENTRY_KEYS.includes(k)) continue;
+      out[k] = e[k];
+    }
+    lines.push(JSON.stringify(out));
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function parseCanonical(text) {
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  if (!lines.length) return emptyLedger();
+  const header = JSON.parse(lines[0]);
+  if (!header || typeof header !== "object" || Array.isArray(header) || "path" in header) {
+    throw new SyntaxError(
+      "research-ledger canonical form: the first line must be the header object, which carries no `path` key");
+  }
+  const ledger = { ...header };
+  if (!ledger.meta || typeof ledger.meta !== "object" || Array.isArray(ledger.meta)) ledger.meta = {};
+  ledger.files = {};
+  for (let i = 1; i < lines.length; i++) {
+    const entry = JSON.parse(lines[i]);
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.path !== "string") {
+      throw new SyntaxError(
+        `research-ledger canonical form: entry number ${i} carries no string \`path\``);
+    }
+    const { path: p, ...rest } = entry;
+    ledger.files[p] = rest;
+  }
+  return ledger;
+}
+
+// Absent yields the empty ledger, matching readLedger. Callers that must not
+// treat absent as zero ask separately — see LedgerAbsentError.
+export function readCanonicalLedger(ledgerPath) {
+  if (!existsSync(ledgerPath)) return emptyLedger();
+  return parseCanonical(readFileSync(ledgerPath, "utf8"));
+}
+
+export function writeCanonicalAtomic(ledgerPath, ledger) {
+  writeAtomic(ledgerPath, () => serializeCanonical(ledger));
   return ledger;
 }
 
@@ -182,16 +291,22 @@ function releaseLock(lockPath) {
 // onto a base that went stale while it worked. Return a replacement object from
 // `mutate` or mutate in place; both are honoured.
 export function withLedger(ledgerPath, mutate, opts = {}) {
-  const { timeoutMs = 120_000, staleMs = 120_000, pollMs = 25, lockPath = `${ledgerPath}.lock` } = opts;
+  // `read`/`write` are the CODEC seam. The default pair is the pretty JSON the
+  // tool shipped with; coverage.mjs passes the canonical pair so the committed
+  // ledger is what the lock, the CAS and the atomic rename all protect.
+  const {
+    timeoutMs = 120_000, staleMs = 120_000, pollMs = 25, lockPath = `${ledgerPath}.lock`,
+    read = readLedger, write = writeJsonAtomic,
+  } = opts;
   sweepStaleTmp(ledgerPath, staleMs);
   acquireLock(lockPath, { timeoutMs, staleMs, pollMs });
   try {
-    const ledger = readLedger(ledgerPath);
+    const ledger = read(ledgerPath);
     const baseRev = ledger.meta?.rev ?? null;
     const next = mutate(ledger) ?? ledger;
     // CAS. Inside the lock this can only trip on a writer that ignored the lock.
     // Refuse loudly instead of destroying whatever it wrote.
-    const seen = diskRev(ledgerPath);
+    const seen = diskRev(ledgerPath, read);
     if (seen !== baseRev) {
       throw new LedgerConflictError(
         `research-ledger changed underneath a locked read-modify-write ` +
@@ -201,7 +316,7 @@ export function withLedger(ledgerPath, mutate, opts = {}) {
     if (!next.meta || typeof next.meta !== "object") next.meta = {};
     next.meta.rev = newRev();
     next.meta.updatedAt = now();
-    writeJsonAtomic(ledgerPath, next);
+    write(ledgerPath, next);
     return next;
   } finally {
     releaseLock(lockPath);

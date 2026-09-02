@@ -65,7 +65,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
     case fence_language(code_attrs) do
       "mermaid" -> [%{"type" => "diagram", "source" => source}]
       "portabledoc" -> portabledoc_fence(source)
-      _ -> [code_block(source)]
+      lang -> [code_block(source, lang)]
     end
   end
 
@@ -214,7 +214,31 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
 
   # ── leaves ───────────────────────────────────────────────────────────────
 
+  # THE LANGUAGE FIELD IS `lang`, NOT `language`. The standalone `code` block's
+  # model says so everywhere it is written or read:
+  #
+  #   * `StudioLive.Blocks.default_block("code")` → `%{"type" => "code",
+  #     "lang" => "", "value" => ""}` (blocks.ex:231);
+  #   * `build_block_patch/2` puts `lang` through `put_if_present/3`, which
+  #     DROPS a nil/"" value (blocks.ex:39) — so an absent language is an
+  #     absent KEY, never `"lang" => ""`;
+  #   * the Studio's code-block editor renders `Map.get(@block, "lang", "")`
+  #     (paper_editor.ex:1115-1118) and the canvas code node round-trips the
+  #     same key (`canvas/code-node.js`).
+  #
+  # `Map.get("language", "")` in `Render.Compose` belongs to `code-tabs` TAB
+  # ENTRIES (compose.ex `code_tab_entries/1`), a different block type. Emitting
+  # `"language"` here would have written a field nothing reads.
+  #
+  # An absent or blank fence info string emits NO key at all, so a language-less
+  # fence keeps today's exact two-key map — the shape every existing caller,
+  # golden and round-trip already pins.
   defp code_block(value), do: %{"type" => "code", "value" => value}
+
+  defp code_block(value, lang) when is_binary(lang) and lang != "",
+    do: %{"type" => "code", "value" => value, "lang" => lang}
+
+  defp code_block(value, _lang), do: code_block(value)
 
   defp text_node(value), do: %{"type" => "text", "value" => value}
 
