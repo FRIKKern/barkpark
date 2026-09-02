@@ -30,6 +30,18 @@ EnvironmentFile=/opt/barkpark/.slots/%i.env
 # no WorkingDirectory is needed (and systemd could not expand an EnvironmentFile
 # var there anyway).
 ExecStart=/usr/local/bin/barkpark-node ${RELEASE_DIR}/server.js
+# A Next.js standalone server installs its OWN SIGTERM handler and returns 143
+# instead of dying to the signal. systemd only counts a signal death or exit 0 as
+# a clean stop, so without this line EVERY deliberate stop of a slot is recorded
+# `failed` — and site-deploy-node.sh stops slots on the NORMAL paths: stop_slot()
+# retires the cold slot after a switch (D67) and unwinds the just-booted slot when
+# its HEALTH gate refuses (exit 14). The result is red units left behind by
+# successful deploys, so `systemctl list-units 'barkpark-site@*'` can no longer
+# tell a slot retired on purpose from one that crashed — the exact confusion that
+# made a leftover-SSR audit miscount the units on guerrilla. Declaring 143 a
+# success exit restores the distinction, and stops `Restart=on-failure` below from
+# reading a clean SIGTERM as a crash worth restarting.
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=2
 

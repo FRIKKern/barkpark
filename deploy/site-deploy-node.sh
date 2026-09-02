@@ -1767,6 +1767,24 @@ FAKENPM
 
   fi
 
+  # ---- the shipped unit template records a deliberate stop as SUCCESS ---------
+  # stop_slot() above is on the NORMAL deploy paths (RETIRE's cold slot, D67; the
+  # HEALTH-gate unwind, exit 14). A Next.js standalone server traps SIGTERM and
+  # returns 143, which systemd calls a failure unless the unit says otherwise — so
+  # without SuccessExitStatus=143 every successful deploy leaves `failed` units
+  # behind and an operator reading `systemctl list-units 'barkpark-site@*'` cannot
+  # separate a retired slot from a crashed one. This is a STATIC check of the file
+  # instance-deploy.sh installs, because nothing else in this suite reads it: a
+  # fake systemctl cannot observe a real unit's exit-status policy.
+  echo "[selftest] the shipped unit template treats a SIGTERM exit (143) as a clean stop"
+  UNIT_TMPL="$(cd "$(dirname "$SELF")" && pwd)/systemd/barkpark-site@.service"
+  unit_ses_section() { awk '/^\[/{s=$0} /^SuccessExitStatus=/{print s; exit}' "$UNIT_TMPL"; }
+  check "deploy/systemd/barkpark-site@.service is in the tree" [ -f "$UNIT_TMPL" ]
+  check "unit declares SuccessExitStatus=143 (a stopped slot is not a failed slot)" \
+    grep -qE '^SuccessExitStatus=(.* )?143( |$)' "$UNIT_TMPL"
+  check "SuccessExitStatus sits in [Service] (systemd ignores it anywhere else)" \
+    [ "$(unit_ses_section)" = "[Service]" ]
+
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }

@@ -30,6 +30,9 @@
   --color-danger: hsl(0 68% 42%);
   --color-info: hsl(217.2 91.2% 59.8%);
   --color-graph-canvas: #16161a;
+  --dur-1: 0.15s;
+  --dur-2: 0.18s;
+  --dur-3: 0.28s;
 }
 [data-theme="dark"] {
   --color-primary: hsl(152.92 60% 52.94%);

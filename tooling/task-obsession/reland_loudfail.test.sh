@@ -209,6 +209,26 @@ echo "== 8. the task-id extractor cannot kill the step (mode 4) =="
 # The step body is EXTRACTED FROM THE WORKFLOW and executed, never copied here.
 # A copy would keep passing after someone re-tightens the regex — which is the
 # regression this section exists to stop.
+#
+# TWO PROPERTIES, AND ONLY THE FIRST IS ABOUT SURVIVAL.
+#   SURVIVAL (mode 4): every body below, parseable or not, leaves the step alive
+#   with rc=0. That is unconditional and is what this section was built for.
+#
+#   AGREEMENT (added when the step stopped carrying its own regex): the id it
+#   yields must equal what scripts/pr-task-gate.sh --extract-task-id yields,
+#   because that script is the grammar of record for the BLOCKING merge gate.
+#   While reland kept a private copy the two drifted, and the drift was not
+#   cosmetic: the copy allowed leading whitespace, so a trailer quoted INSIDE A
+#   FENCED CODE BLOCK matched and `head -1` handed the example's id to the
+#   suppressor — silencing a bystander task while the PR's OWN task stayed
+#   unsuppressed and could surface as a self-overlap finding. The copy also
+#   resolved two distinct trailers BY POSITION, which is guessing.
+#
+# So the wrapper forms the merge gate REFUSES (bold, link, quote) are asserted
+# here as EMPTY + PARSED=0, not as extractions. That is not a capability loss:
+# such a PR is failed by pr-task-gate regardless, and reland must not silently
+# suppress on an id the gate would not accept. Widening reland alone would put
+# the two instruments back out of step, which is the defect, not the fix.
 WF="../../.github/workflows/reland-check.yml"
 check "reland-check.yml is readable"          1  "$([ -r "$WF" ] && echo 1 || echo 0)"
 
@@ -244,26 +264,69 @@ if extract_step > "$STEP" 2>"$tmp/extract.err"; then
   # assertion below passes against an empty file.
   check "extracted body sets task_id"         1  "$(grep -c 'task_id=' "$STEP" | head -1 | awk '{print ($1>0)?1:0}')"
 
-  # Run it exactly as CI does. GITHUB_OUTPUT is a file the step appends to.
+  # Run it exactly as CI does. GITHUB_OUTPUT is a file the step appends to, and
+  # GITHUB_WORKSPACE is the checkout root — the runner exports it, so a harness
+  # that omitted it would only prove the step dies when the repo is elsewhere.
+  WS="$(cd ../.. && pwd)"
   run_step() { # run_step <pr-body> -> prints "rc=<n> id=<parsed>"
     local body="$1" rc
     : > "$tmp/gh_output"
-    PR_BODY="$body" GITHUB_OUTPUT="$tmp/gh_output" bash -e "$STEP" >"$tmp/step.out" 2>&1
+    PR_BODY="$body" GITHUB_OUTPUT="$tmp/gh_output" GITHUB_WORKSPACE="$WS" \
+      bash -e "$STEP" >"$tmp/step.out" 2>&1
     rc=$?
     printf 'rc=%s id=%s' "$rc" "$(sed -n 's/^task_id=//p' "$tmp/gh_output" | head -1)"
   }
+  # NON-VACUITY, second guard: the step must be REACHING the shared extractor.
+  # If scripts/pr-task-gate.sh went missing or moved, every "yields empty"
+  # assertion below would pass for the wrong reason.
+  check "shared extractor is on disk"         1  "$([ -r "$WS/scripts/pr-task-gate.sh" ] && echo 1 || echo 0)"
 
   ID='task-2abbac8d7975050c'
 
+  # ── ACCEPTED by the merge gate, therefore extracted here ──────────────────
   # THE REGRESSION. Backticks are the natural markdown for an id; on the
   # pre-fix extractor this exited 1 and killed the step.
-  check "backticked id: step survives"        "rc=0 id=$ID"  "$(run_step "Task: \`$ID\` (PDS-D700, wave 49)")"
-  check "bare id: step survives"              "rc=0 id=$ID"  "$(run_step "Task: $ID (wave 49)")"
-  check "bold id: step survives"              "rc=0 id=$ID"  "$(run_step "Task: **$ID**")"
-  check "linked id: step survives"            "rc=0 id=$ID"  "$(run_step "Task: [$ID](https://example/x)")"
-  check "quoted id: step survives"            "rc=0 id=$ID"  "$(run_step "Task: \"$ID\"")"
-  check "slug id: step survives"              "rc=0 id=tgw10-bl-screencommand-bypass-census" \
+  check "backticked id: extracted"            "rc=0 id=$ID"  "$(run_step "Task: \`$ID\` (PDS-D700, wave 49)")"
+  check "bare id: extracted"                  "rc=0 id=$ID"  "$(run_step "Task: $ID (wave 49)")"
+  check "slug id: extracted"                  "rc=0 id=tgw10-bl-screencommand-bypass-census" \
                                                              "$(run_step "Task: \`tgw10-bl-screencommand-bypass-census\`")"
+
+  # ── REFUSED by the merge gate, therefore NOT suppressed on here ───────────
+  # Survival is still unconditional: rc=0, empty id, PARSED=0 below.
+  check "bold id: survives, no id"            "rc=0 id="     "$(run_step "Task: **$ID**")"
+  check "linked id: survives, no id"          "rc=0 id="     "$(run_step "Task: [$ID](https://example/x)")"
+  check "quoted id: survives, no id"          "rc=0 id="     "$(run_step "Task: \"$ID\"")"
+
+  # ── THE TWO DIVERGENCES THE PRIVATE COPY CARRIED ──────────────────────────
+  # A fenced EXAMPLE must not be mistaken for the trailer: the copy allowed
+  # leading whitespace and took head -1, so the example WON and the real
+  # column-0 trailer below it was never seen.
+  check "fenced example loses to the trailer" "rc=0 id=$ID" \
+        "$(run_step "\`\`\`
+    Task: task-quoted-example
+\`\`\`
+Task: $ID")"
+  # Two DISTINCT trailers: the copy picked the first. Picking by position is
+  # guessing, and the gate refuses (exit 4) rather than guess. Here the refusal
+  # must land as "no suppression", never as a dead step.
+  check "two distinct trailers: refused"      "rc=0 id="     "$(run_step "Task: first-one
+Task: second-one")"
+  run_step "Task: first-one
+Task: second-one" >/dev/null
+  check "ambiguity says so, not 'no task id'" 1  "$(grep -c 'ambiguous task reference' "$tmp/step.out" | awk '{print ($1>0)?1:0}')"
+  check "ambiguity disclaims an overlap"      1  "$(grep -c 'NOT AN OVERLAP FINDING' "$tmp/step.out" | awk '{print ($1>0)?1:0}')"
+
+  # ── AGREEMENT: reland's id == the merge gate's id, body for body ──────────
+  # The assertion that makes a future private copy impossible to reintroduce
+  # quietly: whatever the gate says, this step must say.
+  agree=1
+  for body in "Task: \`$ID\`" "Task: $ID" "Task: **$ID**" "Task: [$ID](https://x)" \
+              "Task: \"$ID\"" "TASK: $ID" "no trailer at all" ""; do
+    step_id="$(run_step "$body" | sed -n 's/^rc=[0-9]* id=//p')"
+    gate_id="$(PR_BODY="$body" bash "$WS/scripts/pr-task-gate.sh" --extract-task-id 2>/dev/null || true)"
+    [ "$step_id" = "$gate_id" ] || { agree=0; printf '     DRIFT on %-32s step=%s gate=%s\n' "$body" "$step_id" "$gate_id"; }
+  done
+  check "reland id == pr-task-gate id (8 bodies)" 1 "$agree"
 
   # AN UNPARSEABLE BODY MUST NOT KILL THE STEP EITHER — it must yield an empty
   # id and say so. "I could not parse" and "this PR re-lands landed work" were
