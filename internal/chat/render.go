@@ -192,6 +192,39 @@ func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, [
 	msgs := m.st.Messages
 	for i := 0; i < len(msgs); i++ {
 		msg := msgs[i]
+		// SHOW-ACTIVE-ONLY (task-b66928b2958c8cfa). While a turn RUNS, the rows
+		// that ran BEFORE the active one fold behind ONE "+N previous" control
+		// so the row actually in flight cannot scroll away.
+		//
+		// THE GATE is `turn_settled`, NOT the fold key: a settled row that the
+		// server was too old to stamp with fold facts has no key, and U1 leaves
+		// it FLAT on purpose — it must not fall through to this collapse
+		// either. A SETTLED turn is never ours.
+		//
+		// n == 0 (a one-row turn, or parallel calls where the active row IS the
+		// first) hides nothing, so the run falls through to the flat rendering
+		// it has always had and no control is drawn.
+		if msg.Role == "tool" && !metaTrue(msg, "turn_settled") {
+			j := i
+			for j < len(msgs) && msgs[j].Role == "tool" && !metaTrue(msgs[j], "turn_settled") {
+				j++
+			}
+			run := msgs[i:j]
+			if n := runningHiddenCount(run); n > 0 {
+				push(renderRunningFoldHeader(width, runningFoldLabel(n), m.runningFoldExpanded)...)
+				shown := run[n:]
+				if m.runningFoldExpanded {
+					shown = run
+				}
+				for _, row := range shown {
+					if r := renderMessage(width, row, false, "", ""); len(r) > 0 {
+						push(r...)
+					}
+				}
+				i = j - 1
+				continue
+			}
+		}
 		// The TURN FOLD (task-8f904a88b9bc3d59). A settled turn's consecutive
 		// tool rows collapse under ONE header block reading "Worked for 3m 12s"
 		// (or "You stopped after 42s"); ctrl+f expands every fold. The run is
@@ -495,6 +528,61 @@ func renderFoldHeader(width int, label string, rows int, expanded bool) []string
 	}
 	line := fmt.Sprintf("%s %s · %d %s", marker, label, rows, noun)
 	return []string{dimStyle.Render(truncate(line, w))}
+}
+
+// ── show-active-only, the RUNNING half (task-b66928b2958c8cfa) ───────────────
+//
+// The Go twin of BarkparkWeb.Studio.ChatToolRenderer's active_row_index/
+// running_hidden_count/running_fold_label. Both the COUNT and the LABEL are
+// pinned to the Elixir side by the `running_cases` of the shared fixture
+// api/test/support/fixtures/chat_fold_labels.json, which fold_test.go and
+// chat_fold_on_settle_test.exs both read — a change to one surface's counter or
+// wording reds the other surface's test.
+
+// runningActiveIndex is the index of the ACTIVE row inside one RUNNING turn's
+// consecutive tool rows: the FIRST row still awaiting its tool_result (the one
+// executing right now — with parallel tool calls that can be the very first row
+// of the turn), or the LAST row when every result already landed and the turn
+// is running without a tool in flight.
+func runningActiveIndex(run []Message) int {
+	for i, row := range run {
+		if rowAwaitingResult(row) {
+			return i
+		}
+	}
+	if len(run) == 0 {
+		return 0
+	}
+	return len(run) - 1
+}
+
+// runningHiddenCount is N — how many of the running turn's rows hide behind the
+// control. THE one place `bp chat` counts them (Studio's one place is
+// ChatToolRenderer.running_hidden_count/1): the rows BEFORE the active one,
+// which for an ordinary sequential turn is the turn's rows minus the active
+// row. Zero means nothing is hidden and NO control is drawn.
+func runningHiddenCount(run []Message) int { return runningActiveIndex(run) }
+
+// runningFoldLabel is THE one place `bp chat` builds the control's text
+// (Studio's one place is ChatToolRenderer.running_fold_label/1).
+func runningFoldLabel(n int) string { return fmt.Sprintf("+%d previous", n) }
+
+// rowAwaitingResult reports whether this row's tool_result has NOT arrived —
+// the same non-empty `output` envelope fact the settle provenance gate reads.
+func rowAwaitingResult(msg Message) bool {
+	out, _ := msg.Metadata["output"].(string)
+	return out == ""
+}
+
+// renderRunningFoldHeader paints the running turn's ONE control line: a ▸/▾
+// marker and the shared "+N previous" label. The marker differs by state (not
+// only the color) so a NoColor profile still reads open vs closed.
+func renderRunningFoldHeader(width int, label string, expanded bool) []string {
+	marker := "▸"
+	if expanded {
+		marker = "▾"
+	}
+	return []string{dimStyle.Render(truncate(marker+" "+label, bodyWidth(width)))}
 }
 
 // renderToolRow paints one transcript tool row: the settle-gated gutter glyph +
