@@ -9,10 +9,8 @@
 ## Making `pr-task-gate` binding (required-by-name)
 
 **This gate is now BINDING** — `PR references an active task` is one of the four
-required contexts live on `main` (2026-07-28; see *Pre-merge gates* in
-[merge-gates.md](merge-gates.md); it read "two" until 2026-08-07, stale since
-`Cloud gate` and `Console gate` were
-registered, and contradicting that page's own count in the same section). The
+required contexts live on `main` (2026-07-28; the roster and its count are
+[merge-gates.md](merge-gates.md) *Pre-merge gates*). The
 bootstrap below is kept as the account of how a context becomes required, not
 as pending work. A check becomes binding only when added to the
 required-status-checks list **by name**. Required-by-name is load-bearing (D3):
@@ -82,13 +80,11 @@ Two human-provisioned prerequisites, both settled — the flip itself happened
 2026-07-28:
 - **`BARKPARK_TASK_TOKEN`** repo secret — a guerrilla write token, so the
   `hotfix!` lane can auto-file its override task. **PROVISIONED 2026-08-25**
-  (`gh secret list`). This bullet said "It is **not provisioned**, and without
-  it the lane **reds**" until 2026-09-01; with the secret set that is inverted —
-  the label now WAIVES a merge-blocking required context, see the hotfix-lane
-  item under *Pre-merge gates* in [merge-gates.md](merge-gates.md). The token
-  was never a record-keeping nicety —
-  it is what the lane needs to exist at all — so provisioning it armed the
-  bypass, and that is a lead-level merge-authority fact, not a CI detail. Two
+  (`gh secret list`), which ARMED the lane — the label now WAIVES a
+  merge-blocking required context (hotfix-lane item under *Pre-merge gates* in
+  [merge-gates.md](merge-gates.md)). The token is what the lane needs to exist
+  at all, so provisioning it armed the bypass: a lead-level merge-authority
+  fact, not a CI detail. Two
   limits survive: the lane cannot rescue a guerrilla outage (it writes its
   record to guerrilla), and fork PRs receive no secret.
 - Optionally `BARKPARK_LEDGER_BASE` repo **variable** to point the gate at a
@@ -97,10 +93,9 @@ Two human-provisioned prerequisites, both settled — the flip itself happened
 ## Break-glass — the armed override
 
 When a required context must be lowered, the mechanism with an enforced record
-is `scripts/breakglass.sh`, run by a repo admin from a checkout. (This sentence
-read "the mechanism that actually works is **not** the `hotfix!` lane (see
-above: it reds)" until 2026-09-01. The lane has been armed since 2026-08-25 and
-does waive the gate; it is the *unreviewed* override — its record is filed by
+is `scripts/breakglass.sh`, run by a repo admin from a checkout. (The `hotfix!` lane has been armed since
+2026-08-25 and does waive the gate, but it is the *unreviewed* override — its
+record is filed by
 CI onto the very ledger an outage would have taken down. Break-glass refuses
 without `--reason` and `--task` and reads its record back off disk first, which
 is why it stays the one to reach for.)
@@ -120,6 +115,12 @@ apply to non-admins. `.github/workflows/breakglass-watch.yml` polls live
 protection every 30 minutes on `BREAKGLASS_TOKEN` and hard-fails on a credential
 fault, so an unarmed watcher cannot read as "all clear". `scripts/breakglass.sh
 --status` and `scripts/breakglass.test.sh` are the read-only entry points.
+
+**Closing a glass never touches `enforced`** — break-glass moves *live*
+protection only, and `--disable` `exec`s into `--open --total` writing no flag.
+`verify --ci` now reads live protection on `enforced=false` too, so committing
+that flag while `main` is protected **reds the spec gate**: flip it back in the
+PR that restores protection.
 
 ## When to override
 

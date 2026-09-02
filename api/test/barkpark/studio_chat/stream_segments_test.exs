@@ -28,6 +28,10 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
              __DIR__
            )
 
+  # The knee guard's two knobs (see the test for what they measure).
+  @knee_ratio_ceiling 8.0
+  @knee_samples 5
+
   # ── driving a turn ───────────────────────────────────────────────────────
 
   # Split `text` into `chunk`-byte deltas — the shape a provider actually
@@ -620,7 +624,7 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
     end
 
     test "(a) max_stream_display_bytes caps one unbroken block with ZERO segments" do
-      assert StreamSegments.max_stream_display_bytes() == 262_144
+      assert StreamSegments.max_stream_display_bytes() == 131_072
 
       put_bound(:max_stream_display_bytes, 4_096)
       assert StreamSegments.max_stream_display_bytes() == 4_096
@@ -639,6 +643,99 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       assert state.phase == :ended
     end
 
+    # ── (a) is a LATENCY bound: the cap must sit BELOW the converter knee ──
+
+    # `settle/2` parses the whole turn synchronously in ONE Recorder
+    # `handle_info`, and that parse is SUPERLINEAR in block count —
+    # `EarmarkParser.Context._prepend/2` re-`List.flatten`s the accumulated
+    # block list once per top-level block (56% of the profile; still so in
+    # earmark_parser 1.4.46). The cap is therefore the ONLY lever on the
+    # worst-case Recorder stall, and it is only a real lever while it sits on
+    # the NEAR side of the knee.
+    #
+    # This test measures that property at whatever cap is configured rather
+    # than restating a number, so it stays true if the converter is ever fixed
+    # and the cap raised again. It is RATIO-based on purpose: absolute
+    # milliseconds are meaningless on a shared box, but the SHAPE of the curve
+    # survives load — mutation-run under load average 58, this test reads
+    # 3.7x at 131,072 (157.1 ms vs 42.5 ms) and 14.21x at 262,144 (1565.2 ms
+    # vs 110.1 ms), so the 8.0x ceiling has ~2x margin on BOTH sides.
+    test "(a) the cap sits on the NEAR side of the converter's superlinear knee" do
+      cap = StreamSegments.max_stream_display_bytes()
+      quarter = div(cap, 4)
+
+      small = prose_fixture(quarter)
+      large = prose_fixture(cap)
+
+      # min-of-N, not mean: on a shared machine the minimum is the only
+      # estimator a competing build cannot inflate.
+      t_small = min_settle_ms(small)
+      t_large = min_settle_ms(large)
+
+      ratio = t_large / t_small
+
+      assert ratio <= @knee_ratio_ceiling, """
+      settle/2 is past the converter knee at the configured byte cap.
+
+        cap              #{cap} B
+        #{quarter} B    #{Float.round(t_small, 1)} ms
+        #{cap} B    #{Float.round(t_large, 1)} ms
+        ratio            #{Float.round(ratio, 2)}x for 4x the input
+        ceiling          #{@knee_ratio_ceiling}x (perfectly linear would be 4.0x)
+
+      The whole-turn parse runs inside ONE Recorder handle_info, so this ratio
+      IS the worst-case head-of-line stall for every frame consumer on the
+      topic. Either lower :max_stream_display_bytes back under the knee, or
+      remove the quadratic in the converter path and re-measure the knee.
+      """
+    end
+
+    # A deterministic realistic-prose fixture: headings, paragraphs, a list and
+    # a fenced block, i.e. the block MIX that drives the converter's cost, cut
+    # to exactly `bytes`.
+    defp prose_fixture(bytes) do
+      unit = """
+      ## Section heading
+
+      This paragraph is ordinary assistant prose with some **bold** text and a
+      bit of `inline code`, plus a [link](https://example.com/path) to round it
+      out. It runs a few lines so the line count tracks the byte count the way
+      a real reply does.
+
+      - a first list item
+      - a second list item with `code`
+      - a third one
+
+      ```elixir
+      def hello(name) do
+        IO.puts("hi " <> name)
+      end
+      ```
+
+      Another closing paragraph of plain prose to separate the units.
+
+      """
+
+      unit
+      |> List.duplicate(div(bytes, byte_size(unit)) + 1)
+      |> Enum.join()
+      |> binary_part(0, bytes)
+    end
+
+    defp min_settle_ms(text) do
+      settle = fn -> StreamSegments.settle(StreamSegments.new(1), text) end
+      # Warm the code paths and the atom/regex caches before timing anything.
+      settle.()
+
+      1..@knee_samples
+      |> Enum.map(fn _ ->
+        :erlang.garbage_collect()
+        {us, _} = :timer.tc(settle)
+        us / 1000
+      end)
+      |> Enum.min()
+    end
+
     test "(a) the capped state RELEASES the bytes it was holding" do
       put_bound(:max_stream_display_bytes, 4_096)
       {state, _frames} = drive(String.duplicate("para\n\n", 2_000), chunk: 512)
@@ -647,6 +744,27 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       # A memory policy that keeps the memory is not a policy.
       assert byte_size(state.tail.text) == 0
       assert state.blocks == []
+    end
+
+    test "(a) settle/2 refuses an over-cap durable text instead of parsing it" do
+      put_bound(:max_stream_display_bytes, 4_096)
+
+      # `advance/3` checks the cap against the ACCUMULATED DELTAS, so a durable
+      # text larger than what was streamed reaches the parse unchecked. Today
+      # the two agree in both lanes; the point of the arm is that the LATENCY
+      # bound holds even when they stop agreeing, because the parse is the
+      # expensive half and it runs inside one Recorder handle_info.
+      {state, frames} = drive("short\n\nturn\n\n", chunk: 4)
+      assert reasons(frames) == []
+      assert state.phase == :live
+
+      {state, settled} = StreamSegments.settle(state, String.duplicate("para\n\n", 2_000))
+
+      assert reasons(settled) == ["capped"]
+      assert state.phase == :ended
+      # `capped` FREEZES (D64) — it never degrades, so the client keeps the
+      # segments it already rendered instead of dropping them.
+      assert state.reason == "capped"
     end
 
     test "(b) min_segment_interval_ms coalesces a burst without losing bytes" do

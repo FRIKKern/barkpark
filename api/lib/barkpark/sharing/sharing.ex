@@ -243,6 +243,23 @@ defmodule Barkpark.Sharing do
 
   This only removes STORED shares — a share declared via `BARKPARK_SHARES`
   (the env baseline) is not in the table and is unaffected.
+
+  THE KILL SWITCH KILLS THREE THINGS, and the returned count names only the
+  first. Beyond deleting the row it hard-revokes, unconditionally and whether or
+  not a row was there to delete:
+
+    * every live scoped-share EDIT TOKEN under the scope
+      (`Barkpark.Auth.revoke_share_tokens/3`), and
+    * every live ITEM SHARE LINK under the scope
+      (`Barkpark.Sharing.Links.revoke_scope/3`) — the `/s/<token>` URLs, which
+      are stable and re-copyable and may already be pasted somewhere.
+
+  The item-link cascade is RULED behaviour (lead-security-r, 2026-09-02), not an
+  accident: an operator who removes a share believes access is withdrawn, and
+  item links derive their authority from the share they were minted under, so
+  they fall with it. Before it, `/s/<token>` kept serving after the share was
+  gone — a leak the operator could not see. Sibling scopes are untouched: the
+  cascade matches the `(workspace, project, dataset)` triple exactly.
   """
   @spec remove_share(binary(), binary(), binary()) :: {:ok, non_neg_integer()}
   def remove_share(ws_slug, proj_slug, dataset)
@@ -260,6 +277,14 @@ defmodule Barkpark.Sharing do
     # RequireShareEditToken's access_for re-check; this also kills them on full
     # removal so a re-added :read share can never resurrect a stale edit token.)
     Barkpark.Auth.revoke_share_tokens(ws_slug, proj_slug, dataset)
+
+    # THE CASCADE (arpss-w8, RULED CASCADE): the same removal kills the ITEM
+    # `/s/<token>` links minted under this scope. Unconditional, exactly like
+    # the token revoke above and for the same reason — a share can be removed
+    # with `count == 0` (an env-baseline or already-deleted row) while live
+    # links still hang off the scope, so gating the cascade on `count` would
+    # reintroduce the hole on the path that most looks like a no-op.
+    Barkpark.Sharing.Links.revoke_scope(ws_slug, proj_slug, dataset)
 
     refresh()
     {:ok, count}

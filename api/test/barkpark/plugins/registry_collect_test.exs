@@ -98,6 +98,34 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
     end
   end
 
+  # ─── Capture-term restore ───────────────────────────────────────────────
+  #
+  # The fake plugins above stash their "I ran" flags and the seeder-ordering
+  # probe in `:persistent_term`, which is global AND UNOWNED — nothing tears it
+  # down between modules, and `RegistryCase` restores only its own snapshot key.
+  # Each test `erase`s its key BEFORE reading it, which protects that test and
+  # protects nobody else: the term outlives the module. Capture the prior value
+  # and put it back — erasing when there was none, so an absent key stays absent.
+
+  setup do
+    keys = [
+      {FakeCodelistPlugin, :seeded},
+      {FakeRaisingCodelistPlugin, :seeded_after_boom},
+      {__MODULE__, :seed_order}
+    ]
+
+    prior = Enum.map(keys, &{&1, :persistent_term.get(&1, :__absent__)})
+
+    on_exit(fn ->
+      Enum.each(prior, fn
+        {key, :__absent__} -> :persistent_term.erase(key)
+        {key, value} -> :persistent_term.put(key, value)
+      end)
+    end)
+
+    :ok
+  end
+
   # ─── collect_action_handlers/0 ──────────────────────────────────────────
 
   describe "collect_action_handlers/0" do

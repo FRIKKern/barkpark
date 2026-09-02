@@ -1592,7 +1592,13 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       ls = conn |> bearer(admin) |> get("/v1/auth/app-tokens")
       assert ls.status == 200
-      assert %{"tokens" => _, "label_redacted" => true} = json_response(ls, 200)
+
+      # `label_redacted` was `true` here until `task-aa07355fa8a53355` scoped
+      # the sweep to the bearer's admin workspaces; with the rows confined
+      # there is nothing left to withhold, so the flag is a kept-for-wire,
+      # always-`false` envelope field. The key's PRESENCE is the contract this
+      # manifest test cares about.
+      assert %{"tokens" => _, "label_redacted" => false} = json_response(ls, 200)
 
       # Self-revoke: the MINTED token is its own bearer — no admin permission
       # anywhere in this call.

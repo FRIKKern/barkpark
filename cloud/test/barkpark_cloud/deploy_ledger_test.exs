@@ -77,7 +77,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   # two templates fail DIFFERENTLY on the same read:
   #
   #   HEALTH — Next's `fetchCorpusGraph` DEGRADES and records the cause in the
-  #   `bp-corpus-status` marker; `deploy/site-deploy-node.sh:492` reads it back.
+  #   `bp-corpus-status` marker; `deploy/site-deploy-node.sh` `health_gate_node()` reads it back.
   #   BUILD  — Astro's `graphCorpus` THROWS (`src/lib/bp.ts:94`), so the same
   #   sentence arrives inside an ANSI-escaped Astro stack trace at exit 12.
   #
@@ -801,7 +801,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
 
     test "both anchors are the PRODUCERS' own bytes, read from the producers" do
-      # `deploy/site-deploy-node.sh:492` writes the HEALTH sentence. Reword it and
+      # `deploy/site-deploy-node.sh` `health_gate_node()` writes the HEALTH sentence. Reword it and
       # this reds instead of every HEALTH row silently degrading.
       health = File.read!(@health_producer)
 

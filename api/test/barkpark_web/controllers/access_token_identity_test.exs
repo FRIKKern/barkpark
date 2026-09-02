@@ -470,25 +470,36 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
     end
   end
 
-  describe "case 12 — permissions are DERIVED from the caller's real role (Option A)" do
-    test "an owner self-mints up to [\"read\", \"write\", \"admin\"]" do
+  describe "case 12 — permissions are DERIVED from the caller's real role, and CAPPED at write (ruling 2026-09-02)" do
+    test "an owner self-mints up to [\"read\", \"write\"] — never the flat admin bit (RequireAdmin is workspace-blind, ruling 2026-09-02)" do
       ws = create_workspace!()
       user = register_user(uniq_email("owner-mint"))
       {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "owner", "user")
 
       {_raw, pat} = self_mint(user)
 
-      assert Enum.sort(pat["permissions"]) == ["admin", "read", "write"]
+      # INVERTED 2026-09-02. This used to assert ["admin", "read", "write"],
+      # ratified as Option A on 2026-08-24. That was a live escalation: the
+      # `"admin"` permission is the FLAT instance-wide bit
+      # `BarkparkWeb.Plugs.RequireAdmin` reads with no workspace in the check,
+      # so an owner of ANY workspace (including one they just created) walked
+      # out of this route holding the instance — `GET /v1/secrets/:name` in
+      # cleartext included. Workspace-admin authority stays on the MEMBERSHIP
+      # role (`Tenancy.Auth.workspace_admin?/2`), not on a token permission.
+      assert Enum.sort(pat["permissions"]) == ["read", "write"]
+      refute "admin" in pat["permissions"]
     end
 
-    test "an admin self-mints up to [\"read\", \"write\", \"admin\"]" do
+    test "an admin self-mints up to [\"read\", \"write\"] — never the flat admin bit (RequireAdmin is workspace-blind, ruling 2026-09-02)" do
       ws = create_workspace!()
       user = register_user(uniq_email("admin-mint"))
       {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "admin", "user")
 
       {_raw, pat} = self_mint(user)
 
-      assert Enum.sort(pat["permissions"]) == ["admin", "read", "write"]
+      # INVERTED 2026-09-02 — same ruling, same reason as the owner twin above.
+      assert Enum.sort(pat["permissions"]) == ["read", "write"]
+      refute "admin" in pat["permissions"]
     end
 
     test "a member still gets [\"read\"] only — @pat_allowed_member_permissions is not widened" do

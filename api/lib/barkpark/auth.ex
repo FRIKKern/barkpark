@@ -336,10 +336,10 @@ defmodule Barkpark.Auth do
   end
 
   @doc """
-  Every app token (`kind == "api"`), newest first, for the admin enumerate
-  route. Optionally narrowed to one `email` by the SAME label convention the
-  mint uses — and WHEN so narrowed, confined to the workspaces `actor`
-  administers (see below; the unfiltered sweep is deliberately unchanged).
+  Every app token (`kind == "api"`) IN THE WORKSPACES `actor` ADMINISTERS,
+  newest first, for the admin enumerate route. Optionally narrowed further to
+  one `email` by the SAME label convention the mint uses. The workspace
+  confinement is UNCONDITIONAL — it is not a property of the `:email` arm.
 
   ## Why enumeration had to exist (jf-backlog-apptoken-revoke-upstream)
 
@@ -383,32 +383,41 @@ defmodule Barkpark.Auth do
   again, and a NULL `workspace_id` row is administrable by nobody and absent
   (fail-closed, exactly as the write arms document).
 
-  ## THE SCOPE IS THE `?email=` ARM ONLY, AND THAT IS THE PRINCIPLE, NOT
-  CONVENIENCE
+  ## THE SCOPE IS BOTH ARMS NOW — THE RULING (task-aa07355fa8a53355)
 
-  The unfiltered sweep is left exactly as it was, label redaction and all.
-  What makes the filtered arm the defect is that IT CONFIRMS A SPECIFIC
-  ADDRESS: the caller supplies a candidate and the answer says yes or no. An
-  unfiltered sweep cannot probe an address — it returns whatever is there,
-  with labels withheld — so it is a different question, and the question of
-  who should see an instance-wide inventory is a genuine policy one with an
-  argument on each side. It is open as `task-aa07355fa8a53355`, it belongs to
-  that row's owner, and NOTHING here closes it: option 2 ("keep it
-  instance-wide, keep the redaction") remains available.
+  This section used to read "THE SCOPE IS THE `?email=` ARM ONLY", and said
+  "the unfiltered sweep is left exactly as it was, label redaction and all",
+  because the question of who may see an instance-wide inventory was open. It
+  was decided, verbatim:
 
-  This narrowness matters for a concrete reason rather than a tidy one. The
-  GATE on this route is `has_permission?(token, "admin")` — the same
-  permission-only test `BarkparkWeb.Plugs.RequireAdmin` applies, a flat read of
-  the token's global `permissions[]` with NO membership requirement at all.
-  `workspace_admin?/2` is membership-and-role. So an `admin`-permissioned token
-  holding zero memberships passes the gate, reaches this function, and is
-  administrator of nothing.
+  > orchestrator, delegated; owner informed 2026-09-01 — RULED option 1: GET
+  > /v1/auth/app-tokens is scoped to the bearer's ADMIN workspaces
+  > (Tenancy.Auth.workspace_admin?/2, the same predicate both revoke arms use)
+  > with labels UN-REDACTED there; an instance-wide view belongs to the
+  > operator tier only, not to any `admin` permission bit.
 
-  On the `?email=` arm that is exactly right, and it is already the ratified
-  posture of the write twin: `revoke_app_tokens_for_email/2` hands such a
-  caller `revoked_count: 0`. On the SWEEP it would silently empty that
-  operator's instance inventory — a live question, not an obvious win, and not
-  one to settle inside a fix chartered against something else.
+  So the filter moved OUT of the `by_email?` branch and now runs on every
+  return path. The two arms differ in WHAT they select, never in WHO may see
+  it — which is the property that let the old split rot: a reader had to hold
+  both branches in mind to know whether the caller was confined.
+
+  This is not a tightening of the `?email=` arm's justification, it is the
+  removal of an exception. The GATE on this route is
+  `has_permission?(token, "admin")` — the same permission-only test
+  `BarkparkWeb.Plugs.RequireAdmin` applies, a flat read of the token's global
+  `permissions[]` with NO membership requirement at all. `workspace_admin?/2`
+  is membership-and-role. So an `admin`-permissioned token holding zero
+  memberships passes the gate, reaches this function, and is administrator of
+  nothing: it now gets `[]` on BOTH arms, matching the write twin, which hands
+  such a caller `revoked_count: 0`.
+
+  The cost the ruling accepted, stated plainly: an operator whose admin token
+  is seated in one workspace can no longer inventory the whole instance from
+  this route. That reach was never earned by the `admin` permission bit — it
+  was an artifact of a selector that read no workspace. An instance-wide view
+  is an OPERATOR-tier question, and this module has no operator predicate to
+  gate one with (see `BarkparkWeb.AppTokenController.index/2`, which names the
+  row that would have to build it).
 
   (Do not restate this as a bypass in `Tenancy.Auth.authorize/3`. `authorize/3`
   IS membership-gated — `member?/2 and permits?/2`. Its documented, load-bearing
@@ -443,34 +452,32 @@ defmodule Barkpark.Auth do
       ApiToken
       |> where([t], t.kind == "api")
 
-    # `by_email?` is BOTH the filter and the scope trigger, derived once, so the
-    # two can never be spelled inconsistently by a later edit.
-    {query, by_email?} =
+    # `:email` is a FILTER and nothing more. It used to double as the scope
+    # trigger — a `by_email?` boolean that decided both what was selected and
+    # whether the caller was confined — and that coupling was the defect
+    # `task-aa07355fa8a53355` closed: the unfiltered branch fell through
+    # unscoped. There is now ONE return path and it is filtered on it, so no
+    # later edit can add a third arm that forgets.
+    query =
       case Keyword.get(opts, :email) do
         email when is_binary(email) and email != "" ->
-          {where(query, [t], t.label == ^("app:" <> email)), true}
+          where(query, [t], t.label == ^("app:" <> email))
 
         _ ->
-          {query, false}
+          query
       end
 
-    rows =
-      query
-      |> order_by([t], desc: t.inserted_at)
-      |> Repo.all()
-
-    if by_email? do
-      # Post-`Repo.all` filtering, matching `revoke_app_tokens_for_email/2`
-      # exactly so the twin selectors read the same. IF A LIMIT IS EVER ADDED,
-      # IT MUST NOT GO IN THE QUERY ABOVE: the database would take 50 rows
-      # instance-wide and this filter would then hand back the 3 of them the
-      # caller administers, so a full page of the caller's own tokens would look
-      # like a near-empty account. A paginator has to push the workspace set
-      # into the WHERE clause first, which also removes this hop.
-      Enum.filter(rows, &administrable_by?(&1, actor))
-    else
-      rows
-    end
+    query
+    |> order_by([t], desc: t.inserted_at)
+    |> Repo.all()
+    # Post-`Repo.all` filtering, matching `revoke_app_tokens_for_email/2`
+    # exactly so the twin selectors read the same. IF A LIMIT IS EVER ADDED,
+    # IT MUST NOT GO IN THE QUERY ABOVE: the database would take 50 rows
+    # instance-wide and this filter would then hand back the 3 of them the
+    # caller administers, so a full page of the caller's own tokens would look
+    # like a near-empty account. A paginator has to push the workspace set
+    # into the WHERE clause first, which also removes this hop.
+    |> Enum.filter(&administrable_by?(&1, actor))
   end
 
   @doc """
@@ -710,20 +717,48 @@ defmodule Barkpark.Auth do
   @pat_max_ttl 365 * 24 * 3600
   @pat_token_prefix "bppat_"
 
-  # Roles that may mint write/admin tokens. A `member` may only mint a read
-  # token (Coolify's ApiTokenPolicy: only admin/owner mint elevated tokens —
-  # app/Policies/ApiTokenPolicy.php).
+  # Roles that may mint an ELEVATED (write-tier) token. A `member` may only
+  # mint a read token (Coolify's ApiTokenPolicy: only admin/owner mint elevated
+  # tokens — app/Policies/ApiTokenPolicy.php).
+  #
+  # THE CEILING IS `write`, NEVER `admin` (ruling 2026-09-02; orchestrator
+  # ruling A, delegated, owner informed 2026-09-01). WHY: a token's `"admin"`
+  # permission is the FLAT, INSTANCE-WIDE bit `BarkparkWeb.Plugs.RequireAdmin`
+  # reads — `Auth.has_permission?(token, "admin")`, with no workspace anywhere
+  # in the check. It is not, and never was, a workspace-role artefact. Deriving
+  # it from a workspace role (which the HTTP self-mint began doing in #14245)
+  # handed it to whoever happened to be `owner` of SOME workspace — and a
+  # workspace creator is always the owner of the one they just created. Such a
+  # token cleared every `[:api, :require_admin]` route on the INSTANCE: run
+  # secrets in cleartext (`GET /v1/secrets/:name`), `POST /v1/admin/self-update`,
+  # `/v1/admin/rollback`, secrets write/delete, `/v1/plugins/settings` CRUD,
+  # `POST /v1/shares`, bundle import.
+  #
+  # Workspace-scoped administrative authority lives on the MEMBERSHIP ROLE and
+  # is read by `Tenancy.Auth.workspace_admin?/2` — that axis is untouched by
+  # this cap, and so is `RequireAdmin`, which stays the flat instance tier by
+  # design (docs/auth.md, "Hierarchy — permission ⟂ membership"). The cap is at
+  # MINT, not at CHECK: pre-existing `["read", "write", "admin"]` rows (the
+  # instance operator's own credential, the `demo` seed's dev token) keep
+  # working untouched — no migration, no revoke, no backfill.
   @pat_admin_roles ~w(owner admin)
   @pat_allowed_member_permissions ~w(read)
-  @pat_allowed_admin_permissions ~w(read write admin)
+  @pat_allowed_elevated_permissions ~w(read write)
 
   @doc """
   Mint a self-service Personal Access Token, ROLE-GATED on the minting admin's
   workspace role. The `:role` opt is the minter's workspace role (the Studio
   pane passes the current admin's role); a `member` may mint only `["read"]`,
-  an `owner`/`admin` may mint up to `["read", "write", "admin"]`. A request to
-  mint above the role returns `{:error, :forbidden}` (the server is the
-  authority — never trust a client-supplied permission set).
+  an `owner`/`admin` may mint up to `["read", "write"]` — never `"admin"`. A
+  request to mint above the role returns `{:error, :forbidden}` (the server is
+  the authority — never trust a client-supplied permission set).
+
+  `"admin"` is UNMINTABLE here at every role (ruling 2026-09-02): it is the
+  flat, instance-wide permission `BarkparkWeb.Plugs.RequireAdmin` reads with no
+  workspace in the check, so it can never be legitimately derived from a
+  workspace membership role. `create_personal_access_token(_, ["admin"],
+  role: "owner")` is `{:error, :forbidden}`. See
+  `@pat_allowed_elevated_permissions` for the full rationale.
 
   Unlike `create_token/5`, this sets `name` (user-facing) + `created_by` (audit)
   + a bounded `expires_at`, and prefixes the raw token with `#{@pat_token_prefix}`
@@ -836,22 +871,33 @@ defmodule Barkpark.Auth do
   gates on, exposed so a caller (the session-gated self-mint) can DERIVE the
   permission set from the caller's REAL workspace role instead of a hardcoded
   literal, without duplicating the role/permission mapping. `owner`/`admin`
-  get `#{inspect(@pat_allowed_admin_permissions)}`; every other role
+  get `#{inspect(@pat_allowed_elevated_permissions)}`; every other role
   (including `nil` — no membership resolved) gets
   `#{inspect(@pat_allowed_member_permissions)}`, mirroring
   `@pat_allowed_member_permissions`'s deliberate member cap.
+
+  NO ROLE REACHES `"admin"` (ruling 2026-09-02). A workspace role is a
+  WORKSPACE fact; the `"admin"` permission is the INSTANCE-wide bit
+  `RequireAdmin` reads workspace-blind. Mapping one onto the other is the
+  escalation this cap closes — an owner of any workspace, including one they
+  created a second ago, otherwise walked out of this function holding the
+  instance. Workspace-admin authority is `Tenancy.Auth.workspace_admin?/2`
+  (the membership role), not a token permission.
   """
   @spec max_pat_permissions_for_role(String.t() | nil) :: [String.t()]
   def max_pat_permissions_for_role(role) when role in @pat_admin_roles,
-    do: @pat_allowed_admin_permissions
+    do: @pat_allowed_elevated_permissions
 
   def max_pat_permissions_for_role(_role), do: @pat_allowed_member_permissions
 
-  # Gate the requested permission set against the minter's workspace role.
+  # Gate the requested permission set against the minter's workspace role. The
+  # elevated set tops out at `write`, so an explicitly-requested `["admin"]` is
+  # `{:error, :forbidden}` at EVERY role — this is the same allowed set
+  # `max_pat_permissions_for_role/1` publishes, never a second opinion.
   defp authorize_pat_permissions(role, permissions) do
     allowed =
       if role in @pat_admin_roles,
-        do: @pat_allowed_admin_permissions,
+        do: @pat_allowed_elevated_permissions,
         else: @pat_allowed_member_permissions
 
     if Enum.all?(permissions, &(&1 in allowed)) and permissions != [] do

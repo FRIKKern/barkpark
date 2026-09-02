@@ -521,6 +521,17 @@ const SITE_PHONE_SCENS = ["rollback", "site-states", "site-binding-bound"];
 // pin the upper edge as measured rather than as filed (cch-w14-bl said 769-820;
 // 820 and 830 both read 168/168).
 const CHIP_WIDTHS = [721, 725, 730, 735, 740, 741, 750, 768, 769, 775, 780, 785, 800, 805, 810, 820, 830];
+// THIS SET FLOORS AT 721 ON PURPOSE, AND THAT IS NOT A HOLE. Read alone the
+// floor looks like one — cch-w22-bl-chip-guard-blind-below-721 was filed on
+// exactly that reading ("a regression that re-truncates the trial chip at 320
+// would be caught by no committed job"), measured against a tree where it was
+// true. It is not true today: the SAME assertion (`#billing-chip` scrollWidth
+// <= clientWidth, strict, both themes, both past-due scenarios) runs below 721
+// over PHONE_WIDTHS in the W20-phone-band-billing-chip leg, which floors at 320
+// and guards app.css's `@media (max-width: 620px)` topbar wrap. Two sets, one
+// assertion, disjoint bands — 320-620 phone, 721-830 tablet. Re-derive with
+// `grep -n 'W20-phone-band-billing-chip' cloud/priv/static/__preview__/overflow-guard.mjs`.
+// Widening THIS set downward would duplicate that leg, not extend coverage.
 // THE NAMED RESIDUAL IS GONE (W20-S8). 721-740 used to be exempted here by a
 // declared, capped and attributed 9px tolerance (a three-constant band pinned to
 // `cch-w17-bl-band-a-shell-fold-cliff`) on the FLEET_ROW_RESIDUAL precedent. It
@@ -1167,11 +1178,24 @@ async function main() {
     //    PAINT: a display:none'd chip reads 0/0 and would sail through the
     //    scroll assertion — hidden is not whole, so a 0px rect is a finding,
     //    not a skip.
+    //
+    //    THE COUNT IS PRINTED, NOT IMPLIED (cch-w22-bl-chip-guard-blind-below-721,
+    //    criterion 3). The ✓ line below used to read "chip whole at all 10 phone
+    //    widths 320-620" off `cut === 0` alone — and `cut` is only incremented on
+    //    cells the read actually REACHED. A row whose chip went MISSING at nine of
+    //    ten widths therefore printed that full-band sentence beside its own nine
+    //    ✗ lines: the same "green sentence next to its own failures" shape the
+    //    GR108 leg above was corrected for. The claim is now gated on
+    //    rowMeasured === PHONE_WIDTHS.length, a partial row prints a `!` naming
+    //    what it could NOT reach, and the leg closes with an unconditional
+    //    MEASURED n of N line so a reader never has to infer the denominator.
     if (requested.includes("W20-phone-band-billing-chip")) {
       const D = "W20-phone-band-billing-chip";
-      process.stdout.write(`\n${D} — ${PHONE_WIDTHS.length} phone widths x 2 themes x 2 past-due scenarios\n`);
+      const PHONE_SCENS = ["billing-past-due", "overview-past-due"];
+      const phoneCells = PHONE_SCENS.length * 2 * PHONE_WIDTHS.length;
+      process.stdout.write(`\n${D} — ${PHONE_WIDTHS.length} phone widths x 2 themes x ${PHONE_SCENS.length} past-due scenarios = ${phoneCells} cells\n`);
       let measured = 0;
-      for (const scen of ["billing-past-due", "overview-past-due"]) {
+      for (const scen of PHONE_SCENS) {
         for (const theme of ["light", "dark"]) {
           await setViewport(390);
           await nav(
@@ -1179,7 +1203,7 @@ async function main() {
             `document.querySelector('.topbar') && (function(){var c=document.getElementById('billing-chip');return c && !c.hidden;})()`,
           );
           const row = [];
-          let cut = 0;
+          let cut = 0, rowMeasured = 0;
           for (const width of PHONE_WIDTHS) {
             await setViewport(width);
             const chip = await evalJs(
@@ -1190,14 +1214,32 @@ async function main() {
             if (!chip) { fail(D, `${scen}/${theme}@${width}: #billing-chip MISSING — the readiness gate saw it and this read did not`); row.push(`${width}:missing`); continue; }
             if (chip.w <= 0) { fail(D, `${scen}/${theme}@${width}: #billing-chip paints a ${chip.w}px rect — hidden is not whole ("${chip.text}")`); row.push(`${width}:0px`); continue; }
             measured++;
+            rowMeasured++;
             const over = chip.sw > chip.cw;
             if (over) { cut++; fail(D, `${scen}/${theme}@${width}: #billing-chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} ("${chip.text}")`); }
             row.push(`${width}:${chip.sw}/${chip.cw}${over ? "!" : ""}`);
           }
           process.stdout.write(`   chip ${scen}/${theme}  ${row.join(" ")}\n`);
-          if (!cut) okLine(`${scen}/${theme}: chip whole at all ${PHONE_WIDTHS.length} phone widths ${PHONE_WIDTHS[0]}-${PHONE_WIDTHS[PHONE_WIDTHS.length - 1]}`);
+          if (!cut && rowMeasured === PHONE_WIDTHS.length) {
+            okLine(`${scen}/${theme}: chip whole at all ${PHONE_WIDTHS.length} phone widths ${PHONE_WIDTHS[0]}-${PHONE_WIDTHS[PHONE_WIDTHS.length - 1]} (${rowMeasured}/${PHONE_WIDTHS.length} cells MEASURED)`);
+          } else if (!cut) {
+            // Not a ✓: nothing was cut among the cells this row could READ, but
+            // the rest are ✗ above and the band is uncertified for them.
+            process.stdout.write(
+              `   ! ${scen}/${theme}: no cut among the ${rowMeasured} of ${PHONE_WIDTHS.length} widths this row could MEASURE — ` +
+              `the remaining ${PHONE_WIDTHS.length - rowMeasured} are ✗ above and this band is NOT certified\n`,
+            );
+          }
         }
       }
+      // The denominator, printed and not inferred. A leg whose population
+      // shrank to a handful of cells reads as a pass on the ✓ lines alone;
+      // this line is where that shows.
+      process.stdout.write(
+        `   MEASURED ${measured} of ${phoneCells} #billing-chip cells ` +
+        `(${PHONE_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes) — ` +
+        `the ✓ lines above are claims about THESE cells and no others\n`,
+      );
       // A leg that measured nothing certifies nothing — zero cells is a RED,
       // never a tick (the filing criterion's own wording: "FAILS on a zero
       // measured count"). The MISSING/0px arms above fail per-cell; this arm

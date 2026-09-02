@@ -55,9 +55,16 @@ jobs:
       # matches nothing prints "# tests 0" and exits 0, so this job would go
       # green having proven nothing at all. The floor reds on a zero-match
       # pattern, on a file that registers no tests, and prints the test count.
+      #
+      # `--floor 5` IS THE POINT OF THE LITERAL. Every other assertion the
+      # runner makes is derived from this same glob, so deleting 4 of the 5
+      # spec files shrinks the expectation along with the tree and the job
+      # stays green. Five is a committed number: it cannot shrink unless a
+      # human edits this line, which is what makes a partial deletion visible.
+      # Adding a spec reds this with `raise the floor to 6` -- bump it here.
       - name: Run the finder contract tests
         working-directory: templates/astro-search-starter
-        run: node ../../scripts/node-test-floor.mjs 'src/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 5 'src/**/*.test.ts'
 
   token-guard:
     name: Browser-token build guard (both editions)
@@ -72,6 +79,14 @@ jobs:
       # without astro's node_modules) and next.config.mjs (imported for real and
       # its async config factory invoked). Dep-free: no npm ci, fetch is stubbed.
       # Removing either guard reds this job.
+      #
+      # `--floor 1` on an EXPLICIT path is deliberately weak in the downward
+      # direction -- a named path that disappears already reds on its own (the
+      # runner's defect-2 clause), so the below-branch here is unreachable
+      # today. It is committed for the upward one: the day this argument
+      # becomes a glob, or a second guard file joins it, the floor says
+      # `raise the floor to 2` instead of silently widening what this job
+      # certifies.
       - name: Run the token-guard contract tests
         working-directory: templates/search-starter
-        run: node ../../scripts/node-test-floor.mjs token-guard.test.mjs
+        run: node ../../scripts/node-test-floor.mjs --floor 1 token-guard.test.mjs

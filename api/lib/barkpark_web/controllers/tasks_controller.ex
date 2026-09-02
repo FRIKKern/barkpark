@@ -907,8 +907,13 @@ defmodule BarkparkWeb.TasksController do
   # Criterion-level mid-claim evidence (expressive-agent-loops D3/D6/D7/D8).
   # Body/query (the bp CLI rides flags as query params): worker_id +
   # observed_epoch (positional in bp), criterion=<index>, then EXACTLY one of
-  #   met=true  + evidence=<non-empty>   → flip the lock, evidence or nothing
-  #   miss=true + note=<non-empty>       → honest attempt, met never flips
+  #   met=true      + evidence=<non-empty> → flip the lock, evidence or nothing
+  #   miss=true     + note=<non-empty>     → honest attempt, met never flips
+  #   withdraw=true + note=<non-empty>     → LOWER the lock (D745): met→false,
+  #                                          evidence preserved, a signed
+  #                                          withdrawals[] record appended. On a
+  #                                          row with no claim it also needs
+  #                                          observed_rev=<the rev you read>.
   # doc_id resolves via find_task_by_doc_id (close's pattern) and the
   # primitive locks task:<uuid> — the close family, serialized with close over
   # the same criteria. Progress is advisory: the response is the fresh doc
@@ -922,6 +927,7 @@ defmodule BarkparkWeb.TasksController do
         [observed_epoch: observed_epoch, criterion: index, outcome: outcome]
         |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:merge_gated, Params.stamp_merge_gated(params))
+        |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stamp(task.id, worker_id, opts) do
