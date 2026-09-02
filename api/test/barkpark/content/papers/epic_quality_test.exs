@@ -39,6 +39,38 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
     assert :ok = EpicQuality.validate(%{"tags" => [], "blocks" => []})
   end
 
+  # The body_html-only wave Paper is the shape 31 published papers on guerrilla
+  # still carry (created 2026-07-03..2026-08-09): a real body_html blob, real
+  # prose, and NO "blocks" key at all. It renders 200 through the legacy
+  # HTML-only leg in block_ops.ex (is_binary(attrs["body_html"])), so nothing
+  # downstream ever complains -- the ONLY thing that refuses it is the
+  # :blocks_not_array arm in failures/1, and until now nothing pinned that arm.
+  # The producer was the epic-cycle prompt (fixed in a64f036e3d / #11079, which
+  # made PAPER_BLOCK mandate a top-level blocks array); this is the server-side
+  # half, which a future prompt edit cannot un-read.
+  test "a body_html-only wave Paper is refused - blocks_not_array is the arm the corpus needed" do
+    content = %{
+      "tags" => [@epic_tag],
+      "body_html" =>
+        "<h1>The crown is hollow</h1><p>Wave 27 of the deploy-reliability epic.</p>"
+    }
+
+    refute Map.has_key?(content, "blocks")
+
+    assert {:error, {:invalid_epic_paper_quality, details}} = EpicQuality.validate(content)
+
+    assert "blocks_not_array" in details["failures"]
+
+    assert details["failures"] == [
+             "blocks_not_array",
+             "hollow",
+             "opening_missing_h1",
+             "opening_missing_ingress",
+             "opening_missing_orientation",
+             "outline_requires_one_h1"
+           ]
+  end
+
   test "the reference-shaped opening passes without rewarding ornament or volume" do
     assert :ok = EpicQuality.validate(valid_content())
   end

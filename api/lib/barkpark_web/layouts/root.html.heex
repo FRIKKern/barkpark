@@ -91,10 +91,26 @@
     /* ── Source Serif 4 — self-hosted variable woff2 (Roman + Italic in
        priv/static/fonts/, served at /fonts/ by Plug.Static; "fonts" is in
        static_paths). Two files carry the full wght 200–900 axis (was four
-       static TTFs @ 400/700 — unified-aesthetic S9). The Beta editor "paper"
-       surface uses this as its body face; `font-display: swap` accepts a
-       brief Georgia FOUT on cold cache. Source Serif 4, SIL OFL 1.1 — see
-       fonts/SourceSerif4-OFL.txt. */
+       static TTFs @ 400/700 — unified-aesthetic S9).
+
+       It is NOT the paper surface's body face. It sits LAST-but-`serif` in
+       `font.reading.stack`, so the winner is a PLATFORM fact (charter D145),
+       measured 1ch at 18px in Chrome:
+
+         macOS                        Iowan Old Style     10.0078 px/ch
+         Windows                      Palatino Linotype   UNMEASURED (D145)
+         Linux, stock                 Source Serif 4       9.1797 px/ch
+         Linux + ttf-mscorefonts      Georgia             11.0469 px/ch
+
+       So this face wins only where the OS supplies none of the four above it.
+       A browser downloads a webfont only when it actually wins, so on macOS
+       these two woff2 files are never fetched and `document.fonts.check('18px
+       "Source Serif 4"')` reads false — correct behaviour, not a broken
+       descriptor. Verified on the deployed reader 2026-09-02: with the stack
+       head absent the Roman woff2 loads on the natural render path and the
+       prose measures 9.1797 (task-a2f3b567899e9851). `font-display: swap`
+       accepts a brief fallback FOUT on cold cache where it does win.
+       Source Serif 4, SIL OFL 1.1 — see fonts/SourceSerif4-OFL.txt. */
     @font-face {
       font-family: 'Source Serif 4';
       src: url('/fonts/SourceSerif4Variable-Roman.woff2') format('woff2');
@@ -6271,6 +6287,12 @@
         globals exist before the Hooks registration + LiveSocket connect below
         — and here at the BOTTOM of <body>, never in <head>. --%>
   <script src="/assets/bp-chat-turn-clock.js"></script>
+  <%!-- The Studio Claude chat's keyboard navigation: Cmd/Ctrl+1..9 jumps to the
+        Nth sidebar session and Cmd/Ctrl+K opens the session palette, both
+        landing on the SAME push_patch the sidebar click uses. Non-defer so the
+        globals exist before the Hooks registration + LiveSocket connect below
+        — and here at the BOTTOM of <body>, never in <head> (Golden Rule 4). --%>
+  <script src="/assets/bp-chat-palette.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -6315,6 +6337,13 @@
     // per-second render diff.
     if (window.BarkparkChatElapsed) Hooks.ChatElapsed = window.BarkparkChatElapsed;
     if (window.BarkparkChatSpinWord) Hooks.ChatSpinWord = window.BarkparkChatSpinWord;
+    // ChatKeys / ChatPalette — the chat's keyboard navigation (defined in
+    // /assets/bp-chat-palette.js, loaded non-defer above): ChatKeys is the key
+    // filter (Cmd/Ctrl+1..9 and Cmd/Ctrl+K, ignored while focus is in a field),
+    // ChatPalette owns the palette's fuzzy filter, its arrows/Enter, and its
+    // Escape — which it stops before the global interrupt listener sees it.
+    if (window.BarkparkChatKeys) Hooks.ChatKeys = window.BarkparkChatKeys;
+    if (window.BarkparkChatPalette) Hooks.ChatPalette = window.BarkparkChatPalette;
 
     Hooks.PresenceIdentity = {
       mounted() {

@@ -507,8 +507,9 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     # `scope` is "team", matching the two required-role refusals
     # above, so each gate emits ONE scope label. The 15 INLINE
     # `json(conn, 422, %{error: "no_team"})` emitters in router.ex are a
-    # different contract and deliberately unchanged (`bp cloud support add` and
-    # app.js's envVarsFailureCopy both read that status).
+    # different contract and deliberately unchanged (`bp cloud support add` reads
+    # that status; app.js's envVarsFailureCopy was the console half until the team
+    # env-var feature was deleted — cch-w53-bl, Option A, 2026-09-02).
     test "require_primary_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
       user = user_fixture()
 

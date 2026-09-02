@@ -41,12 +41,22 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
   Each leak test drives the SAME socket to a successful OWN-workspace write
   afterwards, so a blanket deny cannot pass this file.
 
-  ## The one divergence that SURVIVES, declared
+  ## The divergence declared here is CLOSED (task-9e9b49d5787a90be)
 
+  This section used to read "The one divergence that SURVIVES, declared":
   `create/2` answers 422 for a scope naming a workspace that does not exist
-  (THE GHOST SHARE). This door still allows it — see the third test, which
-  pins that fact rather than hiding it, and `target_workspace_admits?/2`'s
-  note for why closing it is a separate change with its own blast radius.
+  (THE GHOST SHARE), and this door still ALLOWED it — deferred because closing
+  it reds two `studio_live_shares_test.exs` happy paths spelled on
+  `gyldendal/default/production`, a slug with no workspace row.
+
+  The lead-security ruling of 2026-09-02 settled that trade the other way: "the
+  Studio shares handler must REFUSE a declare or remove whose scope names a
+  workspace that does not exist, with the SAME generic denial a foreign scope
+  gets", because a ghost share is an AUTHORISATION ATTACHED TO A NAME and
+  whoever later registers that slug inherits a public exposure they never made.
+  Those happy-path fixtures moved onto a workspace that EXISTS, and the third
+  test below now pins the REFUSAL — with the foreign-scope sentence, so this
+  surface is not an existence oracle.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -147,17 +157,23 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
              "the confinement broke the panel's own workspace share"
     end
 
-    # THE ONE DECLARED DIVERGENCE, PINNED SO IT CANNOT BE MISREAD AS PARITY.
+    # THE DECLARED DIVERGENCE, NOW FLIPPED — THIS TEST IS THE RECORD OF ITS
+    # CLOSURE, NOT OF THE HOLE.
     #
-    # `create/2` answers 422 for a scope naming a workspace that does not exist
-    # (THE GHOST SHARE). This door still allows it, because closing it reds two
-    # `studio_live_shares_test.exs` cases that declare and revoke
-    # `gyldendal/default/production` — a slug with no workspace row — as the
-    # panel's own happy path, and that behaviour change is outside this row's
-    # obligation ("workspace B", a workspace that EXISTS). Recorded here as a
-    # finding, filed as a follow-up, and asserted so a later fix has to come
-    # back and delete this test rather than silently leaving it green.
-    test "STILL OPEN (recorded): a scope naming no workspace at all is NOT refused here", %{
+    # Its previous spelling was titled "STILL OPEN (recorded)" and asserted the
+    # OPPOSITE — `assert Sharing.shared?(ghost, ...)` — with the note "a later
+    # fix has to come back and delete this test rather than silently leaving it
+    # green". This IS that fix coming back, and the assertion is inverted rather
+    # than deleted so the flip stays legible in one place.
+    #
+    # THE RULING (lead-security, 2026-09-02, task-9e9b49d5787a90be): "the Studio
+    # shares handler must REFUSE a declare or remove whose scope names a
+    # workspace that does not exist, with the SAME generic denial a foreign
+    # scope gets". A ghost share is an AUTHORISATION ATTACHED TO A NAME:
+    # whoever later registers that slug inherits a public exposure they never
+    # made. Legitimate pre-provisioning is the operator env registry
+    # (`BARKPARK_SHARES` / `Sharing.shares_env/0`), not this panel.
+    test "a scope naming NO workspace at all is refused, with the foreign-scope sentence", %{
       conn: conn,
       raw: raw
     } do
@@ -166,14 +182,28 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
 
       {:ok, view, _html} = instance_admin_view(conn, raw)
 
-      render_hook(view, "shares-add", %{
-        "scope" => "#{ghost}/default/#{@dataset}",
-        "surfaces" => ["papers"]
-      })
+      # The panel must be OPEN for the denial sentence to be rendered at all —
+      # `shares_error` lives inside the modal.
+      assert render_hook(view, "shares-open", %{}) =~ "Network shares"
 
-      assert Sharing.shared?(ghost, "default", @dataset, :papers),
-             "the ghost-share divergence is CLOSED — delete this test and the " <>
-               "note in `target_workspace_admits?/2`, they are now stale"
+      html =
+        render_hook(view, "shares-add", %{
+          "scope" => "#{ghost}/default/#{@dataset}",
+          "surfaces" => ["papers"]
+        })
+
+      # THE ROW, not the flash — a "denial" that still wrote the row would be
+      # the same pre-planted exposure in disguise.
+      refute Sharing.shared?(ghost, "default", @dataset, :papers),
+             "the panel pre-declared a public share on a slug nobody has registered yet"
+
+      assert stored_rows_for(ghost) == [],
+             "a StoredShare row survived the ghost denial"
+
+      # ...and it is the SAME sentence a foreign-but-real workspace gets (the
+      # first test in this describe). NO EXISTENCE ORACLE: a caller cannot
+      # walk slugs here to learn which workspaces are taken.
+      assert html =~ "not an admin of that scope&#39;s workspace"
     end
   end
 

@@ -32,6 +32,10 @@ defmodule Barkpark.StudioChat.Titles do
       store slice).
     * `:studio_chat_title_model`, `:studio_chat_title_binary`,
       `:studio_chat_title_timeout_ms` — tunables.
+    * `:anthropic_api_url` (`ANTHROPIC_API_URL`) — the Messages endpoint, shared
+      with `Barkpark.Tasks.Judge` the way `:anthropic_api_key` already is, so an
+      operator behind an Anthropic-compatible gateway can move the URL as well
+      as the key and the model. See `endpoint/0`.
 
   D9: the pure builders (`api_request/1`, `cli_args/1`, `parse_title/1`,
   `derived_title/1`) are unit-tested directly, so an adapter or CLI override can
@@ -39,7 +43,13 @@ defmodule Barkpark.StudioChat.Titles do
   """
   require Logger
 
-  @endpoint "https://api.anthropic.com/v1/messages"
+  # The DEFAULT endpoint, not the value — see `endpoint/0`. It used to be read
+  # directly at the call site, which a release BUILD freezes: the adapter, the
+  # model and the key were all config-read here and only the URL was not, so an
+  # operator behind an Anthropic-compatible gateway could supply the key and the
+  # model and still not move the URL (gh-9531 residual,
+  # task-eeabfd9bf3ed8371).
+  @default_endpoint "https://api.anthropic.com/v1/messages"
   @anthropic_version "2023-06-01"
   @model "claude-haiku-4-5"
   @cli_model "haiku"
@@ -247,7 +257,7 @@ defmodule Barkpark.StudioChat.Titles do
         :error
 
       _key ->
-        case adapter().post(@endpoint, api_request(first_message), headers()) do
+        case adapter().post(endpoint(), api_request(first_message), headers()) do
           {:ok, 200, resp} ->
             case parse_title(api_text(resp)) do
               {:ok, title} -> title
@@ -340,6 +350,62 @@ defmodule Barkpark.StudioChat.Titles do
       {"anthropic-version", @anthropic_version},
       {"content-type", "application/json"}
     ]
+  end
+
+  @doc """
+  The Anthropic-compatible Messages endpoint the title call posts to.
+
+  Read at CALL time from `config :barkpark, :anthropic_api_url`
+  (`ANTHROPIC_API_URL` in `config/runtime.exs`), defaulting to Anthropic's own
+  URL — an unconfigured deployment is byte-identical to before. Shares one key
+  with `Barkpark.Tasks.Judge`, exactly as `:anthropic_api_key` is already
+  shared: one gateway serves both callers.
+
+  FAILS CLOSED: a configured-but-malformed URL raises rather than falling back
+  to api.anthropic.com. A silent fallback would send an operator's chat content
+  — and their key — to the vendor they deliberately routed away from.
+  `Barkpark.Application.start/2` resolves it once at boot, so a typo refuses the
+  node instead of surfacing as titles that quietly drop to the CLI/derived
+  layers (every failure on this path is swallowed by design).
+  """
+  @spec endpoint() :: String.t()
+  def endpoint do
+    case Application.get_env(:barkpark, :anthropic_api_url) do
+      nil -> @default_endpoint
+      configured -> validate_endpoint!(configured)
+    end
+  end
+
+  @doc "The compile-time fallback endpoint — what \"unconfigured\" means, for tests."
+  @spec default_endpoint() :: String.t()
+  def default_endpoint, do: @default_endpoint
+
+  # An http(s) URL with a host and no whitespace or control characters. The
+  # value is handed to an HTTP client, so a CR/LF smuggled through config is
+  # request splitting, not a typo.
+  defp validate_endpoint!(value) when is_binary(value) do
+    uri = URI.parse(value)
+
+    if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" and
+         not Regex.match?(~r/[\s[:cntrl:]]/, value) do
+      value
+    else
+      bad_endpoint!(value)
+    end
+  end
+
+  defp validate_endpoint!(other), do: bad_endpoint!(other)
+
+  defp bad_endpoint!(value) do
+    raise ArgumentError, """
+    invalid Anthropic API URL: #{inspect(value)}.
+
+    Expected an http(s) URL for an Anthropic-compatible Messages endpoint, e.g.
+    "https://gateway.internal/v1/messages".
+
+    Set ANTHROPIC_API_URL to your gateway, or leave it unset to keep the
+    #{@default_endpoint} default.
+    """
   end
 
   defp adapter,

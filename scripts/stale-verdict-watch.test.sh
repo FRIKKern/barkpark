@@ -792,6 +792,154 @@ out="$(SVW_SELFTEST_CHILD=1 SVW_MUTATE=pin-any run_watch "$TMP/a.json" --baselin
   && ok "(o) …and the switch IS real inside a selftest child, so the line above tested the guard, not a no-op" \
   || bad "(o) the mutation had no effect even inside a selftest child (exit $rc) — the guard probe above is vacuous"
 
+# ═══ (p) the PAGED read: it walks a cursor, and it still refuses ════════════
+section "(p) the paged pull-request read — pages, retries a page, and still exits 6 when it cannot read"
+
+# THE DEFECT THIS OWNS. The read was `gh pr list --limit 100 --json
+# …statusCheckRollup`: one request for a hundred pull requests AND a hundred
+# check rollups. Measured on 2026-09-02 at 72 open pull requests it answered
+# HTTP 504 on 3 of 3 attempts while limit=25 answered in ~4s, so EVERY
+# scheduled run of this workflow exited 6 UNREACHABLE. These probes drive a
+# STUB `gh` on PATH, so what they assert is the script's behaviour against a
+# transport, not a claim about which command it happens to type.
+
+STUB="$TMP/stub"; mkdir -p "$STUB"
+STUB_LOG="$TMP/stub-calls.log"
+
+# A stub that answers page 1 of 2 and then page 2, so a passing probe PROVES a
+# cursor was carried. Each page holds one CONFLICTING row with a stale green,
+# so a run that reads BOTH pages classifies 2 and reds at 1 — and a run that
+# silently read only the first classifies 1, which the count assertion catches.
+mk_stub() { # <mode>
+  cat > "$STUB/gh" <<STUBEOF
+#!/usr/bin/env bash
+echo "\$@" >> "$STUB_LOG"
+mode="$1"
+# The commits read is "gh api repos/<r>/commits?..."; the PAGE read is
+# "gh api graphql". Match on the SUBCOMMAND, never on the word "commits" --
+# the GraphQL query text itself contains a commits selection, and matching
+# that made every page request answer with commit dates instead of a page.
+case "\$1 \${2:-}" in
+  "api repos/"*) cat "$COMMITS"; exit 0 ;;
+esac
+if [ "\$mode" = "always504" ]; then
+  echo "HTTP 504: We couldn't respond to your request in time. Sorry about that. (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+# How many page requests have been made so far (this call included)?
+n=\$(grep -c 'graphql' "$STUB_LOG")
+if [ "\$mode" = "flaky-page-2" ] && grep -q 'after=' <<<"\$*" && [ ! -f "$TMP/page2-failed-once" ]; then
+  touch "$TMP/page2-failed-once"
+  echo "HTTP 504: We couldn't respond to your request in time. (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2.json"; else cat "$TMP/gql-page1.json"; fi
+STUBEOF
+  chmod +x "$STUB/gh"
+}
+
+# A raw GraphQL page in GitHub's own shape — NOT the normalised shape — so the
+# normaliser is exercised rather than bypassed.
+gql_page() { # <path> <number> <hasNext> <cursor>
+  local roll="[]" c
+  for c in "${CTX[@]}"; do
+    roll="$(jq -c --arg n "$c" --arg t "$OLD" \
+      '. + [{__typename:"CheckRun", name:$n, conclusion:"SUCCESS", completedAt:$t, status:"COMPLETED"}]' <<<"$roll")"
+  done
+  jq -n --argjson num "$2" --argjson next "$3" --arg cur "$4" --argjson roll "$roll" \
+    '{data:{repository:{pullRequests:{
+        pageInfo:{hasNextPage:$next, endCursor:$cur},
+        nodes:[{number:$num, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY",
+                headRefOid:"0123456789abcdef0123456789abcdef01234567",
+                updatedAt:"2026-08-01T00:00:00Z",
+                commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}]}}}}' > "$1"
+}
+gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
+gql_page "$TMP/gql-page2.json" 9102 false null
+
+STUB_PATH="$STUB:/usr/bin:/bin:/usr/sbin:/sbin"
+run_stubbed() { # <mode> [extra args…]
+  local mode="$1"; shift
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once"
+  mk_stub "$mode"
+  env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 "$@" 2>&1
+}
+
+# (p-1) TWO pages are read and BOTH rows are classified.
+out="$(run_stubbed pages)"; rc=$?
+[ "$rc" = "1" ] && ok "(p-1) a two-page population still reds at exit 1" \
+  || bad "(p-1) expected exit 1 over two paged rows, got $rc: $out"
+grep -q "#9101" <<<"$out" && grep -q "#9102" <<<"$out" \
+  && ok "(p-1) …and BOTH pages' rows are reported — the cursor was carried past page 1" \
+  || bad "(p-1) a row from one of the two pages is missing, so the second page was never fetched: $out"
+grep -q "after=CURSOR_ONE" "$STUB_LOG" \
+  && ok "(p-1) …and page 2 was asked for with the cursor page 1 named" \
+  || bad "(p-1) no request carried the endCursor from page 1: $(cat "$STUB_LOG")"
+[ "$(grep -c graphql "$STUB_LOG")" = "2" ] \
+  && ok "(p-1) …in exactly 2 page requests, so paging is not re-reading the whole population per row" \
+  || bad "(p-1) expected 2 graphql page requests, saw $(grep -c graphql "$STUB_LOG")"
+
+# (p-2) A page that 504s ONCE is retried AS A PAGE — page 1 is not re-fetched.
+out="$(run_stubbed flaky-page-2)"; rc=$?
+[ "$rc" = "1" ] && ok "(p-2) a single-page 504 is survived: the run still reaches its verdict (exit 1)" \
+  || bad "(p-2) a transient 504 on page 2 lost the whole read, got $rc: $out"
+grep -q "#9101" <<<"$out" && grep -q "#9102" <<<"$out" \
+  && ok "(p-2) …with both rows still present, so the pages read before the failure were not discarded" \
+  || bad "(p-2) a row went missing after the retried page: $out"
+[ "$(grep -c 'after=' "$STUB_LOG")" = "2" ] \
+  && ok "(p-2) …and it was the PAGE that was retried (2 cursor requests), not the whole query" \
+  || bad "(p-2) expected the failed page to be re-requested once; cursor requests: $(grep -c 'after=' "$STUB_LOG")"
+
+# (p-3) THE REFUSAL, MUTATION-PROVEN. This is the probe that matters: if the
+# paging above had been bought by making a failed read look like an empty
+# population, THIS is where it would show. Every page 504s, forever.
+out="$(run_stubbed always504 --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "6" ] \
+  && ok "(p-3) a read that 504s on every attempt STILL exits 6 UNREACHABLE — the fix did not buy paging with the refusal" \
+  || bad "(p-3) expected exit 6 when every page 504s, got $rc — a failed read is being reported as something other than unreachable: $out"
+grep -q "UNREACHABLE" <<<"$out" \
+  && ok "(p-3) …and says UNREACHABLE" || bad "(p-3) no UNREACHABLE sentence: $out"
+grep -q "^ok — no CONFLICTING" <<<"$out" \
+  && bad "(p-3) a run that read ZERO pull requests printed the clean sentence" \
+  || ok "(p-3) …and never prints the clean sentence over a population it never read"
+grep -qi "classified nothing" <<<"$out" \
+  && ok "(p-3) …and states it classified nothing" || bad "(p-3) the refusal does not say it classified nothing: $out"
+
+# (p-4) The page size is an ARGUMENT, and a wrong one is a configuration fault
+# rather than a silently degraded read.
+for bad_size in 0 -1 abc 101; do
+  out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" bash "$WATCH" --spec "$SPEC" \
+          --repo FRIKKern/barkpark --page-size "$bad_size" 2>&1)"; rc=$?
+  [ "$rc" = "3" ] && ok "(p-4) --page-size '$bad_size' is a configuration fault (exit 3), not a read" \
+    || bad "(p-4) --page-size '$bad_size' exited $rc instead of 3"
+done
+out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" bash "$WATCH" --spec "$SPEC" \
+        --repo FRIKKern/barkpark --page-attempts 0 2>&1)"; rc=$?
+[ "$rc" = "3" ] && ok "(p-4) --page-attempts 0 is a configuration fault (exit 3)" \
+  || bad "(p-4) --page-attempts 0 exited $rc instead of 3"
+
+# (p-5) DISARM. The probes above would all pass against a script that reds
+# unconditionally. A stub whose pages hold a MERGEABLE row with a FRESH verdict
+# must come out clean — proving (p-1)/(p-2)'s exit 1 was earned by the rows.
+clean_roll="[]"
+for c in "${CTX[@]}"; do
+  clean_roll="$(jq -c --arg n "$c" --arg t "$FRESH" \
+    '. + [{__typename:"CheckRun", name:$n, conclusion:"SUCCESS", completedAt:$t, status:"COMPLETED"}]' <<<"$clean_roll")"
+done
+jq -n --argjson roll "$clean_roll" \
+  '{data:{repository:{pullRequests:{pageInfo:{hasNextPage:false, endCursor:null},
+     nodes:[{number:9103, mergeable:"MERGEABLE", mergeStateStatus:"CLEAN",
+             headRefOid:"0123456789abcdef0123456789abcdef01234567",
+             updatedAt:"2026-08-11T00:00:00Z",
+             commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}]}}}}' \
+  > "$TMP/gql-page1.json"
+out="$(run_stubbed pages)"; rc=$?
+[ "$rc" = "0" ] \
+  && ok "(p-5) disarm: a MERGEABLE, fresh row read through the SAME paged transport exits 0" \
+  || bad "(p-5) the paged read reds no matter what it reads (exit $rc): $out"
+
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
 

@@ -1158,12 +1158,26 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	ranked := rankBarkparks(list)
 	attention, inFlight, healthy := bucketCounts(ranked)
 
+	// The deploy census + site list, read ONCE (statusDeployRead) and shared by
+	// all three consumers below — the per-row marker, the table's DEPLOY
+	// section and `-o json`. Read here rather than inside each renderer so the
+	// window is computed exactly once: statusDeployNow() moves, and two fetches
+	// are two different windows. It never errors — a failure is a named state
+	// carrying the sentence that explains it.
+	//
+	// The MARKER is applied before ANY rendering, because the detail column is
+	// switched on by the rows themselves (renderStatusRowsWith): a healthy
+	// bucket whose only detail is the deploy sentence must grow the column, and
+	// that decision is made at render time off ranked[i].Detail.
+	deploy := statusDeployRead(cfg)
+	applyDeployMarker(ranked, deploy)
+
 	if out.output == "json" || out.output == "yaml" {
 		// dr-w19-s7 followup: the deploy truth reaches the MACHINE reader too.
 		// The section costs the same two extra control-plane reads the table
 		// pays (census + sites); a script reading the fleet could otherwise
 		// see a page of ok boxes on a day the live rate is 27.9%.
-		fleetDeploy, perBoxDeploy := statusDeployJSON(cfg, ranked)
+		fleetDeploy, perBoxDeploy := statusDeployJSON(deploy, ranked)
 		rows := make([]any, 0, len(ranked))
 		for _, r := range ranked {
 			row := rankedBarkparkRow(r)
@@ -1195,7 +1209,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	renderStatusBucket(out, "ATTENTION", "attention", ranked)
 	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
-	renderStatusDeploy(out, cfg, ranked)
+	renderStatusDeploy(out, deploy, ranked)
 	return exitOK
 }
 
@@ -1495,12 +1509,138 @@ func statusDeployReadFailure(from, to time.Time, err error) string {
 	return "could not read the deploy census for your team: " + err.Error() + ". Nothing was read: this is NOT a fleet with zero failures."
 }
 
+// --- ONE reading, shared by the marker, the table and -o json ----------------
+
+// statusDeployReading is the deploy census + site list read ONCE per
+// `bp cloud status` invocation, folded per box.
+//
+// It exists because the reading now has THREE consumers — the per-row marker
+// below, the DEPLOY section and `-o json` — and each of them fetching for
+// itself would mean two extra control-plane round trips per consumer and, far
+// worse, two consumers able to disagree about the same window: the census
+// window is computed off statusDeployNow(), so a second fetch is a SECOND
+// window. State is the fleet-level verdict, worded exactly once here.
+//
+// State is exhaustive: "read" | "census_unreadable" | "sites_unattributable".
+// Reason is the sentence that goes with a non-"read" state, and it is the SAME
+// sentence in both renders — `bp cloud status` and `bp cloud deployments`
+// cannot tell an operator two different stories about the same 403.
+type statusDeployReading struct {
+	From, To     time.Time
+	State        string
+	Reason       string
+	Boxes        map[string]*statusDeployBox
+	MinSample    int
+	Volume       int
+	OrphanRows   int
+	OrphanVolume int
+}
+
+// statusDeployRead performs the two control-plane reads and folds them. It
+// never returns an error: every failure is a NAMED state with the sentence that
+// explains it, because "we could not read the deploy census" and "the fleet has
+// no deploy problems" must never render the same way.
+func statusDeployRead(cfg *Config) *statusDeployReading {
+	to := statusDeployNow().UTC().Truncate(time.Second)
+	from := to.Add(-statusDeployWindow)
+	rd := &statusDeployReading{From: from, To: to, Boxes: map[string]*statusDeployBox{}}
+
+	census, cerr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
+	if cerr != nil {
+		rd.State = "census_unreadable"
+		rd.Reason = statusDeployReadFailure(from, to, cerr)
+		return rd
+	}
+	rd.Volume = census.Volume
+	sites, serr := cfg.CloudClient().ListSites(cloudCtx())
+	if serr != nil {
+		rd.State = "sites_unattributable"
+		rd.Reason = fmt.Sprintf(
+			"the census was read (%d attempted rows over this window) but the site list was not: %s. Without it a census row cannot be tied to a box.",
+			census.Volume, serr.Error())
+		return rd
+	}
+	rd.State = "read"
+	rd.MinSample = census.MinSample
+	rd.Boxes, rd.OrphanRows, rd.OrphanVolume = statusDeployFold(census, sites)
+	return rd
+}
+
+// --- the deploy marker (dr-w13-bl-fleet-verdict-is-deploy-blind) -------------
+//
+// WHAT WAS STILL MISSING after the D330 gauge landed. The DEPLOY section says
+// the true thing — but it says it in a DIFFERENT section, below three tables,
+// and the TABLE ROW for the box producing every deferral in the fleet still
+// printed `ok` with an EMPTY detail. The detail column was not even switched
+// on for the HEALTHY bucket, so a reader who scans the three buckets and stops
+// has read a page of `ok` rows carrying nothing at all.
+//
+// D330 STANDS AND IS NOT REOPENED HERE: no rung, no verdict arm, no fence, no
+// hardcoded floor. `attentionRankOrder` is byte-untouched by this slice and
+// TestStatusDeployIsAGaugeNotAFence still pins it at the charter's twelve.
+// This is the FIFTH detail marker (after slotUnit / runaway / err5xx /
+// unmetered) and it keeps their contract verbatim: it rides on top of whatever
+// the status already said, on ANY row including `ok`, and moves no status, no
+// rank and no bucket.
+//
+// IT NAMES ITS WINDOW, which no per-box sentence on this screen previously did
+// (dr-w13-bl-10129-window-is-pinned-by-nothing's third defect: the window is
+// decoded, printed once in a section header, and never travels with the number
+// it denominates). A rate on a row that does not carry its window is a number
+// with no population, and a marker is exactly the place it can be quoted from.
+//
+// IT SPEAKS ONLY ON A MEASUREMENT, AND ONLY ON A HAPPENING — the same policy
+// err5xxMarker and runawayMarker keep. A box whose every attempted deploy
+// reached live has nothing to add: a sentence on a table row claims something
+// happened, and "everything shipped" is not a happening. And it is SILENT for
+// each of the four absences the DEPLOY section already words (below
+// min_sample, no per-site `live`, an unread census, no rows) rather than
+// minting a fifth wording for the same refusal — silence here is never a green,
+// because the section twenty lines down states the refusal in full.
+func deployMarker(rd *statusDeployReading, id string) string {
+	if rd == nil || rd.State != "read" || rd.MinSample <= 0 {
+		return ""
+	}
+	b := rd.Boxes[id]
+	// Not measured, or measured below the census's own floor: the DEPLOY
+	// section owns those sentences. Never a percentage here.
+	if b == nil || !b.LiveKnown || b.Volume == 0 || b.Volume < rd.MinSample {
+		return ""
+	}
+	// Measured and everything shipped: no happening, no sentence.
+	if b.Live >= b.Volume {
+		return ""
+	}
+	return fmt.Sprintf("deploys live %d/%d (%s) over %s — a GAUGE: it moved no status, rank or bucket on this row",
+		b.Live, b.Volume, pctOf(float64(b.Live), float64(b.Volume)),
+		deployCensusWindowPhrase(rd.From, rd.To))
+}
+
+// applyDeployMarker appends the marker to each ranked row's DETAIL, using the
+// same " · " separator attentionDetail joins its own markers with, so a row
+// that already had a reason keeps it and the deploy sentence rides after it.
+// Status, Bucket and Rank are never touched — that is the D330 boundary, in
+// code: this function can only ever change a string.
+func applyDeployMarker(ranked []rankedBarkpark, rd *statusDeployReading) {
+	for i := range ranked {
+		m := deployMarker(rd, ranked[i].BP.ID)
+		if m == "" {
+			continue
+		}
+		if ranked[i].Detail == "" {
+			ranked[i].Detail = m
+		} else {
+			ranked[i].Detail += " · " + m
+		}
+	}
+}
+
 // statusDeployJSON is the machine half of the deploy section (dr-w19-s7
 // followup): the fleet-level node plus one node per box, every refusal a NAMED
 // state — never an omitted key and never a zero standing in for "we could not
-// say". It reads the SAME census + site list the table reads, folds through
-// the SAME statusDeployFold, and words its refusals with the SAME sentences,
-// so the two outputs cannot tell an operator different stories.
+// say". It reads the SAME statusDeployReading the table and the marker read,
+// and words its refusals with the SAME sentences, so the three outputs cannot
+// tell an operator different stories.
 //
 // States, exhaustively (fleet node): "read" | "census_unreadable" |
 // "sites_unattributable". Per-box node: "rated" | "below_min_sample" |
@@ -1509,49 +1649,35 @@ func statusDeployReadFailure(from, to time.Time, err error) string {
 // to learn why its numbers are null). live/volume/pct are null wherever they
 // were not measured — a JSON null is this contract's "could not measure", and
 // it is never collapsed into 0.
-func statusDeployJSON(cfg *Config, ranked []rankedBarkpark) (map[string]any, map[string]map[string]any) {
-	to := statusDeployNow().UTC().Truncate(time.Second)
-	from := to.Add(-statusDeployWindow)
+func statusDeployJSON(rd *statusDeployReading, ranked []rankedBarkpark) (map[string]any, map[string]map[string]any) {
 	window := map[string]any{
-		"from": from.Format(time.RFC3339),
-		"to":   to.Format(time.RFC3339),
+		"from": rd.From.Format(time.RFC3339),
+		"to":   rd.To.Format(time.RFC3339),
 	}
 
 	perBox := make(map[string]map[string]any, len(ranked))
-	refuseAll := func(state, reason string) (map[string]any, map[string]map[string]any) {
+	if rd.State != "read" {
 		for _, r := range ranked {
 			perBox[r.BP.ID] = map[string]any{
-				"state": state, "reason": reason,
+				"state": rd.State, "reason": rd.Reason,
 				"live": nil, "volume": nil, "pct": nil,
 			}
 		}
-		return map[string]any{"window": window, "state": state, "reason": reason}, perBox
+		return map[string]any{"window": window, "state": rd.State, "reason": rd.Reason}, perBox
 	}
 
-	census, cerr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
-	if cerr != nil {
-		return refuseAll("census_unreadable", statusDeployReadFailure(from, to, cerr))
-	}
-	sites, serr := cfg.CloudClient().ListSites(cloudCtx())
-	if serr != nil {
-		return refuseAll("sites_unattributable", fmt.Sprintf(
-			"the census was read (%d attempted rows over this window) but the site list was not: %s. Without it a census row cannot be tied to a box.",
-			census.Volume, serr.Error()))
-	}
-
-	boxes, orphanRows, orphanVolume := statusDeployFold(census, sites)
 	var minSampleVal any // null when the control plane sent none — absent is not zero
-	if census.MinSample > 0 {
-		minSampleVal = census.MinSample
+	if rd.MinSample > 0 {
+		minSampleVal = rd.MinSample
 	}
 	fleet := map[string]any{
 		"window":     window,
 		"state":      "read",
 		"min_sample": minSampleVal,
-		"orphans":    map[string]any{"rows": orphanRows, "volume": orphanVolume},
+		"orphans":    map[string]any{"rows": rd.OrphanRows, "volume": rd.OrphanVolume},
 	}
 	for _, r := range ranked {
-		b := boxes[r.BP.ID]
+		b := rd.Boxes[r.BP.ID]
 		switch {
 		case b == nil || b.Volume == 0:
 			perBox[r.BP.ID] = map[string]any{
@@ -1563,15 +1689,15 @@ func statusDeployJSON(cfg *Config, ranked []rankedBarkpark) (map[string]any, map
 				"state": "live_unmetered", "live": nil, "volume": b.Volume, "pct": nil,
 				"reason": fmt.Sprintf("%d attempted; this control plane sends no per-site `live`, so whether anything shipped is unknown (never read this as zero)", b.Volume),
 			}
-		case census.MinSample <= 0:
+		case rd.MinSample <= 0:
 			perBox[r.BP.ID] = map[string]any{
 				"state": "no_min_sample", "live": b.Live, "volume": b.Volume, "pct": nil,
 				"reason": fmt.Sprintf("%d attempted, %d live; this control plane sent no min_sample, so nothing says whether a percentage on this sample is a measurement", b.Volume, b.Live),
 			}
-		case b.Volume < census.MinSample:
+		case b.Volume < rd.MinSample:
 			perBox[r.BP.ID] = map[string]any{
 				"state": "below_min_sample", "live": b.Live, "volume": b.Volume, "pct": nil,
-				"reason": fmt.Sprintf("%d attempted is below the census min_sample of %d (%d live); a percentage on this sample would be noise", b.Volume, census.MinSample, b.Live),
+				"reason": fmt.Sprintf("%d attempted is below the census min_sample of %d (%d live); a percentage on this sample would be noise", b.Volume, rd.MinSample, b.Live),
 			}
 		default:
 			perBox[r.BP.ID] = map[string]any{
@@ -1593,27 +1719,26 @@ func statusDeployJSON(cfg *Config, ranked []rankedBarkpark) (map[string]any, map
 // (fleet + per row), so the decision-15 keys scripts already consume are
 // untouched and a machine reader no longer sees a fleet of ok boxes on a day
 // the live rate is 27.9%. `bp cloud deployments` remains the deep reader.
-func renderStatusDeploy(out *writer, cfg *Config, ranked []rankedBarkpark) {
-	to := statusDeployNow().UTC().Truncate(time.Second)
-	from := to.Add(-statusDeployWindow)
-
+//
+// The section still prints in full even though every rated box now also carries
+// the one-line marker in its table row: the marker is silent for the four
+// absences and for a box that shipped everything, and those readings are facts
+// an operator needs to SEE, not infer from a missing sentence.
+func renderStatusDeploy(out *writer, rd *statusDeployReading, ranked []rankedBarkpark) {
 	out.outf("")
-	out.outf("DEPLOY · period: DAILY · window %s", deployCensusWindowPhrase(from, to))
+	out.outf("DEPLOY · period: DAILY · window %s", deployCensusWindowPhrase(rd.From, rd.To))
 	out.outf("  live_rate is a GAUGE and not a fence: it carries its own denominator, refuses a percentage below the census min_sample, and changes no status above.")
 
-	census, cerr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
-	if cerr != nil {
-		out.outf("  NOT READ — %s", statusDeployReadFailure(from, to, cerr))
+	switch rd.State {
+	case "census_unreadable":
+		out.outf("  NOT READ — %s", rd.Reason)
 		return
-	}
-	sites, serr := cfg.CloudClient().ListSites(cloudCtx())
-	if serr != nil {
-		out.outf("  NOT ATTRIBUTED — the census was read (%d attempted rows over this window) but the site list was not: %s. Without it a census row cannot be tied to a box; `bp cloud deployments` reads the same window fleet-wide.",
-			census.Volume, serr.Error())
+	case "sites_unattributable":
+		out.outf("  NOT ATTRIBUTED — %s; `bp cloud deployments` reads the same window fleet-wide.",
+			strings.TrimSuffix(rd.Reason, "."))
 		return
 	}
 
-	boxes, orphanRows, orphanVolume := statusDeployFold(census, sites)
 	width := 0
 	for _, r := range ranked {
 		if n := runewidth.StringWidth(r.BP.Name); n > width {
@@ -1626,11 +1751,11 @@ func renderStatusDeploy(out *writer, cfg *Config, ranked []rankedBarkpark) {
 		if pad < 0 {
 			pad = 0
 		}
-		out.outf("  %s%s  %s", name, strings.Repeat(" ", pad), statusDeployLine(boxes[r.BP.ID], census.MinSample))
+		out.outf("  %s%s  %s", name, strings.Repeat(" ", pad), statusDeployLine(rd.Boxes[r.BP.ID], rd.MinSample))
 	}
-	if orphanRows > 0 {
+	if rd.OrphanRows > 0 {
 		out.outf("  %d census site row(s) (%d attempted) belong to no box in this fleet listing and are in NO line above — run `bp cloud deployments` to see them.",
-			orphanRows, orphanVolume)
+			rd.OrphanRows, rd.OrphanVolume)
 	}
 }
 

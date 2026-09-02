@@ -29,6 +29,8 @@ import {
   type StreamFailure,
   type StreamStatus,
 } from '../api/chat'
+import { ContextBand } from '../chat/ContextBand'
+import { resolveContextIdentity, type ConnectionClaim } from '../chat/context'
 import { PickerSheet, type PickerKind } from '../chat/PickerSheet'
 import { StreamSkeleton } from '../chat/StreamSkeleton'
 import { tailRemainder, type StableSegment, type SuppressedRow } from '../chat/reducer'
@@ -589,12 +591,18 @@ export function chatBlockCtx(theme: Theme, serverBase?: string): BlockCtx {
 
 export function ChatSessionScreen({
   connection,
+  claim,
   sessionId,
   sessionTitle,
   onArchive,
   onBack,
 }: {
   connection: InstanceConnection
+  /** The STORED config's claim about the connection (chat-local-cloud-context-w3).
+   * The band displays what `connection` ACTUALLY dials and reports this beside
+   * it when the two disagree — so it is only ever the accused, never the
+   * source. Optional: with no claim there is simply nothing to contradict. */
+  claim?: ConnectionClaim
   sessionId: string
   /** the list row's title — painted until the full GET lands its own. */
   sessionTitle?: string
@@ -613,6 +621,7 @@ export function ChatSessionScreen({
     transportError,
     streamStatus,
     streamFailure,
+    context,
     send,
     interrupt,
     answer,
@@ -856,6 +865,14 @@ export function ChatSessionScreen({
     [rowCtx],
   )
 
+  // THE CONTEXT BAND'S IDENTITY. Recomputed only when one of its three inputs
+  // moves — the live connection, the stored claim, or the server's facts — so
+  // a streaming turn (which moves neither) re-renders the band zero times. The
+  // resolver is pure; every honesty rule it applies lives in chat/context.ts.
+  const contextIdentity = useMemo(
+    () => resolveContextIdentity(claim, connection, context),
+    [claim, connection, context],
+  )
   const title = state.title !== '' ? state.title : (sessionTitle ?? sessionId)
   const turnActive = state.phase !== 'idle'
   const connLabel = headerStatus(streamStatus, streamFailure)
@@ -969,6 +986,13 @@ export function ChatSessionScreen({
             ))}
         </View>
       </View>
+
+      {/* WHO IS RUNNING THIS SESSION, AGAINST WHAT (chat-local-cloud-context-w3,
+          criterion 2). It sits UNDER the title row and OUTSIDE the transcript:
+          the identity of a connection is not a message, and a band that
+          scrolled away with the oldest turn would be invisible exactly when a
+          wrong connection matters most. */}
+      <ContextBand identity={contextIdentity} theme={theme} />
 
       <View style={styles.transcript}>
         {body}
