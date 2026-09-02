@@ -122,3 +122,21 @@ campaign is judged on those as much as on closes.
   stamps criteria (`bp task stamp`) and never closes.
 - Skip `drafts.*` rows in `bp task ready` — they are unpublished phantoms.
 - Never push to a contributor's branch; never open a PR for a peer's stranded work.
+
+## 5. When the fleet dies (quota) — the campaign must survive its agents
+
+Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one minute. Design for it:
+
+- **State lives in files, not in agents.** Each lane's `status.md`, `DECISIONS-FROM-MAIN.md`, `handoff.md`;
+  every branch pushed; every PR with its `Task:` trailer. A lead is a cursor over those files.
+- **Loops outlive leads.** Keep running from the orchestrator: the campaign-row pulse (18 min), the CI
+  advisory sweep (`helpers/ci-advisory-sweep.sh`), and the merge sweep (`helpers/merge-sweep.sh`) —
+  squash-merges any campaign PR whose FOUR required checks are green **by head sha and whose base is
+  main** (a stacked PR merges into its parent otherwise), never closes ledger rows. Its first pass
+  landed 31 reviewed PRs while every lead was down. Read required checks with `helpers/pr-required.sh`;
+  `gh pr checks` renders cancelled/queued as fail.
+- **Write `$ORCH/RESUME.md`** the moment the fleet drops: per lane, the live concerns and the relaunch
+  prompt (`lead-<lane>-r`: read brief → status → decisions → merge-sweep.log; RE-CLAIM rows first, the
+  leases lapsed; stamp + close what the sweep merged; continue).
+- **Notify the owner once** (PushNotification): quota is theirs (`cswap`); relaunch on their word or at
+  the reset time. Do not spend the outage idle: sweeps, triage reads, and the resume plan are free.
