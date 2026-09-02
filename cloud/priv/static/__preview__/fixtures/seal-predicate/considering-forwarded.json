@@ -1,5 +1,5 @@
 {
-  "_comment": "CONSIDERING is residue. A resolvable successor, ZERO open/in_progress rows, and one `considering` row that nobody forwarded. The predecessor shape sealed this at exit 0 with the row disclosed nowhere; here it is counted into clause (a) and printed on its own disclosure line — and, since wave 28, counted in the `considering` bucket rather than under UNNAMED RESIDUE, because a row printed by name is not unnamed. It still fails clause (a): disclosure is not a forwarding address.",
+  "_comment": "A considering row that IS forwarded under the successor. Clause (a) asks for a named forwarding address and this row has one, so it seals — the wave-28 bucket split is a re-labelling of UNNAMED residue, never a new way for unfinished work to red. The row is still printed by name (charter D90), on the re-disclosure line, proving the disclosure does not depend on which bucket the row landed in.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {
@@ -11,10 +11,18 @@
     }
   },
   "children": [
-    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-considering-1", "lifecycle_status": "considering" }
+    {
+      "_id": "gr-fixture-done-1",
+      "lifecycle_status": "done"
+    },
+    {
+      "_id": "gr-fixture-considering-1",
+      "lifecycle_status": "considering"
+    }
   ],
-  "forwarded": [],
+  "forwarded": [
+    "gr-fixture-considering-1"
+  ],
   "gates": {
     "gr-ops-platform-admin-emails": {
       "_id": "gr-ops-platform-admin-emails",
@@ -45,6 +53,8 @@
     "26acc7a91be0f0352efdb3e89b2017accb786367",
     "58862f621"
   ],
-  "unmeasuredWaivers": ["CCH-D5-rate-limiter-sees-every-user-as-one"],
+  "unmeasuredWaivers": [
+    "CCH-D5-rate-limiter-sees-every-user-as-one"
+  ],
   "defectCommits": {}
 }
