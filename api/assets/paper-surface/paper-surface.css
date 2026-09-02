@@ -135,8 +135,8 @@ html[data-theme="dark"] .bp-paper-body {
      `--bp-*` name and the emitted layer stays the one source.
 
      WHAT IT IS: how much room an EVIDENCE block takes before it starts. The
-     numbers are ratios of `--tok-air-beat` (the benchmark artifact's paragraph
-     beat, 22px), so the LAW ships rather than six literals: code 1.1x, table
+     numbers are ratios of `--tok-air-beat` (the benchmark artifact's AIR UNIT,
+     22px), so the LAW ships rather than six literals: code 1.1x, table
      1.36x, asciicast 1.45x, callout 1.55x, stats 1.64x, figure 1.82x — which
      resolve within 0.2px of the measured scale in
      tooling/paper-excellence/evidence/erasure.html (24/30/32/34/36/40px).
@@ -152,11 +152,33 @@ html[data-theme="dark"] .bp-paper-body {
      reader has none, so only a one-sided margin lands both surfaces on the same
      spacing (additive == collapsed when the other side is zero).
 
-     NOT `--bp-para-margin-top`: the reader's paragraph beat is 12pt/16px, the
-     artifact's is ~22px. The air scale is anchored on the ARTIFACT's beat because
-     that is what reproduces its measured evidence spacing. Retuning the reader's
-     prose rhythm to match is a real question, but it is type.reading's to answer,
-     not this scale's. */
+     NOT `--bp-para-margin-top`, AND THAT IS NOW A RULING RATHER THAN A DEFERRAL
+     (2026-09-02, task-741e0de1ddb3a482). This note used to say retuning the
+     reader's prose rhythm to 22px was "a real question ... type.reading's to
+     answer". It is answered: the prose beat STAYS at 12pt/16px, and 22px is
+     re-read as the artifact's AIR UNIT rather than as anyone's paragraph beat.
+
+     The two numbers are not competing measurements of one thing. 22px is the
+     unit the EVIDENCE ladder is expressed in; 16px is the rhythm PROSE is set
+     on. Anchoring the ladder on the artifact is what reproduces its measured
+     evidence spacing, and it does not oblige the reader's paragraphs to match.
+
+     WHY THE PROSE BEAT DOES NOT RISE TO 22. The ladder's bottom rung is code, at
+     1.1 x 22 = 24.2px. Against a 16px prose beat, the step from a paragraph to
+     the evidence it introduces is 8.2px — a step a reader can see, which is the
+     entire job of the scale. Against 22 it would be 2.2px: the evidence would
+     open at the same distance as the next sentence, and the air would stop
+     saying anything. Worse, paragraph-to-paragraph (22) would then exceed
+     heading-to-paragraph (16), so a heading would sit CLOSER to the paragraph
+     below it than two paragraphs sit to each other — a heading that has lost its
+     grip on the text it introduces. And 16px is 0.556 of the 28.8px line box,
+     inside the classical half-line-to-full-line paragraph window; 22px is 0.76,
+     which reads as a loose block, not as continuous argument.
+
+     The relation is ASSERTED, not remembered: tooling/paper-excellence/rig
+     measures the rendered prose beat against the rendered code air on every
+     (scheme x width) cell and reds unless the prose beat stays a clear step
+     below the ladder's bottom rung. Raising the beat to 22 reds it. */
   --bp-air-code: var(--tok-air-code);
   --bp-air-table: var(--tok-air-table);
   --bp-air-asciicast: var(--tok-air-asciicast);
