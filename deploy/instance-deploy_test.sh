@@ -647,6 +647,22 @@ check "mcp.env carries the listen addr"   "grep -q '^BARKPARK_MCP_HTTP_ADDR=127.
 check "mcp.env holds NO token (forward-through D18)" "! grep -qi 'token' '$TMP/mcp.env'"
 check "committed unit holds NO token env line" "! grep -qiE '^(Environment|ExecStart).*TOKEN' '$HERE/systemd/barkpark-mcp.service'"
 check "mcp route armed alongside"         "[ \"\$(grep -c 'BARKPARK_MCP_ROUTE' '$CADDY')\" = '1' ]"
+# task-1a641b21d19595d3 — the deploy step must READ the unit after the restart,
+# not trust `systemctl restart`'s exit (Type=simple: it returns on fork).
+check "mcp step re-reads is-active after the restart" "grep -q 'systemctl is-active barkpark-mcp' '$SYSCTLLOG'"
+check "mcp step reports the unit ACTIVE by its own state" "grep -q 'barkpark-mcp active after' '$TMP/out.log'"
+check "mcp step never claims 'enabled' off restart alone" "! grep -q 'barkpark-mcp enabled (' '$TMP/out.log'"
+# The committed unit carries a START LIMIT: a serve that fails on every start
+# stops after the burst instead of restarting every 10 s forever.
+check "committed unit declares StartLimitIntervalSec" "grep -qE '^StartLimitIntervalSec=[0-9]+' '$HERE/systemd/barkpark-mcp.service'"
+check "committed unit declares StartLimitBurst"       "grep -qE '^StartLimitBurst=[0-9]+' '$HERE/systemd/barkpark-mcp.service'"
+check "start limit sits in [Unit] (systemd ignores it in [Service])" "awk '/^\\[Unit\\]/{u=1} /^\\[Service\\]/{u=0} u && /^StartLimit(IntervalSec|Burst)=/{n++} END{exit n==2?0:1}' '$HERE/systemd/barkpark-mcp.service'"
+: > "$SYSCTLLOG"
+rm -f "$TMP/mcp.env" "$APP/.instance-deploy-last"   # force a re-run; the unit now DIES after the restart
+rc="$(GO_HTTP=1 UNIT_ACTIVE=failed run_deploy 200 mcpsha3)"
+check "crash-looping mcp unit: deploy still exit 0 (non-fatal)" "[ '$rc' = '0' ]"
+check "crash-looping mcp unit: named in the deploy log as NOT active" "grep -q 'WARN: barkpark-mcp is NOT active after' '$TMP/out.log'"
+check "crash-looping mcp unit: state word carried (failed)" "grep -q 'state=failed' '$TMP/out.log'"
 : > "$SYSCTLLOG"
 rm -f "$TMP/mcp.env" "$APP/.instance-deploy-last"   # force a re-run; build now FAILS
 rc="$(GO_FAIL=1 run_deploy 200 mcpsha2)"
