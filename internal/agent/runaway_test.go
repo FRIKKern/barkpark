@@ -36,7 +36,7 @@ const quietPS = `      0       1     864000  0.0 /sbin/init
 // argv it was handed is the pinned direct-argv contract.
 func runnerFor(t *testing.T, out string) probeRunner {
 	t.Helper()
-	return func(name string, args ...string) (string, error) {
+	return func(_ []string, name string, args ...string) (string, error) {
 		if name != "ps" {
 			t.Fatalf("probe shelled out to %q, want ps", name)
 		}
@@ -205,7 +205,7 @@ func TestRunawayUnreadableOutputIsAnError(t *testing.T) {
 // A failing probe leaves the field UNMEASURED (nil), which the wire renders
 // differently from a measured-empty list.
 func TestRunawayProbeErrorLeavesFieldUnmeasured(t *testing.T) {
-	fail := func(string, ...string) (string, error) { return "", errors.New("no ps") }
+	fail := func([]string, string, ...string) (string, error) { return "", errors.New("no ps") }
 	r := gatherReport(ReportConfig{RunawayProbe: newRunawayProbeWith(fail)})
 	if r.Runaways != nil {
 		t.Fatalf("Runaways = %+v, want nil (unmeasured)", r.Runaways)

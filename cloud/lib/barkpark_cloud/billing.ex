@@ -1216,18 +1216,136 @@ defmodule BarkparkCloud.Billing do
     DateTime.utc_now() |> DateTime.add(trial_days(), :day) |> DateTime.truncate(:microsecond)
   end
 
+  # cch-w50 — HOW FAR AHEAD THE HOURLY SCAN LOOKS. A trial only becomes the
+  # worker's business at its FIRST advance notice (T-3); before that there is
+  # nothing it could do with the row. The horizon must therefore be >= the
+  # worker's largest notice threshold — a shorter one would silently drop the
+  # T-3 notice, which is why `trial_expiry_worker_test.exs` drives a trial at
+  # exactly the T-3 boundary through this query rather than trusting the number.
+  @trial_scan_horizon_seconds 3 * 86_400
+
+  @doc "How far into the future `active_trials/1` reaches, in seconds."
+  @spec trial_scan_horizon_seconds() :: pos_integer()
+  def trial_scan_horizon_seconds, do: @trial_scan_horizon_seconds
+
   @doc """
-  All LIVE `trial` subscriptions (plan `trial`, status `active`) — the working
-  set the `TrialExpiryWorker` scans for advance notices + expiry teardown. A
-  CONVERTED team's live row is a paid plan, so it is naturally excluded here (the
-  worker never touches a subscribed team's boxes).
+  The trial subscriptions the `TrialExpiryWorker` has work for right now — plan
+  `trial`, status `active`, with a real window that closes inside
+  `trial_scan_horizon_seconds/0`. A CONVERTED team's live row is a paid plan, so
+  it is naturally excluded (the worker never touches a subscribed team's boxes).
+
+  cch-w50 — THE PERIOD FILTER, AND THE HALF IT DELIBERATELY DOES NOT DO. This
+  query used to be `plan == "trial" and status == "active"` and nothing else, so
+  the hourly run re-read every trial row that has ever existed. Two bounds close
+  that, and they are closed by DIFFERENT mechanisms on purpose:
+
+    * THE FUTURE SIDE — here. A trial 11 days from its first notice is not
+      actionable, and the exclusion is TIME-REVERSIBLE: the same row re-enters
+      the set the hour it crosses the horizon, so nothing can be stranded by it.
+    * THE PAST SIDE — NOT here. A lapsed row leaves this set by reaching a
+      terminal `status` (`expire_trial/2`, called by the worker once the
+      teardown has actually happened), never by a lookback cutoff. A cutoff
+      would be FAIL-OPEN: a worker outage longer than the window would strand
+      every row that lapsed during it, permanently un-torn-down and
+      un-finalised. Losing the rescan is worth nothing next to that.
+
+  A NULL `current_period_end` is excluded too — `handle_trial/4` already skips
+  such a row as malformed, so this only moves an existing no-op into SQL.
   """
   @spec active_trials() :: [Subscription.t()]
-  def active_trials do
+  def active_trials, do: active_trials(DateTime.utc_now())
+
+  @doc """
+  `active_trials/0` against an explicit `now`, so the worker's scan is a pure
+  function of the instant it was handed (`TrialExpiryWorker.run/1`) instead of
+  re-reading the clock one layer down.
+  """
+  @spec active_trials(DateTime.t()) :: [Subscription.t()]
+  def active_trials(%DateTime{} = now) do
+    horizon = DateTime.add(now, @trial_scan_horizon_seconds, :second)
+
     Subscription
     |> where([s], s.plan == "trial" and s.status == "active")
+    |> where([s], not is_nil(s.current_period_end) and s.current_period_end <= ^horizon)
     |> Repo.all()
   end
+
+  @doc """
+  Finalise a LAPSED trial — THE TERMINAL WRITE THE EXPIRY WORKER NEVER MADE.
+
+  `TrialExpiryWorker` used to enqueue the deprovision jobs and stop there, so an
+  expired trial row kept `plan: "trial", status: "active"` forever. Measured on
+  the live control plane 2026-08-07: 15 of 18 trial rows sat past their
+  `current_period_end` — the oldest three weeks — all still `active`, all with
+  zero boxes left. The console reads `status` (`/v1/subscription` →
+  `live_subscription/1`), so those teams kept being served the running-trial card.
+
+  ## Why `canceled` and not `expired`
+
+  `Subscription`'s status enumeration is `active | canceled | past_due` and
+  `changeset/2` validates against it — `"expired"` is not a value this schema can
+  hold, and writing it round the changeset would poison every `status IN (…)`
+  read in this module. `canceled` is the enumeration's existing terminal value,
+  it is what `cancel_subscription/1` writes, and the one-live-per-team partial
+  unique index EXCLUDES it, so a finalised trial never blocks the team's next
+  subscription row.
+
+  ## Blast radius (every predicate that reads this row)
+
+    * `entitled?/1` — UNCHANGED, in both directions. Its `plan: "trial"` clause
+      already answered `false` for a window in the past, and the finalised row is
+      no longer live, so the fallthrough answers `false` too. No team gains or
+      loses entitlement at the moment of this write. (The ghost-carve-out leg
+      `Registry.provisioning_fqdn_claim/1` defers to `entitled?/1`, so it is
+      unchanged with it.)
+    * `live_subscription/1` / `active_subscription/1` — now nil for the team.
+      That is the point: `/v1/subscription` answers `{subscription: nil}` and the
+      console renders the honest no-plan upsell instead of a trial card.
+    * `trial_days_remaining/1` — nil rather than 0 for a finalised team (the
+      `%Subscription{}` arm is unchanged; only the team/id arm moves, because its
+      `live_subscription/1` lookup now misses).
+    * `active_trials/1` — the row leaves the hourly scan. This is the PAST-side
+      bound the query above deliberately does not implement itself.
+    * `do_activate_from_session/4` — a later checkout takes the `nil` INSERT arm
+      instead of the in-place trial upgrade. Both land an `active` paid row; the
+      INSERT arm additionally runs `Registry.resume_billing_suspended/1`, which is
+      strictly MORE correct for a team whose boxes were suspended. The
+      convert-just-after-expiry race the trial arm guards is NOT widened, because
+      the worker only calls this once the teardown has completed — while a box
+      still exists the row stays `trial`/`active` and the cancelling arm still
+      runs (`trial_expiry_worker_test.exs` "a trial→paid conversion cancels any
+      pending trial-deprovision job" is the pin).
+    * `start_trial/1` — a finalised team moves from `{:error, :ineligible}` to
+      `{:error, :trial_used}`. NO second trial is granted: the one-ever guard is
+      the DURABLE team ledger (`teams.trial_started_at`), not this row — which is
+      exactly why that guard was put on the ledger ("not the (tear-down-able)
+      subscription row"). The refusal is the same refusal with a truer reason.
+
+  Idempotent by its own head: only a `trial`/`active` row with a closed window is
+  written, so a second call — or a second worker pass — is `:noop`.
+  """
+  @spec expire_trial(Subscription.t(), DateTime.t()) ::
+          {:ok, Subscription.t()} | {:error, Ecto.Changeset.t()} | :noop
+  def expire_trial(%Subscription{plan: "trial", status: "active"} = sub, %DateTime{} = now) do
+    case sub.current_period_end do
+      %DateTime{} = period_end ->
+        if DateTime.compare(period_end, now) != :gt do
+          sub
+          |> Subscription.changeset(%{
+            status: "canceled",
+            canceled_at: DateTime.truncate(now, :microsecond)
+          })
+          |> Repo.update()
+        else
+          :noop
+        end
+
+      _ ->
+        :noop
+    end
+  end
+
+  def expire_trial(%Subscription{}, %DateTime{}), do: :noop
 
   @doc """
   Whole days remaining in a trial (0 once expired), or nil when the subject is

@@ -371,6 +371,99 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # The Recorder is the SOURCE OF TRUTH for "this row's turn settled"
+  # (task-d5083ae525902f28). It stamps at the turn's terminal `result` frame, so
+  # BOTH replay surfaces read the same fact off the row: Studio's replay_message
+  # and the Go TUI's toolRowGlyph (message_json ships metadata verbatim). Nothing
+  # is derived from a live-only turn boundary the store cannot reconstruct.
+  describe "settle stamping at the result frame (settle-gated gutter)" do
+    defp settle_tool_frame(id, name, input) do
+      {:claude_chat_event,
+       %{
+         "type" => "assistant",
+         "message" => %{
+           "content" => [%{"type" => "tool_use", "id" => id, "name" => name, "input" => input}]
+         }
+       }}
+    end
+
+    defp settle_result_frame(id, content, error?) do
+      block =
+        %{"type" => "tool_result", "tool_use_id" => id, "content" => content}
+        |> then(fn b -> if error?, do: Map.put(b, "is_error", true), else: b end)
+
+      {:claude_chat_event, %{"type" => "user", "message" => %{"content" => [block]}}}
+    end
+
+    defp settle_row(sid, id) do
+      StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == id))
+    end
+
+    test "a tool row is UNSETTLED until its turn's result frame lands",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, settle_tool_frame("toolu_s1", "Bash", %{"command" => "ls"}))
+      frame(recorder, settle_result_frame("toolu_s1", "a.txt", false))
+
+      # The output is attached, but the TURN has not ended — the row must not
+      # claim completion yet (the settle gate, persisted half).
+      row = settle_row(sid, "toolu_s1")
+      assert row.metadata["output"] == "a.txt"
+      refute row.metadata["turn_settled"]
+
+      frame(recorder, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      assert settle_row(sid, "toolu_s1").metadata["turn_settled"] == true
+    end
+
+    test "an is_error tool_result persists tool_error so a REPLAY draws ✗, not ✓",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, settle_tool_frame("toolu_s2", "Bash", %{"command" => "false"}))
+      frame(recorder, settle_result_frame("toolu_s2", "boom", true))
+      frame(recorder, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      meta = settle_row(sid, "toolu_s2").metadata
+      assert meta["tool_error"] == true
+      assert meta["turn_settled"] == true
+    end
+
+    test "an is_error result with NO text still persists — an empty error is not a silent drop",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, settle_tool_frame("toolu_s3", "Bash", %{"command" => "false"}))
+      # `content` absent entirely: result_text/1 answers nil, which the seam
+      # normalizes to "" rather than raising on the is_binary(output) guard.
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_result", "tool_use_id" => "toolu_s3", "is_error" => true}
+             ]
+           }
+         }}
+      )
+
+      assert Process.alive?(recorder)
+      meta = settle_row(sid, "toolu_s3").metadata
+      assert meta["tool_error"] == true
+      assert meta["output"] == ""
+    end
+
+    test "a row whose result never arrived is SETTLED but resultless — the provenance gate's input",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, settle_tool_frame("toolu_s4", "Bash", %{"command" => "sleep 9000"}))
+      frame(recorder, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      meta = settle_row(sid, "toolu_s4").metadata
+      assert meta["turn_settled"] == true
+      # No output was ever attached — the renderers' provenance gate reads this
+      # absence and keeps the row neutral rather than fabricating a ✓.
+      refute Map.has_key?(meta, "output")
+      refute Map.has_key?(meta, "tool_error")
+    end
+  end
+
   # A TodoWrite-shaped assistant frame (dispatch on shape, not name — the cmux
   # binary lacks TodoWrite, so we synthesize the shape). Each call is a FRESH
   # tool_use id, exactly as the real binary emits per TodoWrite.
