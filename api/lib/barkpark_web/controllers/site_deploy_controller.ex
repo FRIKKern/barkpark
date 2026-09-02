@@ -13,8 +13,12 @@ defmodule BarkparkWeb.SiteDeployController do
 
   Status contract, mirroring `SelfUpdateController`:
 
-    * **503** `feature_not_configured` — the box has not opted in
-      (`BARKPARK_SITE_DEPLOY_APPLY=1`). Fail-closed default.
+    * **503** `feature_not_configured` — the box has not CONSENTED to run
+      third-party site build code. Fail-closed default, and a decision rather
+      than a misconfiguration: the message names the consent boundary and the
+      preflight that checks the per-box prerequisites, never an env var to set
+      (D593). `BARKPARK_SITE_DEPLOY_APPLY=1` is still what records the consent
+      on the box; it is deliberately absent from the wire message.
     * **400** `invalid_slug` / `invalid_build_id` / `invalid_content_rev` /
       `invalid_deploy_mode` / `invalid_env` / `invalid_artifact` /
       `invalid_artifact_digest` / `artifact_too_large` — nothing reaches argv or
@@ -270,6 +274,23 @@ defmodule BarkparkWeb.SiteDeployController do
     end
   end
 
+  # THE REFUSAL NAMES THE CONSENT BOUNDARY, NOT A FLAG TO FLIP (deploy charter
+  # D593). The old message ended `(set BARKPARK_SITE_DEPLOY_APPLY=1)` — an
+  # INSTRUCTION, issued to an operator who may have every reason not to follow
+  # it. A site build is not a self-update: it runs `npm ci` + `npm run build`
+  # over the SITE's own dependency tree, which executes third-party postinstall
+  # code on this box, and `runtime.exs` gates it separately in exactly those
+  # words. A box that has not opted in has not FAILED to be configured; it has
+  # DECLINED, and a spawned box declines by construction because nothing in the
+  # provisioning path may consent on its owner's behalf (`instance-deploy.sh`
+  # PRESERVES the flag and never SETS it — D38).
+  #
+  # The status and the code word are UNCHANGED on purpose (charter D115): the
+  # control plane keys `BOX_DEPLOY_DISABLED_503` on `feature_not_configured`
+  # through `DeployLedger.refusal_class/2`, so re-wording the prose reclassifies
+  # nothing and no historical row moves. What changed is what the sentence asks
+  # of the reader — a decision to make, and where the per-box prerequisites for
+  # making it are actually CHECKED, rather than an env var to export.
   defp feature_not_configured(conn) do
     conn
     |> put_status(:service_unavailable)
@@ -277,8 +298,11 @@ defmodule BarkparkWeb.SiteDeployController do
       error: %{
         code: "feature_not_configured",
         message:
-          "site deploys are not enabled on this instance " <>
-            "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
+          "this instance has not consented to run third-party site build code " <>
+            "— a site deploy executes the site's own npm dependency tree " <>
+            "(postinstall scripts included) on this box, so opting in is the " <>
+            "box owner's decision, not a retry; the per-box prerequisites are " <>
+            "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
       }
     })
   end

@@ -301,6 +301,8 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     PUBLIC_HEALTH_CODE="${PUBLIC_HEALTH_CODE:-$1}" \
     REMOTE_SHA="${REMOTE_SHA:-$2}" MIX_FAIL="${MIX_FAIL:-}" \
     BARKPARK_CLOUD_EGRESS_IPS="${BARKPARK_CLOUD_EGRESS_IPS:-}" \
+    BARKPARK_MEMINFO="${BARKPARK_MEMINFO:-/proc/meminfo}" \
+    BARKPARK_BEAM_BASE_PATH="${BARKPARK_BEAM_BASE_PATH:-}" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
     NODE_MISSING="${NODE_MISSING:-}" NPM_FAIL="${NPM_FAIL:-}" NPM_NO_TSX="${NPM_NO_TSX:-}" \
@@ -1039,6 +1041,161 @@ check "failed redeploy: live blue stamp untouched (v2sha)" "[ \"\$(cat '$APP/.sl
 rc="$(run_preflight v2sha)"
 check "failed redeploy: preflight refuses fail-closed (21)" "[ '$rc' = '21' ]"
 check "failed redeploy: refusal names the wiped build root, not a bogus sha" "grep -q 'no complete build root' '$TMP/preflight.log'"
+rm -rf "$TMP"
+
+echo "== Case 19: the four per-box site-deploy prerequisites are CHECKED, not prose (D593) =="
+# CONSENT stays the box owner's and nothing may give it for them: Case 14 proves
+# this script PRESERVES BARKPARK_SITE_DEPLOY_APPLY and never SETS it (D38), which
+# is precisely why a SPAWNED box arrives with site deploys off and 503s on its
+# first one. That is the design. What was only PROSE — the four things that must
+# be true before a box can HONOUR a consent it has given — is what this case
+# turns into a typed, read-only preflight. Each arm removes exactly one
+# prerequisite and demands ITS code, so a check that silently stops discriminating
+# reds here instead of greening a box that cannot build.
+setup_case
+PREBIN="$TMP/prebin"; mkdir -p "$PREBIN"
+# A CURATED bin dir, not the runner's PATH: flock/python3/caddy must be present
+# or absent because THIS fixture says so. A real /usr/bin/python3 (every macOS,
+# every ubuntu-latest) would green the "no health server" arm on any host and the
+# check would be measuring the runner, not the box. Everything the script itself
+# needs before the preflight exits is symlinked in BY ABSOLUTE PATH — `command -v`
+# inside this bash is the only honest resolver (in a login shell with a `grep`
+# alias it answers the bare word and plants a DEAD symlink, which fakes a MISSING
+# for every prerequisite at once).
+for b in date grep sed awk bash tail; do
+  src="$(command -v "$b" 2>/dev/null || true)"
+  case "$src" in /*) ln -sf "$src" "$PREBIN/$b" ;; esac
+done
+check "prereq fixture: the curated bin dir resolves grep/sed/awk (a dead symlink would fake every MISSING)" \
+  "[ -x '$PREBIN/grep' ] && [ -x '$PREBIN/sed' ] && [ -x '$PREBIN/awk' ]"
+check "prereq fixture: caddy is deliberately NOT in it (the health-server arm must be able to lose)" \
+  "[ ! -e '$PREBIN/caddy' ]"
+BEAMBIN="$TMP/beambin"; mkdir -p "$BEAMBIN"
+printf '#!/bin/sh\nexit 0\n' > "$BEAMBIN/npm";    chmod +x "$BEAMBIN/npm"
+printf '#!/bin/sh\nexit 0\n' > "$PREBIN/flock";   chmod +x "$PREBIN/flock"
+printf '#!/bin/sh\nexit 0\n' > "$PREBIN/python3"; chmod +x "$PREBIN/python3"
+MEMINFO="$TMP/meminfo"
+printf 'MemTotal:        4194304 kB\nMemAvailable:    3145728 kB\n' > "$MEMINFO"
+# The REAL committed start.sh: beam_path REPLAYS its own `export PATH=` line
+# instead of re-typing it, so planting the real file proves the replay as well.
+cp "$HERE/../api/start.sh" "$APP/api/start.sh"
+mkdir -p "$APP/.slots"
+
+run_site_preflight() {
+  env PATH="$PREBIN" \
+    BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
+    BARKPARK_MEMINFO="$MEMINFO" BARKPARK_BEAM_BASE_PATH="$BEAMBIN" \
+    HOME="$TMP/home" \
+    bash "$SCRIPT" --site-deploy-preflight > "$TMP/prereq.log" 2>&1
+  echo $?
+}
+
+# --- ALL FOUR MET, consent not yet given: the two axes are INDEPENDENT. A box
+# can be ready and still have declined; the preflight reports both and exits on
+# the prerequisites only.
+rm -f "$TMP/lock"
+rc="$(run_site_preflight)"
+check "all met: exit 0"                          "[ '$rc' = '0' ]"
+check "all met: consent reported ABSENT (nothing provisioned it — D38)" "grep -q '^SITE_DEPLOY_CONSENT=absent' '$TMP/prereq.log'"
+check "all met: all four lines say ok"           "[ \"\$(grep -c '^SITE_DEPLOY_PREREQ_[A-Z_]*=ok' '$TMP/prereq.log')\" = '4' ]"
+check "all met: verdict line"                    "grep -q '^SITE_DEPLOY_PREREQ=ok\$' '$TMP/prereq.log'"
+check "all met: the memory line REPORTS the number it judged (not a bare ok)" "grep -q '^SITE_DEPLOY_PREREQ_MEMORY=ok 3145728kB available' '$TMP/prereq.log'"
+# LOCK-FREE, and provably so: `exec 9>\$LOCK` would CREATE the file. An operator
+# deciding whether to consent must never be answered "already_running".
+check "all met: the deploy lock was never even opened (read-only, unqueued)" "[ ! -e '$TMP/lock' ]"
+
+# --- npm off the BEAM's PATH -> 31. The slot unit sets no PATH=, so this is the
+# asdf-without-reshim shape, and the reported path proves the derivation came
+# from start.sh's committed export rather than a re-typed guess.
+mv "$BEAMBIN/npm" "$TMP/npm.parked"
+rc="$(run_site_preflight)"
+check "npm missing: typed exit 31"               "[ '$rc' = '31' ]"
+check "npm missing: the npm line names it"       "grep -q '^SITE_DEPLOY_PREREQ_NPM=MISSING' '$TMP/prereq.log'"
+check "npm missing: verdict flips to unmet"      "grep -q '^SITE_DEPLOY_PREREQ=unmet\$' '$TMP/prereq.log'"
+check "npm missing: the OTHER three still report ok (one arm, one code)" "[ \"\$(grep -c '^SITE_DEPLOY_PREREQ_[A-Z_]*=ok' '$TMP/prereq.log')\" = '3' ]"
+check "npm missing: the reported BEAM PATH is start.sh's OWN export, replayed" "grep -q 'SITE_DEPLOY_PREREQ_NPM=MISSING.*/root/.asdf/shims' '$TMP/prereq.log'"
+check "npm missing: …and it ends at the unit's inherited base, not the caller's PATH" "grep -q \"SITE_DEPLOY_PREREQ_NPM=MISSING.*$BEAMBIN\" '$TMP/prereq.log'"
+mv "$TMP/npm.parked" "$BEAMBIN/npm"
+
+# --- no flock(1) -> 32. Without it the fleet build admission gate FAILS OPEN and
+# says so only in a WARN inside a build log nobody reads.
+mv "$PREBIN/flock" "$TMP/flock.parked"
+rc="$(run_site_preflight)"
+check "no flock: typed exit 32"                  "[ '$rc' = '32' ]"
+check "no flock: names the gate that fails OPEN" "grep -q '^SITE_DEPLOY_PREREQ_FLOCK=MISSING.*FAILS OPEN' '$TMP/prereq.log'"
+mv "$TMP/flock.parked" "$PREBIN/flock"
+
+# --- neither python3 nor caddy -> 33. site-deploy.sh cannot start the throwaway
+# HEALTH server, so the gate cannot run AT ALL and every site deploy dies there.
+mv "$PREBIN/python3" "$TMP/py.parked"
+rc="$(run_site_preflight)"
+check "no health server: typed exit 33"          "[ '$rc' = '33' ]"
+check "no health server: names the gate it disarms" "grep -q '^SITE_DEPLOY_PREREQ_HEALTH_SERVER=MISSING.*cannot gate AT ALL' '$TMP/prereq.log'"
+# …and caddy ALONE is enough — the check is an OR, not a python3 requirement.
+printf '#!/bin/sh\nexit 0\n' > "$PREBIN/caddy"; chmod +x "$PREBIN/caddy"
+rc="$(run_site_preflight)"
+check "caddy alone satisfies the health-server prerequisite (it is an OR)" "[ '$rc' = '0' ]"
+rm -f "$PREBIN/caddy"
+mv "$TMP/py.parked" "$PREBIN/python3"
+
+# --- under 2G available -> 34. One build slot peaks at MemoryMax=1500M; a box
+# with less headroom swap-thrashes, which is the DBConnection-500 shape.
+printf 'MemTotal:        2097152 kB\nMemAvailable:    1048576 kB\n' > "$MEMINFO"
+rc="$(run_site_preflight)"
+check "low RAM: typed exit 34"                   "[ '$rc' = '34' ]"
+check "low RAM: reports the measurement AND the floor" "grep -q '^SITE_DEPLOY_PREREQ_MEMORY=LOW 1048576kB available, want >= 2097152kB' '$TMP/prereq.log'"
+# A prerequisite that cannot be MEASURED is not met. The one thing a preflight
+# may never do is answer "fine" because its meter was unreadable.
+rm -f "$MEMINFO"
+rc="$(run_site_preflight)"
+check "unreadable meter: still 34, never a silent pass" "[ '$rc' = '34' ]"
+check "unreadable meter: says the box could not be measured" "grep -q '^SITE_DEPLOY_PREREQ_MEMORY=UNKNOWN' '$TMP/prereq.log'"
+printf 'MemTotal:        4194304 kB\nMemAvailable:    3145728 kB\n' > "$MEMINFO"
+
+# --- consent RECORDED: read from the same .slots/%i.env the BEAM's
+# EnvironmentFile reads, so what the preflight reports is what the app will do.
+printf 'BARKPARK_PORT_OVERRIDE=4001\nBARKPARK_SITE_DEPLOY_APPLY=1\n' > "$APP/.slots/green.env"
+rc="$(run_site_preflight)"
+check "consent seeded: reported GRANTED"         "grep -q '^SITE_DEPLOY_CONSENT=granted\$' '$TMP/prereq.log'"
+check "consent seeded: prerequisites still judged on their own (exit 0)" "[ '$rc' = '0' ]"
+# A near-miss must NOT read as consent: the flag is `=1`, and only `=1`.
+printf 'BARKPARK_PORT_OVERRIDE=4001\nBARKPARK_SITE_DEPLOY_APPLY=0\n' > "$APP/.slots/green.env"
+rc="$(run_site_preflight)"
+check "=0 is NOT consent"                        "grep -q '^SITE_DEPLOY_CONSENT=absent' '$TMP/prereq.log'"
+rm -rf "$TMP"
+
+# --- The DEPLOY path carries the same check, advisory: a box that HAS consented
+# is told, every deploy, whether it can still honour it — an image rebuilt
+# without util-linux rots the prerequisite silently otherwise. A CONTENT deploy
+# never dies for a SITE prerequisite.
+setup_case
+BEAMBIN="$TMP/beambin"; mkdir -p "$BEAMBIN"
+printf '#!/bin/sh\nexit 0\n' > "$BEAMBIN/npm"; chmod +x "$BEAMBIN/npm"
+MEMINFO="$TMP/meminfo"; printf 'MemAvailable:    3145728 kB\n' > "$MEMINFO"
+cp "$HERE/../api/start.sh" "$APP/api/start.sh"
+mkdir -p "$APP/.slots"
+rc="$(BARKPARK_MEMINFO="$MEMINFO" BARKPARK_BEAM_BASE_PATH="$BEAMBIN" run_deploy 200 nocon1)"
+check "no consent: deploy exit 0"                "[ '$rc' = '0' ]"
+check "no consent: the deploy SAYS the door is fail-closed, and why" "grep -q 'consent ABSENT' '$TMP/out.log'"
+check "no consent: it runs NO prerequisite checks (nothing to honour yet)" "! grep -q 'SITE_DEPLOY_PREREQ_' '$TMP/out.log'"
+# Seed consent, redeploy: now the four checks run and all pass.
+printf 'BARKPARK_SITE_DEPLOY_APPLY=1\n' > "$APP/.slots/green.env"
+rm -f "$APP/.instance-deploy-last"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(BARKPARK_MEMINFO="$MEMINFO" BARKPARK_BEAM_BASE_PATH="$BEAMBIN" run_deploy 200 con1)"
+check "consented: deploy exit 0"                 "[ '$rc' = '0' ]"
+check "consented: the four prerequisite lines are IN the deploy log" "[ \"\$(grep -c 'site-deploy prereq: SITE_DEPLOY_PREREQ_' '$TMP/out.log')\" = '4' ]"
+check "consented + healthy: no WARN"             "! grep -q 'CONSENTED to site deploys but a prerequisite is unmet' '$TMP/out.log'"
+check "consented: the flag itself still survives the regen (D38 unbroken)" "grep -q '^BARKPARK_SITE_DEPLOY_APPLY=1\$' '$APP/.slots/green.env'"
+# Break one prerequisite: the deploy STILL succeeds (advisory) and says so LOUDLY.
+rm -f "$BEAMBIN/npm"
+rm -f "$APP/.instance-deploy-last"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(BARKPARK_MEMINFO="$MEMINFO" BARKPARK_BEAM_BASE_PATH="$BEAMBIN" run_deploy 200 con2)"
+check "consented + broken prereq: the CONTENT deploy still succeeds (advisory)" "[ '$rc' = '0' ]"
+check "consented + broken prereq: WARNs with the typed exit"    "grep -q 'a prerequisite is unmet (typed exit 31)' '$TMP/out.log'"
+check "consented + broken prereq: the npm line is in the log"   "grep -q 'site-deploy prereq: SITE_DEPLOY_PREREQ_NPM=MISSING' '$TMP/out.log'"
 rm -rf "$TMP"
 
 echo

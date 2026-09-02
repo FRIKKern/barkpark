@@ -175,7 +175,18 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                |> post("/v1/admin/site-deploy", body("s"))
                |> json_response(503)
 
-      assert message =~ "BARKPARK_SITE_DEPLOY_APPLY=1"
+      # D593: it names the CONSENT BOUNDARY, never a flag to flip. A spawned box
+      # reaches this arm by construction (nothing in the provisioning path may
+      # consent for its owner), so the sentence it answers with is the whole
+      # product of that path — and "set BARKPARK_SITE_DEPLOY_APPLY=1" was an
+      # instruction to an operator who may not want to follow it.
+      assert message =~ "has not consented"
+      assert message =~ "third-party site build code"
+      # The flag name is the instruction, so its ABSENCE is the assertion.
+      refute message =~ "BARKPARK_SITE_DEPLOY_APPLY"
+      # …and the operator who DOES want to consent is sent to the thing that
+      # checks whether this box can honour it, not to an env var.
+      assert message =~ "--site-deploy-preflight"
     end
 
     test "503 wins over a malformed body — a box that cannot deploy says so first", %{conn: conn} do
@@ -256,7 +267,9 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       conn: conn
     } do
       # Same shrunken budget, flag off: the guard answers before the call, so
-      # this must still be the configuration message, byte for byte.
+      # this must still be the CONSENT message, byte for byte (D593 re-worded
+      # it away from "set BARKPARK_SITE_DEPLOY_APPLY=1"; the code word and the
+      # status are unchanged, which is what the ledger classifies on).
       put_runner_cfg(enabled: false)
       refute DeployRunner.enabled?()
 
@@ -267,8 +280,11 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                |> json_response(503)
 
       assert message ==
-               "site deploys are not enabled on this instance " <>
-                 "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
+               "this instance has not consented to run third-party site build code " <>
+                 "— a site deploy executes the site's own npm dependency tree " <>
+                 "(postinstall scripts included) on this box, so opting in is the " <>
+                 "box owner's decision, not a retry; the per-box prerequisites are " <>
+                 "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
     end
   end
 
