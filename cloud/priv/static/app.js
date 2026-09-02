@@ -10419,9 +10419,178 @@
     return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
 
-  // The page shell: four cards, each with its own body slot so one silent route
+  // 5. DEPLOY LEDGER CENSUS — GET /v1/operator/deploy-ledger/census?from=&to=
+  // (deploy-reliability W1 S2, dr-w1-s2). `DeployLedger.census/3` has counted
+  // failure classes, site volumes and the failure rate WITH its denominator
+  // since W1, and until this card NOTHING RENDERED ONE BYTE OF IT: the route
+  // existed, the Go reader existed, and no human surface read either.
+  //
+  // THE WINDOW IS PINNED, AND THE CONSOLE PINS IT. `from` and `to` are REQUIRED
+  // by the route (422 otherwise) and that refusal is deliberate — daily volume
+  // fell 2,766 → 332 over six days, so an unpinned "now minus" window silently
+  // compares two different populations and reports a volume collapse as a
+  // repair. The card therefore sends two explicit instants and PRINTS the
+  // window it read, so nobody can mistake which population a number came from.
+  //
+  // THE TAXONOMY IS NEVER RE-DERIVED HERE, and that is the whole ruling of this
+  // card. Every class NAME, its human LABEL and its SHARE are read straight off
+  // the payload (`classes[].class` / `.label` / `.share`); this file owns no
+  // class list, no label map and no percentage arithmetic. A second derivation
+  // is a second truth, and it drifts from `DeployLedger.classify/2` the first
+  // time a class is added upstream — the class would silently render under the
+  // wrong name, or vanish. __app.test.mjs pins the absence by NAME.
+  var OPERATOR_DEPLOY_CENSUS = "/v1/operator/deploy-ledger/census";
+  // The window this console reads. Seven days is the same default the Go reader
+  // (`bp cloud deployments`) uses, so the two readers of one ledger answer over
+  // the same population rather than quietly disagreeing.
+  var OPERATOR_CENSUS_DAYS = 7;
+
+  // Pure + injectable: the two instants the URL carries. `nowMs` is an argument
+  // so the harness reads the exact bytes the browser sends.
+  function operatorCensusWindow(nowMs) {
+    var toMs = nowMs == null ? Date.now() : nowMs;
+    return {
+      from: new Date(toMs - OPERATOR_CENSUS_DAYS * 86400000).toISOString(),
+      to: new Date(toMs).toISOString(),
+    };
+  }
+
+  function operatorCensusPath(nowMs) {
+    var w = operatorCensusWindow(nowMs);
+    return OPERATOR_DEPLOY_CENSUS +
+      "?from=" + encodeURIComponent(w.from) + "&to=" + encodeURIComponent(w.to);
+  }
+
+  // ONE rate line, THREE outcomes — and the REFUSAL is the load-bearing one.
+  // `DeployLedger.rate/2` refuses below `@min_sample` and says so on the wire
+  // (`refused: true`, `pct: nil`, `sample: 74`). This renders THAT refusal —
+  // "not enough data (n=74)" — and never a percentage, because a percentage off
+  // n=74 is exactly as dishonest in a browser as it is in Elixir.
+  //
+  // `n` IS THE SERVER'S OWN DENOMINATOR (`sample`), never a count this file
+  // re-totalled off `classes` or `volume`: a client-side sum is a second
+  // definition of the denominator, and it would disagree with the refusal
+  // sentence sitting beside it the moment the two populations differ.
+  //
+  // A rate that is present and NOT refused prints its numerator AND its
+  // denominator beside the percentage — no bare percentage escapes this
+  // function, which is the console-side statement of the same rule the rate
+  // node enforces on the wire by carrying `sample` inside itself.
+  function operatorCensusRateHtml(node, title) {
+    if (!node || typeof node !== "object" || typeof node.sample !== "number") {
+      return '<p class="op-gate">' + operatorPillHtml("neutral", title) +
+        "<span>not reported — this reading carried no rate node, so there is no number " +
+        "and no refusal to show.</span></p>";
+    }
+    if (node.refused === true || typeof node.pct !== "number") {
+      return '<p class="op-gate">' + operatorPillHtml("neutral", title) +
+        "<span>" + esc(operatorCensusRefusalText(node)) + "</span></p>";
+    }
+    return '<p class="op-gate">' + operatorPillHtml("info", title) +
+      "<span>" + esc(String(node.pct)) + "% — " +
+      esc(String(node.numerator == null ? "?" : node.numerator)) + " of " +
+      esc(String(node.sample)) + "</span></p>";
+  }
+
+  // The refusal sentence, in ONE place so the top-level rate and every class
+  // row's share cannot drift. The server's own `reason` rides along when it
+  // sent one; the leading clause is this console's, and it never contains a
+  // percent sign.
+  function operatorCensusRefusalText(node) {
+    return "not enough data (n=" + String(node.sample) + ")" +
+      (node.reason ? " — " + String(node.reason) : "");
+  }
+
+  // ONE class row. Name, label, count and share ALL come off the payload; the
+  // share is its own rate node, refusal and all, so the "not enough data (n=…)"
+  // rule applies one level down without this file owning a second copy of it.
+  function operatorCensusClassRowHtml(row) {
+    row = row || {};
+    var name = typeof row.class === "string" && row.class ? row.class : "—";
+    var label = typeof row.label === "string" ? row.label : "";
+    var share = row.share;
+    var shareText =
+      !share || typeof share !== "object" || typeof share.sample !== "number" ? "share not reported"
+      : share.refused === true || typeof share.pct !== "number" ? operatorCensusRefusalText(share)
+      : String(share.pct) + "% of " + String(share.sample);
+    return '<div class="set-row">' +
+      '<div class="set-row-main">' +
+        '<div class="set-row-name">' + esc(name) + "</div>" +
+        (label ? '<div class="set-row-note">' + esc(label) + "</div>" : "") +
+        '<div class="set-row-meta">' + esc(shareText) + "</div>" +
+      "</div>" +
+      '<div class="set-row-side">' +
+        operatorPillHtml("neutral", String(row.count == null ? "—" : row.count)) +
+      "</div>" +
+    "</div>";
+  }
+
+  // The window the reading covers, printed rather than assumed. ISO, verbatim
+  // from the payload — a locale-formatted stamp is a different string on every
+  // machine, and this line exists so two operators can confirm they are looking
+  // at the same population.
+  function operatorCensusWindowHtml(w) {
+    if (!w || !w.from || !w.to) return "";
+    return '<p class="op-foot">Window ' + esc(String(w.from)) + " → " + esc(String(w.to)) +
+      " — pinned, because an unpinned window compares two populations and reads a volume collapse as a repair.</p>";
+  }
+
+  // Every named state the census reports, as COUNTS. Counts, never a second
+  // rate: `census/3` names the whole population on purpose (live / in_flight /
+  // cancelled / deferred / residual) so the success count is not "the part we
+  // did not name", and re-deriving any of them here would put a second
+  // definition beside the first.
+  function operatorCensusTotalsHtml(data) {
+    var bits = [];
+    function push(k, v) { if (typeof v === "number") bits.push(k + " " + v); }
+    push("volume", data.volume);
+    push("failed", data.failed);
+    push("live", data.live);
+    push("in flight", data.in_flight);
+    push("deferred", data.deferred_total);
+    push("cancelled", data.cancelled);
+    push("residual", data.residual);
+    return bits.length ? '<p class="op-foot">' + esc(bits.join(" · ")) + "</p>" : "";
+  }
+
+  // THE CARD. Four states, and three of them are the honest ones:
+  //   • unreadable — the census didn't answer (or answered a shape this cannot
+  //     read). Says so about ITSELF, the G-04 pattern every card here follows.
+  //   • ZERO ROWS — "no deployments in this window". NEVER a zeroed table: a
+  //     table of 0s reads like health, and "nothing was attempted" and "nothing
+  //     failed" are different facts an operator acts on differently.
+  //   • a reading whose rate the ledger REFUSED — the refusal, verbatim.
+  //   • a reading with a rate — the percentage WITH its numerator and its
+  //     denominator, and the basis sentence naming what the denominator counts.
+  function operatorCensusCardHtml(data) {
+    if (!data || typeof data !== "object" || typeof data.volume !== "number" ||
+        !Array.isArray(data.classes)) {
+      return '<p class="set-empty">Deploy ledger unavailable — the census didn\'t answer. ' +
+        "That says nothing about the fleet's deploys; this card just couldn't read it.</p>";
+    }
+    var win = operatorCensusWindowHtml(data.window);
+    if (data.volume === 0) {
+      return win + '<p class="set-empty">No deployments in this window. ' +
+        "Nothing was attempted, so there is no rate to report and no class table to draw — " +
+        "an empty window is not a healthy one, and a table of zeroes would say the opposite.</p>";
+    }
+    var basis = data.failure_rate && data.failure_rate.basis
+      ? '<p class="op-foot">Denominator: ' + esc(String(data.failure_rate.basis)) + "</p>"
+      : "";
+    var table = data.classes.length
+      ? '<div class="set-list">' + data.classes.map(operatorCensusClassRowHtml).join("") + "</div>"
+      : '<p class="set-empty">No failure class was recorded in this window — the ledger names ' +
+        "no failed row here. The counts below are still the whole population.</p>";
+    return win +
+      operatorCensusRateHtml(data.failure_rate, "Failure rate") +
+      basis + table + operatorCensusTotalsHtml(data);
+  }
+
+  // The page shell: five cards, each with its own body slot so one silent route
   // never blanks the others. Painted BEFORE the reads land, so the console has a
-  // shape instantly and every card owns its loading line.
+  // shape instantly and every card owns its loading line — the loading line is
+  // the card's HONEST in-flight state, and it is why a card is never empty
+  // while its request is still out.
   function operatorPageHtml() {
     function card(id, heading, purpose) {
       return '<section class="set-section">' +
@@ -10437,7 +10606,9 @@
       card("op-warm-body", "Warm pool",
         "Pre-provisioned boxes a launch can claim instead of waiting for a cold provision.") +
       card("op-digest-body", "Fleet digest",
-        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.");
+        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.") +
+      card("op-census-body", "Deploy ledger",
+        "Failure classes across every site over a pinned window, and the failure rate with its own denominator beside it.");
   }
 
   // ---- DOM mounts -----------------------------------------------------------
@@ -10544,6 +10715,15 @@
     operatorPaint("#op-warm-body", OPERATOR_WARM_POOL, function (data) { return operatorWarmPoolCardHtml(data); });
     operatorPaint("#op-digest-body", OPERATOR_DELIVERIES, function (data) {
       return operatorDigestCardHtml(data && data.deliveries);
+    });
+    // The census rides the SAME funnel as the other four: operatorPaint owns the
+    // only GET call site the whole console has, so the window query is computed
+    // here and handed in as a path rather than opening a fifth read seam with a
+    // degrade story of its own. (Spelled without the call expression on purpose
+    // — __unknown_census greps the source for it, and a comment that names it
+    // arrives as a phantom sixty-fourth call site.)
+    operatorPaint("#op-census-body", operatorCensusPath(), function (data) {
+      return operatorCensusCardHtml(data);
     });
   }
 
@@ -15499,6 +15679,34 @@
     });
   }
 
+  // dr-w1-s2's `failure_class`, RENDERED — and read straight OFF the payload.
+  //
+  // `deployment_json/1` carries `failure_class: DeployLedger.classify(d)` on
+  // every row, and until this pill nothing in the console read it: the row
+  // showed the humanized prose in `failure_reason` and the operator had no way
+  // to say WHICH named class the ledger had put this failure in — the same
+  // class the census card above counts, and the same one `bp cloud site status`
+  // prints. Three readers, one name, one derivation.
+  //
+  // THE STRING IS RENDERED VERBATIM AND NOTHING MAPS IT. No allowlist, no label
+  // table, no client-side classify: a second derivation is a second truth, and
+  // it drifts from `DeployLedger.classify/2` the first time a class is added
+  // upstream — an unknown class would silently render as the wrong name, or
+  // (worse, because it looks like health) not render at all. So an ARBITRARY
+  // string the server sends renders as itself, and __app.test.mjs pins exactly
+  // that, plus the ABSENCE of any taxonomy vocabulary in this file.
+  //
+  // The pill is the shared `.dep-pill` base and no new modifier: colouring the
+  // class would be a second, client-side judgement about severity on top of the
+  // one the row's own status pill already states (GR11/D24 freeze the .dep-*
+  // family, and this is a consumer of it, never a restyle).
+  function deployFailureClassPillHtml(d) {
+    var fc = d && d.failure_class;
+    if (typeof fc !== "string" || fc === "") return "";
+    return '<span class="dep-pill" title="The deploy ledger\'s class for this row">' +
+      esc(fc) + "</span>";
+  }
+
   function deployRow(d, currentId, flash) {
     var st = d.status || "queued";
     // Headline ref: a full 40-char commit sha is noise, not information — show
@@ -15549,7 +15757,11 @@
         '<div class="deploy-meta">' + metaBits.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
-      '<div class="dep-side">' + actionBtn +
+      // The ledger's class sits BESIDE the status pill, not inside the failure
+      // panel: the panel carries the server's prose sentence, this carries the
+      // machine name that prose was classified into, and conflating them would
+      // hide the one an operator can grep a census for.
+      '<div class="dep-side">' + actionBtn + deployFailureClassPillHtml(d) +
         '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div></div>";
     return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
@@ -25660,6 +25872,7 @@
       promotePath: promotePath, promoteActionFor: promoteActionFor,
       promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
       deployRefLabel: deployRefLabel, deployRow: deployRow,
+      deployFailureClassPillHtml: deployFailureClassPillHtml,
       // cch-w28-bl: previewRow was NEVER exported, so the one test named for it
       // guarded its assertions behind `if (html !== null)` and ran ZERO of them
       // — deleting its whole failure panel left the suite 797/797 green while
@@ -25989,6 +26202,18 @@
       operatorCanaryCardHtml: operatorCanaryCardHtml,
       operatorWarmPoolCardHtml: operatorWarmPoolCardHtml,
       operatorDigestCardHtml: operatorDigestCardHtml,
+      // dr-w1-s2's census, finally read. The window helpers are exported so the
+      // harness can assert the URL the browser actually sends, and the rate /
+      // class-row helpers so the REFUSAL arm ("not enough data (n=74)") is
+      // pinned by name rather than only through the card.
+      operatorCensusWindow: operatorCensusWindow,
+      operatorCensusPath: operatorCensusPath,
+      operatorCensusRateHtml: operatorCensusRateHtml,
+      operatorCensusRefusalText: operatorCensusRefusalText,
+      operatorCensusClassRowHtml: operatorCensusClassRowHtml,
+      operatorCensusCardHtml: operatorCensusCardHtml,
+      OPERATOR_DEPLOY_CENSUS: OPERATOR_DEPLOY_CENSUS,
+      OPERATOR_CENSUS_DAYS: OPERATOR_CENSUS_DAYS,
       operatorPageHtml: operatorPageHtml,
       OPERATOR_SETTLE_MIN: OPERATOR_SETTLE_MIN,
       // cch-w36-s4: the fault classifier + the ONE card funnel it feeds.

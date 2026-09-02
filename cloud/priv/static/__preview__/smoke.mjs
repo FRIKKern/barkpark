@@ -1499,6 +1499,18 @@ const EXPECTATIONS = {
         assert.ok(body.includes(needle), "#site-body missing " + JSON.stringify(needle));
       }
 
+      // dr-w1-s2 (criterion 1): the LEDGER'S CLASS, on the row, in a browser.
+      // `deployment_json/1` has carried `failure_class` since W1 S2 and nothing
+      // rendered it — the operator saw the humanized prose and had no way to
+      // name the class the census counts. Read OFF the payload: the fixture says
+      // BUILD_FAILED and the pill says BUILD_FAILED, with no map in between.
+      assert.ok(body.includes(">BUILD_FAILED<"),
+        "the failed row must carry its ledger class as a pill; got: " + body);
+      // And only the row that HAS one grows one — two live rows sit beside it
+      // with failure_class null, and neither may invent a class.
+      assert.equal((body.match(/>BUILD_FAILED</g) || []).length, 1,
+        "exactly one row carries a class — a null failure_class must render NO pill");
+
       // Every listener loadSite attaches on the success branch, with the event
       // type it was registered for — the shim dispatches PER TYPE, so a control
       // wired for "change" and clicked reports 0 (site-theme-select, measured).
@@ -3858,7 +3870,7 @@ const EXPECTATIONS = {
     check(reg) {
       assert.equal(reg.get("view-operator").hidden, false, "the Operator view must be visible for an operator");
       const page = reg.get("operator-body").innerHTML || "";
-      for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest"])
+      for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest", "Deploy ledger"])
         assert.ok(page.includes(heading), "the page carries the " + heading + " card");
 
       // 1. BRAKE — the SHARED banner model, with the console's one action control.
@@ -3896,6 +3908,23 @@ const EXPECTATIONS = {
       assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty state renders");
       assert.ok(digest.includes("06:00 UTC"), "the one backed clock claim survives (config.exs:334)");
       assert.ok(!/Send (one )?now/i.test(page + digest), "no send-now button anywhere (GR40)");
+
+      // 5. DEPLOY LEDGER CENSUS (dr-w1-s2) — the READABLE arm: n=1840 clears
+      // @min_sample, so the rate answers and must arrive WITH its denominator.
+      // Sixteen waves computed this number and nothing rendered it; this is the
+      // first assertion in the repo that a human can SEE a failure class.
+      const census = reg.get("op-census-body").innerHTML || "";
+      assert.ok(census.includes("16.96%"), "the rate the server computed renders verbatim; got: " + census);
+      assert.ok(census.includes("312 of 1840"),
+        "a percentage NEVER travels without its numerator and denominator; got: " + census);
+      for (const cls of ["BUILD_FAILED", "BOX_UNREACHABLE", "UNCLASSIFIED"])
+        assert.ok(census.includes(cls), "the class table names " + cls);
+      assert.ok(census.includes("the site build exited non-zero"),
+        "the LABEL is DeployLedger.label/1's own string, rendered verbatim — the console owns no label map");
+      assert.ok(!census.includes("not enough data"), "a rate the ledger answered is not a refusal");
+      assert.ok(!census.includes("No deployments in this window"), "1840 rows is not an empty window");
+      assert.ok(census.includes("volume 1840") && census.includes("deferred 99"),
+        "every named state is a COUNT beside the rate, never folded into it");
     },
   },
   "operator-halted": {
@@ -3913,6 +3942,23 @@ const EXPECTATIONS = {
       const digest = reg.get("op-digest-body").innerHTML || "";
       assert.ok(digest.includes("smtp: connection timed out"), "the failed send carries its verbatim error");
       assert.ok(digest.includes("Sent") && digest.includes("Failed"), "both outcomes render");
+
+      // THE REFUSAL, RENDERED (dr-w1-s2). n=74 is below @min_sample 200, so
+      // `rate/2` answers `refused: true, pct: null`. The console must print the
+      // ledger's own refusal and NOT a percentage — and it must not compute one
+      // from the counts (12/74 = 16.22%) sitting right beside it either.
+      const census = reg.get("op-census-body").innerHTML || "";
+      assert.ok(census.includes("not enough data (n=74)"),
+        "the ledger's refusal renders with the SERVER's own n; got: " + census);
+      assert.ok(census.includes("sample 74 below min_sample 200"),
+        "and the server's reason rides along, so the threshold is legible");
+      assert.ok(!/\d+(\.\d+)?%\s*—/.test(census),
+        "NO percentage may be rendered for a refused rate; got: " + census);
+      assert.ok(!census.includes("16.22"), "and certainly not one computed client-side from 12/74");
+      // The COUNTS stay — D9's ruling is that counts stay while ratios go.
+      assert.ok(census.includes("volume 74") && census.includes("failed 12"),
+        "a refused RATIO does not delete the real rows behind it");
+      assert.ok(census.includes("BUILD_FAILED"), "the class table still renders under a refused rate");
     },
   },
   "operator-zero-staging": {
@@ -3938,6 +3984,16 @@ const EXPECTATIONS = {
       const digest = reg.get("op-digest-body").innerHTML || "";
       assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty digest renders");
       assert.ok(!digest.includes("platform-operator addresses"), "the audience is team members, not platform admins (dr-w19-s5)");
+
+      // THE EMPTY CENSUS WINDOW (dr-w1-s2). volume 0 is NOTHING MEASURED, not
+      // zero failures — a zeroed class table beside a 0.0% rate reads as health,
+      // which is the exact inversion this epic exists to refuse.
+      const census = reg.get("op-census-body").innerHTML || "";
+      assert.ok(census.includes("No deployments in this window"),
+        "an empty window says so in words; got: " + census);
+      assert.ok(!census.includes("set-row"), "and draws NO class table — a table of zeroes reads like health");
+      assert.ok(!/%/.test(census), "no rate, not even 0%, off a window with nothing in it");
+      assert.ok(!census.includes("unavailable"), "an empty window is a reading, never an error");
     },
   },
   "operator-denied": {
@@ -3970,12 +4026,13 @@ const EXPECTATIONS = {
       const canary = reg.get("op-canary-body").innerHTML || "";
       const warm = reg.get("op-warm-body").innerHTML || "";
       const digest = reg.get("op-digest-body").innerHTML || "";
+      const census = reg.get("op-census-body").innerHTML || "";
       // cch-w36-s4 — THIS SCENARIO IS A 403 ON ALL FOUR ROUTES, and a 403 is an
       // ANSWER: the control plane made a determination. The cards used to call
       // it "didn't answer / this card just couldn't read it" — a transport story
       // over an authority verdict — because operatorPaint's single ternary
       // destroyed the status before any renderer saw it. Four cards, ONE funnel.
-      for (const [name, html] of [["brake", brake], ["canary", canary], ["warm pool", warm], ["digest", digest]]) {
+      for (const [name, html] of [["brake", brake], ["canary", canary], ["warm pool", warm], ["digest", digest], ["census", census]]) {
         assert.ok(html.includes("refused this read (403)"), "the " + name + " names the refusal");
         assert.ok(html.includes("platform_operator"), "the " + name + " names the authority that refused");
         assert.ok(!html.includes("didn't answer"), "the " + name + " no longer calls a determination a silence");
@@ -3983,7 +4040,15 @@ const EXPECTATIONS = {
       }
       assert.ok(!brake.includes("data-fleet-au"), "a refused brake offers no button");
       assert.ok(!warm.includes("op-metric-v"), "no fake zero is drawn when the count was refused");
-      for (const html of [brake, canary, warm, digest])
+      // A REFUSED CENSUS IS NOT AN EMPTY WINDOW, and it is not a rate of zero.
+      // Both would be a determinate claim about the fleet's deploys off a read
+      // the control plane never performed.
+      assert.ok(!census.includes("No deployments in this window"),
+        "a refused read must NEVER be reported as a measured empty window");
+      assert.ok(!/%/.test(census), "and no percentage is drawn off a reading that was refused");
+      assert.ok(!census.includes("not enough data"),
+        "a 403 is an AUTHORITY verdict, never the ledger's sample-size refusal");
+      for (const html of [brake, canary, warm, digest, census])
         assert.ok(!html.includes("Loading"), "no card is left spinning after its request settles");
     },
   },
@@ -4116,7 +4181,7 @@ const EXPECTATIONS = {
       assert.ok(!after.includes("Checking operator access"),
         "the console must not be left on the spinner the retry painted while it waited; got: " + after);
       // THE SHELL ACTUALLY PAINTED — the four card slots the operator page owns.
-      for (const slot of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body"]) {
+      for (const slot of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body", "op-census-body"]) {
         assert.ok(after.includes(slot), "the operator shell did not mount #" + slot + "; got: " + after);
       }
       assert.equal(reg.get("nav-operator").hidden, false, "a proven operator gets the sidebar entry back");
