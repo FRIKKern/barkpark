@@ -194,42 +194,28 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
         project_id: proj.id
       )
 
-    null_dataset_id!(doc)
-  end
-
-  # WHY THE ROW'S `dataset_id` IS NULLED (a real, separate defect this suite had
-  # to route around — NOT a relaxation of anything under test).
-  #
-  # `Sheets.Session.load_doc/2` calls `Content.get_document/3` with NO scope
-  # opts. `WriteScope.resolve_read_dataset_id/2` then falls back to the SEEDED
-  # DEFAULT project (its `true ->` arm, taken because the caller passed no
-  # `:workspace_id` key at all) and returns the DEFAULT project's `dataset_id`.
-  # `Query.scope_to_dataset/3` applies that as
-  # `dataset_id == default_ds_id or (is_nil(dataset_id) and dataset == "production")`.
-  # A sheet stamped with a NON-Default workspace's own `production` dataset row
-  # matches NEITHER arm, so the session gets `{:error, :not_found}`, never starts,
-  # and `SheetGrid.Ops.send_ops/2` reports `notice: "edit failed: :not_found"`.
-  # Observed verbatim on the first run of this suite.
-  #
-  # Consequence: without this line every "the store did not change" assertion
-  # below would pass VACUOUSLY — not because a gate held, but because the Sheets
-  # session cannot open the sheet at all. Nulling `dataset_id` puts the row in
-  # the LEGACY shape the same query explicitly tolerates, which BOTH the scoped
-  # desk read (project-scoped: `dataset_id == ws_ds_id OR is_nil(dataset_id)`)
-  # and the session's unscoped read admit.
-  #
-  # It touches NO authorization axis: `workspace_id`, `project_id` and the grant
-  # ladder are untouched, and `Access.validate/3` compares the `dataset` STRING
-  # (`socket.assigns[:dataset]`), never `dataset_id`.
-  defp null_dataset_id!(doc) do
-    import Ecto.Query
-
-    {1, _} =
-      Barkpark.Repo.update_all(
-        from(d in Barkpark.Content.Document, where: d.id == ^doc.id),
-        set: [dataset_id: nil]
-      )
-
+    # THE ROW KEEPS ITS REAL `dataset_id` — the ordinary Studio write path
+    # stamps one, and this suite used to have to NULL it.
+    #
+    # WHY IT DID (task-f0c064a406e8d363, fixed): `Sheets.Session.load_doc/2`
+    # called `Content.get_document/3` with NO scope opts.
+    # `WriteScope.resolve_read_dataset_id/2` then took its "no scope at all"
+    # arm and returned the SEEDED DEFAULT project's `dataset_id`, which
+    # `Query.scope_to_dataset/3` applies as `dataset_id == default_ds_id or
+    # (is_nil(dataset_id) and dataset == "production")`. A sheet stamped with
+    # THIS non-Default workspace's own `production` dataset row matched NEITHER
+    # arm: the session got `{:error, :not_found}`, never started, and
+    # `SheetGrid.Ops.send_ops/2` reported `notice: "edit failed: :not_found"`.
+    # Every "the store did not change" assertion in this file then passed
+    # VACUOUSLY — not because a gate held, but because the session could not
+    # open the sheet at all.
+    #
+    # The session is now keyed `{dataset, workspace_id, published-id}` and
+    # loads SCOPED to that workspace, so the real `dataset_id` is admitted.
+    # RESTORE the `null_dataset_id!/1` workaround (or revert the scoping) and
+    # the pds-w44 harness test below reds on `{:error, :no_session}` — that
+    # test is this line's guard.
+    assert is_binary(doc.dataset_id)
     doc
   end
 
@@ -301,9 +287,9 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   # when one exists; with no session the stored document is the truth. Reading
   # both ways is what makes the assertion falsifiable in either direction — a
   # write that starts a session is caught, and so is one that never does.
-  defp persisted_a1(slug) do
+  defp persisted_a1(ws, slug) do
     cells =
-      case Session.peek(slug, @dataset) do
+      case Session.peek(slug, @dataset, ws.id) do
         {:ok, content} ->
           get_in(content, ["tabs", Access.at(0), "cells"]) || %{}
 
@@ -312,6 +298,30 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       end
 
     Map.get(cells, "A1")
+  end
+
+  # The DB row's cells, AFTER forcing the live session to persist. The
+  # STORED-bytes oracle the pds-w44 criteria ask for: it reads what actually
+  # reached storage, so an escalated in-memory cell cannot hide behind a
+  # 60s debounce.
+  defp flushed_cells(slug) do
+    :ok = Session.flush(slug, @dataset)
+    get_in(stored_content(slug), ["tabs", Access.at(0), "cells"]) || %{}
+  end
+
+  # Which workspaces hold a row for this sheet. One, and it must be the test's
+  # own — the session's debounced persist runs through
+  # `Content.upsert_document/4`, whose prev-doc lookup is SCOPE-SCOPED: an
+  # unscoped persist resolves the seeded Default workspace, finds no prev doc
+  # there, and INSERTS a SECOND copy of the sheet into Default.
+  defp row_workspaces(slug) do
+    import Ecto.Query
+
+    Barkpark.Content.Document
+    |> where([d], d.doc_id in ^[slug, "drafts." <> slug] and d.type == "sheet")
+    |> select([d], d.workspace_id)
+    |> Barkpark.Repo.all()
+    |> MapSet.new()
   end
 
   defp stored_content(slug) do
@@ -408,7 +418,7 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       {_user, conn} = write_grantee_session(conn, ws, proj)
       {view, _html} = open_sheet!(conn, ws, proj, @other_slug)
 
-      assert persisted_a1(@other_slug) == @orig
+      assert persisted_a1(ws, @other_slug) == @orig
 
       # ROUTE A — straight at the LiveView. `save` classifies `:write` and
       # `Caps` PASSES it (caps.write is true), so the halt below is
@@ -416,7 +426,7 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       # to the NON-granted sheet and no grant validated.
       render_hook(view, "save", %{"document" => %{}})
       assert flash_error(view) == @outside_grant_flash
-      assert persisted_a1(@other_slug) == @orig
+      assert persisted_a1(ws, @other_slug) == @orig
 
       # NON-VACUITY, BEFORE the write: the component IS reachable on this socket
       # and the cid-routed event really is dispatched into its own
@@ -440,7 +450,7 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       # regression prints `left: %{"v" => 1337}` rather than a custom message,
       # and asserted BEFORE any mechanism assertion so a mutation run reports
       # the BYTES rather than the flag that shadowed them.
-      after_component_event = persisted_a1(@other_slug)
+      after_component_event = persisted_a1(ws, @other_slug)
 
       assert after_component_event == @orig
 
@@ -461,7 +471,7 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       {granted_view, _html} = open_sheet!(conn, ws, proj, @granted_slug)
       component_write(granted_view, @granted_slug, @escalated)
 
-      assert persisted_a1(@granted_slug) == %{"v" => 1337}
+      assert persisted_a1(ws, @granted_slug) == %{"v" => 1337}
       assert component_assigns(granted_view)[:write_capable] == true
     end
 
@@ -486,13 +496,129 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
 
       component_write(view, @granted_slug, @escalated)
 
-      assert persisted_a1(@granted_slug) == %{"v" => 1337}
+      assert persisted_a1(ws, @granted_slug) == %{"v" => 1337}
 
       # The capability really did travel in as a prop, and the write path
       # reported no error (a `notice` here is how the first run of this suite
       # surfaced the session's `:not_found`, see `null_dataset_id!/1`).
       assert component_assigns(view)[:write_capable] == true
       assert component_assigns(view)[:notice] == nil
+    end
+  end
+
+  # ── 2b. pds-w44 — THE WRITE-LANDING HARNESS, in a SCOPED PRIVATE workspace ──
+  #
+  # pds-w44-bl-sheetgrid-write-landing-unproven. Wave 44 proved the capability
+  # PROP flips, but never landed a sheet write in a scoped private workspace:
+  # `Session.peek/2` answered `{:error, :no_session}` in BOTH arms and the
+  # stored cell stayed unchanged either way, so a "store unchanged" assertion
+  # there would have been VACUOUS IN BOTH ARMS.
+  #
+  # The reason was task-f0c064a406e8d363: the session's load was dataset_id-
+  # blind, so it could not open a sheet outside the Default workspace at all.
+  # These tests are the harness that row asked for, in the order it asked for
+  # it — OPEN, then LAND, and only then assert a refusal.
+
+  describe "the Sheets session in a NON-Default, unshared, private workspace" do
+    test "OPENS the sheet — peek returns the stored cell, not {:error, :no_session}", %{
+      ws: ws
+    } do
+      # Nothing is live yet: `peek/3` never starts a session.
+      assert Session.peek(@granted_slug, @dataset, ws.id) == {:error, :no_session}
+
+      # The session starts LAZILY on the first op. Before the fix THIS call
+      # returned `{:error, :not_found}` — `init/1` could not read the row,
+      # because the unscoped `Content.get_document/3` resolved the seeded
+      # DEFAULT project's `dataset_id` and this workspace's sheet carries its
+      # OWN. Delete the `workspace_id` argument here (or revert `load_doc/3`)
+      # and the assertion below reds with `{:error, :not_found}`.
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops(
+                 @granted_slug,
+                 @dataset,
+                 [%{"op" => "set_cell", "tab" => 0, "ref" => "B2", "raw" => "harness"}],
+                 nil,
+                 ws.id
+               )
+
+      # CRITERION 1 — a REAL session is live for a doc in a scoped private
+      # workspace, and `peek/3` returns the STORED cell (the row's own `A1`,
+      # loaded from storage) rather than `{:error, :no_session}`.
+      assert {:ok, content} = Session.peek(@granted_slug, @dataset, ws.id)
+      cells = get_in(content, ["tabs", Access.at(0), "cells"]) || %{}
+      assert Map.get(cells, "A1") == @orig
+      assert Map.get(cells, "B2") == %{"v" => "harness"}
+    end
+
+    test "LANDS a write — the harness write reaches STORAGE, in THIS workspace only", %{
+      ws: ws
+    } do
+      {:ok, _} =
+        Session.apply_ops(
+          @granted_slug,
+          @dataset,
+          [%{"op" => "set_cell", "tab" => 0, "ref" => "B2", "raw" => "harness"}],
+          nil,
+          ws.id
+        )
+
+      # CRITERION 2 — the positive control, on the STORED bytes. The debounce
+      # is 60s in this suite, so nothing reaches the row until the flush; that
+      # is exactly what makes this a landing proof and not a memory read.
+      assert Map.get(flushed_cells(@granted_slug), "B2") == %{"v" => "harness"}
+
+      # …and it landed in THIS tenant, not a second copy in Default. The
+      # session's persist runs `Content.upsert_document/4`, whose prev-doc
+      # lookup is scope-scoped: unscoped, it resolves the seeded Default
+      # workspace, finds no prev doc, and INSERTS. Drop the `write_scope/1`
+      # opts from `Session.persist_result/1` and this set gains the Default
+      # workspace's id.
+      assert row_workspaces(@granted_slug) == MapSet.new([ws.id])
+    end
+
+    test "is TENANT-KEYED — another workspace's identically-slugged sheet is a DIFFERENT session",
+         %{ws: ws} do
+      # A second tenant holding the SAME slug in the SAME dataset. Before this
+      # fix the registry key was `{dataset, published-id}`, so these two shared
+      # ONE session process — the residual the `/ops` tenant gate declared.
+      other_ws = create_workspace!("w41cb-other-#{System.unique_integer([:positive])}")
+      other_proj = create_project!(other_ws, "w41cb-proj")
+      seed_sheet_schema!(other_ws, other_proj)
+      create_sheet!(other_ws, other_proj, @granted_slug)
+
+      {:ok, _} =
+        Session.apply_ops(
+          @granted_slug,
+          @dataset,
+          [%{"op" => "set_cell", "tab" => 0, "ref" => "B2", "raw" => "tenant-a"}],
+          nil,
+          ws.id
+        )
+
+      # Tenant A's session is live; tenant B's is NOT — different key.
+      assert {:ok, _} = Session.peek(@granted_slug, @dataset, ws.id)
+      assert Session.peek(@granted_slug, @dataset, other_ws.id) == {:error, :no_session}
+
+      # And when B starts its own, it reads B's row: A's `B2` is not there.
+      assert {:ok, _} =
+               Session.apply_ops(
+                 @granted_slug,
+                 @dataset,
+                 [%{"op" => "set_cell", "tab" => 0, "ref" => "C3", "raw" => "tenant-b"}],
+                 nil,
+                 other_ws.id
+               )
+
+      assert {:ok, b_content} = Session.peek(@granted_slug, @dataset, other_ws.id)
+      b_cells = get_in(b_content, ["tabs", Access.at(0), "cells"]) || %{}
+      assert Map.get(b_cells, "C3") == %{"v" => "tenant-b"}
+      refute Map.has_key?(b_cells, "B2")
+
+      # …and A never saw B's cell either.
+      assert {:ok, a_content} = Session.peek(@granted_slug, @dataset, ws.id)
+      a_cells = get_in(a_content, ["tabs", Access.at(0), "cells"]) || %{}
+      assert Map.get(a_cells, "B2") == %{"v" => "tenant-a"}
+      refute Map.has_key?(a_cells, "C3")
     end
   end
 
@@ -532,7 +658,7 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       # the SheetGrid callsite (`write_capable={true}`) and THIS line reds with
       # `left: %{"v" => 1337}`; the mechanism assertion below reds too, but the
       # store is the one that matters and it must be the one that speaks.
-      assert persisted_a1(@other_slug) == @orig
+      assert persisted_a1(ws, @other_slug) == @orig
 
       # …and the MECHANISM that held it: the capability the component itself
       # received.
@@ -587,7 +713,7 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       # gates NAVIGATION events, and no Studio LiveComponent implements one, so
       # there is nothing to bypass it WITH. The sheet finding above does NOT
       # transfer to `:studio_chrome_nav`; it needed a component that WRITES.
-      assert persisted_a1(@other_slug) == @orig
+      assert persisted_a1(ws, @other_slug) == @orig
     end
   end
 
@@ -633,16 +759,124 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
 
       assert component_assigns(view)[:active] == {3, 3}
 
+      # pds-w44 CRITERION 2, INSIDE this arm: the harness LANDS a write on the
+      # very sheet the refusal below covers, in this scoped private workspace.
+      # Without it "the store did not change" is satisfied by a session that
+      # could never open the sheet — which is exactly how wave 44 found it.
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops(
+                 @other_slug,
+                 @dataset,
+                 [%{"op" => "set_cell", "tab" => 0, "ref" => "B2", "raw" => "harness"}],
+                 nil,
+                 ws.id
+               )
+
       component_write(view, @other_slug, @escalated)
 
-      # THE ORACLE FIRST — persisted state, by value. Revert the capability at
-      # the SheetGrid callsite (`write_capable={true}`) and THIS line reds with
-      # `left: %{"v" => 1337}`; the mechanism assertion below reds too, but the
-      # store is the one that matters and it must be the one that speaks.
-      assert persisted_a1(@other_slug) == @orig
+      # pds-w44 CRITERION 3 — THE ORACLE IS THE STORED BYTES. `flushed_cells/1`
+      # forces the live session to persist and reads the ROW back, so this is
+      # what actually reached storage, not a memory peek.
+      #
+      # The SAME flush carries both cells, which is what makes the refusal
+      # non-vacuous: `B2` proves writes DO land on this sheet in this
+      # workspace through this session, while `A1` proves the share-read
+      # viewer's escalation did NOT.
+      stored = flushed_cells(@other_slug)
+
+      assert Map.get(stored, "A1") == @orig
+      assert Map.get(stored, "B2") == %{"v" => "harness"}
+
+      assert persisted_a1(ws, @other_slug) == @orig
 
       # …and the MECHANISM that held it: the capability the component itself
       # received.
+      assert component_assigns(view)[:write_capable] == false
+    end
+
+    # pds-w44 CRITERION 4 — NON-VACUOUS BY MUTATION, and it needs THIS
+    # principal, not the anonymous viewer above.
+    #
+    # `Caps.write_capable?/2` is a `cond`, and its arms are ORDERED:
+    #
+    #     readonly_posture?(assigns) -> false     # PDS-D635, the arm under test
+    #     Map.get(caps, :write) == true -> true   # short-circuits BEFORE restricted?/1
+    #     restricted?(assigns) -> false
+    #
+    # For the ANONYMOUS share viewer `caps.write` is FALSE, so deleting the
+    # first arm changes nothing: `restricted?/1` catches it on `readonly_gate?`
+    # and the answer stays `false`. Measured, not assumed — that mutation ran
+    # 9 tests, 0 failures.
+    #
+    # The arm is load-bearing for exactly the population PDS-D635 names: a
+    # SIGNED-IN grantee holding an ACTIVE WRITE GRANT who mounts a `:docs`-shared
+    # desk. `LiveScope.authorize_read/4` offers the public-share arm BEFORE the
+    # grant arm, so they land on grade `:share_read` (`share_access: :read`,
+    # `readonly_gate?: true`, NO `caller_context`, NO `write_gate?`) — while
+    # `Caps.derive/1` still reads their grants off `current_user` and reports
+    # `write: true`. Delete the arm and the SECOND arm fires: the write lands.
+    test "a signed-in WRITE GRANTEE on the shared desk is gated by the read-only POSTURE alone",
+         %{
+           conn: conn,
+           ws: ws,
+           proj: proj
+         } do
+      {_user, conn} = write_grantee_session(conn, ws, proj)
+      {view, _html} = open_sheet!(conn, ws, proj, @granted_slug)
+      assigns = socket_of(view).assigns
+      caps = Caps.derive(socket_of(view))
+
+      # THE PRECONDITION THAT MAKES THE MUTATION BITE, stated as values from the
+      # running socket: a read-only POSTURE sitting on top of a TRUE write
+      # capability. Without `caps.write == true` this test degrades into the
+      # anonymous one above and the mutation is absorbed by `restricted?/1`.
+      assert assigns[:share_access] == :read
+      assert assigns[:readonly_gate?] == true
+      assert assigns[:write_gate?] == nil
+      assert is_nil(assigns[:caller_context])
+      assert %Barkpark.Accounts.User{} = assigns[:current_user]
+      assert caps.write == true
+
+      # NON-VACUITY: the component is reachable and the cid-routed event really
+      # is dispatched into its own `handle_event/3` (C3 is not the mount
+      # default), so an unchanged store below is a REFUSAL, not a lost event.
+      render_hook(grid_target!(view, @granted_slug), "cell-click", %{
+        "ref" => "C3",
+        "shift" => false
+      })
+
+      assert component_assigns(view)[:active] == {3, 3}
+
+      # THE HARNESS LANDS A WRITE on this very sheet, in this scoped private
+      # workspace — so the refusal below is selective, not "sheets are broken".
+      assert {:ok, %{applied: 1, errors: []}} =
+               Session.apply_ops(
+                 @granted_slug,
+                 @dataset,
+                 [%{"op" => "set_cell", "tab" => 0, "ref" => "B2", "raw" => "harness"}],
+                 nil,
+                 ws.id
+               )
+
+      component_write(view, @granted_slug, @escalated)
+
+      # THE ORACLE FIRST, and it is the STORED bytes — read back off the ROW
+      # after forcing the live session to persist. The mechanism assertions are
+      # deliberately BELOW it: on a mutation run they red too, and the store is
+      # the one that must speak.
+      #
+      # RUN-PROVEN MUTATION (pds-w44 criterion 4): delete the
+      # `readonly_posture?(assigns) -> false` arm from
+      # `BarkparkWeb.Studio.Caps.write_capable?/2` and the A1 line below reds
+      # with `left: %{"v" => 1337}` — the ESCALATED STORED value, named.
+      stored = flushed_cells(@granted_slug)
+
+      assert Map.get(stored, "A1") == @orig
+      assert Map.get(stored, "B2") == %{"v" => "harness"}
+
+      # …and the MECHANISM that held them: the posture arm answering `false`
+      # over a TRUE write capability, and the `false` the component received.
+      assert Caps.write_capable?(assigns, caps) == false
       assert component_assigns(view)[:write_capable] == false
     end
   end
