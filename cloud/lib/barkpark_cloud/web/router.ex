@@ -6857,6 +6857,15 @@ defmodule BarkparkCloud.Web.Router do
       team_id = team_id_for_barkpark_of_job(conn.path_params["id"])
 
       case Registry.succeed_deprovision_job(conn.path_params["id"], claim_token_opts(conn)) do
+        # cch-w57: a real delete also stamped a `barkpark.deleted` audit row in
+        # the same transaction, so the console's audit pane is nudged too — the
+        # `:already_gone` arm deleted nothing and wrote nothing, so it must not
+        # claim a trail change.
+        {:ok, :deleted} ->
+          push_event(team_id, "fleet")
+          push_event(team_id, "audit")
+          json(conn, 200, %{ok: true})
+
         {:ok, _} ->
           push_event(team_id, "fleet")
           json(conn, 200, %{ok: true})
