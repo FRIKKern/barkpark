@@ -115,7 +115,12 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   identifier namespace while the operator believed theirs was set — and a
   RecordReference is what the trading partner keys the record by, so the
   mistake is only visible downstream, after ingestion.
-  `Barkpark.Application.start/2` resolves it once at boot.
+  `Barkpark.Plugins.OnixEdit.start_dataset_host_check/0` — the boot child this
+  plugin contributes via `register_workers/1` — resolves it once at startup, so
+  a malformed value refuses the node instead of waiting for the first export.
+  The check rides the PLUGIN's own boot path, not the host's: naming a
+  removable plugin from `application.ex` would break the fresh-install
+  invariant (`Barkpark.Plugin` §Fresh-install invariant).
   """
   @spec dataset_host() :: String.t()
   def dataset_host do

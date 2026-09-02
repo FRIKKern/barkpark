@@ -15,6 +15,7 @@ defmodule Barkpark.DeploymentLiteralsTest do
   """
   use ExUnit.Case, async: false
 
+  alias Barkpark.Plugins.OnixEdit
   alias Barkpark.Plugins.OnixEdit.Export
   alias Barkpark.StudioChat.Titles
   alias Barkpark.Tasks.Judge
@@ -37,6 +38,9 @@ defmodule Barkpark.DeploymentLiteralsTest do
        }}
     end
   end
+
+  # The id `register_workers/1` gives the boot check.
+  @check_id :onixedit_dataset_host_boot_check
 
   @judge_keys [
     :judge_http_adapter,
@@ -233,6 +237,43 @@ defmodule Barkpark.DeploymentLiteralsTest do
           Export.record_reference("p1")
         end
       end
+    end
+  end
+
+  describe "the ONIX host check rides the PLUGIN's boot path" do
+    # The host cannot make this check: naming `Barkpark.Plugins.OnixEdit` from
+    # `application.ex` — where the two host literals above ARE resolved at
+    # boot — reds the fresh-install invariant (`Barkpark.Plugin`
+    # §Fresh-install invariant, `plugin_free_boot_test.exs` tier 5). So OnixEdit
+    # contributes the check as its own `register_workers/1` child: present
+    # exactly where the plugin is enabled, absent where it is not.
+    defp boot_child do
+      Enum.find(OnixEdit.register_workers(%{phase: :boot}), &match?(%{id: @check_id}, &1))
+    end
+
+    test "register_workers/1 contributes the check as a start-only child" do
+      assert %{id: @check_id, start: {OnixEdit, :start_dataset_host_check, []}} = boot_child()
+    end
+
+    test "a valid host starts and leaves NO process behind" do
+      put_onix_host("gyldendal.no")
+
+      assert OnixEdit.start_dataset_host_check() == :ignore
+
+      assert {:ok, sup} = Supervisor.start_link([boot_child()], strategy: :one_for_one)
+      assert Supervisor.which_children(sup) == []
+      Supervisor.stop(sup)
+    end
+
+    test "FAILS CLOSED: a malformed host refuses the supervisor, i.e. the boot" do
+      put_onix_host("https://gyldendal.no")
+
+      assert_raise ArgumentError, ~r/invalid ONIX dataset host/, fn ->
+        OnixEdit.start_dataset_host_check()
+      end
+
+      Process.flag(:trap_exit, true)
+      assert {:error, _reason} = Supervisor.start_link([boot_child()], strategy: :one_for_one)
     end
   end
 end
