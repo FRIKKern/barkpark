@@ -2,6 +2,8 @@
 
 # Re-derivation recipe — the 18 bucket-B executable rows of the mobile epic
 
+> HISTORICAL RECORD (2026-07-29) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Baseline: `origin/main` @ `ab396959c77b01f87800e7399d5616ed8fd99a7b` (2026-07-28).
 Epic root: `task-c31a4f0a6c5be3ea` (child_count 90, 67 done, 23 open).
 The 23 open = 3 human gates + GOAL + `mob-w3-rich-tail` (crown) + **these 18**.

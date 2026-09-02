@@ -42,21 +42,55 @@ defmodule Barkpark.Tasks.Fleet do
   `last_seen` is stamped from `DateTime.utc_now/0` INSIDE the write — clients
   send `ttl_s` as data, never "now".
 
-  ## The fail-closed roster (PDF-D19)
+  ## The workspace-scoped roster (supersedes PDF-D19's global read)
 
-  `roster/2` reads `type == "listener"` GLOBAL-per-dataset — deliberately NO
-  workspace clause, copying `Barkpark.Tasks.Board.snapshot/1`'s shape: the
-  workspace-filtered index shape fail-closes to EMPTY on a nil workspace,
-  and the global shape makes that bug impossible. Staleness is computed at
-  read time and never stored: a row whose `last_seen` is missing, unparsable,
-  or older than its OWN `ttl_s` reads `"offline"` (fail closed); a fresh row
-  reads its stored self-declared status.
+  OWNER RULING, 2026-09-01 (task-4e2986e8609670d7, criterion 0), verbatim:
+
+  > orchestrator, delegated; owner informed 2026-09-01 — RULED A: scope the
+  > roster read with scope_opts(conn); the global view is for the OPERATOR
+  > tier only, NOT any `admin` bit.
+
+  PDF-D19 made this read GLOBAL-per-dataset with NO workspace clause, copying
+  `Barkpark.Tasks.Board.snapshot/1`'s shape. Its stated argument was
+  AVAILABILITY — "a workspace-filtered read fail-closes to EMPTY on a nil
+  workspace; the global shape makes that bug impossible" — never isolation,
+  and it cost tenancy: `beat/3` stamps a listener with the caller's
+  `workspace_id`, while the roster listed EVERY workspace's listeners, plus
+  the doc_id of each worker's in-progress task, to any bearer holding `read`.
+  The read now matches the write:
+
+    * a resolved `opts[:workspace_id]` (what `ScopeHelpers.scope_opts/1` hands
+      every HTTP request) → that workspace's listeners only;
+    * the `:shared_only` sentinel (a REQUEST that resolved no workspace) → the
+      shared `workspace_id IS NULL` layer only, never every tenant;
+    * `nil`, or no `:workspace_id` at all → NO rows. FAIL CLOSED: an empty
+      roster, never everything. That is precisely the case PDF-D19 defended
+      against, and the ruling settles it the other way.
+
+  There is NO global arm an HTTP request can reach. The ruling reserves the
+  cross-tenant view for an OPERATOR tier, and `api/` has no operator predicate
+  today (it lives in `cloud/` as `require_platform_operator`), so none is
+  built here — `GET /v1/fleet/roster` is workspace-scoped, full stop. When the
+  operator tier lands (task-c7e2b87f1bbca815) a global roster belongs behind
+  it, and NOT behind an `admin` bit, which the ruling explicitly refuses.
+
+  The one internal opt-in is `roster/2`'s `global: true`, and the Studio
+  `/admin/fleet` tile (`Barkpark.Plugins.Tasks.Web.FleetLive`, `:ops`-gated)
+  is its only caller — it has no request scope to thread and would otherwise
+  render permanently empty. It is named, greppable, reachable from no route,
+  and the first thing the operator tier should absorb.
+
+  Staleness is unchanged: computed at read time, never stored. A row whose
+  `last_seen` is missing, unparsable, or older than its OWN `ttl_s` reads
+  `"offline"` (fail closed); a fresh row reads its stored self-declared
+  status.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias Barkpark.Repo
 
   @type_name "listener"
@@ -116,31 +150,66 @@ defmodule Barkpark.Tasks.Fleet do
   # ─── Roster ────────────────────────────────────────────────────────────────
 
   @doc """
-  The fleet roster: every listener in `dataset`, with ONLINE/OFFLINE computed
-  at read time (fail closed) and the worker's current task joined in.
+  The fleet roster: every listener in `dataset` THE CALLER'S WORKSPACE OWNS,
+  with ONLINE/OFFLINE computed at read time (fail closed) and the worker's
+  current task joined in.
 
   Rows are string-keyed maps (`worker`, `agent`, `scope`, `status`,
   `capacity`, `last_seen`, `ttl_s`, `task`) sorted by `worker`, ready for the
   `{"ok": true, "documents": [...]}` envelope every installed `bp` binary
   renders as a real table (PDF-D21). `opts[:now]` injects the clock (tests).
+
+  Tenancy opts (the 2026-09-01 ruling — see the moduledoc):
+
+    * `:workspace_id` — a binary scopes to that workspace; `:shared_only`
+      reads the shared `workspace_id IS NULL` layer; `nil` or absent returns
+      NO rows (fail closed). Pass `ScopeHelpers.scope_opts(conn)` straight in.
+    * `:global` — `true` is the ONE explicit cross-tenant opt-in, held by the
+      `:ops`-gated Studio tile alone. No HTTP request can set it.
   """
   # @canonical capability:fleet-presence-staleness aka:online,offline,roster,ttl
   def roster(dataset, opts \\ []) when is_binary(dataset) do
     now = Keyword.get(opts, :now) || DateTime.utc_now()
-    tasks_by_worker = current_tasks_by_worker(dataset)
+    scope = roster_scope(opts)
+    tasks_by_worker = current_tasks_by_worker(dataset, scope)
 
     dataset
-    |> load_listeners()
+    |> load_listeners(scope)
     |> Enum.map(&to_row(&1, tasks_by_worker, now))
     |> Enum.sort_by(& &1["worker"])
   end
 
-  # Global-per-dataset read — NO workspace clause on purpose (PDF-D19, the
-  # Board.snapshot shape): a workspace-filtered read fail-closes to empty on a
-  # nil workspace; the global shape makes that bug impossible. Draft/published
-  # twins collapse to one canonical row (published wins), Board-style.
-  defp load_listeners(dataset) do
+  # The tenant scope BOTH roster queries run under — resolved once so the
+  # listener read and the task join can never disagree about who is asking.
+  #
+  # Project is deliberately NOT narrowed. The ruling scopes the roster to the
+  # TENANT boundary, and that boundary is the workspace; a beat does stamp
+  # `project_id` (registration goes through `Content.create_document/4` with
+  # the caller's write opts), so adding it would split one workspace's fleet
+  # across its projects and drop the task join for a listener whose task lives
+  # in a sibling project — an availability loss no criterion asks for. The
+  # `:project_id` in `scope_opts(conn)` is therefore read and ignored, here.
+  defp roster_scope(opts) do
+    if Keyword.get(opts, :global) == true,
+      do: :global,
+      else: {:workspace, Keyword.get(opts, :workspace_id)}
+  end
+
+  # `Content.Scope` owns every arm: binary → equality, `:shared_only` →
+  # `workspace_id IS NULL`, nil → `where: false` (fail closed, barkpark-s6t1).
+  # The global arm is `scope_to_workspace_global/1`, the codebase's named
+  # "I want all tenants' rows" opt-in — deliberate and greppable, not a default.
+  defp scope_to(query, :global), do: Scope.scope_to_workspace_global(query)
+
+  defp scope_to(query, {:workspace, workspace_id}),
+    do: Scope.scope_to_workspace(query, workspace_id, nil)
+
+  # Workspace-scoped read (the 2026-09-01 ruling — see moduledoc): the same
+  # clause `beat/3` stamps on the way in. Draft/published twins collapse to one
+  # canonical row (published wins), Board-style.
+  defp load_listeners(dataset, scope) do
     from(d in Document, where: d.type == @type_name and d.dataset == ^dataset)
+    |> scope_to(scope)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)
@@ -153,11 +222,16 @@ defmodule Barkpark.Tasks.Fleet do
   # Read-time join: worker -> the doc_id of its current in_progress task.
   # Identity follows the board_live.ex precedent: claim.worker || assignee.
   # Most-recently-updated wins when a worker somehow holds several.
-  defp current_tasks_by_worker(dataset) do
+  #
+  # Carries the SAME scope as load_listeners/2 — this half leaked too: the
+  # `task` column is a published doc_id, so an unscoped join handed a caller
+  # in workspace A the id of a task being worked in workspace B.
+  defp current_tasks_by_worker(dataset, scope) do
     from(d in Document,
       where: d.type == "task" and d.dataset == ^dataset,
       where: fragment("?->>'lifecycle_status' = 'in_progress'", d.content)
     )
+    |> scope_to(scope)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)

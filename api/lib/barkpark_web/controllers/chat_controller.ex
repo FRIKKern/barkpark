@@ -657,6 +657,13 @@ defmodule BarkparkWeb.ChatController do
         # change-only frame, removing the D13 mid-turn strip lag.
         chunk_or_stop(conn, sse_workflow_frame(summary))
 
+      {:chat_title, sid, title} when is_binary(title) ->
+        # The AI title landed (ct-bl-recorder-titles). `Recorder.broadcast_title/2`
+        # publishes it on the per-session topic precisely so this stream can push
+        # it: before, only the LiveView learned of a title and `bp chat` had to
+        # re-GET the session at every turn boundary to notice one (charter D15).
+        chunk_or_stop(conn, sse_title_frame(sid, title))
+
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
         # so no stderr/path/token can reach the wire. The stream stays open — a
@@ -778,6 +785,26 @@ defmodule BarkparkWeb.ChatController do
   # turn-boundary rail, never off a replayed workflow frame.
   def sse_workflow_frame(summary),
     do: "event: workflow\ndata: #{Jason.encode!(summary)}\n\n"
+
+  @doc false
+  # The live title frame (ct-bl-recorder-titles). D23 minimalism, enforced by the
+  # SIGNATURE: two scalars in, `{session_id, title}` out — the session record, its
+  # cwd, its provider argv and the stderr tail are not parameters here, so none of
+  # them can leak into this frame however the caller changes. The title itself is
+  # the store's settled value (the clobber guard ran before the broadcast).
+  #
+  # `session_id` is redundant on a per-session stream — the forwarder subscribes
+  # to `Recorder.topic/1` and nothing else (D24), so the id is authoritative by
+  # construction, never a filter the client must apply. It rides the wire anyway
+  # for the multiplexing consumers (the fleet stream, logs) that see many
+  # sessions' frames in one place.
+  #
+  # UNREPLAYABLE: NO `id:` seq, like every other live delta (D5). A reconnecting
+  # client does not want a replayed title — it re-reads the persisted current
+  # title from `GET /v1/chat/sessions/:id`, which is settled truth and cannot be
+  # stale the way a replayed frame can.
+  def sse_title_frame(session_id, title),
+    do: "event: title\ndata: #{Jason.encode!(%{session_id: session_id, title: title})}\n\n"
 
   @doc false
   # The fixed public exit contract (D23): the reason enum, plus the numeric

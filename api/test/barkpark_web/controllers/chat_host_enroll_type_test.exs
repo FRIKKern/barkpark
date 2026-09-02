@@ -1,7 +1,8 @@
 defmodule BarkparkWeb.ChatHostEnrollTypeTest do
   @moduledoc """
-  POST /v1/chat-host/enroll is FULLY ANONYMOUS (router.ex:2212-2215 pipes it
-  through `:api` alone — enrollment authenticates by POSSESSION of the token),
+  POST /v1/chat-host/enroll is FULLY ANONYMOUS (the router's first
+  `scope "/v1/chat-host"` block pipes it through `:api` alone — enrollment
+  authenticates by POSSESSION of the token),
   so every arm of it is reachable with no credential at all.
 
   The controller's first `enroll/2` clause used to match on key PRESENCE while

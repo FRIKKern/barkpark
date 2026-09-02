@@ -1,0 +1,52 @@
+landed-mark fixture — the ledger as it stood at 2026-09-01T20:00Z
+================================================================
+
+WHAT THIS IS
+  The input `bash scripts/landed-mark.sh --list-open --fixture <this dir>`
+  reads. It stands in for a ledger read at 2026-09-01T20:00Z, the timestamp
+  task-2e16f1390ffc064f's first acceptance criterion names.
+
+WHY A FIXTURE AND NOT A LIVE READ
+  The live ledger can no longer reproduce that state, and the reason is the
+  measurement itself. lead-reconcile closed 27 rows BY HAND in the session that
+  produced the finding — the three examples among them. Read today, all three
+  answer lifecycle=done, assignee=lead-reconcile (the close overwrote the
+  builder's name), landed=null. So a live re-run of the instrument against these
+  shas correctly lists nothing, and would be read as "the defect is not real"
+  rather than "the defect was cleaned up by hand". A frozen capture is the only
+  honest way to re-run the original measurement.
+
+  This is a limit worth stating plainly: the row states below are RECONSTRUCTED
+  from lead-reconcile's own recorded measurement (the `description` field of
+  task-2e16f1390ffc064f, quoted per row), not captured from the server at 20:00Z
+  — nobody captured the server at 20:00Z. Every other byte here IS captured.
+
+commits/  — VERBATIM `git log -1 --format=%B` of five commits on origin/main,
+            named by their full sha. Not edited, not truncated.
+
+  1249e81bc2…  PR #14368, merged 2026-09-01. `Task: task-b68092d5bac508e0`
+               appears TWICE at column 0 — the same id repeated is not
+               ambiguity, and this commit is why the fixture keeps it.
+  fc0900fbb2…  PR #14362, merged 2026-08-31. Task: task-9009e2e4f0e5b5b6
+  3b34f91fcd…  PR #14458, merged 2026-09-01. Task: task-076ca42e29836029
+  b17707e093…  PR #14720, merged 2026-09-01. Task: task-a4ad081d07a2e203 —
+               the NEGATIVE control: this row WAS sealed, so the instrument
+               must not list it. A list that only ever lists is not a
+               measurement.
+  b02631d3b3…  PR #14762 — a real commit with NO `Task:` trailer at all, which
+               is the common case and must be scanned and passed over in
+               silence.
+
+rows/     — `GET /v1/tasks/<id>` shaped, one per task named above.
+            The three OPEN rows carry the lifecycle, assignee and claim the
+            measurement recorded:
+              task-b68092d5bac508e0  open, assignee lead9-cloud, epoch 8, no claim
+              task-9009e2e4f0e5b5b6  open, assignee L3-web-listen-perspective
+              task-076ca42e29836029  open, assignee cloud-domain-guard
+            An `epoch` with no `worker` is not a typo — it is the shape the
+            measurement found: the lease was released or reaped and the counter
+            it left behind was not.
+
+EXPECTED OUTPUT
+  Five commits scanned, four trailers read, three rows listed as still open,
+  one (task-a4ad081d07a2e203) correctly withheld.

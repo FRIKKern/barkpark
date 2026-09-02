@@ -23,7 +23,7 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 | drag divider | resize panes (ratio persists) |
 | `M` | toggle mouse reporting |
 
-Hermetic drive gate: `scripts/taskboard-drive/drive.sh` `DRIVE_MODE=hermetic` (deterministic fixture run).
+Hermetic gate: `taskboard-drive/drive.sh DRIVE_MODE=hermetic` (deterministic fixture run).
 
 ## Documents (list pane)
 
@@ -34,7 +34,7 @@ Hermetic drive gate: `scripts/taskboard-drive/drive.sh` `DRIVE_MODE=hermetic` (d
 | `space` | mark row (✓) for bulk |
 | `ctrl+p` / `U` | publish / unpublish **all marked** |
 | `R R` / `D D` | discard draft / delete (twice = confirm) |
-| `c` / `x` | claim / close (task lists) |
+| `c`/`x`/`r` | claim / close / refresh now (board) |
 | `esc` | clear marks, then go back |
 
 ## Editor

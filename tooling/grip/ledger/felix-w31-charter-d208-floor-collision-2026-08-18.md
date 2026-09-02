@@ -1,6 +1,8 @@
 <!-- doc-tier: cold -->
 # Felix W31 — charter D208 floor + #12147 union-collision (re-derivation recipe)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Assignment charter-d208-floor-collision. All derived from origin/main at fetch time 2026-08-18.
 
 ## Facts + rerun

@@ -48,7 +48,17 @@ type Config struct {
 // default live-loop timings. Fields on Model so tests can shrink them.
 const (
 	defaultDebounceDelay = 750 * time.Millisecond
-	defaultBackstopEvery = 30 * time.Second
+	// defaultBackstopEvery is the SAFETY NET, not the refresh mechanism. It was
+	// 30s and it was the board's floor cost: three heavy requests (the ~9 MB
+	// /v1/tasks list, the in-flight filter pass, and prime's 2 GB seq scan) every
+	// half minute per open board, forever, whether or not anything moved. The
+	// keyset event poll (events.go) is the refresh mechanism now — cheap, PK-
+	// indexed, adaptive — so the backstop is retimed to 5 minutes and left in
+	// place for exactly two jobs it still does: covering the window between the
+	// first snapshot and the cursor catching up, and carrying the board at all if
+	// the feed is unavailable (an older server, or a backlog too deep to walk —
+	// see eventsOff). Ten times fewer unconditional list+prime pairs per board.
+	defaultBackstopEvery = 5 * time.Minute
 	// defaultLiveStale is how long a single SSE frame keeps the stream trusted
 	// as "live". The server emits a `: keepalive` after every 30s of quiet
 	// (api listen_controller), so a healthy stream ALWAYS produces at least one
@@ -192,10 +202,53 @@ type Model struct {
 	// SAME row fires the close; ANY other key clears it (handleKey).
 	pendingClose string
 
+	// ── keyset event-poll state (events.go) ──────────────────────────────────
+	// eventCursor is the last mutation_events id this board has accounted for —
+	// THE resume cursor, and the only thing the cheap poll needs to ask "did any
+	// task move?". It is persisted through the first-paint snapshot cache so a
+	// relaunch resumes near the tip instead of walking the whole backlog again.
+	eventCursor int64
+	// eventsGen tags the self-clocking poll chain (the debounceGen pattern): a
+	// nudge bumps it so a superseded timer is dropped rather than double-clocking
+	// the loop. pollInFlight is the no-overlap bit — while a read is out there is
+	// no pending timer, so a slow tick can never queue another. pollNudged
+	// records a nudge that arrived DURING a read, honoured by armNextPoll.
+	eventsGen    int
+	pollInFlight bool
+	pollNudged   bool
+	// pollEvery is the current adaptive interval: basePollEvery after a delta or
+	// a user action, doubling toward maxPollEvery while idle.
+	pollEvery time.Duration
+	// drainPages / drainOwed carry the catch-up walk: a full page means the
+	// cursor is behind the tip, so pages are walked back-to-back WITHOUT
+	// re-listing and exactly one re-list is owed at the end (and only if the walk
+	// actually saw an event). eventsOff stands the detector down for the life of
+	// the process when the walk cannot finish inside maxDrainPages — the backstop
+	// loop then carries the board exactly as it did before.
+	drainPages int
+	drainOwed  bool
+	eventsOff  bool
+	// lastRelistAt / relistOwed enforce the HEAVY-read floor (minRelistEvery): a
+	// delta detected inside the floor is held, not dropped, and reloads the board
+	// the moment the floor expires. Detection speed and reload frequency are two
+	// different budgets and this is the second one.
+	lastRelistAt time.Time
+	relistOwed   bool
+	// fetchInFlight gates the TICK-driven re-list only (tickRefetchCmd): a delta
+	// that lands while a snapshot fetch is still out is dropped, never queued.
+	fetchInFlight bool
+
 	// injected seams (defaults wired in newModel; tests override). fetch is the
 	// full-hydration seam (charter D28): FetchSnapshotFull returns the board
-	// Snapshot AND the TaskDetail DetailIndex in one round-trip.
-	fetch   func(*apiclient.Client) (Snapshot, DetailIndex, error)
+	// Snapshot AND the TaskDetail DetailIndex in one round-trip. fetchEvents is
+	// the cheap keyset-poll seam the adaptive loop drives.
+	fetch       func(*apiclient.Client) (Snapshot, DetailIndex, error)
+	fetchEvents func(*apiclient.Client, int64, int) (TaskEventsPage, error)
+	// tick is the timer seam: tea.Tick in production. It exists so a test can
+	// READ the delay the loop actually armed instead of re-deriving it — the
+	// request-budget simulation is only evidence if the schedule it walks is the
+	// one the code chose, not one the test computed alongside it.
+	tick    func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 	build   func(Snapshot, RepoContext, time.Time) Board
 	doClaim func(*apiclient.Client, string, string) ActionResult
 	doClose func(*apiclient.Client, string, string, int) ActionResult
@@ -230,6 +283,8 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		cacheDir:      cfg.CacheDir,
 		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
 		fetch:         FetchSnapshotFull,
+		fetchEvents:   FetchTaskEvents,
+		tick:          tea.Tick,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
 		doClose:       DoClose,
@@ -237,6 +292,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
 		liveStale:     defaultLiveStale,
+		pollEvery:     basePollEvery,
 	}
 	if prefs, ok := loadTaskboardPreferences(cfg.CacheDir); ok {
 		m.wideDetailsRatio = prefs.DetailsPaneRatio
@@ -294,6 +350,14 @@ func (m *Model) primeFromCache() {
 	// rather than blocking first paint on git — the badges appear a beat later.
 	m.board = m.build(snap, RepoContext{}, m.now())
 	m.ui.LastSync = snap.FetchedAt
+	// Resume the keyset poll where the last session left it. This is the ONLY
+	// thing primeFromCache seeds besides the paint, and it is safe under the
+	// honest-staleness contract above precisely because a cursor is not truth: a
+	// stale one costs a short catch-up walk, and a wrong one cannot put a wrong
+	// row on screen (only the snapshot refetch ever does that).
+	if snap.EventCursor > 0 {
+		m.eventCursor = snap.EventCursor
+	}
 }
 
 // Init starts the periodic backstop ticker AND fires the initial fetch as a
@@ -301,7 +365,13 @@ func (m *Model) primeFromCache() {
 // server would freeze the prompt for seconds — so frame one paints immediately
 // in the honest "syncing…" state and the fetched board swaps in when it lands.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.scheduleBackstop(), m.refetchCmd(false))
+	// Three commands, and the split is the whole point of this loop: the initial
+	// FULL load (the list+prime pair, as before), the long backstop safety net,
+	// and the cheap keyset poll chain that carries every refresh after this one.
+	// The first poll runs immediately — its job at t0 is to walk the cursor up to
+	// the tip (cursor 0 → the whole task-event backlog), which it does without
+	// re-listing, so the catch-up costs indexed reads and not a single list.
+	return tea.Batch(m.scheduleBackstop(), m.refetchCmd(false), m.schedulePoll(m.eventsGen, 0))
 }
 
 // Update is the single message entry point: it runs the reducer, then re-syncs
@@ -356,6 +426,10 @@ func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDebounce(msg)
 	case backstopMsg:
 		return m.handleBackstop()
+	case eventsPollMsg:
+		return m.handleEventsPoll(msg)
+	case eventsResultMsg:
+		return m.handleEventsResult(msg)
 	case frameMsg:
 		return m.handleFrame(msg)
 	case hoverDebounceMsg:
@@ -568,6 +642,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "M":
 		return m.toggleMouse()
+	case "r":
+		// Manual refresh — the escape hatch the adaptive interval needs. An idle
+		// board settles at one cheap poll per 30s; `r` says "I know something
+		// moved, do not wait for the ladder": one immediate full re-list AND a
+		// collapse of the poll interval back to the 2s floor. Handled here, above
+		// the frame routing, so it works identically on the board and inside a
+		// reading frame — neither of which binds `r` to anything else.
+		return m.manualRefresh()
 	}
 
 	if m.wide && m.wideFocus == wideFocusBoard {

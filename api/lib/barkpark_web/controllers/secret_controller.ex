@@ -62,9 +62,24 @@ defmodule BarkparkWeb.SecretController do
 
   def update(conn, %{"name" => name, "value" => value}) when is_binary(value) do
     with {:ok, scope} <- resolve_scope(conn) do
+      # RECEIPT LAW (pds wave 39 residue): the emitted value DESCENDS FROM THE
+      # WRITE RETURN. `Secrets.put/3` already hands back the persisted
+      # `SecretRecord` and this discarded it for a bare literal. `ok` now derives
+      # from the row's own `updated_at`, and `id` is the store's surrogate
+      # binary_id — neither appears anywhere in the request, so reverting to the
+      # bare success map drops both keys and the differential reds.
+      #
+      # NO CIPHERTEXT, EVER: `value` is deliberately absent. `show/2` is the only
+      # verb that reveals a secret, and it writes a `"reveal"` audit row to do
+      # it — a receipt that leaked the value here would reveal without the stamp.
       case Secrets.put(name, value, actor: actor(conn), scope: scope) do
-        {:ok, _rec} ->
-          json(conn, %{ok: true})
+        {:ok, rec} ->
+          json(conn, %{
+            ok: not is_nil(rec.updated_at),
+            id: rec.id,
+            name: rec.name,
+            updated_at: rec.updated_at
+          })
 
         {:error, %Ecto.Changeset{}} = err ->
           err

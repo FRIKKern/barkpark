@@ -8,8 +8,10 @@ defmodule BarkparkWeb.TasksController do
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label,
       flat or under the `filter[<key>]=` container; an unsupported filter key
       is a 400, never a silently unfiltered page)
-    * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
-    * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts)
+    * `GET    /v1/tasks/ready`              — `Tasks.ready/1` (filter container: `parent`/`parent_id`/`phase_id`,
+      all naming the ONE parent axis `ready_query/1` has; any other key is a 400)
+    * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts;
+      filter container: `worker` only)
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
@@ -23,6 +25,10 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
     * `POST   /v1/tasks/:doc_id/stage`      — `Tasks.stage/3` (sanctioned thought-state transition)
+
+  `GET /v1/tasks/events` (keyset replay) honours NO `filter[...]` key — `since`
+  and `limit` are its only narrowings, and a filter key is a 400 naming it. The
+  four whitelists live in one place: `TasksController.Params` `@route_filters`.
 
   ## Shape contract
 
@@ -55,11 +61,25 @@ defmodule BarkparkWeb.TasksController do
 
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
+  # task-e1b74c19174cb2c1: the `filter[...]` container is PARSED here too, and
+  # fail-CLOSED. Before this, `ready` read only its flat params — a caller who
+  # learned `filter[parent_id]` on `GET /v1/tasks` (where #12780 made it work)
+  # and carried it one route over got a 200 carrying the WHOLE ready queue.
+  # Measured on guerrilla 2026-09-01: 200 rows, 47 distinct parents, HTTP 200,
+  # against 18 rows / 1 parent for the honoured `?phase_id=` spelling. This is
+  # the queue agents CLAIM from, so that false confirmation is one step from a
+  # write against a foreign epic.
+  #
+  # `filter[parent]` / `filter[parent_id]` / `filter[phase_id]` all name the ONE
+  # parent axis `ready_query/1` has; every other key is a 400 that names it (see
+  # `Params` for why kind/lifecycle_status/type/label cannot be honoured here).
   def ready(conn, params) do
-    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+    with {:ok, filters} <- Params.parse_route_filters(params, :ready),
+         {:ok, phase_id} <- Params.ready_phase_id(params, filters),
+         {:ok, order} <- Params.parse_ready_order(params["order"]) do
       opts =
         []
-        |> Params.put_opt(:phase_id, params["phase_id"])
+        |> Params.put_opt(:phase_id, phase_id)
         |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
         |> Params.put_opt(:offset, Params.parse_offset(params["offset"]))
         |> Params.put_opt(:order, order)
@@ -71,6 +91,9 @@ defmodule BarkparkWeb.TasksController do
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
+
+      {:error, reason} ->
+        invalid_filter(conn, reason)
     end
   end
 
@@ -124,10 +147,19 @@ defmodule BarkparkWeb.TasksController do
   #     stream; prime is orientation, not replay).
   #   * `counts` — open/in_progress/blocked/done/cancelled totals for the
   #     scope, so "how big is the board?" needs no extra list call.
+  #
+  # task-e1b74c19174cb2c1: `filter[...]` is fail-CLOSED here too. `filter[worker]`
+  # is the ONE honoured key (the flat `?worker=` narrowing, in bracket spelling);
+  # everything else 400s naming the key. A parent axis is deliberately refused:
+  # prime answers with FOUR slices and only its ready head could take one, so
+  # narrowing a quarter of the response would be a NEW false confirmation of the
+  # same shape. Measured pre-fix on guerrilla 2026-09-01: `?filter[worker]=lead-cli`
+  # → 200 with `worker: null` and all 28 live claims; `?worker=lead-cli` → 4.
   def prime(conn, params) do
-    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+    with {:ok, filters} <- Params.parse_route_filters(params, :prime),
+         {:ok, worker} <- Params.prime_worker(params, filters),
+         {:ok, order} <- Params.parse_ready_order(params["order"]) do
       scope = scope_opts(conn)
-      worker = params["worker"]
       limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
       view = Params.parse_view(params["view"])
 
@@ -187,6 +219,9 @@ defmodule BarkparkWeb.TasksController do
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
+
+      {:error, reason} ->
+        invalid_filter(conn, reason)
     end
   end
 
@@ -207,25 +242,45 @@ defmodule BarkparkWeb.TasksController do
   # the caller's own `since` when the page was empty); `has_more` is true when a
   # full page came back, so the caller polls again immediately instead of
   # waiting for the next tick.
+  #
+  # task-e1b74c19174cb2c1: this feed honours NO `filter[...]` key — its rows are
+  # `mutation_events`, not tasks, so no task filter key exists on a row and
+  # reaching one would need the join to `documents` this module deliberately
+  # refuses. `since` (the keyset cursor) and `limit` are the only narrowings.
+  # A `filter[...]` is therefore a 400 that names the key, never the pre-fix 200
+  # carrying an unnarrowed page (measured on guerrilla 2026-09-01:
+  # `?filter[doc_id]=task-e1b74c19174cb2c1&limit=5` → 5 rows, 5 distinct doc_ids).
+  #
+  # The filter gate is folded INTO this function rather than wrapping an
+  # extracted private body: the PDS receipt census keys its register on the
+  # function that emits each success receipt, so moving the `json/2` call into a
+  # helper would orphan this action's register row and leave the new emitter
+  # unjudged. (The prose here deliberately does not spell the two-word literal
+  # that census greps for — a comment is not a receipt, and spelling it would
+  # move the phantom count.)
   def events(conn, params) do
-    dataset = request_dataset(conn)
-    since = Params.parse_int(params["since"], 0)
+    with {:ok, _no_filters} <- Params.parse_route_filters(params, :events) do
+      dataset = request_dataset(conn)
+      since = Params.parse_int(params["since"], 0)
 
-    limit =
-      Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
+      limit =
+        Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
 
-    workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
+      workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
 
-    rows =
-      Tasks.Events.replay_since(dataset, since, limit: limit, workspace_id: workspace_id)
+      rows =
+        Tasks.Events.replay_since(dataset, since, limit: limit, workspace_id: workspace_id)
 
-    cursor =
-      case rows do
-        [] -> max(since, 0)
-        _ -> List.last(rows).id
-      end
+      cursor =
+        case rows do
+          [] -> max(since, 0)
+          _ -> List.last(rows).id
+        end
 
-    json(conn, %{ok: true, events: rows, cursor: cursor, has_more: length(rows) == limit})
+      json(conn, %{ok: true, events: rows, cursor: cursor, has_more: length(rows) == limit})
+    else
+      {:error, reason} -> invalid_filter(conn, reason)
+    end
   end
 
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
@@ -814,8 +869,13 @@ defmodule BarkparkWeb.TasksController do
   # Criterion-level mid-claim evidence (expressive-agent-loops D3/D6/D7/D8).
   # Body/query (the bp CLI rides flags as query params): worker_id +
   # observed_epoch (positional in bp), criterion=<index>, then EXACTLY one of
-  #   met=true  + evidence=<non-empty>   → flip the lock, evidence or nothing
-  #   miss=true + note=<non-empty>       → honest attempt, met never flips
+  #   met=true      + evidence=<non-empty> → flip the lock, evidence or nothing
+  #   miss=true     + note=<non-empty>     → honest attempt, met never flips
+  #   withdraw=true + note=<non-empty>     → LOWER the lock (D745): met→false,
+  #                                          evidence preserved, a signed
+  #                                          withdrawals[] record appended. On a
+  #                                          row with no claim it also needs
+  #                                          observed_rev=<the rev you read>.
   # doc_id resolves via find_task_by_doc_id (close's pattern) and the
   # primitive locks task:<uuid> — the close family, serialized with close over
   # the same criteria. Progress is advisory: the response is the fresh doc
@@ -829,6 +889,7 @@ defmodule BarkparkWeb.TasksController do
         [observed_epoch: observed_epoch, criterion: index, outcome: outcome]
         |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:merge_gated, Params.stamp_merge_gated(params))
+        |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stamp(task.id, worker_id, opts) do
@@ -2052,14 +2113,31 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/fleet/roster ───────────────────────────────────────────────
-  # The fleet roster — global-per-dataset (PDF-D19, no workspace clause) with
-  # online/offline computed at read time, fail closed. The envelope key is
-  # `documents` (PDF-D21): the one key every installed bp binary renders as a
-  # real table; a bespoke key would degrade to one crammed KV cell.
+  # The fleet roster — WORKSPACE-SCOPED, with online/offline computed at read
+  # time, fail closed. The envelope key is `documents` (PDF-D21): the one key
+  # every installed bp binary renders as a real table; a bespoke key would
+  # degrade to one crammed KV cell.
+  #
+  # Owner ruling, 2026-09-01 (task-4e2986e8609670d7, criterion 0), verbatim:
+  #
+  #   orchestrator, delegated; owner informed 2026-09-01 — RULED A: scope the
+  #   roster read with scope_opts(conn); the global view is for the OPERATOR
+  #   tier only, NOT any `admin` bit.
+  #
+  # This route READ globally while `fleet_beat/2` two functions up WROTE
+  # scoped — the asymmetry that leaked every workspace's listeners, and each
+  # worker's in-progress task id, to any bearer holding `read`. Both halves now
+  # thread the same `scope_opts(conn)`.
+  #
+  # `scope_opts/1` ALWAYS carries `:workspace_id` for a conn — a real id, or
+  # the `:shared_only` sentinel when the request resolved no workspace — so a
+  # request can never reach `Fleet.roster/2`'s `global: true` opt-in, and never
+  # falls into its fail-closed nil arm by accident either. See the ruling and
+  # the operator-tier note in `Barkpark.Tasks.Fleet`'s moduledoc.
 
   def fleet_roster(conn, _params) do
     dataset = request_dataset(conn)
-    json(conn, %{ok: true, documents: Fleet.roster(dataset)})
+    json(conn, %{ok: true, documents: Fleet.roster(dataset, scope_opts(conn))})
   end
 
   defp unprocessable(conn, reason, message) do
@@ -2082,8 +2160,8 @@ defmodule BarkparkWeb.TasksController do
     |> json(%{
       ok: false,
       reason: "invalid_filter",
-      message: Params.index_filter_message(reason),
-      details: Params.index_filter_details(reason)
+      message: Params.filter_message(reason),
+      details: Params.filter_details(reason)
     })
   end
 

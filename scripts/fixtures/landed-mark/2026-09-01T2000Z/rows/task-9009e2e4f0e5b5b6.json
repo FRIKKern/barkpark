@@ -1,0 +1,14 @@
+{
+ "ok": true,
+ "doc": {
+  "doc_id": "task-9009e2e4f0e5b5b6",
+  "rev": "fixture-2026-09-01T2000Z",
+  "title": "web listen SSE proxy forwards the browser's ?perspective verbatim",
+  "lifecycle_status": "open",
+  "content": {
+   "assignee": "L3-web-listen-perspective",
+   "lifecycle_status": "open",
+   "kind": "task"
+  }
+ }
+}

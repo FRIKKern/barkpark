@@ -526,6 +526,63 @@ defmodule Barkpark.Tenancy.Auth do
   def permits?(_token, _action), do: false
 
   @doc """
+  The caller's GLOBAL auth tier, as one of the closed strings the
+  `/v1/capabilities` manifest speaks: `"none" | "read" | "write" | "admin"`,
+  optionally suffixed `"+chat"`.
+
+  THE SINGLE OWNER OF THE LADDER. `Barkpark.Plugins.Capabilities.tier_for_token/1`
+  used to carry its own copy of this `cond`, so the tier the manifest ADVERTISES
+  and the tier the request pipelines ENFORCE were two hand-written ladders that
+  had to agree by review. They live here now, next to `permits?/2` — the very
+  predicate every rung consults and the one the write gate already calls — so
+  there is one rung to change when a permission is added.
+
+  Each rung is the same judgment its pipeline authority makes, and MUST stay
+  equal to it (pinned by
+  `BarkparkWeb.Contract.CapabilitiesTierParityTest`):
+
+    * `"admin"` — `BarkparkWeb.Plugs.RequireAdmin` (`pipeline :require_admin`),
+      i.e. `Barkpark.Auth.has_permission?(token, "admin")`. Identical to
+      `permits?(token, :admin)`, whose `@admin_perms` is exactly `~w(admin)`.
+    * `"write"` — `BarkparkWeb.Plugs.RequireWritePermission`
+      (`pipeline :require_write`), i.e. `permits?(token, :write)`.
+    * `"read"` — the `pipeline :require_token` stack: `RequireToken` admits the
+      credential, `PublicRead` clamps the tier below this one, and
+      `RequireWriteForMutation` refuses this tier every mutation. A token that
+      gets a GET through that stack but is refused a write is `read`.
+    * `"+chat"` — `BarkparkWeb.Plugs.RequireChatAccess.chat_scope/1` resolving
+      `{:workspace, ws}`: a NON-admin, workspace-bound `chat` token. ORTHOGONAL
+      (charter D16/D36) — it rides ALONGSIDE the base rank and lifts nothing,
+      which is why it is a suffix and not a rung.
+
+  `nil` (no resolved token) is `"none"`, the existence-hiding floor.
+
+  @canonical capability:global-auth-tier aka:tier_for_token,tier_of,auth tier,caller tier,tier ladder,auth-tier ladder doc:docs/auth.md
+  """
+  @spec tier_of(ApiToken.t() | nil) :: String.t()
+  def tier_of(nil), do: "none"
+
+  def tier_of(token) do
+    base =
+      cond do
+        permits?(token, :admin) -> "admin"
+        permits?(token, :write) -> "write"
+        permits?(token, :read) -> "read"
+        true -> "none"
+      end
+
+    # A global-admin caller already discovers `chat` through the rank ladder;
+    # the suffix is only for the non-admin, workspace-bound `chat` token —
+    # exactly the principal RequireChatAccess authorizes at `{:workspace, ws}`.
+    if base != "admin" and Barkpark.Auth.has_permission?(token, "chat") and
+         not is_nil(Map.get(token, :workspace_id)) do
+      base <> "+chat"
+    else
+      base
+    end
+  end
+
+  @doc """
   Derive the workspace role from a permissions array: `"admin"` when the
   permissions include "admin", otherwise `"member"`.
 
@@ -593,5 +650,36 @@ defmodule Barkpark.Tenancy.Auth do
   @spec workspace_admin?(binary(), binary(), principal_kind()) :: boolean()
   def workspace_admin?(principal_id, workspace_id, principal_kind) do
     membership_role(principal_id, workspace_id, principal_kind) in @admin_roles
+  end
+
+  # The role that confers WORKSPACE-OWNER authority. Deliberately a SEPARATE
+  # constant from `@admin_roles` — the point of this predicate is that it is
+  # strictly narrower, and sharing a constant would make a future widening of
+  # the admin gate silently widen the owner seat too.
+  @owner_roles ~w(owner)
+
+  @doc """
+  True when the principal's membership ROLE in `workspace_id` is `owner`.
+
+  DELIBERATELY STRICTER than `workspace_admin?/2`: `owner` alone, never
+  `admin`. It is the OWNER-ONLY SEAT test — the gate for a ceremony only the
+  workspace's owner may perform, today chat-host enrollment (the Studio
+  `ChatHostsLive` `:enroll` arm and `ChatHostController.create_enrollment/2`),
+  where handing a machine a long-lived credential is an owner decision while
+  revoking one is an admin decision. The policy lives HERE, at one named
+  predicate, rather than being spelled `membership_role(p, ws) == "owner"` at
+  each call site: that literal was written TWICE, in a controller and a
+  LiveView, and a loosening applied to one and not the other is a silent
+  divergence (`arpss-w10-bl-chat-hosts-owner-literal-seat-fork`).
+
+  Because it is narrower than every other predicate here it can only DENY where
+  they admit — it is not, and must not become, a way to ADMIT anyone
+  `workspace_admin?/2` refuses. A non-member is never an owner, and the
+  fail-closed posture of `membership_role/2` (nil / malformed ids deny rather
+  than raise) is inherited unchanged.
+  """
+  @spec workspace_owner?(principal(), binary()) :: boolean()
+  def workspace_owner?(token_or_principal_id, workspace_id) do
+    membership_role(token_or_principal_id, workspace_id) in @owner_roles
   end
 end

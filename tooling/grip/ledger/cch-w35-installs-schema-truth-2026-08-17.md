@@ -2,6 +2,8 @@
 
 # W35 installs-schema-truth — re-derivation recipe
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Settles the storage contradiction: census said `connector_installs` "does not exist" (it enumerated only the `public` schema). The table is bridge-owned in the `chat_bridge` schema of the guerrilla connectors DB (which is the SAME Postgres as the main Barkpark DB — connectors.env DATABASE_URL points at it).
 
 ## Re-derive everything (single SSH)

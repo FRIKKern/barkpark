@@ -619,7 +619,13 @@ func decodeCriterion(raw json.RawMessage) CriterionItem {
 	}
 	crit, _ := m["criterion"].(string)
 	ev, _ := m["evidence"].(string)
-	return CriterionItem{Criterion: crit, Met: m["met"] == true, Evidence: ev, Attempts: decodeAttempts(m["attempts"])}
+	return CriterionItem{
+		Criterion:   crit,
+		Met:         m["met"] == true,
+		Evidence:    ev,
+		Attempts:    decodeAttempts(m["attempts"]),
+		Withdrawals: decodeWithdrawals(m["withdrawals"]),
+	}
 }
 
 // decodeAttempts reads a criterion's honest-miss trail — the D8 attempts[]
@@ -644,6 +650,37 @@ func decodeAttempts(v any) []CriterionAttempt {
 		a.Note = strField(m, "note")
 		a.Worker = strField(m, "worker")
 		out = append(out, a)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// decodeWithdrawals reads a criterion's correction trail — the D745
+// withdrawals[] list of {"note","ts","worker","superseded_evidence"} entries
+// `bp task stamp --withdraw` appends (UNBOUNDED server-side, unlike attempts).
+// Same tolerance as decodeAttempts at every layer: a non-list value or a
+// non-map entry decodes to nothing, and a map entry keeps whatever fields
+// parse. Junk can never fake a recorded withdrawal, which matters because the
+// presence of one is what says "this row's evidence is the SUPERSEDED text".
+func decodeWithdrawals(v any) []CriterionWithdrawal {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]CriterionWithdrawal, 0, len(list))
+	for _, e := range list {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, CriterionWithdrawal{
+			Note:               strField(m, "note"),
+			At:                 timeField(m, "ts"),
+			Worker:             strField(m, "worker"),
+			SupersededEvidence: strField(m, "superseded_evidence"),
+		})
 	}
 	if len(out) == 0 {
 		return nil

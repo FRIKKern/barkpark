@@ -539,13 +539,57 @@ defmodule BarkparkWeb.MediaController do
   over another tenant's objects. Two halves close it, and neither alone is
   sufficient:
 
-    * the caller is bound to the named workspace with `TenancyAuth.member?/2` —
-      the same predicate `WorkspaceController` uses on `create_project`,
-      `projects` and `datasets`. An unknown slug and a non-member both collapse
-      to 404, the no-existence-leak convention that family already follows.
+    * the caller is bound to the named workspace with
+      `TenancyAuth.workspace_admin?/2` — an `owner` or `admin` seat in THAT
+      workspace. An unknown slug, a non-member and a member below the floor all
+      collapse to 404, the no-existence-leak convention this route follows.
     * the KEY is bound to the workspace by `Media.put_blob/3` — a legitimate
       admin of workspace B naming B in the URL still cannot address a key
       workspace A owns.
+
+  ## THE ROLE FLOOR IS A DECISION, NOT AN INHERITANCE (task-62d9364937b538e5)
+
+  RULED CONFINE by lead-security on 2026-09-02, replacing the `member?/2` this
+  route carried:
+
+  > PUT /api/workspaces/:workspace_slug/media/blob/*path is the restore half of
+  > the bundle import/export lifecycle whose siblings on the same slug (DELETE
+  > /api/workspaces/:slug, GET .../export) already demand
+  > `Tenancy.Auth.workspace_admin?/2`; a raw-byte write into a tenant's blob
+  > store is admin-shaped, and a viewer seat plus the global admin bit must not
+  > clear it. The census tripwire pins the guard SYMBOL only, so harmonising the
+  > three routes at the admin floor is what keeps a later "copy `member?/2`
+  > outward" from silently dropping the floor on delete and export.
+
+  `member?/2` was NOT a role floor at all — it is `not is_nil(membership(...))`,
+  a pure presence test (`Barkpark.Tenancy.Auth.member?/2`). So the predicate it
+  replaced admitted any seat, `viewer` included, once the workspace-blind global
+  `admin` permission had cleared the pipeline. The three routes carrying the
+  same `:workspace_slug` under the same `:require_admin` pipeline now agree on
+  what "admin of that workspace" means.
+
+  WHY THIS DOES NOT BREAK THE CALLER THIS ROUTE EXISTS FOR. The cross-instance
+  bundle import (`bp cloud workspace import --with-blobs`) POSTs
+  `/api/workspaces/:slug/import` and only THEN pushes each blob here with the
+  same token. That import grants the importing principal an `admin` membership
+  on the imported workspace inside the import transaction —
+  `WorkspaceBundle.grant_operator_admin!/2`, reached via `:grant_admin_to`, which
+  states its own reason: an imported workspace otherwise arrives with ZERO valid
+  administrators, and the grant is `admin` rather than `member` precisely
+  because export and delete already sit on `workspace_admin?/2`. By the time the
+  first byte is pushed the floor is already satisfied, which is what
+  `test/barkpark_web/controllers/workspace_import_operator_grant_test.exs` pins.
+
+  The one principal this refuses that `member?/2` admitted — a caller holding a
+  pre-existing sub-admin seat, which the import deliberately never escalates —
+  already cannot export or delete the same workspace. CONFINE makes the third
+  route agree with the two rather than breaking a flow that worked.
+
+  DENIAL SHAPE IS UNCHANGED: 404 `workspace not found`, never 403. The siblings
+  split (unknown slug 404, unauthorized 403) under the path-addressed law
+  documented on `WorkspaceController.delete/2`; this route folds both into 404
+  so a caller learns nothing about whether the slug exists. Raising the floor
+  must not lower the existence-hiding.
 
   The authorize half runs BEFORE `read_full_body/1`, so an unauthorized caller
   is refused without this node buffering up to 100 MB of its body.
@@ -554,11 +598,12 @@ defmodule BarkparkWeb.MediaController do
     token = conn.assigns[:api_token]
 
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.member?(token, workspace.id) do
+         true <- TenancyAuth.workspace_admin?(token, workspace.id) do
       write_blob(conn, Enum.join(path_parts, "/"), workspace)
     else
-      # Unknown slug OR a real workspace the caller is not a member of — never
-      # confirm a workspace exists to a non-member.
+      # Unknown slug, a real workspace the caller holds no seat in, OR a seat
+      # below the owner|admin floor — all one 404. Never confirm a workspace
+      # exists to a caller who may not write into it.
       _ -> not_found(conn, "workspace not found")
     end
   end

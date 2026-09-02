@@ -192,8 +192,22 @@ defmodule Barkpark.Accounts.Webauthn do
     Repo.exists?(from c in WebauthnCredential, where: c.user_id == ^uid)
   end
 
-  @doc "Delete one of `user`'s credentials by id (scoped — can't touch another user's)."
-  @spec delete_credential(User.t(), binary()) :: :ok | {:error, :not_found}
+  @doc """
+  Delete one of `user`'s credentials by id (scoped — can't touch another user's).
+
+  WIDENED FROM A BARE `:ok` (pds wave 39 residue): returns the ROW
+  `Repo.delete/2` removed, so a caller's receipt can DESCEND FROM THE WRITE
+  RETURN instead of asserting a literal beside an exit code. The struct carries
+  no secret material — a passkey's private key never leaves the authenticator,
+  and only `cose_key` (a PUBLIC key) is stored — so handing it back adds no
+  disclosure surface; what the HTTP receipt actually emits is chosen there.
+
+  The failure arm is unchanged: `{:error, :not_found}` for a malformed id and
+  for another user's row alike, and a `Repo.delete/2` that does not answer
+  `{:ok, _}` still raises rather than reporting a success it cannot back.
+  """
+  @spec delete_credential(User.t(), binary()) ::
+          {:ok, WebauthnCredential.t()} | {:error, :not_found}
   def delete_credential(%User{id: uid}, id) do
     # Guard the :binary_id cast: a non-UUID :id (e.g. DELETE …/credentials/garbage)
     # would raise Ecto.CastError → 500 inside get_by. A malformed id matches no
@@ -204,8 +218,12 @@ defmodule Barkpark.Accounts.Webauthn do
 
       uuid ->
         case Repo.get_by(WebauthnCredential, id: uuid, user_id: uid) do
-          nil -> {:error, :not_found}
-          cred -> Repo.delete(cred) |> then(fn {:ok, _} -> :ok end)
+          nil ->
+            {:error, :not_found}
+
+          cred ->
+            {:ok, deleted} = Repo.delete(cred)
+            {:ok, deleted}
         end
     end
   end

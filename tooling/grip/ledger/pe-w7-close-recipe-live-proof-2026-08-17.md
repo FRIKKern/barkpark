@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: pe-w7-close-recipe-live-proof | budget: 1200tok -->
 # pe-w7 close-recipe live proof — re-derivation recipe
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Proven live against guerrilla.barkpark.cloud on 2026-08-17 with bp commit a653550420
 (build 2026-08-17T08:42:54Z). Throwaway probe task-a9b0555e510ad4f5 (published, closed done 2/2).
 

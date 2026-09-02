@@ -73,6 +73,30 @@ type CriterionItem struct {
 	// 5 most recent. A recorded attempt on an unmet criterion is what turns its
 	// ladder rung amber — the board shows the honest miss, not just the seal.
 	Attempts []CriterionAttempt
+	// Withdrawals is the correction trail (D745): `bp task stamp --withdraw`
+	// LOWERS met to false, leaves Evidence exactly where it was, and appends
+	// {note,ts,worker,superseded_evidence} here. Unlike Attempts it is
+	// UNBOUNDED server-side, because silently dropping a correction is the
+	// defect the verb exists to end. A row carrying withdrawals is a row whose
+	// proof was refuted at least once — read it before trusting Evidence, which
+	// is deliberately the SUPERSEDED text on a withdrawn row.
+	Withdrawals []CriterionWithdrawal
+}
+
+// CriterionWithdrawal is one recorded withdrawal of a stamped proof (D745's
+// withdrawals[] entry): who withdrew it, when, why, and the evidence that
+// stamp had carried. It is the signed replacement for the prose convention it
+// supersedes — reviewers used to write "[WITHDRAWN BY WAVE REVIEW …]" into the
+// evidence itself because no verb could lower the flag, and every board went on
+// counting those criteria MET.
+type CriterionWithdrawal struct {
+	Note   string
+	At     time.Time
+	Worker string
+	// SupersededEvidence is the proof text this withdrawal retired, snapshotted
+	// when it was withdrawn — so it stays legible even if the criterion is
+	// later re-stamped over.
+	SupersededEvidence string
 }
 
 // CriterionAttempt is one recorded miss on a criterion (charter D8's
@@ -107,6 +131,13 @@ type Snapshot struct {
 	// beyond the top of the queue, so the ready count renders with a "+" suffix.
 	ReadyHeadClamped bool
 	FetchedAt        time.Time
+	// EventCursor is the last /v1/tasks/events id the board had accounted for
+	// when this snapshot was cached — the resume point for the cheap keyset poll
+	// (events.go), NOT board data. It rides the snapshot only because the cache
+	// file is the one per-scope thing the board already persists; a zero value
+	// (an older cache, a fresh scope) just means the next launch walks the feed
+	// up to the tip once before the adaptive loop settles.
+	EventCursor int64 `json:"event_cursor,omitempty"`
 }
 
 // RepoContext is the local git correlation result. Mentioned maps task
@@ -291,8 +322,20 @@ type UIState struct {
 	// Empty means the ordinary Conn label applies. It distinguishes a rejected
 	// or invalid snapshot from a genuinely unreachable server.
 	ConnProblem string
-	LastSync    time.Time
-	Strip       ActionStrip // the one-line action status above the footer
+	// Paused is the keyset poll's visible slow state (events.go): a poll that
+	// took longer than slowReadThreshold or failed outright. The board says
+	// "paused (server slow) · retry in Ns" and backs off, instead of leaning
+	// harder on a server that is already queueing — the measured failure mode
+	// this loop exists to end. It is a SEPARATE field from ConnProblem on
+	// purpose: the two describe different reads (the cheap poll vs. the snapshot
+	// pair) and must never clobber each other's label.
+	Paused bool
+	// RetryAt is when the next poll is armed for, shown alongside Paused so the
+	// operator can see the board is waiting on a schedule rather than wedged. A
+	// zero value renders nothing.
+	RetryAt  time.Time
+	LastSync time.Time
+	Strip    ActionStrip // the one-line action status above the footer
 	// SpineScroll is the board viewport's remembered top line (Amendment 8:
 	// minimal scrolling — the cursor walks a stable window, and the window
 	// slides only when the cursor would leave it, 1:1 with the cursor's line
