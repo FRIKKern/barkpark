@@ -55,8 +55,56 @@
 # the idiom scripts/release-scan.sh already carries for the same class.
 # `--slurpfile` wraps the file in an OUTER array, hence the `$x[0] as` bindings.
 #
-# EXIT CODES  0 = no conflicted PR asserts a stale green
-#             1 = at least one does — RED, and it will red again in 30 minutes
+# A RED THAT CANNOT CLEAR ITSELF HAS STOPPED WARNING (the ratchet)
+#
+# This watch was RED on every one of its scheduled runs from 2026-08-08 to
+# 2026-09-01 — 8 of the 8 most recent, and hundreds before them. For most of
+# that window the population was ONE pull request, #11766, whose four required
+# contexts passed at 2026-08-17T10:0*Z and which re-dispatched nothing after.
+# Its own error line said so: "this cannot clear itself... it will keep failing
+# every 30 minutes." An instrument that says the same word every 30 minutes for
+# three weeks carries no information: a NEW conflicted PR arriving with a stale
+# green changed the log by one line and changed the conclusion by nothing, and
+# nobody was going to read the line. PR #13310 added a TREND sentence to that
+# red — useful, and not a ratchet: a trend of `+0` is still a failing run.
+#
+# So the standing population is PINNED, in a committed file, and the verdict is
+# a DELTA against the pin:
+#
+#   NOVEL     a reported row that no baseline entry covers      → rc 1, RED
+#   KNOWN     a reported row a baseline entry covers exactly    → WARN, still
+#             printed in full, counted, trended — never failing
+#   HEALED    a baseline entry that is no longer reported       → rc 8, RED
+#             (the PR was closed, or rebased, or its verdict refreshed)
+#   UNREAD    a baseline entry whose row answered UNKNOWN       → neither; a
+#             row this run could not classify is never called healed
+#
+# THE HEALED ARM IS WHAT MAKES THIS A RATCHET AND NOT AN ALLOWLIST. A pin is a
+# debt, and the file may only SHRINK on its own: the moment a pinned row stops
+# being reported, this run FAILS and names the exact line to delete. Growing it
+# takes a human editing a committed file, and every entry carries a written
+# reason the parser REFUSES to accept as blank. A tripwire that grows stops
+# discriminating; this one costs a commit and a sentence to grow and reds until
+# you shrink it.
+#
+# The pin is keyed on (number, head-oid prefix), never on the number alone. A
+# pinned PR that gets a PUSH has a new head and a freshly-dispatched verdict —
+# a different fact about a different tree — and it reds as NOVEL rather than
+# inheriting the old line's cover.
+#
+# The baseline ships EMPTY (2026-09-01: #11766 was closed at 21:26Z and the live
+# population is 0 CONFLICTING rows asserting a stale green — measured, see the
+# file's header). An empty baseline means every stale verdict is NOVEL, which is
+# exactly the pre-ratchet behaviour: this change cannot launder anything today.
+# It is the lever for the next #11766, and the healed arm is what will stop that
+# lever from being left down.
+#
+# EXIT CODES  0 = no conflicted PR asserts a stale green that the pinned
+#                 baseline does not already cover. A non-empty KNOWN set still
+#                 exits 0 — and prints every row, so the debt is visible.
+#             1 = a NOVEL conflicted PR asserts a stale green — RED, and it
+#                 will red again in 30 minutes until it is rebased, closed, or
+#                 pinned with a reason
 #             2 = no red, but SOME rows stayed UNKNOWN after re-polling while
 #                 OTHERS were classified (warning). PARTIAL coverage, and only
 #                 that: the loose wording this line used to carry ("rows stayed
@@ -96,14 +144,39 @@
 #                 the 3/4 split above already gives: for one full release 3 and
 #                 4 were one code and the size fault wore the credential
 #                 fault's name. rc=2 wore both of these.
+#             8 = BASELINE DRIFT: no novel row, and at least one PINNED entry
+#                 is no longer reported. The debt shrank and the committed file
+#                 did not. Its own code, not 1, because the remedy is the
+#                 opposite of 1's: 1 says "go fix a pull request", 8 says
+#                 "delete a line from scripts/stale-verdict-watch.baseline".
+#                 A shared code would have made the ratchet's own maintenance
+#                 indistinguishable from the thing it watches. See the yml note
+#                 at the bottom of this header: until the workflow grows an
+#                 arm for 8 it lands in the `*)` catch-all, which still FAILS
+#                 the run — safe, and less specific than it should be.
 #
 # USAGE
 #   scripts/stale-verdict-watch.sh
 #   scripts/stale-verdict-watch.sh --repo FRIKKern/barkpark --min-commits 1
 #   scripts/stale-verdict-watch.sh --fixture prs.json --commits main-commits.txt
+#   scripts/stale-verdict-watch.sh --baseline scripts/stale-verdict-watch.baseline
+#   scripts/stale-verdict-watch.sh --selftest
 #
 # The two fixture flags make every classification hermetically provable; see
-# scripts/stale-verdict-watch.test.sh.
+# scripts/stale-verdict-watch.test.sh. `--selftest` is a self-contained,
+# network-free prover of the ratchet that runs this very file as a subprocess
+# against built fixtures, and it CAN LOSE: SVW_MUTATE=<pin-any|never-healed|
+# head-blind> (honoured only inside a selftest child) breaks one arm of the
+# partition, and `--selftest` must then exit non-zero. test.sh proves that.
+#
+# THE ONE THING THIS FILE CANNOT DO ALONE
+#   .github/workflows/stale-verdict-watch.yml is owned elsewhere. Two hunks
+#   there would make this better and neither is required for correctness:
+#   (1) a `8)` arm in the rc case, so BASELINE DRIFT gets its own sentence
+#       instead of the "not a verdict it defines" catch-all;
+#   (2) `scripts/stale-verdict-watch.baseline` added to the `pull_request:`
+#       paths filter, so a PR that edits ONLY the baseline still runs the
+#       harness that governs it.
 
 set -uo pipefail
 
@@ -119,6 +192,18 @@ REPO_OVERRIDE=""
 BRANCH="main"
 FIXTURE=""
 COMMITS_FILE=""
+# The pinned known-red set. DEFAULT_BASELINE is remembered separately from
+# BASELINE so the two absences can be told apart: the committed default going
+# missing is survivable (the ratchet falls back to "everything is novel", which
+# is the STRICT direction), while a `--baseline` a human TYPED and misspelled
+# must never quietly disarm the pin.
+DEFAULT_BASELINE="$REPO_ROOT/scripts/stale-verdict-watch.baseline"
+BASELINE="$DEFAULT_BASELINE"
+BASELINE_EXPLICIT=0
+# Honoured ONLY inside a --selftest child (SVW_SELFTEST_CHILD=1). A mutation
+# switch that a production run could read is a production defect, so the guard
+# is on the reader, not on the caller.
+SELFTEST_CHILD="${SVW_SELFTEST_CHILD:-0}"
 # ATTEMPTS / SLEEPS below are measured against real traffic, not tuned blind
 # (dr-w29-bl-watch-poll-budget-inadequate-under-a-merge-burst). 368 scheduled
 # runs from 2026-08-09T15:34Z to 2026-08-23T17:23Z (14 days, spanning the
@@ -259,6 +344,10 @@ def commits_since($t):
 | { required: $req,
     window: $window,
     open: ($rows | length),
+    # Every number this run SAW, classified or not. The ratchet needs it to
+    # tell a pinned PR that was CLOSED (gone from the population entirely)
+    # apart from one that is still open and merely no longer stale.
+    all_numbers: [ $rows[].number ],
     conflicting: [ $rows[] | select(.mergeable == "CONFLICTING") ],
     mergeable_n: [ $rows[] | select(.mergeable == "MERGEABLE") ] | length,
     unknown: [ $rows[] | select(.mergeable != "CONFLICTING" and .mergeable != "MERGEABLE") ] }
@@ -280,8 +369,101 @@ def commits_since($t):
 | .reported            = [ .conflicting[] | select((.stale_greens | length) > 0) ]
 '
 
+# ── THE PIN ──────────────────────────────────────────────────────────────────
+#
+# One entry per line:  <pr-number> <head-oid-prefix> <YYYY-MM-DD> <reason…>
+#
+# Every field is MANDATORY and every field is checked. A blank reason is a
+# CONFIGURATION FAULT (rc 3), not a warning — the whole cost of growing this
+# file is the sentence, and a parser that shrugged at an empty one would have
+# made the pin free. A malformed line names its own line number: a baseline
+# this run could not read must never be treated as an empty baseline, because
+# an empty baseline is the PERMISSIVE reading of "healed" (nothing pinned,
+# nothing to shrink) even though it is the strict reading of "novel".
+BASELINE_JSON='[]'
+BASELINE_NOTE=''
+parse_baseline() { # <file> -> sets BASELINE_JSON; returns 1 on a malformed file
+  # `set -f` for the whole parse: the fields are split with an unquoted $raw
+  # (the only portable way to take "everything after field 3" in bash 3.2), and
+  # a reason containing a `*` would otherwise be expanded against the working
+  # directory — a pin whose text silently becomes a file listing. The wrapper
+  # exists so that the dozen `return 1` arms below cannot each forget `set +f`.
+  local rc=0
+  set -f
+  parse_baseline_body "$@" || rc=$?
+  set +f
+  return "$rc"
+}
+
+parse_baseline_body() { # <file>
+  local f="$1" ln=0 n head date reason stripped acc="$WATCH_TMP/baseline.ndjson"
+  : > "$acc"
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    ln=$((ln + 1))
+    stripped="${raw#"${raw%%[![:space:]]*}"}"
+    case "$stripped" in ''|'#'*) continue ;; esac
+    # shellcheck disable=SC2086
+    set -- $stripped
+    n="${1:-}"; head="${2:-}"; date="${3:-}"
+    if [ "$#" -gt 3 ]; then shift 3; reason="$*"; else reason=""; fi
+    case "$n" in ''|*[!0-9]*) red "baseline $f line $ln: '$n' is not a pull-request number"; return 1 ;; esac
+    case "$head" in
+      ''|*[!0-9a-f]*) red "baseline $f line $ln: '$head' is not a lowercase hex head-oid prefix"; return 1 ;;
+    esac
+    [ "${#head}" -ge 7 ] || { red "baseline $f line $ln: head prefix '$head' is ${#head} chars; 7 is the minimum, because a shorter prefix pins more than one tree"; return 1; }
+    [ "${#head}" -le 40 ] || { red "baseline $f line $ln: head prefix '$head' is longer than a git oid"; return 1; }
+    case "$date" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+      *) red "baseline $f line $ln: '$date' is not a YYYY-MM-DD pin date"; return 1 ;;
+    esac
+    [ "${#reason}" -ge 12 ] || { red "baseline $f line $ln: #$n is pinned with a ${#reason}-character reason ('$reason'). A pin is standing debt; it does not get in without a sentence saying why."; return 1; }
+    jq -c -n --argjson number "$n" --arg head "$head" --arg date "$date" --arg reason "$reason" \
+      '{number: $number, head: $head, pinned_on: $date, reason: $reason}' >> "$acc" || return 1
+  done < "$f"
+  BASELINE_JSON="$(jq -s -c '.' "$acc")" || return 1
+  # A number pinned twice is two claims about one PR, and the second silently
+  # wins every comparison. Refuse rather than pick.
+  local dupes
+  dupes="$(jq -r 'group_by(.number) | map(select(length > 1) | .[0].number) | map("#\(.)") | join(", ")' <<<"$BASELINE_JSON")"
+  [ -z "$dupes" ] || { red "baseline $f: pinned twice — $dupes. One line per pull request."; return 1; }
+  return 0
+}
+
+# The DELTA. Everything above computes what is true right now; this computes
+# what CHANGED against the pin, which is the only thing a 30-minute level check
+# can usefully fail on.
+RATCHET_JQ='
+  . as $v
+  | ($v.reported | map({number, head: .headRefOid})) as $R
+  | ($v.unknown  | map(.number))                     as $UNK
+  | ($v.all_numbers)                                 as $SEEN
+  | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length > 0) ] as $known
+  | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length == 0) ] as $novel
+  # A pinned number that IS reported at a different head: covered by no entry,
+  # so it is novel — and it deserves its own sentence, because "#N is new" is
+  # a confusing thing to read about a number that appears in the file.
+  | [ $novel[] | . as $r
+      | select([ $base[] | select(.number == $r.number) ] | length > 0)
+      | { number: $r.number, head: $r.head,
+          pinned_head: ([ $base[] | select(.number == $r.number) | .head ] | first) } ] as $head_moved
+  | [ $base[] | . as $b | select([ $R[] | select(.number == $b.number) ] | length == 0) ] as $unreported
+  | [ $unreported[] | . as $b | select(($UNK | index($b.number)) != null) ] as $pinned_unread
+  | [ $unreported[] | . as $b | select(($UNK | index($b.number)) == null)
+      | . + { gone: (($SEEN | index($b.number)) == null) } ] as $healed
+  | . + { ratchet: {
+      pinned:        ($base | length),
+      note:          $note,
+      entries:       $base,
+      known:         $known,
+      novel:         $novel,
+      head_moved:    $head_moved,
+      healed:        $healed,
+      pinned_unread: $pinned_unread } }
+'
+
 render() { # reads the verdict JSON on stdin
   jq -r '
+    . as $v |
     "stale-verdict-watch — conflicted pull requests still asserting a green they can no longer earn",
     "required contexts (\(.required | length), derived from .github/required-checks.json): \(.required | join(" · "))",
     "",
@@ -305,16 +487,40 @@ render() { # reads the verdict JSON on stdin
     # empty — which it also is when NOTHING WAS CLASSIFIED. Every arm below now
     # carries `classified N of M`, so the coverage behind the conclusion is in
     # the sentence a human actually reads.
-    (if (.reported | length) > 0
-     then "RED — \(.reported | length) CONFLICTING pull request(s) assert a green required verdict main has moved past. A conflicted PR re-dispatches NOTHING: this cannot clear itself."
+    "RATCHET, against the pinned baseline (\(.ratchet.pinned) entr\(if .ratchet.pinned == 1 then "y" else "ies" end)):",
+    "  PIN    \(.ratchet.note)",
+    "  NOVEL  \(.ratchet.novel | length)" +
+      (if (.ratchet.novel | length) > 0 then " — \(.ratchet.novel | map(.number) | sort | map("#\(.)") | join(", "))  ← this run FAILS on these" else " — nothing arrived that the pin does not cover" end),
+    "  KNOWN  \(.ratchet.known | length)" +
+      (if (.ratchet.known | length) > 0 then " — \(.ratchet.known | map(.number) | sort | map("#\(.)") | join(", "))  (standing debt, printed in full below, NOT failed on)" else " — no pinned row is still reporting" end),
+    "  HEALED \(.ratchet.healed | length)" +
+      (if (.ratchet.healed | length) > 0 then " — \(.ratchet.healed | map(.number) | sort | map("#\(.)") | join(", "))  ← this run FAILS: the baseline must shrink" else " — every pinned entry is still earning its line" end),
+    (if (.ratchet.pinned_unread | length) > 0
+     then "  UNREAD \(.ratchet.pinned_unread | length) — \(.ratchet.pinned_unread | map(.number) | sort | map("#\(.)") | join(", ")): pinned, and this run could not classify the row. NOT called healed on a read that did not happen."
+     else empty end),
+    (.ratchet.head_moved | sort_by(.number)[] |
+      "  ^ #\(.number) is PINNED at head \(.pinned_head) and is reported at head \(.head[0:9]) — a push landed, the verdict is about a different tree, and the old line does not cover it. Re-pin it (with a reason) or fix the PR."),
+    (.ratchet.healed | sort_by(.number)[] |
+      "  ^ #\(.number) pinned \(.pinned_on) is no longer reported (\(if .gone then "the pull request is closed or merged — it is not in the open population at all" else "still open, and no longer asserting a stale green" end)). DELETE its line from the baseline: \(.number) \(.head) \(.pinned_on) …"),
+    "",
+    # THREE WAYS TO SAY "NOT RED", AND THEY ARE NOT THE SAME CLAIM — plus the
+    # ratchet adds two more, which come FIRST because they are the only arms that fail.
+    # The order here MIRRORS the exit-code order in main(); if the two ever
+    # disagree the log and the conclusion describe different runs.
+    (if (.ratchet.novel | length) > 0
+     then "RED — \(.ratchet.novel | length) NOVEL CONFLICTING pull request(s) assert a green required verdict main has moved past, and no baseline entry covers them. A conflicted PR re-dispatches NOTHING: this cannot clear itself. Rebase it, close it, or pin it with a written reason."
      elif .blind
      then "BLIND — classified 0 of \(.open) open pull request(s): the mergeability of every row was still UNKNOWN after re-polling, so this run classified NOTHING. This is NOT a green — a run that could not look cannot report the population clean."
+     elif (.ratchet.healed | length) > 0
+     then "BASELINE DRIFT — no novel row, and \(.ratchet.healed | length) pinned entr\(if (.ratchet.healed|length) == 1 then "y is" else "ies are" end) no longer reported. The debt shrank and the committed file did not. This run fails until the line(s) named above are deleted — a pin may only get smaller on its own."
+     elif (.reported | length) > 0
+     then "WARN — \(.reported | length) CONFLICTING pull request(s) assert a green required verdict main has moved past, and every one of them is PINNED in scripts/stale-verdict-watch.baseline with a reason. This is standing debt, stated in full below and trended; it is not a new fact, so this run does not fail on it. It fails the moment a NEW one arrives or a pinned one heals."
      elif (.unknown | length) > 0
      then "INCONCLUSIVE — classified \(.classified) of \(.open) open pull request(s); \(.unknown | length) row(s) went unread. No CONFLICTING row in the part this run COULD read is asserting a stale green — that says nothing about the rows below."
      else "ok — no CONFLICTING pull request is asserting a green required verdict that main has moved past (classified \(.classified) of \(.open) open)." end),
-    (.reported | sort_by(.number)[] |
+    (.reported | sort_by(.number)[] | . as $row |
       "",
-      "  #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt)",
+      "  #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt)  [\(if ([$v.ratchet.known[] | select(.number == $row.number)] | length) > 0 then "KNOWN — pinned: " + ([$v.ratchet.entries[]? | select(.number == $row.number) | .reason] | first // "—") else "NOVEL" end)]",
       (.ctx[] |
         "      \(.name)\(" " * (if (34 - (.name | length)) > 0 then 34 - (.name | length) else 1 end))" +
         (if (.hits | length) == 0 then "NEVER RENDERED"
@@ -333,12 +539,16 @@ state_start() { # append the START marker; prune so the store never grows unboun
   { echo "START $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATE_SVW" && tail -n 200 "$STATE_SVW" > "$STATE_SVW.prune" && mv "$STATE_SVW.prune" "$STATE_SVW"; } 2>/dev/null || true
 }
 
-state_read() { # <reported> <classified> <open> — only a run that READ may call this
+state_read() { # <reported> <classified> <open> <novel> — only a run that READ may call this
   [ -n "$STATE_SVW" ] || return 0
-  echo "READ $(date -u +%Y-%m-%dT%H:%M:%SZ) reported=$1 classified=$2 open=$3" >> "$STATE_SVW" 2>/dev/null || true
+  # `novel=` is APPENDED, never inserted before `reported=`: the baseline
+  # parser below reads `reported=` with a greedy `.*` prefix, and a second
+  # field carrying that substring earlier in the line would silently
+  # re-baseline the trend on the wrong number.
+  echo "READ $(date -u +%Y-%m-%dT%H:%M:%SZ) reported=$1 classified=$2 open=$3 novel=${4:-0}" >> "$STATE_SVW" 2>/dev/null || true
 }
 
-trend_report() { # <reported> — how the count moved since the last READ run
+trend_report() { # <reported> [novel] — how the count moved since the last READ run
   if [ -z "$STATE_SVW" ]; then
     say "TREND: no state file configured — movement since the last READ run is unknown, and no run is called unchanged without a baseline."
     return 0
@@ -364,6 +574,198 @@ trend_report() { # <reported> — how the count moved since the last READ run
   unread=$((unread - 1)); [ "$unread" -lt 0 ] && unread=0
   delta=$(( $1 - ${base_count:-0} )); sign=""; [ "$delta" -ge 0 ] && sign="+"
   say "TREND: reported $1 — was ${base_count:-?} at ${base_ts:-?} (moved ${sign}${delta} since the last READ run); ${unread} intervening run(s) went UNREAD (cancelled, blind, or unreachable) and are counted UNREAD, never as unchanged."
+  # The novel trend is the one a human should read: `reported` moving +0 for
+  # three weeks is what this ratchet was built because of.
+  local base_novel novel_delta novel_sign
+  base_novel="$(printf '%s\n' "$base_rest" | sed -n 's/.*novel=\([0-9][0-9]*\).*/\1/p')"
+  if [ -n "$base_novel" ] && [ -n "${2:-}" ]; then
+    novel_delta=$(( ${2} - base_novel )); novel_sign=""; [ "$novel_delta" -ge 0 ] && novel_sign="+"
+    say "TREND (novel): $2 — was $base_novel at ${base_ts:-?} (moved ${novel_sign}${novel_delta}). This is the number the run's conclusion is computed from; the reported count above includes the pinned standing debt."
+  else
+    say "TREND (novel): ${2:-?} — the baseline READ line predates the ratchet and carries no novel= field, so nothing is compared and nothing is called unchanged."
+  fi
+}
+
+# The DELTA, restated where a human looks first. $GITHUB_STEP_SUMMARY is set by
+# the runner for every step, so this needs no change to the workflow file.
+step_summary() { # <verdict-json> <reported> <novel> <known> <healed>
+  local dest="${GITHUB_STEP_SUMMARY:-}"
+  [ -n "$dest" ] || return 0
+  {
+    echo "### stale-verdict-watch — delta against the pinned baseline"
+    echo
+    echo "| | count | pull requests |"
+    echo "|---|---|---|"
+    printf '| **NOVEL** (fails this run) | %s | %s |\n' "$3" "$(jq -r '.ratchet.novel | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
+    printf '| KNOWN (pinned standing debt) | %s | %s |\n' "$4" "$(jq -r '.ratchet.known | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
+    printf '| **HEALED** (fails this run — shrink the baseline) | %s | %s |\n' "$5" "$(jq -r '.ratchet.healed | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
+    printf '| UNREAD pinned rows (not classified) | %s | %s |\n' "$(jq '.ratchet.pinned_unread | length' <<<"$1")" "$(jq -r '.ratchet.pinned_unread | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
+    echo
+    printf '%s pinned entr%s · %s reported · classified %s of %s open\n' \
+      "$(jq '.ratchet.pinned' <<<"$1")" "$( [ "$(jq '.ratchet.pinned' <<<"$1")" = "1" ] && echo y || echo ies )" \
+      "$2" "$(jq '.classified' <<<"$1")" "$(jq '.open' <<<"$1")"
+  } >> "$dest" 2>/dev/null || true
+}
+
+# ── --selftest ───────────────────────────────────────────────────────────────
+#
+# Network-free, self-contained, and it CAN LOSE. Every probe runs THIS FILE as
+# a subprocess against a built fixture, so what is proved is the shipped path
+# and not a re-implementation of it. SVW_MUTATE breaks one arm of the partition
+# in the child; a mutated run must make this exit non-zero, which is what
+# scripts/stale-verdict-watch.test.sh asserts.
+SELFTEST_PASS=0
+SELFTEST_FAIL=0
+st_ok()  { SELFTEST_PASS=$((SELFTEST_PASS + 1)); echo "  ok   $*"; }
+st_bad() { SELFTEST_FAIL=$((SELFTEST_FAIL + 1)); echo "  FAIL $*" >&2; }
+
+selftest() {
+  local d="$WATCH_TMP/selftest" out rc
+  mkdir -p "$d"
+  export SVW_SELFTEST_CHILD=1
+
+  local req_json ctx1 ctx_n
+  req_json="$(required_contexts)" || { red "--selftest needs the required-check spec at $SPEC"; return 3; }
+  ctx_n="$(jq 'length' <<<"$req_json")"
+
+  # A pinned commit history: ten commits, all after the fixture verdicts.
+  : > "$d/commits.txt"
+  for i in 1 2 3 4 5 6 7 8 9; do echo "2026-08-0${i}T00:00:00Z" >> "$d/commits.txt"; done
+  echo "2026-08-10T00:00:00Z" >> "$d/commits.txt"
+  local OLDT="2026-07-01T00:00:00Z" HEAD_A="aaaaaaaa11112222333344445555666677778888"
+
+  # Every required context SUCCESS at $OLDT → a full stale green.
+  local rollup
+  rollup="$(jq -c --arg t "$OLDT" '[ .[] | {__typename:"CheckRun", name: ., status:"COMPLETED", conclusion:"SUCCESS", completedAt: $t} ]' <<<"$req_json")"
+  ctx1="$(jq -r '.[0]' <<<"$req_json")"
+  [ -n "$ctx1" ] && [ "$ctx_n" -ge 1 ] || { red "--selftest: the spec lists no required contexts"; return 3; }
+
+  row() { # <number> <mergeable> <head>
+    jq -c -n --argjson n "$1" --arg m "$2" --arg h "$3" --argjson r "$rollup" \
+      '{number:$n, mergeable:$m, mergeStateStatus:(if $m=="CONFLICTING" then "DIRTY" else "CLEAN" end),
+        headRefOid:$h, updatedAt:"2026-08-01T00:00:00Z", statusCheckRollup:$r}'
+  }
+  # The child's output goes to a FILE and its rc is this function's own rc.
+  # `out="$(run_child …)"; rc=$SOME_GLOBAL` cannot work: command substitution
+  # is a subshell, and every variable the child run set dies with it.
+  run_child() { # <fixture> <baseline> -> rc; output in $d/out.txt
+    bash "$0" --fixture "$1" --commits "$d/commits.txt" --spec "$SPEC" \
+      --repo FRIKKern/barkpark --baseline "$2" > "$d/out.txt" 2>&1
+  }
+
+  echo "── stale-verdict-watch --selftest ──"
+
+  # (1) EMPTY PIN + a stale conflicted row → NOVEL, rc 1. This is the arm the
+  #     whole ratchet is judged on: an unpinned arrival still fails.
+  row 9001 CONFLICTING "$HEAD_A" | jq -s -c '.' > "$d/one.json"
+  : > "$d/empty.baseline"
+  run_child "$d/one.json" "$d/empty.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "1" ] && st_ok "(1) an unpinned stale verdict is NOVEL and exits 1" \
+    || st_bad "(1) expected rc 1 for an unpinned stale verdict, got $rc"
+  grep -q "NOVEL  1 — #9001" <<<"$out" && st_ok "(1) …and #9001 is named as NOVEL" \
+    || st_bad "(1) #9001 was not named NOVEL: $out"
+
+  # (2) THE SAME ROW, PINNED → KNOWN, rc 0, and still printed in full.
+  printf '9001 %s 2026-08-01 pinned by the selftest to prove the known arm does not fail\n' "${HEAD_A:0:9}" > "$d/pin.baseline"
+  run_child "$d/one.json" "$d/pin.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "0" ] && st_ok "(2) a pinned stale verdict is KNOWN and exits 0" \
+    || st_bad "(2) expected rc 0 for a pinned stale verdict, got $rc"
+  grep -q "KNOWN  1 — #9001" <<<"$out" && st_ok "(2) …counted KNOWN" || st_bad "(2) not counted KNOWN: $out"
+  grep -q "^  #9001 " <<<"$out" && st_ok "(2) …and the row is still printed in full, so the debt stays visible" \
+    || st_bad "(2) the pinned row was hidden from the report: $out"
+  grep -q "STALE: $ctx1 passed at $OLDT" <<<"$out" \
+    && st_ok "(2) …with its staleness distance, unchanged by the pin" \
+    || st_bad "(2) the pinned row lost its staleness detail: $out"
+
+  # (3) A SECOND, UNPINNED ARRIVAL alongside the pinned one → rc 1. The pin
+  #     must not launder the population it does not name.
+  { row 9001 CONFLICTING "$HEAD_A"; row 9002 CONFLICTING "bbbbbbbb1111222233334444555566667777aaaa"; } | jq -s -c '.' > "$d/two.json"
+  run_child "$d/two.json" "$d/pin.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "1" ] && st_ok "(3) a NEW arrival beside a pinned row still exits 1" \
+    || st_bad "(3) expected rc 1 with one pinned and one novel row, got $rc"
+  grep -q "NOVEL  1 — #9002" <<<"$out" && st_ok "(3) …and only #9002 is novel" \
+    || st_bad "(3) the novel row was not isolated: $out"
+
+  # (4) HEALED — the pinned PR is gone from the population entirely.
+  echo "[]" > "$d/none.json"
+  run_child "$d/none.json" "$d/pin.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "8" ] && st_ok "(4) a pinned entry that stopped reporting exits 8 (baseline drift)" \
+    || st_bad "(4) expected rc 8 when a pin healed, got $rc"
+  grep -q "HEALED 1 — #9001" <<<"$out" && st_ok "(4) …and #9001 is named as HEALED" \
+    || st_bad "(4) #9001 was not named HEALED: $out"
+  grep -q "DELETE its line from the baseline" <<<"$out" \
+    && st_ok "(4) …with the exact remedy: delete the line" \
+    || st_bad "(4) no shrink instruction was printed: $out"
+
+  # (5) HEALED, the other way: the PR is still open and no longer stale.
+  local FRESH="2026-08-11T00:00:00Z" fresh_rollup
+  fresh_rollup="$(jq -c --arg t "$FRESH" '[ .[] | {__typename:"CheckRun", name: ., status:"COMPLETED", conclusion:"SUCCESS", completedAt: $t} ]' <<<"$req_json")"
+  jq -c -n --arg h "$HEAD_A" --argjson r "$fresh_rollup" \
+    '[{number:9001, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY", headRefOid:$h,
+       updatedAt:"2026-08-11T00:00:00Z", statusCheckRollup:$r}]' > "$d/fresh.json"
+  run_child "$d/fresh.json" "$d/pin.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "8" ] && st_ok "(5) a pinned PR that is still open and no longer stale also exits 8" \
+    || st_bad "(5) expected rc 8 for a refreshed pin, got $rc"
+  grep -q "still open, and no longer asserting a stale green" <<<"$out" \
+    && st_ok "(5) …and the message says WHY it healed (open, not closed)" \
+    || st_bad "(5) the healed reason was wrong or missing: $out"
+
+  # (6) A PINNED ROW THIS RUN COULD NOT CLASSIFY IS NOT HEALED. This is the
+  #     arm that keeps a flaky mergeability read from emptying the baseline.
+  jq -c -n --arg h "$HEAD_A" --argjson r "$rollup" \
+    '[{number:9001, mergeable:"UNKNOWN", mergeStateStatus:null, headRefOid:$h,
+       updatedAt:"2026-08-01T00:00:00Z", statusCheckRollup:$r}]' > "$d/unk.json"
+  run_child "$d/unk.json" "$d/pin.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "5" ] && st_ok "(6) an all-UNKNOWN population is BLIND (rc 5), never a baseline-drift verdict" \
+    || st_bad "(6) expected rc 5 when the only row went UNKNOWN, got $rc"
+  grep -q "UNREAD 1 — #9001" <<<"$out" && st_ok "(6) …and the pinned row is counted UNREAD, not HEALED" \
+    || st_bad "(6) an unclassified pinned row was not held out of the healed set: $out"
+  grep -q "HEALED 0" <<<"$out" && st_ok "(6) …healed stays empty on a read that did not happen" \
+    || st_bad "(6) healed was non-empty on an unread row: $out"
+
+  # (7) THE HEAD MOVED. Same number, new head, still stale → NOVEL, not KNOWN.
+  row 9001 CONFLICTING "cccccccc1111222233334444555566667777bbbb" | jq -s -c '.' > "$d/moved.json"
+  run_child "$d/moved.json" "$d/pin.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "1" ] && st_ok "(7) a pinned number at a NEW head is novel, not covered, and exits 1" \
+    || st_bad "(7) expected rc 1 when the pinned head moved, got $rc"
+  grep -q "is PINNED at head ${HEAD_A:0:9} and is reported at head" <<<"$out" \
+    && st_ok "(7) …and the message says the pin is for a different tree" \
+    || st_bad "(7) no head-moved explanation: $out"
+
+  # (8) THE PARSER REFUSES A PIN WITHOUT A REASON, and says so.
+  printf '9001 %s 2026-08-01\n' "${HEAD_A:0:9}" > "$d/noreason.baseline"
+  run_child "$d/one.json" "$d/noreason.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "3" ] && st_ok "(8) a reasonless pin is a configuration fault (rc 3), not a silent allow" \
+    || st_bad "(8) expected rc 3 for a reasonless pin, got $rc"
+  grep -q "does not get in without a sentence" <<<"$out" \
+    && st_ok "(8) …and the refusal explains the cost of a pin" \
+    || st_bad "(8) the reasonless-pin refusal was unexplained: $out"
+
+  # (9) A MISSPELLED --baseline NEVER DISARMS THE RATCHET.
+  run_child "$d/one.json" "$d/no-such-file.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "3" ] && st_ok "(9) a --baseline that cannot be opened is rc 3, never an empty pin" \
+    || st_bad "(9) expected rc 3 for a missing --baseline, got $rc"
+
+  # (10) A NUMBER PINNED TWICE is refused rather than silently resolved.
+  { printf '9001 %s 2026-08-01 first claim about this pull request\n' "${HEAD_A:0:9}"
+    printf '9001 %s 2026-08-02 second claim about the same pull request\n' "${HEAD_A:0:9}"; } > "$d/dupe.baseline"
+  run_child "$d/one.json" "$d/dupe.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "3" ] && st_ok "(10) a number pinned twice is refused (rc 3)" \
+    || st_bad "(10) expected rc 3 for a duplicate pin, got $rc"
+
+  # (11) DISARM. An empty population with an empty pin must be a clean 0 — if
+  #      any of the reds above were unconditional, this is where it shows.
+  run_child "$d/none.json" "$d/empty.baseline"; rc=$?; out="$(cat "$d/out.txt")"
+  [ "$rc" = "0" ] && st_ok "(11) empty population + empty pin = 0; the reds above are conditional" \
+    || st_bad "(11) an empty population with an empty pin exited $rc — something here reds unconditionally"
+  grep -q "this string appears in no verdict" <<<"$out" \
+    && st_bad "(11) a nonsense assertion passed — these greps match anything" \
+    || st_ok "(11) a nonsense assertion fails, so the greps above are load-bearing"
+
+  echo
+  echo "── stale-verdict-watch --selftest: $SELFTEST_PASS passed, $SELFTEST_FAIL failed ──"
+  [ "$SELFTEST_FAIL" -eq 0 ] || return 1
+  return 0
 }
 
 main() {
@@ -390,6 +792,8 @@ main() {
         shift 2 ;;
       --min-commits) MIN_COMMITS="${2:-}"; shift 2 ;;
       --state-file) STATE_SVW="${2:-}"; shift 2 ;;
+      --baseline) BASELINE="${2:-}"; BASELINE_EXPLICIT=1; shift 2 ;;
+      --selftest) shift; selftest; return $? ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) red "unknown argument: $1"; exit 3 ;;
     esac
@@ -399,6 +803,25 @@ main() {
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
   req="$(required_contexts)" || { red "cannot read the required-check spec at $SPEC — this verdict has no set to check against"; exit 3; }
   [ -n "$req" ] && [ "$req" != "null" ] || { red "the spec at $SPEC lists no required contexts"; exit 3; }
+
+  # THE PIN, loaded before anything is read. A `--baseline` a human typed and
+  # got wrong is a hard 3: silently disarming a ratchet on a typo is exactly
+  # the shape of failure this whole file exists to refuse. The COMMITTED
+  # default going missing is different — it degrades to "everything is novel",
+  # the strict direction — and it is SAID rather than swallowed.
+  if [ -z "$BASELINE" ]; then
+    BASELINE_JSON='[]'
+    BASELINE_NOTE="baseline: explicitly disabled (--baseline '') — every stale verdict this run reports is NOVEL."
+  elif [ -f "$BASELINE" ]; then
+    parse_baseline "$BASELINE" || { red "the pinned baseline at $BASELINE is unreadable — this run refuses to treat an unparseable pin as an empty one."; exit 3; }
+    BASELINE_NOTE="baseline: $(jq 'length' <<<"$BASELINE_JSON") pinned entr$( [ "$(jq 'length' <<<"$BASELINE_JSON")" = "1" ] && echo y || echo ies ) from ${BASELINE#"$REPO_ROOT/"}"
+  elif [ "$BASELINE_EXPLICIT" = "1" ]; then
+    red "no such baseline: $BASELINE — a --baseline this run cannot open is a typo, not an empty pin."
+    exit 3
+  else
+    BASELINE_JSON='[]'
+    BASELINE_NOTE="baseline: ${BASELINE#"$REPO_ROOT/"} is ABSENT. The ratchet falls back to 'every stale verdict is NOVEL' — the strict direction — and no pinned entry can be reported healed this run."
+  fi
 
   # The START marker lands BEFORE any read is attempted, so a run cancelled
   # mid-poll — or one that leaves through 5/6/7 — is visible to the next run
@@ -459,28 +882,71 @@ main() {
     return 4
   }
 
+  # THE DELTA against the pin. Folded into the same document the renderer
+  # reads, so the verdict line and the exit code below cannot be computed from
+  # two different partitions.
+  local base_file="$WATCH_TMP/baseline.json" ratchet_jq="$RATCHET_JQ"
+  printf '%s' "$BASELINE_JSON" > "$base_file"
+  # MUTATION SWITCHES. Read ONLY inside a --selftest child; a production run
+  # has SELFTEST_CHILD=0 and never looks at the variable, so an ambient
+  # SVW_MUTATE in a real environment cannot reach the partition.
+  if [ "$SELFTEST_CHILD" = "1" ]; then
+    case "${SVW_MUTATE:-}" in
+      pin-any)     ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/] | length == 0) ] as \$novel/] | length >= 0 and false) ] as $novel/')" ;;
+      never-healed) ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/| . + { gone: ((\$SEEN | index(\$b.number)) == null) } ] as \$healed/| select(false) ] as $healed/')" ;;
+      head-blind)  ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/select(\$b.number == \$r.number and (\$r.head | startswith(\$b.head)))/select($b.number == $r.number)/g')" ;;
+      '') ;;
+      *) red "SVW_MUTATE='${SVW_MUTATE:-}' is not a mutation this file defines"; return 3 ;;
+    esac
+    # A MUTATION THAT DID NOT APPLY IS NOT A MUTATION. If the sed above ever
+    # stops matching (someone reflows the jq), the "mutant" is the pristine
+    # program and every probe passes — a disarm test that proved nothing.
+    if [ -n "${SVW_MUTATE:-}" ] && [ "$ratchet_jq" = "$RATCHET_JQ" ]; then
+      red "SVW_MUTATE='$SVW_MUTATE' matched nothing in RATCHET_JQ — the mutant is identical to the original, so any probe against it is vacuous."
+      return 3
+    fi
+  fi
+  verdict="$(jq -c --slurpfile base_in "$base_file" --arg note "$BASELINE_NOTE" \
+      "\$base_in[0] as \$base | $ratchet_jq" <<<"$verdict")" || {
+    red "COMPUTE FAULT — the verdict was computed and the ratchet partition against the pinned baseline was not."
+    return 4
+  }
+
   printf '%s' "$verdict" | render
 
-  local reported unknown open classified
+  local reported unknown open classified novel_n healed_n known_n
   reported="$(jq '.reported | length' <<<"$verdict")"
   unknown="$(jq '.unknown | length' <<<"$verdict")"
   open="$(jq '.open' <<<"$verdict")"
   classified="$(jq '.classified' <<<"$verdict")"
+  novel_n="$(jq '.ratchet.novel | length' <<<"$verdict")"
+  known_n="$(jq '.ratchet.known | length' <<<"$verdict")"
+  healed_n="$(jq '.ratchet.healed | length' <<<"$verdict")"
   # The trend is computed BEFORE this run writes its own READ line, so the
   # baseline is always a PREVIOUS read — and only a run that actually read
   # (classified > 0, or a legitimately empty population) becomes one. A BLIND
   # run writes no READ: its dangling START is the next run's UNREAD count.
   say ""
-  trend_report "$reported"
+  trend_report "$reported" "$novel_n"
   if [ "${open:-0}" -eq 0 ] || [ "${classified:-0}" -gt 0 ]; then # MUT:G-READLINE
-    state_read "$reported" "$classified" "$open"
+    state_read "$reported" "$classified" "$open" "$novel_n"
   fi
-  if [ "$reported" -gt 0 ]; then return 1; fi
+  step_summary "$verdict" "$reported" "$novel_n" "$known_n" "$healed_n"
+
+  # THE ORDER MIRRORS render()'s VERDICT ARMS, and it is not arbitrary:
+  #   novel first — the only arm that says a NEW pull request needs a human;
+  #   blind next  — a run that classified nothing must not issue a ratchet
+  #                 verdict about a population it could not read;
+  #   healed next — a firm, actionable fact about a committed file;
+  #   unknown     — partial coverage;
+  #   0           — including a non-empty KNOWN set, which is the whole point.
+  if [ "${novel_n:-0}" -gt 0 ]; then return 1; fi
   # BEFORE the unknown check: a run that classified nothing is a stronger
   # statement than "some rows went unread", and 2 is mapped to success by the
   # workflow. An empty population is not blind — it is a read that found no
   # pull requests, which is a legitimate 0.
   if [ "${open:-0}" -gt 0 ] && [ "${classified:-0}" -eq 0 ]; then return 5; fi
+  if [ "${healed_n:-0}" -gt 0 ]; then return 8; fi
   if [ "$unknown" -gt 0 ]; then return 2; fi
   return 0
 }
