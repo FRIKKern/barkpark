@@ -749,7 +749,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- refuse_if_referenced(conn, file, params),
          # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
-         # `Repo.delete/2` removed (media.ex:425-452). This used to discard it
+         # `Repo.delete/2` removed (see `delete_file/2` in media.ex). This used to discard it
          # and echo the `:id` path param; `filename` is stored state the request
          # never carries, so reverting to the echo reds the differential.
          {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
