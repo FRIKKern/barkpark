@@ -533,8 +533,85 @@ test('a considering row is residue: counted into clause (a) and disclosed by nam
   const { status, out } = fixtureRun('considering-residue.json');
   assert.equal(status, NO_SEAL, 'unfinished work with no forwarding address must not seal');
   assert.match(out, /considering \(disclosed\)   : 1  \[gr-fixture-considering-1\]/);
-  assert.match(out, /✗ gr-fixture-considering-1/, 'an unforwarded considering row is an orphan');
-  assert.match(token(out), /a=FAIL .*orphans=1 considering=1/);
+  assert.match(token(out), /a=FAIL .*considering=1/);
+});
+
+// ── A ROW CANNOT BE BOTH DISCLOSED AND UNNAMED ──────────────────────────────
+// Wave 28's re-derivation of clause (a) from a clean checkout (charter D334) found the
+// SAME row on two lines whose labels contradict each other: `considering (disclosed) :
+// 1 [<id>]`, and two lines under it `UNNAMED RESIDUE (orphans) : 1  ✗ <id>`. Live that
+// day: 59 open rows minus the 3 hardcoded permanent human gates = 56 genuinely unnamed
+// rows, and the token said `orphans=57` — the 57th being `cloud-console-operator-audit-
+// log`, printed by name immediately above. The count, not just the label, was wrong.
+//
+// THIS TEST ASSERTS THE COUNT, NOT MERELY THE LINE — a fix that only re-worded the
+// label would leave `orphans=` inflated and every reader of the token misled.
+test('the disclosed considering row is counted ONCE, and never as UNNAMED residue', () => {
+  const { status, out } = fixtureRun('considering-residue.json');
+  const clauseA = out.split('BUCKET (c)')[0];
+
+  // 1. THE COUNT. Zero rows are unnamed: the only residue row is named two lines up.
+  assert.match(out, /UNNAMED RESIDUE \(orphans\) : 0/);
+  assert.match(token(out), /\borphans=0 considering=1\b/, 'the token carries the corrected count');
+  assert.doesNotMatch(clauseA, /✗ gr-fixture-considering-1/, 'a row printed by name is not UNNAMED');
+
+  // 2. THE ARITHMETIC. The four buckets partition residue exactly — the sum the wave-28
+  //    reader had to do by hand off the live ledger, printed by the instrument itself.
+  assert.match(out, /── buckets partition residue: 0 \+ 0 \+ 1 \+ 0 = 1/);
+
+  // 3. THE ROW IS NAMED EXACTLY ONCE inside clause (a). Two mentions is the defect.
+  assert.equal(clauseA.split('gr-fixture-considering-1').length - 1, 1,
+    `the considering row must appear exactly once in the clause (a) block:\n${clauseA}`);
+
+  // 4. NOT AN EXEMPTION. Re-labelling must not lower the bar: the header's clause (a)
+  //    is "zero children open/in_progress/CONSIDERING without … a named forwarding
+  //    address", so this run still fails, still at a=FAIL, and says why by name.
+  assert.equal(status, NO_SEAL, 'a disclosed considering row still has no forwarding address');
+  assert.match(token(out), /\ba=FAIL\b/);
+  assert.match(out, /1 considering row\(s\) are disclosed by name and STILL carry no forwarding address \(clause a\): gr-fixture-considering-1/);
+});
+
+// MUTATION PROOF, DIRECTION 1 — re-merge the buckets (this is main's byte-for-byte
+// behaviour before the fix) and the printed orphan count MOVES, 0 -> 1, with the row
+// carrying the ✗ it was disclosed by name two lines above.
+test('MUTATION PROOF: re-merging the buckets puts the disclosed row back under UNNAMED', () => {
+  const { status, out } = mutatedRun(
+    (src) => src.replace(
+      '    else if (PENDING_STATUSES.includes(c.lifecycle_status)) consideringResidue.push(c._id);\n', ''),
+    ['--ledger', withRequired('considering-residue.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(status, NO_SEAL, `the merged shape still reds, but for the wrong reason: ${token(out)}`);
+  assert.match(token(out), /\borphans=1 considering=1\b/, 'the pre-fix count double-counts the disclosed row');
+  assert.match(out, /✗ gr-fixture-considering-1/, 'and prints it as UNNAMED under its own disclosed name');
+});
+
+// MUTATION PROOF, DIRECTION 2 — the opposite failure, and the one a careless fix would
+// have shipped: drop the new bucket out of clause (a)'s pass predicate and the SAME
+// fixture SEALS over an unfinished row. The bucket is a re-labelling, never an exemption.
+test('MUTATION PROOF: dropping the considering bucket from clause (a) seals an unfinished row', () => {
+  const { status, out } = mutatedRun(
+    (src) => src.replace(
+      'const aPass = orphans.length === 0 && consideringResidue.length === 0;',
+      'const aPass = orphans.length === 0;'),
+    ['--ledger', withRequired('considering-residue.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(status, SEAL, `the exempting shape seals: ${token(out)}`);
+  assert.match(token(out), /SEAL a=PASS/);
+});
+
+// AND THE OTHER SIDE OF THE ORDERING: a considering row that HAS a forwarding address
+// is what clause (a) asks for, so it seals — and its name is STILL printed, on the
+// re-disclosure line, because D90's "printed by name" is unconditional and does not
+// depend on which bucket the row happened to land in.
+test('a FORWARDED considering row seals — and is still disclosed by name', () => {
+  const { status, out } = fixtureRun('considering-forwarded.json');
+  assert.equal(status, SEAL, `a considering row with a named forwarding address must not red: ${token(out)}`);
+  assert.match(token(out), /SEAL a=PASS .*\borphans=0 considering=1\b/);
+  assert.match(out, /forwarded under successor : 1/);
+  assert.match(out, /considering \(disclosed\)   : 0/);
+  assert.match(out, /\(\+1 considering row\(s\) counted on a line above.*gr-fixture-considering-1\)/,
+    'no considering row is ever disclosed by count alone');
+  assert.match(out, /── buckets partition residue: 1 \+ 0 \+ 0 \+ 0 = 1/);
 });
 
 test('MUTATION PROOF: with `considering` dropped from the residue set, the same fixture seals', () => {

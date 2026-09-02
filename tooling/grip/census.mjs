@@ -1197,9 +1197,10 @@ export const LEDGER_CORPUS_NAME = "the durable recipe ledger (tooling/grip/ledge
  *
  * DEDUPED TO ONE RECIPE PER (subject, quantity) BY DEFAULT, because a key's
  * rival recipes re-derive THE SAME QUANTITY and running all of them buys
- * repetition rather than coverage. Measured on a 400-row store: 17,343ms over
- * every recipe against 5,043ms one-per-key — ~3.4x the wall clock for a 37%
- * larger set.
+ * repetition rather than coverage. Measured at ee49d2b7f2 (2026-07-21) on a
+ * synthetic 400-row store: 17,343ms over every recipe against 5,043ms
+ * one-per-key — ~3.4x the wall clock for a 37% larger set. The ratio is the
+ * durable claim; the corpus size is a stated snapshot, not the live store.
  *
  * BUT THE RIVALS ARE NOT SILENTLY DISCARDED. `summarise`'s report has no field
  * for `rival_methods` or `unreadable`, so flattening to a bare string[] would
@@ -1263,10 +1264,12 @@ export function renderLedgerPreamble(source) {
   // than trusting the row, because the mint's grammar moved after the rows were
   // written and the store is immutable. Absorbing that silently would make the
   // clean "0 rival methods" above look like a property of the DATA when it is a
-  // property of the READ — 57 of the 62 committed rows carry a stored key today's
-  // mint no longer produces. A FALLBACK is the one that bites: it is the only way
-  // the fold can still be keying on a stale value, so it prints even at zero once
-  // any restatement happened.
+  // property of the READ — at e8bbba5919 (2026-07-21), 57 of the 62 committed
+  // rows carried a stored key that commit's mint no longer produced. That is a
+  // named past snapshot, not a live count: the store grows without touching this
+  // file, so the figure is never restated with a fresh total (D102). A FALLBACK
+  // is the one that bites: it is the only way the fold can still be keying on a
+  // stale value, so it prints even at zero once any restatement happened.
   if (s.quantity_restated > 0 || s.level_restated > 0 || s.quantity_fallbacks > 0 || s.level_fallbacks > 0) {
     L.push(
       `  key re-derived   ${s.quantity_restated ?? 0} quantity, ${s.level_restated ?? 0} level` +
@@ -1356,7 +1359,18 @@ export function validateArgv(argv) {
 // SILENT — the CLI becomes a no-op that exits 0 having measured nothing, which
 // reads exactly like a clean run.
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (isMain) {
+// THE BLOCK IS LABELLED so the arms below can leave it with `break cliMain`
+// instead of `process.exit` (charter D92). Node writes a PIPE asynchronously,
+// so process.exit() throws away whatever stdout has queued and not yet handed
+// the kernel: `--help | less` could lose the tail of the help screen and
+// `--json | jq` a JSON.parse error the caller blames on this tool's format,
+// while the same runs redirected to a file are whole. census's `--json` is the
+// output in this directory likeliest to outgrow the 64 KiB pipe buffer, which
+// is the size at which this stops being latent. `break` leaves the exit STATUS
+// identical in every arm (0 on --help, 2 on each named rejection) and lets the
+// event loop drain. A label rather than a wrapper function keeps this a
+// three-line change to the exits themselves.
+if (isMain) cliMain: {
   // FIRST ACT, BEFORE ANY ANSWER (D78). A census run that says "9 recipes"
   // means nothing until the operator knows WHICH tree's ledger it counted.
   // STDERR only — `--json` writes a document to stdout and a banner there
@@ -1366,7 +1380,7 @@ if (isMain) {
   const argv = process.argv.slice(2);
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(HELP);
-    process.exit(0);
+    break cliMain;
   }
   // A BOUND THAT SILENTLY UNBOUNDS ITSELF IS THE EPIC'S OWN DEFECT CLASS.
   // `--limit` with a missing or non-numeric value used to parse to NaN, fail
@@ -1376,7 +1390,8 @@ if (isMain) {
   const valid = validateArgv(argv);
   if (!valid.ok) {
     process.stderr.write(`census: ${valid.reason}\n`);
-    process.exit(2);
+    process.exitCode = 2;
+    break cliMain;
   }
   const limitAt = argv.indexOf("--limit");
   let limit = Infinity;
@@ -1384,14 +1399,16 @@ if (isMain) {
     limit = Number.parseInt(argv[limitAt + 1] ?? "", 10);
     if (!Number.isInteger(limit) || limit < 1) {
       process.stderr.write(`census: --limit needs a positive integer, got ${JSON.stringify(argv[limitAt + 1] ?? null)}\n`);
-      process.exit(2);
+      process.exitCode = 2;
+      break cliMain;
     }
   }
 
   const useLedger = argv.includes("--ledger");
   if (!useLedger && argv.includes("--all-rivals")) {
     process.stderr.write("census: --all-rivals only means something with --ledger — the fixture has no (subject, quantity) keys to have rivals over\n");
-    process.exit(2);
+    process.exitCode = 2;
+    break cliMain;
   }
 
   const ledgerSource = useLedger ? loadLedgerRecipes(LEDGER_DIR, { allRivals: argv.includes("--all-rivals") }) : null;
