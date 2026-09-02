@@ -1520,8 +1520,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # The async AI title landed (the store's clobber guard already refused any
   # write that would stomp a human rename) — refresh the sidebar so the row
   # shows it, whichever session it belongs to.
-  def handle_info({:chat_title, _session_id, _title}, socket) do
-    {:noreply, refresh_sessions(socket)}
+  #
+  # ONE accepted write reaches this tab TWICE: `Recorder.broadcast_title/2`
+  # publishes on the activity topic (subscribed at mount) AND on the on-screen
+  # session's topic (subscribed by `subscribe_session/2`) so the SSE forwarder
+  # gets it too (ct-bl-recorder-titles). The second delivery is DROPPED here —
+  # not merely tolerated: `refresh_sessions/1` is a store read, and firing it
+  # again for a row we already render would re-query on every title and let a
+  # concurrent edit land as a flicker the user never asked for. The drop is
+  # keyed on what is RENDERED, so a genuinely new title always refreshes.
+  def handle_info({:chat_title, session_id, title}, socket) do
+    if title_rendered?(socket, session_id, title) do
+      {:noreply, socket}
+    else
+      {:noreply, refresh_sessions(socket)}
+    end
   end
 
   # The CLI's advertised slash commands landed (charter D36a), broadcast by the
@@ -4554,6 +4567,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
+    )
+  end
+
+  # Is `title` for `session_id` ALREADY what the sidebar shows? The duplicate-
+  # delivery guard for `{:chat_title, …}`: the Recorder publishes one accepted
+  # write on two topics this LiveView subscribes to, and the repeat must not
+  # re-read the store. A session absent from the list (a row this tenant cannot
+  # see, or a list not yet loaded) is NOT "rendered", so it falls through to the
+  # refresh — the guard only ever suppresses a no-op.
+  defp title_rendered?(socket, session_id, title) do
+    Enum.any?(
+      socket.assigns[:sessions] || [],
+      &(&1.id == session_id and &1.title == title)
     )
   end
 

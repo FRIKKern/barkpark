@@ -169,6 +169,45 @@ defmodule Barkpark.StudioChat.Recorder do
   @spec activity_topic() :: String.t()
   def activity_topic, do: "studio_chat:activity"
 
+  @doc """
+  Publish a session's settled title — the ONE title event every surface consumes
+  (`ct-bl-recorder-titles`). Called by `Titles.kick_title/2` only AFTER the
+  store's clobber guard accepted the write, so what ships here is the title now
+  in Postgres, never a candidate.
+
+  Two broadcasts of the SAME `{:chat_title, session_id, title}` tuple, the shape
+  `broadcast_workflow/2` already uses (charter D22):
+
+    * `activity_topic/0` — the GLOBAL fleet/sidebar channel. Studio's session
+      list and the `FleetHub` (which re-projects it onto `GET /v1/chat/events`)
+      key off this one; it is the pre-existing D69h delivery, kept verbatim.
+    * `topic/1` — the PER-SESSION channel the SSE forwarder in `ChatController`
+      subscribes to (and ONLY that: D24). This is the new half — it is what lets
+      `bp chat` and any other headless client learn the AI title from the
+      transport it already holds, retiring the D15 "GET the session each turn
+      boundary" workaround.
+
+  A module function, deliberately: title generation races the Recorder's own
+  lifecycle (a one-shot `bp chat` send can settle its title after the runtime
+  idles out), and routing through `whereis/1` would silently drop the event
+  whenever no Recorder happened to be alive. `Phoenix.PubSub.broadcast/3` with
+  zero subscribers returns `:ok` and cannot raise, so this stays safe inside
+  `kick_title`'s fire-and-forget task.
+
+  Exactly ONE event per topic per accepted write. A Studio tab subscribed to
+  both topics therefore sees the tuple twice by construction — `ChatLive`'s
+  handler drops the repeat rather than re-reading the store.
+  """
+  @spec broadcast_title(String.t(), String.t()) :: :ok
+  def broadcast_title(session_id, title) when is_binary(title) do
+    msg = {:chat_title, session_id, title}
+
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, activity_topic(), msg)
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, topic(session_id), msg)
+
+    :ok
+  end
+
   def start_link(%{session_id: id} = opts) do
     GenServer.start_link(__MODULE__, opts, name: {:via, Registry, {@registry, id}})
   end

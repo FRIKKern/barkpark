@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   alias Barkpark.Content
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.PlanPapers
+  alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
 
@@ -2667,6 +2668,63 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       await(fn -> StudioChat.get_session(sid).title_source == "ai" end)
       assert StudioChat.get_session(sid).title == "Refactor the auth layer"
       assert render(view) =~ "Refactor the auth layer"
+    end
+
+    test "the Recorder's title event reaches the open tab through the real subscriptions",
+         %{conn: conn} do
+      # ct-bl-recorder-titles: no `send(view.pid, …)` here — the event goes out
+      # on PubSub exactly as `Titles.kick_title` sends it, so this also proves
+      # the tab is genuinely subscribed rather than merely handling the tuple.
+      sid = seed_session("Original")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      assert render(view) =~ "Original"
+
+      # The sidebar renders the STORE, never the tuple's payload, so the row has
+      # to move first — a rename is the cheapest way to move it.
+      {:ok, _} = StudioChat.rename(sid, "Pushed by the Recorder")
+      Recorder.broadcast_title(sid, "Pushed by the Recorder")
+
+      await(fn -> render(view) =~ "Pushed by the Recorder" end)
+      refute render(view) =~ "Original"
+    end
+
+    test "the SECOND delivery of one title is dropped, not re-read", %{conn: conn} do
+      # An open tab subscribes to BOTH topics the Recorder publishes a title on,
+      # so one accepted write arrives twice. The repeat must not re-read the
+      # store: this test moves the row BEHIND the tab's back between the two
+      # deliveries, so a second `refresh_sessions/1` would visibly repaint a
+      # title nothing announced — the flicker criterion 3 forbids.
+      sid = seed_session("Original")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      {:ok, _} = StudioChat.rename(sid, "Announced title")
+      send(view.pid, {:chat_title, sid, "Announced title"})
+      await(fn -> render(view) =~ "Announced title" end)
+
+      {:ok, _} = StudioChat.rename(sid, "Never announced")
+      send(view.pid, {:chat_title, sid, "Announced title"})
+      render(view)
+
+      assert render(view) =~ "Announced title"
+      refute render(view) =~ "Never announced"
+    end
+
+    test "a title the tab has NOT rendered always refreshes (the guard only drops no-ops)",
+         %{conn: conn} do
+      # The inverse of the test above — proof the duplicate guard cannot swallow
+      # a real update. Same shape, one difference: the announced title is the
+      # NEW store value, so the refresh must happen.
+      sid = seed_session("Original")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      {:ok, _} = StudioChat.rename(sid, "Announced title")
+      send(view.pid, {:chat_title, sid, "Announced title"})
+      await(fn -> render(view) =~ "Announced title" end)
+
+      {:ok, _} = StudioChat.rename(sid, "A genuinely newer title")
+      send(view.pid, {:chat_title, sid, "A genuinely newer title"})
+
+      await(fn -> render(view) =~ "A genuinely newer title" end)
     end
   end
 
