@@ -165,8 +165,9 @@ defmodule BarkparkWeb.Contract.PerFieldOpTableTest do
       # "type": "park") and left the bare spelling silently broken to protect
       # callers who cannot exist.
       #
-      # `type` is on Writer's @reserved_in (writer.ex:1291) and Map.drop-ped
-      # from content on every write (writer.ex:1310), so a document CANNOT
+      # `type` is on Writer's @reserved_in (writer.ex, `@reserved_in`) and it is
+      # Map.drop-ped from content on every write (writer.ex,
+      # `Map.drop(@reserved_in)`), so a document CANNOT
       # carry it in content. Write one that tries:
       {:ok, _} =
         Content.create_document(
