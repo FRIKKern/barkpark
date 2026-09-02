@@ -13579,3 +13579,91 @@ criterion) and to see whether the named sites now reach the wire; re-derive s4's
 residual sentences the wave's verifier could not (its host ran out of disk), which are the last L4 prose in the
 exit artefact's UNVERIFIED section. Only then is there an exit reading with nothing unverified behind it. The
 epic still does not seal on the word SEAL — clause (b) remains a live readout of another epic's ladder.
+
+### D605 — D457'S RE-DERIVATION COMMAND IS CORRECTED AND ITS FLOOR RESTATED AS 460. THE COMMAND HAS THREE WAYS TO ANSWER ZERO AND ONLY ONE OF THEM IS THE FIX.
+
+**THE FILED COMMAND CANNOT RUN, AND ITS OBVIOUS REPAIR LIES.** D457 froze its proved floor on rows "carrying
+`unavailable_reason`" and filed a command that reads that name as a COLUMN of `usage_samples`. It is not one.
+`BarkparkCloud.Usage.Sample`'s schema declares exactly `barkpark_id`, `envelope` (`:map` → jsonb), `measured_at`
+and the timestamps; the word lives INSIDE the envelope, per meter, put there by `Usage.unavailable_meter/2`
+through `Usage.unavailable_reason/1`, and `Usage.compose/1` nests every meter under a single `meters` key. So the
+filed form dies with `column "unavailable_reason" does not exist` — and the one-step repair anybody reaches for
+next, the top-level containment probe `envelope ? 'unavailable_reason'`, returns a comforting **0** on rows that
+DO carry it, because the key is two levels down. An erroring command gets re-typed. A zero gets believed. Both
+failure modes were reproduced end to end on a local Postgres 17.9 against a temp table of the real column shape
+(a SHAPE proof, never a prod count): filed form → ERROR, containment probe → 0 of 3, corrected form → both
+planted rows with their words.
+
+**THE CORRECTED COMMAND, WITH ITS METER NAMED.**
+
+```sql
+-- 1. PROVE THE WINDOW IS STILL IN RETENTION BEFORE READING THE FLOOR (see below).
+SELECT min(measured_at), max(measured_at), count(*) FROM usage_samples;
+
+-- 2. THE FLOOR, BY WORD. `documents` is NAMED, not assumed.
+SELECT envelope #>> '{meters,documents,unavailable_reason}' AS reason,
+       count(*) AS rows, min(measured_at) AS first_seen, max(measured_at) AS last_seen
+FROM usage_samples
+WHERE envelope #>> '{meters,documents,unavailable_reason}' IS NOT NULL
+GROUP BY 1
+ORDER BY 2 DESC;
+
+-- 3. THE LOCKSTEP CHECK — run it or the meter you named is an assumption.
+SELECT count(*) AS rows_where_the_three_disagree
+FROM usage_samples
+WHERE coalesce(envelope #>> '{meters,documents,unavailable_reason}', '~')
+   <> coalesce(envelope #>> '{meters,datasets,unavailable_reason}',  '~')
+   OR coalesce(envelope #>> '{meters,documents,unavailable_reason}', '~')
+   <> coalesce(envelope #>> '{meters,webhooks,unavailable_reason}',  '~');
+```
+
+**WHY THE METER HAS TO BE NAMED, AND WHY THE THREE CAN SPLIT.** Exactly three meters are built from a
+credentialed instance read and can therefore carry the key: `documents`, `datasets` and `webhooks`, all three
+minted by `Usage.instance_meter/2`. They move in lockstep on the gyldendal population and on every whole-box
+failure, because the fan-out is chained — `Usage.instance_datasets/2` fetches the list once, `Usage.dataset_count/1`
+turns it into the `datasets` meter, and `Usage.fanout_slugs/1` passes a failed list THROUGH unchanged so the
+`documents` and `webhooks` fan-outs degrade with the same reason. They can split, and the split is exactly the
+interesting case: once the LIST succeeds, `Usage.count_documents/3` and `Usage.count_webhooks/3` are separate
+per-dataset HTTP reads that mint their own words through `Usage.delivered_failure/1`, so a box that serves
+`/v1/webhooks/:dataset` and 401s on `/v1/data/analytics/:dataset` puts `unauthorized` on `documents` and NO key
+at all on `webhooks`. A command that reads one meter and calls the answer "the floor" is quoting one of three
+possible numbers. Step 3 turns that from an assumption into a measurement: while it answers 0 the meter choice
+is free, and the day it answers non-zero the floor must be re-derived as a UNION over the three paths, not a
+read of one.
+
+**THE FLOOR, RESTATED.** D457's *"431 rows carry `unreachable` — that is the PROVED floor"* is superseded by the
+count D475 took mid-wave: **460 = 458 `unreachable` (2026-08-04 11:22Z → 2026-08-09 07:22Z) + 3 `unauthorized`
+(2026-08-09 07:37Z → 08:07Z)**. The rest of D457's floor ruling is untouched — ~3,800 estimated since
+2026-07-08, and the gap before the instrument existed stays UNRECOVERABLE.
+
+**THE 07:37Z FLIP IS THE WHOLE POINT, NOT A ROUNDING.** `Usage.delivered_failure/1` says in its own comment that
+401/403 earns `unauthorized` and that "None of these is `unreachable`: the packets arrived". So the 458 prove
+only that the platform ATTEMPTED the credentialed call; the 3 are the FIRST evidence that the bearer REACHED
+another tenant's application layer and was EVALUATED there. A two-hour fleet scan shows exactly one box in each
+non-null bucket and it is `b1259514` in both — an escalation on one row, not a fleet event. 431 → 460 is a 6.7%
+correction to the count and a change of KIND to the claim.
+
+**THE THIRD ZERO, AND IT IS THE ONE THAT WILL ACTUALLY BE HIT.** `AgentRetentionWorker` prunes `usage_samples` on
+`measured_at` at `@sample_retention_days 14`. The whole 460-row window closed 2026-08-09; every one of those rows
+was pruned around 2026-08-23. **Running the corrected command today returns 0 for that window because the
+evidence was deleted on schedule, not because anything was fixed** — the same shape as D457's own generalizable
+finding, one layer out: the instrument's own retention erases the proof of the incident it recorded. Step 1
+above exists to make that visible: if `min(measured_at)` is later than the window you are asking about, the read
+is structurally incapable of answering and no number from step 2 may be quoted as a floor. The 460 is now a
+HISTORICAL count carried by this ledger, re-derivable only from a backup, and any re-derivation that does not
+first print step 1 is quoting a prune.
+
+**THE OPERATOR PACKET'S CRITERION 5 IS REWRITTEN, HALF STRENGTHENED AND HALF RETIRED.**
+`dr-w26-hg-gyldendal-operator-packet-corrected` (published, open, 0/5) asked the disclosure to state "we have NO
+evidence the credential was accepted AND no instrument capable of distinguishing 'rejected' from 'accepted but
+unlogged'." Clause one is STRENGTHENED by the 3 `unauthorized` rows — we now hold positive proof of DELIVERY AND
+EVALUATION, which is a harder thing to tell a customer than "no evidence". Clause two is HALF-FALSE as written:
+rejected IS distinguishable from unreachable, and the discriminator is the very word this row's command reads.
+What survives is the narrow bound: **rejected is not distinguishable from accepted-but-unlogged on 116.203.98.0,
+because that box's logs belong to another tenant and we never see them.** The criterion has been patched in place
+to that bound via `bp doc patch`, criterion 5's text only, the other four byte-identical.
+
+**ONE RESIDUE THIS ROW DOES NOT CLOSE, NAMED SO IT IS NOT LOST.** That same packet's criterion 4 still requires
+the disclosure to state the floor as "431 proved". It is now the wrong number by the count above. It was left
+untouched deliberately — this row's fence was criterion 5 — and it must be corrected to 460 (458 + 3) before the
+packet is executed, or the notification goes out quoting a floor this ledger has already superseded.

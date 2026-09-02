@@ -278,7 +278,23 @@ class Cdp {
 }
 
 function findChrome() {
-  if (process.env.CHROME) return process.env.CHROME;
+  // CHROME is VALIDATED, not trusted — the same accessSync check every other
+  // candidate below gets. Returning it unchecked means a typo'd or stale path
+  // reaches `spawn`, whose ENOENT arrives as an unhandled 'error' EVENT (not a
+  // throw), which kills the process with EXIT 1 and a Node stack trace: an
+  // ENVIRONMENT failure wearing a SITE failure's exit code, which is the one
+  // thing the 1/2 split in the header exists to prevent. In CI the step is
+  // named "journey smoke" and the log is a stack trace, so the reader's first
+  // hypothesis is the site. Returning null routes it to the GUARD path instead,
+  // where withChrome names the bad path and exits 2.
+  //
+  // Fixed first in tooling/studio-journey/journey.mjs (its findChrome carries
+  // the same comment); this is the twin that the wave-18 file list did not
+  // reach. Proven by invocation: CHROME=/nonexistent/chrome … --self-test.
+  if (process.env.CHROME) {
+    try { fs.accessSync(process.env.CHROME, fs.constants.X_OK); return process.env.CHROME; }
+    catch { return null; }
+  }
   const candidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -1119,7 +1135,15 @@ function formatStderrTail(tail) {
 async function withChrome(fn) {
   const chromeBin = findChrome();
   if (!chromeBin) {
-    process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
+    // Two distinct environment faults, said apart: an UNSET CHROME with no
+    // Chrome on any known path, and a SET-BUT-WRONG CHROME. The second names
+    // the offending path, because "no Chrome found" while CHROME is set reads
+    // as a lie to whoever set it.
+    process.stderr.write(
+      process.env.CHROME
+        ? `!! GUARD (exit 2): CHROME=${process.env.CHROME} is not an executable file. Point it at a real Chrome/Chromium binary.\n`
+        : "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n",
+    );
     process.exit(2); // pipe-exit-ok: pre-flight guard, one stderr line, must abort before anything is spawned
   }
 
@@ -1141,6 +1165,10 @@ async function withChrome(fn) {
     // (the old `stdio: "ignore"` threw away exactly the line that says why).
     const reasons = [];
     let devPort = null;
+    // A spawn failure arrives as an 'error' EVENT on the child, not a throw.
+    // Recorded here so the bring-up failure can be CLASSIFIED below instead of
+    // taking the process down as an unhandled event (exit 1 + stack trace).
+    let spawnError = null;
     for (let attempt = 1; attempt <= BRINGUP_ATTEMPTS && !devPort; attempt++) {
       const attemptProfile = fs.mkdtempSync(path.join(os.tmpdir(), "journey-smoke-"));
       const attemptChrome = spawn(
@@ -1161,6 +1189,13 @@ async function withChrome(fn) {
         ],
         { stdio: ["ignore", "ignore", "pipe"] },
       );
+      // Unhandled, this event takes the whole process down with exit 1 and a
+      // stack trace — the exact mis-classification the CHROME validation above
+      // closes, arriving by the OTHER door: a path that passes accessSync and
+      // still cannot exec (a wrong-architecture build, a dangling symlink, a
+      // mount that went away between the check and the spawn). Captured, so
+      // the guard below can name it and exit 2.
+      attemptChrome.on("error", (e) => { spawnError = spawnError || e; });
       const readStderr = captureStderr(attemptChrome);
 
       const portFile = path.join(attemptProfile, "DevToolsActivePort");
@@ -1170,6 +1205,9 @@ async function withChrome(fn) {
           const raw = fs.readFileSync(portFile, "utf8").split("\n");
           if (raw[0] && Number(raw[0])) { attemptPort = Number(raw[0]); break; }
         } catch { /* not written yet */ }
+        // A binary that could not be executed will never write the port file;
+        // waiting out the full cap for it only makes the wrong answer slower.
+        if (spawnError) break;
         await sleep(100);
       }
 
@@ -1184,6 +1222,18 @@ async function withChrome(fn) {
       reasons.push(`attempt ${attempt}/${BRINGUP_ATTEMPTS}: DevToolsActivePort never appeared\n${formatStderrTail(readStderr())}`);
       await reapChrome(attemptChrome, `BRING-UP attempt ${attempt}`);
       try { fs.rmSync(attemptProfile, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+
+    // The binary could not be EXECUTED. That is a fact about the environment,
+    // not about the site, so it takes the exit-2 guard path — never the
+    // unhandled 'error' event's exit 1, and never the site-shaped throw below.
+    if (!devPort && spawnError) {
+      process.stderr.write(
+        `!! GUARD (exit 2): could not execute ${chromeBin} — ${spawnError.message}\n` +
+          `   THIS IS AN ENVIRONMENT FAILURE, NOT A SITE DEFECT — no page was ever loaded and no\n` +
+          `   claim is being made about the deployment. Point CHROME at a working Chrome/Chromium.\n`,
+      );
+      process.exit(2); // pipe-exit-ok: environment guard, stderr only, nothing was ever measured
     }
 
     if (!devPort) {
@@ -1234,7 +1284,51 @@ const SELF_TEST_EXPECT = {
   mute: { LAND: PASS, TYPE: FAIL, CLICK: PASS, E404: PASS, ENGINE: FAIL, PHONE: FAIL },
 };
 
+// The CHROME guard's own RED, demonstrated in-process on every self-test run.
+// The invocation proof (`CHROME=/nonexistent/chrome … --self-test` -> exit 2)
+// cannot be a self-test case, because it aborts the very run that would assert
+// it. So the branch is exercised directly instead: a bad CHROME must make
+// findChrome() return null (which is what routes it to the exit-2 guard), and —
+// the non-vacuity half — a GOOD CHROME must still come back. Without the second
+// assertion a findChrome() that returned null unconditionally would pass here
+// and disarm the harness completely.
+function proveChromeGuard() {
+  const saved = process.env.CHROME;
+  const problems = [];
+  try {
+    process.env.CHROME = "/nonexistent/chrome";
+    if (findChrome() !== null) {
+      problems.push("findChrome() trusts CHROME unvalidated — a bad path reaches spawn(), whose ENOENT is an unhandled 'error' event: exit 1 with a stack trace, i.e. an environment fault wearing a site fault's exit code");
+    }
+    // An executable that is certainly not Chrome, but IS executable — so a
+    // findChrome() that simply refused every CHROME would be caught here.
+    process.env.CHROME = process.execPath;
+    if (findChrome() !== process.execPath) {
+      problems.push("findChrome() rejects an EXECUTABLE CHROME — the validation is not a check, it is a wall, and CHROME= no longer works at all");
+    }
+  } finally {
+    if (saved === undefined) delete process.env.CHROME;
+    else process.env.CHROME = saved;
+  }
+  if (!problems.length) {
+    process.stdout.write(">> guard   CHROME validation proven both ways (bad path -> null, executable -> kept)\n");
+  }
+  return problems;
+}
+
 async function selfTest(opts) {
+  // Refused BEFORE the fixture and Chrome: a harness whose environment guard is
+  // broken cannot certify anything, and a stack trace here would be the very
+  // failure mode this check exists to prevent.
+  const guardProblems = proveChromeGuard();
+  if (guardProblems.length) {
+    process.stderr.write(
+      `\n!! SELF-TEST FAIL — the CHROME environment guard does not behave as specified:\n` +
+        guardProblems.map((p) => `   ✗ ${p}\n`).join("") +
+        `\n   This is a fault in journey-smoke.mjs itself, NOT in any deployed site.\n`,
+    );
+    return 1;
+  }
   const { server, port } = await startFixture();
   const results = {};
   try {

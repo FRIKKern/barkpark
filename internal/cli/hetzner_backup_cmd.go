@@ -335,10 +335,11 @@ func runHetznerBackupRestore(out *writer, args []string) int {
 	if !ok {
 		return exitAuth
 	}
-	if err := backup.Restore(hetznerCtx(), c, bucket, key, sink); err != nil {
-		return useError(out, "failed", err.Error(), exitGeneric)
+	rep, rerr := backup.Restore(hetznerCtx(), c, bucket, key, sink)
+	if rerr != nil {
+		return useError(out, "failed", rerr.Error(), exitGeneric)
 	}
-	return hzResDone(out, "restore", "backup", key, key, hzRestoreNotConfirmed(bucket))
+	return hzResDone(out, "restore", "backup", key, key, hzRestoreNotConfirmed(bucket, rep))
 }
 
 // hzRestoreNotConfirmed is `backup restore`'s DECLARED EXEMPTION, spelled as
@@ -353,16 +354,26 @@ func runHetznerBackupRestore(out *writer, args []string) int {
 // carries the same `confirmation: unavailable` vocabulary the destroy half uses
 // when its read fails, and says in words that the restored state is not
 // confirmed — instead of a confirmed_present key nothing read.
-func hzRestoreNotConfirmed(bucket string) map[string]any {
-	return map[string]any{
+func hzRestoreNotConfirmed(bucket string, rep backup.RestoreReport) map[string]any {
+	extra := map[string]any{
 		"bucket":              bucket,
 		hzKeyConfirmation:     hzConfirmUnavail,
 		hzKeyConfirmedPresent: false,
 		hzKeyConfirmBasis:     "none — DECLARED EXEMPTION",
+		"restored_bytes":      rep.Bytes,
+		"restored_sha256":     rep.SHA256,
+		"manifest_check":      rep.Verification,
 		"note": "the dump was streamed into the target database and the restore sink accepted it; whether that " +
 			"database now HOLDS it is a post-condition inside Postgres, outside this verb's S3 credential plane, " +
 			"so the restored state is " + hzNotConfirmedPhras + " (verify with a query against the target)",
 	}
+	// The unverified case keeps its OWN key rather than sharing the verified
+	// one, so a reader (and a script) counts the two apart: a restore whose
+	// manifest could not be read is never tallied as a manifest that passed.
+	if !rep.Verified() {
+		extra["manifest_unverified_reason"] = rep.Reason
+	}
+	return extra
 }
 
 func runHetznerBackupPrune(out *writer, args []string) int {

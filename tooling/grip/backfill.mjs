@@ -402,10 +402,22 @@ async function main(argv) {
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  // NO process.exit HERE (charter D92, the same ruling ledger.mjs's entry guard
+  // already applies). process.exit() tears whatever stdout has not yet reached
+  // the OS: Node writes a pipe ASYNCHRONOUSLY, so once a report outgrows the
+  // kernel pipe buffer the bytes past it are simply dropped the instant a
+  // caller adds `| jq`, while the same run redirected to a file is whole. A
+  // truncated `--json` is not a loud failure — it is a JSON.parse error the
+  // caller blames on this tool's format. Measured on darwin: an emitter whose
+  // tail is `process.exit(code)` delivers exactly 65536 bytes of a 1 MiB
+  // payload to a slow reader; the `process.exitCode` tail delivers all of it.
+  // Setting exitCode leaves the exit STATUS identical and lets the event loop
+  // drain first — main() opens no lingering handles, so the natural exit is
+  // immediate. exit-race.test.mjs is the pin.
   main(process.argv.slice(2))
-    .then((code) => process.exit(code))
+    .then((code) => { process.exitCode = code; })
     .catch((err) => {
       process.stderr.write(`backfill: crashed before any write — ${err?.stack ?? err?.message ?? String(err)}\n`);
-      process.exit(2);
+      process.exitCode = 2;
     });
 }
