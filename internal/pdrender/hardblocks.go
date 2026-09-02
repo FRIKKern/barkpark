@@ -65,6 +65,15 @@ func innerWidth(ctx RenderCtx) int {
 type diagramRenderer struct{}
 
 func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
+	// EMPTY-CHROME INVARIANT (blank.go): a diagram with NEITHER a source NOR a
+	// caption renders nothing — not the "◇ Mermaid diagram (diagram)" box with a
+	// lone "(view in Studio)" line, which reads as a broken figure and mirrors
+	// the 328-byte silent card the web reader stopped emitting in #14991.
+	// EITHER field alone still renders.
+	if blankDiagram(b.Attrs) {
+		return nil
+	}
+
 	source := attrStr(b.Attrs, "source")
 	caption := sanitizeText(attrStr(b.Attrs, "caption"))
 	kind := mermaidKind(source)
@@ -186,6 +195,16 @@ func mermaidKind(source string) string {
 type asciicastRenderer struct{}
 
 func (asciicastRenderer) Render(b Block, ctx RenderCtx) []string {
+	// EMPTY-CHROME INVARIANT (blank.go): a recording with NEITHER a cast URL NOR
+	// a caption renders nothing — not a bordered "▶ Asciicast · open in browser"
+	// mount with no cast behind it (the web twin of that mount carried
+	// data-cast-src="#" and the player tried to FETCH it; #14991). `poster`,
+	// `rows`, `cols` and `duration` are player options, so a meta-only block is
+	// still blank even though asciicastMeta could spell a suffix out of it.
+	if blankAsciicast(b.Attrs) {
+		return nil
+	}
+
 	src := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "src")))
 
 	head := "▶ Asciicast"
