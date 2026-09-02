@@ -83,6 +83,31 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     refute :completed in unique.states
   end
 
+  ## 1a. THE BOUND ON ANY "IN ITS LIFE" COUNT (dr-w26)
+  ##
+  ##     Charter D456 reports this worker "has completed FOUR times in its life".
+  ##     That number cannot be read off `oban_jobs`: the Pruner reaps finished
+  ##     rows on a fixed age, so a daily worker's row count is capped at
+  ##     `max_age / 1 day` whatever its real history. This pins the cap, so a
+  ##     later reader who quotes a lifetime count off that table has a checked
+  ##     reason not to. With the cap at 7, D456's own dates close with no
+  ##     remainder: 4 present (08-02/04/05/07) + 3 absent (08-03/06/08, the
+  ##     rolling-window losses §1b drives) = the 7 retained days.
+
+  test "the Pruner caps any oban_jobs digest count at 7, so a lifetime count is unreadable there" do
+    max_age =
+      Application.fetch_env!(:barkpark_cloud, Oban)[:plugins]
+      |> Enum.find_value(fn
+        {Oban.Plugins.Pruner, opts} -> opts[:max_age]
+        _ -> nil
+      end)
+
+    assert max_age == 60 * 60 * 24 * 7
+
+    # The cron entry is daily, so the retained row count is the retention in days.
+    assert div(max_age, 86_400) == 7
+  end
+
   ## 1b. The rolling-window defect — a COMPLETED digest must not eat today's tick
   ##
   ##     The pin above is a shape; this is the behaviour. Under the bare
@@ -290,9 +315,19 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   ##    and `notification_deliveries` held zero `fleet_digest` rows across 37
   ##    unpruned days: a push channel succeeding at sending nothing.
   ##
-  ##    So the pin is WIDENED, not loosened. `{:ok, :no_admins}` stays exact
-  ##    (loosening it to `{:ok, _}` is the vacuity this epic exists to kill) and
-  ##    the run must now also produce a countable record of the loss.
+  ##    So the pin is WIDENED, not loosened. `{:ok, :no_admins}` stays exact on
+  ##    the DELIVERY function (loosening it to `{:ok, _}` is the vacuity this
+  ##    epic exists to kill) and the run must now also produce a countable record
+  ##    of the loss.
+  ##
+  ##    dr-w26 ESCALATION. The counted record was not enough: the WORKER still
+  ##    returned `{:ok, :no_admins}`, so Oban wrote `completed` over a run that
+  ##    mailed nobody, and on 2026-08-08 an 18-row five-site outage passed with
+  ##    every Oban read reporting a healthy digest. The worker now returns
+  ##    `{:cancel, :no_team_recipients}`. `deliver_fleet_digest/1`'s own return is
+  ##    UNCHANGED — `notifications_test.exs`, `withhold_test.exs` and
+  ##    `notifications_platform_admin_env_test.exs` still pin `{:ok, :no_admins}`
+  ##    there, and this file's job-state test below is the behavioural half.
 
   # Attach a telemetry collector for one test and hand back the ref it tags with.
   defp attach_digest_probe do
@@ -313,7 +348,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     ref
   end
 
-  test "a fleet with no reachable recipient is a COUNTED loss: recipients=0 sent=0, warned, still :ok" do
+  test "a fleet with no reachable recipient is a COUNTED loss: recipients=0 sent=0, warned, and REFUSED" do
     # dr-w19-s5 re-addressed the digest: the empty population is no longer the
     # platform allowlist (which nobody could join) but a team with no members —
     # the honest zero. An instance owned by a memberless team is the fleet row
@@ -330,7 +365,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
 
     log =
       capture_log(fn ->
-        assert {:ok, :no_admins} = perform_job(DailyDigestWorker, %{})
+        # dr-w26: the worker REFUSES, it does not report success. Exact tuple, not
+        # `{:cancel, _}` — the reason is the whole point of choosing this return.
+        assert {:cancel, :no_team_recipients} = perform_job(DailyDigestWorker, %{})
       end)
 
     # (a) THE COUNT — the record a reporter or a test can attach to. No Delivery
@@ -366,6 +403,79 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # The Swoosh Test adapter posts {:email, _} to this process on any send —
     # none arrives, proving the zero-admin path never delivered.
     refute_received {:email, _}
+  end
+
+  ## 4b. THE OBAN ROW ITSELF — `cancelled` with a reason, never `completed`
+  ##
+  ##     §4 pins the RETURN. This pins what Oban writes to `oban_jobs`, which is
+  ##     the surface the escalation is actually about: on 2026-08-08 the only
+  ##     machine-readable trace of the digest channel was a `completed` row, and
+  ##     `completed` is the word every "is it working?" query filters FOR.
+  ##
+  ##     It runs the job through Oban's own executor (`Oban.drain_queue/1`, legal
+  ##     in `testing: :manual`) rather than `perform_job/2`, because `perform_job`
+  ##     never writes a row: a test over the return alone cannot see the state,
+  ##     and the state is the defect.
+
+  test "an empty audience lands the Oban row in `cancelled` with its reason, not `completed`" do
+    n = System.unique_integer([:positive])
+    orphan_owner = user("nobody-#{n}@example.com")
+    {:ok, memberless} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+
+    _bp = instance(memberless, "Prod", "prod-#{n}", %{update_state: "behind"})
+    set_admins([orphan_owner.email])
+
+    {:ok, job} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    capture_log(fn ->
+      assert %{cancelled: 1} = Oban.drain_queue(queue: :maintenance, with_safety: false)
+    end)
+
+    row = Repo.get!(Oban.Job, job.id)
+
+    # THE ASSERTION THE WHOLE ROW EXISTS FOR.
+    assert row.state == "cancelled"
+    refute row.state == "completed"
+
+    # ...and the row NAMES why, so a reader who finds it does not have to go
+    # correlate a journald line to learn what happened.
+    assert Enum.any?(row.errors, fn e ->
+             e |> Map.get("error", "") |> to_string() =~ "no_team_recipients"
+           end),
+           "the cancelled row must carry :no_team_recipients: #{inspect(row.errors)}"
+
+    # NO RETRY STORM. `:cancel` is terminal on the first attempt — the audience
+    # cannot change between attempts, so an `{:error, _}` would have been a lie
+    # about recoverability as well as a `discarded` row.
+    assert row.attempt == 1
+    refute_email_sent()
+  end
+
+  ## 4c. AND THE STATE IS NOT A CONSTANT — a run that DID mail somebody completes
+  ##
+  ##     Without this, §4b would pass against a worker hard-wired to cancel, which
+  ##     is the same false green one layer up: a digest channel that always reads
+  ##     `cancelled` is exactly as uninformative as one that always read
+  ##     `completed`.
+
+  test "a run that reaches a real recipient still lands the Oban row in `completed`" do
+    admin = user("op-#{System.unique_integer([:positive])}@example.com")
+    t = team(admin)
+    _bp = instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{})
+
+    set_admins([])
+
+    {:ok, job} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    capture_log(fn ->
+      assert %{success: 1} = Oban.drain_queue(queue: :maintenance, with_safety: false)
+    end)
+
+    row = Repo.get!(Oban.Job, job.id)
+
+    assert row.state == "completed"
+    assert row.errors == []
+    assert_email_sent()
   end
 
   ## 5. The counted loss is not a constant — a healthy run counts what it sent
