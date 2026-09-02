@@ -82,6 +82,7 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuityTest do
       after_rows = [row("BOX_AT_CAPACITY_DEFERRED", 12)]
 
       assert ClassContinuity.check(before_rows, after_rows) == []
+
       assert [%{verdict: :went_quiet, retained: 0}] =
                ClassContinuity.verdicts(before_rows, after_rows)
     end
@@ -91,6 +92,7 @@ defmodule BarkparkCloud.DeployLedger.ClassContinuityTest do
       after_rows = [row("BOX_AT_CAPACITY_DEFERRED", 704)]
 
       assert ClassContinuity.check(before_rows, after_rows) == []
+
       assert [%{class: "DEFERRED_UNCLASSIFIED", verdict: :below_floor}] =
                ClassContinuity.verdicts(before_rows, after_rows)
 
