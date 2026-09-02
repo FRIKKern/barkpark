@@ -104,7 +104,9 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       # A `["read"]` token now 403s, and this test is about the cache header on
       # the 200.
       raw = "cache-policy-metrics-" <> Integer.to_string(System.unique_integer([:positive]))
-      {:ok, _} = Auth.create_token(raw, "cache-policy-metrics", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(raw, "cache-policy-metrics", "test", ["read", "write", "admin"])
 
       conn = conn |> bearer(raw) |> get("/v1/instance/metrics")
 
