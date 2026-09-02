@@ -14,9 +14,12 @@
  * BROWSER REACH (charter D52): these three constants are read by CLIENT code
  * too — `use-live-search` builds the channel topic `search:<ws>:<proj>:<dataset>`
  * from them. A bare `BARKPARK_*` name is not inlined into the client bundle, so
- * the browser would silently fall back to the defaults above and join
- * `search:default:default:docs` — a topic that JOINS GREEN and then returns
- * count=0 forever, which reads as "live search is broken" with no error anywhere.
+ * the browser would silently fall back to the defaults above and ask for
+ * `search:default:default:docs` — a topic `SearchChannel.join/3` REFUSES with
+ * reason "unknown_dataset" whenever that dataset is not in the resolved
+ * project. The join fails, so the LIVE badge never lights and every keystroke
+ * keeps riding the same-origin HTTP route: search still works, it just pays a
+ * round trip it did not have to, and the refusal reason is the whole diagnosis.
  * `next.config.mjs` therefore DERIVES `NEXT_PUBLIC_BARKPARK_{DATASET,WORKSPACE,
  * PROJECT}` from the server vars (no deploy-allowlist change, charter D47), and
  * each constant below reads the browser-visible name FIRST, falling back to the
