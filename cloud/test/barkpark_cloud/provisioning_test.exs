@@ -2890,6 +2890,125 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert survivor["command"] == "journalctl -u bp-site-build-*"
     end
 
+    # dr-bl-w5-failed-slot-unit-is-invisible. Measured 2026-08-06 on guerrilla:
+    # `barkpark-slot@blue` sat in `failed` (an 8m30s stop-sigterm timeout ending
+    # in SIGKILL) and the fact was known ONLY to ssh. The row carried thirty-odd
+    # fields and zero unit state, so every operator surface read `ok` — right by
+    # accident, because green was serving, and structurally unable to be wrong.
+    test "the blue/green UNIT STATE rides the row, systemd's own properties verbatim" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.put(pre_vitals_report(), "slot_units", [
+            %{
+              "unit" => "barkpark-slot@blue.service",
+              "active_state" => "failed",
+              "sub_state" => "failed",
+              "result" => "timeout",
+              "main_pid" => 0,
+              "exec_main_status" => 1,
+              "state_since" => "Wed 2026-08-06 14:22:49 UTC"
+            },
+            %{
+              "unit" => "barkpark-slot@green.service",
+              "active_state" => "active",
+              "sub_state" => "running",
+              "result" => "success",
+              "main_pid" => 1_604_014,
+              "exec_main_status" => 0,
+              "state_since" => "Tue 2026-09-01 21:37:14 UTC"
+            }
+          ])
+        )
+
+      assert [blue, green] = pressure_for(user, bp)["slot_units"]
+      assert blue["unit"] == "barkpark-slot@blue.service"
+      assert blue["active_state"] == "failed"
+      assert blue["sub_state"] == "failed"
+      # Result and exec_main_status are relayed as a PAIR. `exit-code` alone
+      # reads a deliberate SIGTERM retire (status 143) as a crash — measured
+      # 2026-09-01 on barkpark-site@search__b, and the reason PR #14863 exists.
+      assert blue["result"] == "timeout"
+      assert blue["exec_main_status"] == 1
+      # A MEASURED pid 0 — the unit claims a state with no main process — is a
+      # real fact and survives as itself, never collapsed into nil.
+      assert blue["main_pid"] == 0
+      # systemd's own timestamp string, VERBATIM. A reformat here would be a
+      # second source of truth for a fact systemd already states.
+      assert blue["state_since"] == "Wed 2026-08-06 14:22:49 UTC"
+      assert green["active_state"] == "active"
+      assert green["main_pid"] == 1_604_014
+    end
+
+    test "an INTACT pair reports [] and an UNMEASURED box reports nil — never the same" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # The probe RAN and had nothing to report.
+      :ok = beat(bp, Map.put(pre_vitals_report(), "slot_units", []))
+      assert pressure_for(user, bp)["slot_units"] == []
+
+      # No systemd, no dbus, or an agent that predates the probe: nobody looked.
+      # Rendering this as [] would say "the deploy pair is fine" about a box
+      # nothing examined — the exact silence this field exists to break.
+      :ok = beat(bp, pre_vitals_report())
+      pressure = pressure_for(user, bp)
+      assert Map.has_key?(pressure, "slot_units")
+      assert pressure["slot_units"] == nil
+      assert pressure["slot_units_truncated"] == nil
+
+      # Garbage is unmeasured too.
+      :ok = beat(bp, Map.put(pre_vitals_report(), "slot_units", "all fine"))
+      assert pressure_for(user, bp)["slot_units"] == nil
+
+      # And the agent's -1 sentinel on the truncation count renders nil, while a
+      # measured 0 ("the cap hid nothing") survives as 0 — so a short list can
+      # never pass for a whole one.
+      :ok = beat(bp, Map.put(pre_vitals_report(), "slot_units_truncated", -1))
+      assert pressure_for(user, bp)["slot_units_truncated"] == nil
+      :ok = beat(bp, Map.put(pre_vitals_report(), "slot_units_truncated", 0))
+      assert pressure_for(user, bp)["slot_units_truncated"] == 0
+    end
+
+    test "a unit row without its three NAMING fields is dropped; the optional ones render nil" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.put(pre_vitals_report(), "slot_units", [
+            # No unit name: a state nobody can attribute to anything.
+            %{"active_state" => "failed", "sub_state" => "failed"},
+            # No active_state: the axis the whole field exists to carry.
+            %{"unit" => "barkpark-slot@blue.service", "sub_state" => "failed"},
+            # Empty unit: the agent's "not attributable", never a guess.
+            %{"unit" => "", "active_state" => "failed", "sub_state" => "failed"},
+            # Complete NAMING fields, unreadable optionals: this row SURVIVES.
+            # Dropping it over an unparseable pid would delete the `failed` that
+            # is the point of the row.
+            %{
+              "unit" => "barkpark-slot@green.service",
+              "active_state" => "failed",
+              "sub_state" => "failed",
+              "main_pid" => -1,
+              "exec_main_status" => -1
+            }
+          ])
+        )
+
+      assert [survivor] = pressure_for(user, bp)["slot_units"]
+      assert survivor["unit"] == "barkpark-slot@green.service"
+      assert survivor["active_state"] == "failed"
+      assert survivor["result"] == nil
+      assert survivor["main_pid"] == nil
+      assert survivor["exec_main_status"] == nil
+      assert survivor["state_since"] == nil
+    end
+
     test "the LATEST beat wins — a newer report replaces an older one on the row" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)

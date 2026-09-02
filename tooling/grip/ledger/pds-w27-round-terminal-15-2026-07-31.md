@@ -2,6 +2,8 @@
 
 # PDS wave 27 — the terminal round, re-derived by content
 
+> HISTORICAL RECORD (2026-07-31) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Ledger-only slice `pds-w27-round-terminal-15`. The 15 rows that made up clause 3 of the
 census (off-vocabulary dispositions) were re-adjudicated to the canonical `closed`, and every
 reason was re-written from the tree rather than templated from the row's stored text. The

@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: cch-branch-sha-reconciliation-2026-08-23 | budget: 600tok -->
 # CCH done-set branch-SHA -> merge-SHA reconciliation — full re-derivation, 2026-08-23
 
+> HISTORICAL RECORD (2026-08-23) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Pays criterion 0 (the table) and criterion 2 (the re-runnable recipe) of
 `cch-bl-thirtyone-done-rows-cite-branch-shas`. Run by the lead session (ledger-writes packet, section C #15).
 Origin/main head at run: `51a823b10d2f2ab809d5c526e373e286ca6dc7bb` (2026-08-22 23:47 +0200). Full clone (`git rev-parse --is-shallow-repository` = false), fetched first.

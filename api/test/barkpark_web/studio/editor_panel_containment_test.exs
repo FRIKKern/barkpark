@@ -85,6 +85,21 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
   # which the `*.js` glob below never sees — the SOURCE is the honest census input.
   @paper_editor_css Path.expand("../../../assets/paper-editor/src/styles.css", __DIR__)
 
+  # The BUILT sheet (spd-census-built-paper-editor-css). `assets/paper-editor`'s
+  # `npm run build` runs `esbuild src/styles.css --bundle --outfile=
+  # ../../priv/static/assets/bp-paper-editor.css --minify`, and that artifact is
+  # COMMITTED — it, not the source above, is the byte stream `ensureStyles/0`
+  # links into the page. It escaped every census this file runs: the source
+  # census reads `src/styles.css`, and the artifact census globs
+  # `priv/static/assets/*.js` only. So a hand-edit here, or a build that no
+  # longer matches its source, could add a `position: fixed` surface under the
+  # paper `.editor-panel` root with every guard green.
+  #
+  # One equality assertion closes both holes: built-only selector (hand-edit /
+  # rebuilt-from-edited-source-without-committing-the-source) AND source-only
+  # selector (stale build), because a set equality fails in either direction.
+  @paper_editor_built_css Path.expand("../../../priv/static/assets/bp-paper-editor.css", __DIR__)
+
   # The SIX `.editor-panel` roots (charter D42 — D29 listed only five).
   # A seventh root means the inventory below has to be re-audited, so the set is
   # pinned rather than merely counted.
@@ -263,6 +278,70 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     |> elem(1)
     |> MapSet.new()
   end
+
+  # ── The MINIFIED-SAFE census (spd-census-built-paper-editor-css) ─────────
+  #
+  # `fixed_position_selectors/1` above is LINE-based: it decides the selector by
+  # splitting the line that carries the declaration. That is exact on authored
+  # CSS and useless on the built sheet, which esbuild emits as ONE line — every
+  # declaration in the file would be attributed to the first selector in it.
+  #
+  # This walks characters instead, keeping the same brace stack, so it reads
+  # authored and minified CSS identically. `built_and_source_agree_on_the_source`
+  # (below) pins that equivalence rather than assuming it.
+  #
+  # It also normalises the two forms esbuild legitimately rewrites:
+  #
+  #   * whitespace — `position: fixed` (source) vs `position:fixed` (built), and
+  #     a selector broken across lines vs joined;
+  #   * comma lists — `.a,\n.b { … }` vs `.a,.b{…}`. The list is SPLIT, so the
+  #     census is a set of individual selectors and a re-grouped rule is not a
+  #     spurious diff.
+  #
+  # Quoted strings are tracked so a `content: "}"` cannot unbalance the stack.
+  defp minified_safe_fixed_selectors(css) do
+    css
+    |> decommented()
+    |> String.graphemes()
+    |> Enum.reduce({[], "", nil, []}, &css_scan_step/2)
+    |> then(fn {_stack, _buf, _quote, found} -> found end)
+    |> Enum.flat_map(&split_selector_list/1)
+    |> MapSet.new()
+  end
+
+  # Inside a string literal: copy through until the matching quote.
+  defp css_scan_step(ch, {stack, buf, quote_ch, found}) when not is_nil(quote_ch) do
+    {stack, buf <> ch, if(ch == quote_ch, do: nil, else: quote_ch), found}
+  end
+
+  defp css_scan_step(ch, {stack, buf, nil, found}) when ch in ["\"", "'"],
+    do: {stack, buf <> ch, ch, found}
+
+  defp css_scan_step("{", {stack, buf, nil, found}),
+    do: {[collapse_ws(buf) | stack], "", nil, found}
+
+  # A `}` also terminates the last declaration, which minifiers emit without a
+  # trailing `;` — so the buffer is censused before the stack pops.
+  defp css_scan_step("}", {stack, buf, nil, found}),
+    do: {Enum.drop(stack, 1), "", nil, census_declaration(buf, stack, found)}
+
+  defp css_scan_step(";", {stack, buf, nil, found}),
+    do: {stack, "", nil, census_declaration(buf, stack, found)}
+
+  defp css_scan_step(ch, {stack, buf, nil, found}), do: {stack, buf <> ch, nil, found}
+
+  defp census_declaration(buf, stack, found) do
+    if Regex.match?(~r/(^|[\s;])position\s*:\s*fixed$/i, collapse_ws(buf)) do
+      [List.first(stack, "<unattributed>") | found]
+    else
+      found
+    end
+  end
+
+  defp collapse_ws(str), do: str |> String.replace(~r/\s+/, " ") |> String.trim()
+
+  defp split_selector_list(selector),
+    do: selector |> String.split(",") |> Enum.map(&collapse_ws/1) |> Enum.reject(&(&1 == ""))
 
   defp push_pop_braces(line, stack) do
     line
@@ -545,6 +624,106 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
       assert MapSet.difference(found, known) == MapSet.new([".bp-planted-census-probe"]),
              "the planted rule is the ONLY thing the census should flag as new; got: " <>
                inspect(found |> MapSet.difference(known) |> MapSet.to_list() |> Enum.sort())
+    end
+
+    test "the BUILT paper-editor stylesheet censuses to the same fixed set as its source" do
+      source = minified_safe_fixed_selectors(File.read!(@paper_editor_css))
+      built = minified_safe_fixed_selectors(File.read!(@paper_editor_built_css))
+
+      built_only = MapSet.difference(built, source)
+      source_only = MapSet.difference(source, built)
+
+      assert built_only == MapSet.new([]),
+             """
+             `priv/static/assets/bp-paper-editor.css` declares `position: fixed`
+             for a selector its SOURCE does not:
+
+               #{built_only |> MapSet.to_list() |> Enum.sort() |> Enum.join("\n  ")}
+
+             The built sheet is what the page actually links (index.js
+             `ensureStyles/0`), and the paper editor mounts INSIDE the
+             `studio-paper-editor` `.editor-panel` root — so this is an
+             unaudited fixed surface under a panel.
+
+             Either the artifact was hand-edited (it is generated: `cd
+             api/assets/paper-editor && npm run build`), or it was built from a
+             `styles.css` that was never committed. Fix the SOURCE, rebuild, and
+             classify the selector in @paper_editor_fixed_inventory.
+             """
+
+      assert source_only == MapSet.new([]),
+             """
+             The committed build is STALE: `assets/paper-editor/src/styles.css`
+             declares `position: fixed` for selectors the built sheet is missing:
+
+               #{source_only |> MapSet.to_list() |> Enum.sort() |> Enum.join("\n  ")}
+
+             Every other guard in this file reads the source, so a stale artifact
+             makes them certify a stylesheet nobody is served. Rebuild and commit:
+             `cd api/assets/paper-editor && npm run build`.
+             """
+
+      # Belt and braces: the built set is the SAME set the source census
+      # classifies, so the built sheet is inventoried, not merely self-consistent.
+      assert built == MapSet.new(Map.keys(@paper_editor_fixed_inventory))
+    end
+
+    test "the built-sheet census is non-vacuous in both directions" do
+      source_css = File.read!(@paper_editor_css)
+      built_css = File.read!(@paper_editor_built_css)
+
+      # Guard 0 — the minified walker is not a second POLICY. On the authored
+      # source it must agree exactly with the line-based census the rest of this
+      # file uses; otherwise the equality above compares two different questions.
+      assert minified_safe_fixed_selectors(source_css) == fixed_position_selectors(source_css),
+             "the minified-safe walker disagrees with the line-based census on " <>
+               "the authored source — the built/source equality is comparing " <>
+               "two different policies"
+
+      # Guard 1 — the walker actually parses the MINIFIED sheet. A one-line file
+      # is exactly where a line-based reader silently returns garbage or nothing.
+      refute MapSet.size(minified_safe_fixed_selectors(built_css)) == 0,
+             "the built-sheet census found zero `position: fixed` selectors in " <>
+               "#{@paper_editor_built_css} — it certifies nothing"
+
+      assert length(String.split(built_css, "\n")) <= 2,
+             "the built sheet is no longer minified; the walker still works, but " <>
+               "the minification premise in the comments above is now wrong"
+
+      source = minified_safe_fixed_selectors(source_css)
+      built = minified_safe_fixed_selectors(built_css)
+
+      # Guard 2 — a built-ONLY selector fails. This is the hand-edit / bad-build
+      # direction, and it is the hole the task named. Stated as "the difference
+      # grows by exactly the probe" so this control stays exact even while the
+      # real artifact is broken (the test above owns that verdict, not this one).
+      built_only = MapSet.difference(built, source)
+      refute MapSet.member?(built_only, ".bp-planted-built-only")
+
+      planted_built =
+        minified_safe_fixed_selectors(
+          built_css <> ".bp-planted-built-only{position:fixed;inset:0}"
+        )
+
+      assert MapSet.difference(planted_built, source) ==
+               MapSet.put(built_only, ".bp-planted-built-only"),
+             "a `position: fixed` selector planted in the BUILT sheet alone is " <>
+               "not flagged — the equality assertion above is vacuous"
+
+      # Guard 3 — a STALE build fails. Same assertion, other direction: the
+      # source grows a selector the artifact was never rebuilt to carry.
+      source_only = MapSet.difference(source, built)
+      refute MapSet.member?(source_only, ".bp-planted-stale-probe")
+
+      planted_source =
+        minified_safe_fixed_selectors(
+          source_css <> "\n.bp-planted-stale-probe {\n  position: fixed;\n}\n"
+        )
+
+      assert MapSet.difference(planted_source, built) ==
+               MapSet.put(source_only, ".bp-planted-stale-probe"),
+             "a selector present in the SOURCE but missing from the built sheet " <>
+               "is not flagged — a stale build would pass"
     end
 
     test "the paper-editor stylesheet contributes no unaudited under-panel surface" do

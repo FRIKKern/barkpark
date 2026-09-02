@@ -234,14 +234,16 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # AppTokenController.index
     {"GET", "/v1/auth/app-tokens"} =>
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # AppTokenController.create
     {"POST", "/v1/auth/app-tokens"} =>
@@ -256,14 +258,16 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # AppTokenController.delete_current
     {"DELETE", "/v1/auth/app-tokens/current"} =>
       {:workspace_derived,
        "credential-derived: Auth.list_app_tokens/2, revoke_app_token_by_id/2 and " <>
          "revoke_app_tokens_for_email/2 take the BEARER as the selector and confine to the " <>
-         "workspaces it administers (task-ea8cae3258ea4bd3); delete_current is self-revoke, " <>
+         "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
+         "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
     # LoginTicketController.create
     {"POST", "/v1/auth/login-tickets"} =>
@@ -499,13 +503,17 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     # TasksController.fleet_roster
     {"GET", "/v1/fleet/roster"} =>
       {:workspace_derived,
-       "PIPELINE-DERIVED BUT CONTROLLER IGNORES IT — filed as task-4e2986e8609670d7. " <>
-         "fleet_roster/2 calls Fleet.roster/2 with the DATASET only; Fleet.load_listeners/1 " <>
-         "and Fleet.current_tasks_by_worker/1 query Document by type+dataset with NO workspace " <>
-         "clause, so every workspace's listener rows and in-progress task ids come back to any " <>
-         "bearer. Fleet.beat/3 on the same controller DOES pass scope_opts/1 — the asymmetry " <>
-         "is the tell. The pipeline fix cannot reach this: the controller never reads " <>
-         ":current_workspace."},
+       "CLOSED 2026-09-01 by the owner ruling on task-4e2986e8609670d7 (\"RULED A: scope the " <>
+         "roster read with scope_opts(conn); the global view is for the OPERATOR tier only, " <>
+         "NOT any `admin` bit\"). fleet_roster/2 now threads ScopeHelpers.scope_opts/1 into " <>
+         "Fleet.roster/2, which scopes BOTH halves of the read — load_listeners/2 and the " <>
+         "current_tasks_by_worker/2 task join — through Content.Scope.scope_to_workspace/3. " <>
+         "The read finally matches the write Fleet.beat/3 was already doing; the asymmetry " <>
+         "that was the tell is gone. A conn ALWAYS carries :workspace_id (a real id, or the " <>
+         ":shared_only sentinel when no workspace resolved), so the route reaches neither " <>
+         "Fleet.roster/2's `global: true` opt-in (the :ops-gated Studio tile alone holds it, " <>
+         "pending the operator tier of task-c7e2b87f1bbca815) nor its fail-closed nil arm by " <>
+         "accident. Pinned by fleet_roster_tenancy_test.exs."},
     # TasksController.graph_corpus
     {"GET", "/v1/graph"} =>
       {:workspace_derived,

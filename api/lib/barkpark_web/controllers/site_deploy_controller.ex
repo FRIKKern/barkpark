@@ -13,8 +13,12 @@ defmodule BarkparkWeb.SiteDeployController do
 
   Status contract, mirroring `SelfUpdateController`:
 
-    * **503** `feature_not_configured` — the box has not opted in
-      (`BARKPARK_SITE_DEPLOY_APPLY=1`). Fail-closed default.
+    * **503** `feature_not_configured` — the box has not CONSENTED to run
+      third-party site build code. Fail-closed default, and a decision rather
+      than a misconfiguration: the message names the consent boundary and the
+      preflight that checks the per-box prerequisites, never an env var to set
+      (D593). `BARKPARK_SITE_DEPLOY_APPLY=1` is still what records the consent
+      on the box; it is deliberately absent from the wire message.
     * **400** `invalid_slug` / `invalid_build_id` / `invalid_content_rev` /
       `invalid_deploy_mode` / `invalid_env` / `invalid_artifact` /
       `invalid_artifact_digest` / `artifact_too_large` — nothing reaches argv or
@@ -270,6 +274,23 @@ defmodule BarkparkWeb.SiteDeployController do
     end
   end
 
+  # THE REFUSAL NAMES THE CONSENT BOUNDARY, NOT A FLAG TO FLIP (deploy charter
+  # D593). The old message ended `(set BARKPARK_SITE_DEPLOY_APPLY=1)` — an
+  # INSTRUCTION, issued to an operator who may have every reason not to follow
+  # it. A site build is not a self-update: it runs `npm ci` + `npm run build`
+  # over the SITE's own dependency tree, which executes third-party postinstall
+  # code on this box, and `runtime.exs` gates it separately in exactly those
+  # words. A box that has not opted in has not FAILED to be configured; it has
+  # DECLINED, and a spawned box declines by construction because nothing in the
+  # provisioning path may consent on its owner's behalf (`instance-deploy.sh`
+  # PRESERVES the flag and never SETS it — D38).
+  #
+  # The status and the code word are UNCHANGED on purpose (charter D115): the
+  # control plane keys `BOX_DEPLOY_DISABLED_503` on `feature_not_configured`
+  # through `DeployLedger.refusal_class/2`, so re-wording the prose reclassifies
+  # nothing and no historical row moves. What changed is what the sentence asks
+  # of the reader — a decision to make, and where the per-box prerequisites for
+  # making it are actually CHECKED, rather than an env var to export.
   defp feature_not_configured(conn) do
     conn
     |> put_status(:service_unavailable)
@@ -277,8 +298,11 @@ defmodule BarkparkWeb.SiteDeployController do
       error: %{
         code: "feature_not_configured",
         message:
-          "site deploys are not enabled on this instance " <>
-            "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
+          "this instance has not consented to run third-party site build code " <>
+            "— a site deploy executes the site's own npm dependency tree " <>
+            "(postinstall scripts included) on this box, so opting in is the " <>
+            "box owner's decision, not a retry; the per-box prerequisites are " <>
+            "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
       }
     })
   end
@@ -433,9 +457,38 @@ defmodule BarkparkWeb.SiteDeployController do
       exit_code: status.exit_code,
       failure_reason: status.failure_reason,
       log: status.log,
+      # THE SLOT CADDY IS ACTUALLY SERVING (site-spawner: node slot truth), read
+      # back out of the Caddyfile by the node engine AFTER its flip committed —
+      # never the slot the run intended. `null` on every static deploy (a symlink
+      # swap has no slot) and on any node build that died before SWITCH.
+      #
+      # `Map.get/2`, not dot access: `status/1` answers in five shapes (a live
+      # Port run, a reconstructed systemd render, a cached one, a terminal record
+      # and `:idle`), and a status map from a pre-upgrade cached render must not
+      # crash this door.
+      served_port: Map.get(status, :served_port),
+      served_slot: Map.get(status, :served_slot),
       started_at: iso(status.started_at),
       finished_at: iso(status.finished_at)
     }
+    |> put_health_exit_code(status)
+  end
+
+  # THE HEALTH CODE IS OMITTED WHEN IT WAS NEVER MEASURED, and that omission is
+  # the contract — the same discipline `prebuilt_echo/1` above states for the
+  # 202: an absent field is an honest "nobody measured this", where a present one
+  # invites the caller to read it as a considered answer.
+  #
+  # It matters more here than anywhere else on this door, because the value that
+  # would be invented is ZERO and zero is SUCCESS. A `health_exit_code: 0` on a
+  # build that died in BUILD says the health gate passed. So: present and `0`
+  # when HEALTH really ran and passed, present and `14` when it ran and failed,
+  # and ABSENT when there is no HEALTH verdict in the fold at all.
+  defp put_health_exit_code(payload, status) do
+    case DeployRunner.health_exit_code(Map.get(status, :stages) || []) do
+      nil -> payload
+      code -> Map.put(payload, :health_exit_code, code)
+    end
   end
 
   # `detail` is the failed stage's REAL reason (npm's 401, HEALTH's marker miss).

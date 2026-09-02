@@ -1,8 +1,9 @@
 defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
   @moduledoc """
   dwb-13 — the free-trial lifecycle worker: T-3 / T-1 advance notices (idempotent
-  under the hourly cron), expiry teardown via the EXISTING deprovision path, and
-  the MONEY-PATH guard that a subscribed team's box is never torn down.
+  under the hourly cron), expiry teardown via the EXISTING deprovision path, the
+  cch-w50 FINALISATION of the subscription row once that teardown has happened,
+  and the MONEY-PATH guard that a subscribed team's box is never torn down.
 
   `async: true` is safe because Oban runs in `:manual` mode (config/test.exs) —
   `perform_job/2` runs the worker synchronously in this test's own transaction.
@@ -293,5 +294,192 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
     # And it is still exactly-once afterward.
     assert {:ok, %{noticed_3d: 0}} = perform_job(TrialExpiryWorker, %{})
     assert notice_count(team.id) == 1
+  end
+
+  ## 9. cch-w50 — THE TERMINAL WRITE, AND THE GATE THAT MAKES IT SAFE
+  ##
+  ## Measured on the live control plane 2026-08-07: 15 of 18 trial subscriptions
+  ## sat past `current_period_end` with ALL 18 still `status = 'active'` — the
+  ## oldest lapsed three weeks earlier — every one of those teams carrying both
+  ## notice stamps and ZERO barkparks. The teardown had run; the money row was
+  ## the ghost. This worker enqueued deprovision jobs and wrote NOTHING to
+  ## `subscriptions` (no `Repo.update` / `update_all` on `Subscription` anywhere
+  ## in the module), so nothing could ever close the row, `active_trials/0`
+  ## re-read it hourly forever, and `/v1/subscription` kept answering the console
+  ## with a live trial for a team whose box was gone.
+
+  describe "cch-w50: finalising the lapsed trial row" do
+    test "a lapsed trial with NO boxes left is FINALISED on the first pass — the ghost shape" do
+      # The exact production shape: window closed, teardown already done (zero
+      # barkparks). This is what all fifteen live rows look like.
+      {team, sub} = trial_team(-3600)
+
+      assert Registry.list_barkparks(team) == []
+
+      assert {:ok, %{expired: 1, teardowns: 0, finalized: 1}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      finalised = Repo.get!(Subscription, sub.id)
+      assert finalised.status == "canceled"
+      assert finalised.plan == "trial", "the PLAN is history, not a lie — only the status closes"
+      assert finalised.canceled_at
+
+      # The row is out of every LIVE read, which is what stops the console
+      # rendering a trial card to a team whose instance is gone.
+      assert is_nil(Billing.live_subscription(team))
+      assert is_nil(Billing.active_subscription(team))
+      assert is_nil(Billing.trial_days_remaining(team))
+    end
+
+    test "entitlement is UNCHANGED across the finalisation — false before, false after" do
+      # The blast-radius claim, driven rather than asserted in prose: an expired
+      # trial was ALREADY un-entitled (entitled?/1's trial clause reads the
+      # window, not the status), so this write moves nobody across the launch gate.
+      {team, _sub} = trial_team(-3600)
+      refute Billing.entitled?(team)
+
+      assert {:ok, %{finalized: 1}} = perform_job(TrialExpiryWorker, %{})
+
+      refute Billing.entitled?(team)
+    end
+
+    test "finalisation is IDEMPOTENT — a second pass finalises nothing and rewrites nothing" do
+      {_team, sub} = trial_team(-3600)
+
+      assert {:ok, %{finalized: 1}} = perform_job(TrialExpiryWorker, %{})
+      first = Repo.get!(Subscription, sub.id)
+
+      # The row has left `active_trials/1` entirely, so the second pass does not
+      # even see it — no expiry, no teardown, no second write.
+      assert {:ok, %{expired: 0, teardowns: 0, finalized: 0}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      after_second = Repo.get!(Subscription, sub.id)
+      assert after_second.status == "canceled"
+      assert after_second.canceled_at == first.canceled_at
+      assert after_second.updated_at == first.updated_at, "the second pass did not touch the row"
+
+      refute Enum.any?(Billing.active_trials(), &(&1.id == sub.id))
+    end
+
+    test "a lapsed trial whose box is STILL UP is NOT finalised — the conversion race stays closed" do
+      # THE GATE. Finalising on "teardown enqueued" instead of "teardown done"
+      # would push a converting team onto activate_from_session/4's INSERT arm,
+      # which does not cancel the pending deprovision — the box the team just
+      # paid for would be torn down by the job already in flight. So while a box
+      # exists the row stays live and the cancelling trial arm still runs.
+      {team, sub} = trial_team(-3600)
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %{expired: 1, teardowns: 1, finalized: 0}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      still_live = Repo.get!(Subscription, sub.id)
+      assert still_live.status == "active", "a team with a live box keeps its live row"
+      assert is_nil(still_live.canceled_at)
+      assert %Subscription{plan: "trial"} = Billing.live_subscription(team)
+
+      # And the in-place conversion arm — the one that cancels the teardown — is
+      # therefore still the arm a checkout in this window reaches.
+      raw =
+        Jason.encode!(%{
+          "id" => "evt_w50",
+          "type" => "checkout.session.completed",
+          "data" => %{
+            "object" => %{
+              "customer" => "cus_w50",
+              "subscription" => "sub_w50",
+              "metadata" => %{"team_id" => team.id, "plan" => "supporter"}
+            }
+          }
+        })
+
+      assert {:ok, %Subscription{id: converted_id, plan: "supporter"}} =
+               Billing.handle_webhook(raw, BarkparkCloud.Billing.StubGateway.test_signature())
+
+      assert converted_id == sub.id, "converted IN PLACE — the same row, not a second one"
+      assert deprovision_jobs(bp.id) == [], "the pending teardown was cancelled"
+    end
+
+    test "once the box is GONE, the NEXT pass finalises the row the pass before could not" do
+      # The two-pass sequence a real teardown produces, driven end to end. This is
+      # the only case that shows the gate OPENS as well as closes — without it, a
+      # `finalize/3` hard-wired to 0 would pass every other case in this block.
+      {team, sub} = trial_team(-3600)
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %{finalized: 0}} = perform_job(TrialExpiryWorker, %{})
+      assert Repo.get!(Subscription, sub.id).status == "active"
+
+      # The deprovision drains: the box row is gone.
+      Repo.delete!(bp)
+      assert Registry.list_barkparks(team) == []
+
+      assert {:ok, %{expired: 1, teardowns: 0, finalized: 1}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      assert Repo.get!(Subscription, sub.id).status == "canceled"
+    end
+
+    test "a LIVE trial is never finalised, however many passes run" do
+      {team, sub} = trial_team(10 * 86_400)
+
+      assert {:ok, %{expired: 0, finalized: 0}} = perform_job(TrialExpiryWorker, %{})
+      assert {:ok, %{expired: 0, finalized: 0}} = perform_job(TrialExpiryWorker, %{})
+
+      assert Repo.get!(Subscription, sub.id).status == "active"
+      assert %Subscription{plan: "trial"} = Billing.live_subscription(team)
+    end
+  end
+
+  ## 10. cch-w50 — THE PERIOD FILTER ON `Billing.active_trials/1`
+  ##
+  ## The query used to be `plan == "trial" and status == "active"` and nothing
+  ## else, so every trial row that has ever existed was re-read every hour. The
+  ## FUTURE side is bounded here; the PAST side is bounded by the terminal status
+  ## above, deliberately NOT by a lookback cutoff (a cutoff would strand every row
+  ## that lapsed during a worker outage longer than the window).
+
+  describe "cch-w50: the scan horizon" do
+    test "a trial beyond the horizon is not in the working set at all" do
+      {_team, sub} = trial_team(10 * 86_400)
+
+      refute Enum.any?(Billing.active_trials(DateTime.utc_now()), &(&1.id == sub.id))
+    end
+
+    test "NON-VACUITY: a trial at the T-3 boundary IS in the set, and still gets its notice" do
+      # The horizon must cover the worker's largest notice threshold. If it ever
+      # shrinks below it, the T-3 notice silently stops being sent to anyone — a
+      # loss with no surface, exactly like the stamp bug cch-w52-s2 fixed. This
+      # drives the boundary through the REAL query rather than comparing numbers.
+      {team, sub} = trial_team(3 * 86_400 - 60)
+
+      assert Enum.any?(Billing.active_trials(DateTime.utc_now()), &(&1.id == sub.id))
+
+      assert {:ok, %{noticed_3d: 1}} = perform_job(TrialExpiryWorker, %{})
+      assert Repo.get(Team, team.id).trial_notice_3d_sent_at
+    end
+
+    test "a lapsed trial is still in the set — the filter bounds the FUTURE, not the past" do
+      # The one direction a period filter must never take: dropping a row that
+      # has already lapsed would leave its boxes standing forever.
+      {_team, sub} = trial_team(-90 * 86_400)
+
+      assert Enum.any?(Billing.active_trials(DateTime.utc_now()), &(&1.id == sub.id)),
+             "a row lapsed 90 days ago is still the worker's business until it is finalised"
+    end
+
+    test "a trial with NO window never reaches the scan (the malformed-row no-op, moved into SQL)" do
+      {team, sub} = trial_team(-3600)
+
+      sub
+      |> Ecto.Changeset.change(current_period_end: nil)
+      |> Repo.update!()
+
+      refute Enum.any?(Billing.active_trials(DateTime.utc_now()), &(&1.id == sub.id))
+      assert {:ok, %{expired: 0, finalized: 0}} = perform_job(TrialExpiryWorker, %{})
+      assert Repo.get!(Subscription, sub.id).status == "active"
+      assert is_nil(Repo.get(Team, team.id).trial_notice_3d_sent_at)
+    end
   end
 end

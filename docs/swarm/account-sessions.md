@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: swarm-account-sessions | budget: 4000tok -->
 # swarm: account-sessions
 
+> HISTORICAL RECORD (2026-06-29) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 **Candidate — judge before merge.** Adapts Coolify's "Account management & sessions"
 into Barkpark Cloud (`cloud/`, `BarkparkCloud.*`).
 

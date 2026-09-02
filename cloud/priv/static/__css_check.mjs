@@ -187,10 +187,52 @@
 //           not. Nothing static knows which wrappers hold a long-labelled pill.
 //         • It asserts nothing about the base `.status-pill`, and nothing about
 //           the jacket (see choice 2).
-//         • It reads LONGHAND declarations only: a `padding: 2px 11px`
-//           shorthand neither triggers E14 nor satisfies `padding-top`. The
-//           three live copies are longhand and the canonical recipe is stated
-//           in longhand; a shorthand copy is a shape this check does not see.
+//         • It does not READ shorthand VALUES. A core property set through a
+//           shorthand (`padding: 2px 11px`, `block-size`, `text-wrap`) is
+//           TRIGGERED and REFUSED, never parsed — see the shorthand ruling
+//           below for why that is the remedy and not a parser.
+//       SHORTHAND (cch-w19-bl-e14-shorthand-blind). THE GAP AS MEASURED: on the
+//       pre-fix tree a wrapper-scoped `.status-pill` rule written
+//       `{ padding: 2px 11px }` neither TRIGGERED E14 (`padding` is not one of
+//       the five pinned core NAMES, so declares-any-core never fired) nor
+//       SATISFIED `padding-top`/`padding-bottom`. The asymmetry ran the bad
+//       way: a drifting fourth copy in shorthand was INVISIBLE, not red — the
+//       vacuous green this epic exists to kill. REPRODUCED BEFORE IT WAS FIXED:
+//       the same synthetic stylesheet the driven legs build (four pinned
+//       survivors plus `.op-gate .status-pill { padding: 2px 11px }`) exited 0
+//       with `4 wrapper-scoped wrap copy(ies), 0 E14 error(s)` on the pre-fix
+//       check and exits 1 naming `.op-gate` after it. Both directions, plus the
+//       legal shorthand-with-restatement copy, are driven in __app.test.mjs.
+//       TWO REMEDIES WERE ON THE TABLE AND ONE LOST.
+//         (a) EXPAND THE SHORTHAND, then compare longhands — REJECTED. It buys
+//             a mini CSS parser: padding's 1/2/3/4-value grammar, `!important`,
+//             `var()` inside the value (unresolvable statically — `padding:
+//             var(--p)` would have to answer "is padding-top 2px?" and cannot),
+//             `inherit`/`initial`/`unset`, and the same grammar again for every
+//             future core property. Each edge it gets wrong is a FALSE GREEN in
+//             a tripwire — the disease, not the cure — and the cost recurs on
+//             every core-property change. It also legitimises TWO spellings of
+//             the canonical recipe, so the next reader must diff two forms to
+//             see whether four copies agree.
+//         (b) TRIGGER ON THE SHORTHAND AND DEMAND THE LONGHAND — CHOSEN. A core
+//             shorthand makes the rule a wrap copy (so it can never be
+//             invisible), and the copy is green only if every core longhand
+//             that shorthand can set is RESTATED in longhand, at the canonical
+//             value, LATER IN THE SAME BLOCK. No value is parsed, so there is
+//             no grammar to get wrong and no `var()` it cannot answer; the
+//             canonical recipe stays single-form; and `{ padding: 2px 11px;
+//             padding-top: 2px; padding-bottom: 2px }` — the legitimate way to
+//             add horizontal padding — still greens.
+//       IT IS SOURCE-ORDER CORRECT, which the naive form is not. Requiring only
+//       that the longhand be PRESENT would green `padding-top: 2px;
+//       padding-bottom: 2px; padding: 3px 11px`, where the shorthand comes last
+//       and wins the cascade — a false green. The longhand must appear AFTER
+//       the shorthand it re-pins.
+//       THE SHORTHAND SET IS PINNED AS A LITERAL (WRAP_CORE_SHORTHANDS), for
+//       design choice 3's reason: derived from the copies it would shrink to
+//       whatever they happen to use. It covers the physical shorthand, the
+//       logical aliases and the `white-space` sub-longhands, because each of
+//       them CAN set a core property's computed value and so can hide drift.
 //       Fixture: __css_check.wrapparity.fixture.css; targeted run:
 //       `node __css_check.mjs --wrap-parity-check
 //       __css_check.wrapparity.fixture.css` (exit 1). Executed, both
@@ -801,6 +843,24 @@ const WRAP_CORE = [
   ["padding-top", "2px"],
   ["padding-bottom", "2px"],
 ];
+// EVERY PROPERTY THAT CAN SET A CORE PROPERTY WITHOUT NAMING IT — the physical
+// shorthand, the logical aliases (`writing-mode: horizontal-tb` is the console's
+// only mode, so block-start/end ARE top/bottom here) and `white-space`'s own
+// sub-longhands. Pinned as a literal for design choice 3's reason. A rule that
+// declares any of these is a wrap copy and owes the longhand RESTATED AFTER it;
+// nothing here is value-parsed. Ruling and the rejected alternative: the
+// SHORTHAND paragraph of this file's E14 header entry.
+const WRAP_CORE_SHORTHANDS = [
+  ["padding", ["padding-top", "padding-bottom"]],
+  ["padding-block", ["padding-top", "padding-bottom"]],
+  ["padding-block-start", ["padding-top"]],
+  ["padding-block-end", ["padding-bottom"]],
+  ["block-size", ["height"]],
+  ["min-block-size", ["min-height"]],
+  ["white-space-collapse", ["white-space"]],
+  ["text-wrap", ["white-space"]],
+  ["text-wrap-mode", ["white-space"]],
+];
 // The three copies that survived wave 18, pinned as REQUIRED-PRESENT. A
 // same-file pin is the correct form here (pin-your-own, derive-foreign): it
 // closes the PARTIAL-blindness case the zero-copies guard cannot see — a scan
@@ -827,30 +887,63 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
     const prelude = m[1];
     const body = m[2];
     const declared = new Map();
+    // Source POSITION of each property's LAST declaration. The shorthand arm is
+    // order-sensitive by construction (a longhand only re-pins a shorthand that
+    // came BEFORE it), so position is data, not decoration.
+    const posOf = new Map();
+    let nth = 0;
     for (const seg of body.split(";")) {
       const c = seg.indexOf(":");
       if (c === -1) continue;
       const prop = seg.slice(0, c).trim().toLowerCase();
       if (!/^[a-z-]+$/.test(prop)) continue;
       declared.set(prop, seg.slice(c + 1).trim().replace(/\s*!important$/, ""));
+      posOf.set(prop, nth++);
     }
     // DESIGN CHOICE 1 — the trigger is the DECLARATION, not the selector. A
     // wrapper-scoped rule that touches none of the five is not a wrap copy and
-    // is not even counted.
-    if (!WRAP_CORE.some(([p]) => declared.has(p))) continue;
+    // is not even counted. A core SHORTHAND counts as declaring the core: it is
+    // how a fourth copy used to go invisible (see the header's SHORTHAND
+    // ruling), so the trigger reads the shorthand set too.
+    const startedWith = [
+      ...WRAP_CORE.filter(([p]) => declared.has(p)).map(([p]) => p),
+      ...WRAP_CORE_SHORTHANDS.filter(([p]) => declared.has(p)).map(([p]) => p),
+    ];
+    if (!startedWith.length) continue;
+    // Which core longhands are set through a shorthand and NOT re-pinned in
+    // longhand at the canonical value after it. No shorthand value is parsed —
+    // remedy (b), not remedy (a).
+    const shadowedBy = new Map();
+    for (const [sp, longs] of WRAP_CORE_SHORTHANDS) {
+      const at = posOf.get(sp);
+      if (at === undefined) continue;
+      for (const [lp, canonical] of WRAP_CORE) {
+        if (!longs.includes(lp)) continue;
+        const li = posOf.get(lp);
+        if (li !== undefined && li > at && declared.get(lp) === canonical) continue;
+        shadowedBy.set(lp, sp);
+      }
+    }
     for (const part of prelude.split(",")) {
       const hit = part.match(WRAPPER_SCOPED_PILL);
       if (!hit) continue;
       const selector = part.trim().replace(/\s+/g, " ");
       const line = lineOf(stripped, m.index + prelude.indexOf(part.replace(/^\s+/, "")));
       copies.push({ selector, host: hit[1].trim().replace(/\s+/g, " "), line, declared });
-      const missing = WRAP_CORE.filter(([p, v]) => declared.get(p) !== v).map(
-        ([p, v]) => `${p}: ${v} (${declared.has(p) ? `declared "${declared.get(p)}"` : "not declared"})`,
+      const missing = WRAP_CORE.filter(([p, v]) => declared.get(p) !== v || shadowedBy.has(p)).map(
+        ([p, v]) =>
+          `${p}: ${v} (${
+            shadowedBy.has(p)
+              ? `set through the shorthand \`${shadowedBy.get(p)}: ${declared.get(shadowedBy.get(p))}\`, ` +
+                `which E14 does not parse — restate \`${p}: ${v}\` in longhand AFTER that shorthand`
+              : declared.has(p)
+                ? `declared "${declared.get(p)}"`
+                : "not declared"
+          })`,
       );
       if (missing.length) {
         errs.push(
-          `E14 ${file}:${line}  ${selector} declares ${WRAP_CORE.filter(([p]) => declared.has(p))
-            .map(([p]) => p)
+          `E14 ${file}:${line}  ${selector} declares ${startedWith
             .join(", ")} — starting the wrap recipe — but DIVERGES from the shared core: ` +
             `${missing.join("; ")}. A wrapper-scoped .status-pill rule that declares ANY of the five ` +
             `must declare ALL five at the canonical value (white-space: normal; height: auto; ` +
@@ -1553,6 +1646,61 @@ function runContrast(errs) {
 // is compliant — its indicator is that border, and the translucent shadow is a
 // decorative halo around it (.fleet-row[data-id]:focus-visible and
 // .site-row[data-id]:focus-visible are exactly this shape and must stay green).
+//
+// THE ESCAPE MUST BE ABLE TO PAINT (cch-w12-bl-e12-blind-to-border-width). The
+// escape used to be granted by reading the ALPHA of a colour out of the focus
+// rule's OWN block and nothing else. A colour is not an indicator: a
+// `border-color` on an edge whose width is 0 or whose style is `none` paints
+// exactly nothing, and the guard certified it. PROVEN BY MUTATION on the
+// pre-fix tree: with `.fleet-row { border: 0 }` and
+// `.fleet-row[data-id]:focus-visible { outline: none; border-color: var(--ring);
+// box-shadow: 0 0 0 2px var(--ring-soft) }` left verbatim, __css_check exited 0
+// with 0 error(s) — a focused row with NO indicator at all, blessed. It was not
+// hypothetical either: `.inst-sites-card .site-row { border: none; …;
+// border-top: 1px solid var(--border) }` left three of four sides at `0px none`
+// under the shared focus rule, and only the rendered driving of
+// cch-w12-s3-sites-card-focus-perimeter found it.
+//
+// SO THE ESCAPE NOW RESOLVES THE BOX, NOT THE BLOCK. For the focus rule's
+// SUBJECT (the selector with its focus pseudo-classes stripped) E12 resolves
+// `border-width` / `border-style` — and `outline-width` / `outline-style` for an
+// `outline-color` escape — across every rule in the owned sources that can apply
+// to that subject, in cascade order (specificity, then source order), with the
+// focus rule's own block applied last because it wins while focused. The escape
+// holds only if ALL FOUR sides paint. Three sides are not a perimeter, and the
+// one shipped case that exploited this was exactly a top-only hairline.
+//
+// TWO THINGS MAKE IT SEE `.inst-sites-card`, and both are load-bearing:
+//   • A rule is RELEVANT when its LAST compound is a token-subset of the
+//     subject's last compound — it constrains the subject element with a subset
+//     of what the subject requires, so it matches a superset of elements there.
+//     `.site-row` is relevant to `.site-row[data-id]`; `.fleet-row` is not.
+//   • Extra ANCESTOR steps do not make a rule irrelevant, they make it
+//     CONDITIONAL. `.inst-sites-card .site-row` applies to SOME of the elements
+//     `.site-row[data-id]` matches, so it is evaluated as its own CONTEXT:
+//     unconditional rules, plus that one, plus the focus rule. A context in
+//     which the escape cannot paint is a red, because a keyboard user in that
+//     context has no indicator. Checking only the unconditional cascade would
+//     have missed the one defect that actually shipped.
+//
+// THE DEFAULT IS UNPAINTABLE, DELIBERATELY. `border-*-style`'s initial value is
+// `none`, so a subject that no rule gives a border to fails the escape. That is
+// the correct answer, not a false red: a rule claiming "my indicator is the
+// border" when nothing anywhere gives the element a border has no indicator.
+//
+// COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
+//   • It reads @media-conditioned rules UNCONDITIONALLY. A `border: 0` that
+//     only lands under a breakpoint is a real loss of the indicator at that
+//     width, so counting it is right; but it cannot say "only below 700px".
+//   • It ignores `!important` ordering and the logical box properties
+//     (`border-block`, `border-inline`): neither appears in the owned sources,
+//     and both would need the same widening if one ever does.
+//   • A width that is a `var()` or a `calc()` is treated as NON-zero — it
+//     cannot resolve one statically, and guessing zero would be a false red in
+//     a tripwire.
+//   • It cannot know the DOM. A subject whose border arrives from a class the
+//     element also carries but no selector here mentions is a FALSE POSITIVE;
+//     the honest fix is that rule paying its own indicator, not an allowlist.
 // task-5acf9b5ad30f9a74 — THE TWO GAPS WAVE 7 NAMED, AND WHAT DRIVING THEM FOUND.
 //
 // GAP 2 IS NOT THEORETICAL. The sentence above used to end "A rule that paints
@@ -1726,6 +1874,267 @@ function bandOf(decls) {
   return { band: null, prop: null };
 }
 
+/** Border/outline styles that paint nothing however wide the edge is. */
+const UNPAINTABLE_STYLES = new Set(["none", "hidden"]);
+const BORDER_STYLE_KEYWORDS = new Set([
+  "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset",
+]);
+const SIDES = ["top", "right", "bottom", "left"];
+/** One simple selector: attribute, pseudo, id/class, universal, or type. Ordered. */
+const SIMPLE_SELECTOR = /\[[^\]]*\]|::?[A-Za-z-]+(?:\([^()]*\))?|[.#][A-Za-z0-9_-]+|\*|[A-Za-z][A-Za-z0-9_-]*/g;
+
+/** Split a declaration value on TOP-LEVEL whitespace, so `var(--a, 1px)` stays whole. */
+function splitValueTokens(value) {
+  const out = [];
+  let depth = 0, cur = "";
+  for (const ch of String(value)) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (depth === 0 && /\s/.test(ch)) { if (cur) out.push(cur); cur = ""; } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** A width that computes to zero. `thin|medium|thick`, `var()` and `calc()` are NOT. */
+function widthIsZero(w) {
+  const v = String(w).trim().toLowerCase();
+  if (!v || /^(thin|medium|thick)$/.test(v)) return false;
+  const n = Number.parseFloat(v);
+  return Number.isFinite(n) && n === 0 && !/[a-z]*\(/.test(v);
+}
+
+/** Does this {width, style} edge paint anything? */
+function edgePaints(edge) {
+  return !UNPAINTABLE_STYLES.has(String(edge.style).trim().toLowerCase()) && !widthIsZero(edge.width);
+}
+
+/** The initial box: every border side and the outline at `medium none`. */
+function initialBoxState() {
+  const st = { outline: { width: "medium", style: "none" } };
+  for (const side of SIDES) st[side] = { width: "medium", style: "none" };
+  return st;
+}
+
+/**
+ * Apply one declaration block to a box state. A SHORTHAND resets its longhands
+ * to their initial values — that is precisely why `border: 0` (width 0, style
+ * `none`) and `border: none` (style `none`, width `medium`) both kill the edge
+ * while `border-width: 0` leaves the style alone, and it is the mechanism the
+ * mutation proof exercises.
+ */
+function applyBoxDecls(state, decls) {
+  const shorthand = (value) => {
+    let width = "medium", style = "none";
+    for (const t of splitValueTokens(value)) {
+      const lt = t.toLowerCase();
+      if (BORDER_STYLE_KEYWORDS.has(lt)) style = lt;
+      else if (/^(thin|medium|thick)$/.test(lt) || /^[-+]?[\d.]+[a-z%]*$/.test(lt)) width = lt;
+    }
+    return { width, style };
+  };
+  const spread = (value) => {
+    const v = splitValueTokens(value);
+    if (!v.length) return null;
+    const [a, b = a, c = a, d = b] = v;
+    return { top: a, right: b, bottom: c, left: d };
+  };
+  for (const [rawProp, rawValue] of Object.entries(decls)) {
+    const prop = rawProp.toLowerCase();
+    const value = String(rawValue).replace(/\s*!important\s*$/i, "").trim();
+    if (prop === "border") {
+      const sh = shorthand(value);
+      for (const side of SIDES) state[side] = { ...sh };
+    } else if (prop === "border-width" || prop === "border-style") {
+      const key = prop.slice(7);
+      const m = spread(value);
+      if (m) for (const side of SIDES) state[side][key] = key === "style" ? m[side].toLowerCase() : m[side];
+    } else if (prop === "outline") {
+      state.outline = { ...shorthand(value) };
+    } else if (prop === "outline-width") {
+      state.outline.width = value;
+    } else if (prop === "outline-style") {
+      state.outline.style = value.toLowerCase();
+    } else if (SIDES.includes(prop.slice(7))) {
+      state[prop.slice(7)] = { ...shorthand(value) };
+    } else {
+      const m = prop.match(/^border-(top|right|bottom|left)-(width|style)$/);
+      if (m) state[m[1]][m[2]] = m[2] === "style" ? value.toLowerCase() : value;
+    }
+  }
+}
+
+/** The compound steps of a complex selector, combinators dropped. */
+function selectorSteps(sel) {
+  return String(sel).replace(/\s*[>+~]\s*/g, " ").trim().split(/\s+/).filter(Boolean);
+}
+/** Is every simple selector of compound `a` also in compound `b`? */
+function stepGeneralises(a, b) {
+  const bt = new Set(String(b).match(SIMPLE_SELECTOR) || []);
+  const at = String(a).match(SIMPLE_SELECTOR) || [];
+  return at.length > 0 && at.every((t) => bt.has(t));
+}
+/** CSS specificity as one comparable number (ids, then class/attr/pseudo, then type). */
+function specificityOf(sel) {
+  let a = 0, b = 0, c = 0;
+  for (const t of String(sel).match(SIMPLE_SELECTOR) || []) {
+    if (t.startsWith("#")) a++;
+    else if (t.startsWith("::")) c++;
+    else if (t.startsWith(".") || t.startsWith("[") || t.startsWith(":")) b++;
+    else if (t !== "*") c++;
+  }
+  return a * 10000 + b * 100 + c;
+}
+/**
+ * How a rule part relates to a focus subject: "always" (it applies to every
+ * element the subject matches), "context" (it applies to SOME of them, behind
+ * extra ancestors) or null (it cannot reach the subject element at all).
+ */
+function ruleReach(rulePart, subject) {
+  const r = selectorSteps(rulePart), sub = selectorSteps(subject);
+  if (!r.length || !sub.length) return null;
+  if (!stepGeneralises(r[r.length - 1], sub[sub.length - 1])) return null;
+  let i = 0;
+  for (const step of r.slice(0, -1)) {
+    while (i < sub.length - 1 && !stepGeneralises(step, sub[i])) i++;
+    if (i >= sub.length - 1) return "context";
+    i++;
+  }
+  return "always";
+}
+
+/** Every rule in every owned source, in source order, parsed once. */
+let _cascadeRules = null;
+function allCascadeRules() {
+  if (_cascadeRules) return _cascadeRules;
+  _cascadeRules = [];
+  let order = 0;
+  for (const src of focusRuleSources()) {
+    for (const m of src.text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const lead = m[1].length - m[1].trimStart().length;
+      _cascadeRules.push({
+        selector: m[1].trim(),
+        decls: declsOf(m[2]),
+        file: src.file,
+        line: src.lineBase + lineOf(src.text, m.index + lead),
+        order: order++,
+      });
+    }
+  }
+  return _cascadeRules;
+}
+
+/** Does this block touch the border/outline box at all? */
+function declaresBox(decls) {
+  return Object.keys(decls).some((p) => /^(border|outline)(-|$)/.test(p) && !/-color$|-radius$|-image|-offset$|-collapse$|-spacing$/.test(p));
+}
+
+/** Is this declaration value's colour opaque in every theme state? */
+function opaqueValue(value) {
+  const atom = value && colorAtomOf(value);
+  if (!atom) return false;
+  const a = minAlphaAcrossThemes(atom);
+  return a !== null && a >= 1;
+}
+
+/**
+ * Does this resolved box plus merged focus declarations leave the subject an
+ * indicator that can actually be SEEN? Three ways to pass, and each needs BOTH
+ * halves — a colour that paints on an edge that exists:
+ *   (a) all four border sides paint and an opaque border colour is set,
+ *   (b) the outline paints and an opaque outline colour is set,
+ *   (c) the band itself (outermost box-shadow layer) is already opaque.
+ * Three painting sides is not a perimeter, which is why (a) is `every`.
+ */
+function indicatorSurvives(state, merged) {
+  if (SIDES.every((side) => edgePaints(state[side])) && (opaqueValue(merged["border-color"]) || opaqueValue(merged["border"]))) return true;
+  if (edgePaints(state.outline) && (opaqueValue(merged["outline-color"]) || opaqueValue(merged["outline"]))) return true;
+  const { band } = bandOf(merged);
+  if (band) {
+    const a = minAlphaAcrossThemes(band);
+    if (a !== null && a >= 1) return true;
+  }
+  return false;
+}
+
+/** Are `steps` a subsequence of `within`, matching each step by generalisation? */
+function stepsImplied(steps, within) {
+  let i = 0;
+  for (const step of steps) {
+    while (i < within.length && !stepGeneralises(step, within[i])) i++;
+    if (i >= within.length) return false;
+    i++;
+  }
+  return true;
+}
+
+/** Every focus rule PART that reaches a subject, with its reach and prefix. */
+function focusPartsFor(subject) {
+  const out = [];
+  for (const rule of allCascadeRules()) {
+    if (!/:focus\b|:focus-visible\b/.test(rule.selector)) continue;
+    for (const rawPart of rule.selector.split(",")) {
+      const part = rawPart.replace(/::?focus(-visible|-within)?\b/g, "").replace(/\s+/g, " ").trim();
+      if (!part) continue;
+      const reach = ruleReach(part, subject);
+      if (!reach) continue;
+      out.push({ ...rule, part, reach, prefix: selectorSteps(part).slice(0, -1), spec: specificityOf(rawPart) });
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * The context, if any, in which this focus rule's OPAQUE-COLOUR escape has
+ * nothing to paint on. Walks the subject's contexts (see the ESCAPE MUST BE
+ * ABLE TO PAINT ruling): the unconditional cascade alone, then that cascade
+ * plus each conditional box-declaring rule in turn. Every focus rule that also
+ * reaches the subject IN THAT CONTEXT is applied on top — a context-specific
+ * focus override is the honest fix for this defect and must not be re-reported
+ * as the defect. Returns null when every context keeps an indicator.
+ */
+function escapePaintFailure(focusRule) {
+  for (const subject of focusSubjectsOf(focusRule.selector)) {
+    const focusParts = focusPartsFor(subject);
+    const uncond = [], cond = [];
+    for (const rule of allCascadeRules()) {
+      if (!declaresBox(rule.decls)) continue;
+      if (/:focus\b|:focus-visible\b/.test(rule.selector)) continue;
+      for (const rawPart of rule.selector.split(",")) {
+        const part = rawPart.trim();
+        const reach = ruleReach(part, subject);
+        if (!reach) continue;
+        (reach === "always" ? uncond : cond).push({ ...rule, part, spec: specificityOf(part) });
+        break;
+      }
+    }
+    const byCascade = (x, y) => x.spec - y.spec || x.order - y.order;
+    for (const extra of [null, ...cond]) {
+      const contextSteps = extra ? selectorSteps(extra.part).slice(0, -1) : [];
+      const state = initialBoxState();
+      for (const r of [...uncond, ...(extra ? [extra] : [])].sort(byCascade)) applyBoxDecls(state, r.decls);
+      const inContext = focusParts
+        .filter((f) => f.reach === "always" || stepsImplied(f.prefix, contextSteps))
+        .sort(byCascade);
+      const merged = {};
+      for (const f of inContext) {
+        applyBoxDecls(state, f.decls);
+        Object.assign(merged, f.decls);
+      }
+      if (indicatorSurvives(state, merged)) continue;
+      const edges = SIDES.filter((side) => !edgePaints(state[side]))
+        .map((side) => `${side} ${state[side].width}/${state[side].style}`);
+      return {
+        subject,
+        edges: edges.length ? edges : [`outline ${state.outline.width}/${state.outline.style}`],
+        killer: extra || [...uncond].sort(byCascade).pop() || null,
+      };
+    }
+  }
+  return null;
+}
+
 /** How many focus rules E12 examined, by file — printed so an empty scan is visible. */
 export function focusScanCensus() {
   const byFile = {};
@@ -1788,15 +2197,30 @@ export function focusIndicatorErrors() {
     const alpha = minAlphaAcrossThemes(band);
     if (alpha === null || alpha >= 1) continue;
 
-    // The escape: an opaque border/outline colour IS the indicator.
-    const escape = ["border-color", "outline-color", "border"]
-      .map((p) => decls[p] && colorAtomOf(decls[p]))
-      .filter(Boolean)
-      .some((atom) => {
-        const a = minAlphaAcrossThemes(atom);
-        return a !== null && a >= 1;
-      });
-    if (escape) continue;
+    // The escape: an opaque border/outline colour IS the indicator — but ONLY if
+    // that edge can actually PAINT. A colour on a zero-width or `style: none`
+    // edge paints nothing; see the ESCAPE MUST BE ABLE TO PAINT ruling above.
+    const escapeProp = ["border-color", "outline-color", "border"].find((p) => opaqueValue(decls[p]));
+    if (escapeProp) {
+      const fail = escapePaintFailure(m);
+      if (!fail) continue;
+      errs.push(
+        `E12 ${m.file}:${m.line}  focus rule ${JSON.stringify(selector.replace(/\s+/g, " "))} paints its band ` +
+          `from ${band} (${bandProp}) at alpha ${alpha} and takes the OPAQUE-BORDER escape via ` +
+          `${escapeProp}: ${decls[escapeProp]} — but that edge CANNOT PAINT for ${JSON.stringify(fail.subject)}. ` +
+          `Resolving border/outline width and style across every rule that reaches the subject (cascade order, ` +
+          `focus rules last) leaves ${fail.edges.join(", ")} (width/style)` +
+          (fail.killer
+            ? `, set by \`${fail.killer.part}\` at ${fail.killer.file}:${fail.killer.line}` +
+              ` — and no focus rule applying in that context restores one`
+            : ` — nothing gives the subject a border or outline at all`) +
+          `. A COLOUR on a zero-width or style:none edge paints NOTHING, so the rule's only real indicator there ` +
+          `is the translucent band, which can never reach the 3:1 SC 1.4.11 floor over an opaque backdrop. ` +
+          `Give the subject a border that paints on all four sides in that context, or paint the indicator with ` +
+          `an inset \`outline\` (the .inst-sites-card .site-row shape — no layout cost, all four sides)`,
+      );
+      continue;
+    }
 
     errs.push(
       `E12 ${m.file}:${m.line}  focus rule ${JSON.stringify(selector.replace(/\s+/g, " "))} paints its ` +

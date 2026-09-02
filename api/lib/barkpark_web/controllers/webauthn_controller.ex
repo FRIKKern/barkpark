@@ -209,8 +209,26 @@ defmodule BarkparkWeb.WebauthnController do
 
   def delete(conn, %{"id" => id}) do
     case Webauthn.delete_credential(conn.assigns.current_user, id) do
-      :ok -> json(conn, %{ok: true})
-      {:error, :not_found} -> error(conn, 404, "not_found", "no such passkey")
+      # RECEIPT LAW (pds wave 39 residue): `Webauthn.delete_credential/2` was
+      # WIDENED to hand back the row `Repo.delete/2` removed, so this receipt
+      # names what actually left the store instead of asserting a bare literal
+      # beside a 200. `nickname` and `created_at` are the row's own fields — the
+      # request carries the `:id` path param and nothing else — so reverting to the
+      # bare success map drops them and the differential reds. `ok` is kept, and
+      # kept `true`, so the wire contract is unchanged for existing callers; it
+      # is the CONTENT beside it that descends. Field names mirror `index/2`'s
+      # projection rather than inventing a second shape for the same row. No
+      # credential material (`credential_id`, `cose_key`) is ever emitted.
+      {:ok, cred} ->
+        json(conn, %{
+          ok: true,
+          deleted: cred.id,
+          nickname: cred.nickname,
+          created_at: cred.inserted_at
+        })
+
+      {:error, :not_found} ->
+        error(conn, 404, "not_found", "no such passkey")
     end
   end
 

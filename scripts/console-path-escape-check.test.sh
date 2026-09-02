@@ -15,6 +15,14 @@
 #   * the dispatcher must red rather than emit all-false    (case 10)
 #   * the cssom wrapper must tell REFUSED from DEFECT, and
 #     green neither                                         (case 11)
+#   * a read the census is STRUCTURALLY BLIND to must still be
+#     DISPATCHED on                                          (case 6) — the
+#     emit-fence guard the seal predicate SPAWNS copies its tree from an
+#     IMPORTED list (design/emit.mjs's ARTIFACTS), so no literal-extracting
+#     door can ever resolve those paths. Measured: a comment appended to
+#     web/lib/tokens.gen.ts reds that guard while --match console said
+#     false. A declared entry has no census row to protect it, so the
+#     harness is the only guard a deletion has to get past.
 # A harness with only green cases is the defect, not the proof.
 
 set -euo pipefail
@@ -615,6 +623,77 @@ while IFS= read -r g; do
 done <<EOF
 $("$SCRIPT" --print-set console)
 EOF
+# ── the emit ARTIFACTS: DECLARED, because the census is structurally blind ──
+# `design/emit-fence.test.mjs` is a guard the seal predicate SPAWNS, and it
+# copies its tree from `ARTIFACTS.map((a) => a.path)` plus the mirror module's
+# two exported paths — an IMPORTED list, so no literal-extracting door in
+# `file_lits` can ever resolve one of them, and the frontier recursion stops one
+# frame short of `design/emit.mjs` by declaration. Measured on origin/main: a
+# comment appended to `web/lib/tokens.gen.ts` took that guard from
+# `# pass 9 / # fail 0` to `# pass 6 / # fail 3` while `--match console` printed
+# `false` for it. Cases 3/3b cannot cover this: they prove the ratchet reds on a
+# read the census SEES. These arms are the ONLY thing standing between a deleted
+# declaration and a silent return to that hole.
+#
+# AND THE DECLARATION STAYS DERIVED RATHER THAN DECORATIVE: the list is read
+# back out of the emitter itself, so an artifact added there without a line in
+# CONSOLE_PATHS reds HERE, and retiring an artifact retires its arm with it.
+# Deriving ZERO paths is itself a failure — otherwise the loop passes vacuously
+# the day the grep stops matching, which is the exact shape this harness exists
+# to refuse.
+emit_src="$REAL_ROOT/design/emit.mjs"
+if [ ! -f "$emit_src" ]; then
+  no "design/emit.mjs is missing — the ARTIFACTS declarations cannot be re-derived"
+else
+  # `|| true` is LOAD-BEARING, and it covers ONLY the grep. Under this harness's
+  # `set -euo pipefail` a grep that matches nothing exits 1, the command
+  # substitution inherits it, and the ASSIGNMENT kills the whole run — no FAIL
+  # line, no tally, just a stop, which is a red for a reason foreign to what is
+  # being tested. Split across two substitutions so pipefail still governs the
+  # sed|sort that follows.
+  art_paths="$(awk '/^export const ARTIFACTS = \[/,/^\];/' "$emit_src" \
+    | { grep -Eoh 'path: "[^"]*"' || true; })"
+  art_paths="$(sed -E 's/^path: "//; s/"$//' <<<"$art_paths" | LC_ALL=C sort -u | sed '/^$/d')"
+  if [ -z "$art_paths" ]; then
+    no "derived ZERO artifact paths from design/emit.mjs — the derivation went blind and the arms below would pass vacuously"
+  else
+    ok "derived $(printf '%s\n' "$art_paths" | wc -l | tr -d ' ') ARTIFACTS path(s) from design/emit.mjs"
+    while IFS= read -r a; do
+      [ -n "$a" ] || continue
+      check_match "$a" console true
+    done <<EOF
+$art_paths
+EOF
+  fi
+fi
+# The same treatment for the two paths the guard imports from the mirror module.
+# SURFACE_PATH is also an ARTIFACTS row; BUNDLE_PATH is not, and it reds the
+# same guard when a line is spliced inside its generated mirror region — so it
+# is declared on its own measurement and re-derived on its own grep.
+mirror_src="$REAL_ROOT/design/paper-editor-mirror.mjs"
+if [ ! -f "$mirror_src" ]; then
+  no "design/paper-editor-mirror.mjs is missing — the SURFACE_PATH/BUNDLE_PATH declarations cannot be re-derived"
+else
+  mirror_paths="$({ grep -Eoh '^export const (SURFACE_PATH|BUNDLE_PATH) = "[^"]*"' "$mirror_src" || true; })"
+  mirror_paths="$(sed -E 's/.*"([^"]*)"$/\1/' <<<"$mirror_paths" | LC_ALL=C sort -u | sed '/^$/d')"
+  if [ -z "$mirror_paths" ]; then
+    no "derived ZERO paths from design/paper-editor-mirror.mjs — the derivation went blind and the arm below would pass vacuously"
+  else
+    ok "derived the mirror module's path exports: $(tr '\n' ' ' <<<"$mirror_paths")"
+    while IFS= read -r a; do
+      [ -n "$a" ] || continue
+      check_match "$a" console true
+    done <<EOF
+$mirror_paths
+EOF
+  fi
+fi
+# …and the declaration is EXACT FILES, never the trees they live in: widening to
+# a directory would bill every api/ and web/ PR for a console harness run, which
+# is the over-inclusion the script's own header refuses.
+check_match "api/lib/barkpark_web/controllers/user_controller.ex" console false
+check_match "web/lib/other.ts" console false
+check_match "internal/semrole/role.go" console false
 echo
 
 # ── case 7: a bad set name is an error, not a silent false ──────────────────

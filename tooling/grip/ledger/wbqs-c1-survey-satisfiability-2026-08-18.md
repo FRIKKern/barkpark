@@ -2,6 +2,8 @@
 
 # WBQS epic — criterion C1 "surveys filed as published bp tasks" satisfiability
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verifier re-derivation recipe (wild-bulk-quality-sweep-2026-07-16-epic, reconcile wave 2026-08-18).
 
 ## Claim

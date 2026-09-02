@@ -26,15 +26,18 @@ import (
 //
 // WHAT IT WILL NOT DO, and each refusal is load-bearing:
 //
-//   - It NEVER retries a non-GET. A 500 tells you NOTHING about whether a write
+//   - It NEVER retries a write. A 500 tells you NOTHING about whether a write
 //     landed — in this very incident a `bp doc publish` returned 500 and the
 //     publish HAD landed, so a blind retry would have filed a duplicate. HTTP
-//     already gives us the only distinction the transport can trust: GET is
-//     idempotent by definition, POST is not. Read-shaped POSTs (the query
-//     endpoint) are therefore NOT covered — the transport cannot tell a query
-//     POST from a mutate POST, and guessing wrong is a duplicated write. That
-//     gap is real; closing it needs an explicit per-call opt-in, not a cleverer
-//     transport.
+//     already gives us the only distinction the transport can trust: GET and
+//     HEAD are idempotent by definition, POST is not. Read-shaped POSTs (the
+//     query endpoint) are therefore NOT covered — the transport cannot tell a
+//     query POST from a mutate POST, and guessing wrong is a duplicated write.
+//     That gap is real and it is closed ABOVE this layer, not here: the task
+//     ledger writes get their repeat from internal/cli/tasks_write_retry.go,
+//     which RE-READS the store before every attempt and so never re-sends a
+//     write that already landed. A transport cannot do that, and must not
+//     pretend it can.
 //   - It NEVER retries a 4xx. A refusal is an answer; repeating it is noise.
 //   - It NEVER retries a 5xx that is not exactly `internal_error`. A 502/503
 //     from a proxy, or a 500 carrying a different code, is a different fault
@@ -89,6 +92,34 @@ func (n RetryNotice) String() string {
 		retryErrorCode, n.Method, n.URL, n.Attempt, n.Of, n.Delay)
 }
 
+// ExhaustedNotice describes a retry sequence that ran out of attempts (or out
+// of deadline budget) with the transient fault still standing.
+//
+// It exists because "gave up after three tries" and "failed once" render
+// IDENTICALLY otherwise — the caller receives the last response and nothing
+// else — and because the request id that matters is the LAST attempt's. The
+// first attempt's id names a request the server has already forgotten; quoting
+// it to support sends them hunting a log line that explains nothing.
+type ExhaustedNotice struct {
+	// Attempts is how many requests were actually made.
+	Attempts int
+	// Method and URL identify the request that kept failing.
+	Method string
+	URL    string
+	// RequestID is the id carried by the LAST attempt's error envelope, or ""
+	// when the server did not supply one.
+	RequestID string
+}
+
+func (n ExhaustedNotice) String() string {
+	id := n.RequestID
+	if id == "" {
+		id = "(none reported)"
+	}
+	return fmt.Sprintf("barkpark: transient %s from %s %s persisted through %d attempts — giving up (last request_id: %s)",
+		retryErrorCode, n.Method, n.URL, n.Attempts, id)
+}
+
 // retryTransport wraps a RoundTripper with the narrow retry described above.
 // The zero delay slice and a nil base are both valid: base nil means
 // http.DefaultTransport.
@@ -100,6 +131,11 @@ type retryTransport struct {
 	sleep func(time.Duration)
 	// onRetry, when non-nil, is called once per retry. Never called on success.
 	onRetry func(RetryNotice)
+	// onExhausted, when non-nil, is called AT MOST ONCE per RoundTrip: only
+	// when at least one retry was spent and the sequence still ended on the
+	// transient fault. Never called on success, and never for a 500 that was
+	// handed straight back without a retry.
+	onExhausted func(ExhaustedNotice)
 	// count is the cumulative number of retries this transport has performed.
 	count atomic.Int64
 }
@@ -117,9 +153,12 @@ func (t *retryTransport) roundTripper() http.RoundTripper {
 // is returned with its body untouched and unbuffered. Only a 500 pays for the
 // bounded peek that reads its error code.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Non-GET is out of scope, permanently. See the package comment: the
-	// transport cannot know whether a POST landed, so it must never repeat one.
-	if req.Method != http.MethodGet {
+	// Idempotence gate. GET and HEAD qualify by definition — a HEAD is a GET
+	// that discards the body, and there is no shape of either whose repeat can
+	// change server state. Every other method is passed through untouched: a
+	// write's repeat is not this layer's decision to make (see the package
+	// comment).
+	if !idempotentMethod(req) {
 		return t.roundTripper().RoundTrip(req)
 	}
 
@@ -130,6 +169,11 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	var resp *http.Response
 	var err error
+
+	// retried counts the retries this call actually spent. It gates the
+	// give-up announcement: a request that never retried (the budget check
+	// declined on attempt 1) must not claim it "persisted through" anything.
+	retried := 0
 
 	for attempt := 1; ; attempt++ {
 		resp, err = t.roundTripper().RoundTrip(req)
@@ -143,7 +187,17 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 
-		if attempt >= attempts || !isRetryableServerFault(resp) {
+		retryable, requestID := isRetryableServerFault(resp)
+		if !retryable {
+			return resp, nil
+		}
+		if attempt >= attempts {
+			// Out of attempts and still failing. Say so, naming the request id
+			// of THIS attempt — the last one, the only one whose envelope the
+			// caller is about to be handed. Without this line a three-attempt
+			// give-up is indistinguishable from a single hard 500, and the
+			// operator quoting a request id to support quotes the wrong one.
+			t.announceExhausted(req, attempt, requestID, retried)
 			return resp, nil
 		}
 
@@ -164,6 +218,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// attempt. Otherwise hand back the honest 500 immediately — no sleep,
 		// no extra request, nothing spent that the caller did not authorise.
 		if !t.hasBudgetFor(req, delay) {
+			t.announceExhausted(req, attempt, requestID, retried)
 			return resp, nil
 		}
 
@@ -172,6 +227,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 
+		retried++
 		t.count.Add(1)
 		if t.onRetry != nil {
 			t.onRetry(RetryNotice{
@@ -190,6 +246,46 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, fmt.Errorf("barkpark: retry backoff interrupted: %w", err)
 		}
 	}
+}
+
+// idempotentMethod reports whether req's method is one this transport may
+// repeat on its own authority.
+func idempotentMethod(req *http.Request) bool {
+	return req != nil && (req.Method == http.MethodGet || req.Method == http.MethodHead)
+}
+
+// NewRetryTransport returns the SAME transient-internal_error retry every typed
+// Client installs, wrapping base (nil means http.DefaultTransport), for a
+// caller that builds its own *http.Client.
+//
+// It exists so the CLI's manifest dispatch — a bare http.Client that predates
+// this package's retry and shared none of it — can ride the identical policy
+// instead of growing a second, drifting copy: same attempt cap, same backoff,
+// same stderr lines, same deadline-budget check, same refusal to touch a 4xx, a
+// non-internal_error 5xx, or any method but GET/HEAD. There is ONE transport
+// retry policy in this binary and this is how a second call site gets it.
+func NewRetryTransport(base http.RoundTripper) http.RoundTripper {
+	return &retryTransport{
+		base:        base,
+		onRetry:     stderrRetryNotifier,
+		onExhausted: stderrExhaustedNotifier,
+	}
+}
+
+// announceExhausted fires the give-up notice, once, for a sequence that spent
+// at least one retry and still ended on the transient fault. A call that never
+// retried has nothing to announce — its 500 is a plain 500 and the ordinary
+// error rendering already owns it.
+func (t *retryTransport) announceExhausted(req *http.Request, attempts int, requestID string, retried int) {
+	if retried == 0 || t.onExhausted == nil {
+		return
+	}
+	t.onExhausted(ExhaustedNotice{
+		Attempts:  attempts,
+		Method:    req.Method,
+		URL:       req.URL.String(),
+		RequestID: requestID,
+	})
 }
 
 // minAttemptBudget is the time a retry must be able to leave for the NEXT
@@ -273,15 +369,17 @@ func (t *retryTransport) sleepFor(ctx context.Context, d time.Duration) error {
 
 // isRetryableServerFault reports whether resp is EXACTLY the transient fault
 // this transport retries: HTTP 500 whose JSON envelope carries
-// error.code == "internal_error".
+// error.code == "internal_error". It also returns that envelope's request id,
+// so the give-up announcement can name the LAST attempt without re-parsing a
+// body the caller has not read yet.
 //
 // It reads a bounded prefix of the body to decide, then puts every byte it read
 // back so a caller that receives this response still sees the complete body.
 // Anything it cannot parse is NOT retryable — an unreadable body is not evidence
 // of a transient fault.
-func isRetryableServerFault(resp *http.Response) bool {
+func isRetryableServerFault(resp *http.Response) (bool, string) {
 	if resp == nil || resp.StatusCode != http.StatusInternalServerError || resp.Body == nil {
-		return false
+		return false, ""
 	}
 
 	prefix, err := io.ReadAll(io.LimitReader(resp.Body, maxRetryProbeBytes))
@@ -289,7 +387,7 @@ func isRetryableServerFault(resp *http.Response) bool {
 		// Restore what we managed to read, then decline: a body we could not
 		// finish reading is not proof of anything.
 		resp.Body = restoredBody(prefix, resp.Body)
-		return false
+		return false, ""
 	}
 	resp.Body = restoredBody(prefix, resp.Body)
 
@@ -298,9 +396,9 @@ func isRetryableServerFault(resp *http.Response) bool {
 	// or a retryable refusal silently stops being retried.
 	env, ok := apierr.Parse(prefix)
 	if !ok {
-		return false
+		return false, ""
 	}
-	return env.Code == retryErrorCode
+	return env.Code == retryErrorCode, env.RequestID
 }
 
 // restoredBody re-attaches an already-read prefix in front of the unread
@@ -325,6 +423,15 @@ func (b *joinedBody) Close() error { return b.closer.Close() }
 // result. Set BARKPARK_QUIET_RETRIES=1 to silence it — the Retries counter still
 // counts, so silencing the line never silences the fact.
 func stderrRetryNotifier(n RetryNotice) {
+	if os.Getenv("BARKPARK_QUIET_RETRIES") != "" {
+		return
+	}
+	fmt.Fprintln(os.Stderr, n.String())
+}
+
+// stderrExhaustedNotifier is the give-up announcement, on the same channel and
+// under the same silencer as the per-retry line.
+func stderrExhaustedNotifier(n ExhaustedNotice) {
 	if os.Getenv("BARKPARK_QUIET_RETRIES") != "" {
 		return
 	}

@@ -93,9 +93,24 @@ type Barkpark struct {
 	Version      string `json:"version"`
 	GitCommit    string `json:"git_commit"`
 	LastSeenAt   string `json:"last_seen_at"`
-	TeamID       string `json:"team_id"`
-	Team         *Team  `json:"team,omitempty"`
-	InsertedAt   string `json:"inserted_at"`
+
+	// GitCommitFirstSeenAt (dr-w22-bl) — when the control plane first saw this
+	// box report the sha in GitCommit (RFC3339). The plane stamps it on the beat
+	// where the reported sha DIFFERS from the one on the row; a steady box
+	// beating the same sha every 60 s never re-stamps it.
+	//
+	// EMPTY IS UNMEASURED, NEVER "just now", and it is not rare: every row read
+	// empty the day the column shipped, and a box that has not changed sha since
+	// still does. A box whose stored sha was empty when a sha first arrived also
+	// reads empty on purpose — that commit may have been running long before the
+	// first beat carrying it reached us. Render the empty string as UNMETERED
+	// (the word this package already uses for commit_distance) and never sort it
+	// as fresh; an older control plane omits the key entirely and it decodes to
+	// the same empty string, tolerantly.
+	GitCommitFirstSeenAt string `json:"git_commit_first_seen_at"`
+	TeamID               string `json:"team_id"`
+	Team                 *Team  `json:"team,omitempty"`
+	InsertedAt           string `json:"inserted_at"`
 
 	// Provider is the cloud the box runs on (hetzner/azure). The control plane
 	// stamps it on every row (migration default 'hetzner', Decision 9); it is
@@ -257,6 +272,21 @@ type Pressure struct {
 	// MEASURED AND QUIET. `len() == 0` is true of both, so a consumer that means
 	// "we looked and it is clean" must test for non-nil, not for empty.
 	RunawayProcs []RunawayProc `json:"runaway_procs"`
+	// SlotUnits is the state of the box's blue/green SYSTEMD UNITS — the only
+	// field on this block that is about the DEPLOY PAIR rather than the host, and
+	// the one whose absence let `bp cloud status` call a box healthy while half
+	// of it sat in `failed`. Every scalar above is a host aggregate; none of them
+	// can be wrong about a dead slot because none of them can see one.
+	//
+	// It carries the same three-state honesty RunawayProcs does, by the same
+	// mechanism: nil (the CP sent `null`) is UNMEASURED — an agent predating the
+	// probe, or a box with no systemd; a NON-NIL EMPTY slice is MEASURED AND
+	// INTACT. `len() == 0` is true of both.
+	SlotUnits []SlotUnit `json:"slot_units"`
+	// SlotUnitsTruncated is how many failed SITE units the agent's cap hid. nil
+	// is unmeasured, a measured 0 means the list above is complete. The
+	// blue/green pair is never truncated, so this can never hide a slot unit.
+	SlotUnitsTruncated *float64 `json:"slot_units_truncated"`
 	// ReportedAt is the BEAT's own timestamp (RFC3339), a pointer for the same
 	// reason: null means the box has never phoned home at all, which is not the
 	// same as "beat, but told us nothing readable".
@@ -280,6 +310,37 @@ type RunawayProc struct {
 	ElapsedS   float64 `json:"elapsed_s"`
 	CPUPercent float64 `json:"cpu_percent"`
 	Command    string  `json:"command"`
+}
+
+// SlotUnit is ONE systemd unit off a fleet row's pressure block: systemd's own
+// properties, relayed by the control plane, never a verdict. The consumer owns
+// the verdict, because it cannot be made from one unit alone — a `failed` blue
+// beside a serving green is a degraded pair on a box that IS serving, and
+// `failed` on both while health says up is a contradiction. Those are different
+// sentences and only a reader holding the whole list can tell them apart.
+//
+// Result and ExecMainStatus are read TOGETHER or not at all. Measured on
+// guerrilla 2026-09-01: barkpark-site@search__b reads Result "exit-code" with
+// ExecMainStatus 143 — 128+15, i.e. Next.js exiting on the SIGTERM of its own
+// retire, filed by systemd as an exit code because the unit lacks
+// SuccessExitStatus=143 (PR #14863). `result` alone reads a deliberate stop as
+// a crash.
+//
+// The pointers carry the same law as every pointer in Pressure: nil is "the
+// control plane could not read this property", never a fabricated 0 — and a pid
+// 0 is a REAL, different fact (the unit claims a state with no main process).
+type SlotUnit struct {
+	Unit           string   `json:"unit"`
+	ActiveState    string   `json:"active_state"`
+	SubState       string   `json:"sub_state"`
+	Result         *string  `json:"result"`
+	MainPID        *float64 `json:"main_pid"`
+	ExecMainStatus *float64 `json:"exec_main_status"`
+	// StateSince is systemd's own timestamp string for the unit's last state
+	// change, VERBATIM (e.g. "Tue 2026-09-01 11:07:52 UTC") — not RFC3339, not
+	// reformatted. nil on a unit systemd has no timestamp for, which is what a
+	// never-started unit reports.
+	StateSince *string `json:"state_since"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane

@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: none | budget: 2000tok -->
 # V4 premise-smoke re-derivation — sharing object-authz wave (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Every premise the direction/charter/wish cites, re-derived on origin/main. Citation
 line numbers had drifted; every named SYMBOL still exists. Re-run commands:
 

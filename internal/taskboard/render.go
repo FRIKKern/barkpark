@@ -200,6 +200,17 @@ func headerLine1(st UIState, width int, now time.Time) string {
 		// Say so honestly, distinct from offline.
 		word = "syncing…"
 	}
+	// The keyset poll's visible slow state wins the chip, because it is the most
+	// specific true thing about what the board is doing RIGHT NOW: it is not
+	// polling, not offline, not syncing — it is deliberately waiting, and it can
+	// say until when. Without the retry time this reads as "stuck"; with it, the
+	// operator can see the schedule and decide whether to press r.
+	if st.Paused {
+		word = pausedLabel
+		if !st.RetryAt.IsZero() {
+			word += " · retry " + retryIn(st.RetryAt, now)
+		}
+	}
 	cs := roleStyle(connRole(st.Conn))
 	right := dimStyle.Render("⇄ "+firstDNSLabel(Chrome.Server)) + "  " + cs.Render(glyph) + " " + dimStyle.Render(word)
 	if age := AgeBadge(st.LastSync, now); age != "" {
@@ -602,6 +613,21 @@ func clusterDisplayName(key string) string {
 		}
 	}
 	return key
+}
+
+// retryIn renders how long until the paused poll retries, as a compact "in 4s" /
+// "in 2m". It floors at "now" rather than emitting a negative: a retry the clock
+// has already passed but whose tick has not landed yet is imminent, not overdue,
+// and a "-1s" on the identity strip would read as a bug in the board.
+func retryIn(at, now time.Time) string {
+	d := at.Sub(now)
+	if d <= 0 {
+		return "now"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("in %ds", int((d+time.Second-1)/time.Second))
+	}
+	return fmt.Sprintf("in %dm", int((d+time.Minute-1)/time.Minute))
 }
 
 // isSyncing is the honest first-paint state: we are polling for the very first

@@ -2,7 +2,7 @@
 // Merge agent results + programmatic signals into the final importance chart.
 // PURE programmatic (zero tokens). final = blend(deterministic prior, agent
 // criticality) for code/test files; prior alone for data/asset/doc files.
-// Emits importance-chart.csv + importance-chart.html (sortable, color-graded).
+// Emits importance-chart.csv + importance-chart.json + importance-chart.html.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
@@ -56,6 +56,18 @@ const esc = (v) => `"${String(v).replace(/"/g, '""').replace(/\n/g, " ")}"`;
 const cols = ["score","path","stack","kind","fanIn","churn","loc","seam","entrypoint","tier","prior","agentCrit","votes","agreement","contested","confidence","role","description","whatBreaks"];
 writeFileSync(join(HERE, "importance-chart.csv"),
   [cols.join(","), ...rows.map(r => cols.map(c => esc(r[c])).join(","))].join("\n"));
+
+// ---- JSON ----
+// Same rows, same scoring — the blend above is untouched. The chart used to
+// exist only as a spreadsheet and a web page, so the ONE consumer that needed
+// the evidence tier (tooling/barkpark-sync, which publishes these numbers as
+// durable papers) had nothing machine-readable to read and fell back to the
+// deterministic prior while still calling it "importance". This file is that
+// fallback's replacement; it adds no judgment, it only stops discarding one.
+writeFileSync(join(HERE, "importance-chart.json"), JSON.stringify({
+  blend: { prior: 0.45, agentCrit: 0.55, appliesTo: ["code", "test"], note: "kind outside appliesTo scores prior alone (tier 'auto')" },
+  rows,
+}, null, 2));
 
 // ---- stats ----
 const missing = rows.filter(r => r.tier === "MISSING");
@@ -113,7 +125,7 @@ writeFileSync(join(HERE, "importance-chart.html"), html);
 
 const multiVoted = rows.filter(r => r.votes > 1);
 const contested = rows.filter(r => r.contested);
-console.error(`[merge] ${rows.length} files → importance-chart.{csv,html}`);
+console.error(`[merge] ${rows.length} files → importance-chart.{csv,json,html}`);
 console.error(`  agent-scored: ${rows.filter(r=>r.tier==="agent"||r.tier==="contested").length} · auto: ${rows.filter(r=>r.tier==="auto").length} · MISSING: ${missing.length}`);
 if (multiVoted.length) {
   console.error(`  multi-vote: ${multiVoted.length} file(s) panel-judged · ${contested.length} CONTESTED (panel disagreed — review before trusting)`);

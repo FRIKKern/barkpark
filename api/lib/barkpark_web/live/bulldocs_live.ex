@@ -158,6 +158,23 @@ defmodule BarkparkWeb.BulldocsLive do
       if subscribe_document_changes? do
         Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{task_ws}:#{dataset}")
       end
+
+      # DELETION needs NO extra subscription (pd-ee-reader-stale-cache).
+      # `Content.paper_topic(slug, ws, ds)` above and
+      # `Content.doc_topic(pubid, "paper", ws, ds)` build the SAME string —
+      # `doc:ws:<ws>:<ds>:paper:<slug>` — because a paper's doc_id IS its slug
+      # and `paper_topic/3` is the doc topic with the type pinned to "paper"
+      # (content/broadcast.ex). So the delete frame
+      # `{:doc_updated, %{mutation: "delete"}}` that
+      # `Broadcast.tap_broadcast/7` publishes ALREADY arrives here. What was
+      # missing was a `handle_info/2` clause for it: the reader only ever
+      # matched `{:paper_updated, …}`, which delete never emits, and its
+      # `{:document_changed, %{type: "paper"}}` clause reacts only to LINKED
+      # papers. The frame landed in the catch-all and was dropped, so a reader
+      # already on the URL kept rendering a paper that was gone from storage.
+      # The topic identity is pinned in
+      # `bulldocs_reader_deleted_paper_test.exs` so a future rename that splits
+      # the two topics apart reds instead of silently reopening the leak.
     end
 
     rail_events = load_rail_events(paper)
@@ -930,6 +947,21 @@ defmodule BarkparkWeb.BulldocsLive do
   # ── whole-HTML frame (Wave 3 fallback) ────────────────────────────────────
 
   def handle_info({:paper_updated, _msg}, socket), do: {:noreply, refetch(socket)}
+
+  # THE DELETE FRAME (pd-ee-reader-stale-cache). Deletion is the ONE mutation
+  # that reaches this reader as `{:doc_updated, …}` and never as
+  # `{:paper_updated, …}` — the paper-write pipeline emits the latter, the
+  # generic `Content.delete_document/4` path only the former (on the same
+  # topic; see the mount comment). Without this clause the frame fell into the
+  # catch-all and a connected reader served the deleted body indefinitely.
+  #
+  # `refetch/1` re-reads the slug and, on nil, clears the stream, the html and
+  # `:found` — so this one line IS the not-found transition. Every OTHER
+  # `{:doc_updated, …}` on the topic still falls through: an ordinary edit
+  # already arrives as `{:paper_updated, …}`, and refetching twice per edit
+  # would be pure duplicate work on a public reader.
+  def handle_info({:doc_updated, %{mutation: "delete"}}, socket),
+    do: {:noreply, refetch(socket)}
 
   # Emitted only after the edge projector has reconciled the materialised
   # graph. Re-read the compact related-Paper projection without replacing the

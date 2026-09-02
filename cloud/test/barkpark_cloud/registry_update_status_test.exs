@@ -25,7 +25,7 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
-  alias BarkparkCloud.Registry.{Barkpark, Vault}
+  alias BarkparkCloud.Registry.{Barkpark, ProvisionJob, Vault}
   alias BarkparkCloud.StudioLinkFakeHttpClient
 
   @instance_admin_token "instance-admin-token-plaintext"
@@ -575,6 +575,112 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       # And a word outside the vocabulary is a changeset ERROR, not a silent
       # write — the roster never carries an invented state.
       refute Barkpark.update_status_changeset(%Barkpark{}, %{apply_arming: "maybe"}).valid?
+    end
+  end
+
+  describe "the hourly sweep FILES the repair, it does not merely RECORD it (isu-w5)" do
+    # THE GAP THIS CLOSES. `record_apply_unarmed/1` — the rollout worker's 503
+    # branch — had its auto-enqueue pinned by enable_apply_jobs_test.exs. The
+    # OTHER writer of the same measurement, `refresh_update_status/1`'s hourly
+    # `UpdateStatusWorker` sweep, did not: deleting `|> auto_enqueue_on_unarmed(arming)`
+    # from the end of `persist_update_check/3` left the whole suite GREEN. That
+    # is the site that matters most, because the sweep is the ONLY writer that
+    # reaches a box the rollout never picks — the retro-arm cohort's boxes are
+    # measured unarmed and then DISQUALIFIED from `next_autoupdate_candidate/1`,
+    # so the 503 branch can never fire on them again. Without the sweep's
+    # enqueue, an unarmed box is recorded forever and repaired never.
+    #
+    # Asserted on the JOB ROW, not on a returned value: the rail is a queue the
+    # provisioner drains minutes later, so the only thing that matters is what
+    # is in the table when the sweep returns.
+
+    defp swept(body, overrides) do
+      bp =
+        live_barkpark(team_fixture())
+        |> Ecto.Changeset.change(
+          Map.merge(%{url: "#{@instance_url}/#{System.unique_integer([:positive])}"}, overrides)
+        )
+        |> Repo.update!()
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: body}}])
+      _ = Registry.refresh_update_status(bp)
+      bp
+    end
+
+    test "a consented box the sweep reads UNARMED gets its enable_apply job FILED" do
+      bp = swept(arming_body(false), %{autoupdate_enabled: true, suspended: false})
+
+      assert Repo.get!(Barkpark, bp.id).apply_arming == "unarmed",
+             "precondition: the sweep must have measured the box unarmed"
+
+      assert [%ProvisionJob{kind: "enable_apply", status: "pending", barkpark_id: filed_for}] =
+               Repo.all(ProvisionJob),
+             "the hourly sweep is the only writer that reaches a DISQUALIFIED box — " <>
+               "recording unarmed without filing the repair strands it forever"
+
+      assert filed_for == bp.id
+    end
+
+    test "an ARMED sweep files nothing — only an unarmed measurement is a repair" do
+      bp = swept(arming_body(true), %{autoupdate_enabled: true, suspended: false})
+
+      assert Repo.get!(Barkpark, bp.id).apply_arming == "armed"
+      assert Repo.aggregate(ProvisionJob, :count) == 0
+    end
+
+    test "an UNMEASURED (pre-#12995) sweep files nothing — absent is not false" do
+      bp = swept(arming_body(:absent), %{autoupdate_enabled: true, suspended: false})
+
+      assert is_nil(Repo.get!(Barkpark, bp.id).apply_arming)
+
+      assert Repo.aggregate(ProvisionJob, :count) == 0,
+             "a box that sent no apply_enabled key may be perfectly armed; SSHing " <>
+               "into it on an absent key is the collapse the third state prevents"
+    end
+
+    test "an opted-OUT box is still RECORDED unarmed but never enqueued (the consent gate)" do
+      bp = swept(arming_body(false), %{autoupdate_enabled: false, suspended: false})
+
+      assert Repo.get!(Barkpark, bp.id).apply_arming == "unarmed",
+             "the measurement is a fact and is written regardless of consent"
+
+      assert Repo.aggregate(ProvisionJob, :count) == 0
+    end
+
+    test "two consecutive unarmed sweeps stay ONE job — the hourly re-report does not pile up" do
+      bp =
+        live_barkpark(team_fixture())
+        |> Ecto.Changeset.change(
+          url: "#{@instance_url}/#{System.unique_integer([:positive])}",
+          autoupdate_enabled: true
+        )
+        |> Repo.update!()
+
+      for _ <- 1..2 do
+        StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
+        _ = Registry.refresh_update_status(bp)
+      end
+
+      assert Repo.aggregate(ProvisionJob, :count) == 1
+    end
+
+    test "an enqueue failure NEVER masks the measurement the sweep persisted" do
+      # The job insert is refused by the one-active-per-kind guard (a job is
+      # already in flight), and the sweep must still return {:ok, _} with the
+      # arming written — a control-plane queue fault cannot cost us the reading.
+      bp =
+        live_barkpark(team_fixture())
+        |> Ecto.Changeset.change(
+          url: "#{@instance_url}/#{System.unique_integer([:positive])}",
+          autoupdate_enabled: true
+        )
+        |> Repo.update!()
+
+      {:ok, _} = Registry.enqueue_enable_apply_job(bp)
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
+      assert {:ok, %Barkpark{apply_arming: "unarmed"}} = Registry.refresh_update_status(bp)
+      assert Repo.aggregate(ProvisionJob, :count) == 1
     end
   end
 end

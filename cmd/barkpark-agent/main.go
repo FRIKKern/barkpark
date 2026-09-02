@@ -168,7 +168,15 @@ func run(args []string) int {
 			// goes through. On a box without `ps` it ERRORS, so runaway_procs
 			// stays null (UNMEASURED) rather than landing an empty list that
 			// would read "nothing running here".
-			RunawayProbe:   agent.NewRunawayProbe(),
+			RunawayProbe: agent.NewRunawayProbe(),
+			// The blue/green SYSTEMD UNITS themselves. Every vital above is a
+			// number about the host; none of them can say that half the
+			// deploy pair is sitting in `failed` — which on 2026-08-06 was true
+			// on guerrilla while every operator surface read `ok`. Two bounded
+			// `systemctl` calls per beat. On a box without systemd or dbus they
+			// ERROR, so slot_units stays null (UNMEASURED) rather than landing
+			// an empty list that would read "no failed units here".
+			SlotUnitsProbe: agent.NewSlotUnitsProbe(),
 			HealthBaseURL:  *healthURL,
 			HealthToken:    healthToken,
 			HealthGateOpts: agentHealthGateOpts(*healthURL, healthToken),

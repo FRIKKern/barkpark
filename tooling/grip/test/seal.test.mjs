@@ -17,9 +17,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { readFileSync, writeFileSync, rmSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   CLAUSES,
@@ -441,4 +442,81 @@ test("the clamp guard sits on PAGE, not on the pool size — a healthy 3010-row 
 test("a missing pool report is a fault, never a silent pass", () => {
   assert.equal(reconcilePool(null).ok, false);
   assert.equal(reconcilePool(undefined).ok, false);
+});
+
+// ── THE ENTRY GUARD ─────────────────────────────────────────────────────────
+// seal.mjs shipped `import.meta.url === `file://${process.argv[1]}``, which is
+// NOT a path comparison: import.meta.url percent-encodes anything URL-special
+// (a space -> %20, a `#` -> %23) and the concatenation does not, so on such a
+// path the guard reads false, main() never runs and the process exits 0 having
+// adjudicated NOTHING — indistinguishable from a HOLDS verdict at the epic's
+// own close. The two tests below are a pair on purpose: the CONTROL proves the
+// probe path really does defeat the old form (otherwise the live test is green
+// because it cannot see), and the LIVE test runs SEAL.MJS'S OWN guard
+// expression, lifted verbatim from the shipped source, in a real process spawned
+// from that path. Restoring the string compare in seal.mjs reds the live test.
+
+/** seal.mjs's entry-guard CONDITION, read out of the shipped source. */
+function shippedGuardExpression() {
+  const lines = readFileSync(resolve(REPO, "tooling/grip/seal.mjs"), "utf8").split("\n");
+  // The named form FIRST: `if (isMain) {` would otherwise be lifted as the
+  // condition and the probe would run the string "isMain", not the guard.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const named = lines[i].match(/^const isMain = (.+);$/);
+    if (named) return named[1];
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const inline = lines[i].match(/^if \((.+)\) \{$/);
+    if (inline) return inline[1];
+  }
+  throw new Error("no entry guard found in tooling/grip/seal.mjs");
+}
+
+/**
+ * Write `expr` as the entry guard of a throwaway module living at a path that
+ * carries BOTH a space and a `#`, spawn it, and report what the guard decided.
+ * The realpathSync is load-bearing on macOS, where os.tmpdir() sits under the
+ * /var -> /private/var symlink: Node realpaths the main module, so an
+ * unresolved probe path would make EVERY guard read false and the test would
+ * pass for the wrong reason.
+ */
+function probeGuard(expr) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "grip-entry-guard-")));
+  const dir = join(root, "seal guard #probe");
+  mkdirSync(dir);
+  const probe = join(dir, "probe.mjs");
+  writeFileSync(probe, [
+    'import { resolve } from "node:path";',
+    'import { fileURLToPath } from "node:url";',
+    `const isMain = ${expr};`,
+    'process.stdout.write(isMain ? "MAIN-RAN" : "SILENT-NO-OP");',
+    "",
+  ].join("\n"));
+  try {
+    assert.notEqual(
+      pathToFileURL(probe).href, `file://${probe}`,
+      "the probe path must be one the two forms DISAGREE on, or this proves nothing",
+    );
+    const r = spawnSync(process.execPath, [probe], { encoding: "utf8", timeout: 60000 });
+    assert.equal(r.status, 0, `the probe itself must run: ${r.stdout}${r.stderr}`);
+    return r.stdout;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("CONTROL: the string-compare guard reads FALSE from a path with a space and a `#`", () => {
+  const verdict = probeGuard("import.meta.url === `file://${process.argv[1]}`");
+  assert.equal(verdict, "SILENT-NO-OP",
+    "if the old form survives this path the LIVE test below is vacuous — pick a nastier path");
+});
+
+test("seal.mjs's SHIPPED entry guard reads TRUE from that same path", () => {
+  const expr = shippedGuardExpression();
+  assert.match(expr, /import\.meta\.url/, "the extracted guard must be the real one");
+  assert.match(expr, /process\.argv/, "the extracted guard must be the real one");
+  assert.equal(probeGuard(expr), "MAIN-RAN",
+    "seal.mjs exits 0 having sealed NOTHING from any path a URL encodes — a vacuous green at the epic's close");
+  assert.doesNotMatch(expr, /`file:\/\/\$\{/,
+    "seal.mjs must not string-concatenate a path into a URL — that is the defect class itself");
 });
