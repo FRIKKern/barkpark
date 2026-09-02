@@ -20,9 +20,17 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     |> Enum.map(&compose_inline(&1, false))
   end
 
+  # Tolerate scalar cells (a plain string where a list of inline nodes was
+  # expected — common in tables emitted by upstream converters that flatten
+  # text-only cells). Treat the scalar as a single text node so the cell
+  # renders as its string value instead of vanishing.
+  def compose_inline_children(s) when is_binary(s), do: [s]
+  def compose_inline_children(n) when is_number(n), do: [to_string(n)]
+  def compose_inline_children(_), do: []
+
   # A BLOCK-level node sitting in an inline array — `{"type":"paragraph",
   # "content":[…]}` or `{"type":"list-item","content":[…]}` — carries its text
-  # one level deeper than every inline clause below looks. Without this, such a
+  # one level deeper than the inline clauses in this module look. Without this, such a
   # node falls to the catch-all `compose_inline/2` and composes to an empty
   # string: the reader serves HTTP 200 and shows an empty bullet while the prose
   # sits on disk, unreported. Measured 2026-09-02 on the live corpus: 75 list
@@ -50,14 +58,6 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       node -> [node]
     end)
   end
-
-  # Tolerate scalar cells (a plain string where a list of inline nodes was
-  # expected — common in tables emitted by upstream converters that flatten
-  # text-only cells). Treat the scalar as a single text node so the cell
-  # renders as its string value instead of vanishing.
-  def compose_inline_children(s) when is_binary(s), do: [s]
-  def compose_inline_children(n) when is_number(n), do: [to_string(n)]
-  def compose_inline_children(_), do: []
 
   def compose_inline(%{"type" => "text"} = n, inside_link) do
     # Coerce a non-string `value` — a raw API/SDK/CLI mutate can persist a number
