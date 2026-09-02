@@ -37,11 +37,19 @@ defmodule BarkparkCloud.Web.Auth do
   """
   import Plug.Conn
 
+  require Logger
+
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.Authz
   alias BarkparkCloud.Accounts.TeamMembership
   alias BarkparkCloud.Notifications
   alias BarkparkCloud.Registry
+
+  # The roles the ladder actually ranks, read at COMPILE TIME from the one
+  # module that owns them (`TeamMembership.@ranks`, via `ranked_roles/0`) so a
+  # role added there arms `require_team_role/3`'s head guard in the same edit. A
+  # re-typed literal here would pin itself and silently refuse the new role.
+  @ranked_roles TeamMembership.ranked_roles()
 
   @doc """
   Require a valid USER session token. On success assigns `:current_user` and
@@ -442,9 +450,12 @@ defmodule BarkparkCloud.Web.Auth do
     * 404 if the user is NOT a member of that team (no existence leak — a
       non-member learns nothing about whether the team exists).
     * 403 if a member but below `min_role`.
+    * 403 for EVERY caller, owner included, if `min_role` is not a role the
+      ladder ranks — the second clause below the body. An unranked threshold is
+      a call-site bug and must narrow the gate, never widen it.
   """
   @spec require_team_role(Plug.Conn.t(), binary() | nil, String.t()) :: Plug.Conn.t()
-  def require_team_role(conn, team_id, min_role) do
+  def require_team_role(conn, team_id, min_role) when min_role in @ranked_roles do
     conn = require_user(conn, [])
 
     if conn.halted do
@@ -475,6 +486,38 @@ defmodule BarkparkCloud.Web.Auth do
           end
       end
     end
+  end
+
+  # UNRANKED `min_role` — a plural, a typo, a renamed role, a value threaded
+  # from config or a param. This clause exists because the comparison above
+  # carries BOTH sides of `TeamMembership.rank/1`'s 0 default, and the default is
+  # right on only one of them:
+  #
+  #   * HELD unranked     → `0 < rank(min_role)` is TRUE  → refused. Fail-CLOSED.
+  #   * REQUIRED unranked → `rank(held) < 0` is FALSE for every real member
+  #     (ranks are 1..3) → the `cond` fell through its `true ->` arm and ADMITTED.
+  #     Fail-OPEN: an intended-admin gate degraded to "any member of this team",
+  #     silently, with a 200 — on the team-membership surface itself (inviting,
+  #     revoking, re-roling, removing), where a tier collapse compounds.
+  #
+  # The remedy is HERE and not in `rank/1`: two callers
+  # (`Authz.can_grant?/3` and this function's held side) depend on an off-ladder
+  # role ranking 0 to fail CLOSED, so fail-closing the ladder itself would flip
+  # them the wrong way. Narrowing the REQUIRED side alone makes both directions
+  # of the same expression refuse.
+  #
+  # Refuse EVERY caller, owner included. A threshold nobody can name is a
+  # threshold nobody can satisfy: a gate nobody passes is a visible outage; a
+  # gate everybody passes is a silent privilege collapse. `Logger.error` because
+  # reaching this clause is a CALL-SITE bug, not a user error.
+  def require_team_role(conn, _team_id, min_role) do
+    Logger.error(
+      "require_team_role/3 refused every caller: min_role #{inspect(min_role)} is not a " <>
+        "ranked team role (#{inspect(@ranked_roles)}). Fix the call site — this gate " <>
+        "cannot be satisfied."
+    )
+
+    forbidden(conn, required: min_role, scope: "team")
   end
 
   @doc """

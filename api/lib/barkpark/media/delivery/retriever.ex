@@ -70,8 +70,41 @@ defmodule Barkpark.Media.Delivery.Retriever do
   # asset doc to this workspace's blob (barkpark-vmv1). A nil workspace_id
   # (unscoped path) leaves the workspace filter off (deliberate global read);
   # the `:shared_only` sentinel does NOT — see `join_scope_workspace/3`.
+  #
+  # The workspace MUST be forwarded into `resolve_read_dataset_id/2` too
+  # (barkpark-sknf). That resolver only falls back to the seeded Default
+  # project when the caller passed NO scope at all, and it detects "no scope"
+  # by the PRESENCE of a `:workspace_id` key. This call site used to build a
+  # fresh `[project_id: project_id]` list even though `workspace_id` was bound
+  # right here, so the guard was unreachable from here: a workspace-only read
+  # (the shape the flat routes produce — `DeriveWorkspaceFromToken` sets the
+  # workspace and nothing sets the project, so `ScopeHelpers.put_scope/3` drops
+  # `:project_id`) resolved the DEFAULT project's `dataset_id`, and
+  # `join_scope_dataset/3` applied it as `d.dataset_id == <Default's id> or
+  # (is_nil(d.dataset_id) and d.dataset == <slug>)` — which excludes this
+  # tenant's own non-NULL-dataset_id asset docs. Because that filter is
+  # NULL-tolerant and the doc binds through a LEFT JOIN, the blob rows survived
+  # and only their METADATA match was lost: media text search silently degraded
+  # to filename-only for every token-derived workspace. Same dropped keyword as
+  # the documents twin (`DocumentsRetriever.scope_to_dataset/4`, #14429), a
+  # milder blast radius, not a milder bug.
+  #
+  # The key is added ONLY when the workspace is actually present, mirroring
+  # `ScopeHelpers.scope_opts/1`, which drops an absent assign rather than
+  # emitting `workspace_id: nil`. Passing a nil workspace as a PRESENT key
+  # would make the guard fire for the genuinely-unscoped flat caller too,
+  # dropping it to the legacy `dataset` STRING and re-conflating same-named
+  # datasets across tenants (barkpark-y9ee). `is_binary/1` also leaves the
+  # `:shared_only` sentinel on today's Default-project resolution — that path's
+  # NULL-workspace rows are rescued by the NULL-tolerant `dataset_id` arm
+  # either way, and changing it is a separate call with its own proof.
   defp asset_doc_join_query(dataset, workspace_id, project_id) do
-    dataset_id = Barkpark.Content.resolve_read_dataset_id(dataset, project_id: project_id)
+    opts =
+      if is_binary(workspace_id),
+        do: [project_id: project_id, workspace_id: workspace_id],
+        else: [project_id: project_id]
+
+    dataset_id = Barkpark.Content.resolve_read_dataset_id(dataset, opts)
 
     Document
     |> where([d], d.type == ^@asset_type)

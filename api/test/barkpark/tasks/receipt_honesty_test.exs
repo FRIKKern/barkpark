@@ -56,10 +56,21 @@ defmodule Barkpark.Tasks.ReceiptHonestyTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # PDS-D291: one MET criterion keeps this file's `done` closes out of the
+  # close-artifact gate, which refuses a `done` close of a criteria-less
+  # kind:task row whose reason names no PR+sha and pastes no run. These
+  # tests measure the returned receipt and the fence, not the close reason.
+  # The stale-rev case matters most: the honesty gates run AHEAD of the rev
+  # CAS (D289 already does), so without a criterion that test would hear the
+  # artifact refusal instead of the `:stale_claim` it exists to pin.
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
       Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+        },
         content_extra
       )
 

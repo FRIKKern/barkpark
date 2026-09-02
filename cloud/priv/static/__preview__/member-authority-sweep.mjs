@@ -360,7 +360,13 @@ const PIN_MEMBER_SCENARIOS = 10;
 // is unmoved and PIN_MEMBER_SCENARIOS stays at 10 — the member arm of these
 // verbs is pinned in __app.test.mjs's cch-w38-s1 eleven-offer table, which
 // asserts both directions on all seven.
-const PIN_TOTAL_SCENARIOS = 119;
+// 119 -> 120 (cch-w29, PR #15265): `site-deploy-rail-live` — the first live-footer
+// deploy-rail fixture — joins the corpus so the W29 overflow leg has a scenario to
+// drive. RE-DERIVED by running this sweep and reading the number it PRINTED (the
+// corpus-size guard said "120 committed (pinned 119)"). It carries the same owner
+// actor `me("Acme Inc", …)` as every site-detail scenario, so the member slice is
+// unmoved and PIN_MEMBER_SCENARIOS stays at 10 (69 controls accounted).
+const PIN_TOTAL_SCENARIOS = 120;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

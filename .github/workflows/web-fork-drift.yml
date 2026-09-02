@@ -1,0 +1,81 @@
+name: web-fork-drift
+
+# NAMED-INVARIANT drift guard for the web/lib <-> templates/search-starter/lib
+# fork pair (search-template epic). templates/search-starter/lib was EXTRACTED
+# from web/lib and the two have drifted in BOTH directions with nothing watching
+# them: measured 2026-08-24 over 28 paired lib files — 11 identical, 14
+# diverged, 3 fork-only — and #3779/#3780/#3842 were still unpropagated five
+# weeks after the vendor.
+#
+# THIS EDGE WAS KNOWN AND DELIBERATELY LEFT UNWATCHED.
+# scripts/check-astro-finder-drift.sh's own header says, verbatim: "The web/lib
+# -> search-starter drift is a SEPARATE pre-existing backlog and is explicitly
+# out of scope here." That scope note became a permanent exemption. This
+# workflow is what ends it.
+#
+# WHY NOT BYTE-IDENTITY, unlike astro-finder-drift.yml and bp-graph-drift.yml:
+# those two guard copies that are meant to be VERBATIM. This pair is not — web/
+# is a fixed site, the template is a configurable scaffold, and several
+# divergences are correct (branding env vars, demo data, first-run UX,
+# fork-only feature modules, and a `fields=` ABSENCE on the web side that
+# scripts/preview-parity-check.sh part 2 separately ENFORCES). A byte-identity
+# gate here would red on its first run and be waived within a week. The script
+# carries a named-invariant list and an exemption list instead.
+#
+# ADVISORY, honestly labelled, with a named reader.
+# This name is NOT in .github/required-checks.json, so it gates nothing: it REDS
+# THE PR PAGE and nothing else. Putting a context on that list is a repo-settings
+# decision taken through scripts/required-checks-*.sh, never a side effect of
+# adding a workflow file. WHO IS EXPECTED TO READ IT: the author of any PR that
+# touches either tree — the paths filter below means the check only renders when
+# one of them changed, so a red here is always addressed to the person who just
+# changed the code — and the search-template lane lead on review. A repo where 41
+# of 55 workflows carry a push arm has plenty of advisory checks nobody watches;
+# this one is scoped so narrowly that its rendering IS the notification.
+#
+# NOTE ON REGISTRATION: this workflow carries a workflow-level `on: paths:`
+# filter, which structurally disqualifies it from branch protection today — a
+# required context that is ABSENT reports "expected" forever (honest-gates D18).
+# Promoting it would mean giving it a path-unfiltered arm first. That is a
+# separate decision and is deliberately not taken here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/lib/**"
+      - "web/__tests__/retry-after.test.ts"
+      - "templates/search-starter/lib/**"
+      - "scripts/check-web-fork-drift.sh"
+      - ".github/workflows/web-fork-drift.yml"
+  pull_request:
+    paths:
+      - "web/lib/**"
+      - "web/__tests__/retry-after.test.ts"
+      - "templates/search-starter/lib/**"
+      - "scripts/check-web-fork-drift.sh"
+      - ".github/workflows/web-fork-drift.yml"
+
+concurrency:
+  group: web-fork-drift-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  drift:
+    name: web <-> search-starter named invariants (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Prove the tripwire can fail before trusting that it passed. The selftest
+      # copies BOTH real trees into a temp dir, plants five violations across
+      # four invariants (including the INV-1 ratchet arm), asserts each plant
+      # actually changed its file, and asserts the report NAMES the file and the
+      # invariant. It also proves the exemption filter suppresses an identical
+      # violation inside an exempt file, that PAYING a debt reports PROMOTABLE
+      # rather than red, and that two empty lib directories trip the floor.
+      - name: Self-test the tripwire
+        run: bash scripts/check-web-fork-drift.sh --selftest
+
+      - name: Check named invariants
+        run: bash scripts/check-web-fork-drift.sh

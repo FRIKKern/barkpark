@@ -881,7 +881,16 @@ defmodule Barkpark.StudioChat do
   number of rows settled.
   """
   @spec settle_tool_rows(String.t()) :: non_neg_integer()
-  def settle_tool_rows(session_id) when is_binary(session_id) do
+  @spec settle_tool_rows(String.t(), map()) :: non_neg_integer()
+  def settle_tool_rows(session_id, stamp \\ %{"turn_settled" => true})
+
+  def settle_tool_rows(session_id, stamp) when is_binary(session_id) and is_map(stamp) do
+    # ONE jsonb `||` merge, not a per-key jsonb_set chain: the whole turn stamp
+    # (`turn_settled` + the fold facts) lands in the SAME UPDATE that the WHERE
+    # already fences to this turn's rows, so "stamped exactly once" is a
+    # property of the statement rather than of call ordering.
+    patch = Jason.encode!(Map.put(stamp, "turn_settled", true))
+
     {count, _} =
       Repo.update_all(
         from(m in Message,
@@ -892,8 +901,9 @@ defmodule Barkpark.StudioChat do
             set: [
               metadata:
                 fragment(
-                  "jsonb_set(coalesce(?, '{}'::jsonb), '{turn_settled}', 'true'::jsonb)",
-                  m.metadata
+                  "coalesce(?, '{}'::jsonb) || ?::jsonb",
+                  m.metadata,
+                  type(^patch, :string)
                 )
             ]
           ]
@@ -903,6 +913,57 @@ defmodule Barkpark.StudioChat do
 
     count
   end
+
+  @doc """
+  The ONE turn-settle stamp — the metadata patch that says WHEN a turn ran and
+  HOW it ended, built here so no surface re-derives it (task-8f904a88b9bc3d59).
+
+  The Recorder calls it at the terminal `result` frame and hands the result to
+  `settle_tool_rows/2` (the durable half, what a reconnect/replay reads back);
+  Studio's live mirror calls the SAME builder off the SAME result frame so the
+  live transcript and the reopened one carry byte-identical facts.
+
+  Facts in: `:started_at` (the turn's `system/init`, `nil` when the Recorder
+  never saw one), `:settled_at` (defaults to now), `:duration_ms` (the runtime's
+  own turn duration off the result frame — the FALLBACK when there is no
+  `started_at`), `:interrupted?`.
+
+  Facts out (all string-keyed, jsonb-ready): `turn_settled`, `turn_started_at`,
+  `turn_settled_at`, `turn_duration_ms`, `turn_outcome` (`"settled"` |
+  `"interrupted"`). An absent `started_at` is OMITTED rather than faked — the
+  duration still lands, so the fold label never goes blank.
+  """
+  @spec turn_settle_stamp(map()) :: map()
+  def turn_settle_stamp(facts) when is_map(facts) do
+    settled_at = Map.get(facts, :settled_at) || DateTime.utc_now()
+    started_at = Map.get(facts, :started_at)
+
+    %{
+      "turn_settled" => true,
+      "turn_started_at" => iso8601(started_at),
+      "turn_settled_at" => iso8601(settled_at),
+      "turn_duration_ms" =>
+        turn_duration_ms(started_at, settled_at, Map.get(facts, :duration_ms)),
+      "turn_outcome" =>
+        if(Map.get(facts, :interrupted?) == true, do: "interrupted", else: "settled")
+    }
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  # The turn's wall-clock span. The Recorder's own clock wins when it saw the
+  # turn start; otherwise the runtime's self-reported `duration_ms` off the
+  # result frame. Never negative (a clock step back reads 0, never a label
+  # saying the turn ended before it began).
+  defp turn_duration_ms(%DateTime{} = started_at, %DateTime{} = settled_at, _fallback) do
+    max(DateTime.diff(settled_at, started_at, :millisecond), 0)
+  end
+
+  defp turn_duration_ms(_started_at, _settled_at, ms) when is_integer(ms) and ms >= 0, do: ms
+  defp turn_duration_ms(_started_at, _settled_at, _fallback), do: 0
+
+  defp iso8601(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp iso8601(_), do: nil
 
   @doc """
   Replace the persisted `input` on a tool/todo row, matched by its metadata
@@ -2125,7 +2186,7 @@ defmodule Barkpark.StudioChat do
 
   @doc """
   Merge a patch into a needs-you row's metadata, keyed by `request_id` (charter
-  D49 — the plan-paper stamp seam). Reuses `find_approval/2` (already inclusive
+  D49 — the plan-paper stamp seam). Reuses `get_needs_you_message/2` (already inclusive
   of the `"plan"` role) + `Map.merge` + `Repo.update`, so the row's existing
   metadata (request_id, tool_name, input, approval_status, …) is preserved and
   only the patched keys are added/overwritten.
@@ -2139,7 +2200,7 @@ defmodule Barkpark.StudioChat do
           {:ok, Message.t()} | {:error, term()} | :noop
   def merge_approval_metadata(session_id, request_id, patch)
       when is_binary(session_id) and is_binary(request_id) and is_map(patch) do
-    case find_approval(session_id, request_id) do
+    case get_needs_you_message(session_id, request_id) do
       nil ->
         :noop
 
@@ -2150,10 +2211,21 @@ defmodule Barkpark.StudioChat do
     end
   end
 
-  # The needs-you message (approval | question | plan) for a request_id (unique
-  # per ask). Newest wins if a request_id were ever reused; never raises on 0/N
-  # rows.
-  defp find_approval(session_id, request_id) do
+  @doc """
+  The needs-you message (approval | question | plan) for a `request_id` (unique
+  per ask), or `nil`. Newest wins if a request_id were ever reused; never raises
+  on 0/N rows.
+
+  PUBLIC because the row is the SERVER-HELD truth about an ask, and the D49
+  plan-paper projection (`Barkpark.StudioChat.PlanPapers.publish_approved_plan/3`)
+  must read it from a surface that has no socket to read from — the flat
+  `/v1/chat` transport. One reader, one query: a second copy of this predicate is
+  exactly the fork that let the Studio LiveView and the transport disagree about
+  what an approved plan is.
+  """
+  @spec get_needs_you_message(String.t(), String.t()) :: Message.t() | nil
+  def get_needs_you_message(session_id, request_id)
+      when is_binary(session_id) and is_binary(request_id) do
     Message
     |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
     |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))

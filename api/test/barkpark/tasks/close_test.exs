@@ -54,8 +54,28 @@ defmodule Barkpark.Tasks.CloseTest do
     :ok
   end
 
+  # PDS-D291 (the close-artifact gate): the base fixture carries ONE MET
+  # acceptance criterion. Not decoration — without it every `done` close in this
+  # file would trip the new gate, which refuses a `done` close of a kind:task row
+  # with ZERO criteria whose reason names no PR+sha and pastes no run. These
+  # tests are about the fencing epoch, the holder gate, the work digest, the land
+  # digest and the reason field; a met criterion keeps each of them measuring
+  # THAT and nothing else. Every criteria-specific test below already passes its
+  # own `acceptance_criteria` through `content_extra`, which wins the merge, so
+  # this default is invisible to them — and the two tests that genuinely need a
+  # criteria-less row opt out with `"acceptance_criteria" => []` and say why.
+  @fixture_criterion [%{"criterion" => "the fixture is closeable", "met" => true}]
+
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "acceptance_criteria" => @fixture_criterion
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -1655,13 +1675,21 @@ defmodule Barkpark.Tasks.CloseTest do
       refute Map.has_key?(closed.content, "close_override")
     end
 
+    # D289 has nothing to measure here, and that is the whole point: it answers
+    # `{:ok, nil}` VACUOUSLY. PDS-D291 is what now stands in that gap, so the
+    # close needs an artifact in its reason — the row is closed by naming the PR
+    # and sha, not by saying "done". Opts out of the fixture criterion on purpose.
     test "a task with NO acceptance criteria is unaffected", %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
-      task = mk_task!(uniq("crit-gate-none"), scope)
+      task = mk_task!(uniq("crit-gate-none"), scope, %{"acceptance_criteria" => []})
 
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 reason: "landed #14383 @ 63b89bef30"
+               )
 
       assert closed.content["lifecycle_status"] == "done"
     end
@@ -1814,6 +1842,186 @@ defmodule Barkpark.Tasks.CloseTest do
                )
 
       assert closed.content["lifecycle_status"] == "done"
+    end
+  end
+
+  # ─── TEXT-KEYED CRITERIA — the authoring rubric shape (gh-2314) ──────────
+  #
+  # The defect this closes: `bp task get` prints acceptance criteria as
+  # `{"criterion": …, "met": …, "evidence": …}`, and until now a close could
+  # only address them as `{"index": N, …}`. An agent had to translate the rubric
+  # it had just read into 0-based indices by hand — and when it got that wrong,
+  # its only recourse was to mutate the published document directly.
+  #
+  # These tests pin the resolution law: exactly one exact-text match resolves;
+  # zero and many are NAMED refusals that write nothing. Resolution happens
+  # inside the close's own transaction, so a text-keyed close is atomic in the
+  # same sense an indexed one is.
+  describe "close/3 — :criteria option (text-keyed rubric rows)" do
+    @rubric [
+      %{"criterion" => "the reader survives a nil workspace", "met" => false},
+      %{"criterion" => "the 500 is gone", "met" => false}
+    ]
+
+    test "a rubric row with no index resolves by exact text and flips that row only",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-text-happy"), scope, %{"acceptance_criteria" => @rubric})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 # D289 measures the doc AS READ, so this close still needs a
+                 # recorded reason — unchanged by the new shape.
+                 criteria_override: "text-keyed merge under test, not criteria proof",
+                 criteria: [
+                   %{
+                     "criterion" => "the 500 is gone",
+                     "met" => true,
+                     "evidence" => "PR #14349 + controller test"
+                   }
+                 ]
+               )
+
+      [first, second] = closed.content["acceptance_criteria"]
+
+      # The SECOND row is the one that carried that wording — resolution is by
+      # text, not by position, and a 0-based-by-habit reader would have hit the
+      # first.
+      assert second["met"] == true
+      assert second["evidence"] == "PR #14349 + controller test"
+      assert second["criterion"] == "the 500 is gone"
+      # The untargeted row is byte-identical: no reordering, no rewriting.
+      assert first == %{"criterion" => "the reader survives a nil workspace", "met" => false}
+    end
+
+    test "the whole rubric can be pasted back — mixed met values, one write", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-text-whole"), scope, %{"acceptance_criteria" => @rubric})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "blocked",
+                 criteria: [
+                   %{
+                     "criterion" => "the reader survives a nil workspace",
+                     "met" => true,
+                     "evidence" => "close_test: nil-workspace read"
+                   },
+                   %{"criterion" => "the 500 is gone", "met" => false}
+                 ]
+               )
+
+      assert [
+               %{"met" => true, "evidence" => "close_test: nil-workspace read"},
+               %{"met" => false}
+             ] = closed.content["acceptance_criteria"]
+
+      assert closed.content["lifecycle_status"] == "blocked"
+    end
+
+    test "a text that matches NO stored row is refused and writes nothing", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-text-missing"), scope, %{"acceptance_criteria" => @rubric})
+
+      assert {:error, :criterion_not_found} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{
+                     # One character off — the match is EXACT on purpose.
+                     "criterion" => "the 500 is gone.",
+                     "met" => true,
+                     "evidence" => "close-time proof"
+                   }
+                 ]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.rev == task.rev, "a refused resolution is not a partial write"
+      assert reloaded.content["lifecycle_status"] == "open"
+      assert reloaded.content["acceptance_criteria"] == @rubric
+    end
+
+    test "two rows sharing one wording are AMBIGUOUS — refused, never guessed",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      dupes = [
+        %{"criterion" => "ships with a test", "met" => false},
+        %{"criterion" => "ships with a test", "met" => false}
+      ]
+
+      task = mk_task!(uniq("crit-text-dupe"), scope, %{"acceptance_criteria" => dupes})
+
+      assert {:error, :criterion_ambiguous} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{"criterion" => "ships with a test", "met" => true, "evidence" => "proof"}
+                 ]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.rev == task.rev
+      assert reloaded.content["acceptance_criteria"] == dupes
+
+      # The indexed shape is the documented way through an ambiguity: it says
+      # WHICH row, and its text guard still has to match.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria_override: "disambiguation under test",
+                 criteria: [
+                   %{
+                     "index" => 1,
+                     "criterion" => "ships with a test",
+                     "met" => true,
+                     "evidence" => "proof"
+                   }
+                 ]
+               )
+
+      assert [%{"met" => false}, %{"met" => true, "evidence" => "proof"}] =
+               closed.content["acceptance_criteria"]
+    end
+
+    test "a text-keyed met-flip is guarded BY CONSTRUCTION — the text is the CAS",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-text-guard"), scope, %{"acceptance_criteria" => @rubric})
+
+      # The D56 refusal (:criterion_text_required) exists for an index with no
+      # text. A text-keyed entry can never be in that state — it resolved BY the
+      # text — so the same flip that 409s as `{"index":1,"met":true}` lands here.
+      assert {:error, :criterion_text_required} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "met" => true, "evidence" => "no text"}]
+               )
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria_override: "guard-by-construction under test",
+                 criteria: [
+                   %{"criterion" => "the 500 is gone", "met" => true, "evidence" => "no index"}
+                 ]
+               )
+
+      assert [_, %{"met" => true, "evidence" => "no index"}] =
+               closed.content["acceptance_criteria"]
     end
   end
 end

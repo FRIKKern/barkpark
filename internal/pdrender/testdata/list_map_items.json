@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "lm-1",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        { "content": [{ "type": "text", "value": "map item with content" }] },
+        {
+          "content": [
+            { "type": "text", "value": "map item with a " },
+            { "type": "strong", "children": [{ "type": "text", "value": "mark" }] }
+          ]
+        },
+        { "text": "map item with only text" },
+        ["plain inline-array item"],
+        "bare string item"
+      ]
+    },
+    {
+      "id": "lm-2",
+      "type": "ordered-list",
+      "items": [
+        { "content": [{ "type": "text", "value": "first ordered map item" }] },
+        { "content": [{ "type": "text", "value": "second ordered map item" }] }
+      ]
+    }
+  ]
+}

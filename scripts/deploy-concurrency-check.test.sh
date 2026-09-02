@@ -310,6 +310,62 @@ expect_step "workflow_dispatch targets=both, anchor already covers -> both true,
 expect_step "workflow_dispatch targets=auto, anchor already covers -> NOT covered, the path diff decides" \
   "false true RAN rc=0" workflow_dispatch "$SHA_B" "$SHA_C" auto
 
+
+echo "── PART C: the main-run gate (scripts/main-run-concurrency-check.sh) ──────"
+MGATE="$REPO_ROOT/scripts/main-run-concurrency-check.sh"
+[ -f "$MGATE" ] || { echo "HARNESS-UNAVAILABLE: $MGATE missing" >&2; exit 2; }
+# expect_mrc <label> <want-rc> <targets…>
+expect_mrc() {
+  local label="$1" want="$2"; shift 2
+  local got=0 out
+  out="$(MAIN_CONCURRENCY_TARGETS="$*" bash "$MGATE" 2>&1)" || got=$?
+  if [ "$got" -eq "$want" ]; then ok "$label (rc=$got)"; else bad "$label — wanted rc=$want, got rc=$got" "$(printf '%s' "$out" | grep -E '^FAIL|HARNESS' | head -2 | tr '\n' ' ')"; fi
+}
+# C1 — the LIVE workflows. If this ever reds, the fix regressed on main.
+expect_mrc "C1 live elixir.yml + doc-gates.yml keep one group per main sha" 0 \
+  "$REPO_ROOT/.github/workflows/elixir.yml" "$REPO_ROOT/.github/workflows/doc-gates.yml"
+# C2 — THE RED-BEFORE. Verbatim the stanza both workflows carried on main before
+# this fix: per-REF group, never-cancel-main guard. 37 of 40 main runs since
+# 10:27Z on 2026-09-02 were cancelled under it.
+cat > "$TMP/c2.yml" <<'YML'
+name: elixir
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: elixir-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+YML
+expect_mrc "C2 the pre-fix per-ref main group REDS" 1 "$TMP/c2.yml"
+# C3 — per-sha on main but a bare cancel-in-progress:true — never-cancel-main
+# is the other half; a RUNNING main run must not be killed either.
+sed 's/cancel-in-progress: .*/cancel-in-progress: true/; s/group: .*/group: elixir-${{ github.ref == '"'"'refs\/heads\/main'"'"' \&\& github.sha || github.ref }}/' "$TMP/c2.yml" > "$TMP/c3.yml"
+expect_mrc "C3 per-sha group + bare cancel-in-progress:true REDS" 1 "$TMP/c3.yml"
+# C4 — per-sha on main with the literal false is also accepted (the deploy shape).
+sed 's/cancel-in-progress: .*/cancel-in-progress: false/' "$TMP/c3.yml" > "$TMP/c4.yml"
+expect_mrc "C4 per-sha group + literal false is accepted" 0 "$TMP/c4.yml"
+# C5 — mentions github.sha but with NO main condition: a per-sha group on PR
+# refs too would stop superseding pushes on a branch; the property is per-sha
+# ON MAIN, and the expression must say so.
+sed 's/group: .*/group: elixir-${{ github.sha }}/' "$TMP/c4.yml" > "$TMP/c5.yml"
+expect_mrc "C5 github.sha without a refs\/heads\/main condition REDS" 1 "$TMP/c5.yml"
+# C6 — no concurrency block at all: an absence is not a decision (rc 2).
+grep -v -E '^concurrency:|^  group:|^  cancel-in-progress:' "$TMP/c4.yml" > "$TMP/c6.yml"
+expect_mrc "C6 no concurrency block cannot be measured" 2 "$TMP/c6.yml"
+# C7 — one good file and one bad file: the verdict is the worst one (rc 1).
+expect_mrc "C7 a green file does not launder a red sibling" 1 "$TMP/c4.yml" "$TMP/c2.yml"
+# C8 — a missing target is a refusal, never a pass.
+expect_mrc "C8 a missing target is rc 2" 2 "$TMP/does-not-exist.yml"
+# C9 — the terminal refusal on a stray argument.
+got=0; bash "$MGATE" --bogus >/dev/null 2>&1 || got=$?
+if [ "$got" -eq 2 ]; then ok "C9 unknown argument is rc 2 (rc=$got)"; else bad "C9 unknown argument — wanted rc=2, got rc=$got"; fi
+
 echo ""
 printf 'deploy-concurrency-check.test.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 if [ "$PASS" -eq 0 ]; then

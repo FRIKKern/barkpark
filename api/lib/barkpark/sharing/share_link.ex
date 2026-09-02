@@ -12,6 +12,20 @@ defmodule Barkpark.Sharing.ShareLink do
   working access to the bound item, so every such path must be authorised
   BEFORE it serialises. Revocation/expiry are enforced in the resolve query, so
   a dead link is indistinguishable from a missing one.
+
+  EVERY ROW IS BOUND TO A TENANT SCOPE — `workspace_id` AND `project_id` are
+  `validate_required` (`task-2da739b78e938be0`). Both columns are NULLABLE in
+  the table and the changeset used to require NEITHER, so a row bound to no
+  project was persistable. Such a row is not a sibling-scope survivor: it
+  matches NO `(workspace_id, project_id, dataset)` triple, so
+  `Barkpark.Sharing.Links.revoke_scope/3` — the cascade `Sharing.remove_share/3`
+  fires when an operator withdraws a section share — CANNOT reach it, and it
+  outlives every revocation an operator can perform on the scope it appears to
+  belong to. The rule lives HERE, at the one changeset both mint doors cross,
+  rather than at either door: the HTTP mint (`ShareLinkController.mint/2`)
+  resolves a `%Tenancy.Project{}` before it builds attrs and so never produced
+  one, while the Studio mint builds `project_id` as
+  `socket.assigns[:current_project] && …` and had nothing pinning it non-nil.
   """
   use Ecto.Schema
 
@@ -63,7 +77,15 @@ defmodule Barkpark.Sharing.ShareLink do
   def changeset(link, attrs) do
     link
     |> cast(attrs, @fields)
-    |> validate_required([:token_hash, :dataset, :kind, :ref_id, :access])
+    |> validate_required([
+      :token_hash,
+      :workspace_id,
+      :project_id,
+      :dataset,
+      :kind,
+      :ref_id,
+      :access
+    ])
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:access, @accesses)
     |> unique_constraint(:token_hash)

@@ -86,6 +86,17 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
   # mount/handle_params and NEVER taken from the message payload, so none can
   # name another tenant's row the way the by-id `handle_event` clauses could
   # (that is `tenancy_permits?/2`'s job, PR #14593).
+  #
+  # `{:claude_chat_task_hands, verdict}` (task-token renewal) is classified
+  # `:no_write`: its whole body is
+  # `assign(socket, readiness: readiness_for_hands(verdict))` — a pure atom→atom
+  # map into assigns, no Content/StudioChat call on the path. It is driven by a
+  # run in chat_live_test.exs ("a renewal that lands mid-session flips the card
+  # in place"), which sends both `:rearmed` and `:expired` to a live socket.
+  #
+  # 44 -> 43: `:turn_tick` left when the turn clock moved into the browser
+  # (Hooks.ChatElapsed). It was a `:no_write` head — assigns only — so nothing
+  # in this list changes with it.
   @chat_write_heads [
     # ensure_session → StudioChat.create_session; persist_user_message →
     # persist_store → StudioChat.append_message

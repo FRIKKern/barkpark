@@ -422,6 +422,35 @@ defmodule BarkparkWeb.TasksController.Params do
   # it). Checked against the RAW docs — the same inputs the render saw — so
   # the predicate can never drift from what actually got cut. Full view never
   # truncates, so it never carries the line.
+  @doc """
+  The `page` block every `/v1/tasks` list envelope carries: the window the
+  server actually served.
+
+  `has_more` is deliberately the CHEAP predicate `returned == limit` and not a
+  `COUNT(*)`. This whole change exists because one unbounded read over
+  `documents` was expensive; paying for a second scan just to narrate the first
+  would reintroduce the cost under a new name. The predicate is exact in the
+  direction that matters — `returned < limit` PROVES the page is the last one —
+  and over-reports only on an exactly-full final page, which tells a caller to
+  look again and find nothing. A reader that needs an exact total asks for one
+  (`bp task ls --all`, which pages by offset with a lookahead anchor).
+
+  `limit` is the EFFECTIVE limit after clamping, so `?limit=5000` reports 1000:
+  the number the caller asked for is not the number they got, and this field is
+  about what they got.
+  """
+  def page_meta(docs, page_opts) when is_list(docs) do
+    limit = Keyword.fetch!(page_opts, :limit)
+    returned = length(docs)
+
+    %{
+      limit: limit,
+      offset: Keyword.fetch!(page_opts, :offset),
+      returned: returned,
+      has_more: returned == limit
+    }
+  end
+
   def maybe_put_brief_truncation_help(base, _docs, :full), do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
@@ -936,7 +965,10 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|every criteria entry with met=true must carry its "criterion" — the exact stored wording — e.g. | <>
         ~s|--set 'criteria:=[{"index":0,"met":true,"evidence":"…","criterion":"<acceptance_criteria[0].criterion, verbatim>"}]'. | <>
-        ~s|The 0-BASED index alone is unverifiable and can flip a neighbouring criterion. An entry with met=false needs no text.|
+        ~s|The 0-BASED index alone is unverifiable and can flip a neighbouring criterion. An entry with met=false needs no text. | <>
+        ~s|Or drop the index entirely and send the rubric row as `bp task get` prints it — | <>
+        ~s|--set 'criteria:=[{"criterion":"<the exact stored wording>","met":true,"evidence":"…"}]' — | <>
+        ~s|which resolves the row by that text (and then needs non-empty evidence).|
 
   # The MERGE-GATE refusal (cch-w49 / cch-w19). This message is load-bearing in
   # BOTH directions and each clause was asked for by a task row: it must name
@@ -979,11 +1011,53 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|If you meant to record a failed attempt on it, that is --miss --note "…". Check the index: | <>
         ~s|--criterion N is 0-BASED, so the first criterion is 0.|
 
+  # ─── The landing mark's two PERMIT refusals (task-59fe7b40b719b379) ───────
+  #
+  # `landed` is the one criteria write with no holder behind it, so its guards
+  # are the only thing standing between a CI token and a fabricated done. Both
+  # messages therefore have to name the STRUCTURAL fix, not just the wall:
+  # `merge_gate: true` on the row is what makes a landing mark able to seal it,
+  # and a human stamp is what a non-merge row still needs.
+  def criteria_hint(:criterion_not_merge_shaped, :landed),
+    do:
+      ~s|`landed` may only flip a merge-shaped criterion — one the lead seals when the PR merges. | <>
+        ~s|That row is not: it carries no "merge_gate": true, and its wording says nothing about being merge-gated | <>
+        ~s|or about a PR being merged to main. Nothing was written (the flip and the landing sentence ride one CAS). | <>
+        ~s|A criterion proven by WORK is stamped by whoever did the work — `bp task stamp <id> <worker> <epoch> | <>
+        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If this row really is the lead's merge gate, | <>
+        ~s|mark it "merge_gate": true on the criterion and the landing mark will seal it. | <>
+        ~s|Re-run without --criterion to record the landing sentence alone.|
+
+  def criteria_hint(:criterion_already_met, :landed),
+    do:
+      ~s|that criterion is already met, and `landed` NEVER overwrites a met criterion — the stored evidence is | <>
+        ~s|somebody's proof, and replacing it with a merge notice would erase the proof and leave the notice. | <>
+        ~s|Nothing was written. The landing sentence itself still lands: re-run without --criterion.|
+
   def criteria_hint(:criteria_mismatch, _surface),
     do:
       ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>
         ~s|— it is 0-BASED, the FIRST criterion is 0 — or the list changed since you read it. Nothing was written. | <>
         ~s|Re-read `bp task get <id>` and pass the index and the wording of the SAME row.|
+
+  # The TEXT-KEYED resolution refusals (gh-2314). Both are the same law as the
+  # D56 hints above — a text-keyed entry resolves to exactly one row or to
+  # nothing at all, because guessing between candidates is the silent-neighbour
+  # bug wearing a different hat.
+  def criteria_hint(:criterion_not_found, _surface),
+    do:
+      ~s|no acceptance criterion has that exact wording, so there is no row to update. Nothing was written. | <>
+        ~s|The match is EXACT — whitespace and punctuation included — so copy the text verbatim from | <>
+        ~s|`bp task get <id>` at acceptance_criteria[].criterion rather than retyping it. If the wording | <>
+        ~s|itself changed since you read the task, re-read it first.|
+
+  def criteria_hint(:criterion_ambiguous, _surface),
+    do:
+      ~s|two or more acceptance criteria share that exact wording, so keying by text cannot say which row | <>
+        ~s|you mean, and picking one would flip a criterion you did not name. Nothing was written. | <>
+        ~s|Use the indexed shape for these rows instead: | <>
+        ~s|--set 'criteria:=[{"index":<N>,"met":true,"evidence":"…","criterion":"<the same wording>"}]' | <>
+        ~s|(the index is 0-BASED — the FIRST criterion is 0).|
 
   def criteria_hint(:criteria_index_out_of_range, _surface),
     do:
@@ -1025,6 +1099,24 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|To close anyway, on the record: --set ack_override="<why the reporter is not being told>". | <>
         ~s|criteria_override does NOT discharge this: they are different admissions.|
 
+  # The CLOSE ARTIFACT refusal (PDS-D291). The hint QUOTES the ruling, because the
+  # ruling is the whole content of the refusal: without it the caller reads
+  # "needs an artifact" as a formatting nit rather than as "this is not done".
+  # It must also name the honest exit the ruling itself names (add criteria, or
+  # cancel) BEFORE the override, so the override is the third choice and not the
+  # first — reflexive overriding is what emptied `criteria_override` of meaning.
+  def criteria_hint(:close_reason_needs_artifact, :close),
+    do:
+      ~s|this row carries ZERO acceptance criteria, and main ruled (task-ce0c0ffff6edde23, 2026-09-02): | <>
+        ~s|"a row with ZERO acceptance criteria may close done only when its close_reason names the merged PR | <>
+        ~s|number + sha (or the run output) that discharged its title; if no such artifact exists it is NOT done | <>
+        ~s|— add criteria or cancel with the reason. A merge condition written only in prose does not bind." | <>
+        ~s|So: put the artifact IN the reason — a PR number AND its sha (e.g. "landed #14383 @ 63b89bef30") or a | <>
+        ~s|pasted run (a ``` fence, or a line starting with "$ ") — or add the acceptance criteria this row should | <>
+        ~s|have carried and stamp them, or close it `cancelled` with the reason. Goals, decisions and rows with | <>
+        ~s|children are exempt. To close done anyway, on the record: --set close_reason_override="<why it is done | <>
+        ~s|with no artifact>".|
+
   def criteria_hint({:sentinel_worker_id, worker}, _surface),
     do:
       ~s|"#{worker}" is not a worker id — it is a missing value wearing a worker's clothes (empty, "None", | <>
@@ -1053,6 +1145,51 @@ defmodule BarkparkWeb.TasksController.Params do
   #
   # help[] is ADDITIVE — a sibling of the existing envelope fields (the
   # `warnings:` precedent on close_response/1), never a rename or removal.
+  # The SAME default `Barkpark.Tasks.TtlSweeper` reaps on
+  # (`@default_ttl_seconds` there, `:task_lease_ttl_seconds` in config). Kept in
+  # sync by the conn test that asserts the claim receipt's `seconds` equals the
+  # configured value — a drift between the number the sweeper enforces and the
+  # number the receipt promises is the whole defect this closes.
+  @default_lease_ttl_seconds 2700
+
+  # ─── The lease a claim/pulse just granted (claim-lease, wave 27) ─────────
+  #
+  # A claim IS a lease, and every receipt described it EXCEPT its duration. The
+  # epoch rode the envelope, help[] rode the envelope, the expiry rode nothing —
+  # it lived only in `TtlSweeper`'s TTL constant and in `content.claim.ts_iso`,
+  # two facts a caller would have to join by reading server source. So a lead
+  # who claimed four rows and dispatched builders learned the lease length by
+  # watching one lapse 29s before its PR opened: the pr-task-gate refused the
+  # PR and `bp task next` handed the sibling row to a second lead mid-build.
+  #
+  # This computes that join ONCE, server-side, where both halves are already in
+  # hand, and rides the 2xx envelope as an ADDITIVE top-level `lease` (the
+  # `help:` precedent — a sibling field, never a rename). It is DERIVED, never
+  # stored: `TtlSweeper.sweep/1` reaps on `now - ttl > ts_iso`, so the expiry a
+  # caller is told is exactly the boundary the sweeper will apply, and a TTL
+  # config change moves both at once. nil when the row carries no parseable
+  # `claim.ts_iso` — a receipt that guessed an expiry would be this same defect
+  # wearing a fix's clothes, and the bp CLI prints nothing when the field is
+  # absent (internal/cli/tasks_lease.go).
+  #
+  # RENEWAL: claim (renewal path), re-claim and pulse all refresh `ts_iso`, so
+  # the same function describes the lease after a heartbeat with no special case.
+  def claim_lease(%Document{} = doc) do
+    ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, @default_lease_ttl_seconds)
+
+    with ts when is_binary(ts) <- get_in(doc.content || %{}, ["claim", "ts_iso"]),
+         {:ok, granted, _} <- DateTime.from_iso8601(ts) do
+      %{
+        granted_at: DateTime.to_iso8601(granted),
+        expires_at: granted |> DateTime.add(ttl, :second) |> DateTime.to_iso8601(),
+        seconds: ttl,
+        minutes: div(ttl, 60)
+      }
+    else
+      _ -> nil
+    end
+  end
+
   def mutation_help(verb, %Document{} = doc, worker) do
     id = strip_draft_prefix(doc.doc_id)
     epoch = get_in(doc.content || %{}, ["claim", "epoch"])
@@ -1093,11 +1230,53 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # ─── Acceptance-criteria close-out (living-values §8/§9) ─────────────────
 
-  # Parses the optional close-body `criteria` list: each update targets one
-  # acceptance_criteria row by index and flips met/evidence — SHAPE-only
-  # validation here (pure); state conflicts (index out of range, criterion
-  # guard mismatch) are the close transaction's to detect under its lock.
-  # Returns {:ok, updates} or {:error, :invalid_criteria, msg} (→ 400).
+  # Parses the optional close-body `criteria` list: each update targets ONE
+  # acceptance_criteria row and flips met/evidence — SHAPE-only validation here
+  # (pure); state conflicts (index out of range, criterion guard mismatch, a
+  # text that resolves to zero or many rows) are the close transaction's to
+  # detect under its lock. Returns {:ok, updates} or {:error, :invalid_criteria,
+  # msg} (→ 400).
+  #
+  # ─── THE CLOSE INPUT CONTRACT (gh-2314) ─────────────────────────────────
+  #
+  # An entry names its row in one of two dialects, and ONE COMMAND SPEAKS ONE
+  # DIALECT:
+  #
+  #   1. INDEXED (guarded)  `{"index": N, "met"?: bool, "evidence"?: str,
+  #                           "criterion"?: str}`
+  #      N is 0-based. `met: true` REQUIRES a non-empty `criterion` equal to the
+  #      stored wording at N (D56 — an unguarded index flips a neighbour in
+  #      silence). Unchanged, byte for byte: every existing caller keeps working.
+  #
+  #   2. TEXT-KEYED  `{"criterion": "<the exact stored wording>", "met"?: bool,
+  #                    "evidence"?: str}` — NO index.
+  #      This is the AUTHORING rubric shape: the row as `bp task get` prints it.
+  #      The server resolves the index by exact match inside the close's own
+  #      transaction (`Tasks.Internal.merge_criteria/2`).
+  #
+  # NORMALIZATION. A text-keyed entry becomes the indexed+guarded entry it
+  # resolves to, then follows the identical path — same CAS, same rev, same
+  # atomicity. There is no second write path and no second set of semantics.
+  #
+  # DUPLICATES. Resolution refuses rather than guesses: no stored row with that
+  # exact wording → 409 `criterion_not_found`; two or more → 409
+  # `criterion_ambiguous` (pass `"index"` to disambiguate). Nothing is written.
+  #
+  # ABSENT EVIDENCE. A text-keyed `met: true` REQUIRES a non-empty `evidence`
+  # string (400 here, before any transaction). Rationale: the indexed dialect
+  # pays for its met-flip with the text guard, and for the text-keyed dialect
+  # that guard is free (the text IS the key) — so without this the NEW door
+  # would be the cheapest way in the system to flip a lock. It also costs an
+  # honest caller nothing: a rubric row read back from the document already
+  # carries its evidence. (The indexed dialect's evidence stays presence-
+  # sensitive — omitted preserves, `""` clears — so no existing close changes
+  # behaviour.)
+  #
+  # MIXED SHAPES ARE REJECTED. A list mixing indexed and text-keyed entries is a
+  # 400: the two dialects resolve rows by different keys, and interleaving them
+  # makes "which row did entry 3 hit?" unanswerable from the request alone. An
+  # entry carrying BOTH `index` and `criterion` is NOT mixed — that is dialect 1
+  # with its mandatory guard.
   def parse_criteria(nil), do: {:ok, []}
 
   def parse_criteria(list) when is_list(list) do
@@ -1109,7 +1288,7 @@ defmodule BarkparkWeb.TasksController.Params do
       end
     end)
     |> case do
-      {:ok, updates} -> {:ok, Enum.reverse(updates)}
+      {:ok, updates} -> updates |> Enum.reverse() |> check_criteria_dialect()
       other -> other
     end
   end
@@ -1117,7 +1296,25 @@ defmodule BarkparkWeb.TasksController.Params do
   def parse_criteria(_other),
     do:
       {:error, :invalid_criteria,
-       "criteria must be a list of {index, met, evidence, criterion} objects"}
+       "criteria must be a list of {index, met, evidence, criterion} objects, " <>
+         "or of text-keyed {criterion, met, evidence} rubric rows"}
+
+  # One dialect per command — see MIXED SHAPES above.
+  defp check_criteria_dialect(updates) do
+    {indexed, text_keyed} = Enum.split_with(updates, &Map.has_key?(&1, "index"))
+
+    if indexed != [] and text_keyed != [] do
+      {:error, :invalid_criteria,
+       "criteria mixes two shapes in one command: #{length(indexed)} indexed " <>
+         "{index,…} entr#{if length(indexed) == 1, do: "y", else: "ies"} and " <>
+         "#{length(text_keyed)} text-keyed {criterion,…} entr#{if length(text_keyed) == 1, do: "y", else: "ies"}. " <>
+         "Pick one: give EVERY entry an \"index\" (0-based, with \"criterion\" as the text guard on any " <>
+         "met=true), or give NO entry an index and key every row by its exact stored \"criterion\" wording. " <>
+         "Nothing was written."}
+    else
+      {:ok, updates}
+    end
+  end
 
   defp parse_criteria_entry(%{"index" => index} = entry) when is_integer(index) and index >= 0 do
     met = Map.get(entry, "met", true)
@@ -1145,8 +1342,41 @@ defmodule BarkparkWeb.TasksController.Params do
     end
   end
 
+  # Dialect 2 — the AUTHORING rubric row, keyed by its exact stored wording.
+  # Shape-only here; the text→index resolution (and its not-found / ambiguous
+  # refusals) belongs to the close transaction, which is the only place that can
+  # read the stored list under the lock.
+  defp parse_criteria_entry(%{"criterion" => criterion} = entry)
+       when is_binary(criterion) and criterion != "" and not is_map_key(entry, "index") do
+    met = Map.get(entry, "met", true)
+    evidence = Map.get(entry, "evidence")
+
+    cond do
+      not is_boolean(met) ->
+        {:error, "criteria[].met must be a boolean when set"}
+
+      not (is_nil(evidence) or is_binary(evidence)) ->
+        {:error, "criteria[].evidence must be a string when set"}
+
+      met == true and not (is_binary(evidence) and String.trim(evidence) != "") ->
+        {:error,
+         "a text-keyed criteria entry with met=true must carry non-empty \"evidence\" — " <>
+           "evidence or nothing. (The {index,…} shape guards a met-flip with its \"criterion\" " <>
+           "text; the text-keyed shape gets that guard for free, so it pays with proof instead. " <>
+           "A rubric row read back from `bp task get` already has its evidence.) Nothing was written."}
+
+      true ->
+        update = %{"criterion" => criterion, "met" => met}
+        {:ok, if(is_binary(evidence), do: Map.put(update, "evidence", evidence), else: update)}
+    end
+  end
+
   defp parse_criteria_entry(_other),
-    do: {:error, "each criteria entry needs an integer index >= 0"}
+    do:
+      {:error,
+       "each criteria entry needs EITHER an integer \"index\" >= 0 (0-based, with \"criterion\" as " <>
+         "the text guard on any met=true) OR a non-empty \"criterion\" naming its row by the exact " <>
+         "stored wording — the rubric shape `bp task get` prints. One shape per command."}
 
   # ─── Mid-claim criterion stamp (expressive-agent-loops D8) ───────────────
 
@@ -1209,6 +1439,83 @@ defmodule BarkparkWeb.TasksController.Params do
       end
     end
   end
+
+  @landed_criterion_msg "criterion must be a non-negative integer index into acceptance_criteria " <>
+                          "(0-BASED — the FIRST criterion is 0). Omit it to record the landing " <>
+                          "sentence without flipping anything."
+
+  @doc """
+  Parses the OPTIONAL `criterion` index off a landing mark. Absent / `nil` /
+  blank means "record the sentence, flip nothing" — the default shape — so it
+  is `{:ok, nil}`, not an error. Anything present must be a non-negative
+  integer (JSON body int, or the manifest flag's query-string spelling).
+
+  SHAPE only (→ 400). Whether the index RESOLVES, whether that row is
+  merge-shaped and whether it is already met are state questions, answered
+  under `Tasks.Landed`'s lock as 409s.
+  """
+  @spec parse_landed_criterion(term()) ::
+          {:ok, non_neg_integer() | nil} | {:error, :invalid_landed, String.t()}
+  def parse_landed_criterion(nil), do: {:ok, nil}
+  def parse_landed_criterion(""), do: {:ok, nil}
+  def parse_landed_criterion(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  def parse_landed_criterion(s) when is_binary(s) do
+    case Integer.parse(String.trim(s)) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> {:error, :invalid_landed, @landed_criterion_msg}
+    end
+  end
+
+  def parse_landed_criterion(_), do: {:error, :invalid_landed, @landed_criterion_msg}
+
+  @doc """
+  The two SHAPE rules a landing mark must satisfy before any DB work:
+
+    * at least one of `commit` / `pr` / `note` carries something — a landing
+      mark with nothing to say would burn a rev and emit an event that says
+      nothing;
+    * a `criterion` flip carries a `note`, because the note IS the evidence
+      written onto the criterion. A met with empty evidence is the exact shape
+      `Tasks.Stamp` refuses as `:evidence_required`.
+
+  Blank / whitespace-only strings count as ABSENT under both rules, matching
+  `Tasks.Landed`'s own trim, so `commit=" "` is a 400 here rather than an
+  `:empty_landing` 409 one layer down.
+  """
+  @spec check_landed_payload(map(), non_neg_integer() | nil) ::
+          :ok | {:error, :invalid_landed, String.t()}
+  def check_landed_payload(params, criterion) do
+    note = landed_present(Map.get(params, "note"))
+
+    cond do
+      is_nil(landed_present(Map.get(params, "commit"))) and
+        is_nil(landed_present(Map.get(params, "pr"))) and is_nil(note) ->
+        {:error, :invalid_landed,
+         "a landing mark must carry at least one of commit, pr, note — there is nothing to record"}
+
+      not is_nil(criterion) and is_nil(note) ->
+        {:error, :invalid_landed,
+         "note is required with criterion: the note IS the evidence written onto that criterion, " <>
+           "and a met flip with empty evidence is not a sealed row"}
+
+      true ->
+        :ok
+    end
+  end
+
+  # A landing field counts as present only when it has content. Integers (a JSON
+  # `pr`) are present by definition; blank/whitespace strings are not.
+  defp landed_present(v) when is_integer(v), do: v
+
+  defp landed_present(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      s -> s
+    end
+  end
+
+  defp landed_present(_), do: nil
 
   @doc """
   Reads the LEAD-ONLY `--merge-gated` override off a stamp request, from the

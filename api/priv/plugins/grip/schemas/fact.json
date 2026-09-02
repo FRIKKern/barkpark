@@ -1,0 +1,69 @@
+{
+  "name": "fact",
+  "title": "Facts",
+  "icon": "check-circle",
+  "visibility": "private",
+  "fields": [
+    {
+      "name": "subject",
+      "title": "Subject",
+      "type": "string",
+      "surface": "body",
+      "description": "What the fact is ABOUT — a repo-rooted path, a symbol, a run id. Never a bare filename: an ambiguous reference is a wrong value waiting to be read."
+    },
+    {
+      "name": "quantity",
+      "title": "Quantity",
+      "type": "string",
+      "surface": "sidebar",
+      "description": "The observable being measured (a count, a status code, a boolean predicate)."
+    },
+    {
+      "name": "claim",
+      "title": "Claim",
+      "type": "text",
+      "surface": "body",
+      "rows": 3,
+      "description": "The measured value, stated as a discrete predicate."
+    },
+    {
+      "name": "evidence",
+      "title": "Evidence",
+      "type": "text",
+      "surface": "body",
+      "rows": 6,
+      "description": "Free prose. L6 BY CONSTRUCTION — the level grammar never reads this field and no wording here can raise a level."
+    },
+    {
+      "name": "rerun",
+      "title": "Rerun command",
+      "type": "string",
+      "surface": "body",
+      "description": "ONE literal shell command that re-derives this fact. The level grammar reads this and nothing else. Required to publish."
+    },
+    {
+      "name": "level",
+      "title": "Authority level",
+      "type": "select",
+      "surface": "sidebar",
+      "options": ["L1", "L2", "L3", "L4", "L5", "L6"],
+      "description": "Claimed authority. The level DERIVED from `rerun` is a ceiling: a claim above it is refused at publish as LEVEL-SKIP. Under-claiming is always allowed."
+    },
+    {
+      "name": "observed_at",
+      "title": "Observed at",
+      "type": "datetime",
+      "surface": "sidebar",
+      "description": "When the rerun command was actually run."
+    },
+    {
+      "name": "deps",
+      "title": "Depends on",
+      "type": "arrayOf",
+      "ordered": false,
+      "surface": "sidebar",
+      "of": { "type": "string" },
+      "description": "Subjects this fact was derived from."
+    }
+  ]
+}

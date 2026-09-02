@@ -282,8 +282,16 @@ defmodule Barkpark.Tasks.CloseAcknowledgementTest do
     test "a plain task closes done exactly as before", %{scope: scope} do
       task = mk_task!("plain-#{System.unique_integer([:positive])}", scope, %{})
 
+      # PDS-D291: this row is criteria-less ON PURPOSE — that is the population
+      # the ack gate must not touch — so the close names the artifact the
+      # close-artifact gate now requires, rather than growing a criterion that
+      # would change the very shape under test.
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 reason: "landed #14383 @ 63b89bef30"
+               )
 
       assert closed.content["lifecycle_status"] == "done"
     end
@@ -307,8 +315,16 @@ defmodule Barkpark.Tasks.CloseAcknowledgementTest do
           }
         })
 
+      # PDS-D291: this row is criteria-less ON PURPOSE — that is the population
+      # the ack gate must not touch — so the close names the artifact the
+      # close-artifact gate now requires, rather than growing a criterion that
+      # would change the very shape under test.
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 reason: "landed #14383 @ 63b89bef30"
+               )
 
       assert closed.content["lifecycle_status"] == "done"
       refute Map.has_key?(closed.content, "close_override")

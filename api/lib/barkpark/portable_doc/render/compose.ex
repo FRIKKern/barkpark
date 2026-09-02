@@ -221,10 +221,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # ingress ran together with zero block separation in mail clients).
     _ = style
 
+    # The body reads `content` FIRST and only then the flat `text` — the same
+    # content⟂text law `paragraph_inline/1` holds for the sibling prose clauses
+    # (ingress / paragraph / pullquote). Eyebrows persisted as an inline array
+    # (`{"type":"eyebrow","content":[…]}` — the canvas node-view's own shape)
+    # used to compose `[stringish(nil)]` = `[""]` and served a BLANK kicker;
+    # 3 such blocks are live on guerrilla (census 2026-07-25, task-993d136b0fbf2fd1).
+    # The `[]` arm keeps the flat path byte-identical AND keeps the fail-soft:
+    # `paragraph_inline/1` yields `[]` for a NON-BINARY `text` (a map/list/number
+    # a raw mutate persisted), where `stringish/1` is the clause that decides
+    # what such a leaf degrades to — a number still stringifies ("42"), a
+    # map/list still degrades to "" rather than 500-ing the public reader.
+    # Composing `paragraph_inline/1` UNGUARDED would silently blank a numeric
+    # eyebrow and drop the `[""]` degradation shape the two coercion tests pin.
+    children =
+      case paragraph_inline(b) do
+        [] -> [stringish(Map.get(b, "text", ""))]
+        inline -> compose_inline_children(inline)
+      end
+
     %{
       "kind" => "PdParagraph",
       "_role" => "eyebrow",
-      "children" => [stringish(Map.get(b, "text", ""))]
+      "children" => children
     }
   end
 

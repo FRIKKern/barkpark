@@ -71,7 +71,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # widened, `padding: 4px` added to `.bp-paper-surface .bp-stats` with no editor
   # twin reds §2 (".bp-stats.padding: View=\"4px\" Edit=nil"); before the widening
   # the same mutation shipped GREEN through the whole portable_doc tree.
-  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols)
+  # `a` + `a:focus-visible` (paper-links wave): the LINK AFFORDANCE. Before this
+  # wave the reader rule was `text-decoration: none` + a `--paper-accent-soft`
+  # border-bottom that computed to 1.14–1.35:1 over the reading ground, and the
+  # editor surfaces declared NO `a` rule at all — the widest kind of View↔Edit
+  # asymmetry this gate exists to catch, and it shipped green because `a` was
+  # not on the wire. Red-before (mutation-proven, paper-links): changing
+  # `text-underline-offset` to `0.19em` on `.bp-paper-surface a` alone reds §2
+  # ("a.text-underline-offset: View=\"0.19em\" Edit=\"0.18em\"").
+  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
@@ -425,7 +433,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # §2 gates them reader↔root only, so WITHOUT these entries a bundle-side
   # drift on either breakout class would ship green — the exact rot §5 exists
   # to catch.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
+  # `a` / `a:focus-visible` ride here too (paper-links wave): §2 gates the link
+  # rule reader↔root only, so WITHOUT these the bundle copy could drift and the
+  # embedded editor would lose the underline while Studio kept it.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()

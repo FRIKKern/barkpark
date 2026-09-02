@@ -65,7 +65,14 @@ defmodule Barkpark.Tasks.PulseTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          # PDS-D291: one MET criterion keeps this file's `done` close out of
+          # the close-artifact gate (a criteria-less `done` close whose reason
+          # names no PR+sha is refused). These tests measure the pulse.
+          "content" => %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+          }
         },
         @dataset,
         scope

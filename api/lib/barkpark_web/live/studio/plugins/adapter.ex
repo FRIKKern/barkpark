@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
     4. Falls back to `"core"`.
 
   No `Code.eval_*` is used (decision D7). The TUI is read-only for v2
-  (decision D12) — see `tui.go` line ~936 for the corresponding fall-through.
+  (decision D12); the TUI's read-only path lives in `cmd/barkpark/tui.go`.
   """
 
   use Phoenix.Component

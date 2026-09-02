@@ -208,4 +208,88 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportControllerTest do
     refute body["slug"] =~ "/"
     refute body["slug"] =~ ".."
   end
+
+  # ── 8. xlsx decompression-bomb guard — the response CLASS ──────────────────
+  #
+  # Two hostile xlsx uploads, pinned at the HTTP boundary rather than at
+  # `XlsxImport.to_content/1`, because the controller is the only thing that
+  # decides 413 vs 422 vs an uncaught raise (500). `create/2`'s `with` has no
+  # rescue: anything `to_content/1` throws leaves the controller as a 500, so
+  # these two cases are the guard's user-visible contract.
+
+  # 320 KiB of incompressible bytes zipped, then the CENTRAL directory's
+  # uncompressed-size field rewritten to 0 while the local headers and the
+  # deflate stream stay honest. `:zip.list_dir/1` reports "0 bytes"; every
+  # reader still inflates the real thing. comp_size × 1032 (deflate's maximum
+  # ratio) clears the default 256 MiB ceiling, so the guard refuses it on
+  # compressed size alone.
+  defp lying_zip_bytes do
+    {:ok, {_name, bin}} =
+      :zip.create(
+        ~c"lying.zip",
+        [{~c"xl/payload.bin", :crypto.strong_rand_bytes(320 * 1024)}],
+        [:memory]
+      )
+
+    eocd_at = byte_size(bin) - 22
+
+    <<_::binary-size(eocd_at), 0x50, 0x4B, 0x05, 0x06, _::binary-size(6), count::little-16,
+      _cd_size::little-32, cd_offset::little-32, 0, 0>> = bin
+
+    <<before_cd::binary-size(cd_offset), central::binary>> = bin
+    before_cd <> zero_headers(central, count, <<>>)
+  end
+
+  defp zero_headers(rest, 0, acc), do: acc <> rest
+
+  defp zero_headers(rest, n, acc) do
+    <<0x50, 0x4B, 0x01, 0x02, upto_comp::binary-size(20), _uncomp::little-32, name_len::little-16,
+      extra_len::little-16, comment_len::little-16, tail::binary>> = rest
+
+    var_len = name_len + extra_len + comment_len
+    <<fixed::binary-size(12), names::binary-size(var_len), more::binary>> = tail
+
+    header =
+      <<0x50, 0x4B, 0x01, 0x02>> <>
+        upto_comp <>
+        <<0::little-32, name_len::little-16, extra_len::little-16, comment_len::little-16>> <>
+        fixed <> names
+
+    zero_headers(more, n - 1, acc <> header)
+  end
+
+  @tag :tmp_dir
+  test "returns 413 sheet_too_large for an xlsx whose central directory declares 0",
+       %{conn: conn, tmp_dir: tmp_dir} do
+    upload = write_upload!(tmp_dir, "bomb.xlsx", lying_zip_bytes())
+
+    body =
+      conn
+      |> authed()
+      |> post(@import_path, %{"file" => upload, "dataset" => @dataset})
+      |> json_response(413)
+
+    assert body["error"]["code"] == "sheet_too_large"
+    assert body["error"]["message"] =~ "decompressed size"
+  end
+
+  @tag :tmp_dir
+  test "returns 422 invalid_xlsx for garbage named .xlsx — the guard abstains, it does not 500",
+       %{conn: conn, tmp_dir: tmp_dir} do
+    # `guard_decompressed_size/1` no longer carries a function-level
+    # `rescue _ -> :ok`. This is the case that rescue was covering for: bytes
+    # whose central directory does not read as a zip must still reach
+    # `open_package/1` and come back as the canonical 422, never a 413 and
+    # never an uncaught exception.
+    upload = write_upload!(tmp_dir, "garbage.xlsx", "PK\x03\x04 definitely not a zip")
+
+    body =
+      conn
+      |> authed()
+      |> post(@import_path, %{"file" => upload, "dataset" => @dataset})
+      |> json_response(422)
+
+    assert body["error"]["code"] == "invalid_xlsx"
+    assert body["error"]["message"] =~ "invalid xlsx"
+  end
 end

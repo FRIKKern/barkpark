@@ -10,10 +10,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
   Sites covered in this file:
     * search_controller.ex:316         delete_search_synonym (surface "documents")
     * v1/media_controller.ex:188       delete_search_synonym (surface "media")
-    * secret_controller.ex:67          update (ciphertext + "set" audit row)
+    * SecretController.update/2         update (ciphertext + "set" audit row)
     * secret_controller.ex:80          delete (audit row is INSIDE the delete txn)
     * plugin_settings_controller.ex:53 update (settings map + "write" audit row)
-    * plugin_settings_controller.ex:65 delete (row gone + "delete" audit row)
+    * PluginSettingsController.delete/2 delete (row gone + "delete" audit row)
 
   Every stored-row assertion reads Postgres DIRECTLY through `Repo`. Reading it
   back through a second HTTP endpoint would only prove receipt-vs-receipt: two

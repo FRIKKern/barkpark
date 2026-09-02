@@ -139,7 +139,15 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          old_tab = Sheets.get_tab(state.content, tab_idx),
          {:ok, new_tab} <- structural_shift(op, old_tab, at, count) do
-      inverse = shift_inverse(op, tab_idx, old_tab, at, count)
+      axis = if op in ["insert_rows", "delete_rows"], do: :row, else: :col
+      kind = if op in ["insert_rows", "insert_cols"], do: :insert, else: :delete
+      change = {kind, at, count}
+
+      # Built from the PRE-op content — for a delete_* it captures the
+      # pre-rewrite cells of every formula the two rewrite passes below touch
+      # (own tab and every other tab holding a cross-tab ref), which is what
+      # makes the undo lossless. See `shift_inverse/6`.
+      inverse = shift_inverse(op, tab_idx, old_tab, state, axis, change)
 
       state =
         apply_structural(state, tab_idx, new_tab, true, %{
@@ -151,12 +159,9 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
       # CT (design §3.2, B-CT-5): a row/col insert/delete on this tab shifts
       # cross-tab refs to it living in OTHER tabs' formulas (via X2's
-      # `Structure.shift_cross_tab_refs/4`, keyed by the tab INDEX). The shifted
-      # OTHER tabs inherit the documented lossy-undo contract (the own-tab
-      # inverse restores only its own tab).
-      axis = if op in ["insert_rows", "delete_rows"], do: :row, else: :col
-      kind = if op in ["insert_rows", "insert_cols"], do: :insert, else: :delete
-      state = apply_cross_tab_shift(state, tab_idx, axis, {kind, at, count})
+      # `Structure.shift_cross_tab_refs/4`, keyed by the tab INDEX). Those other
+      # tabs ride the SAME capture the own tab does — the inverse's 4th element.
+      state = apply_cross_tab_shift(state, tab_idx, axis, change)
 
       {:ok, state, inverse}
     end
@@ -412,9 +417,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         # CT (design §3.2): rewrite every `Name!` ref to the deleted tab, across
         # all OTHER tabs, to the literal `#REF!` (Excel). Guarded/no-op until
         # X2's `Structure.delete_tab_refs/2`; when live those rewrites inherit
-        # the DOCUMENTED lossy-undo contract (like delete-shift `#REF!`s — only
-        # rename captures a lossless multi-tab inverse), and the delete_tab
-        # structure delta already drives a client refetch.
+        # the DOCUMENTED lossy-undo contract — `rename_tab` and `delete_rows`/
+        # `delete_cols` capture a lossless multi-tab inverse, `delete_tab` does
+        # NOT — and the delete_tab structure delta already drives a client
+        # refetch.
         state =
           commit_cross_tab_content(
             state,
@@ -599,8 +605,16 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   #
   #   * {:cell, tab_idx, ref, cell | nil}      — restore one cell exactly
   #   * {:structural, op_map}                  — a plain structural wire op
-  #   * {:structural_restore, op_map, cells}   — insert_* + the deleted
-  #     span's captured cells (the inverse of a delete_*)
+  #   * {:structural_restore, op_map, cells, cross} — insert_* + the deleted
+  #     span's captured cells AND every cell whose formula the delete's rewrite
+  #     touched: `cells` (%{ref => pre-rewrite cell}) is the mutated tab, `cross`
+  #     (%{other_tab_idx => %{ref => pre-rewrite cell}}) every other tab whose
+  #     cross-tab refs the sweep rewrote. The inverse of a delete_*, and what
+  #     makes it LOSSLESS — without the two rewrite captures undo restored the
+  #     span but left the `#REF!`s standing (task-bb0b8faf5a9a2a37). A `cross`
+  #     dimension cannot live in the flat `cells` map (its keys are refs, not
+  #     tab indexes), hence the 4th element rather than a new shape. The 3-tuple
+  #     is tolerated on read for an in-flight pre-upgrade entry.
   #   * {:tab_restore, idx, tab}               — re-insert a deleted tab
   #   * {:rename_restore, tab, name, captured} — rename `tab` back to `name`
   #     AND overlay `captured` (%{dep_tab_idx => %{ref => pre-rewrite cell}}) —
@@ -786,6 +800,14 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp remap_entry({:cell, tab, ref, cell}, fun), do: {:cell, fun.(tab), ref, cell}
   defp remap_entry({:structural, op_map}, fun), do: {:structural, remap_op_tab(op_map, fun)}
 
+  # A structural_restore pins the mutated tab index AND (in its cross-tab
+  # capture) every OTHER tab it restores — a tab move/delete permutes them all
+  # (the #843 all-inverse-shapes remap contract), exactly as rename_restore does.
+  defp remap_entry({:structural_restore, op_map, cells, cross}, fun) do
+    {:structural_restore, remap_op_tab(op_map, fun), cells,
+     Map.new(cross, fn {t, cells} -> {fun.(t), cells} end)}
+  end
+
   defp remap_entry({:structural_restore, op_map, cells}, fun),
     do: {:structural_restore, remap_op_tab(op_map, fun), cells}
 
@@ -925,9 +947,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Undo of a delete_rows/delete_cols: re-insert the span, then overlay the
+  # captured PRE-rewrite cells BEFORE the recompute, so every dependent settles
+  # from the real formulas instead of from the `#REF!` the delete wrote.
+  # `captured` restores the mutated tab (deleted span + own rewritten formulas);
+  # `cross` restores the OTHER tabs whose cross-tab refs the sweep rewrote.
+  #
+  # The restore deliberately does NOT re-run `apply_cross_tab_shift/4` for the
+  # insert: the capture already holds every cell the forward sweep changed, so
+  # sweeping again would shift those refs a second time.
   defp apply_entry(
          {:structural_restore, %{"op" => op, "tab" => tab, "at" => at, "count" => count},
-          captured},
+          captured, cross},
          state
        ) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
@@ -938,15 +969,24 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         {:structural,
          %{"op" => delete_op_for(op), "tab" => tab_idx, "at" => at, "count" => count}}
 
-      {:ok,
-       apply_structural(state, tab_idx, new_tab, true, %{
-         op: op,
-         at: at,
-         count: count,
-         tab: tab_idx
-       }), counter}
+      structure = %{op: op, at: at, count: count, tab: tab_idx}
+
+      state =
+        if map_size(cross) == 0 do
+          apply_structural(state, tab_idx, new_tab, true, structure)
+        else
+          restore_with_cross(state, tab_idx, new_tab, cross, structure)
+        end
+
+      {:ok, state, counter}
     end
   end
+
+  # LEGACY 3-tuple — an in-flight stack entry recorded before the lossless
+  # capture landed (a live session survives a code change). Carries no
+  # cross-tab capture; behaves exactly as it did.
+  defp apply_entry({:structural_restore, op_map, captured}, state),
+    do: apply_entry({:structural_restore, op_map, captured, %{}}, state)
 
   # Granular merge undo — drop exactly the named canonical ranges (a range
   # already gone is silently ignored, never an error), leaving every other
@@ -975,10 +1015,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Granular merge redo/undo re-add — re-append each canonical range that does
   # NOT overlap the CURRENT list; a range a later op has re-covered is SKIPPED
   # (never write an overlapping list — the persist gate depends on it). A
-  # re-added merge may land at pre-shift coordinates (the same lossy contract
-  # as delete_* undo). The counter removes exactly what was re-added, so the
-  # opposite direction inverts cleanly. Inverse of unmerge_cells and the
-  # redo-counter of {:remove_merges, …}.
+  # re-added merge carries its ORIGINAL coordinates, so after an intervening
+  # row/col shift it may land where the range used to be — merge GEOMETRY,
+  # unlike formula text, is not captured. The counter removes exactly what was
+  # re-added, so the opposite direction inverts cleanly. Inverse of
+  # unmerge_cells and the redo-counter of {:remove_merges, …}.
   defp apply_entry({:add_merges, tab, canonicals}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
       old_tab = Sheets.get_tab(state.content, tab_idx)
@@ -1090,20 +1131,72 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
-  # insert_* invert to plain deletes; delete_* invert to inserts carrying
-  # the deleted span's cells (keyed by their original refs).
-  defp shift_inverse(op, tab_idx, _old_tab, at, count)
+  # The multi-tab arm of the restore: overlay the captured cells of every OTHER
+  # tab, then settle the WHOLE document in ONE `Engine.recompute/1` (a cross-tab
+  # capture exists only when a cross-tab dependency does — the CT-D4 path), and
+  # broadcast the own-tab structure delta plus one cell delta per restored tab.
+  # Mirrors `finalize_rename/5`, the same shape for the rename inverse.
+  defp restore_with_cross(state, tab_idx, new_tab, cross, structure) do
+    before = state.content
+
+    content =
+      before
+      |> put_tab(tab_idx, new_tab)
+      |> overlay_captured_content(cross)
+      |> Engine.recompute()
+
+    changed = diff_cells(tab_cells(before, tab_idx), tab_cells(content, tab_idx))
+    state = finalize_structural(state, content, tab_idx, changed, structure)
+
+    Enum.each(Map.keys(cross), fn dep_idx ->
+      dep_changed = diff_cells(tab_cells(before, dep_idx), tab_cells(content, dep_idx))
+      if map_size(dep_changed) > 0, do: broadcast_delta(state, dep_idx, dep_changed)
+    end)
+
+    state
+  end
+
+  # insert_* invert to plain deletes; delete_* invert to inserts carrying THREE
+  # things the shift destroyed (task-bb0b8faf5a9a2a37):
+  #
+  #   1. the deleted span's cells, keyed by their original refs (`captured_span`);
+  #   2. every SURVIVING own-tab cell whose formula the local rewrite changed —
+  #      a dead ref collapsed to the literal `#REF!`, a partially covered range
+  #      clipped (`Structure.rewritten_formula_cells/3`), keyed by its PRE-op
+  #      address (the re-insert puts each survivor back exactly there);
+  #   3. every OTHER tab's cell whose CROSS-TAB ref the sweep rewrote
+  #      (`Structure.cross_tab_rewritten_cells/4`), as %{tab_idx => %{ref =>
+  #      cell}} in the 4th element.
+  #
+  # (2) and (3) are what used to be "lossy by design": undo gave the span back
+  # and left the `#REF!`s standing, so a delete + undo destroyed formulas.
+  # Both captures are computed from the PRE-op state and are proportional to the
+  # number of REWRITTEN formulas — never a tab snapshot.
+  #
+  # The mutated tab's own SELF-qualified refs (`ThisTab!A1`) come out of the
+  # cross-tab sweep, not the local pass, so its entry is popped off (3) and
+  # merged into (2): same tab, same PRE-op address space (the sweep keys on the
+  # tab NAME, so it is address independent and the two passes commute).
+  defp shift_inverse(op, tab_idx, _old_tab, _state, _axis, {_kind, at, count})
        when op in ["insert_rows", "insert_cols"] do
     {:structural, %{"op" => delete_op_for(op), "tab" => tab_idx, "at" => at, "count" => count}}
   end
 
-  defp shift_inverse(op, tab_idx, old_tab, at, count) do
-    axis = if op == "delete_rows", do: :row, else: :col
+  defp shift_inverse(op, tab_idx, old_tab, state, axis, {_kind, at, count} = change) do
     insert_op = if op == "delete_rows", do: "insert_rows", else: "insert_cols"
-    captured = captured_span(old_tab, axis, at, count)
+
+    tabs = Map.get(state.content, "tabs") || []
+    swept = Structure.cross_tab_rewritten_cells(tabs, tab_idx, axis, change)
+    {own_swept, cross} = Map.pop(swept, tab_idx, %{})
+
+    captured =
+      old_tab
+      |> captured_span(axis, at, count)
+      |> Map.merge(Structure.rewritten_formula_cells(old_tab, axis, change))
+      |> Map.merge(own_swept)
 
     {:structural_restore, %{"op" => insert_op, "tab" => tab_idx, "at" => at, "count" => count},
-     captured}
+     captured, cross}
   end
 
   defp delete_op_for("insert_rows"), do: "delete_rows"

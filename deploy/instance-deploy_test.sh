@@ -350,6 +350,7 @@ check "exactly one clean build (2 compile lines)" "[ \"\$(grep -c compile '$MIXL
 check "migrate runs with the statement timeout OFF" "grep -q 'ecto.migrate .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG'"
 check "the build steps do NOT inherit that export"  "! grep -E 'mix (deps.get|deps.compile|compile) .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG' >/dev/null"
 check "slot env files written"            "grep -q 'BARKPARK_PORT_OVERRIDE=4001' '$APP/.slots/green.env' && grep -q '_build_blue' '$APP/.slots/blue.env'"
+check "indx state dir created outside the build roots (task-527b519e47669559)" "grep -q 'install -d -m 0750 -o root -g root /var/lib/barkpark/indx-state' '$SYSCTLLOG'"
 check "green slot booted"                 "grep -q 'restart barkpark-slot@green' '$SYSCTLLOG'"
 check "Caddy flipped to :4001"            "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
 check "armed Caddyfile caddy-valid"       "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"

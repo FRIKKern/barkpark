@@ -12,15 +12,46 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   Started LAZILY on the first op via `apply_ops/3` — a `DynamicSupervisor`
   (`Barkpark.Plugins.Sheets.SessionSupervisor`) child keyed in
-  `Barkpark.Plugins.Sheets.SessionRegistry` by `{dataset, published-id}`. `init/1`
-  reads the persisted row ONCE (draft-first, published fallback — the same
-  precedence the export controller uses); while the session lives, its
+  `Barkpark.Plugins.Sheets.SessionRegistry` by
+  `{dataset, workspace_id, published-id}`. `init/1` reads the persisted row
+  ONCE (draft-first, published fallback — the same precedence the export
+  controller uses), SCOPED to that `workspace_id`; while the session lives, its
   memory is authoritative. The process hibernates when idle
   (`:hibernate_after`) and stops itself after `idle_stop_ms` without calls;
   `terminate/2` persists any unflushed state (exits are trapped so a
   supervisor shutdown reaches it). On a NON-graceful BEAM death (kill -9,
   OOM, power loss) up to `debounce_ms`/`flush_after_ops` worth of
   acknowledged-but-unpersisted ops are lost by design.
+
+  ## Tenancy (task-f0c064a406e8d363)
+
+  The session is a TENANT-SCOPED process. `workspace_id` is the third element
+  of the registry key and the scope every read and the debounced write carry:
+
+    * WITHOUT it the load ran `Content.get_document/3` with NO scope opts, so
+      `Content.WriteScope.resolve_read_dataset_id/2` took its "no scope at all"
+      arm and resolved the SEEDED DEFAULT project's `dataset_id`. A sheet row
+      stamped with a NON-Default workspace's own dataset row matched neither
+      arm of `Query.scope_to_dataset/3`, `init/1` got `{:error, :not_found}`,
+      and every edit on that desk died as `"edit failed: :not_found"`.
+    * The debounced persist had the mirror defect: an unscoped
+      `Content.upsert_document/4` resolves the write scope to the seeded
+      Default workspace, so once the load was fixed the flush would have
+      re-parented the sheet into Default (its scoped prev-doc lookup finds
+      nothing and INSERTS).
+    * And the key itself was `{dataset, published-id}`, so two tenants holding
+      the same slug in the same dataset shared ONE session process — declared
+      as a residual by the `/ops` tenant gate (PR #14779) and closed here.
+
+  `workspace_id: nil` is the UNSCOPED caller (mix tasks, the pre-existing
+  arity-2/3 API). It NORMALIZES to the seeded Default workspace — the same
+  `normalize_topic_ws/1` rule `Content.doc_topic/4` already applies, and the
+  same tenant an unscoped read lands in today (`resolve_read_dataset_id/2`'s
+  no-scope arm returns the Default PROJECT's `dataset_id`). So an unscoped
+  caller keeps reaching the rows it always reached and shares one session with
+  the Default workspace's Studio, as it did before; it simply can no longer
+  reach ANOTHER tenant's row. A caller that HAS a tenant passes it, gets its
+  own process, and reads its own rows. The two never share a key.
 
   ## Ops (v1)
 
@@ -152,7 +183,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   records the op's INVERSE onto that user's undo stack (depth 100, oldest
   entries drop): `set_cell`/`clear_cell` store the prior cell map; `insert_*` store
   the matching `delete_*`; `delete_*` store the matching `insert_*` PLUS the
-  deleted span's captured cells; `set_col_width`/`set_row_height` store the
+  deleted span's captured cells AND the pre-rewrite cells of every formula the
+  shift rewrote — own tab and, keyed by tab index, every OTHER tab holding a
+  cross-tab ref to the mutated one (the `{:structural_restore, op, cells,
+  cross}` inverse; see "Lossless `delete_*` undo" below);
+  `set_col_width`/`set_row_height` store the
   prior px; `set_frozen` the prior bands; `rename_tab` the prior name — PLUS, when the
   rename rewrote cross-tab refs in other tabs, a multi-tab capture of their
   pre-rewrite cells so undo restores every rewritten ref losslessly (the
@@ -164,9 +199,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   moves both ways, loss-free);
   `merge_cells` a GRANULAR remove of just the range it added and `unmerge_cells`
   a granular re-add of just the ranges it dropped (skipping any a later op has
-  re-covered — a re-added merge may land at pre-shift coordinates, the same
-  lossy contract as `delete_*` undo), never a whole-list snapshot that would
-  clobber another user's merges. Undo/redo arrive as
+  re-covered — a re-added merge carries its ORIGINAL coordinates, so after an
+  intervening row/col shift it may land where the range used to be; merge
+  GEOMETRY, unlike formula text, is not captured), never a whole-list snapshot
+  that would clobber another user's merges. Undo/redo arrive as
   ops through the same mailbox:
 
     * `%{"op" => "undo", "user" => u}` — pops u's undo stack, applies the
@@ -178,8 +214,37 @@ defmodule Barkpark.Plugins.Sheets.Session do
   normal recompute + delta path, so every client re-renders. Undoing
   something another user already overwrote just applies the inverse —
   Google Sheets semantics: it may overwrite their newer value (documented;
-  LWW stands). Formula refs a `delete_*` rewrote to the literal `#REF!`
-  are NOT restored by its undo (the rewrite is lossy by design).
+  LWW stands).
+
+  ### Lossless `delete_*` undo (task-bb0b8faf5a9a2a37)
+
+  A `delete_rows`/`delete_cols` collapses every dead ref to the literal
+  `#REF!` and clips every partially covered range — in the mutated tab's own
+  formulas AND, through the cross-tab sweep, in every other tab that
+  referenced it by name (design §3.2). That rewrite is NOT invertible from the
+  resulting text, so the `{:structural_restore, …}` inverse CAPTURES the
+  pre-rewrite cell map (formula, computed value, style) of exactly the cells
+  the two passes touched: `cells` for the mutated tab, `cross`
+  (`%{tab_idx => %{ref => cell}}`) for the others. Undo re-inserts the span,
+  overlays both captures BEFORE the recompute, so every dependent settles from
+  the real formulas. Delete a column, watch three totals turn `#REF!`, press
+  undo — the totals come back, text and value.
+
+  The capture is proportional to the number of REWRITTEN formulas, never a tab
+  snapshot: a 1000-cell tab with three rewritten formulas captures three cells.
+
+  Remaining limits:
+
+    * A formula a LATER op rewrote before the undo runs is restored to its
+      pre-DELETE text, not to that later text — the standard LWW contract every
+      inverse here carries.
+    * Only the last 100 entries of a user's stack survive; a delete that has
+      fallen off the depth-100 window is unreachable, capture and all.
+    * The `insert_*` inverse (a plain `delete_*`) carries no capture: undoing an
+      INSERT deletes the inserted span, so a formula written to reference that
+      span in between rewrites to `#REF!` — Excel does the same.
+    * Merge geometry, unlike formula text, is still not captured (see the merge
+      bullet above).
 
   Every inverse entry pins an ABSOLUTE tab index, so a reorder (`move_tab`),
   an insert (`duplicate_tab` or a `tab_restore` undo), or a delete
@@ -288,8 +353,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Returns `{:ok, %{rev: n, applied: n, errors: [%{index:, code:, message:}]}}`,
   `{:error, :not_found}` when no sheet resolves for the slug,
   `{:error, :batch_too_large, n}` when `ops` exceeds `max_ops_per_call/0`,
-  or `{:error, :session_unavailable}` when the session died twice in a row
-  (see `call_session/4`).
+  `{:error, :session_unavailable}` when the session died twice in a row
+  (see `call_session/4`), or `{:error, :replay_unavailable}` when a
+  `request_id` was supplied and the replay ring cannot be read (fail-closed:
+  applying without the ring could double-apply — see `ReplayRing`'s
+  "Ownership" section).
 
   ## Exactly-once retry (`request_id`)
 
@@ -305,16 +373,17 @@ defmodule Barkpark.Plugins.Sheets.Session do
   semantics — the caller committed to that key). See the moduledoc's
   "Idempotency (request_id replay ring)" section for the accepted residuals.
   """
-  @spec apply_ops(String.t(), String.t(), [map()], String.t() | nil) ::
+  @spec apply_ops(String.t(), String.t(), [map()], String.t() | nil, String.t() | nil) ::
           {:ok, %{rev: non_neg_integer(), applied: non_neg_integer(), errors: [map()]}}
           | {:error, term()}
           | {:error, :batch_too_large, pos_integer()}
-  def apply_ops(slug, dataset, ops, request_id \\ nil)
+  def apply_ops(slug, dataset, ops, request_id \\ nil, workspace_id \\ nil)
       when is_binary(slug) and is_binary(dataset) and is_list(ops) and
-             (is_nil(request_id) or is_binary(request_id)) do
+             (is_nil(request_id) or is_binary(request_id)) and
+             (is_nil(workspace_id) or is_binary(workspace_id)) do
     case length(ops) do
       n when n > @max_ops_per_call -> {:error, :batch_too_large, n}
-      _ -> call_session(slug, dataset, {:apply_ops, ops, request_id})
+      _ -> call_session(slug, dataset, workspace_id, {:apply_ops, ops, request_id})
     end
   end
 
@@ -330,21 +399,51 @@ defmodule Barkpark.Plugins.Sheets.Session do
   debounce retry stays armed, so callers must NOT serve the stale row as
   fresh (the export controller maps this to a 503 with a retry hint).
   """
-  @spec flush(String.t(), String.t()) :: :ok | {:error, term()}
-  def flush(slug, dataset) do
-    case whereis(slug, dataset) do
+  @spec flush(String.t(), String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def flush(slug, dataset, workspace_id) do
+    case whereis(slug, dataset, workspace_id) do
       nil -> :ok
       pid -> safe_call(pid, :flush)
     end
   end
 
   @doc """
+  The TENANT-AGNOSTIC flush: ask EVERY live session for `{dataset, slug}` —
+  whatever workspace each is keyed under — to persist.
+
+  This is deliberately NOT `flush(slug, dataset, nil)`. `flush/3` addresses one
+  key; this sweeps them all, which is what a read-your-writes barrier at a door
+  that has already authorized its own tenant (the export controller) needs: it
+  must not miss the Studio's workspace-keyed session just because it does not
+  name the workspace. It moves NO data between tenants — each session persists
+  its OWN content to its OWN scope — so the sweep leaks nothing.
+
+  Returns `:ok` when every live session persisted (including "none was live"),
+  or the FIRST `{:error, reason}` so the caller still refuses to serve a stale
+  row.
+  """
+  @spec flush(String.t(), String.t()) :: :ok | {:error, term()}
+  def flush(slug, dataset) do
+    pubid = Content.published_id(slug)
+
+    @registry
+    |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.filter(fn {{ds, _ws, id}, _pid} -> ds == dataset and id == pubid end)
+    |> Enum.reduce(:ok, fn {_key, pid}, acc ->
+      case safe_call(pid, :flush) do
+        :ok -> acc
+        {:error, _} = err -> if acc == :ok, do: err, else: acc
+      end
+    end)
+  end
+
+  @doc """
   The session's in-memory content (authoritative while it lives).
   `{:error, :no_session}` when none is live — this never starts one.
   """
-  @spec peek(String.t(), String.t()) :: {:ok, map()} | {:error, :no_session}
-  def peek(slug, dataset) do
-    case whereis(slug, dataset) do
+  @spec peek(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, :no_session}
+  def peek(slug, dataset, workspace_id \\ nil) do
+    case whereis(slug, dataset, workspace_id) do
       nil -> {:error, :no_session}
       pid -> GenServer.call(pid, :peek, @call_timeout)
     end
@@ -354,18 +453,18 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Stop a live session (normal shutdown — `terminate/2` persists any dirty
   state). A no-op when none is registered.
   """
-  @spec stop(String.t(), String.t()) :: :ok
-  def stop(slug, dataset) do
-    case whereis(slug, dataset) do
+  @spec stop(String.t(), String.t(), String.t() | nil) :: :ok
+  def stop(slug, dataset, workspace_id \\ nil) do
+    case whereis(slug, dataset, workspace_id) do
       nil -> :ok
       pid -> safe_stop(pid)
     end
   end
 
-  @doc "The live session pid for `{slug, dataset}`, or `nil`."
-  @spec whereis(String.t(), String.t()) :: pid() | nil
-  def whereis(slug, dataset) do
-    case Registry.lookup(@registry, key(slug, dataset)) do
+  @doc "The live session pid for `{dataset, workspace_id, slug}`, or `nil`."
+  @spec whereis(String.t(), String.t(), String.t() | nil) :: pid() | nil
+  def whereis(slug, dataset, workspace_id \\ nil) do
+    case Registry.lookup(@registry, key(slug, dataset, workspace_id)) do
       [{pid, _}] -> pid
       [] -> nil
     end
@@ -396,7 +495,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
   end
 
   @doc false
-  def start_link({dataset, pubid} = session_key) when is_binary(dataset) and is_binary(pubid) do
+  def start_link({dataset, workspace_id, pubid} = session_key)
+      when is_binary(dataset) and is_binary(pubid) and
+             (is_nil(workspace_id) or is_binary(workspace_id)) do
     GenServer.start_link(__MODULE__, session_key,
       name: {:via, Registry, {@registry, session_key}},
       hibernate_after: config().hibernate_after
@@ -405,10 +506,42 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   # ── resolve-or-start + call plumbing ─────────────────────────────────────
 
-  defp key(slug, dataset), do: {dataset, Content.published_id(slug)}
+  defp key(slug, dataset, workspace_id),
+    do: {dataset, normalize_scope_ws(workspace_id), Content.published_id(slug)}
 
-  defp call_session(slug, dataset, msg, retry? \\ true) do
-    with {:ok, pid} <- ensure_session(slug, dataset) do
+  # The registry key's tenant token. Mirrors `Content.Broadcast.doc_topic/4`'s
+  # own `normalize_topic_ws/1` EXACTLY, and for the same reason: the two sides
+  # of a key must agree on what "no workspace" means or they address different
+  # things. A present id passes through verbatim. A `nil` (an unscoped internal
+  # caller — a mix task, a test, a legacy NULL-workspace row) resolves to the
+  # SEEDED DEFAULT workspace, which is precisely the tenant an unscoped read
+  # already lands in today: `WriteScope.resolve_read_dataset_id/2`'s no-scope
+  # arm returns the Default PROJECT's `dataset_id`. So the token and the read
+  # tell the same story, and an unscoped caller keeps reading the rows it
+  # always read (Default's, plus the shared NULL-workspace layer) — it simply
+  # can no longer reach ANOTHER tenant's row, which is the leak.
+  #
+  # With NO Default seeded (a fresh sandbox) the token stays `nil` and the read
+  # carries no scope opts — the pre-fix behaviour, byte for byte.
+  defp normalize_scope_ws(ws) when is_binary(ws) and ws != "", do: ws
+
+  defp normalize_scope_ws(_nil_or_blank) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} when is_binary(ws_id) -> ws_id
+      _ -> nil
+    end
+  end
+
+  # The scope opts a session's reads carry. A nil `workspace_id` (the unscoped
+  # caller) yields `[]` — byte-identical to the pre-fix unscoped read. A present
+  # one pins the tenant: `resolve_read_dataset_id/2` then declines to fall back
+  # to the seeded Default project (it only does that when NO scope key is
+  # present at all) and `scope_to_workspace_or_global/3` fences the row.
+  defp read_scope(nil), do: []
+  defp read_scope(workspace_id) when is_binary(workspace_id), do: [workspace_id: workspace_id]
+
+  defp call_session(slug, dataset, workspace_id, msg, retry? \\ true) do
+    with {:ok, pid} <- ensure_session(slug, dataset, workspace_id) do
       try do
         GenServer.call(pid, msg, @call_timeout)
       catch
@@ -419,7 +552,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
         # clean error tuple instead of the raw exit.
         :exit, {reason, {GenServer, :call, _}} when reason in [:noproc, :normal, :shutdown] ->
           if retry? do
-            call_session(slug, dataset, msg, false)
+            call_session(slug, dataset, workspace_id, msg, false)
           else
             {:error, :session_unavailable}
           end
@@ -427,8 +560,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
     end
   end
 
-  defp ensure_session(slug, dataset) do
-    session_key = key(slug, dataset)
+  defp ensure_session(slug, dataset, workspace_id) do
+    session_key = key(slug, dataset, workspace_id)
 
     case Registry.lookup(@registry, session_key) do
       [{pid, _}] ->
@@ -458,21 +591,44 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # ── GenServer ────────────────────────────────────────────────────────────
 
   @impl true
-  def init({dataset, pubid}) do
+  def init({dataset, scope_ws, pubid}) do
     # Trap exits so a supervisor shutdown runs terminate/2 (the dirty-state
     # persist) instead of killing the process outright.
     Process.flag(:trap_exit, true)
 
-    case load_doc(pubid, dataset) do
+    case load_doc(pubid, dataset, scope_ws) do
       {:ok, doc} ->
         content = doc.content || %{}
 
         {:ok,
          schedule_idle(%{
+           # MISNAMED, deliberately left alone: this holds a PUBLISHED-ID, not
+           # a slug. `init/1` is called with the registry key's third element,
+           # which `key/3` built as `Content.published_id(slug)`, and every
+           # reader here (`load_doc/3`, the ring key, the persist's `doc_id`)
+           # wants exactly that. `published_id/1` is idempotent and the two
+           # forms coincide for a plain slug, so the tuple the moduledoc
+           # documents — `{dataset, workspace_id, published-id}` — is CORRECT
+           # and this FIELD NAME is the drift, not the doc. Reported once as a
+           # key mismatch; it is not one.
+           #
+           # Not renamed to `published_id` because `Session.Ops` reads
+           # `state.slug` too (`ops.ex` `sheet_id:` and the `topic/3` call), so
+           # the rename is a cross-module change and this task's fence is
+           # session.ex + replay_ring.ex. Rename both together or not at all.
            slug: pubid,
            dataset: dataset,
            title: doc.title,
+           # The registry-key half: the tenant the CALLER declared. Drives every
+           # read this session makes and the ReplayRing key. `nil` = unscoped.
+           scope_ws: scope_ws,
+           # The ROW's own workspace — the topic key (`Content.doc_topic/4`
+           # normalizes a nil), unchanged by this fix.
            workspace_id: doc.workspace_id,
+           # The row's own project, threaded into the debounced persist so the
+           # write resolves the sheet's OWN dataset row instead of the seeded
+           # Default project's.
+           project_id: Map.get(doc, :project_id),
            content: content,
            rev: 0,
            # Incarnation stamp: rev restarts at 0 with every new session
@@ -513,7 +669,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   @impl true
   def handle_call({:apply_ops, ops, request_id}, _from, state) do
-    ring_key = {state.dataset, state.slug}
+    ring_key = {state.dataset, state.scope_ws, state.slug}
 
     case request_id && ReplayRing.lookup(ring_key, request_id) do
       {:ok, cached} ->
@@ -522,8 +678,35 @@ defmodule Barkpark.Plugins.Sheets.Session do
         # retried non-idempotent batch (insert_rows) never runs twice.
         {:reply, {:ok, Map.put(cached, :replayed, true)}, schedule_idle(state)}
 
+      :unavailable ->
+        # The ring cannot answer — there is no table to read. This is NOT a
+        # miss: "never applied" is a claim only a readable ring can make, and
+        # treating the two alike is exactly how a retry used to re-apply a
+        # non-idempotent batch in silence. Fail CLOSED. The ring has already
+        # logged at :error naming this key; the caller retries once the ring is
+        # back, and the batch is applied at most once either way.
+        #
+        # HTTP surface, named because it is a real residual: `OpsController`'s
+        # `apply_ops_error/4` has no clause for this reason, so it currently
+        # renders through the catch-all as 422 `session_start_failed`. The
+        # CORRECT surface is the transient 503 + `retry-after` that
+        # `:session_unavailable` already gets. Out of this change's fence
+        # (`ops_controller.ex`), and reachable only when the table is deleted
+        # outright — a ring CRASH no longer reaches here at all, because the
+        # heir keeps the table.
+        {:reply, {:error, :replay_unavailable}, schedule_idle(state)}
+
       _ ->
         {reply, state} = do_apply_ops(ops, state)
+
+        # THE ONLY WRITER of `:sheets_ops_replay`, and it must stay that way.
+        # `ReplayRing.put/3` is a lookup-then-insert on a public ETS table; it
+        # is atomic only because this call runs INSIDE this GenServer and the
+        # unique `SessionRegistry` guarantees one live process per `ring_key`.
+        # Do not move it into a Task/spawn and do not add a second writer — see
+        # the fence comment above `ReplayRing.put/3` for the measured
+        # lost-update shape, and `replay_ring_single_writer_test.exs`, which
+        # fails if this call ever executes off this pid.
         if request_id, do: ReplayRing.put(ring_key, request_id, reply)
         {:reply, {:ok, reply}, schedule_idle(state)}
     end
@@ -662,7 +845,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
     attrs = %{"doc_id" => state.slug, "content" => state.content}
     attrs = if is_binary(state.title), do: Map.put(attrs, "title", state.title), else: attrs
 
-    case Content.upsert_document("sheet", attrs, state.dataset, source: "sheets_session") do
+    case Content.upsert_document(
+           "sheet",
+           attrs,
+           state.dataset,
+           [source: "sheets_session"] ++ write_scope(state)
+         ) do
       {:ok, doc} ->
         state =
           cancel_debounce(%{
@@ -714,7 +902,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # DOCUMENTED conflict (M4 presence/locks territory): detect the external
   # rev change, warn, and let this persist win.
   defp detect_external_change(state) do
-    case Content.get_document(state.persisted_doc_id, "sheet", state.dataset) do
+    case Content.get_document(
+           state.persisted_doc_id,
+           "sheet",
+           state.dataset,
+           read_scope(state.scope_ws)
+         ) do
       {:ok, %{rev: rev}} when rev != state.persisted_rev ->
         Logger.warning(
           "[Sheets.Session] external write detected on #{state.dataset}/#{state.persisted_doc_id} " <>
@@ -745,13 +938,41 @@ defmodule Barkpark.Plugins.Sheets.Session do
     %{state | idle_timer: Process.send_after(self(), :idle_stop, state.cfg.idle_stop_ms)}
   end
 
-  # Draft-first, published fallback — the export controller's precedence.
-  defp load_doc(pubid, dataset) do
-    with {:error, :not_found} <- Content.get_document(Content.draft_id(pubid), "sheet", dataset),
-         {:error, :not_found} <- Content.get_document(pubid, "sheet", dataset) do
+  # Draft-first, published fallback — the export controller's precedence —
+  # SCOPED to the session's tenant (task-f0c064a406e8d363). An unscoped load
+  # resolved the seeded Default project's `dataset_id` and could not see a
+  # non-Default workspace's own sheet row at all.
+  defp load_doc(pubid, dataset, workspace_id) do
+    scope = read_scope(workspace_id)
+
+    with {:error, :not_found} <-
+           Content.get_document(Content.draft_id(pubid), "sheet", dataset, scope),
+         {:error, :not_found} <- Content.get_document(pubid, "sheet", dataset, scope) do
       {:error, :not_found}
     else
       {:ok, doc} -> {:ok, doc}
+    end
+  end
+
+  # The scope the debounced persist carries. Taken from the LOADED ROW, not the
+  # caller: the row is the authority on which tenant owns these bytes, and
+  # `Content.WriteScope.put_scope_attrs/2` stamps exactly those keys back.
+  #
+  # A row with NO workspace yields `[]`, so the write resolves the seeded
+  # Default scope exactly as it did before this fix (byte-identical for every
+  # pre-existing sheet). A row WITH one pins it — without this the flush's
+  # prev-doc lookup (scoped to the resolved Default) would find nothing and
+  # INSERT a second copy of the sheet into the Default workspace.
+  defp write_scope(state) do
+    case state.workspace_id do
+      ws when is_binary(ws) ->
+        case state.project_id do
+          proj when is_binary(proj) -> [workspace_id: ws, project_id: proj]
+          _ -> [workspace_id: ws]
+        end
+
+      _ ->
+        []
     end
   end
 

@@ -255,21 +255,29 @@ export const MOTION_STEPS = ["dur-1", "dur-2", "dur-3"];
 // check.mjs Part N reads this list and proves each entry carries the tokens.json
 // bytes exactly once, so the list cannot become a lie in either direction.
 //
-// Most entries get the ladder from the GENERATED block below. Two do not, and the
-// difference matters:
+// Every entry but ONE gets the ladder from the GENERATED block below:
 //   • api/assets/paper-editor/src/styles.css receives it through the de-scoping
-//     paper-surface mirror rather than an emitter of its own.
-//   • cloud/priv/static/app.css DECLARES IT BY HAND and always has — its
-//     decision-29 token area carries --dur-1/-2/-3 with these exact values plus
-//     --ease, --t and a prefers-reduced-motion collapse to 0s, and four rules
-//     already spend them. (This is the half of spd-b21's premise that was wrong:
-//     `grep -rn -- "--dur" api/ cloud/` was empty for api/ only.) Emitting a
-//     second copy would be strictly worse than leaving it: the generated block
-//     sits EARLIER in the file, so the hand copy would win the cascade and the
-//     emitted one — the bytes this gate reads — would go inert. Listing it here
-//     instead governs it where it lives; promoting it into the generated block
-//     is a follow-up that has to move --ease, --t and the reduced-motion block
-//     together, which is a cloud-surface change, not a token change.
+//     paper-surface mirror rather than an emitter of its own. That is the only
+//     surface on this list with no generated declaration of its own.
+//
+// cloud/priv/static/app.css was the second exception until cch-app-css-motion:
+// it DECLARED THE LADDER BY HAND in its decision-29 token area (--dur-1/-2/-3
+// with exactly these values, plus --ease, --t and a prefers-reduced-motion
+// collapse to 0s), and the emitter deliberately wrote nothing, because the
+// generated block sits EARLIER in the file — a hand copy downstream wins the
+// cascade and makes the emitted bytes, the ones Part N reads, inert. That is now
+// closed in the only order that is safe: cloudBlock() EMITS all five declarations
+// plus the reduced-motion collapse, and the hand copy was DELETED in the same
+// diff. Each rung is declared exactly once, and the declaration that paints is
+// the declaration the gate reads. Part N's exactly-once arm is the tripwire —
+// re-adding a hand copy anywhere below the marker reds it immediately, and
+// deleting the hand copy WITHOUT this emission would have left four live
+// consumers (.fresh-badge x2, modal-in, toast-in) resolving to nothing.
+//
+// `--ease` is tokens.motion.ease. `--t` (`var(--dur-1) var(--ease)`) is a
+// cloud-LOCAL shorthand with ~26 consumers, not a new token — it rides along
+// because it is fully DERIVED from the ladder, and leaving it hand-authored
+// while the rungs moved is exactly the split this promotion exists to remove.
 //
 // cloud/priv/static/styleguide.html is absent for a third reason: its generated
 // region is a swatch TABLE (markup), with nowhere to put a declaration. Its one
@@ -554,6 +562,52 @@ const cloudThemeBlock = (name, t) => [
   "}",
 ].join("\n");
 
+// The cloud SPA's decision-29 MOTION area (cch-app-css-motion). Three rungs from
+// tokens.motion via motionVarLines(), then two cloud-local companions:
+//   --ease  is tokens.motion.ease VERBATIM (a token; the schema requires it).
+//   --t     is `var(--dur-1) var(--ease)` — the SPA's transition shorthand, spent
+//           by ~26 rules. Not a token and not a new value: it is a pure function
+//           of the two lines above it, which is why it belongs beside them rather
+//           than hand-authored 100 lines downstream where the two could drift.
+// Theme-INVARIANT, so this goes on the bare :root only — never inside
+// [data-theme="dark"] or a [data-bp-theme] block (D25, the motionVars rule).
+function cloudMotionVars(indent, t = tokens) {
+  return [
+    ...motionVarLines(t),
+    `--ease: ${t.motion.ease};`,
+    "--t: var(--dur-1) var(--ease);",
+  ].map((l) => indent + l).join("\n");
+}
+
+// The reduced-motion collapse, GENERATED with the ladder rather than left beside
+// it. Two reasons, in order of weight:
+//   1. It is DERIVED from MOTION_STEPS, so a fourth rung added to tokens.json is
+//      zeroed automatically. The hand block listed three rungs by name; adding
+//      dur-4 would have shipped a rung that ignores the user's setting, silently.
+//   2. It is emitted LAST in the region — after the theme blocks — so it wins the
+//      cascade over every declaration this emitter writes, which is the property
+//      that makes it a collapse rather than one more shadow.
+// `0s` is written literally, not as `0${t.motion._unit}`: check.mjs Part N's
+// exactly-once arm exempts a re-declaration by the exact VALUE "0s" (that is what
+// keeps the exemption from being stretched to cover a literal that paints), so the
+// byte the gate recognises is the byte we emit. Zero is zero in any time unit.
+// --t needs no entry: var() inside a custom property substitutes at computed-value
+// time on the element that DECLARES it, so --t recomputes to `0s ease` on :root.
+// Spinner keyframes keep their literal durations on purpose — a progress
+// indicator is state, not decoration.
+function cloudReducedMotion() {
+  return [
+    "/* Motion collapses when the user asks for it (decision 29). Only the token",
+    "   durations go to 0 — spinner keyframes keep their literal duration because",
+    "   a progress indicator is state, not decoration. --t follows for free. */",
+    "@media (prefers-reduced-motion: reduce) {",
+    "  :root {",
+    ...MOTION_STEPS.map((k) => `    --${k}: 0s;`),
+    "  }",
+    "}",
+  ].join("\n");
+}
+
 function cloudBlock(themes = loadThemes()) {
   const lines = [
     ":root {",
@@ -562,6 +616,10 @@ function cloudBlock(themes = loadThemes()) {
     cloudStatusVars("light", "  "),
     cloudAccentVars("light", "  "),
     providerVars("light", "  "),
+    "  /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-",
+    "     invariant, so :root only; the reduced-motion collapse is at the end of",
+    "     this region. */",
+    cloudMotionVars("  "),
     "}",
     '[data-theme="dark"] {',
     cloudChromeVars("dark", "  "),
@@ -578,6 +636,8 @@ function cloudBlock(themes = loadThemes()) {
   ];
   const themed = themeBlocks(themes, cloudThemeBlock);
   if (themed) lines.push(THEME_BANNER, themed);
+  // LAST in the region on purpose — see cloudReducedMotion()'s note.
+  lines.push(cloudReducedMotion());
   return lines.join("\n");
 }
 
@@ -1986,6 +2046,49 @@ function sheetsBlock(themes = loadThemes()) {
 // reader-dark-parity stays green because the guard's edit-side scan reads
 // paper-surface.css only, and the reader-coverage scan still finds these dark
 // re-skins inside prefers-color-scheme blocks.
+// PRINT — the reader's paged output. A paper prints as ink on white whatever
+// the screen was wearing, and BOTH dark routes survive into paged output: a
+// print preview keeps the OS `prefers-color-scheme` AND keeps whatever
+// `data-theme` the pre-paint toggle stamped. The reader's @media print block
+// (the hand region of bulldocs.html.heex) forces a white ground but never
+// re-stamped the ink, so an OS-dark reader printed the DARK palette's ink onto
+// that white — #e7ede9 on #fff, ~1.2:1, a page that looks blank.
+//
+// This re-stamps the LIGHT palette under print, from the SAME token data the
+// light blocks above emit — never a hand-copy, so a palette edit reaches print
+// with the rest of it (and the values stay inside the GENERATED marker, where
+// check.mjs Part E's literal ledger does not count them).
+//
+// TWO selector shapes because the dark palette arrives two ways:
+//   * the bare pair matches the `@media (prefers-color-scheme: dark)` block's
+//     specificity exactly and wins on source order (it is emitted later);
+//   * the `[data-theme]` pair matches `[data-theme="dark"]`'s specificity, so a
+//     reader who explicitly toggled dark prints light as well.
+// `root` is the ROOT-element selector the palette hangs off: `html` for the base
+// palette, `html[data-bp-theme="x"]` for a theme. `[data-theme]` is appended as a
+// COMPOUND (no space) because data-bp-theme and data-theme both sit on <html>.
+const printRestamp = (root, lightLines) => {
+  const sel = (tail) => `      ${root} ${tail}`;
+  const selStamped = (tail) => `      ${root}[data-theme] ${tail}`;
+  const art = "body:has(.bp-paper-article)";
+  const shell = `${art} .bp-paper-shell.bp-paper-article`;
+  return [
+    "    /* PRINT: the LIGHT palette, re-stamped from the same token data as the",
+    "       light blocks above — paged output is ink on white whatever the screen",
+    "       scheme or the stamped [data-theme] was. See printRestamp in",
+    "       design/emit.mjs; the white ground + chrome hiding stay in the hand",
+    "       region's @media print block further down this sheet. */",
+    "    @media print {",
+    sel(art + ","),
+    sel(shell + ","),
+    selStamped(art + ","),
+    selStamped(shell + " {"),
+    ...lightLines.map((l) => "        " + l.trim()),
+    "      }",
+    "    }",
+  ];
+};
+
 const bulldocsThemeBlock = (name, t) => {
   const rl = t.color.paper.reader.light;
   const rd = t.color.paper.reader.dark;
@@ -2074,6 +2177,7 @@ const bulldocsThemeBlock = (name, t) => {
     `    ${p}[data-theme="dark"] #bp-mailapp {`,
     ...mailVars("dark"),
     "    }",
+    ...printRestamp(p, readerVars(rl, "light", lightExtra)),
   ].join("\n");
 };
 
@@ -2251,6 +2355,24 @@ function bulldocsBlock(themes = loadThemes()) {
     `      --mail-paper: ${mc.paper.dark}; --mail-bar: ${mc.bar.dark}; --mail-rule: ${mc.rule.dark};`,
     `      --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
     "    }",
+    ...printRestamp("html", [
+      `--paper-bg:         ${rl["bg"]};`,
+      `--paper-bg-deep:    ${rl["bg-deep"]};`,
+      `--paper-ink:        ${rl["ink"]};`,
+      `--paper-ink-soft:   ${rl["ink-soft"]};`,
+      `--paper-rule:       ${rl["rule"]};`,
+      `--paper-accent:     ${rl["accent"]};`,
+      `--paper-accent-soft: ${rl["accent-soft"]};`,
+      `--paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
+      `--paper-ink-faint:    ${sfl["ink-faint"]};`,
+      `--paper-chrome-bg:    ${sfl["chrome-bg"]};`,
+      `--paper-chrome-border: ${sfl["chrome-border"]};`,
+      `--bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
+      `--bp-tone-success-bg: ${cl.success.bg}; --bp-tone-success-fg: ${cl.success.fg};`,
+      `--bp-tone-warning-bg: ${cl.warning.bg}; --bp-tone-warning-fg: ${cl.warning.fg};`,
+      `--bp-tone-danger-bg:  ${cl.danger.bg}; --bp-tone-danger-fg:  ${cl.danger.fg};`,
+      `--bp-tone-neutral-bg: ${cl.neutral.bg}; --bp-tone-neutral-fg: ${cl.neutral.fg};`,
+    ]),
     ...(themed ? ["    " + THEME_BANNER, themed] : []),
   ].join("\n");
 }

@@ -81,7 +81,15 @@ defmodule BarkparkWeb.TasksControllerTenantIsolationTest do
         %{
           "doc_id" => uniq("iso"),
           "title" => "A's task",
-          "content" => %{"kind" => "task", "lifecycle_status" => "open", "parent_id" => phase}
+          # PDS-D291: one MET criterion keeps the in-scope `done` close out of
+          # the close-artifact gate (a criteria-less `done` close whose reason
+          # names no PR+sha is refused). This test measures tenancy.
+          "content" => %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "parent_id" => phase,
+            "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+          }
         },
         @dataset,
         scope_a

@@ -2505,6 +2505,13 @@ defmodule BarkparkCloud.Registry do
   IDEMPOTENT: {:ok, :deleted} normal; {:ok, :already_gone} if the job/barkpark are
   already gone (retried succeed); {:error, :conflict} if the job is terminally
   "failed".
+
+  AUDITED (cch-w57). The delete stamps one `barkpark.deleted` audit event in the
+  SAME transaction, so the removal of a box that actually RAN is recorded on the
+  team's trail exactly like the router's non-live `DELETE /v1/barkparks/:id` arm
+  records the removal of one that never did. A refused audit insert rolls the
+  delete back. Only the `:deleted` outcome writes: `:already_gone` deleted
+  nothing, and a `:conflict` / `:stale_claim` never reached the row.
   """
   @spec succeed_deprovision_job(binary(), keyword()) ::
           {:ok, :deleted | :already_gone}
@@ -2536,15 +2543,65 @@ defmodule BarkparkCloud.Registry do
                     :already_gone
 
                   %Barkpark{} = bp ->
+                    # Read the cascade's victims BEFORE the delete — after it,
+                    # `sites` is gone and the trail could no longer name what
+                    # the removal took with it.
+                    site_slugs = cascaded_site_slugs(bp.id)
+
                     case Repo.delete(bp) do
-                      {:ok, _} -> :deleted
-                      {:error, cs} -> Repo.rollback(cs)
+                      {:ok, _} ->
+                        case record_deprovision_audit(bp, site_slugs) do
+                          {:ok, _event} -> :deleted
+                          {:error, cs} -> Repo.rollback(cs)
+                        end
+
+                      {:error, cs} ->
+                        Repo.rollback(cs)
                     end
                 end
               end
           end
         end)
     end
+  end
+
+  defp cascaded_site_slugs(barkpark_id) do
+    from(s in Site, where: s.barkpark_id == ^barkpark_id, select: s.slug, order_by: s.slug)
+    |> Repo.all()
+  end
+
+  # cch-w57: the LIVE teardown's audit row. It is inserted INSIDE
+  # `succeed_deprovision_job/2`'s transaction, immediately after the row delete,
+  # so the fact and the act commit together or neither does — the same
+  # atomic-with-mutation discipline `Accounts.audit/3` gives the router's
+  # NON-live DELETE arm. Before this, the only lane a box that actually RAN
+  # could take deleted the row silently, and the console's append-only audit
+  # list showed the removal of every box that never ran and none that did.
+  #
+  # `actor_user_id` is nil ON PURPOSE, not by omission: the deletion is
+  # performed by the deprovision WORKER, minutes to hours after the admin who
+  # pressed Remove, and `provision_jobs` carries no actor column to relay them
+  # through. A nil actor is the audit register's declared shape for a
+  # system-driven fact (see `Accounts.AuditEvent`'s moduledoc). Attributing the
+  # requester needs a column and a migration — a separate row.
+  #
+  # A rollback here is not theoretical politeness: a refused audit insert MUST
+  # refuse the delete, or the register is back to recording fewer removals than
+  # happened.
+  defp record_deprovision_audit(%Barkpark{} = bp, site_slugs) do
+    BarkparkCloud.Accounts.record_audit(%{
+      team_id: bp.team_id,
+      actor_user_id: nil,
+      action: "barkpark.deleted",
+      target_type: "barkpark",
+      target_id: bp.id,
+      metadata: %{
+        "name" => bp.name,
+        "host" => bp.host,
+        "via" => "deprovision",
+        "sites" => site_slugs
+      }
+    })
   end
 
   @doc """

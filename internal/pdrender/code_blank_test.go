@@ -11,9 +11,9 @@ func TestCodeRendererBlankSourceRendersNothing(t *testing.T) {
 	reg := testRegistry()
 	ctx := RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}
 	cases := []struct {
-		name   string
-		attrs  map[string]any
-		blank  bool
+		name  string
+		attrs map[string]any
+		blank bool
 	}{
 		{"empty code key", map[string]any{"code": ""}, true},
 		{"spaces only", map[string]any{"code": "   "}, true},

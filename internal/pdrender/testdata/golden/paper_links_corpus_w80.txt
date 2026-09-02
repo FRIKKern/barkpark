@@ -1,0 +1,101 @@
+Worth opening next                                                              
+A few real Papers that add useful context to this edition.                      
+                                                                                
+▸ Viable Everywhere — reachable from every agent surface (/papers/viable-       
+everywhere-strategy)                                                            
+  The larger idea behind making Barkpark available wherever work already        
+  happens.                                                                      
+                                                                                
+▸ The tiered desk, seen (/papers/ssp-visual-addendum)                           
+  Real product screenshots showing how Barkpark’s working desk took shape.      
+                                                                                
+▸ View vs Edit — the real 1:1 parity test (/papers/view-vs-edit-parity)         
+  A side-by-side look at where Paper reading and editing genuinely match.       
+                                                                                
+▸ The 80-Column Standard (/papers/the-80-column-standard)                       
+  The principle behind keeping rich Papers useful in an ordinary terminal.      
+                                                                                
+The year, month by month                                                        
+Open any month for its full story, visual evidence, and daily record.           
+                                                                                
+April 2026 · 01 Apr–30 Apr                                                      
+▸ Tasks return to view (/papers/barkpark-changelog-2026-04)                     
+  Work focused on returning the full picture instead of something partial or    
+  misleading. People can trust that what they see is the whole story.           
+  Edition · 223 verified changes                                                
+                                                                                
+May 2026 · 01 May–31 May                                                        
+▸ Failures now explain what happened (/papers/barkpark-changelog-2026-05)       
+  Missing or failed results now say what happened instead of dressing an error  
+  up as an empty or successful page.                                            
+  Edition · 419 verified changes                                                
+                                                                                
+June 2026 · 01 Jun–30 Jun                                                       
+▸ Mutate halt returns the canonical error envelope (not a bare string)          
+(/papers/barkpark-changelog-2026-06)                                            
+  Errors and awkward states were made easier to understand and recover from.    
+  Less guesswork when something needs attention.                                
+  Edition · 782 verified changes                                                
+                                                                                
+July 2026 · 01 Jul–31 Jul                                                       
+▸ Barkpark Cloud makes site status easier to understand (/papers/barkpark-      
+changelog-2026-07)                                                              
+  Site health and release state became clearer, with awkward and refused actions
+  leaving a useful explanation behind.                                          
+  Edition · 3,120 verified changes                                              
+                                                                                
+August 2026 · 01 Aug–31 Aug                                                     
+▸ A bare-string was spread character by character, so the page never revalidated
+(/papers/barkpark-changelog-2026-08)                                            
+  Work focused on returning the full picture instead of something partial or    
+  misleading. People can trust that what they see is the whole story.           
+  Edition · 1,669 verified changes                                              
+                                                                                
+Travel through the month                                                        
+Every stop opens the live daily edition; the quieter days remain in the complete
+calendar below.                                                                 
+                                                                                
+02 Aug                                                                          
+▸ The cause stays visible (/papers/barkpark-changelog-2026-08-02)               
+  Failure screens and messages preserve the explanation a person can act on.    
+  Edition                                                                       
+                                                                                
+06 Aug                                                                          
+▸ ‘Live’ stops covering a failed release (/papers/barkpark-changelog-2026-08-06)
+  Status follows the newest release instead of the most comforting state.       
+  Edition                                                                       
+                                                                                
+09 Aug                                                                          
+▸ Unknown gets nine useful names (/papers/barkpark-changelog-2026-08-09)        
+  Cloud separates measured reasons that previously collapsed into one vague     
+  label.                                                                        
+  Edition                                                                       
+                                                                                
+12 Aug                                                                          
+▸ Papers get a demanding benchmark (/papers/barkpark-changelog-2026-08-12)      
+  A real investigation brings screenshots, diagrams, and terminal replays into  
+  the quality bar.                                                              
+  Edition                                                                       
+                                                                                
+14 Aug                                                                          
+▸ Evidence gets room; prose does not stretch (/papers/barkpark-changelog-2026-  
+08-14)                                                                          
+  Wide material steps out locally, then the reading line returns to normal.     
+  Edition                                                                       
+                                                                                
+17 Aug                                                                          
+▸ Paper creation becomes a product path (/papers/barkpark-changelog-2026-08-17) 
+  Working-copy, parity, and publish behavior turn one benchmark into a reusable 
+  system.                                                                       
+  Edition                                                                       
+                                                                                
+24 Aug                                                                          
+▸ Nothing is no longer a passing result (/papers/barkpark-changelog-2026-08-24) 
+  Release checks reject empty runs instead of rewarding them with a green mark. 
+  Edition                                                                       
+                                                                                
+25 Aug                                                                          
+▸ The release archive becomes navigable (/papers/barkpark-changelog-2026-08-25) 
+  Chronicle gains visual evidence, live Paper links, and weekly chapters with   
+  distinct arguments.                                                           
+  Edition                                                                       

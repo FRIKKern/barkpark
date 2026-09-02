@@ -1385,6 +1385,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   defdelegate refetch_paper(socket), to: Paper
 
   @doc false
+  defdelegate reader_paper_html(socket, paper), to: Paper
+
+  @doc false
+  defdelegate write_denied?(socket), to: Paper
+
+  @doc false
   def fetch_published_twin(nil, _type, _dataset, _is_draft, _has_published, _scope_opts), do: nil
   def fetch_published_twin(_doc, nil, _dataset, _is_draft, _has_published, _scope_opts), do: nil
   def fetch_published_twin(_doc, _type, _dataset, false, _has_published, _scope_opts), do: nil
@@ -1552,6 +1558,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def link_url(base, token), do: "#{base}/s/#{token}"
 
   @doc false
+  # `project_id` STAYS nil-able here on purpose (task-2da739b78e938be0): this
+  # function reports the socket's scope, it does not invent one. A nil reaches
+  # `ShareLink.changeset/2`, which REFUSES the write — a link bound to no project
+  # is revocable by no cascade. `ItemShare.item_share_create/2` short-circuits
+  # first so the refusal carries a reason. Substituting a default project HERE
+  # would bind the link to a project nobody chose.
   def item_link_attrs(socket, item, access) do
     %{
       workspace_id: socket.assigns.current_workspace.id,

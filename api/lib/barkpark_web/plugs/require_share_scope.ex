@@ -227,7 +227,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
          true <- link.workspace_id == workspace.id,
          true <- link.project_id == project.id,
          true <- link.dataset == dataset,
-         true <- link_matches_route_resource?(link, conn.path_params) do
+         true <- Barkpark.Sharing.Links.binds_route_resource?(link, conn.path_params) do
       conn
       |> assign(:current_workspace, workspace)
       |> assign(:current_project, project)
@@ -242,7 +242,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
   end
 
   # An item grant is confined to the ONE resource it is bound to
-  # (`link_matches_route_resource?/2` above). `query_controller`'s `?expand=`
+  # (`Links.binds_route_resource?/2`). `query_controller`'s `?expand=`
   # and `?resolve=tasks` both walk OUTWARD from the bound doc — expand follows
   # its references, resolve=tasks runs a scope-wide task query — so either
   # param would let a leaked item link read documents it was never minted for.
@@ -266,18 +266,13 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
     }
   end
 
-  # An item link is bound to ONE resource; it only opens a route addressing
-  # exactly that resource. Paper reader → slug; doc read → doc_id (compared
-  # exactly as minted); media meta/renditions → file id. Routes without a
-  # single-resource param (lists, file paths) never item-grant.
-  defp link_matches_route_resource?(link, %{"slug" => slug}),
-    do: link.kind == "doc" and link.ref_type == "paper" and link.ref_id == slug
-
-  defp link_matches_route_resource?(link, %{"doc_id" => doc_id}),
-    do: link.kind == "doc" and link.ref_id == doc_id
-
-  defp link_matches_route_resource?(link, %{"id" => id}),
-    do: link.kind == "media" and link.ref_id == id
-
-  defp link_matches_route_resource?(_link, _path_params), do: false
+  # The per-resource binding itself is NOT decided here. It lives on
+  # `Barkpark.Sharing.Links.binds_route_resource?/2` (@canonical
+  # capability:share-link-route-binding), the ONE owner shared with the
+  # socket-side gate `BarkparkWeb.PluginScopeSession`. This plug used to carry
+  # a byte-identical private `link_matches_route_resource?/2`; a kind added to
+  # one copy and not the other split the dead render from the socket mount
+  # (task-3ba103f76393b04e). What THIS module still owns is the argument: the
+  # conn's PATH params, never the query string, so a `?doc_id=` a route never
+  # declared cannot manufacture a single-resource shape.
 end
