@@ -366,7 +366,16 @@ const PIN_MEMBER_SCENARIOS = 10;
 // corpus-size guard said "120 committed (pinned 119)"). It carries the same owner
 // actor `me("Acme Inc", …)` as every site-detail scenario, so the member slice is
 // unmoved and PIN_MEMBER_SCENARIOS stays at 10 (69 controls accounted).
-const PIN_TOTAL_SCENARIOS = 120;
+// 120 -> 121: cch-w23-bl-cruel-identity-own-scenario added
+// `account-modal-cruel-identity` — the 158-character email local part that used
+// to ride `account-modal-revoke`, where it silently drove smoke.mjs's click
+// oracle. THIS PIN IS ONE OF THE FOUR CENSUSES that made the wave-23 slice park
+// the identity on an existing key instead of minting one; all four are taught in
+// the same commit. RE-DERIVED by running this sweep and reading the number it
+// PRINTED, not by adding one. Its actor is the same owner `me("Guerrilla")`
+// every account-modal scenario carries — only the email differs — so the member
+// slice is unmoved and PIN_MEMBER_SCENARIOS stays at 10.
+const PIN_TOTAL_SCENARIOS = 121;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

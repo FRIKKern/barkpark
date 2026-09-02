@@ -146,6 +146,25 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 	if !strings.Contains(steps[0].Cmd, "command -v caddy") {
 		t.Errorf("install step must probe for an existing caddy before the apt path; got:\n%s", steps[0].Cmd)
 	}
+
+	// AND the apt path REFRESHES BEFORE IT INSTALLS (D-caddy-apt-404). A stock
+	// Hetzner Ubuntu image carries a stale index pinning curl at a point release
+	// the mirror has already deleted, so an install that leads resolves a .deb
+	// that 404s and exits 100 — three managed provisions died exactly there on
+	// 2026-09-02. Asserting the ORDER, not mere presence: the second `apt-get
+	// update` (for the Caddy repo) has always been there and did not save it.
+	install := steps[0].Cmd
+	firstUpdate := strings.Index(install, "apt-get update")
+	firstInstall := strings.Index(install, "apt-get install")
+	if firstUpdate < 0 {
+		t.Fatalf("install step must refresh the apt index; got:\n%s", install)
+	}
+	if firstInstall < 0 {
+		t.Fatalf("install step must install packages; got:\n%s", install)
+	}
+	if firstUpdate > firstInstall {
+		t.Errorf("apt-get update must come BEFORE the first apt-get install (a stale index 404s on a superseded curl); got:\n%s", install)
+	}
 }
 
 // TestCaddySteps_SkipAppRestart pins the go-live single-restart contract: with
