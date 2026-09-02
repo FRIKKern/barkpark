@@ -145,8 +145,10 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
     # the GLOBAL one, whose `blocks` field is private. The anonymous reader must
     # therefore find NO servable source — never the prose, and never the derived
     # body_html cache of the same prose.
-    assert {:error, :redacted_source} = Content.Papers.reader_source(paper, @ds, []),
-           "the global schema's private `blocks` leaked #{@prose_secret} to the anonymous paper reader"
+    source = Content.Papers.reader_source(paper, @ds, [])
+
+    assert match?({:error, :redacted_source}, source),
+           "the global schema's private `blocks` leaked #{@prose_secret} to the anonymous paper reader (got #{inspect(source)})"
   end
 
   # ── 2. GET /s/:token (D4 — share_link_controller.ex) ───────────────────────
