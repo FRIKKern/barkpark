@@ -6265,6 +6265,12 @@
         (charter D25). Non-defer so window.BarkparkChatComposer exists before the
         Hooks registration + LiveSocket connect below. --%>
   <script src="/assets/bp-chat-composer.js"></script>
+  <%!-- The Studio Claude chat's turn clock: the elapsed label and the busy
+        row's park word tick in the BROWSER off a server stamp, so a running
+        turn costs no per-second LiveView diff per viewer. Non-defer so the
+        globals exist before the Hooks registration + LiveSocket connect below
+        — and here at the BOTTOM of <body>, never in <head>. --%>
+  <script src="/assets/bp-chat-turn-clock.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -6302,6 +6308,13 @@
     // ChatComposer — paste/drop image attachments for the Studio Claude chat
     // composer (defined in /assets/bp-chat-composer.js, loaded non-defer above).
     if (window.BarkparkChatComposer) Hooks.ChatComposer = window.BarkparkChatComposer;
+    // ChatElapsed / ChatSpinWord — the chat turn clock's client half (defined
+    // in /assets/bp-chat-turn-clock.js, loaded non-defer above): the elapsed
+    // label ticks off a server-stamped data-started-at and the busy word
+    // rotates on its own interval, so a running turn costs the server no
+    // per-second render diff.
+    if (window.BarkparkChatElapsed) Hooks.ChatElapsed = window.BarkparkChatElapsed;
+    if (window.BarkparkChatSpinWord) Hooks.ChatSpinWord = window.BarkparkChatSpinWord;
 
     Hooks.PresenceIdentity = {
       mounted() {
