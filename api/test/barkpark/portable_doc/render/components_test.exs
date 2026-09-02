@@ -709,3 +709,119 @@ defmodule Barkpark.PortableDoc.Render.CardsPipelineTest do
     refute none =~ "bp-pnode__src"
   end
 end
+
+defmodule Barkpark.PortableDoc.Render.ChatCardStatusTest do
+  # Pure emitter — no DB, safe to run async.
+  use ExUnit.Case, async: true
+
+  alias Barkpark.PortableDoc.Render.Components
+
+  # ── chat card status: the fold + the narrow-viewport clamp ──────────────────
+  #
+  # A chat card's status word used to take ARBITRARY author text into a span
+  # carrying an INLINE `white-space: nowrap` — inline, so no paper-surface.css
+  # rule could ever clamp it. Measured on origin/main, headless Chromium, the
+  # reader's real container geometry, 390px viewport, ONE 44-character
+  # approval_status: chat-approval 433px, chat-plan 450px, chat-question 466px
+  # of document scrollWidth against a 390px innerWidth. Both halves are closed
+  # here: the three html emitters fold the status through
+  # `chat_approval_status/1` (pending | allowed | denied | canceled, fail-open
+  # to pending) and the header span carries a wrap guard instead of the nowrap.
+  describe "chat card approval_status is folded before it is rendered" do
+    # 44 characters — the exact length the filed measurement used.
+    @arbitrary_status "awaiting-operator-decision-2026-08-24T11:23Z"
+
+    setup do
+      assert String.length(@arbitrary_status) == 44
+      :ok
+    end
+
+    test "chat_approval_html/1 never lets an arbitrary status reach the output" do
+      html =
+        Components.chat_approval_html(%{
+          "type" => "chat-approval",
+          "tool_name" => "Bash",
+          "summary" => "Bash — command: rm -rf build",
+          "approval_status" => @arbitrary_status
+        })
+
+      refute html =~ @arbitrary_status
+      assert html =~ ">pending</span>"
+      # and the fold reaches the TITLE branch too — an unrecognized status is
+      # still "awaiting you", so the card keeps asking.
+      assert html =~ "Allow Bash?"
+    end
+
+    test "chat_question_html/1 never lets an arbitrary status reach the output" do
+      html =
+        Components.chat_question_html(%{
+          "type" => "chat-question",
+          "questions" => [%{"question" => "Which database?", "options" => ["Postgres"]}],
+          "approval_status" => @arbitrary_status
+        })
+
+      refute html =~ @arbitrary_status
+      assert html =~ ">pending</span>"
+    end
+
+    test "chat_plan_html/1 never lets an arbitrary status reach the output" do
+      html =
+        Components.chat_plan_html(%{
+          "type" => "chat-plan",
+          "title" => "Ship the parser",
+          "preview" => "Refactor the tokenizer, then add tests.",
+          "approval_status" => @arbitrary_status
+        })
+
+      refute html =~ @arbitrary_status
+      assert html =~ ">pending</span>"
+    end
+
+    test "the KNOWN vocabulary survives the fold — the cards still read terminal state" do
+      for {status, label} <- [
+            {"pending", "pending"},
+            {"allowed", "✓ allowed"},
+            {"denied", "⊘ denied"},
+            {"canceled", "— canceled"}
+          ] do
+        for html <- [
+              Components.chat_approval_html(%{
+                "tool_name" => "Bash",
+                "summary" => "s",
+                "approval_status" => status
+              }),
+              Components.chat_question_html(%{"questions" => [], "approval_status" => status}),
+              Components.chat_plan_html(%{
+                "title" => "t",
+                "preview" => "p",
+                "approval_status" => status
+              })
+            ] do
+          assert html =~ label, "status #{inspect(status)} lost its label"
+        end
+      end
+    end
+
+    test "the header carries NO inline white-space:nowrap — the declaration CSS cannot beat" do
+      for html <- [
+            Components.chat_approval_html(%{
+              "tool_name" => "Bash",
+              "summary" => "s",
+              "approval_status" => "pending"
+            }),
+            Components.chat_question_html(%{"questions" => [], "approval_status" => "pending"}),
+            Components.chat_plan_html(%{
+              "title" => "t",
+              "preview" => "p",
+              "approval_status" => "pending"
+            })
+          ] do
+        refute html =~ "nowrap"
+        # the guard a shrink-to-fit flex item actually needs: only `anywhere`
+        # reduces the intrinsic width the box is sized from, and `min-width: 0`
+        # lets the item shrink below its content size at all.
+        assert html =~ "min-width: 0; overflow-wrap: anywhere;"
+      end
+    end
+  end
+end

@@ -352,6 +352,35 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   @list_keys ~w(docs hits results)
 
+  # ── the task_prime queue chip ───────────────────────────────────────────────
+  #
+  # `task_prime` answers with `{ok, worker, counts, in_progress, ready, rails,
+  # recent_events}` — a shape that matches NEITHER the result-LIST branch
+  # (docs/hits/results) nor the single-entity branch (doc/doc_id/id), so the
+  # richest queue-state tool used to draw no chip at all. Detection stays
+  # SHAPE-keyed: the `counts` + `ready` key PAIR is unique to prime among our
+  # MCP results, and it is disjoint from both existing branches (a prime payload
+  # carries no docs/hits/results and no top-level doc/doc_id/id), so the search
+  # and entity chips are byte-unchanged for every payload that is not prime.
+  @prime_keys ~w(counts ready)
+
+  # Ready-head rows drawn before the honest "+N more" (payload law, as the
+  # search chip's @chip_hit_cap).
+  @prime_ready_cap 5
+
+  # The lifecycle vocabulary that OWNS a `--life-*` token (defined in
+  # root.html.heex; `rail_status_color/1` in chat_live.ex is the sibling reader).
+  # A status outside it is dim-NEUTRAL — an unknown state must never borrow a
+  # known state's color, which would report queue state that does not exist.
+  @life_states ~w(open ready in_progress blocked done closed cancelled considering researching)
+
+  # Emitted token, never a copied literal (studio-literal-check).
+  @life_neutral "var(--fg-dim)"
+
+  # Count keys in board order. Any OTHER key the server later adds still renders,
+  # appended in sorted order, so the chip never silently drops a lifecycle state.
+  @count_order ~w(open ready in_progress blocked done closed cancelled)
+
   @doc """
   Classify an MCP tool RESULT into a first-class chip, or `nil` (keep the generic
   `●`/`⎿` row). `tool` is the persisted tool name, `output` the single text
@@ -364,7 +393,8 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
        row. A `{"ok": false}` outcome (e.g. the empty-queue claim) is a real
        non-result and also yields no chip.
 
-  Kind comes from the decoded payload: a non-empty result LIST
+  Kind comes from the decoded payload: a `counts` + `ready` pair is a `:prime`
+  queue chip (lifecycle counts + a colored ready head); a non-empty result LIST
   (`docs`/`hits`/`results`) is a `:search` chip (inline expandable hits, each
   deep-linked by its OWN `type`); a single entity is a `:task` or `:paper` chip
   by its `type`, deep-linking to the board (`/admin/projects?task=`) or the
@@ -395,13 +425,22 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
     end
   end
 
-  # A non-empty result LIST is a search chip; otherwise a single entity chip.
+  # A prime payload is a queue chip; a non-empty result LIST a search chip;
+  # otherwise a single entity chip.
   defp build_chip(suffix, payload) do
-    case result_list(payload) do
-      [_ | _] = list -> search_chip(list)
-      _ -> entity_chip(payload, suffix)
+    cond do
+      prime?(payload) ->
+        prime_chip(payload)
+
+      true ->
+        case result_list(payload) do
+          [_ | _] = list -> search_chip(list)
+          _ -> entity_chip(payload, suffix)
+        end
     end
   end
+
+  defp prime?(payload), do: Enum.all?(@prime_keys, &Map.has_key?(payload, &1))
 
   defp result_list(payload) do
     Enum.find_value(@list_keys, [], fn k ->
@@ -492,6 +531,75 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   defp hit_href(%{"type" => "task"} = h), do: task_href(h)
   defp hit_href(_), do: nil
 
+  # Summarize a prime payload into `{counts, ready head}`. EVERY field is read
+  # defensively: a partial or malformed payload (counts that is not a map, ready
+  # that is not a list, rows that are not maps, non-integer count values) yields
+  # an EMPTY slice rather than a crash or an invented number — the chip still
+  # draws, neutrally, and the generic ⎿ row still holds the full response.
+  defp prime_chip(payload) do
+    ready = as_list(payload["ready"])
+
+    rows =
+      ready
+      |> Enum.take(@prime_ready_cap)
+      |> Enum.map(&prime_row/1)
+      |> Enum.reject(&is_nil/1)
+
+    %{
+      kind: :prime,
+      counts: prime_counts(payload["counts"]),
+      ready: rows,
+      ready_total: length(ready),
+      overflow: max(length(ready) - length(rows), 0)
+    }
+  end
+
+  # Board order first, then any unrecognized state the server added, sorted —
+  # a new lifecycle state renders (dim-neutral) instead of vanishing.
+  defp prime_counts(counts) when is_map(counts) do
+    extra =
+      counts
+      |> Map.keys()
+      |> Enum.filter(&(is_binary(&1) and &1 not in @count_order))
+      |> Enum.sort()
+
+    for state <- @count_order ++ extra, is_integer(counts[state]) do
+      %{state: state, count: counts[state], color: life_color(state)}
+    end
+  end
+
+  defp prime_counts(_), do: []
+
+  # One ready-head row: its title (or id), its lifecycle color, and the board
+  # deep link. A row carrying neither a title nor an id has nothing to draw.
+  defp prime_row(row) when is_map(row) do
+    case first_binary([row["title"], entity_id(row)]) do
+      label when is_binary(label) ->
+        state = prime_state(row["lifecycle_status"])
+        %{label: label, state: state, color: life_color(state), href: task_href(row)}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp prime_row(_), do: nil
+
+  # A BRIEF card omits `lifecycle_status` exactly when it is "open"
+  # (`put_unless(:lifecycle_status, …, "open")` in tasks_controller/params.ex),
+  # so an ABSENT value honestly reads open — it is not an unknown state.
+  defp prime_state(s) when is_binary(s) and s != "", do: s
+  defp prime_state(_), do: "open"
+
+  defp life_color(state) when is_binary(state) do
+    if state in @life_states, do: "var(--life-" <> state <> ")", else: @life_neutral
+  end
+
+  defp life_color(_), do: @life_neutral
+
+  defp as_list(v) when is_list(v), do: v
+  defp as_list(_), do: []
+
   defp first_binary(values) do
     Enum.find(values, fn v -> is_binary(v) and v != "" end)
   end
@@ -548,6 +656,55 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
     """
   end
 
+  def tool_chip(%{chip: %{kind: :prime}} = assigns) do
+    ~H"""
+    <div style="margin: 4px 0 0 16px;">
+      <details style="font-family: var(--font-mono); font-size: 12px;">
+        <summary
+          style="cursor: pointer; list-style: none; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface);"
+        >
+          <span style="color: var(--primary); flex: none;"><%= chip_glyph(:prime) %></span>
+          <span data-gutter-text><%= @chip.ready_total %> ready</span>
+          <span
+            :for={c <- @chip.counts}
+            style="display: inline-flex; align-items: center; gap: 4px; flex: none;"
+          >
+            <span style={life_dot_style(c.color)}></span>
+            <span class="text-dim" style="opacity: 0.7;"><%= c.state %> <%= c.count %></span>
+          </span>
+        </summary>
+        <ul
+          :if={@chip.ready != []}
+          style="list-style: none; margin: 6px 0 0; padding: 0 0 0 12px; display: flex; flex-direction: column; gap: 3px;"
+        >
+          <li :for={row <- @chip.ready} style="display: flex; gap: 6px; align-items: baseline;">
+            <span style={life_dot_style(row.color)}></span>
+            <a
+              :if={row.href}
+              href={row.href}
+              style="color: var(--primary); text-decoration: none; overflow-wrap: anywhere;"
+              data-gutter-text
+            ><%= row.label %></a>
+            <span
+              :if={is_nil(row.href)}
+              style="overflow-wrap: anywhere;"
+              data-gutter-text
+            ><%= row.label %></span>
+            <span class="text-dim" style="opacity: 0.6; flex: none;"><%= row.state %></span>
+          </li>
+        </ul>
+        <div
+          :if={@chip.overflow > 0}
+          class="text-dim"
+          style="padding: 3px 0 0 12px; opacity: 0.7;"
+        >
+          … +<%= @chip.overflow %> more
+        </div>
+      </details>
+    </div>
+    """
+  end
+
   def tool_chip(%{chip: %{kind: kind}} = assigns) when kind in [:task, :paper] do
     ~H"""
     <a
@@ -573,6 +730,15 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   def tool_chip(assigns), do: ~H""
 
+  # The lifecycle dot every prime row and count pill carries. The color is a
+  # `var(--life-*)` token (or the neutral token for an unknown state), never a
+  # copied literal — studio-literal-check stays green.
+  defp life_dot_style(color) do
+    "display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 999px; " <>
+      "background: " <> color <> ";"
+  end
+
+  defp chip_glyph(:prime), do: "◷"
   defp chip_glyph(:task), do: "◈"
   defp chip_glyph(:paper), do: "❐"
   defp chip_glyph(_), do: "●"
