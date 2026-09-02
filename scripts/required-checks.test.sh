@@ -452,18 +452,267 @@ fi
 # real repo's `Boundary gate (advisory)` maps exactly — asserted on the real
 # workflow tree below.
 
-section "3c. against the REAL workflow tree — literal-paren names still map"
+section "3c. against the REAL workflow tree — every required context still resolves to a job that publishes it"
 
-REAL_UNMAPPED="$(bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIX" --no-merge \
-  --sha shaA --sha shaA --explain 2>&1 | grep -c "S0 UNMAPPED" || true)"
-# Every fixture name in the intersection is synthetic, so all of them are
-# unmapped against the real tree — the assertion that matters is the opposite
-# one: the real names in the committed spec DO map. Checked via the spec itself.
-if jq -e '.exclusions | map(select(.reason | startswith("S0"))) | length == 0' "$SPEC" >/dev/null; then
-  ok "the committed spec carries no S0 UNMAPPED exclusion — every real name, parens and all, resolved to a job"
+# WHAT THIS SECTION USED TO BE, AND WHY IT COULD NOT LOSE (wave 29).
+#
+# The real-tree read below was already here. Its answer went into `REAL_UNMAPPED`
+# — a variable that occurred EXACTLY ONCE in this file, as an assignment. The
+# only assertion in the section jq'd `$SPEC`, i.e. the committed, static
+# `.github/required-checks.json`: a file that no edit to `.github/workflows/`
+# can move. So the one signal in the section that responds to the real tree was
+# computed and dropped, and the assertion that ran was green by construction.
+# Measured on origin/main, by isolated reproduction:
+#
+#   tree given to the generator            REAL_UNMAPPED   generator rc   3c said
+#   clean                                  0               0              ok
+#   `Console gate`'s job `name:` renamed   2               0              ok
+#   a catch-all planted in the real tree   0               1              ok
+#
+# READING THE OLD VARIABLE WOULD NOT HAVE BEEN ENOUGH EITHER, which is why this
+# is a rebuild and not a one-line fix. The old read fed the generator the
+# HERMETIC fixture feed, whose names are all synthetic, so EVERY name in the
+# intersection is unmapped against the real tree and the count is noise that
+# happens to be 0 only because the intersection is small. A real-tree read needs
+# a feed carrying the names the real tree is supposed to publish — and those are
+# DERIVED from the committed spec's required contexts rather than typed here,
+# because a hand-written probe can always be written so as not to contain the
+# defect it is supposed to find.
+#
+# TWO ARMS, BECAUSE ONE OF THEM CANNOT SEE HALF THE FAILURES. `REAL_UNMAPPED`
+# alone is blind to a generator that DIES before it ever classifies a name: a
+# real-tree catch-all exits 1 with the count still at 0 (row three above), and
+# an `|| true` would swallow it exactly the way the emit sites did before
+# `emit_spec` existed. So the exit status is CAPTURED and asserted on its own,
+# and both arms get their own mutation twin below.
+#
+# THE VERDICT COMES FROM THE GENERATOR; THE DIAGNOSIS COMES FROM A LOCAL READ.
+# `rc3c_inventory` is a small awk pass over `jobs:` → `name:` used ONLY to say
+# which job most likely used to publish a name that no longer maps. It never
+# decides anything: if it ever drifts from the generator's own parser the
+# failure text gets vaguer and no verdict moves. A rename that keeps the old
+# name as a substring (a suffix, a qualifier — the common shape) is named
+# exactly; a rename beyond recognition degrades to "the string still appears
+# in <file>".
+#
+# WHERE THIS RUNS AND WHAT ITS RED DOES: `.github/workflows/required-checks-drift.yml`
+# job `spec-gate`, rendered as `Required-check spec gate`. That name is held out
+# of the required set under S7 and the job is in no required aggregator's
+# `needs:`, so it cannot stop a merge — its red is a signal a human must read.
+# Registering it is a branch-protection change and a lead call; see that
+# workflow's own header, which states the same thing.
+
+RC3C_FIX="$TMP/rc3c-fixtures"
+mkdir -p "$RC3C_FIX"
+
+# The probe feed: one green Actions check run per COMMITTED REQUIRED CONTEXT,
+# read out of $SPEC. Nothing here is typed.
+rc3c_feed() {
+  jq -r '.protection.required_status_checks.checks[].context' "$SPEC" \
+    | jq -R . \
+    | jq -s '{check_runs: map({name: ., conclusion: "success", started_at: "2026-07-28T01:00:00Z", app: {id: 15368}})}'
+}
+rc3c_feed > "$RC3C_FIX/checkruns-rc3cA.json"
+cp "$RC3C_FIX/checkruns-rc3cA.json" "$RC3C_FIX/checkruns-rc3cB.json"
+# main is all-green so S5 can never fire on a probe name: this section's subject
+# is S0 and the exit code, and nothing else may decide its verdict.
+cp "$RC3C_FIX/checkruns-rc3cA.json" "$RC3C_FIX/checkruns-rc3cMAIN.json"
+echo "rc3cMAIN" > "$RC3C_FIX/main-shas.txt"
+
+RC3C_REQUIRED_N="$(jq -r '.protection.required_status_checks.checks[].context' "$SPEC" | awk 'NF {n++} END {print n+0}')"
+RC3C_SPEC_SORTED="$(jq -c '[.protection.required_status_checks.checks[].context] | sort' "$SPEC")"
+RC3C_FEED_SORTED="$(jq -c '[.check_runs[].name] | sort' "$RC3C_FIX/checkruns-rc3cA.json")"
+if [ "$RC3C_REQUIRED_N" -ge 1 ] && [ "$RC3C_FEED_SORTED" = "$RC3C_SPEC_SORTED" ]; then
+  ok "the probe feed IS the committed required set — $RC3C_REQUIRED_N name(s) read out of .github/required-checks.json, never typed here, so the fixture cannot be written so as to miss the defect"
 else
-  bad "the committed spec has unmapped names: $(jq -c '[.exclusions[] | select(.reason|startswith("S0")).context]' "$SPEC")"
+  bad "the probe feed is not derived from the spec: feed $RC3C_FEED_SORTED vs spec $RC3C_SPEC_SORTED ($RC3C_REQUIRED_N required)"
 fi
+
+# ONE invocation, driven three times (the real tree, a COPY with a required
+# aggregator's job renamed, a COPY with a catch-all planted). The exit status is
+# captured into RC3C_RC — never `|| true`d, never piped into anything whose own
+# status would replace it.
+RC3C_OUT=""
+RC3C_RC=0
+rc3c_run() { # <workflows dir>
+  RC3C_RC=0
+  RC3C_OUT="$(bash "$GEN" --workflows "$1" --fixture-dir "$RC3C_FIX" --no-merge \
+    --sha rc3cA --sha rc3cB --explain 2>&1)" || RC3C_RC=$?
+}
+# The ledger lines are `  exclude  <name>  — <reason>` and
+# `  keep     <name>  (<file> job '<job>')`; both prefixes are 11 characters and
+# the name is terminated by the next DOUBLE space. awk rather than
+# `grep | sed`, because `grep -c` prints a count AND exits non-zero on zero
+# matches, and a `grep -q` that closes the pipe early takes its upstream out
+# with SIGPIPE under `set -o pipefail` — either one turns "clean" into a suite
+# abort or a false number.
+rc3c_unmapped() { # <ledger text> -> one required context per line that NO job publishes
+  printf '%s\n' "$1" | awk '
+    /^  exclude  / && index($0, "S0 UNMAPPED") {
+      s = substr($0, 12); i = index(s, "  "); if (i) s = substr(s, 1, i - 1)
+      print s
+    }'
+}
+rc3c_count() { # <ledger text> -> the integer REAL_UNMAPPED
+  rc3c_unmapped "$1" | awk 'NF {n++} END {print n+0}'
+}
+rc3c_mapped() { # <ledger text> -> "<context> <- <file> job '<job>'; …"
+  printf '%s\n' "$1" | awk '
+    /^  keep     / {
+      s = substr($0, 12); i = index(s, "  ("); if (!i) next
+      ctx = substr(s, 1, i - 1); prov = substr(s, i + 3); sub(/\)$/, "", prov)
+      printf "%s <- %s; ", ctx, prov
+    }'
+}
+rc3c_inventory() { # <workflows dir> -> file<TAB>job key<TAB>job name template
+  local f
+  for f in "$1"/*.yml; do
+    [ -f "$f" ] || continue
+    awk -v file="$(basename "$f")" '
+      /^jobs:[[:space:]]*$/                 { injobs = 1; next }
+      injobs && /^[^[:space:]#]/            { injobs = 0 }
+      injobs && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ { job = $1; sub(/:$/, "", job); next }
+      injobs && job != "" && /^    name:[[:space:]]/ {
+        nm = $0; sub(/^    name:[[:space:]]*/, "", nm)
+        gsub(/^["\047]|["\047]$/, "", nm)
+        printf "%s\t%s\t%s\n", file, job, nm
+      }
+    ' "$f"
+  done
+}
+rc3c_diagnose() { # <workflows dir> <context>
+  local near files
+  near="$(rc3c_inventory "$1" | awk -F'\t' -v c="$2" '
+    $3 != "" && (index($3, c) || index(c, $3)) { printf "%s job \047%s\047 now publishes \047%s\047; ", $1, $2, $3 }')"
+  if [ -n "$near" ]; then
+    printf 'the job that used to feed it is %s' "$near"
+    return 0
+  fi
+  files="$( { ( cd "$1" && grep -lF -- "$2" ./*.yml 2>/dev/null ) || true; } | sed 's|^\./||' | tr '\n' ' ' )"
+  if [ -n "$files" ]; then
+    printf 'no job publishes it and no job name resembles it; the string still appears in: %s(renamed beyond recognition, or deleted?)' "$files"
+  else
+    printf 'no job publishes it and no workflow file mentions it at all (deleted?)'
+  fi
+}
+rc3c_report() { # <workflows dir> <ledger text> <generator rc>
+  local ctx
+  printf 'the REAL workflow tree does not publish every required context (generator exit %s). ' "$3"
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    printf 'UNMAPPED required context "%s" — %s. ' "$ctx" "$(rc3c_diagnose "$1" "$ctx")"
+  done <<EOF
+$(rc3c_unmapped "$2")
+EOF
+  printf 'still resolving: %s' "$(rc3c_mapped "$2")"
+}
+
+# ── the clean read, on the tree this repo actually ships ─────────────────────
+rc3c_run "$REPO_ROOT/.github/workflows"
+RC3C_CLEAN_OUT="$RC3C_OUT"
+RC3C_CLEAN_RC="$RC3C_RC"
+REAL_UNMAPPED="$(rc3c_count "$RC3C_CLEAN_OUT")"
+RC3C_MAPPED_N="$(rc3c_mapped "$RC3C_CLEAN_OUT" | tr ';' '\n' | awk 'NF {n++} END {print n+0}')"
+
+if [ "$RC3C_CLEAN_RC" -eq 0 ]; then
+  ok "the real-tree run EXITS 0, and that status is asserted separately from the count — a refusal leaves REAL_UNMAPPED at 0, so a count-only clause reads clean on a generator that died"
+else
+  bad "the generator REFUSED over .github/workflows/ (exit $RC3C_CLEAN_RC): $(printf '%s\n' "$RC3C_CLEAN_OUT" | grep -v '^[[:space:]]*$' | head -2 | tr '\n' '⏎')"
+fi
+
+# ZERO UNMAPPED IS NOT THE CLAIM — "$RC3C_REQUIRED_N of $RC3C_REQUIRED_N RESOLVED" is.
+# A generator that refuses at index-build time classifies NOTHING, so it returns
+# zero unmapped names as well: measured with a catch-all planted in the real
+# tree, a bare `REAL_UNMAPPED -eq 0` printed "all 4 resolve" over an empty
+# ledger. The mapped side is counted too, and both must agree with the spec.
+if [ "$RC3C_CLEAN_RC" -eq 0 ] && [ "$REAL_UNMAPPED" -eq 0 ] && [ "$RC3C_MAPPED_N" -eq "$RC3C_REQUIRED_N" ]; then
+  ok "REAL_UNMAPPED is 0 and it is READ: all $RC3C_REQUIRED_N committed required context(s) resolve to a NAMED job in .github/workflows/ — $(rc3c_mapped "$RC3C_CLEAN_OUT")"
+else
+  bad "$(rc3c_report "$REPO_ROOT/.github/workflows" "$RC3C_CLEAN_OUT" "$RC3C_CLEAN_RC") [$RC3C_MAPPED_N of $RC3C_REQUIRED_N required context(s) resolved to a job]"
+fi
+
+# ── MUTATION TWIN 1: the count arm. Rename a required aggregator's job. ──────
+#
+# Both assertions above pass on a NUMBER BEING ZERO and a STATUS BEING ZERO, so
+# both also pass when the read never happened. The victim is DERIVED from the
+# clean run's own keep ledger — the first required context the real tree
+# resolves — so this twin cannot be aimed at a name chosen to make it work.
+RC3C_COPY="$TMP/rc3c-renamed"
+mkdir -p "$RC3C_COPY"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC3C_COPY/"
+RC3C_KEEP1="$(printf '%s\n' "$RC3C_CLEAN_OUT" | awk '/^  keep     / { print substr($0, 12); exit }')"
+RC3C_CTX="${RC3C_KEEP1%%  (*}"
+RC3C_PROV="${RC3C_KEEP1#*  (}"; RC3C_PROV="${RC3C_PROV%)}"
+RC3C_FILE="${RC3C_PROV%% job *}"
+RC3C_JOB="${RC3C_PROV#* job }"; RC3C_JOB="${RC3C_JOB//\'/}"
+
+RC3C_RENAME_RC=0
+awk -v ctx="$RC3C_CTX" '
+  {
+    line = $0; t = line; ind = ""
+    if (match(line, /^[[:space:]]+/)) ind = substr(line, 1, RLENGTH)
+    sub(/^[[:space:]]+/, "", t)
+    if (t == "name: " ctx) { line = ind "name: " ctx " RENAMED BY THE 3C MUTATION"; n++ }
+    print line
+  }
+  END { exit (n == 1 ? 0 : 1) }
+' "$RC3C_COPY/$RC3C_FILE" > "$TMP/rc3c-rename.tmp" || RC3C_RENAME_RC=$?
+if [ "$RC3C_RENAME_RC" -eq 0 ] && [ -s "$TMP/rc3c-rename.tmp" ]; then
+  mv "$TMP/rc3c-rename.tmp" "$RC3C_COPY/$RC3C_FILE"
+  ok "the mutation APPLIES: EXACTLY ONE \`name: $RC3C_CTX\` line — $RC3C_FILE job '$RC3C_JOB' — is rewritten in a COPY of the real tree, so the twin below is not asserting over an unchanged file"
+else
+  bad "the rename did not rewrite exactly one \`name:\` line (awk exit $RC3C_RENAME_RC) for the victim derived from the clean ledger — file '$RC3C_FILE', job '$RC3C_JOB', context '$RC3C_CTX' (an EMPTY triple means the clean run classified nothing, i.e. the generator refused) — everything below it would be vacuous"
+fi
+
+rc3c_run "$RC3C_COPY"
+RC3C_R_UNMAPPED="$(rc3c_count "$RC3C_OUT")"
+RC3C_R_REPORT="$(rc3c_report "$RC3C_COPY" "$RC3C_OUT" "$RC3C_RC")"
+# `grep -qF ""` matches ANYTHING, so every clause below is guarded on the
+# derived victim being non-empty first: a twin aimed at nothing must red, never
+# pass by matching the empty string.
+if [ -n "$RC3C_CTX" ] && [ "$RC3C_R_UNMAPPED" -gt "$REAL_UNMAPPED" ] && grep -qxF "$RC3C_CTX" <<<"$(rc3c_unmapped "$RC3C_OUT")"; then
+  ok "…and renaming that one job in the COPY takes REAL_UNMAPPED from $REAL_UNMAPPED to $RC3C_R_UNMAPPED and names '$RC3C_CTX' — the clean verdict above is a READ of the workflow tree, not a silence (main's clause could not move at all: it asserted on the static spec file)"
+else
+  bad "the real-tree read could not be made to move: renamed $RC3C_FILE job '$RC3C_JOB' out from under required context '$RC3C_CTX' and REAL_UNMAPPED is still $RC3C_R_UNMAPPED"
+fi
+if [ -n "$RC3C_FILE" ] && [ -n "$RC3C_JOB" ] && [ -n "$RC3C_CTX" ] \
+   && grep -qF "$RC3C_FILE" <<<"$RC3C_R_REPORT" && grep -qF "$RC3C_JOB" <<<"$RC3C_R_REPORT" \
+   && grep -qF "$RC3C_CTX" <<<"$RC3C_R_REPORT"; then
+  ok "…and the text it reds WITH names the workflow ($RC3C_FILE), the job ('$RC3C_JOB') and the required context it feeds ('$RC3C_CTX') — the operator is told what to fix, not merely that something is wrong"
+else
+  bad "the red names less than workflow+job+context: $RC3C_R_REPORT"
+fi
+rm -rf "$RC3C_COPY"
+
+# ── MUTATION TWIN 2: the exit-code arm, which the count arm cannot see. ──────
+#
+# A catch-all job name in the real tree makes the generator `die` at INDEX-BUILD
+# time — before a single name is classified — so it exits 1 with REAL_UNMAPPED
+# still 0. This is the row-three case from the table at the top of the section,
+# and it is the whole reason the status is asserted on its own line.
+RC3C_CA="$TMP/rc3c-catchall"
+mkdir -p "$RC3C_CA"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC3C_CA/"
+cat > "$RC3C_CA/aaa-rc3c-catchall.yml" <<'YAML'
+name: rc3c catch-all specimen
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: string
+jobs:
+  run:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+YAML
+rc3c_run "$RC3C_CA"
+RC3C_CA_UNMAPPED="$(rc3c_count "$RC3C_OUT")"
+if [ "$RC3C_RC" -ne 0 ] && [ "$RC3C_CA_UNMAPPED" -eq 0 ]; then
+  ok "…and a catch-all planted in a COPY of the real tree REFUSES (exit $RC3C_RC) while REAL_UNMAPPED stays 0 — the exit-code arm is load-bearing, and a clause that asserted only the count would have called this clean"
+else
+  bad "the catch-all case did not reproduce (exit $RC3C_RC, REAL_UNMAPPED $RC3C_CA_UNMAPPED) — the exit-code assertion above may be idle"
+fi
+rm -rf "$RC3C_CA"
 
 section "3d. a job named after an INPUT is a catch-all — the generator refuses it instead of letting it claim every name"
 
