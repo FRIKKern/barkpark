@@ -270,11 +270,18 @@ EOF
   # Fake curl, URL-aware — the three probes must be drivable INDEPENDENTLY:
   #   --resolve …           the PUBLIC post-flip probe   -> PUBLIC_HEALTH_CODE
   #   …/v1/auth/login       the pre-flip DB probe        -> DB_CODE
+  #   …/info/refs           the origin probe differential -> CURL_INFO_REFS
   #   otherwise             the pre-flip '/' boot probe  -> HEALTH_CODE
   # so a slot that boots perfectly on its own port can still be driven to fail
-  # the public probe, which is the whole point of the post-flip gate.
+  # the public probe, which is the whole point of the post-flip gate. There is
+  # exactly ONE curl fake on purpose: a second `cat > "$dir/curl"` further down
+  # make_flip_fakes would silently clobber this one and turn every health probe
+  # into a real network call (it did — every post-flip case exited 14).
   cat > "$dir/curl" <<'EOF'
 #!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in *info/refs*) printf '%s' "${CURL_INFO_REFS:-200}"; exit 0 ;; esac
+done
 for a in "$@"; do
   case "$a" in --resolve) printf '%s' "${PUBLIC_HEALTH_CODE:-200}"; exit 0 ;; esac
 done
@@ -295,6 +302,37 @@ while [ "$i" -lt "${#args[@]}" ]; do
   esac
 done
 [ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeefcafe}"; exit 0; }
+# The origin probe (task-a14a2f489452e95d). GIT_ORIGIN_FAIL selects which fault
+# origin has, and the ls-remote arm answers DIFFERENTLY depending on whether the
+# caller pinned protocol.version=0 — that asymmetry is the whole differential:
+#   auth   — both handshakes get the exact Username prompt stderr from the outage
+#   v0only — the PINNED handshake is refused, the default one works (stale pin)
+#   v2only — the DEFAULT handshake is refused, the pinned one works (barkpark-cp
+#            on git 2.34.1, i.e. the box the pull's pin exists for: must stay green)
+#   net    — DNS/connection failure, no auth wording at all
+[ "$sub" = "--version" ] && { echo "git version ${FAKE_GIT_VERSION:-2.34.1}"; exit 0; }
+[ "$sub" = "remote" ] && { echo "https://github.com/example/barkpark.git"; exit 0; }
+auth_refusal() {
+  echo "fatal: could not read Username for 'https://github.com': No such device or address" >&2
+  echo "fatal: expected flush after ref listing" >&2
+  exit 128
+}
+if [ "$sub" = "ls-remote" ]; then
+  v0=0; for a in "$@"; do [ "$a" = "protocol.version=0" ] && v0=1; done
+  case "${GIT_ORIGIN_FAIL:-}" in
+    auth)   auth_refusal ;;
+    v0only) [ "$v0" = 1 ] && auth_refusal ;;
+    v2only) [ "$v0" = 0 ] && auth_refusal ;;
+    net)    echo "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com" >&2; exit 128 ;;
+  esac
+  echo "${FAKE_SHA:-deadbeefcafe}	refs/heads/main"; exit 0
+fi
+# The pull carries the v0 pin, so it only fails where the PINNED handshake fails.
+if [ "$sub" = "pull" ]; then
+  case "${GIT_ORIGIN_FAIL:-}" in
+    auth|v0only) echo "fatal: could not read Username for 'https://github.com': No such device or address" >&2; exit 1 ;;
+  esac
+fi
 exit 0
 EOF
 
@@ -768,6 +806,62 @@ check "the failing signature is recorded in the script (the ref-listing line)" \
   "grep -q 'expected flush after ref listing' '$SCRIPT'"
 check "the box's git version is recorded next to the pin" \
   "grep -q 'git 2.34.1' '$SCRIPT'"
+
+# ---- Case 19b: the origin probe NAMES which of THREE faults hides behind the one
+# "could not read Username" line (task-a14a2f489452e95d). 2026-09-02: three hours
+# of bare "pull failed". The probe must run the pull's OWN protocol pin, quote
+# git's stderr verbatim, run the differential (unpinned retry, anonymous
+# info/refs), name a verdict, emit an ::error:: line, exit 11, and never pull.
+setup_flip localhost:4100
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=auth CURL_INFO_REFS=401)"
+check "private-repo probe: exit 11" "[ '$rc' = '11' ]"
+check "private-repo probe: verdict names REPO PRIVATE and past-mistake #9" \
+  "grep -q 'REPO PRIVATE' '$FTMP/out.log' && grep -q 'past-mistake #9' '$FTMP/out.log'"
+check "private-repo probe: git stderr quoted VERBATIM, prefixed" \
+  "grep -q \"git: fatal: could not read Username for 'https://github.com': No such device or address\" '$FTMP/out.log'"
+check "private-repo probe: the second stderr line survives too" \
+  "grep -q 'git: fatal: expected flush after ref listing' '$FTMP/out.log'"
+check "private-repo probe: ::error:: carries the verdict for the check-run summary" \
+  "grep -q '::error::cp-deploy: pull refused — REPO PRIVATE' '$FTMP/out.log'"
+check "private-repo probe: the probe ran the pull's own protocol pin" \
+  "grep -qE 'git .*protocol.version=0 .*ls-remote' '$GITLOG'"
+check "private-repo probe: the pull itself never ran" "! grep -qE 'git .*pull --ff-only' '$GITLOG'"
+check "private-repo probe: no bare 'pull failed' line survives" "! grep -q '] pull failed' '$FTMP/out.log'"
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=auth CURL_INFO_REFS=200)"
+check "unauthenticated-remote probe: anonymous info/refs 200 → REMOTE UNAUTHENTICATED, exit 11" \
+  "[ '$rc' = '11' ] && grep -q 'REMOTE UNAUTHENTICATED' '$FTMP/out.log' && ! grep -q 'REPO PRIVATE' '$FTMP/out.log'"
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=v0only CURL_INFO_REFS=200)"
+check "stale-pin probe: v0 refused but the default handshake works → PROTOCOL PIN STALE, exit 11" \
+  "[ '$rc' = '11' ] && grep -q 'PROTOCOL PIN STALE' '$FTMP/out.log' && ! grep -qE 'REPO PRIVATE|REMOTE UNAUTHENTICATED' '$FTMP/out.log'"
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=net)"
+check "network probe: exit 11 with the network classification, none of the three auth verdicts" \
+  "[ '$rc' = '11' ] && grep -q 'origin refused the ref listing (network' '$FTMP/out.log' && ! grep -qE 'PROTOCOL PIN STALE|REMOTE UNAUTHENTICATED|REPO PRIVATE' '$FTMP/out.log'"
+# NEGATIVE ARM 1 — the probe must not refuse the very box the pin above exists for.
+# GIT_ORIGIN_FAIL=v2only is barkpark-cp's 2026-09-02 git 2.34.1: protocol v2
+# refused, v0 fine. A probe that did not carry the pin would red here.
+: > "$GITLOG"
+rc="$(run_flip GIT_ORIGIN_FAIL=v2only)"
+check "pinned box (v2 refused, v0 fine): the probe passes and the deploy proceeds" "[ '$rc' = '0' ]"
+check "pinned box: the pull still ran" "grep -qE 'git .*pull --ff-only' '$GITLOG'"
+check "pinned box: no refusal verdict was printed" \
+  "! grep -q 'pull refused before it ran' '$FTMP/out.log'"
+# NEGATIVE ARM 2 — a healthy origin leaves the pull path behaviourally identical:
+# the deploy still exits 0, still flips, and the probe adds exactly ONE log line.
+# Fresh setup_flip: the arm above already consumed one flip (4100 -> 4101), and a
+# second deploy from that state flips BACK, so re-asserting 4101 needs a reset.
+setup_flip localhost:4100
+: > "$GITLOG"
+rc="$(run_flip)"
+check "healthy origin: the probe passes and the pull runs" \
+  "[ '$rc' = '0' ] && grep -qE 'git .*pull --ff-only' '$GITLOG'"
+check "healthy origin: the flip still landed" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "healthy origin: the probe adds exactly one log line, no ::error::" \
+  "[ \"\$(grep -c 'git ls-remote origin (probe before pull' '$FTMP/out.log')\" = 1 ] && ! grep -q '::error::' '$FTMP/out.log'"
+rm -rf "$FTMP"
 
 # ===========================================================================
 # THE PROVISIONER RESTART GATE

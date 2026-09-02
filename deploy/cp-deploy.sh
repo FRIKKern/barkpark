@@ -61,6 +61,60 @@ docker tag cloud-control_plane:latest cloud-control_plane:rollback 2>/dev/null \
   && log "tagged rollback image" || log "no current image to tag (first deploy?)"
 
 git checkout -- . 2>/dev/null || true
+# ---- Probe origin BEFORE the pull and NAME the cause (task-a14a2f489452e95d).
+# 2026-09-02 13:58Z-19:28Z every control-plane deploy died at the pull below with
+# a bare "pull failed" (exit 11) while git's own stderr said
+#     fatal: could not read Username for 'https://github.com': No such device or address
+#     fatal: expected flush after ref listing
+# THREE unrelated faults print that same first line, and the outage ran three
+# hours because the deploy log named none of them:
+#   PROTOCOL PIN STALE     — the pull's protocol.version=0 pin (see the block
+#                            below) is itself what origin now refuses, while the
+#                            default handshake succeeds from this box
+#   REMOTE UNAUTHENTICATED — origin still serves anonymous reads, so this box's
+#                            remote URL or credential helper is the broken part
+#   REPO PRIVATE (or moved) — anonymous info/refs answers 401/404 (CLAUDE.md
+#                            past-mistake #9): the box needs an authenticated
+#                            remote before the repo can be private
+# ls-remote is the same ref-listing handshake as the pull without a working-tree
+# write, and it runs WITH THE PULL'S OWN protocol pin — a green probe therefore
+# means the pull gets the same answer. Probing unpinned would have failed on the
+# very box the pin was added for and turned this guard into the outage.
+# On failure the differential runs (an unpinned retry, then an anonymous curl of
+# info/refs), git's stderr is quoted VERBATIM, and the verdict lands in the log
+# AND in an ::error:: line so the check-run summary carries the reason rather
+# than a naked exit code.
+# `timeout` is coreutils: present on the box, absent on a stock Mac running the harness.
+PROBE_TIMEOUT="$(command -v timeout || command -v gtimeout || true)"
+probe_ls_remote() { ${PROBE_TIMEOUT:+$PROBE_TIMEOUT 60} git -c core.hooksPath=/dev/null "$@" ls-remote --exit-code -h origin main 2>&1 >/dev/null; }
+log "git ls-remote origin (probe before pull, same protocol pin as the pull)"
+PROBE_ERR="$(probe_ls_remote -c protocol.version=0)"
+PROBE_RC=$?
+if [ "$PROBE_RC" -ne 0 ]; then
+  case "$PROBE_ERR" in
+    *"could not read Username"*|*"Authentication failed"*|*"Repository not found"*|*" 403"*|*" 401"*)
+      if probe_ls_remote >/dev/null 2>&1; then
+        PROBE_WHY="PROTOCOL PIN STALE: origin refuses the pinned protocol.version=0 handshake but the default one succeeds from this box ($(git --version 2>/dev/null)) — drop the pin on the pull below"
+      else
+        ORIGIN_URL="$(git remote get-url origin 2>/dev/null)"
+        INFO_REFS_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${ORIGIN_URL%.git}.git/info/refs?service=git-upload-pack" 2>/dev/null || echo 000)"
+        case "$INFO_REFS_CODE" in
+          200) PROBE_WHY="REMOTE UNAUTHENTICATED: origin answers anonymous info/refs 200, so this box's remote or credential helper is broken, not the repo" ;;
+          401|404) PROBE_WHY="REPO PRIVATE (or moved): anonymous info/refs answers $INFO_REFS_CODE — this box needs an authenticated remote before the repo can be private (CLAUDE.md past-mistake #9)" ;;
+          *) PROBE_WHY="origin unreachable while probing info/refs (curl $INFO_REFS_CODE): network, DNS or a GitHub outage" ;;
+        esac
+      fi ;;
+    *)
+      case "$PROBE_RC" in
+        124) PROBE_WHY="origin did not answer within 60 s (network, DNS or a GitHub outage)" ;;
+        *)   PROBE_WHY="origin refused the ref listing (network, DNS, or a moved/renamed repo)" ;;
+      esac ;;
+  esac
+  log "pull refused before it ran — $PROBE_WHY"
+  printf '%s\n' "$PROBE_ERR" | sed 's/^/    git: /'
+  echo "::error::cp-deploy: pull refused — $PROBE_WHY — $(printf '%s' "$PROBE_ERR" | head -1)"
+  exit 11
+fi
 log "git pull"
 # protocol.version=0 IS LOAD-BEARING — do not delete it as cargo cult because you
 # cannot reproduce the failure from a modern box. THE OUTAGE IT ENDS (2026-09-02):
