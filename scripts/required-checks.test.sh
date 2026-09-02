@@ -1779,11 +1779,14 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
          --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
 # THE EXCLUSION HALF OF THE SAME ACKNOWLEDGEMENT (wave 57). `--expect-unrendered`
 # now answers for the `.exclusions` ledger as well as the check list, and this
-# frozen pair cannot render eight committed exclusion rows: six elixir.yml names
-# that simply did not run on these two heads, `gofmt drift ceiling (blocking)`,
-# whose job is pull_request-only and therefore unrenderable on ANY branch head,
-# and `Sobelow baseline rows still hash to their own fingerprint (blocking)`,
-# whose job DID NOT EXIST at either frozen head. They are listed here ONE NAME AT
+# frozen pair cannot render ten committed exclusion rows: six elixir.yml names
+# that simply did not run on these two heads, two whose jobs are
+# pull_request-only and therefore unrenderable on ANY branch head (`gofmt drift
+# ceiling (blocking)` and `PR task gate self-test`), and two whose jobs DID NOT
+# EXIST at either frozen head — `Sobelow baseline rows still hash to their own
+# fingerprint (blocking)` and `Dispatch (compose-smoke paths)`, whose whole
+# workflow landed on 2026-08-09, nine days after both frozen heads. They are
+# listed here ONE NAME AT
 # A TIME, exactly as an operator would type them, so a row that stops being
 # unrenderable reds this file instead of quietly widening a blanket waiver. §14b
 # below asserts the refusal that makes this list necessary; every section that
@@ -1801,9 +1804,11 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # simulator of that step body, and the spec-authority marker) and stopped there.
 # ADDING A BLOCKING JOB TO security.yml? Add its rendered name below.
 ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
+        --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
         --expect-unrendered "Format (mix format --check-formatted, advisory) (27.0, 1.18.1)"
         --expect-unrendered "gofmt drift ceiling (blocking)"
+        --expect-unrendered "PR task gate self-test"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
         --expect-unrendered "Sobelow baseline rows still hash to their own fingerprint (blocking)"
         --expect-unrendered "Test (Elixir 1.18.1 / OTP 27.0)"

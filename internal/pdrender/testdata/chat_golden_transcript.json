@@ -125,6 +125,7 @@
           "type": "table"
         },
         {
+          "lang": "elixir",
           "type": "code",
           "value": "def render(reply) do\n  FromMarkdown.blocks(reply)\nend"
         }

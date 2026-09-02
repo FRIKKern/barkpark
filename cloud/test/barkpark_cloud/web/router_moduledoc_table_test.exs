@@ -419,12 +419,13 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
   test "a delegated helper resolves per CALL SITE, not by its first clause" do
     # `with_team_site/3` gates on a `case` over its `auth` argument: `:session`
-    # takes `Auth.require_user`, `{:ability, ab}` takes `require_user_or_pat |>
-    # require_ability(ab)`. The `:session` branch is textually FIRST, so a lens
-    # that reads the joined helper body first-hit-wins hands `require_user` to
-    # all ELEVEN delegating /v1/sites routes — and the one distinction this
-    # family draws (a PAT reaches six of them, and is turned away from five)
-    # becomes unsayable in the contract a CLI or SDK author reads.
+    # takes `Auth.require_user`, `:team_admin` takes `Auth.require_team_admin`,
+    # `{:ability, ab}` takes `require_user_or_pat |> require_ability(ab)`. The
+    # `:session` branch is textually FIRST, so a lens that reads the joined
+    # helper body first-hit-wins hands `require_user` to all ELEVEN delegating
+    # /v1/sites routes — and the distinctions this family draws (a PAT reaches
+    # six of them and is turned away from five; one of those five is admin-only)
+    # become unsayable in the contract a CLI or SDK author reads.
     #
     # This is a GATE defect, never a live auth hole: every one of the eleven
     # enforces exactly what its own code says. What could not be stated was WHICH.
@@ -432,7 +433,13 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
       {"GET", "/v1/sites/:id/deployments"},
       {"GET", "/v1/sites/:id/previews"},
       {"POST", "/v1/sites/:id/env"},
-      {"POST", "/v1/sites/:id/domains"},
+      {"POST", "/v1/sites/:id/domains"}
+    ]
+
+    # Session-only AND team-admin. A THIRD mode, not a footnote on `:session`: it
+    # is a different tier, and folding it into session_only would re-assert the
+    # `user` cell this route no longer enforces.
+    admin_only = [
       {"POST", "/v1/sites/:id/github"}
     ]
 
@@ -447,7 +454,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
     # The count is load-bearing: if a route joins or leaves the family, this
     # enumeration is stale and the split has to be re-derived, not patched.
-    assert length(session_only) + length(pat_reachable) == 11
+    assert length(session_only) + length(admin_only) + length(pat_reachable) == 11
 
     for {m, p} <- session_only do
       assert raw_route_guard(m, p) == "require_user",
@@ -456,6 +463,16 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
       assert documented_tier(m, p) == "user",
              "#{m} #{p} is session-only; `user(s)` would tell a PAT holder they can reach it"
+    end
+
+    for {m, p} <- admin_only do
+      assert raw_route_guard(m, p) == "require_team_admin",
+             "#{m} #{p} passes `:team_admin` to with_team_site, so it enforces " <>
+               "Auth.require_team_admin — a plain member is refused"
+
+      assert documented_tier(m, p) == "admin",
+             "#{m} #{p} is admin-gated; a `user` cell would tell every member they " <>
+               "may bind the site's build source"
     end
 
     for {m, p} <- pat_reachable do
@@ -477,6 +494,15 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
 
     assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/env")] == "user"
     assert guard_tier()[raw_route_guard("PATCH", "/v1/sites/:id")] == "user(s)"
+
+    # THREE modes, three tiers, from one helper — the same inequality extended to
+    # `:team_admin`, so a lens that collapsed it back onto `:session` reds here.
+    assert raw_route_guard("POST", "/v1/sites/:id/github") !=
+             raw_route_guard("POST", "/v1/sites/:id/env"),
+           "POST /v1/sites/:id/github (:team_admin) and POST /v1/sites/:id/env (:session) " <>
+             "collapsed to one guard key — the lens is back to first-clause-wins"
+
+    assert guard_tier()[raw_route_guard("POST", "/v1/sites/:id/github")] == "admin"
 
     # …and `user(s)` must survive normalization as its own tier, or the census
     # folds it back into `user` and both halves agree again by construction.
@@ -500,9 +526,18 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     end
 
     # The contrast that proves `(s)` is not decoration: the SAME token on
-    # /v1/deliveries sits over a guard that genuinely does accept a PAT.
-    assert raw_route_guard("GET", "/v1/deliveries") == "require_user_or_pat"
-    assert documented_tier("GET", "/v1/deliveries") == "user(s)"
+    # /v1/deploy-ledger/census sits over a guard that genuinely does accept a PAT.
+    assert raw_route_guard("GET", "/v1/deploy-ledger/census") == "require_user_or_pat"
+    assert documented_tier("GET", "/v1/deploy-ledger/census") == "user(s)"
+
+    # …and the `(s)` SURVIVES a wider disjunction. GET /v1/deliveries now also
+    # admits the faceless worker that WRITES the row (task-e2acb66e9ed0da09), and
+    # the tier column says BOTH halves out loud. `user(s)+worker` and not
+    # `worker`: collapsing it would delete the D385/D412 PAT reachability from
+    # the contract a CLI author reads, which is the same class of lie the
+    # /v1/tokens rows above told in the other direction.
+    assert raw_route_guard("GET", "/v1/deliveries") == "require_user_or_pat_or_worker"
+    assert documented_tier("GET", "/v1/deliveries") == "user(s)+worker"
   end
 
   test "every moduledoc route-table row still maps to a declared route" do
