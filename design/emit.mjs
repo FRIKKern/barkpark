@@ -2631,7 +2631,10 @@ export function readManifest() {
   catch (e) { throw new Error(`${MANIFEST_PATH} is not valid JSON (${e.message}); repair it or re-bless with: node design/emit.mjs --adopt`); }
 }
 
-function writeManifest(regions) {
+// Exported so the paper-editor mirror CLI (design/paper-editor-mirror.mjs), the
+// OTHER writer of a generated region, records its write in the SAME ledger —
+// one manifest, one fence, no second implementation.
+export function writeManifest(regions) {
   const sorted = {};
   for (const k of Object.keys(regions).sort()) sorted[k] = regions[k];
   writeFileSync(MANIFEST_ABS, JSON.stringify({
