@@ -20,18 +20,76 @@ import (
 	"strings"
 )
 
+// userConfigDirFunc / userHomeDirFunc are the platform seams this file reads
+// the filesystem through. They exist so a test can SHAPE a macOS host — where
+// os.UserConfigDir() answers ~/Library/Application Support — on any machine,
+// instead of hiding the darwin-only case behind a runtime.GOOS skip that never
+// runs in CI.
+var (
+	userConfigDirFunc = os.UserConfigDir
+	userHomeDirFunc   = os.UserHomeDir
+)
+
+// hcloudConfigCandidates lists the cli.toml locations to try, in order, when
+// HCLOUD_CONFIG is unset.
+//
+// TWO spellings, because Go and the hcloud CLI disagree on macOS.
+// os.UserConfigDir() answers ~/Library/Application Support there, while the
+// hcloud CLI writes ~/.config/hcloud/cli.toml on EVERY platform — so a bp that
+// consulted only the Go spelling had this whole rung silently dead for every
+// macOS user while it worked on Linux and in CI. On Linux the two spellings
+// collapse to the same path (os.UserConfigDir honours XDG_CONFIG_HOME), so the
+// list is de-duplicated and the behaviour there is unchanged.
+func hcloudConfigCandidates() []string {
+	var out []string
+	add := func(dir string) {
+		if dir == "" {
+			return
+		}
+		p := filepath.Join(dir, "hcloud", "cli.toml")
+		for _, seen := range out {
+			if seen == p {
+				return
+			}
+		}
+		out = append(out, p)
+	}
+	if dir, err := userConfigDirFunc(); err == nil {
+		add(dir)
+	}
+	xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+	if xdg == "" {
+		if home, err := userHomeDirFunc(); err == nil && home != "" {
+			xdg = filepath.Join(home, ".config")
+		}
+	}
+	add(xdg)
+	return out
+}
+
 // hcloudConfigPath returns the hcloud CLI config file location: the
 // HCLOUD_CONFIG override when set (the same env var the hcloud CLI honours),
-// else <UserConfigDir>/hcloud/cli.toml (the CLI's own default).
+// else the FIRST READABLE candidate — <UserConfigDir>/hcloud/cli.toml, then
+// $XDG_CONFIG_HOME (default ~/.config)/hcloud/cli.toml, which is where the
+// hcloud CLI actually writes on macOS. When none is readable the first
+// candidate is returned anyway, so the caller's error names a real path.
 func hcloudConfigPath() string {
 	if p := strings.TrimSpace(os.Getenv("HCLOUD_CONFIG")); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
+	candidates := hcloudConfigCandidates()
+	for _, p := range candidates {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		_ = f.Close()
+		return p
 	}
-	return filepath.Join(dir, "hcloud", "cli.toml")
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ""
 }
 
 // TokenFromCLIContext returns the API token of the hcloud CLI's selected

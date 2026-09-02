@@ -58,7 +58,7 @@ func TestRunPaginatedAll_EnvelopeKeys(t *testing.T) {
 			out.output = "json"
 			cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 				t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr.String())
 			}
 
@@ -117,7 +117,7 @@ func TestRunPaginatedAll_RefusesUnreadablePage(t *testing.T) {
 			out.output = "json"
 			cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitGeneric {
+			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitGeneric {
 				t.Fatalf("exit = %d, want %d (an HTTP-200 anomaly rendered as success); stdout=%q", code, exitGeneric, stdout.String())
 			}
 			var envelope struct {
@@ -165,7 +165,7 @@ func TestRunPaginatedAll_RefusesUnreadablePage(t *testing.T) {
 			out.output = "json"
 			cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 				t.Fatalf("exit = %d, want %d — the refusal reddened an honest read; stdout=%q stderr=%q",
 					code, exitOK, stdout.String(), stderr.String())
 			}
@@ -216,7 +216,7 @@ func TestRunPaginatedAll_RefusesUnreadablePageMidPagination(t *testing.T) {
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitGeneric {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitGeneric {
 		t.Fatalf("exit = %d, want %d (page-2 poison passed as a complete result); stdout=%q", code, exitGeneric, stdout.String())
 	}
 	var envelope struct {
@@ -420,7 +420,7 @@ func TestRunPaginatedAll_StopsOnRepeatedOrCyclicFullPage(t *testing.T) {
 			out.output = "json"
 			cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitGeneric {
+			if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitGeneric {
 				t.Fatalf("exit = %d, want %d", code, exitGeneric)
 			}
 			if requests != tc.wantRequests {
@@ -468,7 +468,7 @@ func TestRunPaginatedAll_AllowsEqualShapedRowsWithDistinctIdentities(t *testing.
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr.String())
 	}
 	var got map[string][]json.RawMessage
@@ -507,7 +507,7 @@ func TestRunPaginatedAll_AllowsDistinctFullPagesWithSharedGenericFields(t *testi
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}}
 
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr.String())
 	}
 	var got map[string][]json.RawMessage
@@ -554,7 +554,7 @@ func TestRunPaginatedAll_WalksLargeCorpusPastOffset100InOrder(t *testing.T) {
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ls", HTTP: manifest.HTTP{Method: "GET"}}
 
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 		t.Fatalf("exit = %d, want %d (false pagination_stalled on a correctly-paged server?); stdout=%q stderr=%q",
 			code, exitOK, stdout.String(), stderr.String())
 	}
