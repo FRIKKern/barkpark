@@ -289,3 +289,4 @@ jobs:
             echo "::notice title=Compose smoke: green — nothing ran::NOTHING RAN on this head.%0ACompose smoke is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0ARead it as 'no compose-smoke job executed', never as 'the compose stack passed'."
           fi
           echo "Compose smoke: every upstream job either succeeded or was legitimately not dispatched."
+# fan-out diet 2 proof: IN-PATH probe line. Reverted with the branch.

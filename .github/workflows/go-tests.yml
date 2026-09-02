@@ -539,3 +539,4 @@ jobs:
             echo "::notice title=Go gate: green — nothing ran::NO GO JOB RAN on this head.%0AGo gate is green because this diff touched none of the path globs declared in go-tests.yml on.push.paths, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0ARead it as 'no Go job executed', never as 'the Go suite passed'."
           fi
           echo "Go gate: every upstream job either succeeded or was legitimately not dispatched."
+# fan-out diet 2 proof: IN-PATH probe line. Reverted with the branch.

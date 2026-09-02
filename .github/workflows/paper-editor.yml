@@ -86,3 +86,4 @@ jobs:
             stale=1
           fi
           exit "$stale"
+# fan-out diet 2 proof: IN-PATH probe line. Reverted with the branch.

@@ -101,3 +101,4 @@ jobs:
       - name: Test
         working-directory: apps/mobile
         run: pnpm test
+# fan-out diet 2 proof: IN-PATH probe line. Reverted with the branch.

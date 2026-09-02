@@ -749,3 +749,4 @@ jobs:
             echo "::notice title=Security gate: green — nothing ran::NOTHING SECURITY RAN on this head.%0ASecurity gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Security job executed', never as 'the security scans passed'."
           fi
           echo "Security gate: every upstream job either succeeded or was legitimately not dispatched."
+# fan-out diet 2 proof: IN-PATH probe line. Reverted with the branch.
