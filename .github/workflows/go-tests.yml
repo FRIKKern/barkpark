@@ -1,5 +1,20 @@
 name: go-tests
 
+# ADVISORY, NOT REQUIRED (recorded 2026-09-02, row pds-bl-go-tests-not-required).
+# The `go vet + test` context is absent from .github/required-checks.json's
+# required set and from its exclusions list, so a red here is a signal a human
+# must read — it does not stop anything from landing. "Gate it on every Go
+# change" below describes WHEN this runs, not what its red can do. Registration
+# is deliberately sequenced (orchestrator ruling 2026-09-02), not skipped:
+#   1. the PR-workflow fan-out diet (pr-meta.yml) lands, so the runner pool has
+#      headroom for a fifth context on every PR;
+#   2. this workflow gets a path filter with a skip-as-success shim, so a PR
+#      that touches no Go reports green without consuming a runner;
+#   3. ONE atomic PR adds the context to the required set with the
+#      required-checks-drift guard updated in the same commit.
+# Until step 3 lands, any doc or fixture that calls this context blocking is
+# wrong; scripts/required-checks-generate.sh is the authority on the set.
+
 # The Go test suite — the `bp` CLI + TUI, manifest, apiclient, pdrender, cloud
 # clients, provisioner/runtime, … (170+ *_test.go files). Before this,
 # `go test ./...` ran ONLY in cli-release.yml (on cli-v* tags), so a broken Go
