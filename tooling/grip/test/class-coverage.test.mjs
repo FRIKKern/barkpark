@@ -8,7 +8,7 @@
 // The filed version of this work was a shell one-liner over SEVEN hand-listed
 // modules, matching the HYPHEN spelling only. It reproduces three real absences
 // (NO-QUANTITY, NOT-A-REF, WRITE-FAILED) — the measurement was right — but the
-// method is wrong twice over:
+// method is wrong three times over:
 //
 //   1. THE FILE SET WAS HAND-LISTED. backfill.mjs was not on it, so TEST-RUNNER
 //      escaped both prior scans. A hand-listed set measures the author's memory,
@@ -19,32 +19,61 @@
 //      (SCREEN-REFUSED, ANOMALOUS-SILENCE, AMBIGUOUS-SILENCE, UNCLASSIFIED-128,
 //      SKIPPED-TEST-RUNNER) — never-cry-wolf failing INSIDE the instrument built
 //      to enforce it. This scan matches BOTH spellings.
+//   3. THE UNIVERSE WAS SCRAPED, NEVER ASKED FOR. A scan for HYPHENATED string
+//      literals cannot see a class whose name is one word, and widening the
+//      regex to bare SHOUTY words would swamp it in prose, fixture keys and
+//      assertion names. So the universe is now the UNION of two layers: the
+//      hyphenated literal scan, and the VALUES of the enum objects the modules
+//      EXPORT, obtained by importing them. The enum layer is scoped to enum
+//      values and to nothing else, which is what keeps a bare `PASS` written in
+//      a comment out of the universe while putting `OUTCOME.PASS` in it.
 //
-// It is written in Node (fs + RegExp), not shell, deliberately: `grep` on the
-// authoring host is ugrep 7.5.0, which rejects invocations GNU grep accepts, and
-// grip has NO CI — so a shell-shaped tripwire is tested only on one box and
-// untested where it would have to hold.
+// It is written in Node (fs + RegExp + import), not shell, deliberately: `grep`
+// on the authoring host is ugrep 7.5.0, which rejects invocations GNU grep
+// accepts, and grip has NO CI — so a shell-shaped tripwire is tested only on one
+// box and untested where it would have to hold. A shell scan also cannot ask a
+// module what it exports.
 //
 // WHAT THIS TRIPWIRE DOES NOT MEASURE — declared, not implied:
-//   * IT REQUIRES A HYPHEN. Six of adjudicate.mjs's ten verdict names (ADMITTED,
-//     DEMOTED, REJECTED, FAILED, UNAVAILABLE, CONFLICT) and backfill.mjs's
-//     UNMINTABLE carry no hyphen and are INVISIBLE to it by construction. The
-//     number it prints is a LOWER BOUND on the identifier universe, never a
-//     census of it.
+//   * IT IS STILL A LOWER BOUND, for two NAMED reasons rather than the old
+//     hyphen one. (a) A class name assembled at runtime — concatenation or a
+//     template literal — is a literal to neither layer and a value to neither
+//     enum, so both layers are blind to it. (b) The enum layer reads DEPTH 1 of
+//     an exported plain object with UPPER_SNAKE keys, so a class reached only
+//     through an array of records, or one kept in a module-private table, is out
+//     of its reach. The blind-spot test below pins binding.mjs's two array
+//     registries (BINDING_RULES, EXIT_MASK_RULES) inside the union, so that
+//     depth costs nothing TODAY — but a bound that costs nothing today is still
+//     a bound.
+//   * A MODULE THE SWEEP CANNOT IMPORT CONTRIBUTES NO ENUMS. The sweep runs in a
+//     CHILD process precisely because a grip module may execute, print, or exit
+//     on import — harvest.mjs runs its fixture gate the moment it is imported.
+//     A module that kills the sweep is skipped, NAMED in the printed line, and
+//     its enums are then outside the universe. The unreadable count is printed
+//     next to the universe size so this bound is visible rather than implied.
 //   * IT MEASURES MENTION, NOT CONTROL. A class named anywhere under test/ reads
 //     as covered here. Mention is not control — proven by mutation in the survey:
 //     renaming FORGE-API-READ to another same-class rule left binding.test.mjs at
 //     63/62/1 unchanged, and renaming the else branch collapsed DEFAULT-CWD-BOUND
 //     29 → 2 while IMPROVING the epic's flagship else-share 4.8% → 0.6% with
-//     nothing going red (binding.test.mjs:454 is `assert.ok(registered.has(…))`,
-//     a subset check that cannot fail for an unexercised rule). So absence here
-//     is a PROOF of no control; presence is only an INVITATION to check. The
-//     controls in part (B) below are the real thing: each one fires the class on
-//     an input that must trigger it and withholds it on a neighbour that must not.
+//     nothing going red (binding.test.mjs registers rules through
+//     `assert.ok(registered.has(…))`, a subset check that cannot fail for an
+//     unexercised rule). So absence here is a PROOF of no control; presence is
+//     only an INVITATION to check. The controls in part (B) below are the real
+//     thing: each one fires the class on an input that must trigger it and
+//     withholds it on a neighbour that must not.
+//   * IT DOES NOT COUNT ITS OWN DECLARATIONS. This file names classes in prose —
+//     the paragraph above is itself an example — and a tripwire that reads its
+//     own commentary as coverage grades its own homework. So THIS file
+//     contributes to the corpus from the part (B) banner ONWARD and no earlier:
+//     the controls count, the declarations do not. UNMINTABLE is why that
+//     matters — under the old file it was "covered" by nothing but a sentence in
+//     this header listing it as invisible.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, cpSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -54,69 +83,212 @@ import { classifyRef } from "../level.mjs";
 import { writeLedgerRun } from "../ledger.mjs";
 import { classifyOutcome, OUTCOME } from "../census.mjs";
 import { backfillOne, DISPOSITION } from "../backfill.mjs";
-import { classifyBinding, isDefaultRule } from "../binding.mjs";
+import { classifyBinding, isDefaultRule, BINDING_RULES, EXIT_MASK_RULES } from "../binding.mjs";
 import { mintRecipe } from "../mint.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GRIP = resolve(HERE, "..");
 const SELF = "class-coverage.test.mjs";
 
+// Everything in THIS file from this banner onward is a CONTROL and counts as
+// corpus; everything before it is commentary and does not. `lastIndexOf` picks
+// the banner, never this line.
+const CONTROLS_BANNER = "(B) THE CONTROLS";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // (A) THE TRIPWIRE
 // ─────────────────────────────────────────────────────────────────────────────
 
-// A SHOUTY class identifier is a fully-uppercase, hyphen-joined STRING LITERAL.
-// Restricting to literals (rather than any word in the file) keeps prose in
-// comments — "DEFAULT-*", "the D73 rule" — out of the universe, so the tripwire
-// counts things the code can actually return.
+// LAYER ONE — a SHOUTY class identifier is a fully-uppercase, hyphen-joined
+// STRING LITERAL. Restricting to literals (rather than any word in the file)
+// keeps prose in comments — "DEFAULT-*", "the D73 rule" — out of the universe,
+// so the tripwire counts things the code can actually return.
 const SHOUTY_LITERAL = /(["'`])((?:[A-Z0-9]+-)+[A-Z0-9]+)\1/g;
 
+// LAYER TWO — an enum VALUE. The shape is deliberately narrow at BOTH ends: the
+// KEY must be UPPER_SNAKE (so binding.mjs's PORTABLE_SCOPES, keyed by prose
+// class names, contributes nothing) and the VALUE must be a fully-uppercase
+// word or hyphen/underscore-joined phrase (so ANCESTRY's lowercase rungs and
+// LEVELS' integers contribute nothing). One word is now enough: this is the
+// half that sees ADMITTED, DEMOTED, REJECTED, FAILED, UNAVAILABLE, CONFLICT and
+// UNMINTABLE, and it never looks at a free literal.
+const ENUM_KEY = /^[A-Z][A-Z0-9_]*$/;
+const ENUM_VALUE = /^[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)*$/;
+
+// The sweep runs OUT OF PROCESS. harvest.mjs runs its fixture gate at import and
+// can `process.exit` on a bad argv — importing the tree in-process would let one
+// module kill the whole test file. The child writes its state after EVERY module
+// so a death is attributable: whatever is `pending` in the file is what killed
+// it, and the parent re-runs with that module skipped.
+const ENUM_SWEEP = `
+import { readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const src = process.env.GRIP_ENUM_SRC;
+const out = process.env.GRIP_ENUM_OUT;
+const skip = new Set(JSON.parse(process.env.GRIP_ENUM_SKIP || "[]"));
+const KEY = ${ENUM_KEY.toString()};
+const VALUE = ${ENUM_VALUE.toString()};
+const state = { pending: null, unreadable: [...skip], values: {} };
+const flush = () => writeFileSync(out, JSON.stringify(state), "utf8");
+const isEnumObject = (v) =>
+  v !== null && typeof v === "object" && !Array.isArray(v) &&
+  (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
+flush();
+for (const name of readdirSync(src).filter((n) => n.endsWith(".mjs")).sort()) {
+  if (skip.has(name)) continue;
+  state.pending = name;
+  flush();
+  let mod = null;
+  try { mod = await import(pathToFileURL(join(src, name)).href); }
+  catch { state.unreadable.push(name); }
+  for (const [enumName, value] of Object.entries(mod || {})) {
+    if (!isEnumObject(value)) continue;
+    for (const [key, member] of Object.entries(value)) {
+      if (!KEY.test(key)) continue;
+      if (typeof member !== "string" || !VALUE.test(member)) continue;
+      (state.values[member] ||= []).push({ module: name, enumName, key });
+    }
+  }
+  state.pending = null;
+  flush();
+}
+flush();
+`;
+
+const ENUM_CACHE = new Map();
+
 /**
- * scanClassCoverage({ srcDir, testDir, excludeTests }) →
- *   { modules, universe: Map<class, "file:line">, hyphenOnly: [], dual: [] }
+ * sweepEnumUniverse(srcDir) → { values: Map<class, origin[]>, unreadable: [] }
  *
- * GLOBS `srcDir` — never a hand-listed set. `dual` is the uncontrolled set under
- * BOTH spellings (`NO-QUANTITY` and `NO_QUANTITY`); `hyphenOnly` is what the
- * filed method would have said, kept so the two can be printed side by side.
- * Exported so a scratch copy of the tree can be scanned without editing this one.
+ * `origin` is { module, enumName, key } — the enum member that HOLDS the class,
+ * which is what lets the coverage check accept `OUTCOME.TOOL_ERROR` as a mention
+ * of TOOL-ERROR without accepting the bare word TOOL_ERROR anywhere else.
+ * Cached per directory: the sweep costs one child process, not one per test.
+ */
+export function sweepEnumUniverse(srcDir = GRIP) {
+  const cached = ENUM_CACHE.get(srcDir);
+  if (cached) return cached;
+
+  const workdir = mkdtempSync(join(tmpdir(), "grip-enumsweep-"));
+  const out = join(workdir, "sweep.json");
+  const unreadable = [];
+  let state = { pending: null, unreadable: [], values: {} };
+  try {
+    writeFileSync(out, JSON.stringify(state), "utf8");
+    // Bounded by the module count: each retry retires exactly one killer.
+    const budget = readdirSync(srcDir).filter((n) => n.endsWith(".mjs")).length + 1;
+    for (let attempt = 0; attempt < budget; attempt++) {
+      spawnSync(process.execPath, ["--input-type=module", "-e", ENUM_SWEEP], {
+        stdio: "ignore",
+        timeout: 60_000, // a hung module must not hang the suite; it becomes an unreadable module instead
+        env: { ...process.env, GRIP_ENUM_SRC: srcDir, GRIP_ENUM_OUT: out, GRIP_ENUM_SKIP: JSON.stringify(unreadable) },
+      });
+      state = JSON.parse(readFileSync(out, "utf8"));
+      if (!state.pending) break;
+      unreadable.push(state.pending); // it died on this one — retire it and retry
+    }
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+
+  const result = {
+    values: new Map(Object.entries(state.values)),
+    unreadable: [...new Set([...(state.unreadable || []), ...unreadable])].sort(),
+  };
+  ENUM_CACHE.set(srcDir, result);
+  return result;
+}
+
+/**
+ * The corpus contribution of one test file. THIS file contributes only its
+ * controls — see the "does not count its own declarations" bullet in the header.
+ */
+function corpusTextOf(name, raw) {
+  if (name !== SELF) return raw;
+  const at = raw.lastIndexOf(CONTROLS_BANNER);
+  return at === -1 ? "" : raw.slice(at);
+}
+
+/**
+ * Is `id` named by the corpus? Three spellings, and for a one-word class only
+ * the last two — `corpus.includes("FAILED")` would be satisfied by the substring
+ * inside WRITE-FAILED, which is how a loose scan grades an absent class covered.
+ */
+function isMentioned(corpus, id, origins) {
+  if (id.includes("-")) {
+    if (corpus.includes(id)) return true; // the hyphen spelling, as written in the module
+    if (new RegExp(`\\b${id.replace(/-/g, "_")}\\b`).test(corpus)) return true; // the UPPER_SNAKE enum key
+  }
+  if (new RegExp(`(["'\`])${id}\\1`).test(corpus)) return true; // the value as a quoted literal
+  return origins.some(({ enumName, key }) => new RegExp(`\\b${enumName}\\.${key}\\b`).test(corpus)); // ENUM.KEY
+}
+
+/**
+ * scanClassCoverage({ srcDir, testDir, excludeTests }) → {
+ *   modules, testFiles, literalUniverse, enumUniverse, unreadable,
+ *   universe, hyphenOnly, dual, uncontrolled
+ * }
+ *
+ * GLOBS `srcDir` — never a hand-listed set. `universe` is the UNION of the two
+ * layers. `dual` is the uncontrolled set of the LITERAL layer under both
+ * spellings, and `hyphenOnly` what the filed method would have said; both are
+ * kept so the three methods can be printed side by side. `uncontrolled` is the
+ * committed expectation — the union layer's flagged set. Exported so a scratch
+ * copy of the tree can be scanned without editing this one.
  */
 export function scanClassCoverage({ srcDir = GRIP, testDir = join(GRIP, "test"), excludeTests = [] } = {}) {
   const modules = readdirSync(srcDir).filter((name) => name.endsWith(".mjs")).sort();
-  const universe = new Map();
+  const literalUniverse = new Map();
   for (const name of modules) {
     const lines = readFileSync(join(srcDir, name), "utf8").split("\n");
     lines.forEach((line, i) => {
       SHOUTY_LITERAL.lastIndex = 0;
       let m;
       while ((m = SHOUTY_LITERAL.exec(line)) !== null) {
-        if (!universe.has(m[2])) universe.set(m[2], `${name}:${i + 1}`);
+        if (!literalUniverse.has(m[2])) literalUniverse.set(m[2], `${name}:${i + 1}`);
       }
     });
+  }
+
+  const { values: enumUniverse, unreadable } = sweepEnumUniverse(srcDir);
+  const universe = new Map(literalUniverse);
+  for (const [id, origins] of enumUniverse) {
+    if (!universe.has(id)) universe.set(id, `${origins[0].module} ${origins[0].enumName}.${origins[0].key}`);
   }
 
   const testFiles = readdirSync(testDir)
     .filter((name) => name.endsWith(".mjs") && !excludeTests.includes(name))
     .sort();
-  const corpus = testFiles.map((name) => readFileSync(join(testDir, name), "utf8")).join("\n");
+  const corpus = testFiles.map((name) => corpusTextOf(name, readFileSync(join(testDir, name), "utf8"))).join("\n");
 
   const hyphenOnly = [];
   const dual = [];
+  const uncontrolled = [];
   for (const [id, where] of universe) {
-    const mentionedHyphen = corpus.includes(id);
-    const mentionedSnake = new RegExp(`\\b${id.replace(/-/g, "_")}\\b`).test(corpus);
-    if (!mentionedHyphen) hyphenOnly.push({ id, where });
-    if (!mentionedHyphen && !mentionedSnake) dual.push({ id, where });
+    const origins = enumUniverse.get(id) ?? [];
+    if (literalUniverse.has(id)) {
+      const mentionedHyphen = corpus.includes(id);
+      const mentionedSnake = new RegExp(`\\b${id.replace(/-/g, "_")}\\b`).test(corpus);
+      if (!mentionedHyphen) hyphenOnly.push({ id, where });
+      if (!mentionedHyphen && !mentionedSnake) dual.push({ id, where });
+    }
+    if (!isMentioned(corpus, id, origins)) uncontrolled.push({ id, where });
   }
-  return { modules, testFiles, universe, hyphenOnly, dual };
+  return { modules, testFiles, literalUniverse, enumUniverse, unreadable, universe, hyphenOnly, dual, uncontrolled };
 }
 
-// The committed expectation. EMPTY is the whole point: every hyphenated class
-// literal in tooling/grip/*.mjs is named by some test under tooling/grip/test/.
-// A new class landing with no test anywhere turns this red and names it.
+// The committed expectation. EMPTY is the whole point: every class in the union
+// universe — hyphenated literal OR exported enum value — is named by some test
+// under tooling/grip/test/. A new class landing with no test anywhere turns this
+// red and names it, one word or seven.
 const EXPECTED_UNCONTROLLED = [];
 
-// What this file itself brought under control. Measured by scanning with THIS
+// What this file itself brought under control, measured by scanning with THIS
 // file excluded from the test corpus — so the row below is the honest "before".
+// Split by which LAYER sees them, because that split is the whole point of the
+// change: the hyphenated seven were always visible to the scan, and UNMINTABLE
+// was not visible to anything until the enum layer arrived.
 const CONTROLLED_HERE = [
   "TEST-RUNNER",
   "FORGE-API-READ",
@@ -126,21 +298,31 @@ const CONTROLLED_HERE = [
   "NOT-A-REF",
   "NO-QUANTITY",
 ];
+const CONTROLLED_HERE_UNHYPHENATED = ["UNMINTABLE"];
 
-test("TRIPWIRE: every hyphenated class literal in tooling/grip/*.mjs is named by some test (dual spelling, globbed)", () => {
+test("TRIPWIRE: every class in tooling/grip/*.mjs — hyphenated literal OR exported enum value — is named by some test", () => {
   const scan = scanClassCoverage();
-  const names = scan.dual.map((row) => `${row.id} (${row.where})`);
+  const names = scan.uncontrolled.map((row) => `${row.id} (${row.where})`);
+
+  // NON-VACUITY OF THE SELF-SLICE. If the slice ever swallowed part (A), this
+  // file's own declarations would start counting as coverage and the tripwire
+  // would go quietly green on classes nothing exercises; if it swallowed part
+  // (B) instead, seven controlled classes would flag. Both directions are pinned.
+  const selfControls = corpusTextOf(SELF, readFileSync(join(GRIP, "test", SELF), "utf8"));
+  assert.ok(selfControls.includes("never cries wolf: a pathless ref"), "the self-slice lost this file's controls");
+  assert.ok(!selfControls.includes("EXPECTED_UNCONTROLLED"), "the self-slice swallowed part (A) — declarations would credit themselves");
 
   console.log(
     `\n  [class-coverage] ${scan.modules.length} modules globbed, ${scan.testFiles.length} test files read` +
-      `, ${scan.universe.size} hyphenated class literals found (LOWER BOUND — see the blind-spot test)` +
-      `\n  [class-coverage] uncontrolled under BOTH spellings: ${names.length === 0 ? "none" : names.join(", ")}\n`,
+      `, ${scan.unreadable.length} modules unreadable by the enum sweep${scan.unreadable.length ? ` (${scan.unreadable.join(", ")})` : ""}` +
+      `\n  [class-coverage] universe ${scan.universe.size} = ${scan.literalUniverse.size} hyphenated literals ∪ ${scan.enumUniverse.size} exported enum values (LOWER BOUND — see the blind-spot test)` +
+      `\n  [class-coverage] uncontrolled: ${names.length === 0 ? "none" : names.join(", ")}\n`,
   );
 
   assert.deepEqual(
     names,
     EXPECTED_UNCONTROLLED,
-    "a class literal exists in tooling/grip/*.mjs that no test names under either spelling — write a fail-before control for it, or add it to EXPECTED_UNCONTROLLED with a written reason",
+    "a class exists in tooling/grip/*.mjs that no test names under any spelling — write a fail-before control for it, or add it to EXPECTED_UNCONTROLLED with a written reason",
   );
 });
 
@@ -152,69 +334,98 @@ test("TRIPWIRE never cries wolf: the hyphen-only method flags five census classe
   const CRIED_WOLF_ON = ["SCREEN-REFUSED", "ANOMALOUS-SILENCE", "AMBIGUOUS-SILENCE", "UNCLASSIFIED-128", "SKIPPED-TEST-RUNNER"];
 
   // Scanned with THIS file excluded, so the comparison is the historical one:
-  // what the two methods said about the tree BEFORE this file existed.
+  // what the methods said about the tree BEFORE this file existed.
   const before = scanClassCoverage({ excludeTests: [SELF] });
   const hyphen = before.hyphenOnly.map((r) => r.id);
   const dual = before.dual.map((r) => r.id);
+  const union = before.uncontrolled.map((r) => r.id);
 
   for (const id of CRIED_WOLF_ON) {
     assert.ok(hyphen.includes(id), `${id} should be flagged by the hyphen-only method (that is the defect being demonstrated)`);
     assert.ok(!dual.includes(id), `${id} is controlled via its UPPER_SNAKE spelling and must NOT be flagged`);
+    assert.ok(!union.includes(id), `${id} is controlled — the union layer must not re-introduce the false alarm`);
   }
   for (const id of CONTROLLED_HERE) {
     assert.ok(dual.includes(id), `${id} was uncontrolled before this file — if another test now controls it, drop it from CONTROLLED_HERE`);
   }
+  for (const id of CONTROLLED_HERE_UNHYPHENATED) {
+    assert.ok(!dual.includes(id), `${id} carries no hyphen — the literal layer cannot see it and must not report it`);
+    assert.ok(union.includes(id), `${id} was uncontrolled before this file — if another test now controls it, drop it from CONTROLLED_HERE_UNHYPHENATED`);
+  }
 
   console.log(
     `\n  [side by side] hyphen-only (the filed method): ${hyphen.length} flagged — ${hyphen.join(", ")}` +
-      `\n  [side by side] dual-spelling (this tripwire):  ${dual.length} flagged — ${dual.join(", ")}` +
-      `\n  [side by side] the ${CRIED_WOLF_ON.length} cleared are controlled through the UPPER_SNAKE enum key, not the hyphen string\n`,
+      `\n  [side by side] dual-spelling, literals only:  ${dual.length} flagged — ${dual.join(", ")}` +
+      `\n  [side by side] union with the enum layer:     ${union.length} flagged — ${union.join(", ")}` +
+      `\n  [side by side] the ${CRIED_WOLF_ON.length} cleared are controlled through the UPPER_SNAKE enum key, not the hyphen string` +
+      `\n  [side by side] the enum layer adds ${union.length - dual.length}: ${CONTROLLED_HERE_UNHYPHENATED.join(", ")} — invisible to every literal scan\n`,
   );
 });
 
-test("TRIPWIRE declares its own blind spot: it requires a hyphen, so seven known class names are invisible to it", () => {
-  const INVISIBLE_BY_CONSTRUCTION = ["ADMITTED", "DEMOTED", "REJECTED", "FAILED", "UNAVAILABLE", "CONFLICT", "UNMINTABLE"];
-  const { modules, universe } = scanClassCoverage();
-
-  // NOT VACUOUS: `universe` only ever holds hyphenated ids, so asserting absence
-  // alone would pass for any string at all. The load-bearing half is the FIRST
-  // assertion — each of these is a REAL class literal that lives in the modules
-  // this tripwire scans, and is nonetheless missing from its universe. If a
-  // rename ever gives one of them a hyphen, the second assertion goes red and
-  // the declaration below must be rewritten; if one is deleted outright, the
-  // first goes red and it must be dropped from the list.
-  const sources = modules.map((name) => readFileSync(join(GRIP, name), "utf8")).join("\n");
-  for (const id of INVISIBLE_BY_CONSTRUCTION) {
-    assert.match(
-      sources,
-      new RegExp(`(["'\`])${id}\\1`),
-      `${id} is no longer a string literal in tooling/grip/*.mjs — drop it from the blind-spot declaration`,
-    );
-    assert.ok(!universe.has(id), `${id} carries a hyphen now — the blind-spot declaration below must be rewritten`);
+test("TRIPWIRE declares its residual blind spot: the hyphen hole is CLOSED, what is left is depth and construction", () => {
+  // The seven the previous draft of this file declared invisible by construction.
+  // Both halves are load-bearing: they are still absent from the LITERAL layer
+  // (nothing was renamed to sneak them in), and they are now IN the universe via
+  // the enum layer. If a rename gives one a hyphen the first goes red; if one
+  // leaves its enum the second goes red, and either way the declaration below is
+  // stale and must be rewritten.
+  const CLOSED_BY_THE_ENUM_LAYER = ["ADMITTED", "DEMOTED", "REJECTED", "FAILED", "UNAVAILABLE", "CONFLICT", "UNMINTABLE"];
+  const scan = scanClassCoverage();
+  for (const id of CLOSED_BY_THE_ENUM_LAYER) {
+    assert.ok(!scan.literalUniverse.has(id), `${id} carries a hyphen now — it is no longer an example of the closed hole`);
+    assert.ok(scan.universe.has(id), `${id} is no longer an exported enum value — the blind-spot declaration below must be rewritten`);
   }
+
+  // THE RESIDUAL DEPTH BOUND, priced rather than asserted away. The enum layer
+  // reads depth 1 of an exported object, so binding.mjs's two ARRAY registries
+  // are outside it. They cost nothing today only because every rule name they
+  // carry is also a hyphenated literal the other layer sees — which is a fact
+  // about today's spelling, not a property of the scan, so it is pinned here.
+  for (const entry of [...BINDING_RULES, ...EXIT_MASK_RULES]) {
+    assert.ok(
+      scan.universe.has(entry.rule),
+      `${entry.rule} lives in an array registry the enum layer does not walk, and it is no longer a hyphenated literal either — it has fallen out of the universe entirely`,
+    );
+  }
+
   console.log(
-    `\n  [BLIND SPOT] This tripwire matches hyphenated UPPERCASE string literals ONLY.` +
-      ` ${INVISIBLE_BY_CONSTRUCTION.length} known class names — ${INVISIBLE_BY_CONSTRUCTION.join(", ")} —` +
-      ` carry no hyphen and are INVISIBLE to it by construction (six of adjudicate.mjs's ten verdicts, plus backfill.mjs's UNMINTABLE).` +
-      ` The universe size it prints is a LOWER BOUND, not a census; and mention under test/ is not control.\n`,
+    `\n  [BLIND SPOT] The hyphen hole is CLOSED: the universe is now hyphenated literals ∪ exported enum values,` +
+      ` so ${CLOSED_BY_THE_ENUM_LAYER.length} one-word classes the previous draft declared invisible are inside it.` +
+      ` WHAT REMAINS, and why the number is still a LOWER BOUND: (a) a class name built at RUNTIME by concatenation` +
+      ` is a literal to neither layer; (b) the enum layer reads DEPTH 1 of an exported object, so a class held only in` +
+      ` an array of records or in a module-private table is out of reach — the ${BINDING_RULES.length + EXIT_MASK_RULES.length}` +
+      ` array-registry rules pinned above are covered by the literal layer, not by the enum one;` +
+      ` (c) ${scan.unreadable.length} module(s) the sweep could not import contribute no enums at all.` +
+      ` And mention under test/ is still not control.\n`,
   );
 });
 
-test("TRIPWIRE is able to fail: a planted class in a scratch copy of the tree is named", () => {
-  // The plant's NAME is assembled at runtime and never appears spelled out in
-  // any file under test/ — otherwise this very file would "control" it by
-  // mention and the plant would come back clean, which is how a tripwire proves
-  // itself green without being able to go red.
-  const planted = ["PLANTED", "UNCONTROLLED", "CLASS"].join("-");
+test("TRIPWIRE is able to fail: planted classes in a scratch copy of the tree are named — hyphenated AND one word", () => {
+  // Both plants' NAMES are assembled at runtime and never appear spelled out in
+  // any file under test/ — otherwise this very file would "control" them by
+  // mention and the plants would come back clean, which is how a tripwire proves
+  // itself green without being able to go red. (The self-slice would drop this
+  // block from the corpus anyway; assembling the names too means the plant does
+  // not depend on the slice being right.)
+  const plantedHyphen = ["PLANTED", "UNCONTROLLED", "CLASS"].join("-");
+  const plantedWord = ["PLANTED", "SINGLEWORD", "CLASS"].join("");
   const scratch = mkdtempSync(join(tmpdir(), "grip-classcov-plant-"));
   try {
     cpSync(GRIP, join(scratch, "grip"), { recursive: true });
     const src = join(scratch, "grip");
-    writeFileSync(join(src, "planted.mjs"), `export const PLANTED = Object.freeze({ NEVER_TESTED: "${planted}" });\n`, "utf8");
+    writeFileSync(
+      join(src, "planted.mjs"),
+      `export const PLANTED = Object.freeze({ NEVER_TESTED: "${plantedHyphen}", ALSO_NEVER_TESTED: "${plantedWord}" });\n`,
+      "utf8",
+    );
     const scan = scanClassCoverage({ srcDir: src, testDir: join(src, "test") });
-    const flagged = scan.dual.map((r) => r.id);
-    assert.ok(flagged.includes(planted), `the plant was not flagged; scan said ${JSON.stringify(flagged)}`);
+    const flagged = scan.uncontrolled.map((r) => r.id);
+    assert.ok(flagged.includes(plantedHyphen), `the hyphenated plant was not flagged; scan said ${JSON.stringify(flagged)}`);
+    assert.ok(flagged.includes(plantedWord), `the ONE-WORD plant was not flagged — this is the hole the enum layer exists to close; scan said ${JSON.stringify(flagged)}`);
+    assert.ok(!scan.literalUniverse.has(plantedWord), "the one-word plant must be invisible to the literal layer — otherwise this proves nothing about the enum layer");
+    assert.ok(scan.enumUniverse.has(plantedWord), "the enum layer did not see the planted enum value");
     assert.ok(scan.modules.includes("planted.mjs"), "the glob missed a new module — a hand-listed set is exactly how backfill.mjs escaped");
+    assert.deepEqual(scan.unreadable, [], "the enum sweep could not import part of the scratch tree — the plant result is not trustworthy");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -345,6 +556,42 @@ test("TEST-RUNNER never cries wolf: the screen decides first, and a real read is
     assert.notEqual(row.disposition, DISPOSITION.TEST_RUNNER, `${cmd} is not a test runner`);
     assert.equal(row.disposition, DISPOSITION.MINTED);
   }
+});
+
+test("UNMINTABLE fires when a command ANSWERS but no recipe can be minted, and names WHY", () => {
+  // The four shapes part (C) proves reach NO-QUANTITY: `cd` swallows the head
+  // AND its argument, so the path still mints a subject while the quantity has
+  // no head left to come from. The command ANSWERED — this is neither a decay
+  // nor a refusal, and that is the distinction UNMINTABLE exists to record.
+  //
+  // THIS CONTROL IS WHY THE ENUM LAYER WAS BUILT. UNMINTABLE carries no hyphen,
+  // so no literal scan could ever see it; before this pair it was named by
+  // nothing under test/ except a sentence in this file's own header declaring it
+  // invisible — a class "covered" by the confession that it was not.
+  const now = "2026-07-27T00:00:00Z";
+  for (const cmd of ["cd tooling/grip/mint.mjs", "cd api/lib/foo.ex", "cd tooling/grip", "cd x.txt"]) {
+    const row = backfillOne(cmd, { now, exec: ANSWERED_RUN });
+    assert.equal(row.disposition, DISPOSITION.UNMINTABLE, `${cmd} should be dispositioned UNMINTABLE`);
+    assert.equal(row.disposition, "UNMINTABLE");
+    assert.equal(row.outcome, "ANSWERED", "an UNMINTABLE row RAN and answered — what was lost is the recipe, never the read");
+    assert.equal(row.why, "NO-QUANTITY", "the row must carry the mint reason, or UNMINTABLE degenerates into a shrug");
+  }
+});
+
+test("UNMINTABLE never cries wolf: a real read MINTS, a refusal is SCREEN-REFUSED, a failed run is DECAYED", () => {
+  const now = "2026-07-27T00:00:00Z";
+  const FAILED_RUN = () => ({ exit: 1, stdout: "", stderr: "boom", ms: 1, timedOut: false, spawnError: null });
+  for (const cmd of ["wc -l tooling/grip/mint.mjs", "go vet ./internal/cli"]) {
+    assert.equal(backfillOne(cmd, { now, exec: ANSWERED_RUN }).disposition, DISPOSITION.MINTED, `${cmd} mints — it is not unmintable`);
+  }
+  // The two neighbours that also end with NO durable row. Calling either of them
+  // UNMINTABLE would misreport WHY the row is missing: the first never ran at
+  // all, the second ran and lost its answer, and only a minted-stage failure is
+  // UNMINTABLE.
+  assert.equal(backfillOne("FOO=1", { now, exec: NEVER_SPAWNS }).disposition, DISPOSITION.SCREEN_REFUSED);
+  const decayed = backfillOne("wc -l gone.txt", { now, exec: FAILED_RUN });
+  assert.equal(decayed.disposition, DISPOSITION.DECAYED);
+  assert.equal(decayed.outcome, "RAN-AND-FAILED");
 });
 
 test("FORGE-API-READ fires on gh reads, and names the forge as the anchor", () => {
