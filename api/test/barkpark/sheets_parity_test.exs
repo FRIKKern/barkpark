@@ -581,6 +581,89 @@ defmodule Barkpark.SheetsParityTest do
            "cells.ex @engine_errors drifted from Engine.error_values/0 — update the local mirror"
   end
 
+  # ── THE TYPESCRIPT MIRRORS, LOCKED FROM A CONTEXT THAT CAN BLOCK ─────────────
+  #
+  # The two TS surfaces below cannot call `Engine.error_values/0`, so each keeps
+  # a local `ERROR_VALUES` set. Each already has a guard in its OWN suite — the
+  # react one in `js/packages/react/tests/sheet-error-vocabulary.test.ts`, the
+  # mobile one in `apps/mobile/__tests__/sheetErrorVocabulary.test.ts` — and
+  # those guards are good: they read the shared fixture and assert both
+  # directions.
+  #
+  # They are also not enough on their own, and this is not a hypothesis. On
+  # 2026-09-02 PR #15374 added `#NAME?` engine-side, the react guard went RED on
+  # main (run 33650238539: 2 failed of 617, `missing '#NAME?'`), and the merge
+  # landed anyway — because `js-tests.yml` publishes no context in
+  # `.github/required-checks.json`. For about a day `#NAME?` rendered as plain
+  # black text through @barkpark/react. The guard fired and could not stop it.
+  #
+  # These two assertions close the direction that actually bit. A PR that adds a
+  # code engine-side touches `api/`, so `mix test` runs, so the REQUIRED and
+  # deliberately-unfiltered Elixir gate goes red here — on a context that CAN
+  # block. The opposite direction (someone edits only the .ts file) stays covered
+  # by each package's own guard, which always triggers because its own tree is in
+  # its workflow's paths filter.
+  #
+  # Deliberately a source read, not an import: Elixir cannot evaluate TypeScript,
+  # and a mirror that a build step could satisfy is not the thing being locked.
+  # `error_values_literal!/1` REFUSES rather than returning [] when it cannot
+  # find the set — an extractor that silently yields nothing would make this
+  # whole lock vacuous the first time someone reformats the file.
+  @ts_error_mirrors [
+    {"js/packages/react/src/blocks/sheet.ts", "the @barkpark/react sheet emitter"},
+    {"apps/mobile/src/papers/portabledoc/blocks/sheet.tsx", "the mobile sheet block"}
+  ]
+
+  for {rel, what} <- @ts_error_mirrors do
+    test "#{rel} ERROR_VALUES equals Engine.error_values/0 (#{what})" do
+      rel = unquote(rel)
+      codes = error_values_literal!(rel)
+
+      assert Enum.sort(codes) == Enum.sort(Engine.error_values()),
+             "#{rel} ERROR_VALUES drifted from Engine.error_values/0.\n" <>
+               "  only in the TS mirror: #{inspect(codes -- Engine.error_values())}\n" <>
+               "  only in the engine:    #{inspect(Engine.error_values() -- codes)}\n" <>
+               "Update the mirror in the SAME PR as the engine change: a red in that " <>
+               "package's own suite cannot block a merge (see the comment above)."
+    end
+  end
+
+  # Pull the `ERROR_VALUES = new Set([...])` members out of a TS source file.
+  # Raises with the path when the shape it depends on is gone, so a refactor
+  # that moves the literal fails LOUDLY instead of quietly matching nothing.
+  defp error_values_literal!(rel) do
+    path = Path.expand("../../../" <> rel, __DIR__)
+    src = File.read!(path)
+
+    body =
+      case Regex.run(~r/ERROR_VALUES\s*=\s*new Set\(\s*\[(.*?)\]/s, src) do
+        [_, body] ->
+          body
+
+        _ ->
+          flunk(
+            "#{rel}: could not find an `ERROR_VALUES = new Set([...])` literal. " <>
+              "If it was renamed or restructured, update @ts_error_mirrors and this " <>
+              "extractor — do NOT delete the assertion, it is the only lock on this " <>
+              "mirror that runs in a required context."
+          )
+      end
+
+    codes =
+      ~r/['"]([^'"]+)['"]/
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, code] -> code end)
+
+    if codes == [],
+      do:
+        flunk(
+          "#{rel}: found the ERROR_VALUES literal but extracted zero codes — " <>
+            "the extractor is broken and this lock would be vacuous."
+        )
+
+    codes
+  end
+
   # Behavioural half of the same lock: the marks each surface actually stamps
   # (walk.ex → red/bold inline; cells.ex → `sheet-err` class) cover exactly the
   # engine vocabulary. This proves the mirror is WIRED, not merely present.
