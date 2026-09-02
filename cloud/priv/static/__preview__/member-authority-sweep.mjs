@@ -338,7 +338,7 @@ const KNOWN = [
 // ── PINS ─────────────────────────────────────────────────────────────────────
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
-const PIN_MEMBER_SCENARIOS = 10;
+const PIN_MEMBER_SCENARIOS = 9;
 // 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
 // (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
@@ -375,7 +375,16 @@ const PIN_MEMBER_SCENARIOS = 10;
 // PRINTED, not by adding one. Its actor is the same owner `me("Guerrilla")`
 // every account-modal scenario carries — only the email differs — so the member
 // slice is unmoved and PIN_MEMBER_SCENARIOS stays at 10.
-const PIN_TOTAL_SCENARIOS = 121;
+// 121 -> 118, and the member slice 10 -> 9 (cch-w53-bl env-var Option A, ruled
+// 2026-09-02): the team env-var feature is DELETED, taking `env-populated`,
+// `env-write-once-409` and `env-member` with it. `env-member` was one of the ten
+// plain-member scenarios, so PIN_MEMBER_SCENARIOS moves too — this is the ONE
+// case the note above says it may: the member slice itself moved. Both numbers
+// were RE-DERIVED after the rebase onto origin/main by running this sweep and
+// reading what it PRINTED (9 member actor(s), 118 committed), never by
+// subtracting — main had moved the corpus to 121 while this branch was in
+// flight, so the pre-rebase 117 was a stale arithmetic.
+const PIN_TOTAL_SCENARIOS = 118;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

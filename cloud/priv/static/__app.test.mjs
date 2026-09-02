@@ -9267,12 +9267,10 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   assert.ok(!plain.includes("Pending invitations"));
 });
 
-// ── G-06 Members restyle + greenfield env-vars page (Settings wave, phase 4) ──
+// ── G-06 Members restyle (Settings wave, phase 4) ────────────────────────────
 
-test("G-06: the members + env-vars helpers are exported", () => {
-  for (const name of ["memberInitials", "removeMemberFailureCopy", "inviteFailureCopy",
-    "envScopeLabel", "envVarsFailureCopy", "envVarWriteFailureCopy",
-    "envVarRowHtml", "envVarsPanelHtml", "envAddFormHtml"]) {
+test("G-06: the members helpers are exported", () => {
+  for (const name of ["memberInitials", "removeMemberFailureCopy", "inviteFailureCopy"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
 });
@@ -9309,132 +9307,33 @@ test("G-06: inviteFailureCopy — already_member vs already_invited each get tru
   assert.equal(typeof hooks.inviteFailureCopy({ error: "other" }), "string");
 });
 
-test("G-06: envScopeLabel — barkpark scope OR a barkpark_id reads Instance, else Team", () => {
-  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: null }), "Team");
-  assert.equal(hooks.envScopeLabel({ scope: "barkpark", barkpark_id: "bp1" }), "Instance");
-  assert.equal(hooks.envScopeLabel({ scope: "team", barkpark_id: "bp1" }), "Instance"); // id wins
-  assert.equal(hooks.envScopeLabel({}), "Team");
-});
-
-test("G-06: envVarsFailureCopy + envVarWriteFailureCopy — honest per-status copy", () => {
-  assert.match(hooks.envVarsFailureCopy(0), /Network error/i);
-  assert.match(hooks.envVarsFailureCopy(422), /isn't part of a team/i);
-  assert.match(hooks.envVarsFailureCopy(403), /permission/i);
-  // The write-once 409 is the honest per-row truth — delete + recreate.
-  assert.match(hooks.envVarWriteFailureCopy(409, { error: "write_once" }), /write-once.*[Dd]elete/i);
-  // cch-w40-s1 — THE 403 ARM NOW CONSULTS THE SERVER, NOT THE AUTHOR. It used to
-  // return "Only team owners and admins can change environment variables." BEFORE
-  // faultCopy/friendly, shadowing forbiddenEvidenceCopy — and that sentence is
-  // FLATLY FALSE on router.ex:4394, the cross-tenant arm, where the caller IS an
-  // admin. Evidence first; a bare 403 gets the curated generic and names no role.
-  assert.equal(hooks.envVarWriteFailureCopy(403, { error: "forbidden", required: "admin", scope: "team" }),
-    "You need the admin role on this team — an admin on this team can grant it.",
-    "router.ex:4355/4417 send `required: \"admin\"` — the evidence is no longer discarded");
-  for (const bare of [{}, { error: "forbidden" }, null]) {
-    assert.doesNotMatch(hooks.envVarWriteFailureCopy(403, bare), /owners and admins/i,
-      "a bare 403 must not fabricate a role sentence: " + JSON.stringify(bare));
-  }
-  assert.equal(hooks.envVarWriteFailureCopy(403, { error: "forbidden" }),
-    "You don't have permission to do that, and the refusal didn't say which role would allow it.",
-    "the cross-tenant arm (router.ex:4394) states only what a bare 403 proves");
-  assert.match(hooks.envVarWriteFailureCopy(422, { error: "key_required" }), /Enter a key/i);
-});
-
-test("G-06: envVarRowHtml — value sealed forever (no reveal), write-once note, canWrite gates Delete", () => {
-  const secret = { id: "e1", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "pg" };
-  const admin = hooks.envVarRowHtml(secret, true);
-  assert.match(admin, /set-row-key">DATABASE_URL/); // mono key visible
-  assert.match(admin, /set-chip">Secret</);
-  assert.match(admin, /set-chip">Team</);
-  assert.match(admin, /data-env-delete="e1"/);       // admin gets Delete
-  // The value is NEVER rendered or revealable — no reveal/show affordance at all.
-  assert.ok(!/Reveal|Show value|reveal/i.test(admin), "no reveal affordance may exist");
-  // A member gets the SAME metadata, zero Delete.
-  const member = hooks.envVarRowHtml(secret, false);
-  assert.ok(!member.includes("data-env-delete"), "a member row carries no Delete");
-  // A write-once row states it can't be changed in place (a POST would 409).
-  const once = hooks.envVarRowHtml({ id: "e2", key: "STRIPE", scope: "team", is_secret: true, is_shown_once: true }, true);
-  assert.match(once, /set-chip">Write-once</);
-  assert.match(once, /Delete and recreate to change/i);
-});
-
-test("G-06: envVarsPanelHtml — admin gets the add FORM + save-row; a member is read-only", () => {
-  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
-  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
-  assert.match(admin, /Add a variable/);
-  assert.match(admin, /set-save-row/);
-  assert.match(admin, /data-env-delete="e1"/);
-  // Member-read / admin-write: E-03's any-member-write does NOT transfer here.
-  const member = hooks.envVarsPanelHtml(vars, { role: "member" });
-  assert.ok(!member.includes("Add a variable"), "a member sees no add form");
-  assert.ok(!member.includes("set-save-row"), "a member sees no save-row");
-  assert.ok(!member.includes("data-env-delete"), "a member sees no Delete");
-  // The empty-state copy invites an admin, stays quiet for a member.
-  assert.match(hooks.envVarsPanelHtml([], { role: "admin" }), /Add one below/);
-  assert.ok(!hooks.envVarsPanelHtml([], { role: "member" }).includes("Add one below"));
-});
-
-// ── cch-w53-s1 · THE ENV CUSTODY RETRACTION, PINNED SO IT CANNOT COME BACK ──
-// MEASURED GROUND: the control plane ships `env: Registry.resolved_env_for_barkpark/1`
-// in every provision claim, but provisioner.JobSpec declares no `env` json tag and
-// decodes with a bare json.Unmarshal — the map is dropped with no error, and a live
-// managed box's /opt/barkpark/.env carries platform keys only. So every sentence
-// that told a user these values reach an instance was false, and each was pinned by
-// NOTHING: the whole retraction was free-green. These three tests are the pins.
-// They are deliberately NEGATIVE (ban the claim) as well as positive (require the
-// honest shape), because a future well-meaning rewrite is exactly the failure mode.
-
-// The vocabulary of the retracted claim. Any of these back in the env surface means
-// the console is again promising a delivery no code performs.
-const ENV_CUSTODY_LIES = /injected into your instance|values injected|at boot\b|at the next boot|removes it from every instance/i;
-
-test("cch-w53-s1: envVarsPanelHtml never re-claims boot-time injection", () => {
-  const vars = [{ id: "e1", key: "K", scope: "team", is_secret: true, is_shown_once: false }];
-  for (const role of ["admin", "member"]) {
-    const html = hooks.envVarsPanelHtml(vars, { role });
-    assert.ok(!ENV_CUSTODY_LIES.test(html),
-      "the env panel must not claim these values reach an instance (" + role + ")");
-  }
-  // And it still says the true thing, so the retraction is not just a deletion.
-  const admin = hooks.envVarsPanelHtml(vars, { role: "admin" });
-  assert.match(admin, /Stored encrypted for your team/);
-  assert.match(admin, /not delivered to any instance/i);
-  // The already-filed, out-of-scope sentences are untouched (cch-w52 backlog owns
-  // them) — this pin must not be read as licence to re-cut them here.
-  assert.match(admin, /Values are encrypted at rest and never shown again after you save/);
-});
-
-test("cch-w53-s1: index.html's env header carries no injection claim either", () => {
-  // A SECOND, INDEPENDENT sentence in a DIFFERENT file: it renders before app.js
-  // paints and survives every panel error state, so an app.js-only fix leaves the
-  // lie standing on screen. Scoped to the #view-env section so unrelated copy
-  // elsewhere in the document cannot green or red this by accident.
-  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
-  const start = html.indexOf('id="view-env"');
-  assert.ok(start > 0, "the env view must be locatable in index.html");
-  const end = html.indexOf("</section>", start);
-  assert.ok(end > start, "the env view must be a closed section");
-  const section = html.slice(start, end);
-  assert.ok(!ENV_CUSTODY_LIES.test(section),
-    "index.html's env header must not claim these values reach an instance");
-  assert.match(section, /stored encrypted/i);
-  assert.match(section, /not delivered to any instance/i);
-});
-
-test("cch-w53-s1: the delete sheet claims no containment it cannot perform", () => {
-  // Source-sliced rather than rendered: confirmDeleteEnvVar writes through
-  // openModal (DOM), and the sentence — not the wiring — is what regressed.
+// ── cch-w53-bl · THE ENV-VAR SURFACE IS GONE, PINNED SO IT CANNOT COME BACK ──
+// Option A, ruled by main 2026-09-02: the team env-var feature was DELETED (prod
+// `env_vars` held zero rows ever — n_live_tup/n_tup_ins/n_tup_del all 0 since the
+// 2026-07-23 postmaster start, against 27 teams / 27 users / 8 barkparks). The
+// nine G-06 env tests that stood here went with the helpers they drove, and the
+// three cch-w53-s1 retraction pins went with the sentences they policed. What
+// replaces them is the ABSENCE pin: a console that regrows this page without a
+// delivery path reds here, which is the failure mode the retraction was written
+// for in the first place.
+test("cch-w53-bl: the team env-var console surface is gone, in all three artifacts", () => {
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
-  const start = src.indexOf("function confirmDeleteEnvVar(");
-  const end = src.indexOf("function ", start + 10);
-  assert.ok(start > 0 && end > start, "confirmDeleteEnvVar must be locatable");
-  const region = src.slice(start, end);
-  assert.ok(!ENV_CUSTODY_LIES.test(region),
-    "the delete sheet must not claim a removal from any instance");
-  // The loss it CAN speak to survives verbatim — smoke.mjs env-populated and
-  // env-write-once-409 both read this substring.
-  assert.ok(region.includes("can't be recovered"), "the honest loss clause must survive");
-  assert.match(region, /No instance changes/);
+  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  for (const name of ["envScopeLabel", "envVarsFailureCopy", "envVarWriteFailureCopy",
+    "envVarRowHtml", "envVarsPanelHtml", "envAddFormHtml", "loadEnvVars", "fetchEnvVars",
+    "submitEnvVar", "confirmDeleteEnvVar"]) {
+    assert.equal(hooks[name], undefined, name + " must not be exported — the feature is deleted");
+    assert.ok(!src.includes("function " + name + "("), name + " must not be declared in app.js");
+  }
+  // The wire is gone in BOTH directions: no call site, and no route left to call.
+  assert.ok(!src.includes("/v1/env-vars"), "app.js must hold no /v1/env-vars call site");
+  // And the static shell no longer registers the screen or its nav entry.
+  assert.ok(!html.includes('id="view-env"'), "index.html must not register the env screen");
+  assert.ok(!html.includes("#settings/env"), "index.html must not link the env screen");
+  // NON-VACUITY: the sibling settings screen this one was cut alongside is still
+  // here, so a green above is an absence of env-vars, not an absence of parsing.
+  assert.ok(html.includes('id="view-members"') && typeof hooks.loadMembers === "function",
+    "the members screen must still be present — otherwise this test proves nothing");
 });
 
 test("cch-w53-s1/bl: the sign-out-everywhere sheet states the SOFT measured bound and no stronger timing", () => {
@@ -9463,15 +9362,6 @@ test("cch-w53-s1/bl: the sign-out-everywhere sheet states the SOFT measured boun
   // The two accurate clauses stay.
   assert.match(body, /This device stays signed in/);
   assert.match(body, /can sign back in with their password/);
-});
-
-test("G-06: envAddFormHtml — write-only (never a value read-back affordance)", () => {
-  const html = hooks.envAddFormHtml();
-  assert.match(html, /id="env-key"/);
-  assert.match(html, /id="env-value"/);
-  assert.match(html, /id="env-once"/);   // the write-once toggle
-  assert.match(html, /set-save-row/);
-  assert.ok(!/Reveal|Show value/i.test(html), "the add form never offers a value read-back");
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -19044,17 +18934,15 @@ test("cch-w30-s5: faultCopy swaps the validation fallback out on a 5xx only", ()
   assert.match(hooks.faultCopy(413, { error: "request_too_large" }, fb), /too large/i);
 });
 
-test("cch-w30-s5: the two named copy helpers stop blaming the person on a 5xx", () => {
+test("cch-w30-s5: the named copy helper stops blaming the person on a 5xx", () => {
+  // The env-var write twin was deleted with the feature (cch-w53-bl, Option A);
+  // inviteFailureCopy is the surviving helper of the pair this slice fixed.
   // invite: "Check the address and try again." was a lie on a 500.
   assert.match(hooks.inviteFailureCopy({ error: "server_error" }, 500), /broke on our side/i);
   assert.ok(!/check the address/i.test(hooks.inviteFailureCopy({}, 500)));
   // …and the 4xx answers it was written for are untouched.
   assert.match(hooks.inviteFailureCopy({ error: "already_member" }, 409), /already on your team/i);
   assert.match(hooks.inviteFailureCopy({}, 422), /Check the address/i);
-  // env-var write: "Check the values and try again." was a lie on a 500.
-  assert.match(hooks.envVarWriteFailureCopy(500, { error: "server_error" }), /broke on our side/i);
-  assert.ok(!/check the values/i.test(hooks.envVarWriteFailureCopy(500, {})));
-  assert.match(hooks.envVarWriteFailureCopy(422, {}), /Check the values/i);
 });
 
 test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's back", () => {
@@ -19065,7 +18953,6 @@ test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's ba
     "Check the details and try again.",
     "Check the form and try again.",
     "Check the address and try again.",
-    "Check the values and try again.",
     // cch-w31-s4 — the two sentences the survey found STILL bare. Each one is
     // added in the same change as its fix, and each REDS this test on its own:
     // the connection sentence sat at the fleet + billing degradation cards with
@@ -19217,9 +19104,12 @@ test("cch-w31-s4: api()'s envelope is ADDITIVE — status 0 and network_error su
   // operator read as `unreachable` so a card that never got an answer stops
   // reading like one that got a refusal. The pin is a set-size ratchet on
   // ADDITIONS, not a ban on them — a branch that DISAPPEARS still reds it.
+  // cch-w53-bl (env-var Option A, 2026-09-02) takes the pin 6 -> 5: one of the
+  // four originals was envVarsFailureCopy's, deleted with the team env-var
+  // feature. A branch that DISAPPEARS reds this — which is what it just did.
   const zeroBranches = [...src.matchAll(/^\s*if \(status === 0\)/gm)];
-  assert.equal(zeroBranches.length, 6,
-    "the four original status-0 branches, faultCopy's arm, and operatorReadFault's (found " + zeroBranches.length + ")");
+  assert.equal(zeroBranches.length, 5,
+    "the three surviving original status-0 branches, faultCopy's arm, and operatorReadFault's (found " + zeroBranches.length + ")");
   assert.ok([...src.matchAll(/err === "network_error"/g)].length >= 2);
   // A non-JSON body still hands consumers an EMPTY data object (all 354 .data
   // reads unchanged) — the bytes now ride alongside as `text` instead of
@@ -20191,16 +20081,6 @@ test("cch-w36-s3: loadMembers reports a FAILED /v1/me as a failure, never as 'No
     assert.match(failed, re);
     assert.match(failed, /data-members-retry/, "and the honest state offers the Retry it needs");
   }
-});
-
-test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed too", async () => {
-  const teamless = await driveMeGatedLoader(hooks.loadEnvVars, "env-body", 200, { user: { id: "u9", email: "solo@acme.com" } });
-  assert.match(teamless, /No team yet/, "a GENUINE teamless 200 keeps its determinate answer");
-
-  const failed = await driveMeGatedLoader(hooks.loadEnvVars, "env-body", 500, { error: "server_error" });
-  assert.ok(failed.indexOf("No team yet") === -1);
-  assert.match(failed, /Couldn&#39;t load environment variables|Couldn't load environment variables/);
-  assert.match(failed, /data-env-retry/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21669,31 +21549,6 @@ test("cch-w40-s1 (D419(d)): the delivery log stops selling a permanent 403 as 'm
     "r.status/r.data were already in scope in loadNotifDeliveries — the copy just never asked for them");
   assert.equal((APP_SRC.match(/notifDeliveriesErrorHtml\(\)/g) || []).length, 0,
     "no arity-0 call site survives in the shipped file");
-});
-
-test("cch-w40-s1: envVarWriteFailureCopy's 403 stops shadowing the evidence seam", () => {
-  // The arm returned BEFORE faultCopy/friendly, so the console's authored guess
-  // structurally outranked the server's own evidence. Two 403s reach it.
-  const f = hooks.envVarWriteFailureCopy;
-  // (a) router.ex:4355 / :4417 — the admin gate. The evidence is now rendered.
-  assert.equal(f(403, { error: "forbidden", required: "admin", scope: "team" }), ADMIN_SENTENCE);
-  // (b) router.ex:4394 — the CROSS-TENANT arm, left bare on purpose (D396(5)):
-  //     an admin of team A writing team B's barkpark_id. The old sentence
-  //     ("Only team owners and admins can change environment variables.") was
-  //     FLATLY FALSE there — the caller IS an admin — and unfixable by the reader,
-  //     because no role grant repairs a wrong-team id.
-  assert.equal(f(403, { error: "forbidden" }), FORBIDDEN_GENERIC);
-  assert.equal(f(403, { error: "forbidden" }).indexOf("owners and admins"), -1);
-  // A malformed/absent body must not fall out of the 403 class into input copy.
-  for (const junk of [{}, null, undefined]) {
-    assert.equal(f(403, junk), FORBIDDEN_GENERIC, "a 403 is never a validation answer: " + JSON.stringify(junk));
-    assert.equal(f(403, junk).indexOf("Check the values"), -1);
-  }
-  // THE OTHER ARMS ARE UNTOUCHED — this widened one branch, not the function.
-  assert.match(f(409, { error: "write_once" }), /write-once/);
-  assert.equal(f(422, { error: "key_required" }), "Enter a key.");
-  assert.match(f(500, { error: "server_error" }), /broke on our side/);
-  assert.match(f(422, {}), /Check the values/);
 });
 
 test("cch-w40-s1 THE INVERSION CANNOT REACH A BILLING SCREEN — proved, not asserted (D444/D447(c))", () => {
@@ -24728,8 +24583,9 @@ test("cch-w72-bl: roleChangeFailureCopy — an unread typed slug reads the hones
     "You're the last owner — promote another member to owner first.");
 });
 
-// The four toast handlers (session-revoke paint, confirmRevokeToken,
-// confirmRevokeInvite, confirmDeleteEnvVar) are click-driven modal callbacks that
+// The toast handlers (session-revoke paint, confirmRevokeToken,
+// confirmRevokeInvite — confirmDeleteEnvVar was the fourth until the team env-var
+// feature was deleted, cch-w53-bl) are click-driven modal callbacks that
 // emit friendly(r.data, "<honest>") inline. Each is proven the same way: locate
 // the exact call site by its toast title, PARSE its two argument texts (callArgs
 // throws if the site is gone or reformatted), then DRIVE the real exported
@@ -24762,10 +24618,6 @@ test("cch-w72-bl: confirmRevokeToken — friendly() carries a truthy honest fall
 
 test("cch-w72-bl: confirmRevokeInvite — friendly() carries a truthy honest fallback", () => {
   cchw72ActionSite('title: "Couldn\'t revoke invitation", body: friendly');
-});
-
-test("cch-w72-bl: confirmDeleteEnvVar — friendly() carries a truthy honest fallback", () => {
-  cchw72ActionSite('title: "Couldn\'t delete variable", body: friendly');
 });
 
 // ── the negative control: the humanizer tail is UNTOUCHED ──

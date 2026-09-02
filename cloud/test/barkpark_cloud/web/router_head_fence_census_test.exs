@@ -209,8 +209,15 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # does no lookup at all, so it does not even reach the throttled `last_used`
   # bookkeeping the session branch defers. No `side_effecting_get?/1` clause is
   # owed. agent_or_worker gains exactly the route session loses; public unchanged.
-  @baseline_total 68
-  @baseline_session 48
+  # 2026-09-02 (second move of the day): 67 / 47 / 8 / 12. ONE ROUTE WAS REMOVED,
+  # which is the benign half of this file's two cases. `GET /v1/env-vars` went
+  # with the team env-var feature — Option A, ruled by main after cch-w53-bl's
+  # measurement that prod `env_vars` held ZERO rows ever. `total` and `session`
+  # each fall by exactly one and nothing changed class; machine and public are
+  # untouched. No `side_effecting_get?/1` clause is owed or released: the deleted
+  # route was a pure `Registry.list_env_vars/1` read.
+  @baseline_total 67
+  @baseline_session 47
   @baseline_machine 8
   @baseline_public 12
 
