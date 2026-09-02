@@ -1,0 +1,257 @@
+name: pr-meta
+
+# THE PATH-AGNOSTIC META GATES, IN ONE RUNNER BOOT.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Measured 2026-09-02: the Actions queue was 682 runs deep with 8 running and 68
+# open PRs. Every PR workflow already carries a `concurrency:` group, so re-pushes
+# are not the cause — FAN-OUT is. Eleven workflows boot on every pull_request
+# regardless of paths, and each one is a separate runner boot and a separate queue
+# slot. Three of them were single-job, whole-tree checks that share a checkout and
+# nothing else: committed-symlink-gate, run-level-reader-census and
+# aesthetics-guard. They are now three step groups in ONE job here, and their
+# three files are deleted.
+#
+# WHY A FOLD AND NOT A `paths:` FILTER — for these three specifically
+# ------------------------------------------------------------------
+# Each of the three had a header arguing that it must NOT be path-filtered, and
+# each argument still holds:
+#   * a symlink can be added anywhere, so a filtered lane fires only when the
+#     guard's own files change — the shape of a check that is green because it
+#     never ran;
+#   * a run-level read can be added in a script, a workflow or a tooling .mjs;
+#   * the filebase critic scores `git ls-files` PLUS content greps (a doc goes
+#     dead, and a tracked artifact goes from served to removable, when a
+#     MODIFICATION deletes the reference to it), so no add/delete-shaped path
+#     predicate covers it either.
+# So the saving here is runner boots, not skipped work: 3 boots -> 1. The one
+# genuinely bounded predicate in the set — aesthetics-guard's `push: main` arm,
+# which existed only to refresh the critic against its own tooling — is preserved
+# below as an in-job early exit, not deleted.
+#
+# WHAT DID **NOT** MOVE, AND WHY (do not "finish the job" without reading this)
+# ----------------------------------------------------------------------------
+#   reland-check.yml           Out-of-fence harnesses parse it BY PATH AND BY JOB
+#                              ID: reland_workflow_sim.py extracts its real `run:`
+#                              blocks out of that filename under that job key, and
+#                              reland_loudfail.test.sh asserts the file is
+#                              readable. Moving the steps here silently blinds a
+#                              mutation harness — the exact class of defect that
+#                              harness exists to catch.
+#   required-checks-drift.yml  Two of its three job names are committed rows in
+#                              .github/required-checks.json `exclusions`, one of
+#                              them carrying a named replacement trigger for its
+#                              own future registration. Folding erases both names
+#                              and the registration path with them. Wave 10 also
+#                              split that workflow on a CREDENTIAL boundary
+#                              (BREAKGLASS_TOKEN vs hermetic); one job re-crosses
+#                              it. And its header designates it the deliberately
+#                              path-unfiltered home of the workflow-job-shape
+#                              ratchet.
+#   compose-smoke.yml,         Already dispatcher+aggregator shaped: one always-on
+#   security.yml               dispatcher, expensive arms behind a job-level `if:`,
+#                              an aggregator name that CAN be required. That is the
+#                              same fan-out answer, reached the other way.
+#   elixir / cloud /           The four required contexts. A workflow-level `paths:`
+#   console-harness /          on any of them makes a required context ABSENT, and
+#   pr-task-gate               an absent required context reports `expected` forever.
+#
+# BLOCKING vs ADVISORY IS PRESERVED PER STEP, NOT PER JOB
+# ------------------------------------------------------
+# The two gates that could red before still red this job; the advisory critic
+# carries `continue-on-error: true` at the STEP level, so it reports without
+# blocking exactly as its job-level flag used to. Every step keeps the name it had
+# in its own workflow, so a red still names its own reason, and the advisory steps
+# carry `!cancelled()` so a blocking red above them does not silently swallow the
+# advisory below — three independent jobs behaved that way and one job must too.
+#
+# NOT one of main's required contexts (those are exactly: Elixir gate, PR
+# references an active task, Cloud gate, Console gate). Wiring it here makes these
+# checks RUN, not BLOCK.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-meta-${{ github.ref }}
+  # never cancel a main run — a cancelled run on main leaves no verdict at all,
+  # which reads identically to a clean one.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  pr-meta:
+    name: PR meta gates
+    runs-on: ubuntu-latest
+    steps:
+      # THE MERGE REF, deliberately, and `fetch-depth: 0`.
+      #
+      # That ref is what committed-symlink-gate and run-level-reader-census
+      # documented themselves as wanting: on a pull_request the checked-out HEAD is
+      # the MERGE commit, so a symlink or a run-level read arriving THROUGH the
+      # merge is caught too, not just one the branch adds.
+      #
+      # The filebase critic wants the opposite tree — the PR head, unpolluted by
+      # everyone else's landed changes (charter D34) — so it does not share this
+      # checkout: it adds pinned worktrees at the head sha and the base sha below.
+      # `fetch-depth: 0` is what makes both shas reachable from this one clone; the
+      # two workflows that needed full history were each paying for it separately
+      # before this fold.
+      - name: Checkout (merge ref; full history for the pinned worktrees)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── committed-symlink-gate ────────────────────────────────────────────────
+      # NO SYMLINK IS EVER COMMITTED TO THIS REPO. A guard against a SILENT defect
+      # must not itself be silent-capable: main carries zero committed symlinks, so
+      # this gate's expected output is "clean" forever — exactly the condition
+      # under which a broken scanner is indistinguishable from a clean tree.
+      # --selftest plants symlinks in throwaway repos and proves the gate BITES,
+      # stays silent without one, and REFUSES TO MEASURE (exit 2) rather than
+      # reporting a false clean. It runs before the gate, so it cannot rot
+      # unexecuted.
+      - name: Prove the gate can fail (--selftest)
+        run: bash scripts/committed-symlink-check.sh --selftest
+
+      - name: No symlink is committed to this repo
+        run: bash scripts/committed-symlink-check.sh
+
+      # ── run-level-reader-census ───────────────────────────────────────────────
+      # A run conclusion and its job conclusions are different facts:
+      # `continue-on-error` makes a job report `failure` while its run reports
+      # `success`. A reader that asks the RUN "did the check pass" reports success
+      # over a failed audit with no red anywhere. Same selftest-first argument as
+      # the gate above: the census's steady state is "everything adjudicated",
+      # which is also what a broken scan produces.
+      - name: Prove the census can fail (--selftest)
+        run: bash scripts/run-level-reader-census.sh --selftest
+
+      - name: Every run-level reader is adjudicated
+        run: bash scripts/run-level-reader-census.sh
+
+      # ── aesthetics-guard (ADVISORY) ───────────────────────────────────────────
+      # `!cancelled()` and not `success()`: a red from either gate above must not
+      # swallow this advisory. It ran as its own job before the fold and it has to
+      # keep running independently now.
+      #
+      # THE ONE EARLY EXIT IN THIS FILE, and it is the one bounded predicate in the
+      # set. On a pull_request the critic ALWAYS runs — any PR can introduce root
+      # clutter, a dead doc or tracked build-output, and a modification-only PR can
+      # do it too (deleting the last reference to a doc kills it). On `push: main`
+      # the old workflow was paths-filtered to `tooling/aesthetics/**` plus its own
+      # file, because that arm exists only to re-exercise the critic against its own
+      # tooling; that filter is preserved here rather than dropped.
+      - name: Aesthetics — is this event in scope?
+        id: aesthetics_scope
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "run=1" >> "$GITHUB_OUTPUT"
+            echo "in scope: pull_request (no paths predicate is sound for this subject)"
+            exit 0
+          fi
+          changed="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
+          if printf '%s\n' "$changed" | grep -qE '^(tooling/aesthetics/|\.github/workflows/pr-meta\.yml$)'; then
+            echo "run=1" >> "$GITHUB_OUTPUT"
+            echo "in scope: push to main touched the critic's own tooling"
+          else
+            echo "run=0" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED on push:main — the critic's own tooling did not change. This mirrors the paths filter aesthetics-guard.yml carried on its push arm; the pull_request arm is never skipped."
+          fi
+
+      - name: Setup Node
+        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # bp is ABSENT in CI, so the critic's TASK signal is not reliable here; only
+      # the STRUCTURAL findings are diffed (compare.mjs excludes the dead-task
+      # signal entirely). Both trees are PINNED worktrees off the one clone above —
+      # never the merge ref — so a PR is scored on its own tree and blamed for
+      # nothing anyone else landed.
+      - name: Run filebase critic on the PR head and the base tip
+        id: aesthetics_reports
+        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' }}
+        continue-on-error: true # advisory — report, never block
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            HEAD_SHA="$(git rev-parse HEAD)"
+            BASE_SHA="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          echo "head=$HEAD_SHA base=$BASE_SHA"
+          # Defensive only. `fetch-depth: 0` above already reaches both parents of
+          # the merge commit; if a fetch is somehow still needed it happens here,
+          # and if the worktree add then fails this step FAILS rather than scoring
+          # a tree it never read.
+          git fetch --no-tags --depth=1 origin "$HEAD_SHA" 2>/dev/null || true
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          for t in head base; do rm -rf "/tmp/${t}-tree"; done
+          git worktree add --detach /tmp/head-tree "$HEAD_SHA"
+          ( cd /tmp/head-tree && node tooling/aesthetics/aesthetics.mjs )
+          cp /tmp/head-tree/tooling/aesthetics/aesthetics-report.json /tmp/head-report.json
+          git worktree remove --force /tmp/head-tree
+          git worktree add --detach /tmp/base-tree "$BASE_SHA"
+          ( cd /tmp/base-tree && node tooling/aesthetics/aesthetics.mjs )
+          cp /tmp/base-tree/tooling/aesthetics/aesthetics-report.json /tmp/base-report.json
+          git worktree remove --force /tmp/base-tree
+
+      - name: Filebase aesthetics gate (advisory) — compare + post summary
+        id: aesthetics_compare
+        if: ${{ !cancelled() && steps.aesthetics_scope.outputs.run == '1' && steps.aesthetics_reports.outcome == 'success' }}
+        continue-on-error: true # advisory — report, never block
+        run: |
+          set -euo pipefail
+          node tooling/aesthetics/compare.mjs /tmp/base-report.json /tmp/head-report.json | tee /tmp/aesthetics-summary.md
+          # Strip the machine line out of the human summary before posting. `|| true`:
+          # grep -v exits 1 if it filters out every line, which would abort under
+          # `set -o pipefail` — a non-match here is not an error.
+          grep -v '^AESTHETICS_GUARD_FLAGGED=' /tmp/aesthetics-summary.md >> "$GITHUB_STEP_SUMMARY" || true
+          if grep -q '^AESTHETICS_GUARD_FLAGGED=1' /tmp/aesthetics-summary.md; then
+            echo "flagged=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "flagged=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ADVISORY ≠ SILENT. Three states have to be distinguishable and only one of
+      # them is "clean": the critic ran and flagged nothing, the critic ran and
+      # flagged something, and the critic DID NOT RUN. The third used to be a red
+      # job; inside a folded job it would otherwise be a skipped step nobody reads.
+      - name: Aesthetics — what this advisory actually did (always)
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          scope="${{ steps.aesthetics_scope.outputs.run }}"
+          reports="${{ steps.aesthetics_reports.outcome }}"
+          flagged="${{ steps.aesthetics_compare.outputs.flagged }}"
+          # THREE different not-run realities, and only the middle one is benign.
+          # An empty `scope` means the scope step itself died — which must never
+          # read as the deliberate push:main skip.
+          if [ -z "$scope" ]; then
+            echo "::warning title=Filebase aesthetics DID NOT RUN::the scope step failed, so the critic was never dispatched. NOT a clean reading and NOT the deliberate push:main skip. Advisory, non-blocking."
+            echo "### Filebase aesthetics: **DID NOT RUN** — the scope step failed" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$scope" != "1" ]; then
+            echo "### Filebase aesthetics: not evaluated on this event (push to main, critic tooling unchanged)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$reports" != "success" ]; then
+            echo "::warning title=Filebase aesthetics DID NOT RUN::the critic could not produce both reports (see the failed step above). This is NOT a clean reading — no comparison was made. Advisory, non-blocking."
+            echo "### Filebase aesthetics: **DID NOT RUN** — this is not a clean reading" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$flagged" = "1" ]; then
+            echo "::warning title=Filebase aesthetics (advisory)::This PR introduces new structural filebase mess (new root clutter / dead doc / removable build-output, or a Bloat drop) vs the base branch. Advisory only — see the job summary. Does NOT block the merge."
+          fi

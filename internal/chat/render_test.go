@@ -1791,3 +1791,104 @@ func TestAnchorAtRoundTripsThroughTheBlockIndex(t *testing.T) {
 		t.Fatalf("a vanished block must fall back to the raw pin, got %d", got)
 	}
 }
+
+// ── the settle-gated tool-row gutter (task-d5083ae525902f28) ─────────────────
+//
+// The Go leg of a truth table BarkparkWeb.Studio.ChatToolRenderer.settle_state/1
+// owns on the Elixir side. Both surfaces read the SAME three envelope facts off
+// the row's `metadata` — which chat_controller.message_json already ships
+// verbatim for every row — so a `bp chat` transcript and a Studio transcript
+// cannot disagree about whether a tool succeeded.
+//
+// The glyph is row-ENVELOPE chrome, deliberately NOT block content: most tool
+// rows (Bash/Read/Grep) project no PortableDoc block at all, so a glyph carried
+// "on the block" would be invisible on exactly the rows that most need it. This
+// is the same split D35 already made for the interactive cards, whose
+// answerability rides the envelope while the block carries only the visual.
+func toolMsg(meta map[string]any) Message {
+	return Message{Role: "tool", SourceMarkdown: "Bash — ls -la", Metadata: meta}
+}
+
+func TestToolRowSettleGlyph(t *testing.T) {
+	cases := []struct {
+		name  string
+		meta  map[string]any
+		state string
+		glyph string
+	}{
+		// THE SETTLE GATE: a result that landed mid-turn does NOT flip the row.
+		// Deleting the turn_settled check makes this case return "ok".
+		{"unsettled with a result", map[string]any{"output": "a.txt"}, "pending", "●"},
+		{"unsettled and resultless", map[string]any{}, "pending", "●"},
+		{"nil metadata", nil, "pending", "●"},
+		{"settled with a result", map[string]any{"turn_settled": true, "output": "a.txt"}, "ok", "✓"},
+		{"settled with an error", map[string]any{"turn_settled": true, "output": "boom", "tool_error": true}, "error", "✗"},
+		{"settled error with no text", map[string]any{"turn_settled": true, "output": "", "tool_error": true}, "error", "✗"},
+		// THE PROVENANCE GATE: settled but the result never arrived — neutral
+		// forever, never a fabricated ✓. Deleting the output check returns "ok".
+		{"settled but resultless", map[string]any{"turn_settled": true}, "pending", "●"},
+		{"settled with an empty result", map[string]any{"turn_settled": true, "output": ""}, "pending", "●"},
+		// Forward-compatible: a non-boolean turn_settled is not a settle.
+		{"settled stamped as a string", map[string]any{"turn_settled": "true", "output": "x"}, "pending", "●"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			msg := toolMsg(tc.meta)
+			if got := toolRowState(msg); got != tc.state {
+				t.Fatalf("toolRowState = %q, want %q", got, tc.state)
+			}
+			glyph, _ := toolRowGlyph(msg)
+			if glyph != tc.glyph {
+				t.Fatalf("toolRowGlyph = %q, want %q", glyph, tc.glyph)
+			}
+			// The glyph must actually reach the transcript — a truth table the
+			// renderer never consults is a vacuous green.
+			out := strings.Join(renderToolRow(chatRegistry, 80, msg), "\n")
+			if !strings.Contains(out, tc.glyph) {
+				t.Fatalf("rendered tool row is missing the %q gutter:\n%s", tc.glyph, out)
+			}
+			if !strings.Contains(out, "ls -la") {
+				t.Fatalf("rendered tool row lost its tool line:\n%s", out)
+			}
+		})
+	}
+}
+
+// A tool row that DOES carry a typed block (a file mutation → chat-tool-diff)
+// keeps the gutter header ABOVE its diff card, exactly as Studio draws
+// `● Edit — path` above the colored diff. Proves the header did not displace the
+// block render when tool rows moved off the blockRoles path.
+func TestToolRowKeepsItsBlockBelowTheGutter(t *testing.T) {
+	blocks, err := json.Marshal([]any{map[string]any{
+		"type":  "chat-tool-diff",
+		"input": map[string]any{"file_path": "lib/x.ex", "old_string": "a", "new_string": "b"},
+		"lines": []any{
+			map[string]any{"op": "-", "text": "alpha"},
+			map[string]any{"op": "+", "text": "bravo"},
+		},
+		"added": 1, "removed": 1,
+	}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	msg := Message{
+		Role:           "tool",
+		SourceMarkdown: "Edit — lib/x.ex",
+		Blocks:         blocks,
+		Metadata:       map[string]any{"turn_settled": true, "output": "ok"},
+	}
+
+	out := strings.Join(renderMessage(80, msg, false, ""), "\n")
+	if !strings.Contains(out, "✓") {
+		t.Fatalf("a settled diff row must wear its ✓ gutter:\n%s", out)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "bravo") {
+		t.Fatalf("the diff block must still render beneath the gutter:\n%s", out)
+	}
+	if !strings.Contains(out, "lib/x.ex") {
+		t.Fatalf("the diff header path must survive:\n%s", out)
+	}
+}

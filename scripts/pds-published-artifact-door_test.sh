@@ -92,11 +92,11 @@ if grep -q <<<"$out" 'holdr-twin.*REFUSE'; then ok "PAIRED PROBE: the twin at a 
 printf '{"ignore":["@barkpark/react"]}\n' > js/.changeset/config.json
 commit "ignore react"
 out="$(bash "$DOOR" HEAD 2>&1)"
-if printf '%s' "$out" | grep -qE '@barkpark/react .*SKIP \.changeset ignore'; then ok "HATCH .changeset ignore SKIPs the package that would otherwise REFUSE"; else bad "hatch ignore" "react was not skipped on the ignore list"; fi
+if grep -qE '@barkpark/react .*SKIP \.changeset ignore' <<<"$out"; then ok "HATCH .changeset ignore SKIPs the package that would otherwise REFUSE"; else bad "hatch ignore" "react was not skipped on the ignore list"; fi
 printf '{"ignore":[]}\n' > js/.changeset/config.json
 commit "mutation: empty the ignore list"
 out="$(bash "$DOOR" HEAD 2>&1)"
-if printf '%s' "$out" | grep -qE '@barkpark/react .*REFUSE'; then ok "MUTATION: emptying the ignore list REFUSES the same package on the same tree"; else bad "hatch ignore mutation" "react did not refuse after emptying ignore"; fi
+if grep -qE '@barkpark/react .*REFUSE' <<<"$out"; then ok "MUTATION: emptying the ignore list REFUSES the same package on the same tree"; else bad "hatch ignore mutation" "react did not refuse after emptying ignore"; fi
 git reset -q --hard "$DIRTY"
 
 # A genuine release must be structurally silent, not silent by exception. Again
@@ -104,7 +104,7 @@ git reset -q --hard "$DIRTY"
 pkg react '{"name":"@barkpark/react","version":"2.0.0","exports":{".":"x","./client":"y"}}'
 commit "release: bump literal"
 out="$(bash "$DOOR" HEAD 2>&1)"
-if printf '%s' "$out" | grep -qE '@barkpark/react .*2\.0\.0 .*PASS'; then ok "A RELEASE IS STRUCTURALLY SILENT: bumping the literal moves R onto itself"; else bad "release silent" "react still refuses after a real release bump — a door that fires on a release will be weakened"; fi
+if grep -qE '@barkpark/react .*2\.0\.0 .*PASS' <<<"$out"; then ok "A RELEASE IS STRUCTURALLY SILENT: bumping the literal moves R onto itself"; else bad "release silent" "react still refuses after a real release bump — a door that fires on a release will be weakened"; fi
 git reset -q --hard "$DIRTY"
 
 # READER FAILURES ARE NAMED, NEVER CLASSIFIED (task-4dba2e52ea7c1b04). A
