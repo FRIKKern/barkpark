@@ -121,6 +121,12 @@ protection every 30 minutes on `BREAKGLASS_TOKEN` and hard-fails on a credential
 fault, so an unarmed watcher cannot read as "all clear". `scripts/breakglass.sh
 --status` and `scripts/breakglass.test.sh` are the read-only entry points.
 
+**Closing a glass never touches `enforced`** — break-glass moves *live*
+protection only, and `--disable` `exec`s into `--open --total` writing no flag.
+`verify --ci` now reads live protection on `enforced=false` too, so committing
+that flag while `main` is protected **reds the spec gate**: flip it back in the
+PR that restores protection.
+
 ## When to override
 
 The `mix-prod-compile` gate may be bypassed only by an explicit Boss

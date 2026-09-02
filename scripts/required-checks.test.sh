@@ -139,7 +139,31 @@ fi
 PASS=0
 FAIL=0
 TMP="$(mktemp -d)"
-cleanup() { rm -rf "$TMP"; }
+# A CRASH IS NOT A PASS, AND THIS FILE USED TO REPORT IT AS ONE.
+# `cleanup() { rm -rf "$TMP"; }` ends in a command that succeeds, and an EXIT
+# trap's final status REPLACES the script's — so any death before the tally line
+# exited 0. Measured, not theorised: while §22 was being written an unbound
+# variable under `set -u` killed the run at §22 and `echo "RC=$?"` printed 0,
+# with 107 assertions run out of ~190 and no tally line at all. In CI that is
+# `Required-check spec gate` GREEN over a fraction of its suite — the exact
+# shape every clause in this file exists to refuse, in the file itself.
+#
+# Two clauses, because preserving the status alone is not enough: a `set -e`
+# death whose failing command exits 0 is possible, and "the run stopped early"
+# must be a failure on its own terms. RC_TALLY_REACHED is set on the last line
+# of the run; if the trap fires without it and the status is somehow 0, that is
+# a hard 70. The `exit 3` preconditions above run BEFORE this trap is installed,
+# so they are unaffected.
+RC_TALLY_REACHED=0
+cleanup() {
+  local rc=$?
+  rm -rf "$TMP"
+  if [ "$RC_TALLY_REACHED" -ne 1 ] && [ "$rc" -eq 0 ]; then
+    echo "required-checks.test.sh: the run ended BEFORE its tally line while reporting success — it crashed, and a crash is not a pass. Scroll up for the last assertion that printed." >&2
+    exit 70
+  fi
+  exit "$rc"
+}
 trap cleanup EXIT
 
 ok()   { PASS=$((PASS + 1)); echo "  ok   $*"; }
@@ -1105,8 +1129,14 @@ else
   ok "the mutation applies: the enforced=false live-probe call is removed from a copy of verify"
   # `--workflows` explicitly: the mutant lives in $TMP, so its own REPO_ROOT
   # points at the temp dir and the advisory-prose clause would red for a reason
-  # that has nothing to do with what is being proven here.
-  RCS6_MUT_OUT="$(bash "$RCS6_NOCHECK" --spec "$RCS6_UNAPPLIED" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe --workflows "$REPO_ROOT/.github/workflows" 2>&1)" && RCS6_MUT_RC=0 || RCS6_MUT_RC=$?
+  # that has nothing to do with what is being proven here. `--prose` for the
+  # same reason and the same directory: the merge-truth clause (cch-w34) scans
+  # `git ls-files` in REPO_ROOT, which in $TMP is not a checkout at all, so the
+  # mutant would refuse before ever reaching the clause this proof is about.
+  RCS6_NEUTRAL="$TMP/s6-prose-neutral"
+  mkdir -p "$RCS6_NEUTRAL"
+  printf '%s\n' "Neutral corpus, naming no required context." > "$RCS6_NEUTRAL/neutral.md"
+  RCS6_MUT_OUT="$(bash "$RCS6_NOCHECK" --spec "$RCS6_UNAPPLIED" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe --workflows "$REPO_ROOT/.github/workflows" --prose "$RCS6_NEUTRAL" 2>&1)" && RCS6_MUT_RC=0 || RCS6_MUT_RC=$?
   if [ "$RCS6_MUT_RC" -eq 0 ] && grep -q "protection is not applied yet" <<<"$RCS6_MUT_OUT"; then
     ok "…and WITHOUT it the SAME protected read-back exits 0 saying \`protection is not applied yet\` — the old blindness, reproduced on demand"
   else
@@ -1116,13 +1146,19 @@ fi
 
 section "9. verify --selftest is itself green"
 
-if bash "$VERIFY" --selftest >/dev/null 2>&1; then
-  # The count is the selftest's OWN numbering (`1/16` … `16/16`), which this
-  # label had drifted four clauses behind. It is also the reason drift.yml no
-  # longer runs `--selftest` as a step of its own: §9 IS that home.
-  ok "verify --selftest passes (16 mutation clauses)"
+RC9_OUT="$(bash "$VERIFY" --selftest 2>&1)" && RC9_RC=0 || RC9_RC=$?
+# The count is READ OFF the selftest's own numbering (`1/29` … `29/29`) rather
+# than typed here. It was typed here, it said 16 against a suite of 23, and a
+# label four clauses behind is the same instrument fault this file exists to
+# hunt: a number nobody re-earns. §9 is also the only home `--selftest` has —
+# drift.yml no longer runs it as a step of its own.
+RC9_N="$(sed -n 's/^  ok   [0-9]*\/\([0-9]*\) .*/\1/p' <<<"$RC9_OUT" | tail -1)"
+if [ "$RC9_RC" -eq 0 ] && [ -n "$RC9_N" ]; then
+  ok "verify --selftest passes ($RC9_N mutation clauses, counted from its own numbering)"
+elif [ "$RC9_RC" -eq 0 ]; then
+  bad "verify --selftest exited 0 but printed no numbered clause — a suite that runs nothing exits 0 too"
 else
-  bad "verify --selftest is red"
+  bad "verify --selftest is red (exit $RC9_RC): $(grep -m2 'SELFTEST FAIL' <<<"$RC9_OUT")"
 fi
 
 section "11 (hermetic half). the section-11 mutation is DERIVED, not typed"
@@ -3638,6 +3674,288 @@ else
 fi
 
 
+section "22. the merge-truth prose clause reads the WHOLE TRACKED corpus, and tells an assertion apart from a record of one"
+
+# THE BLIND SPOT THIS SECTION PINS (cch-w34). `advisory_prose_check` scans
+# `find "$WORKFLOWS_DIR" -maxdepth 1` — .github/workflows, one level. Every
+# charter under `.claude/workflows/`, every page under `docs/`, every README is
+# outside it, and those are what an agent is handed BY NAME, in full, before it
+# has run a single `gh api`. The founding defect (cch-w32-s4) was a workflow
+# comment calling `Console gate` advisory while it was required; the SAME
+# sentence re-copied into a charter was invisible to every clause in the file.
+#
+# The widening is only half of it, and the smaller half. Pointed at narrative
+# prose unchanged, the workflow clause's PROXIMITY reading is 94% noise — so the
+# corpus widens and the lens tightens with it, to ATTRIBUTION: the span stops at
+# the clause, the disclaimer must be predicated of the context by a copula, and
+# a dated record / a quotation / a fenced transcript are fenced rather than
+# asserted. This section is that discrimination, one context per case so all
+# four are observable in ONE run (the scanner reports the first hit per context,
+# so four cases sharing a name would hide three of themselves).
+
+RC22_ROOT="$TMP/mt-prose"
+mkdir -p "$RC22_ROOT/nested/deeper"
+RC22_DOC="$RC22_ROOT/nested/deeper/bp-fixture-charter.md"
+# TWO DIRECTORIES DEEP AND NAMED .md — the two properties the depth-1 workflow
+# glob is structurally blind to. The filler paragraphs are load-bearing: the
+# record fence reads 160 characters to the LEFT of a name, so without them one
+# row's marker would classify the next row.
+cat > "$RC22_DOC" <<'MD'
+# Fixture corpus
+
+- **D1 — the assertion.** Land on green. `Console gate` is ADVISORY today, so a
+  red one does not stop the merge button; treat it as blocking anyway.
+
+Filler paragraph, holding nothing for any rule here to bite on, long enough to
+push the row above out of the window that the row below reads behind itself.
+
+- **D2 — a quotation, which must stay green.** The seal printed *"`Cloud gate`
+  is NOT a required status check on main"* under the spec of the day.
+
+Filler paragraph, holding nothing for any rule here to bite on, long enough to
+push the row above out of the window that the row below reads behind itself.
+
+- **D3 — a dated record, which must stay green.** At the time this wave was
+  written `Elixir gate` was advisory; it is required now.
+
+Filler paragraph, holding nothing for any rule here to bite on, long enough to
+push the row above out of the window that the row below reads behind itself.
+
+- **D4 — proximity, not attribution, which must stay green.** The required set
+  is `PR references an active task` and three others (branch-protection API) —
+  doc-gates hosts the shell check but is NOT required.
+MD
+
+# Writes to a FILE and returns verify's exit code, rather than printing the
+# output and setting a global: `X="$(fn)"` runs fn in a SUBSHELL, so a global
+# assigned inside it never reaches the caller — under `set -u` the caller then
+# dies on an unbound variable instead of grading anything.
+RC22_OUT="$TMP/rc22-out.txt"
+rc22_run() { # <prose-root> [extra args…]  -> writes $RC22_OUT, returns verify's rc
+  local root="$1"; shift
+  bash "$VERIFY" --spec "$SPEC" --readback "$TMP/rb.json" --runs "$TMP/runs.json" \
+    --sha probe --prose "$root" "$@" > "$RC22_OUT" 2>&1
+}
+
+# (a) THE DEFECT. A charter the workflow glob cannot reach, calling a REQUIRED
+#     context advisory, must red — and red by NAME. A bare non-zero would be
+#     satisfied by a missing fixture or any other refusal in the file.
+rc22_run "$RC22_ROOT" && RC22_RC=0 || RC22_RC=$?
+RC22_A="$(cat "$RC22_OUT")"
+# The path is printed absolute here: `rel` strips REPO_ROOT, and under --prose
+# the fixture lives in $TMP instead. The assertion still names the file and the
+# context, which is what "red by name" means.
+if [ "$RC22_RC" -ne 0 ] \
+   && grep -q 'UNPINNED .*nested/deeper/bp-fixture-charter.md' <<<"$RC22_A" \
+   && grep -q 'claims "Console gate" is not blocking' <<<"$RC22_A"; then
+  ok "a charter TWO directories deep, named .md, calling a required context advisory REDS by name (exit $RC22_RC) — the corpus the depth-1 workflow glob cannot reach"
+else
+  bad "the outside-workflows claim was not caught by name (exit $RC22_RC): $(grep -m2 -e FAIL -e UNPINNED <<<"$RC22_A")"
+fi
+
+# (b) …AND EVERYTHING ELSE IN THE SAME FILE STAYS GREEN, counted rather than
+#     merely absent. Delete ONLY D1. If the quotation, the dated record or the
+#     proximity row red, the widening is the 94%-noise clause that gets switched
+#     off in a wave — and a green that never SAW them would prove nothing, so
+#     the fence tallies are read off the pass line.
+sed '/D1 — the assertion/,+1d' "$RC22_DOC" > "$RC22_DOC.x" && mv "$RC22_DOC.x" "$RC22_DOC"
+rc22_run "$RC22_ROOT" && RC22_RC=0 || RC22_RC=$?
+RC22_B="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] \
+   && grep -q '1 dated record(s), 1 quotation(s)' <<<"$RC22_B"; then
+  ok "…and with ONLY the assertion removed the file is GREEN with the quotation and the dated record COUNTED as fenced — seen and told apart, not merely absent"
+else
+  bad "the audit-trail half did not survive the widening (exit $RC22_RC): $(grep -e 'ok  *no tracked prose' -e UNPINNED <<<"$RC22_B" | head -2)"
+fi
+
+# (c) PROXIMITY NEVER FIRED AT ALL, which the tallies in (b) cannot show on
+#     their own: `PR references an active task` sits one clause from `is NOT
+#     required`, and rule 1 stops the attributed span at the `)` before it. On
+#     its own, with no record and no quotation anywhere in the corpus, both
+#     fence counters must read ZERO — a green reached by fencing would not.
+RC22_PROX="$TMP/mt-prose-prox"
+mkdir -p "$RC22_PROX"
+cat > "$RC22_PROX/roster.md" <<'MD'
+The required set is `PR references an active task` and three others
+(branch-protection API) — doc-gates hosts the shell check but is NOT required.
+MD
+rc22_run "$RC22_PROX" && RC22_RC=0 || RC22_RC=$?
+RC22_C="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] && grep -q '0 dated record(s), 0 quotation(s)' <<<"$RC22_C"; then
+  ok "…and the proximity sentence is green with BOTH fences at zero — rule 1 stopped the span, so nothing was fenced away to get there"
+else
+  bad "the proximity sentence was not handled by attribution (exit $RC22_RC): $(grep -e 'ok  *no tracked prose' -e UNPINNED <<<"$RC22_C" | head -2)"
+fi
+
+# (d) THE TRANSCRIPT FENCE. The wave ledgers paste planted probe fixtures and
+#     shell sessions verbatim inside ``` blocks — a fixture written to make THIS
+#     suite red is not a sentence telling an agent anything. The identical
+#     sentence from (a), inside a fence, must go green with the fence counted.
+RC22_FENCE="$TMP/mt-prose-fence"
+mkdir -p "$RC22_FENCE"
+{ printf '%s\n' 'Transcript of the probe that was planted in wave 32:'
+  printf '%s\n' '```'
+  printf '%s\n' '# PROBE: `Console gate` is ADVISORY today and does not block a merge.'
+  printf '%s\n' '```'
+} > "$RC22_FENCE/ledger.md"
+rc22_run "$RC22_FENCE" && RC22_RC=0 || RC22_RC=$?
+RC22_D="$(cat "$RC22_OUT")"
+if [ "$RC22_RC" -eq 0 ] && grep -qE '[1-9][0-9]* code-fence line\(s\) fenced' <<<"$RC22_D"; then
+  ok "…and the SAME sentence inside a \`\`\` block is green with the code-fence lines COUNTED — a pasted transcript is evidence about a claim, not the claim"
+else
+  bad "the transcript fence did not hold or did not report its size (exit $RC22_RC): $(grep -e 'ok  *no tracked prose' -e UNPINNED <<<"$RC22_D" | head -2)"
+fi
+
+# (e) THE CENSUS IS THE WHOLE TRACKED CORPUS, and the count is checked against
+#     `git ls-files` rather than trusted. This is the criterion the row states in
+#     as many words ("any TRACKED text file"), and it is the one a root list
+#     silently fails: `.claude/workflows docs CLAUDE.md` reached 217 files and
+#     read as a green. A directory allowlist is the same shape as the depth-1
+#     glob this clause exists to delete.
+RC22_TRACKED="$(cd "$REPO_ROOT" && git ls-files -- '*.md' '*.markdown' '*.txt' \
+  | while IFS= read -r f; do [ -f "$f" ] && printf 'x\n'; done | grep -c .)"
+RC22_E="$(bash "$VERIFY" --spec "$SPEC" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe 2>&1)" \
+  && RC22_E_RC=0 || RC22_E_RC=$?
+RC22_SCANNED="$(sed -n 's/.*(\([0-9]*\) tracked file(s) scanned outside .github\/workflows.*/\1/p' <<<"$RC22_E")"
+if [ "$RC22_E_RC" -eq 0 ] && [ -n "$RC22_SCANNED" ] && [ "$RC22_SCANNED" = "$RC22_TRACKED" ]; then
+  ok "the committed corpus scans all $RC22_TRACKED tracked *.md/*.markdown/*.txt — the census is \`git ls-files\`, not a directory allowlist, and the run is green"
+else
+  bad "the committed-corpus scan did not cover the tracked census (exit $RC22_E_RC, scanned '${RC22_SCANNED:-none}' of $RC22_TRACKED): $(grep -m2 -e FAIL -e UNPINNED <<<"$RC22_E")"
+fi
+
+# (f) THE PIN CANNOT ROT INTO AN EXEMPTION. A census is a SET EQUALITY, never a
+#     count: a pin whose sentence has been fixed must be reported STALE, so the
+#     commit that fixes a claim has to drop its pin in the same breath. Append a
+#     pin that matches nothing and the clause must say so.
+#
+#     The mutant is SOURCED with `$0` set to the real script, because REPO_ROOT
+#     is derived from `$0` and the committed-corpus arm runs `git ls-files` in
+#     it — a copy in $TMP would scan a directory that is not a checkout and red
+#     for a reason that has nothing to do with the pin.
+RC22_PINMUT="$TMP/verify-stale-pin.sh"
+perl -pe 's{^(PROSE_CLAIM_PINS=\x27.*)\x27$}{$1\ndocs/this-file-does-not-exist.md|Console gate|` is advisory in a file nobody has\x27}' \
+  "$VERIFY" > "$RC22_PINMUT"
+if ! grep -q 'this-file-does-not-exist' "$RC22_PINMUT"; then
+  bad "the stale-pin mutation did not apply — PROSE_CLAIM_PINS is no longer a single-quoted assignment, so the proof below would be vacuous"
+else
+  ok "the mutation applies: a second pin, matching nothing in the committed corpus, is appended to a copy of verify"
+  RC22_F="$(bash -c 'M="$1"; shift; . "$M"' "$VERIFY" "$RC22_PINMUT" \
+    --spec "$SPEC" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe 2>&1)" \
+    && RC22_F_RC=0 || RC22_F_RC=$?
+  if [ "$RC22_F_RC" -ne 0 ] && grep -q 'STALE  the pin "docs/this-file-does-not-exist.md' <<<"$RC22_F"; then
+    ok "…and a pin matching nothing REDS as STALE — fixing a claim must drop its pin in the same commit, so a pin cannot outlive the sentence it excuses"
+  else
+    bad "a pin that matches nothing passed in silence (exit $RC22_F_RC) — the pin list is an exemption list: $(grep -m2 -e FAIL -e STALE <<<"$RC22_F")"
+  fi
+fi
+
+# (g) MUTATION PROOF. Remove the clause's CALL from a copy and (a)'s exact
+#     fixture must sail through green again. Without this, (a) passes on any
+#     refusal the file happens to raise for another reason, and the BEFORE half
+#     of this slice's claim is unproven. `--workflows` explicitly for the reason
+#     §8b(d) already wrote down: the mutant's own REPO_ROOT is $TMP.
+RC22_NOCLAUSE="$TMP/verify-no-merge-truth.sh"
+sed -E 's%^( *)merge_truth_prose_check \|\| (rc=1|return 1)%\1: # MERGE-TRUTH CLAUSE REMOVED%' "$VERIFY" > "$RC22_NOCLAUSE"
+RC22_MUTN="$(grep -c 'MERGE-TRUTH CLAUSE REMOVED' "$RC22_NOCLAUSE" || true)"
+if [ "$RC22_MUTN" -ne 3 ]; then
+  bad "the merge-truth mutation applied $RC22_MUTN times, not 3 (run_full's two arms and run_ci) — the call moved, so the proof below is vacuous"
+else
+  ok "the mutation applies: the merge-truth call is removed from all 3 of its call sites in a copy of verify"
+  # Restore D1 — (b) deleted it in place.
+  sed '1a\
+- **D1 — the assertion.** `Console gate` is ADVISORY today, so a red one does not stop the merge button.' \
+    "$RC22_DOC" > "$RC22_DOC.x" && mv "$RC22_DOC.x" "$RC22_DOC"
+  RC22_G="$(bash "$RC22_NOCLAUSE" --spec "$SPEC" --readback "$TMP/rb.json" --runs "$TMP/runs.json" \
+    --sha probe --prose "$RC22_ROOT" --workflows "$REPO_ROOT/.github/workflows" 2>&1)" \
+    && RC22_G_RC=0 || RC22_G_RC=$?
+  if [ "$RC22_G_RC" -eq 0 ]; then
+    ok "…and WITHOUT it the SAME charter sails through green — the blind spot, reproduced on demand"
+  else
+    bad "the unguarded verify did not reproduce the blindness (exit $RC22_G_RC) — clause (a) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC22_G")"
+  fi
+fi
+
+section "23. --ci reads live protection on enforced=false too — the arm every PR runs"
+
+# THE DEFECT THIS SECTION PINS (cchi-w51). §8b closed this hole in `run_full`
+# and deliberately stopped there: `--ci` is what `required-checks-drift.yml`
+# runs on every PR, so flipping its polarity is a merge-path change that
+# deserved its own review. Until this commit `run_ci`'s enforced=false branch
+# printed four sentences arguing that enforced=false is a committed, reviewable
+# state — and never read the live branch. The prose was not wrong; it was
+# answering a question nobody asked. Reviewable is not the same as TRUE, and the
+# one direction a spec-reader can never see is SPEC SAYS THE GATE IS OFF WHILE
+# THE GATE IS ON.
+#
+# The three read-back fixtures are §8b's, deliberately: protected, GitHub's OWN
+# 404 body, and a path that does not exist. A false red here blocks the repo.
+
+RC23_UNAPPLIED="$TMP/rc23-unapplied.json"
+jq '.enforced = false' "$SPEC" > "$RC23_UNAPPLIED"
+RC23_UNPROTECTED="$TMP/rc23-rb-unprotected.json"
+printf '%s\n' '{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection"}' > "$RC23_UNPROTECTED"
+
+# (a) THE DRIFT DIRECTION, through --ci this time.
+RC23_OUT="$(bash "$VERIFY" --ci --spec "$RC23_UNAPPLIED" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe 2>&1)" && RC23_RC=0 || RC23_RC=$?
+RC23_MISSING=""
+while IFS= read -r c; do
+  grep -qF "$c" <<<"$RC23_OUT" || RC23_MISSING="$RC23_MISSING $c"
+done < <(SPEC_CONTEXTS)
+if [ "$RC23_RC" -ne 0 ] && grep -q "IS PROTECTED right now" <<<"$RC23_OUT" && [ -z "$RC23_MISSING" ]; then
+  ok "--ci on an enforced=false spec against a PROTECTED branch REDS (exit $RC23_RC) and names all $(SPEC_CONTEXTS | grep -c .) live context(s)"
+else
+  bad "the --ci enforced=false/protected drift was not caught as a named red (exit $RC23_RC, unnamed:${RC23_MISSING:- none}): $(grep -m2 FAIL <<<"$RC23_OUT")"
+fi
+# …and the four lines it used to print instead must be gone. A red that also
+# says "committed, reviewable state" is read as OK by whoever skims it.
+if grep -q "COMMITTED, reviewable state" <<<"$RC23_OUT"; then
+  bad "the --ci drift red still printed the reviewable-state prose — a red that also reassures is read as a green"
+else
+  ok "…and the run does NOT print the \`COMMITTED, reviewable state\` prose it used to exit 0 on"
+fi
+
+# (b) THE LEGITIMATE CASE. Without this the fix is indistinguishable from
+#     "always red here", which is how a guard on the merge path gets disabled.
+#     Anchored on the live probe's OWN agreement line, not on the exit code:
+#     `--ci` never prints run_full's "genuinely unprotected" summary, and a bare
+#     exit 0 here would also be satisfied by the clause never running at all —
+#     which is the defect, not the fix.
+RC23_OK_OUT="$(bash "$VERIFY" --ci --spec "$RC23_UNAPPLIED" --readback "$RC23_UNPROTECTED" --runs "$TMP/runs.json" --sha probe 2>&1)" && RC23_OK_RC=0 || RC23_OK_RC=$?
+if [ "$RC23_OK_RC" -eq 0 ] && grep -q "the spec's enforced=false claim matches reality" <<<"$RC23_OK_OUT"; then
+  ok "…while --ci on the same spec against a genuinely unprotected branch still exits 0, having LOOKED and agreed — this is not \"always red\", and not a skip either"
+else
+  bad "the --ci pre-flip case broke (exit $RC23_OK_RC): $(tail -2 <<<"$RC23_OK_OUT")"
+fi
+
+# (c) COULD-NOT-LOOK IS NOT AGREEMENT — the whole finding is a guard that
+#     greened because it declined to look.
+RC23_BLIND_OUT="$(bash "$VERIFY" --ci --spec "$RC23_UNAPPLIED" --readback "$TMP/rc23-nope.json" --runs "$TMP/runs.json" --sha probe 2>&1)" && RC23_BLIND_RC=0 || RC23_BLIND_RC=$?
+if [ "$RC23_BLIND_RC" -ne 0 ] && grep -q "could not look at live protection" <<<"$RC23_BLIND_OUT"; then
+  ok "…and an unreadable live protection on --ci's enforced=false path REDS as \"could not look\", never as agreement"
+else
+  bad "the --ci no-read path did not degrade honestly (exit $RC23_BLIND_RC): $(tail -2 <<<"$RC23_BLIND_OUT")"
+fi
+
+# (d) MUTATION PROOF, §8b(d)'s shape. run_ci's call is the ONLY
+#     `unapplied_spec_matches_reality || rc=1` in the file — run_full's is
+#     `|| return 1` and §8b mutates that one — so the count is asserted, not
+#     assumed.
+RC23_NOCHECK="$TMP/verify-no-ci-clause.sh"
+sed -E 's%^( *)unapplied_spec_matches_reality \|\| rc=1%\1: # RUN_CI CLAUSE REMOVED%' "$VERIFY" > "$RC23_NOCHECK"
+RC23_MUTN="$(grep -c 'RUN_CI CLAUSE REMOVED' "$RC23_NOCHECK" || true)"
+if [ "$RC23_MUTN" -ne 1 ]; then
+  bad "the run_ci mutation applied $RC23_MUTN times, not once — the call moved or run_full's arm now shares its shape, so the proof below is vacuous"
+else
+  ok "the mutation applies: run_ci's live-probe call — and only run_ci's — is removed from a copy of verify"
+  RC23_MUT_OUT="$(bash "$RC23_NOCHECK" --ci --spec "$RC23_UNAPPLIED" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe --workflows "$REPO_ROOT/.github/workflows" --prose "$RC22_PROX" 2>&1)" && RC23_MUT_RC=0 || RC23_MUT_RC=$?
+  if [ "$RC23_MUT_RC" -eq 0 ]; then
+    ok "…and WITHOUT it the SAME protected read-back exits 0 through --ci — the old blindness on the arm every PR runs, reproduced on demand"
+  else
+    bad "the unguarded --ci did not reproduce the blindness (exit $RC23_MUT_RC) — clause (a) may be reding for an unrelated reason: $(tail -2 <<<"$RC23_MUT_OUT")"
+  fi
+fi
+
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
@@ -3650,4 +3968,7 @@ fi
 echo
 echo "════════════════════════════════════════════════════════════"
 echo "required-checks: $PASS passed, $FAIL failed$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
+# The run reached its own end. Anything that exits 0 without passing through
+# this line is a crash, and the EXIT trap turns it into a 70.
+RC_TALLY_REACHED=1
 [ "$FAIL" -eq 0 ] || exit 1
