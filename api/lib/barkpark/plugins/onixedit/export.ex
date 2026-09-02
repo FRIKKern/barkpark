@@ -343,6 +343,15 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
           | {:error, {:xsd_invalid, [String.t()]}}
           | {:error, {:invalid_code, map()}}
           | {:error, File.posix()}
+  # `path` is this function's own contract: `to_file/3` exists to write where
+  # its caller says. It is a library entry point with no in-tree caller — every
+  # in-repo export goes through `to_string/2` or `to_iodata/1` — so no request
+  # data reaches `File.write/2` here; a caller that one day passes user input
+  # owes the check at ITS boundary, where the trust decision actually lives.
+  # Inline rather than a `.sobelow-skips` row: the row this replaces
+  # (export.ex:261) had already drifted off its call site and was suppressing
+  # nothing.
+  # sobelow_skip ["Traversal.FileModule"]
   def to_file(book_doc, path, opts \\ []) when is_map(book_doc) and is_binary(path) do
     with {:ok, binary} <- __MODULE__.to_string(book_doc, opts),
          :ok <- File.write(path, binary) do
