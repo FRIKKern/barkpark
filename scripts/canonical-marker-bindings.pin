@@ -31,6 +31,7 @@ mcp-task-tools	registerTaskTools
 merge-gate-criterion-predicate	merge_gated?
 platform-delivery-record	record_all
 preview-manifest	project
+published-paper-provenance-gate	gateNodes
 pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
 scope-project-resolution	scope_project_id
