@@ -386,13 +386,44 @@ defmodule PDS.Census do
   # verb adds no sibling GET — and `phantom` holding at 9 is the same tell as last
   # wave: the receipt's own comments deliberately do not spell the needle, so an
   # explanation cannot inflate the population it explains.
+
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, substring counts, route depth 6, `transaction` NOT
+  # a write verb, corpus api/lib/**/*.ex = 837 files, CORPUS-INTACT this run); engine
+  # of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0, 2026-09-02.
+  #
+  # WHAT MOVED IT AGAIN: task-16e56d05b809dd39 added ONE more routed-write receipt —
+  # TasksController.renew/2's `ok: true` success arm, the emission that makes a PR-open
+  # lease extension auditable instead of an UNDISPOSED ARRIVAL. One emission moves the
+  # same four rows a second time:
+  #
+  #   textual   107 -> 108  the new `ok: true` occurrence
+  #                         (108 == ast 99 + phantom 9).
+  #   ast        98 ->  99  the same one, as an AST-literal pair.
+  #   emitted    94 ->  95  the site emits on the wire.
+  #   write      56 ->  57  post /v1/tasks/:doc_id/renew joins the routed-write set;
+  #                         the depth-6 relation reaches Tasks.Renew.renew/2's Repo
+  #                         write through the Tasks facade. Disposed by the register
+  #                         row authored for it, not by an @routed_excluded entry.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 16, unrouted 22 read `==` in the
+  # same run. `read` holding at 16 is the tell that this arrival is a POST only — the
+  # verb adds no sibling GET.
+  #
+  # THIS BRANCH AND PR #15090 (task-59fe7b40b719b379, the landed verb) EACH MOVED THESE
+  # SAME FOUR LITERALS BY ONE, from 106/97/93/55. Green apart, wrong together: #15090
+  # landed first and took them to 107/98/94/56, so this branch RE-DERIVED BY RUN on the
+  # merged tree rather than taking either diff. The run is the instrument.
   @rederived %{
-    textual: 107,
-    ast: 98,
+    textual: 108,
+    ast: 99,
     phantom: 9,
     consumer: 4,
-    emitted: 94,
-    write: 56,
+    emitted: 95,
+    write: 57,
     read: 16,
     unrouted: 22
   }
@@ -1628,6 +1659,24 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:169"},
+    # barkpark_web/controllers/tasks_controller.ex:1034 — the NON-HOLDER PR lease
+    # extension (task-16e56d05b809dd39). renew/2 emits `ok: true`, so it is JUDGED
+    # rather than excluded, and a judged site needs no @routed_excluded entry. This
+    # one row clears BOTH arms it arrived red on: ROUTED-POPULATION-COMPLETE (the
+    # UNDISPOSED ARRIVAL of post /v1/tasks/:doc_id/renew) and REGISTER-COMPLETE
+    # (the unjudged site).
+    #
+    # THE BASIS IS EARNED, NOT ASSERTED. `end_to_end` needs both halves of its
+    # falsifier: the cited block drives the ROUTE (post/1 through authed/1) and
+    # reads the STORED row back (`Repo.get!(Document, task.id)`), asserting the
+    # wire `until`/`pr`/`renewals` EQUAL the stored ones rather than merely that a
+    # row exists. Not `_unmutated`: the branch's two mutation proofs exercise the
+    # sweeper guard and the pr-matched clear, and the receipt arm is re-run green
+    # after each restore.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.renew/2", "132866510", "84462998"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: "api/test/barkpark_web/controllers/tasks_renew_test.exs:97"},
     # barkpark_web/controllers/tasks_controller.ex:961
     # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
     # unchanged success body to edges_for_kind/3, so the emitting def moved and

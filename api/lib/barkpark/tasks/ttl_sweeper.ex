@@ -135,6 +135,30 @@ defmodule Barkpark.Tasks.TtlSweeper do
   (config.exs default 900 s / 15 min — thought idles faster than the
   45-min work lease; runtime override via
   `BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS`).
+
+  ## PR lease extension — the one thing that stays a reap's hand
+
+  MEASURED 2026-09-02: the 45-minute lease is SHORTER than the CI queue was
+  (60-90 min, 390 runs queued at 04:15Z), so a PR that waited out the queue met
+  the required `PR references an active task` gate with its own claim already
+  reaped. The gate stays strict (ruled); the LEASE learned to be extendable.
+
+  `Barkpark.Tasks.Renew` (`POST /v1/tasks/:doc_id/renew`) stamps
+  `content.claim.lease_extension.until` — a bounded, self-expiring grace window
+  a CI job buys on behalf of an OPEN pull request, WITHOUT touching the epoch,
+  the worker, or `ts_iso`. This sweeper honours it in both places it decides
+  anything: the candidate SELECT skips a row whose window is still open, and
+  `lease_extended?/2` re-checks under the advisory lock, where the row is
+  ground truth. An extended row counts as `skipped`, exactly like a healthy
+  heartbeat — it is not a reap and not an error.
+
+  **The window is the safety property, not the flag.** Nothing here asks
+  GitHub anything. When the PR closes, merges, or is abandoned, nothing renews,
+  `until` slides into the past, and the very next sweep reaps on the normal
+  schedule. A merge/close may also clear the record outright for promptness,
+  but the design does not depend on that message ever arriving — and
+  `Tasks.Renew`'s cap means an unbroken chain of renewals still ends. See that
+  module's moduledoc for the full decision and the rejected alternative.
   """
 
   use Oban.Worker, queue: :tasks_ttl, max_attempts: 3
@@ -196,12 +220,17 @@ defmodule Barkpark.Tasks.TtlSweeper do
   """
   @spec sweep(non_neg_integer()) :: %{swept: non_neg_integer(), skipped: non_neg_integer()}
   def sweep(ttl_seconds) when is_integer(ttl_seconds) and ttl_seconds >= 0 do
-    cutoff = DateTime.utc_now() |> DateTime.add(-ttl_seconds, :second)
+    # ONE `now` for the whole sweep: the lease cutoff is `now - ttl`, but the
+    # PR lease-extension window (see the section above) is compared against
+    # `now` itself. Deriving both from the same instant keeps a sweep's two
+    # questions answered on one clock.
+    now = DateTime.utc_now()
+    cutoff = DateTime.add(now, -ttl_seconds, :second)
 
-    candidates = expired_candidates(cutoff)
+    candidates = expired_candidates(cutoff, now)
 
     Enum.reduce(candidates, %{swept: 0, skipped: 0}, fn %Document{id: doc_id}, acc ->
-      case reap_one(doc_id, cutoff) do
+      case reap_one(doc_id, cutoff, now) do
         :swept -> %{acc | swept: acc.swept + 1}
         :skipped -> %{acc | skipped: acc.skipped + 1}
       end
@@ -242,7 +271,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
   # NULL when either key is absent. Using `IS NULL OR < cutoff` covers
   # both the malformed-row case (no claim map / no ts_iso) and the
   # normal expired case.
-  defp expired_candidates(%DateTime{} = cutoff) do
+  defp expired_candidates(%DateTime{} = cutoff, %DateTime{} = now) do
     from(d in Document,
       where: d.type == "task",
       where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
@@ -252,6 +281,17 @@ defmodule Barkpark.Tasks.TtlSweeper do
           d.content,
           d.content,
           ^cutoff
+        ),
+      # LEASE-EXTENSION-SQL — the PR grace window, pushed into the candidate
+      # SELECT so an extended row is not even considered (still_expired?/3 is
+      # the authority, this is the cheap arm). Absent key → NULL → a candidate,
+      # exactly like the NULL-tolerance above: no extension means no grace.
+      where:
+        fragment(
+          "((?->'claim'->'lease_extension'->>'until')::timestamptz IS NULL OR (?->'claim'->'lease_extension'->>'until')::timestamptz <= ?)",
+          d.content,
+          d.content,
+          ^now
         ),
       select: %Document{id: d.id}
     )
@@ -288,7 +328,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
   # ─── Per-task reap (the locked, idempotent unit) ──────────────────────────
 
-  defp reap_one(doc_id, %DateTime{} = cutoff) do
+  defp reap_one(doc_id, %DateTime{} = cutoff, %DateTime{} = now) do
     result =
       Repo.transaction(fn ->
         # Per-task advisory lock — same key Tasks.close/3 uses. Auto-
@@ -305,6 +345,12 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
           %Document{} = doc ->
             cond do
+              lease_extended?(doc, now) ->
+                # An OPEN pull request bought this claim grace (see the
+                # "PR lease extension" section of the moduledoc). Not a reap,
+                # not an error — the same `skipped` a healthy heartbeat earns.
+                :skipped
+
               not still_expired?(doc, cutoff) ->
                 # Another caller (a healthy worker heartbeat, a close
                 # that committed, an earlier sweep in this same run)
@@ -340,6 +386,25 @@ defmodule Barkpark.Tasks.TtlSweeper do
   # Recheck under the lock: lifecycle_status must STILL be "in_progress"
   # AND ts_iso must STILL be < cutoff (or missing). This is the only
   # place that authoritatively decides "this claim is dead."
+  # LEASE-EXTENSION-GUARD — the authoritative, in-lock half of the PR grace
+  # window. `until` in the FUTURE means an open PR is still paying for this
+  # claim; anything else (absent, unparseable, elapsed) means no grace, so the
+  # normal lease decides. Deliberately NOT keyed on the pr number or on any
+  # GitHub state: the ledger cannot poll GitHub, and a window that must be
+  # RE-BOUGHT is the only shape whose failure mode is "the row is released".
+  defp lease_extended?(%Document{content: content}, %DateTime{} = now) do
+    case get_in(content || %{}, ["claim", "lease_extension", "until"]) do
+      iso when is_binary(iso) ->
+        case DateTime.from_iso8601(iso) do
+          {:ok, dt, _offset} -> DateTime.compare(dt, now) == :gt
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
   defp still_expired?(%Document{content: content}, %DateTime{} = cutoff) do
     case Map.get(content, "lifecycle_status") do
       "in_progress" ->
