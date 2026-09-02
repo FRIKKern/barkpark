@@ -85,6 +85,13 @@ const (
 	cp500Landed
 	// cp500Absent answers the POST 500 and writes nothing — 500 + LOST.
 	cp500Absent
+	// cp409StaleClaimLanded answers the close 409 `stale_claim` but COMMITS —
+	// the shape measured on five real closes: the row stored, with its own
+	// reason verbatim, while the CLI exited 6.
+	cp409StaleClaimLanded
+	// cp409StaleClaimAbsent answers 409 `stale_claim` and writes nothing — the
+	// ordinary lost race, which must stay a failure.
+	cp409StaleClaimAbsent
 )
 
 // cpDecodeBody reads the flat string map the CLI dispatch POSTs. Every value the
@@ -117,6 +124,10 @@ type cpStore struct {
 	// pass its own suite.
 	closedBy string
 	closedAt string
+	// closeReason is `content.close_reason` — where the server puts the close's
+	// `reason`. It is the only field that can identify WHOSE close a sealed row
+	// holds, so a fixture without it cannot express "the row stored MY close".
+	closeReason string
 }
 
 // cpTestServer wires a fake Barkpark that counts POSTs to the close/pulse
@@ -137,8 +148,9 @@ func cpTestServer(t *testing.T, mode cpStoreMode) (*cpStore, *int32) {
 	// is in before either verb runs.
 	st := &cpStore{lifecycle: "open", worker: "w", epoch: 1}
 
-	commits := mode == cpHonest || mode == cp500Landed
+	commits := mode == cpHonest || mode == cp500Landed || mode == cp409StaleClaimLanded
 	fails := mode == cp500Landed || mode == cp500Absent
+	staleClaims := mode == cp409StaleClaimLanded || mode == cp409StaleClaimAbsent
 
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -160,7 +172,16 @@ func cpTestServer(t *testing.T, mode cpStoreMode) (*cpStore, *int32) {
 				// added beside it.
 				st.closedBy = body["worker_id"]
 				st.closedAt = "2026-09-01T20:41:44.493753Z"
+				st.closeReason = body["reason"]
 				st.mu.Unlock()
+			}
+			if staleClaims {
+				// The tasks controller's 409 shape: {"ok":false,"reason":…}.
+				// It is answered AFTER the commit above, which is the whole
+				// point — the status code says nothing about the write.
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"ok":false,"reason":"stale_claim","message":"epoch 1 is stale"}`))
+				return
 			}
 			if fails {
 				// The write (if this mode commits one) already happened above —
@@ -193,11 +214,15 @@ func cpTestServer(t *testing.T, mode cpStoreMode) (*cpStore, *int32) {
 				return
 			}
 			st.mu.Lock()
+			content := map[string]any{"acceptance_criteria": []any{}}
+			if st.closeReason != "" {
+				content["close_reason"] = st.closeReason
+			}
 			doc := map[string]any{
 				"doc_id":           "bp-task-x",
 				"status":           "published",
 				"lifecycle_status": st.lifecycle,
-				"content":          map[string]any{"acceptance_criteria": []any{}},
+				"content":          content,
 			}
 			// The claim rides the TOP LEVEL, exactly as render_doc emits it —
 			// it is deleted out of content server-side.
