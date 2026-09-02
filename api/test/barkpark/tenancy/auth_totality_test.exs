@@ -47,6 +47,21 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # kind it holds. This pin RED is what a new public arity is supposed to
   # produce — it was red on 15-vs-11 before this list was updated.
   #
+  # `tier_of/1` is the GLOBAL AUTH TIER, moved here from
+  # `Barkpark.Plugins.Capabilities.tier_for_token/1` (task-0cdfc8ce6e8d17c3):
+  # the /v1/capabilities manifest used to carry its OWN `cond` over
+  # `permits?/2`, so the tier advertised to every bp/MCP client and the tier the
+  # request pipelines enforce were two hand-written ladders. It is a fold over
+  # `permits?/2` and lives next to it; `tier_for_token/1` is now a one-line
+  # `defdelegate`. It is NOT in `driven/2` and deliberately so — like
+  # `role_permits?/3`, its argument is not a (principal id, workspace id) pair:
+  # it takes a resolved `%ApiToken{}` or `nil`, produced ONLY by
+  # `Barkpark.Auth.verify_token/1` via RequireToken/OptionalToken, so the
+  # malformed-workspace-id matrix has nothing to say about it. `nil` is its own
+  # first clause and answers the existence-hiding floor `"none"`. Its
+  # manifest==pipeline equality is pinned by
+  # `BarkparkWeb.Contract.CapabilitiesTierParityTest`.
+  #
   # `workspace_owner?/2` is the OWNER-ONLY SEAT added by
   # `arpss-w10-bl-chat-hosts-owner-literal-seat-fork`: chat-host enrollment
   # spelled its rule as a literal `membership_role(p, ws) == "owner"` in a
@@ -68,6 +83,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     permits?: 2,
     role_for_permissions: 1,
     role_permits?: 3,
+    tier_of: 1,
     valid_role_names: 1,
     workspace_admin?: 2,
     workspace_admin?: 3,
@@ -133,7 +149,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 17 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 18 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

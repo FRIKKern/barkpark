@@ -356,6 +356,10 @@ check "armed Caddyfile caddy-valid"       "caddy validate --adapter caddyfile --
 check "maintenance handler armed once"    "[ \"\$(grep -c 'handle_errors {' '$CADDY')\" = '1' ]"
 check "mcp route armed once"              "[ \"\$(grep -c 'BARKPARK_MCP_ROUTE' '$CADDY')\" = '1' ]"
 check "mcp route proxies :4010, exactly one line" "[ \"\$(grep -c 'localhost:4010' '$CADDY')\" = '1' ]"
+# connectors-mcp-deploy-path-literal-guard: the harness pinned the PORT but never
+# the PATH — a matcher armed as `/mcp-BROKEN` would have proxied :4010 and passed.
+check "mcp matcher path literal is exactly '/mcp /mcp/*'" "[ \"\$(grep -cE '^[[:space:]]*@barkpark_mcp path /mcp /mcp/\\*[[:space:]]*$' '$CADDY')\" = '1' ]"
+check "no other @barkpark_mcp matcher shape is armed" "[ \"\$(grep -c '@barkpark_mcp path' '$CADDY')\" = '1' ]"
 check "mcp handle sits before the bare slot proxy" "[ \"\$(grep -n 'handle @barkpark_mcp' '$CADDY' | head -1 | cut -d: -f1)\" -lt \"\$(grep -nE 'reverse_proxy localhost:400[01]' '$CADDY' | head -1 | cut -d: -f1)\" ]"
 check "flip sed left :4010 untouched"     "grep -q 'reverse_proxy localhost:4010' '$CADDY'"
 check "mcp unit NOT enabled (bp lacks --http)" "! grep -q 'enable barkpark-mcp' '$SYSCTLLOG'"
