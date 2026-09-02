@@ -109,7 +109,7 @@ func onbTestFixture(t *testing.T) (*httptest.Server, manifest.Context, *bool) {
 func TestOnboardingReceiptShape(t *testing.T) {
 	_, ctx, readyHit := onbTestFixture(t)
 
-	r := buildOnboardingReceipt(globals{yes: true}, ctx)
+	r := buildOnboardingReceipt(globals{yes: true}, ctx, tokenProvenance{})
 
 	// (a) PATH
 	if !r.Path.Resolved || r.Path.Path != "/usr/local/bin/bp" {
@@ -167,7 +167,7 @@ func TestOnboardingReceiptJSONNoBearer(t *testing.T) {
 	_, ctx, _ := onbTestFixture(t)
 
 	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
-		return runDoctorOnboarding(out, globals{yes: true}, ctx, []string{"--onboarding"})
+		return runDoctorOnboarding(out, globals{yes: true}, ctx, []string{"--onboarding"}, tokenProvenance{})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0 (ready receipt)\n%s", code, stdout)
@@ -259,7 +259,7 @@ func TestOnboardingToolCallProofFailureSurfaced(t *testing.T) {
 	t.Cleanup(swapVar(&onboardingListFleet, func(c *Config) ([]cloudclient.Barkpark, error) { return nil, nil }))
 
 	ctx := manifest.Context{Server: ts.URL, Workspace: "default", Project: "default", Dataset: "production"}
-	r := buildOnboardingReceipt(globals{yes: true}, ctx)
+	r := buildOnboardingReceipt(globals{yes: true}, ctx, tokenProvenance{})
 
 	if r.ToolCall.OK {
 		t.Fatalf("tool call OK on a 403, want failure: %+v", r.ToolCall)
@@ -358,7 +358,7 @@ func TestWhoamiCarriesOnboardingReceiptSpine(t *testing.T) {
 	ctx := manifest.Context{Server: ts.URL, Token: onbContentSecret, Workspace: "default", Project: "default", Dataset: "production"}
 
 	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
-		return runWhoami(out, globals{yes: true}, ctx)
+		return runWhoami(out, globals{yes: true}, ctx, tokenProvenance{})
 	})
 	if code != exitOK {
 		t.Fatalf("runWhoami exit = %d\n%s", code, stdout)
@@ -690,7 +690,7 @@ func TestWhoamiCLIFreshnessIsNetworkFree(t *testing.T) {
 
 	start := time.Now()
 	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
-		return runWhoami(out, globals{yes: true}, ctx)
+		return runWhoami(out, globals{yes: true}, ctx, tokenProvenance{})
 	})
 	elapsed := time.Since(start)
 	if code != exitOK {
@@ -902,7 +902,7 @@ func TestOnboardingDevBuildHumanRenderSaysUnreported(t *testing.T) {
 
 	out, buf, _ := newTestWriter()
 	out.output = "table" // the human render
-	code := runDoctorOnboarding(out, globals{yes: true}, ctx, []string{"--onboarding"})
+	code := runDoctorOnboarding(out, globals{yes: true}, ctx, []string{"--onboarding"}, tokenProvenance{})
 	stdout := buf.String()
 
 	// DECIDED: an unknown leg is not a failure — ok stays true, exit stays 0.

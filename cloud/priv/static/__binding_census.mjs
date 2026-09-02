@@ -201,18 +201,25 @@
 //       discrimination control, a pin that no longer sums, a vanished
 //       context_fn target, a changed inline-cond overlay — or a fixture whose
 //       observations do not match what it declares about itself
+//   3 — THE RATCHET (2j): a pin row is ELEVATED and UNPREDICATED and its key is
+//       not on LEGACY_UNPREDICATED. Its own code, not 1 and not 2, and the
+//       distinction is the point: nothing ARRIVED unpinned (that is 1) and
+//       nothing ROTTED (that is 2). Someone wrote down, in the pin, that the
+//       console grew one more affordance a plain member can see, click, and be
+//       refused for. See THE RATCHET below for what it can and cannot do.
 //
 // Run: node cloud/priv/static/__binding_census.mjs
 //      node cloud/priv/static/__binding_census.mjs <app.js> <router.ex> <accounts.ex> <authz.ex>
 //   (the argv overrides exist so a mutation driver can point the census at a
 //    patched COPY without writing inside this slice's fence)
 //
-//      node cloud/priv/static/__binding_census.mjs --add-check    <fixture.js>
-//      node cloud/priv/static/__binding_census.mjs --remove-check <fixture.js>
+//      node cloud/priv/static/__binding_census.mjs --add-check     <fixture.js>
+//      node cloud/priv/static/__binding_census.mjs --remove-check  <fixture.js>
+//      node cloud/priv/static/__binding_census.mjs --ratchet-check <fixture.js>
 //   THE FIXTURE CONTROL (charter D452) — the committed proof that the arm which
-//   actually GATES can lose. Both exit 1 when the fixture's declared arms fire.
-//   See THE FIXTURE CONTROL below for why it is a fixture and not a mutant of
-//   the live tree, and why its expectations live in the fixture files.
+//   actually GATES can lose. All three exit 1 when the fixture's declared arms
+//   fire. See THE FIXTURE CONTROL below for why it is a fixture and not a mutant
+//   of the live tree, and why its expectations live in the fixture files.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -226,7 +233,7 @@ const here = path.dirname(new URL(import.meta.url).pathname);
 // '--add-check'`. __css_check.mjs's targeted modes sit far down its file and do
 // not hit this, because each of them reads its own subject INSIDE the mode
 // block; this census reads its subject once, at the top, for everything.
-const FIXTURE_FLAGS = ["--add-check", "--remove-check"];
+const FIXTURE_FLAGS = ["--add-check", "--remove-check", "--ratchet-check"];
 const fixtureFlagAt = process.argv.findIndex((a) => FIXTURE_FLAGS.includes(a));
 const FIXTURE_MODE = fixtureFlagAt === -1 ? null : process.argv[fixtureFlagAt];
 const FIXTURE_FILE = FIXTURE_MODE ? process.argv[fixtureFlagAt + 1] : null;
@@ -699,6 +706,36 @@ for (const s of sites) if (!seenByKey.has(keyOf(s))) seenByKey.set(keyOf(s), s);
 // re-implements the rule it is proving has proven its own copy and nothing else.
 const verdictContrastLost = (pair) => pair.length > 1 && pair.every((r) => r.predicate === null);
 
+// THE RATCHET'S RULE, named here for the same reason: the fixture control below
+// and the live arm (2j) far down this file both call THIS function. A control
+// that re-implements the rule it is proving has proven its own copy.
+//
+// `!r.predicate` rather than `r.predicate === null` on purpose — it is the
+// identical test the classification summary uses for its UNPREDICATED count, and
+// arm (2j) asserts the two agree. A row pinned `predicate: ""` must not be
+// unpredicated to one and predicated to the other.
+const isUnboundElevated = (r) => r.elevated === true && !r.predicate;
+
+// Given a pin and a CEILING (a list of keys), split the pin three ways. `novel`
+// is the only failing outcome; `healed` is the ceiling LOWERING, which is always
+// green, and is what stops this arm becoming a guard that stays green only while
+// the disease stays untreated (charter D452).
+const ratchetVerdict = (pinRows, ceilingKeys) => {
+  const ceiling = new Set(ceilingKeys);
+  const byKey = new Map(pinRows.map((r) => [keyOf(r), r]));
+  const novel = pinRows.filter((r) => isUnboundElevated(r) && !ceiling.has(keyOf(r))).map(keyOf);
+  const healed = [];
+  const held = [];
+  for (const k of ceiling) {
+    const r = byKey.get(k);
+    if (!r) healed.push({ key: k, why: "the pin row is GONE — the call site was deleted" });
+    else if (!r.elevated) healed.push({ key: k, why: "re-pinned BELOW plain-member elevation" });
+    else if (r.predicate) healed.push({ key: k, why: `now PREDICATED on ${r.predicate}` });
+    else held.push(k);
+  }
+  return { novel, healed, held };
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // THE FIXTURE CONTROL (charter D452) — `--add-check` / `--remove-check`.
 //
@@ -751,16 +788,25 @@ if (FIXTURE_MODE) {
   // unfixed forever. `fixtureBareProvider`/`fixtureGatedProvider` mirror the
   // POST /v1/providers pair's SHAPE (one route, two call sites, opposite
   // verdicts) so the verdict-contrast arm has something to lose on.
+  //
+  // `elevated` is carried here ONLY because the RATCHET arm reads it; no other
+  // arm does, so these six flags cannot change what ADD, REMOVE or
+  // VERDICT-COLLAPSE observe. Two rows are deliberately elevated-and-unbound —
+  // `fixtureBareProvider` and `fixtureDepartedWrite` — because a ceiling with
+  // nothing under it cannot be lowered, and the ratchet fixture's HEALED row
+  // needs a legacy entry to heal.
   const FIXTURE_PIN = [
-    { fn: "fixtureSelfWrite", verb: "POST", route: "/v1/fixture/self", predicate: null },
-    { fn: "fixtureTeamWrite", verb: "DELETE", route: "/v1/fixture/team/:*", predicate: "fixtureCanManage" },
-    { fn: "fixtureBareProvider", verb: "POST", route: "/v1/fixture/providers", predicate: null },
-    { fn: "fixtureGatedProvider", verb: "POST", route: "/v1/fixture/providers", predicate: "fixtureCanWrite" },
-    { fn: "fixtureDepartedWrite", verb: "POST", route: "/v1/fixture/departed", predicate: null },
-    { fn: "fixtureDepartedTeam", verb: "DELETE", route: "/v1/fixture/departed/:*", predicate: "fixtureCanManage" },
+    { fn: "fixtureSelfWrite", verb: "POST", route: "/v1/fixture/self", elevated: false, predicate: null },
+    { fn: "fixtureTeamWrite", verb: "DELETE", route: "/v1/fixture/team/:*", elevated: true, predicate: "fixtureCanManage" },
+    { fn: "fixtureBareProvider", verb: "POST", route: "/v1/fixture/providers", elevated: true, predicate: null },
+    { fn: "fixtureGatedProvider", verb: "POST", route: "/v1/fixture/providers", elevated: true, predicate: "fixtureCanWrite" },
+    { fn: "fixtureDepartedWrite", verb: "POST", route: "/v1/fixture/departed", elevated: true, predicate: null },
+    { fn: "fixtureDepartedTeam", verb: "DELETE", route: "/v1/fixture/departed/:*", elevated: true, predicate: "fixtureCanManage" },
   ];
-  const ARMS = ["ADD", "REMOVE", "VERDICT-COLLAPSE"];
-  const IN_SCOPE = FIXTURE_MODE === "--add-check" ? ["ADD", "VERDICT-COLLAPSE"] : ["REMOVE"];
+  const ARMS = ["ADD", "REMOVE", "VERDICT-COLLAPSE", "RATCHET"];
+  const IN_SCOPE = FIXTURE_MODE === "--add-check" ? ["ADD", "VERDICT-COLLAPSE"]
+    : FIXTURE_MODE === "--remove-check" ? ["REMOVE"]
+    : ["RATCHET"];
   const inScope = (row) => IN_SCOPE.includes(row.split(" ")[0]);
 
   const dieFixture = (lines) => {
@@ -778,8 +824,20 @@ if (FIXTURE_MODE) {
   const flags = [];
   const clears = [];
   const overrides = [];
-  for (const m of src.matchAll(/^[ \t]*\/\/[ \t]*@(must-flag|must-clear|pin-override)[ \t]+(.+?)[ \t]*$/gm)) {
+  // The fixture's own CEILING, declared in its own bytes exactly like everything
+  // else about it. A fixture that declares none is making no ratchet claim and
+  // the arm stays out of its way — that is how the add and remove fixtures come
+  // back silent (exit 0) under `--ratchet-check`, by measurement rather than by
+  // an exemption keyed to their filenames. A fixture that declares a ceiling and
+  // then cannot make the arm fire still dies, through the ordinary
+  // DECLARED-BUT-SILENT path below, so this is not a way to buy quiet.
+  const ceilingDecls = [];
+  for (const m of src.matchAll(/^[ \t]*\/\/[ \t]*@(must-flag|must-clear|pin-override|legacy)[ \t]+(.+?)[ \t]*$/gm)) {
     const [, kind, rest] = m;
+    if (kind === "legacy") {
+      ceilingDecls.push(rest.trim());
+      continue;
+    }
     if (kind === "pin-override") {
       const om = rest.match(/^(.+?)[ \t]+predicate=(null|[A-Za-z_$][A-Za-z0-9_$]*)$/);
       if (!om) dieFixture(["  unparseable @pin-override: " + JSON.stringify(rest),
@@ -837,6 +895,24 @@ if (FIXTURE_MODE) {
     for (const [rk, group] of pairGroups) if (verdictContrastLost(group)) observed.add("VERDICT-COLLAPSE " + rk);
   }
 
+  // The RATCHET arm — PIN-side like VERDICT-COLLAPSE, and driven the same way:
+  // `@pin-override` nulls a predicate, which is how a fixture manufactures "a
+  // new elevated write shipped unbound" without a live defect to anchor to.
+  let ratchetHealed = [];
+  let ratchetHeld = [];
+  if (IN_SCOPE.includes("RATCHET") && ceilingDecls.length) {
+    for (const k of ceilingDecls) {
+      if (!fixturePinByKey.has(k)) dieFixture(["  @legacy names a key FIXTURE_PIN does not carry: " + k]);
+    }
+    if (new Set(ceilingDecls).size !== ceilingDecls.length) {
+      dieFixture(["  @legacy declares the same key twice — a ceiling with a duplicate row is a ceiling nobody read."]);
+    }
+    const v = ratchetVerdict(overridden, ceilingDecls);
+    ratchetHealed = v.healed;
+    ratchetHeld = v.held;
+    for (const k of v.novel) observed.add("RATCHET " + k);
+  }
+
   // ── every must-clear key must be REAL, or the negative control is theatre ──
   const unreal = [];
   for (const c of clears.filter(inScope)) {
@@ -844,6 +920,8 @@ if (FIXTURE_MODE) {
     const key = restParts.join(" ");
     if (arm === "VERDICT-COLLAPSE") {
       if (!pairGroups.has(key) || pairGroups.get(key).length < 2) unreal.push(`  ${c} — no multi-site FIXTURE_PIN group on that route`);
+    } else if (arm === "RATCHET" && !ceilingDecls.length) {
+      unreal.push(`  ${c} — the fixture declares no @legacy ceiling, so the RATCHET arm never ran`);
     } else if (!fixturePinByKey.has(key)) {
       unreal.push(`  ${c} — FIXTURE_PIN carries no such row, so nothing could have cleared`);
     } else if (!seenByKey.has(key)) {
@@ -866,6 +944,16 @@ if (FIXTURE_MODE) {
   console.log("fixture          :", LABEL);
   console.log("mode             :", FIXTURE_MODE, "· arms in scope:", IN_SCOPE.join(", "),
     "(pin: " + FIXTURE_PIN.length + " rows · fixture sites: " + sites.length + ")");
+  if (IN_SCOPE.includes("RATCHET")) {
+    if (ceilingDecls.length) {
+      const novelHere = [...observed].filter((o) => o.startsWith("RATCHET ")).length;
+      console.log("ratchet ceiling  : legacy " + ceilingDecls.length + " · still unbound " + ratchetHeld.length +
+        " · healed " + ratchetHealed.length + " · NOVEL " + novelHere);
+      for (const h of ratchetHealed) console.log("    HEALED  " + h.key + "  — " + h.why);
+    } else {
+      console.log("ratchet ceiling  : none declared (@legacy) — the RATCHET arm makes no claim on this fixture");
+    }
+  }
   console.log("");
   console.log("  declared must-flag :" + (scopedFlags.length ? "" : " (none in scope — this is a CROSS cell)"));
   for (const f of scopedFlags) console.log("    " + (observed.has(f) ? "FIRED   " : "SILENT  ") + f);
@@ -1032,6 +1120,128 @@ if (PIN.length !== EXPECT.total ||
     "  If the population genuinely moved, move EXPECT in the same commit and say why in the",
     "  message — the numbers are the doctrine's receipt, not a convenience.",
   ]);
+}
+
+// ── (2j) THE RATCHET. LEGACY_UNPREDICATED is a CEILING, not a count. ────────
+//
+//      WHAT IT CLOSES. Everything above this arm is a SET DIFF over CALL SITES,
+//      and that is the whole of its reach: (1) reds on a write affordance that
+//      ARRIVED with no pin row. It has never had anything to say about a write
+//      that arrives WITH one. `elevated` and `predicate` are pinned judgements
+//      (LIMIT 1 at the top of this file) and EXPECT is this pin checked against
+//      itself, so the sanctioned way to land a new affordance — add the call
+//      site, add its row, move EXPECT in the same commit — is also the way to
+//      land a new UNBOUND one. Measured, on a tree without this arm: a new
+//      `DELETE /v1/github/installation` caller pinned `{elevated: true,
+//      predicate: null}` with EXPECT moved by one exits 0, while the census's
+//      own summary announces the unpredicated population growing. A brand-new
+//      button a plain member can click and be refused for ships GREEN, and the
+//      instrument narrates it happening.
+//
+//      WHAT IT DOES. The keys below are the elevated-and-unbound rows this pin
+//      carried when the arm landed, named ONE BY ONE. An elevated row with no
+//      predicate whose key is NOT among them exits 3. The population is free to
+//      SHRINK without touching this list — a row that gains a predicate, gets
+//      re-pinned below elevation, or loses its call site prints HEALED and stays
+//      green. So the number can go down on its own and can only go UP through a
+//      named edit to a list called LEGACY.
+//
+//      THE LIMIT, SAID OUT LOUD, BECAUSE AN UNSTATED LIMIT IS THE SAME LIE.
+//      This list is SOURCE-EDITABLE, exactly like EXPECT. Anyone who can add a
+//      pin row can add a key here in the same commit and be green again. This
+//      arm therefore does NOT make it impossible for an unbound elevated write
+//      to ship, and no evidence, PR body or comment may claim that it does. What
+//      it changes is the SHAPE of the edit: an invisible `+1` inside an
+//      eighty-row table becomes a new line in a list whose name is LEGACY and
+//      whose failure text says, in this file's own words, that pinning the row
+//      and moving EXPECT is not a fix. It is LOUD, not unbypassable.
+//
+//      THE SECOND LIMIT. The two HEALED directions are proven by editing PIN
+//      JUDGEMENTS, not by putting a real client predicate in app.js, because
+//      this census cannot see one (charter D430) — `predicate` is a hand-written
+//      claim and (2g) only checks that the name it holds is declared somewhere.
+//      So the mutation evidence for this arm shows that the ceiling is FREE TO
+//      LOWER; it does not show that a fence landing in the console is detected.
+//      That is a different instrument (the unfiled DRIFT arm) and this one must
+//      not be read as if it were that one.
+//
+//      WHY 3 AND NOT 1 OR 2. 1 means the pin stopped describing the tree. 2
+//      means the instrument lost its footing. Neither happened here: the pin
+//      describes the tree perfectly and the instrument is fine. The tree got
+//      worse, on purpose, in a commit that said so. That deserves its own code.
+const LEGACY_UNPREDICATED = [
+  // Each key is `${fn}|${verb} ${route}` — the census's own keyOf, so a row is
+  // named by the HANDLER that writes, never by a line number and never by a
+  // position in a table. Re-derive with:
+  //   node -e 'const s=require("fs").readFileSync("cloud/priv/static/__binding_census.mjs","utf8");
+  //     for (const m of s.matchAll(/\{ fn: "([^"]+)", verb: "([^"]+)", route: "([^"]+)", elevated: true, predicate: null,/g))
+  //       console.log(`"${m[1]}|${m[2]} ${m[3]}",`)'
+  // …or simply read the "UNPREDICATED ELEVATED WRITES" block this file prints.
+  "submitProviderCred|POST /v1/providers",
+  "submitAgentKey|POST /v1/barkparks/:*/agent-key",
+  "newVercelDeploy|POST /v1/barkparks/:*/vercel-deploy",
+  "newCreateRepo|POST /v1/github/repos",
+  "newRenderFailed|POST /v1/barkparks/:*/retry",
+];
+{
+  if (new Set(LEGACY_UNPREDICATED).size !== LEGACY_UNPREDICATED.length) {
+    die2(["FAIL(2): LEGACY_UNPREDICATED names the same key twice.",
+      "  A ceiling with a duplicate row is a ceiling nobody read.",
+      ...new Set(LEGACY_UNPREDICATED.filter((k, i, a) => a.indexOf(k) !== i)).values()].map(String));
+  }
+  const ratchet = ratchetVerdict(PIN, LEGACY_UNPREDICATED);
+
+  // NON-VACUITY, tied to a number this file already prints. `held + novel` is
+  // the same population the classification line calls UNPREDICATED. If the two
+  // ever disagree the arm is reading a different pin than the summary is, and a
+  // green from it would mean nothing — so that is a footing failure, not a pass.
+  if (ratchet.held.length + ratchet.novel.length !== pinnedUnpredicated.length) {
+    die2([
+      "FAIL(2): the ratchet arm and the classification summary disagree about the pin.",
+      `  arm sees ${ratchet.held.length} held + ${ratchet.novel.length} novel = ${ratchet.held.length + ratchet.novel.length};` +
+      ` the summary counts ${pinnedUnpredicated.length} unpredicated elevated rows.`,
+      "  One of the two is reading a field the other is not. Do not silence this by moving a",
+      "  number — find which reader is wrong.",
+    ]);
+  }
+
+  console.log("");
+  console.log(`ratchet (2j)     : legacy ${LEGACY_UNPREDICATED.length} · still unpredicated ${ratchet.held.length} · ` +
+    `healed ${ratchet.healed.length} · NOVEL ${ratchet.novel.length}`);
+  for (const h of ratchet.healed) {
+    console.log(`    HEALED  ${h.key}`);
+    console.log(`            ${h.why} — the ceiling LOWERED. Trim it from LEGACY_UNPREDICATED when convenient;`);
+    console.log("            the arm does not require it, because a ceiling that has to be edited to stay");
+    console.log("            green is a ceiling that gets edited for the wrong reason too.");
+  }
+
+  if (ratchet.novel.length) {
+    console.error("");
+    console.error("FAIL(3): a NEW unpredicated elevated write is pinned, and it is not on the legacy ceiling.");
+    console.error("");
+    for (const k of ratchet.novel) {
+      const r = pinByKey.get(k);
+      const live = liveByKey(r);
+      console.error(`  NOVEL     ${k}`);
+      console.error(`            ${LABEL}:${live ? live.line : "gone"}  tier ${r.auth_fn || r.context_fn || "?"}`);
+    }
+    console.error("");
+    console.error("  LEGACY_UNPREDICATED is a CEILING, not a count. It names the elevated writes this");
+    console.error("  console already ships with no client predicate in front of them. It is allowed to");
+    console.error("  shrink on its own and it is not allowed to grow quietly.");
+    console.error("");
+    console.error("  PINNING THE ROW AND MOVING EXPECT IS NOT A FIX. It is the move this arm exists to");
+    console.error("  make visible: the pin would go on summing, the set diff would go on matching, and a");
+    console.error("  plain member would go on seeing a button that answers 403. Put a CLIENT PREDICATE in");
+    console.error("  front of the affordance — withhold the offer, or render it disabled with no mount");
+    console.error("  hook, the way this pin's predicated rows already do — and pin THAT.");
+    console.error("");
+    console.error("  If the write genuinely belongs on the ceiling — it shipped unbound before this arm");
+    console.error("  existed and you are only recording it — add its key below with the reason. That edit");
+    console.error("  is legal and it is meant to be readable in review: a line added to a list named");
+    console.error("  LEGACY is what this arm buys instead of an invisible increment.");
+    process.exit(3);
+  }
 }
 
 // (2c) DUPLICATE KEYS. Two pinned rows sharing a key would let one hide behind

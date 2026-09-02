@@ -4,7 +4,8 @@ defmodule BarkparkWeb.AccessControllerTest do
 
     * `POST /v1/access` mints (grantor), returns the raw token ONCE, and NEVER
       leaks `link_token_hash`; the no-escalation gate still 403s a token that
-      lacks the conferred capability.
+      lacks the conferred capability, and the RULING that a grant confers READ
+      or WRITE only is enforced at the edge (`["admin"]` → 422, and no row).
     * `GET /v1/access` is grantor/workspace-scoped — one workspace's grants
       never bleed into another's; no `link_token_hash` in output.
     * `GET /v1/access/:id` is grantor-or-admin; a stranger — who can see no
@@ -116,14 +117,16 @@ defmodule BarkparkWeb.AccessControllerTest do
     end
 
     # The no-escalation gate lives INSIDE `Access.mint/2` and must keep speaking
-    # over HTTP. It is deliberately probed with a WRITE-capable grantor asking
-    # for `admin` (task-a85afbbc0c4b1be3): a read-only grantor is now refused
-    # upstream by `Plugs.RequireWriteForMutation`, so the old `["read"]` →
-    # `["write"]` shape would answer 403 without `Access.mint/2` ever running —
-    # a green that no longer proves the thing it names.
-    test "no-escalation: a write token cannot mint an admin grant → 403", %{conn: conn} do
+    # over HTTP. It USED to be probed with a write-capable grantor asking for
+    # `admin` (task-a85afbbc0c4b1be3) — that shape now answers 422 at the edge
+    # (see the admin tests below), so it can no longer reach the gate. The probe
+    # moved INSIDE the narrowed vocabulary: a WRITE-only token clears
+    # `Plugs.RequireWriteForMutation` (so `Access.mint/2` really runs) and is
+    # then refused for conferring `read`, which `@read_perms ~w(read admin
+    # public-read)` does not give it.
+    test "no-escalation: a write-only token cannot mint a read grant → 403", %{conn: conn} do
       ws = create_workspace!()
-      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+      {grantor_raw, _} = token_principal(ws, ["write"])
 
       conn =
         conn
@@ -131,11 +134,98 @@ defmodule BarkparkWeb.AccessControllerTest do
         |> post("/v1/access", %{
           "grantee_email" => "grantee@example.com",
           "workspace_id" => ws.id,
-          "capabilities" => ["admin"]
+          "capabilities" => ["read"]
         })
 
       assert json_response(conn, 403)["error"]["message"] =~
                "capabilities you do not hold"
+    end
+
+    # ── the RULING: grants confer read/write only ────────────────────────────
+    #
+    # `admin` is a third spelling of tenant-control authority beside the
+    # membership role and the token permission bit. The Studio picker only ever
+    # surfaced read/write (`@surfaced_caps`); the server now matches it, at the
+    # edge, BEFORE `Access.mint/2`. The grantor below holds `admin` and would
+    # have sailed through the no-escalation gate — this is a REFUSAL OF THE
+    # VOCABULARY, not of the grantor, which is why the negative store readback
+    # matters.
+    test "capabilities [\"admin\"] → 422 and NO grant row is written", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write", "admin"])
+      email = "admin-cap-#{Ecto.UUID.generate()}@example.com"
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => email,
+          "workspace_id" => ws.id,
+          "capabilities" => ["admin"]
+        })
+
+      body = json_response(conn, 422)
+      assert body["error"]["code"] == "unprocessable"
+      assert body["error"]["message"] =~ "read or write"
+
+      # Read the STORE back: the refusal happened before `Access.mint/2`, so
+      # this workspace (fresh, so no whole-table count) holds nothing.
+      assert Access.list_grants_for_workspace(ws.id) == []
+    end
+
+    test "a mixed [\"read\", \"admin\"] mint is refused whole → 422, no row", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write", "admin"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "mixed-#{Ecto.UUID.generate()}@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["read", "admin"]
+        })
+
+      assert json_response(conn, 422)["error"]["code"] == "unprocessable"
+      assert Access.list_grants_for_workspace(ws.id) == []
+    end
+
+    # POSITIVE CONTROLS — the refusal is narrow. Without these the 422 above
+    # would be green even if the endpoint refused everything.
+    test "positive control: [\"read\"] still mints → 201", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "read-#{Ecto.UUID.generate()}@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["read"]
+        })
+
+      assert %{"grant" => grant} = json_response(conn, 201)
+      assert grant["capabilities"] == ["read"]
+      assert [%Access.Grant{}] = Access.list_grants_for_workspace(ws.id)
+    end
+
+    test "positive control: [\"read\", \"write\"] still mints → 201", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "rw-#{Ecto.UUID.generate()}@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["read", "write"]
+        })
+
+      assert %{"grant" => grant} = json_response(conn, 201)
+      assert grant["capabilities"] == ["read", "write"]
+      assert [%Access.Grant{}] = Access.list_grants_for_workspace(ws.id)
     end
 
     # The upstream half of the same refusal, kept separate so the two reasons
@@ -446,5 +536,151 @@ defmodule BarkparkWeb.AccessControllerTest do
 
       assert redirected_to(browser) == "/studio"
     end
+  end
+
+  # ── 8. malformed workspace_id → 403, never a crash (CONTRACT PIN) ───────────
+
+  # Pins the observable HTTP contract the `Barkpark.Tenancy.Auth.membership/2`
+  # totality seam (#12616) produces on the two access-GRANT verbs that take a
+  # client-supplied `workspace_id` in a NON-id position: `index/2` and `mint/2`.
+  #
+  # BEFORE the seam these two answered HTTP 400 `Ecto.Query.CastError` — NOT a
+  # 500. `deps/phoenix_ecto/lib/phoenix_ecto/plug.ex` maps
+  # `{Ecto.Query.CastError, 400}`; 500 is Plug's `Any` fallback and covers the
+  # nil / non-binary `FunctionClauseError` class, which is UNREACHABLE here
+  # because both entry guards (`fetch_workspace_id/1` and
+  # `Access.authorize_capabilities/3`) already require `is_binary`. The
+  # exception module is `Ecto.Query.CastError`, never `Ecto.CastError` — the
+  # latter fires zero times on this path, so asserting it would be vacuous.
+  #
+  # AFTER the seam all three answer 403 `forbidden`, indistinguishable from a
+  # well-formed-but-unauthorized id. That collapse is the point: splitting
+  # "malformed" from "not yours" would re-open the existence oracle the `:id`
+  # ladder in this controller's moduledoc closes.
+  #
+  # Each row is its own test so each reds INDIVIDUALLY under the pre-seam
+  # mutation, and the three control rows below stay green in both worlds.
+  describe "malformed workspace_id on the grant surface (403, not a crash)" do
+    # CHANGED ROW 1. `index/2` never resolves the workspace — it hands the raw
+    # param straight to `Auth.authorize/3`, so a short non-UUID reached the
+    # `:binary_id` comparison inside `Repo.one`. This is the crash the existing
+    # `show/:id` non-UUID coverage in this file did NOT reach, which is exactly
+    # why it survived.
+    test "GET /v1/access?workspace_id=zzz → 403 for a non-member read token", %{conn: conn} do
+      raw = unaffiliated_token(["read"])
+
+      conn = conn |> bearer(raw) |> get("/v1/access", %{"workspace_id" => "zzz"})
+
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+
+    # CHANGED ROW 2. The 16-byte row, and it is NOT the same mechanism as row 1.
+    # `Ecto.UUID.cast/1` accepts ANY 16-byte binary as raw UUID bytes, so the
+    # seam NORMALISES this one into a well-formed uuid that REACHES the query
+    # and denies by matching no row — it does not short-circuit. Pre-seam it
+    # raised anyway, because `Ecto.UUID.dump/1` (what a query param binding
+    # runs) accepts ONLY the 36-character form.
+    test "GET /v1/access?workspace_id=<16-byte non-UUID> → 403", %{conn: conn} do
+      raw = unaffiliated_token(["read"])
+
+      conn = conn |> bearer(raw) |> get("/v1/access", %{"workspace_id" => "0123456789abcdef"})
+
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+
+    # CHANGED ROW 3. The MINT half — the credential-MINTING surface, which is
+    # why this class mattered enough to pin. The crash sat in
+    # `Access.authorize_capabilities/3`, i.e. BEFORE `Grant.changeset/2` ever
+    # ran, so no changeset validation could have caught it.
+    #
+    # The token holds `["write"]`, not `["read"]`: `POST /v1/access` rides
+    # `:require_token`, which carries `Plugs.RequireWriteForMutation`, so a
+    # read-only token is refused by the PIPELINE and never reaches
+    # `Access.mint/2` at all — a 403 that would be green in both worlds and
+    # prove nothing. `["write"]` is the weakest principal that actually reaches
+    # the seam. It is still NON-ADMIN and a member of NO workspace.
+    test "POST /v1/access with workspace_id=zzz and a non-empty capabilities list → 403",
+         %{conn: conn} do
+      raw = unaffiliated_token(["write"])
+
+      conn =
+        conn
+        |> bearer(raw)
+        |> post("/v1/access", %{
+          "workspace_id" => "zzz",
+          "capabilities" => ["read"],
+          "grantee_email" => "x@example.com"
+        })
+
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+
+    # CONTROL 1 (UNCHANGED by the seam). An EMPTY workspace_id is caught by
+    # `fetch_workspace_id/1`'s own `id != ""` guard, upstream of any query, so
+    # it answers 422 in both worlds. A run where this row also reds is a run
+    # where the mutation broke something wider than the seam.
+    test "CONTROL: GET /v1/access?workspace_id= (empty) → 422, never 403", %{conn: conn} do
+      raw = unaffiliated_token(["read"])
+
+      conn = conn |> bearer(raw) |> get("/v1/access", %{"workspace_id" => ""})
+
+      assert json_response(conn, 422)["error"]["code"] == "unprocessable"
+    end
+
+    # CONTROL 2 (UNCHANGED by the seam). An EMPTY capabilities list falls to
+    # `Access.authorize_capabilities/3`'s own arity catch-all — the guarded head
+    # requires `caps != []` — so it denies WITHOUT ever binding the malformed
+    # workspace_id into a query. The crash required a NON-EMPTY list; this row
+    # proves the pre-seam reds in this describe come from the seam and not from
+    # merely mentioning "zzz".
+    test "CONTROL: POST /v1/access with workspace_id=zzz and capabilities=[] → 403", %{conn: conn} do
+      raw = unaffiliated_token(["write"])
+
+      conn =
+        conn
+        |> bearer(raw)
+        |> post("/v1/access", %{
+          "workspace_id" => "zzz",
+          "capabilities" => [],
+          "grantee_email" => "x@example.com"
+        })
+
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+
+    # CONTROL 3 (UNCHANGED by the seam). A WELL-FORMED workspace id the caller
+    # is not a member of. This is the answer the three changed rows above are
+    # now indistinguishable from — the whole point of choosing 403 over a 422
+    # "malformed" body.
+    test "CONTROL: GET /v1/access?workspace_id=<valid uuid, non-member> → 403", %{conn: conn} do
+      ws = create_workspace!()
+      raw = unaffiliated_token(["read"])
+
+      conn = conn |> bearer(raw) |> get("/v1/access", %{"workspace_id" => ws.id})
+
+      assert json_response(conn, 403)["error"]["code"] == "forbidden"
+    end
+  end
+
+  # A bearer token with the given permissions and NO membership row ANYWHERE —
+  # the weakest principal that can present a valid bearer. Deliberately NOT
+  # `Barkpark.Auth.create_token/5`, which falls back to `default_workspace_id()`
+  # and would CREATE a membership; this inserts the row directly so "member of
+  # no workspace" is true by construction. Label is unique: the test database is
+  # shared across concurrent agents.
+  defp unaffiliated_token(permissions) do
+    raw = "u-" <> Ecto.UUID.generate()
+
+    {:ok, _token} =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        token_hash: ApiToken.hash_token(raw),
+        label: "unaffiliated-#{System.unique_integer([:positive])}",
+        dataset: "test",
+        permissions: permissions
+      })
+      |> Repo.insert()
+
+    raw
   end
 end
