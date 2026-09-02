@@ -526,6 +526,63 @@ defmodule Barkpark.Tenancy.Auth do
   def permits?(_token, _action), do: false
 
   @doc """
+  The caller's GLOBAL auth tier, as one of the closed strings the
+  `/v1/capabilities` manifest speaks: `"none" | "read" | "write" | "admin"`,
+  optionally suffixed `"+chat"`.
+
+  THE SINGLE OWNER OF THE LADDER. `Barkpark.Plugins.Capabilities.tier_for_token/1`
+  used to carry its own copy of this `cond`, so the tier the manifest ADVERTISES
+  and the tier the request pipelines ENFORCE were two hand-written ladders that
+  had to agree by review. They live here now, next to `permits?/2` — the very
+  predicate every rung consults and the one the write gate already calls — so
+  there is one rung to change when a permission is added.
+
+  Each rung is the same judgment its pipeline authority makes, and MUST stay
+  equal to it (pinned by
+  `BarkparkWeb.Contract.CapabilitiesTierParityTest`):
+
+    * `"admin"` — `BarkparkWeb.Plugs.RequireAdmin` (`pipeline :require_admin`),
+      i.e. `Barkpark.Auth.has_permission?(token, "admin")`. Identical to
+      `permits?(token, :admin)`, whose `@admin_perms` is exactly `~w(admin)`.
+    * `"write"` — `BarkparkWeb.Plugs.RequireWritePermission`
+      (`pipeline :require_write`), i.e. `permits?(token, :write)`.
+    * `"read"` — the `pipeline :require_token` stack: `RequireToken` admits the
+      credential, `PublicRead` clamps the tier below this one, and
+      `RequireWriteForMutation` refuses this tier every mutation. A token that
+      gets a GET through that stack but is refused a write is `read`.
+    * `"+chat"` — `BarkparkWeb.Plugs.RequireChatAccess.chat_scope/1` resolving
+      `{:workspace, ws}`: a NON-admin, workspace-bound `chat` token. ORTHOGONAL
+      (charter D16/D36) — it rides ALONGSIDE the base rank and lifts nothing,
+      which is why it is a suffix and not a rung.
+
+  `nil` (no resolved token) is `"none"`, the existence-hiding floor.
+
+  @canonical capability:global-auth-tier aka:tier_for_token,tier_of,auth tier,caller tier,tier ladder,auth-tier ladder doc:docs/auth.md
+  """
+  @spec tier_of(ApiToken.t() | nil) :: String.t()
+  def tier_of(nil), do: "none"
+
+  def tier_of(token) do
+    base =
+      cond do
+        permits?(token, :admin) -> "admin"
+        permits?(token, :write) -> "write"
+        permits?(token, :read) -> "read"
+        true -> "none"
+      end
+
+    # A global-admin caller already discovers `chat` through the rank ladder;
+    # the suffix is only for the non-admin, workspace-bound `chat` token —
+    # exactly the principal RequireChatAccess authorizes at `{:workspace, ws}`.
+    if base != "admin" and Barkpark.Auth.has_permission?(token, "chat") and
+         not is_nil(Map.get(token, :workspace_id)) do
+      base <> "+chat"
+    else
+      base
+    end
+  end
+
+  @doc """
   Derive the workspace role from a permissions array: `"admin"` when the
   permissions include "admin", otherwise `"member"`.
 

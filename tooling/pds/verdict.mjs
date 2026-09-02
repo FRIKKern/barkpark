@@ -16,6 +16,7 @@
 
 import { PDS_VERDICT } from "./adjudicate.mjs";
 import { varianceSet } from "./variance.mjs";
+import { blindSpotNote } from "./blind-spot.mjs";
 
 const ORDER = [
   PDS_VERDICT.RE_DERIVED,
@@ -36,6 +37,10 @@ export function renderVerdict(report, { source = "(unnamed)", listProseOnly = tr
   out.push(`  source        ${source}`);
   out.push(`  status        ${report.status}`);
   out.push(`  budget        estimate ${report.estimateMs}ms / budget ${report.budgetMs}ms / elapsed ${report.elapsedMs}ms`);
+  // THE SENTENCE, BESIDE THE FIGURE (PDS-D633), and BEFORE the REFUSED-TO-START
+  // early return below — a refusal still prints elapsed 0ms, and a millisecond
+  // figure with no meter named beside it is the defect, whatever its value.
+  for (const line of blindSpotNote()) out.push(line);
 
   if (report.status === "REFUSED-TO-START") {
     out.push("");
