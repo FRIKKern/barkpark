@@ -704,7 +704,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{483, 483}],
+      basis_spans: [{501, 501}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -712,7 +712,9 @@ defmodule PDS.Census do
         "inline comment :483 — \"Always 200 — never reveal whether the email is registered.\" " <>
           "RE-ANCHORED off :439 on the self-service-PAT-mint lane (PR #14245): that PR inserts " <>
           "the PAT workspace-binding code above this def, pushing every line below down by 44 — " <>
-          "the span slid, the comment did not move relative to the def.",
+          "the span slid, the comment did not move relative to the def. RE-ANCHORED again off " <>
+          ":483 on the PAT admin-mint cap lane (PR #14933): the workspace-binding resolver above " <>
+          "this def grew by 18 lines — +18, the comment still sits on the def's first body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -721,7 +723,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{498, 503}],
+      basis_spans: [{516, 521}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -731,7 +733,9 @@ defmodule PDS.Census do
           "trace-skipped-notifications, PR #13902): that PR inserts a NotificationWithhold.record/2 " <>
           "else-branch above request_reset/2's json/2 call, pushing every line below down by 6 — the " <>
           "span slid, the sentence did not move relative to the def. RE-ANCHORED again off :454-459 " <>
-          "on the self-service-PAT-mint lane (PR #14245): +44 lines inserted above the span.",
+          "on the self-service-PAT-mint lane (PR #14245): +44 lines inserted above the span. " <>
+          "RE-ANCHORED again off :498-503 on the PAT admin-mint cap lane (PR #14933): +18 lines " <>
+          "inserted above (the token `anti-enumeration` now on :519).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
