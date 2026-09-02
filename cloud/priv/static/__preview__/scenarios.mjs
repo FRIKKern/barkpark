@@ -2608,15 +2608,22 @@ if (/[^a-z0-9]/.test(cruelAccountLocal)) {
   throw new Error("cruel identity: the local part carries a character a line breaker can use (- . _ + or whitespace) — BREAKABLE, so it would wrap on its own and certify a rule that never bounded it");
 }
 
-// The cruel identity rides an EXISTING account scenario rather than a new key,
-// and this is a fence, not a preference: a new SCENARIOS key is refused by three
-// instruments this slice is fenced out of — smoke.mjs's census guard (every
-// scenario needs an expectation, exit 1), breakpoint-sweep.mjs's committed
-// residue literal (exit 2, "UNLISTED scenario") and its test's census numbers.
-// `account-modal-revoke` is the account scenario with the smallest blast radius:
-// it is the only one of the five that modal-oracle.mjs does NOT drive, and
-// smoke's click oracle asserts sessions and ids, never the identity text.
-// FILED, not implied: cch-w23-bl-cruel-identity-own-scenario.
+// cch-w23-bl-cruel-identity-own-scenario — THE CRUEL IDENTITY NOW OWNS A KEY.
+// cch-w23-s2 hung this `me` on the EXISTING `account-modal-revoke` because a new
+// SCENARIOS key is refused by four instruments that slice was fenced out of —
+// smoke.mjs's census guard (exit 1, "NO expectation"), breakpoint-sweep.mjs's
+// committed residue literal (exit 2, "UNLISTED scenario"), that sweep's test
+// census numbers, and member-authority-sweep.mjs's PIN_TOTAL_SCENARIOS (exit 1).
+// It worked, and it lied twice: the cruelty hid inside a scenario whose NAME
+// says revoke, and the revoke CLICK ORACLE — four sessions, two DELETEs, a
+// danger-tier confirm — ran against a 158-character identity as a side effect,
+// on the fixture shoot.sh publishes as the revoke evidence. All four censuses
+// are taught in THIS commit, so the identity is now `account-modal-cruel-
+// identity` and `account-modal-revoke` is back on the production-dominant
+// `me("Guerrilla")` (`ada@acme.com`, three rendered glyphs). The scenario the
+// cruel `me` rides is asserted, not assumed: smoke.mjs's FIXTURE_SHAPE_PINS pin
+// `me.user.email.length` at 160 on the cruel key and 12 on the revoke key, so
+// putting this object back on the click oracle reds BEFORE any scenario boots.
 const cruelAccountMe = (function () {
   const m = me("Guerrilla");
   return Object.assign({}, m, { user: Object.assign({}, m.user, { email: cruelAccountEmail }) });
@@ -4790,17 +4797,49 @@ export const SCENARIOS = {
   // Revoke, then Sign-out-everywhere, and reads what the REAL code path paints.
   // Named with the `account-modal` prefix, which (as GR76 notes) auto-enrols it
   // in shoot.sh's screenshot set — intended, so the revoke state gets an eye too.
-  // cch-w23-s2: this scenario is ALSO the CRUEL IDENTITY twin. Its `me` carries
-  // an email whose local part sits at the derived 158-character cap (see the
-  // cruelAccountEmail ledger above `SCENARIOS`), so `.am-name` renders the
-  // longest name a person can actually own. Nothing this scenario already
-  // asserted reads the identity text — smoke's click oracle counts session rows
-  // and ids — and the KIND control is `account-modal` next door, still
-  // `ada@acme.com` (three glyphs), which is what makes a remedy that shreds an
-  // ordinary name red. Driven by overflow-guard's W23-account-modal-identity
-  // -bounded leg.
+  // cch-w23-bl-cruel-identity-own-scenario: this scenario is NO LONGER the cruel
+  // identity twin. cch-w23-s2 parked `cruelAccountMe` here because a new
+  // SCENARIOS key was fenced out of its slice; the consequence was that the one
+  // scenario in this file driven by REAL CLICKS — and the one shoot.sh publishes
+  // as the revoke evidence — ran its whole oracle against a 158-character
+  // address nobody in this corpus otherwise owns. The cruelty moved next door to
+  // `account-modal-cruel-identity`, and this fixture is back on the
+  // PRODUCTION-DOMINANT identity `me("Guerrilla")` (`ada@acme.com`), which is
+  // what the click oracle should measure a revoke against. That is PINNED, not
+  // hoped: smoke.mjs's FIXTURE_SHAPE_PINS carries `account-modal-revoke` ·
+  // `me.user.email.length` = 12, so a future edit that re-parks a cruel `me`
+  // here reds before any scenario boots.
   "account-modal-revoke": {
-    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count; ALSO the cruel-identity twin (a 158-char email local part, the derived cap)",
+    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessionsRevoke,
+    },
+  },
+  // cch-w23-bl-cruel-identity-own-scenario — THE CRUEL IDENTITY, ON ITS OWN KEY.
+  // `.am-name` paints `email.split("@")[0]` (accountModel() — re-derive with
+  // `grep -n 'function accountModel' cloud/priv/static/app.js`), so the string a
+  // person can actually put on that element is capped by the SERVER's
+  // `validate_length(:email, max: 160)` and nothing else: 160 − "@" − one domain
+  // character = 158 unbroken characters (the full derivation, and why the filed
+  // 255 is INADMISSIBLE, is in the cruelAccountEmail ledger above `SCENARIOS`).
+  // Its KIND control is `account-modal` next door, still `ada@acme.com` (three
+  // rendered glyphs) — the pair is what makes a remedy that buys the cruel name
+  // by shredding an ordinary one red. Driven at 7 widths x 2 themes by
+  // overflow-guard's W23-account-modal-identity-bounded leg (AM_SCENS), asserted
+  // at rest by smoke.mjs's `account-modal-cruel-identity` expectation, and
+  // auto-enrolled in shoot.sh's screenshot set by the `account-modal` name
+  // prefix (GR76) with zero harness change. It carries the SHORT session list,
+  // not the revoke one: this scenario's axis is the identity, and a stateful
+  // revoke fixture here would give it a second axis nothing asserts.
+  "account-modal-cruel-identity": {
+    label: "Account modal — the CRUEL identity: a 158-character email local part, the longest name a person can actually own (validate_length(:email, max: 160))",
     authed: true,
     deepLink: "",
     data: {
@@ -4809,7 +4848,7 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: [],
-      accountSessions: accountSessionsRevoke,
+      accountSessions: accountSessions,
     },
   },
   "account-modal-2fa-badcode": {
