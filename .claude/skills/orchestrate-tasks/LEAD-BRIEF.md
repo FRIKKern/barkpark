@@ -205,3 +205,12 @@ blocked-on-user: <task — question — 2 options — your pick>
 what the filings got wrong: <bullets>
 next slice for a successor lead: <ids>
 ```
+
+## Retraction rules (2026-09-02, from three leads' own retractions)
+
+- **Read back before believing a bp write FAILED.** `bp task close` can exit non-zero printing `stale_claim` while the write lands; the retry then says `not_ready` because the row is already closed. Five confirmed cases in one shift. A worker trusting the exit code reports a correctly-closed row as uncloseable.
+- **A correction to work already on disk interrupts the batch.** It never queues behind the next message. 344 routing verdicts sat in main's voice for hours because the correction arrived inside a batch of five and was absorbed as context.
+- **A diagnostic message hands you a culprit. Test the simpler explanation first.** Twice in one shift a lead blamed a known, real bug for a race with another lane's claim, because the refusal text named the bug. Re-read the row fresh and ask whether another actor moved it.
+- **A stale count is not a stale row.** Wrong integers in a row do not refute its claim; the numbers rot first. Re-read the claim after correcting the arithmetic.
+- **An absence claim is only as good as its path. Run the control grep.** Before "not found" means anything, grep the same path for something that must be there. A STALE verdict cited a file that does not exist and was right by luck.
+- **A bulk close with committed evidence is a dead pointer, not fabrication.** 304 "zero met" closes cited a session scratchpad instead of the committed packet under `tooling/grip/ledger/`. Chase the rows naming no packet at all; annotate the rest.
