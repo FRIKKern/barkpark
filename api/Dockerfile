@@ -30,13 +30,30 @@ RUN mix deps.get --only prod && mix deps.compile
 COPY api/config/config.exs api/config/prod.exs api/config/runtime.exs config/
 
 # Compile-time reads that live OUTSIDE api/:
-#   design/status-manifest.json  ← Render.StatusVocab (resolves to /design at runtime path depth)
-#   api/assets/**                ← Render.Stylesheet (File.read! + @external_resource)
+#   design/status-manifest.json      ← Render.StatusVocab (resolves to /design at runtime path depth)
+#   api/assets/**                    ← Render.Stylesheet (File.read! + @external_resource)
+#   tooling/pds/pre-gate-papers.json ← the pre-gate Paper register (#15234), read at
+#                                      compile by @external_resource (#15331). Without
+#                                      this COPY the module compiles with an EMPTY
+#                                      register and the pre-gate badge is silently
+#                                      off on every Docker-built instance while a full
+#                                      checkout (prod) works — task-527b… sibling class.
 COPY design /design
+COPY tooling/pds /tooling/pds
 COPY api/assets assets
 
 COPY api/lib lib
 COPY api/priv priv
+
+# Every compile-time asset the modules above read from OUTSIDE api/ must be in the
+# build context BEFORE `mix compile`, or the module compiles against nothing and
+# says so nowhere. Fail the image here, by name, instead. Add a line per asset
+# when a new @external_resource points outside api/.
+RUN set -e; for f in \
+      /design/status-manifest.json \
+      /tooling/pds/pre-gate-papers.json; do \
+      [ -f "$f" ] || { echo "compile-time asset missing from the build context: $f (add its COPY above)"; exit 1; }; \
+    done
 
 RUN mix compile
 RUN mix release
