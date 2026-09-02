@@ -1055,6 +1055,58 @@ const depRailFailedKind = deployment({
   ],
 });
 
+// ── cch-w29-bl-deploy-rail-live-site-open-still-nowrap: THE LIVE FOOTER ──────
+//
+// EVERY RAIL FIXTURE ABOVE IS A FAILURE FOOTER. `deployRailHtml` has two
+// footers and only one of them had ever rendered in this harness:
+// `.deploy-rail-fail` (cch-w25-s3, above) and `.deploy-rail-live` — the
+// copyable site URL the OTHER branch emits once every stage is done. So the
+// anchor inside the live footer was never measured at any width, and the base
+// `white-space: nowrap` it inherits from `.site-open` (app.css) went unseen:
+// #8743 dropped that nowrap for `.fleet-url .site-open` and the rail's twin
+// emit kept it. THE SCENARIO-AXIS GAP IS THE DEFECT'S HIDING PLACE, which is
+// why the fixture is the first half of the fix and not an extra.
+//
+// THE STATE IS THE SAME HONEST TRANSIENT WINDOW THE FAILED TWIN LIVES IN:
+// `deployIsActive` (app.js) gates the rail to queued/building/pushing, so the
+// rail is on screen while the control-plane row still reads `pushing` — and the
+// SSE narration can already carry all six stages done, because the last
+// stage-done frame arrives before the row settles to `live`. `deployRailStatus`
+// folds an all-`ok` row set to tone "live", and `deployRailHtml` then emits
+// `.deploy-rail-live` with `opts.url`.
+//
+// THE URL IS DERIVED, NEVER TYPED. `mountDeployRail` passes
+// `siteLiveUrl(site, bp)`, and this site carries no `url` column, so the string
+// is `liveInstance.url + "/sites/" + slug + "/"` — the product's own
+// construction. Nothing here is lengthened to make it overflow: the ordinary
+// 55-character live URL of the ordinary fixture site is what spills.
+//
+// THE HEAD'S `.fleet-url .site-open` IS THE IN-PAGE CONTROL, and that is why
+// this fixture uses `webSiteDeploys` rather than a bare `webSite`: it carries
+// `current_deployment_id`, so `siteHasEverDeployed` makes the detail head
+// render THE SAME STRING through the twin selector #8743 already paid. One
+// route, two anchors, one URL — the measured pair overflow-guard's
+// W29-deploy-rail-live-url-wrap leg reads is a comparison inside a single page,
+// not across two runs.
+const depRailLive = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d8",
+  site_id: IDS.siteWeb,
+  status: "pushing",
+  git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
+  branch: "main",
+  detail: "pushing",
+  inserted_at: tMinus(96),
+  updated_at: tMinus(2),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094118Z-9c1f2ab, blue → green", at: tMinus(96) },
+    { stage: "BUILD", status: "done", detail: "npm ci && npm run build (next standalone)", at: tMinus(58) },
+    { stage: "STAGE", status: "done", detail: "", at: tMinus(40) },
+    { stage: "HEALTH", status: "done", detail: "slot green on :8081 answered 200 at /healthz", at: tMinus(24) },
+    { stage: "SWITCH", status: "done", detail: "", at: tMinus(9) },
+    { stage: "RETIRE", status: "done", detail: "", at: tMinus(2) },
+  ],
+});
+
 // ── cch-deploy-detail-render-has-no-cap: THE LIVE SUB-CAPTION, AT ITS STORE CAP
 //
 // `.deploy-detail` is the only caption on the deploy rail with NO render bound,
@@ -2756,6 +2808,17 @@ export const SCENARIOS = {
       sites: [webSiteDeploys, blogSite],
       audit: [],
       deployments: rollbackDeployments,
+      // cch-w2-revoke-oracle-round2 — the repo picker's list. openSiteGithub
+      // reads GET /v1/github/repos FIRST and paints one of five arms off the
+      // answer; with no fixture every scenario got the "Couldn't load your
+      // repositories" arm, so #github-disconnect-site — the door to
+      // DELETE /v1/sites/:id/github — had never been painted by any instrument.
+      // acme/web is webSite's own github_repo, so the select renders it
+      // `selected`, which is the state a connected site is actually in.
+      githubRepos: [
+        { full_name: "acme/web", private: false },
+        { full_name: "acme/internal-docs", private: true },
+      ],
     },
   },
   // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before
@@ -3260,6 +3323,27 @@ export const SCENARIOS = {
         [IDS.siteWeb]: [depRailFailedCruel, depCurrent, depPrior],
         [IDS.siteBlog]: [depRailFailedKind],
       },
+    },
+  },
+  // cch-w29-bl: THE DEPLOY RAIL, LIVE — the OTHER footer, and the first fixture
+  // in this harness to render `.deploy-rail-live` at all (see the ledger beside
+  // `depRailLive` in the fixtures above for why the state is honest and where
+  // the URL comes from). ONE site on purpose: the live footer's anchor and the
+  // detail head's `.fleet-url .site-open` carry the SAME derived URL on this
+  // one route, so the paid twin is the in-page control for the unpaid one.
+  // Driven by overflow-guard's W29-deploy-rail-live-url-wrap leg at 320/360/390
+  // in both themes, page AND anchor.
+  "site-deploy-rail-live": {
+    label: "Deploy rail — every stage done; the footer carries the copyable live URL",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys],
+      audit: [],
+      deployments: [depRailLive, depCurrent, depPrior],
     },
   },
   // ── bp-login-ux W3 (decision 40): the /activate device-login approve page ──
@@ -4223,6 +4307,21 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // cch-w2-revoke-oracle-round2 — THE SAME console-side fixture
+      // providers-member already carries (see its comment for why
+      // connected:true cannot come from the live control plane), moved onto the
+      // OWNER actor as well. It has to be here and not there: githubCardHtml
+      // paints #github-disconnect only `if (canWrite)`, so on the member
+      // scenario the DELETE has no door to come through, and
+      // DELETE /v1/github/installation had no click-driven oracle anywhere.
+      // install_url is carried so the POST-DISCONNECT repaint is the honest
+      // reconnect door ("Connect GitHub") rather than githubCardHtml's
+      // last-resort "aren't configured yet" arm, which would be a false claim
+      // about the deployment on a Barkpark that just disconnected.
+      github: {
+        connected: true, account_login: "acme-engineering", configured: true,
+        install_url: "https://github.com/apps/barkpark-cloud/installations/new",
+      },
     },
   },
   "providers-empty": {
@@ -4857,6 +4956,16 @@ function destroyFrom(list, state, pred) {
   return { status: 200, body: { ok: true } };
 }
 
+// The GitHub installation, as a MUTABLE per-boot singleton. Same contract as
+// listOf above (opt-in, per-boot copy, the GET reads through it) for a resource
+// that is one object rather than a list, so a disconnect is observable as a
+// state change instead of a 200 nobody can check.
+function githubOf(d, state) {
+  if (!state) return Object.assign({}, d.github || {});
+  if (!state.github) state.github = Object.assign({}, d.github || {});
+  return state.github;
+}
+
 // route(name, method, path, state) → { status, body } | null.
 //   Returns null for a path this harness does not model, so a caller can decide
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
@@ -5150,7 +5259,11 @@ export function route(name, method, path, state) {
   if (method === "POST" && p === "/v1/billing/cancel") {
     return d.billingCancel || { status: 200, body: { status: "active", cancel_at_period_end: true } };
   }
-  if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
+  // cch-w2-revoke-oracle-round2: through the state bag, so a site-level mutation
+  // (today: DELETE /v1/sites/:id/github) is visible to the very next read. The
+  // no-state arm is the old `d.sites` verbatim, and listOf's per-boot copy makes
+  // the collection and the drill-down below answer the SAME objects.
+  if (p === "/v1/sites") return { status: 200, body: { sites: listOf(d, state, "sites") } };
 
   // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);
   // POST → mint (201 {token: <plaintext ONCE>, pat: pat_json}, overridable via
@@ -5266,7 +5379,21 @@ export function route(name, method, path, state) {
   // instance body under `data`, exactly like the real control-plane relay.
   const whColl = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks$/);
   if (whColl && method === "GET") {
-    return { status: 200, body: { data: { webhooks: d.webhooks || [] } } };
+    // cch-bl-webhook-delete-oracle: through listOf, so the endpoint DELETE below
+    // is visible to the next list read. The stateless arm is `d.webhooks`
+    // verbatim. NOTE the path arrives QUERY-STRIPPED (route() splits on "?"),
+    // so `?dataset=production` is already gone by the time these matchers run.
+    return { status: 200, body: { data: { webhooks: listOf(d, state, "webhooks") } } };
+  }
+  // cch-bl-webhook-delete-oracle — DELETE one endpoint, the TWELFTH destroy verb
+  // and the only list-shaped one cch-w10 could not reach. It was UNMODELLED: it
+  // fell through the terminal `/v1/` 200 {}, so `deleteWebhook` toasted its
+  // client-side constant ("Webhook deleted") against a fixture that still served
+  // both endpoints. Placed ABOVE the PUT matcher's siblings but sharing whOne's
+  // shape, so a wrong id 404s exactly as destroyFrom does everywhere else.
+  const whDelete = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/([^/]+)$/);
+  if (whDelete && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "webhooks"), state, (w) => String(w.id) === whDelete[1]);
   }
   const whOne = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/([^/]+)$/);
   if (whOne && method === "PUT") {
@@ -5325,8 +5452,32 @@ export function route(name, method, path, state) {
   // Single-site drill-down (best-effort, for shots that click a site row).
   const siteMatch = p.match(/^\/v1\/sites\/([^/]+)$/);
   if (siteMatch) {
-    const s = d.sites.filter((x) => String(x.id) === siteMatch[1])[0];
+    const s = listOf(d, state, "sites").filter((x) => String(x.id) === siteMatch[1])[0];
     return s ? { status: 200, body: { site: s } } : { status: 404, body: { error: "not_found" } };
+  }
+  // cch-w2-revoke-oracle-round2 — DELETE /v1/sites/:id/github, the repository
+  // UNLINK. It was UNMODELLED: it fell through the terminal `/v1/` 200 {}, so
+  // disconnectSiteGithub "succeeded" against a fixture that then re-served a
+  // site still carrying github_repo — the refetched header repainted the repo
+  // chip and the console looked like it had ignored the operator.
+  //   grep -n "function disconnectSiteGithub" cloud/priv/static/app.js
+  // is the handler; it reads `#github-disconnect-site`, which openSiteGithub
+  // paints only when the site's `github_webhook_configured` is true.
+  const siteGithub = p.match(/^\/v1\/sites\/([^/]+)\/github$/);
+  if (siteGithub && method === "DELETE") {
+    const s = listOf(d, state, "sites").filter((x) => String(x.id) === siteGithub[1])[0];
+    // 404 on a miss AND on an already-unlinked site — destroyFrom's rule: a
+    // no-op must never be indistinguishable from real work.
+    if (!s || !s.github_repo) return { status: 404, body: { error: "not_found" } };
+    if (state) { s.github_repo = null; s.github_branch = null; s.github_webhook_configured = false; }
+    return { status: 200, body: { ok: true } };
+  }
+  // The repo picker openSiteGithub reads before it can paint anything at all.
+  // Gated on the fixture so every scenario without one keeps falling through to
+  // the catch-all exactly as before (which renders the honest "Couldn't load
+  // your repositories" arm).
+  if (p === "/v1/github/repos" && method === "GET" && d.githubRepos) {
+    return { status: 200, body: { repos: d.githubRepos } };
   }
   // cch-w25-s3: PER-SITE deployment lists. The default stays the scenario-wide
   // `d.deployments` (every scenario written before this line is byte-identical
@@ -5525,8 +5676,22 @@ export function route(name, method, path, state) {
   // Disconnect affordance has a wire to reach, not because a member may use it
   // (cch-w48-s3 owns that fence).
   if (p === "/v1/github/installation" && d.github) {
-    if (method === "DELETE") return { status: 200, body: { connected: false } };
-    if (method === "GET") return { status: 200, body: d.github };
+    // cch-w2-revoke-oracle-round2 — STATEFUL, on the sessionsOf/listOf pattern.
+    // It used to answer `{connected:false}` to the DELETE and then serve
+    // `d.github` — connected:true — to the refetch the success arm issues, so
+    // the card repainted CONNECTED after a successful disconnect and no oracle
+    // could tell the teardown from a no-op. A single object rather than a list
+    // (this endpoint is a singleton), but the three properties are the same:
+    // opt-in on `state`, copied per boot, and the GET reads through it.
+    const inst = githubOf(d, state);
+    if (method === "DELETE") {
+      // 404 on a miss, exactly as destroyFrom does: disconnecting nothing must
+      // be distinguishable from disconnecting something.
+      if (!inst.connected) return { status: 404, body: { error: "not_found" } };
+      if (state) { inst.connected = false; delete inst.account_login; }
+      return { status: 200, body: { connected: false } };
+    }
+    if (method === "GET") return { status: 200, body: inst };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

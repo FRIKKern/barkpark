@@ -52,12 +52,28 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # PDS-D291 (the close-artifact gate): the base fixture carries ONE MET
+  # acceptance criterion, because without it every `done` close in this file
+  # would 409 `close_reason_needs_artifact` — the gate refuses a `done` close of
+  # a kind:task row with ZERO criteria whose reason names no PR+sha and pastes no
+  # run. These tests measure routing, fencing, envelopes and help[]; a met
+  # criterion keeps each of them measuring THAT. Tests that pass their own
+  # `acceptance_criteria` through `content_extra` win the merge and are
+  # unaffected; the ones that genuinely need a criteria-less row opt out with
+  # `"acceptance_criteria" => []`, or with `nil` for a row carrying NO SUCH KEY
+  # (absent and empty are different facts on the read side, and two tests below
+  # exist precisely to tell them apart).
+  @fixture_criterion [%{"criterion" => "the fixture is closeable", "met" => true}]
+
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
-      Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
-        content_extra
-      )
+      %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "acceptance_criteria" => @fixture_criterion
+      }
+      |> Map.merge(content_extra)
+      |> drop_nil_criteria()
 
     {:ok, doc} =
       Content.create_document(
@@ -69,6 +85,13 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     doc
   end
+
+  # `"acceptance_criteria" => nil` in content_extra means "no such KEY", which a
+  # Map.merge cannot express on its own.
+  defp drop_nil_criteria(%{"acceptance_criteria" => nil} = content),
+    do: Map.delete(content, "acceptance_criteria")
+
+  defp drop_nil_criteria(content), do: content
 
   # dr-w34-s4: a task that really lives at its BARE (published) doc_id.
   # `mk_task!` can never produce one — `Content.Writer.create_document` forces
@@ -684,9 +707,14 @@ defmodule BarkparkWeb.TasksControllerTest do
         |> authed()
         |> post(
           "/v1/tasks/#{task.doc_id}/close",
+          # PDS-D291: this row is deliberately criteria-less, and holder_override
+          # does NOT discharge the close-artifact gate — one override per
+          # admission. A lead seal names the merge it is sealing, so the reason
+          # carries the artifact.
           Jason.encode!(%{
             worker_id: "oc-lead",
             observed_epoch: epoch,
+            reason: "lead seal — landed #14383 @ 63b89bef30",
             holder_override: "lead seal on merge"
           })
         )
@@ -736,6 +764,127 @@ defmodule BarkparkWeb.TasksControllerTest do
       doc = Jason.decode!(show.resp_body)["doc"]
       assert doc["lifecycle_status"] == "open"
       assert [%{"met" => false}] = doc["content"]["acceptance_criteria"]
+    end
+
+    # ─── THE RUBRIC SHAPE over HTTP (gh-2314) ────────────────────────────
+    #
+    # `bp task get` prints acceptance criteria as {criterion, met, evidence}.
+    # Until now the close body only accepted {index, met, evidence}, so an agent
+    # had to translate the rubric it had just read into 0-based indices — and
+    # when the parser refused, the documented recourse was to mutate the
+    # published document by hand. These tests pin the whole contract at the
+    # boundary that actually serves `bp`.
+    test "a text-keyed rubric row closes the task without an index", %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-rubric"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "the first row is a decoy", "met" => false},
+            %{"criterion" => "the rubric shape is accepted", "met" => false}
+          ]
+        })
+
+      body =
+        Jason.encode!(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          criteria_override: "rubric-shape acceptance under test, not criteria proof",
+          criteria: [
+            %{
+              criterion: "the rubric shape is accepted",
+              met: true,
+              evidence: "tasks_controller_test.exs — text-keyed close"
+            }
+          ]
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", body)
+      assert resp.status == 200
+
+      doc = Jason.decode!(resp.resp_body)["doc"]
+      assert doc["lifecycle_status"] == "done"
+
+      # Resolved by TEXT: the second row moved, the decoy at index 0 did not.
+      assert [
+               %{"criterion" => "the first row is a decoy", "met" => false},
+               %{"met" => true, "evidence" => "tasks_controller_test.exs — text-keyed close"}
+             ] = doc["content"]["acceptance_criteria"]
+    end
+
+    test "text-keyed refusals are named, teach the fix, and write nothing",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-rubric-bad"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "shared wording", "met" => false},
+            %{"criterion" => "shared wording", "met" => false},
+            %{"criterion" => "unique wording", "met" => false}
+          ]
+        })
+
+      post_close = fn body ->
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", Jason.encode!(body))
+      end
+
+      # (a) No row carries that wording → 409, named, with the copy-verbatim fix.
+      missing =
+        post_close.(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          criteria: [%{criterion: "wording that is not stored", met: true, evidence: "x"}]
+        })
+
+      assert missing.status == 409
+      missing_body = Jason.decode!(missing.resp_body)
+      assert missing_body["reason"] == "criterion_not_found"
+      assert missing_body["message"] =~ "EXACT"
+
+      # (b) Two rows share it → 409 ambiguous, pointing at the indexed shape.
+      ambiguous =
+        post_close.(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          criteria: [%{criterion: "shared wording", met: true, evidence: "x"}]
+        })
+
+      assert ambiguous.status == 409
+      ambiguous_body = Jason.decode!(ambiguous.resp_body)
+      assert ambiguous_body["reason"] == "criterion_ambiguous"
+      assert ambiguous_body["message"] =~ "index"
+
+      # (c) A met-flip with no evidence is a 400 — the text-keyed door gets its
+      # guard for free, so it pays with proof instead.
+      no_evidence =
+        post_close.(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          criteria: [%{criterion: "unique wording", met: true}]
+        })
+
+      assert no_evidence.status == 400
+      assert Jason.decode!(no_evidence.resp_body)["message"] =~ "evidence"
+
+      # (d) One command, one dialect: mixing indexed and text-keyed entries is a
+      # 400 before anything is read.
+      mixed =
+        post_close.(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          criteria: [
+            %{index: 2, met: false},
+            %{criterion: "unique wording", met: false}
+          ]
+        })
+
+      assert mixed.status == 400
+      assert Jason.decode!(mixed.resp_body)["message"] =~ "mixes two shapes"
+
+      # None of the four touched the task.
+      show = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      doc = Jason.decode!(show.resp_body)["doc"]
+      assert doc["lifecycle_status"] == "open"
+
+      assert [%{"met" => false}, %{"met" => false}, %{"met" => false}] =
+               doc["content"]["acceptance_criteria"]
     end
   end
 
@@ -1230,7 +1379,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     test "criteria-absent tasks OMIT the key entirely (never 0/0)",
          %{conn: conn, scope: scope} do
-      no_key = mk_task!(uniq("crit-absent"), scope)
+      no_key = mk_task!(uniq("crit-absent"), scope, %{"acceptance_criteria" => nil})
       empty = mk_task!(uniq("crit-empty"), scope, criteria([]))
 
       for task <- [no_key, empty] do
@@ -1311,11 +1460,21 @@ defmodule BarkparkWeb.TasksControllerTest do
       refute Map.has_key?(payload, "warnings")
     end
 
+    # Opts out of the fixture criterion: a criteria-less row IS the subject here.
+    # That makes it the one lvw-t6 case that meets PDS-D291, so the reason names
+    # the artifact — the close still has to LAND for "no warnings" to mean
+    # anything, and a 409 would make this assertion vacuous.
     test "close done with NO criteria carries no warnings (absent ≠ unmet)",
          %{conn: conn, scope: scope} do
-      task = mk_task!(uniq("crit-close-nocrit"), scope)
+      task = mk_task!(uniq("crit-close-nocrit"), scope, %{"acceptance_criteria" => []})
 
-      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1})
+      close_body =
+        Jason.encode!(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          reason: "landed #14383 @ 63b89bef30"
+        })
+
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
 
       payload = Jason.decode!(resp.resp_body)
@@ -2587,7 +2746,9 @@ defmodule BarkparkWeb.TasksControllerTest do
     test "minimal open card is exactly {doc_id, title, status, child_count, updated_at}",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-brief-min")
-      mk_task!(uniq("brief-min"), scope, %{"parent_id" => phase})
+      # No criteria on the doc is part of what this asserts (see the key list
+      # below), so it opts out of the PDS-D291 fixture criterion.
+      mk_task!(uniq("brief-min"), scope, %{"parent_id" => phase, "acceptance_criteria" => nil})
 
       payload =
         conn
@@ -3471,6 +3632,77 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       assert conflict_resp.status == 409
       refute Map.has_key?(Jason.decode!(conflict_resp.resp_body), "help")
+    end
+
+    # ─── the lease the claim GRANTED (claim-lease, wave 27) ────────────────
+    #
+    # A claim IS a lease and the receipt described everything about it except
+    # its duration: the epoch rode the envelope, help[] rode the envelope, the
+    # expiry rode nothing. It lived only in TtlSweeper's TTL and in
+    # content.claim.ts_iso — two facts a caller had to join by reading server
+    # source, so a lead who claimed four rows learned the lease length by
+    # watching one lapse 29s before its PR opened (pr-task-gate refused the PR;
+    # `bp task next` handed the sibling row to a second lead mid-build).
+    test "claim: the envelope carries the lease it granted — expiry AND length, derived from the SAME TTL the sweeper reaps on",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, 2700)
+
+      lease = payload["lease"]
+      assert lease["seconds"] == ttl
+      assert lease["minutes"] == div(ttl, 60)
+
+      # DERIVED, never a second clock: granted_at is the claim's own ts_iso and
+      # expires_at is exactly ttl later, so the boundary the caller is told is
+      # the boundary TtlSweeper.sweep/1 will apply. A drift between the number
+      # the sweeper enforces and the number the receipt promises would be this
+      # defect with a receipt bolted on.
+      {:ok, granted, _} = DateTime.from_iso8601(lease["granted_at"])
+      {:ok, expires, _} = DateTime.from_iso8601(lease["expires_at"])
+      assert DateTime.diff(expires, granted, :second) == ttl
+
+      {:ok, claim_ts, _} = DateTime.from_iso8601(payload["doc"]["claim"]["ts_iso"])
+      assert DateTime.compare(granted, claim_ts) == :eq
+    end
+
+    test "claim_by_id: the targeted claim carries the same lease", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("lease-byid"), scope)
+
+      payload =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "helper-1"}))
+        |> then(&Jason.decode!(&1.resp_body))
+
+      assert payload["ok"] == true
+      ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, 2700)
+      assert payload["lease"]["seconds"] == ttl
+      assert payload["lease"]["minutes"] == div(ttl, 60)
+      assert is_binary(payload["lease"]["expires_at"])
+    end
+
+    # A pulse RENEWS the lease (Tasks.Pulse refreshes ts_iso), so its receipt
+    # must report the NEW window — the point of a heartbeat is that the row
+    # stops being reapable, and a receipt echoing the claim-time expiry would
+    # tell the operator the opposite.
+    test "pulse: the receipt reports the RENEWED lease, not the one the claim granted",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      doc_id = bare_id(payload)
+      {:ok, claimed_expiry, _} = DateTime.from_iso8601(payload["lease"]["expires_at"])
+
+      pulsed =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/pulse",
+          Jason.encode!(%{worker_id: "helper-1", now: "halfway through"})
+        )
+        |> then(&Jason.decode!(&1.resp_body))
+
+      assert pulsed["ok"] == true
+      {:ok, renewed_expiry, _} = DateTime.from_iso8601(pulsed["lease"]["expires_at"])
+      assert DateTime.compare(renewed_expiry, claimed_expiry) != :lt
     end
   end
 

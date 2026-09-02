@@ -725,13 +725,18 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "chat transport commands (charter bp-chat-tui, ct-bl-manifest-commands)" do
     # bp chat was invisible to the capabilities manifest — the MCP bridge
     # (--tools all), SDK codegen, and headless harnesses could not discover it.
-    # These pin the `chat` noun + the nine non-streaming admin verbs mapped to
-    # the already-shipped /v1/chat routes (the eighth, SSE events, is a builtin
-    # carve-out with no manifest verb). StudioChat is core-embedded, NOT a
-    # Barkpark.Plugin, so the noun is declared in core_nouns/0, not plugin_nouns/2.
+    # These pin the `chat` noun + the twelve non-streaming admin verbs mapped to
+    # the already-shipped /v1/chat routes (SSE events is a builtin carve-out with
+    # no manifest verb). StudioChat is core-embedded, NOT a Barkpark.Plugin, so
+    # the noun is declared in core_nouns/0, not plugin_nouns/2.
+    #
+    # The two attachment verbs (ct-bl-chat-attachments) belong to THIS set and
+    # not to the media noun on purpose: chat bytes are gated by the chat tenant
+    # oracle, never by the any-token-public `GET /media/files/*` (charter D16).
     @chat_commands ~w(
       chat.create_session chat.list_sessions chat.get_session chat.update_session
-      chat.send_message chat.interrupt chat.approve chat.archive chat.unarchive
+      chat.send_message chat.interrupt chat.approve chat.answer chat.archive
+      chat.unarchive chat.upload_attachment chat.get_attachment
     )
 
     test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
@@ -748,7 +753,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
     end
 
-    test "exactly the nine non-streaming chat verbs are registered (events stays absent)",
+    test "exactly the twelve non-streaming chat verbs are registered (events stays absent)",
          %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -792,8 +797,11 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         "chat.send_message" => {"POST", "/v1/chat/sessions/:id/messages"},
         "chat.interrupt" => {"POST", "/v1/chat/sessions/:id/interrupt"},
         "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"},
+        "chat.answer" => {"POST", "/v1/chat/sessions/:id/answer"},
         "chat.archive" => {"POST", "/v1/chat/sessions/:id/archive"},
-        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"}
+        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"},
+        "chat.upload_attachment" => {"POST", "/v1/chat/sessions/:id/attachments"},
+        "chat.get_attachment" => {"GET", "/v1/chat/sessions/:id/attachments/:attachment_id"}
       }
 
       for {id, {method, path}} <- expected do
@@ -845,7 +853,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     # `{:workspace, ws}`), and tier_for_token/1 now mirrors that grant: the
     # token's base tier stays "none" (chat lifts no rank), but a `+chat`
     # capability rides alongside so project/2's chat_visible?/2 side-branch
-    # projects the `chat` noun + its seven verbs — and ONLY the chat noun.
+    # projects the `chat` noun + its ten verbs — and ONLY the chat noun.
     test "a workspace token carrying only `chat` sees the chat noun WITHOUT any rank lift (D36 orthogonal)",
          %{conn: conn} do
       ws = Barkpark.TenancyFixtures.create_workspace!()
@@ -864,7 +872,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat is orthogonal — a chat-only token must still echo base tier \"none\"; " <>
                "got: #{inspect(manifest["auth_tier"])}"
 
-      # The whole chat noun + its seven verbs are now discoverable by their
+      # The whole chat noun + its ten verbs are now discoverable by their
       # own token.
       assert Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
              "chat-capability workspace token must discover the chat noun"
@@ -876,7 +884,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         |> Enum.sort()
 
       assert chat_ids == Enum.sort(@chat_commands),
-             "chat-capability token must see exactly the seven chat verbs; got: #{inspect(chat_ids)}"
+             "chat-capability token must see exactly the ten chat verbs; got: #{inspect(chat_ids)}"
 
       # GUARD — chat lifts NO other noun's tier. The base tier stays "none", so
       # the chat-only token must see EXACTLY the anonymous (tier-none) noun set

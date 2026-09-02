@@ -208,18 +208,29 @@ func TestDoClaim_SurfacesNotice(t *testing.T) {
 }
 
 // TestDoClose_ResyncGuidance: the two recoverable fence reasons render the
-// actionable next-keypress guidance (press c to renew / reopen to re-read) in
-// danger, not the bare humanised reason — the whole point of the polish.
+// actionable next-keypress guidance in danger, not the bare humanised reason —
+// the whole point of the polish — and carry the ResyncKind the reducer arms its
+// recovery on.
+//
+// doc_changed_since_claim LEADS WITH observed_rev on purpose. The copy it
+// replaced ("reopen the task (enter) to re-read, then close again") named a
+// recovery that cannot work: a same-worker re-read preserves the claim's
+// work_digest, so the next rev-less close repeats the identical 409
+// (docs/setup/TASK-SYSTEM.md; close.ex check_work_digest). The line must name
+// observed_rev, the keys to press, and what the pinned close does.
 func TestDoClose_ResyncGuidance(t *testing.T) {
 	cases := []struct {
-		name    string
-		resp    string
-		wantMsg string
+		name     string
+		resp     string
+		wantMsg  string
+		wantKind ResyncKind
 	}{
 		{"fenced_off", `{"ok":false,"reason":"fenced_off"}`,
-			"fenced off — the task changed under you (blocker/move/sweep); press c to renew, then x again"},
+			"fenced off — the task changed under you (blocker/move/sweep); press c to renew, then x again",
+			ResyncRenewClaim},
 		{"doc_changed_since_claim", `{"ok":false,"reason":"doc_changed_since_claim"}`,
-			"the brief changed since your claim — reopen the task (enter) to re-read, then close again"},
+			"close now needs observed_rev: the brief changed under your claim — re-read it (enter), then x x closes pinned to the revision on screen; a bare re-read alone repeats this refusal",
+			ResyncObservedRev},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,7 +248,60 @@ func TestDoClose_ResyncGuidance(t *testing.T) {
 			if got.Role != RoleDanger {
 				t.Errorf("role = %v, want RoleDanger", got.Role)
 			}
+			if got.Resync != tc.wantKind {
+				t.Errorf("Resync = %v, want %v", got.Resync, tc.wantKind)
+			}
 		})
+	}
+}
+
+// The drift line must NOT send the user down the dead-end path the ledger
+// contract forbids: a bare "re-read, then close again" repeats the same 409. The
+// line has to NAME observed_rev — this pins the property, not just today's
+// wording, so a future re-word cannot quietly reintroduce the dead end.
+func TestDoClose_DriftGuidanceNamesObservedRev(t *testing.T) {
+	var cap capture
+	srv := serve(t, http.StatusConflict, `{"ok":false,"reason":"doc_changed_since_claim"}`, &cap)
+	defer srv.Close()
+
+	got := DoClose(testClient(srv.URL), "t1", "tui-mbp", 4)
+	if !strings.Contains(got.Message, "observed_rev") {
+		t.Errorf("drift guidance = %q, must name observed_rev — the only recovery that can land", got.Message)
+	}
+	if got.Resync != ResyncObservedRev {
+		t.Errorf("Resync = %v, want ResyncObservedRev", got.Resync)
+	}
+	// The retired dead end, verbatim: a re-read alone leaves the claim-time work
+	// digest in place, so this instruction produces the same refusal forever.
+	if strings.Contains(got.Message, "re-read, then close again") {
+		t.Errorf("drift guidance = %q still tells the user to close again after a bare re-read", got.Message)
+	}
+}
+
+// The observed_rev close is a real strict-CAS request, not decoration: the rev
+// the caller pinned must ride the close body verbatim.
+func TestDoCloseRev_PinsObservedRevOnTheWire(t *testing.T) {
+	var cap capture
+	srv := serve(t, http.StatusOK, `{"ok":true,"doc":{}}`, &cap)
+	defer srv.Close()
+
+	got := DoCloseRev(testClient(srv.URL), "t1", "tui-mbp", 4, "rev-9f")
+	if !got.OK {
+		t.Fatalf("expected OK, got %+v", got)
+	}
+	if cap.body["observed_rev"] != "rev-9f" {
+		t.Errorf("observed_rev = %v, want rev-9f", cap.body["observed_rev"])
+	}
+	// An EMPTY rev must not put the key on the wire at all — that is the
+	// fence-armed ordinary close (DoCloseRev falls through to DoClose).
+	var cap2 capture
+	srv2 := serve(t, http.StatusOK, `{"ok":true,"doc":{}}`, &cap2)
+	defer srv2.Close()
+	if got := DoCloseRev(testClient(srv2.URL), "t1", "tui-mbp", 4, ""); !got.OK {
+		t.Fatalf("expected OK, got %+v", got)
+	}
+	if _, present := cap2.body["observed_rev"]; present {
+		t.Errorf("a rev-less close put observed_rev on the wire (%v) — the work-digest fence must stay armed", cap2.body["observed_rev"])
 	}
 }
 

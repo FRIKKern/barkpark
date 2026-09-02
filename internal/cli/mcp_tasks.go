@@ -60,6 +60,23 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// curatedTaskToolNames names the eight tools registerTaskTools registers, in
+// registration order. Registration is all-or-nothing (every verb Lookup is
+// batched before the first AddTool), so when it fails ALL eight are absent —
+// which lets a degrade path (mcpToolsetTasksBestEffort, mcp_serve.go) tell an
+// operator exactly which tools a caller will NOT find on the server. Pinned
+// against drift by TestCuratedTaskToolNamesMatchRegistration.
+var curatedTaskToolNames = []string{
+	"task_ready",
+	"task_next",
+	"task_show",
+	"task_close",
+	"task_create",
+	"task_prime",
+	"task_stamp",
+	"task_pulse",
+}
+
 // registerTaskTools registers the curated eight task tools on srv, hand-mapping
 // each onto its manifest task verb (task_create has no manifest verb — the live
 // manifest declares no task.create, so it is built directly from the mutate
@@ -68,7 +85,10 @@ import (
 // Lookups run BEFORE the first AddTool: this batch-first invariant is what lets
 // runMCPServe report a missing-verb failure cleanly (nothing half-registered),
 // and it is why a tasks-less manifest under --tools all fails this function fast
-// rather than serving a broken tool.
+// rather than serving a broken tool. Whether that failure is FATAL is the
+// caller's call, not this function's: stdio refuses to start, --tools all
+// degrades to bridge-only, and --http degrades loudly and keeps serving
+// (mcpToolsetTasksBestEffort, mcp_serve.go).
 //
 // Naming note: most tool names match their verb, but task_show maps onto the
 // task.get verb (the tool keeps its show-vs-get name for MCP-client familiarity).
@@ -293,7 +313,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "observed_epoch": {
       "type": "integer",
-      "description": "The epoch from your claim (doc.claim.epoch). Close is a compare-and-swap on this — a stale epoch 409s."
+      "description": "The CURRENT claim epoch (doc.claim.epoch) — not necessarily the one your claim returned: every task_pulse ADVANCES it, so re-read it from the pulse response. Close is a compare-and-swap on this — a stale epoch 409s fenced_off."
     },
     "observed_rev": {
       "type": "string",
@@ -596,7 +616,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "observed_epoch": {
       "type": "integer",
-      "description": "The epoch from your claim (doc.claim.epoch). Same fence as close — a stale epoch 409s. Stamp does NOT bump it."
+      "description": "The CURRENT claim epoch (doc.claim.epoch) — not necessarily the one your claim returned: every task_pulse ADVANCES it, so re-read it from the pulse response. Same fence as close — a stale epoch 409s fenced_off. Stamp itself does NOT bump it."
     },
     "criterion": {
       "type": "integer",

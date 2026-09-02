@@ -51,6 +51,19 @@ defmodule BarkparkCloud.Notifications.Render do
   over-claims it: Pushover escalates priority only on `:error`, so `:warning`
   raises no Pushover priority; what it buys is the Discord/severity colour and
   an honest classification.
+
+  ## The teardown ITSELF is a second, later arm (cch-w52-bl)
+
+  `trial_expiring` is the ADVANCE notice — T-3 and T-1 days, future tense. The
+  teardown that follows it dispatched NOTHING: `TrialExpiryWorker` enqueued a
+  deprovision for every box a team owned and the only artefact was a
+  `{"deprovision","pending"}` job row. A team that missed both advance notices
+  learned its instances were gone at the outage. `trial_expired` is that missing
+  fact, and it is a DIFFERENT fact from "expiring": it is past tense, it NAMES
+  the instances that were torn down (`teardown_clause/1`, shared with the alert
+  email so the two rails cannot disagree about which instances a team lost), and
+  it prescribes the one action left. Reusing `trial_expiring` at day 0 would have
+  mailed future-tense copy about something that had already happened.
   """
 
   alias BarkparkCloud.FailureCopy
@@ -99,6 +112,11 @@ defmodule BarkparkCloud.Notifications.Render do
          "Your free trial ends #{trial_window(payload)} — #{site} is torn down " <>
            "automatically when it ends.", :warning}
 
+      "trial_expired" ->
+        {"Trial ended",
+         "Your free trial has ended and #{teardown_clause(payload)}. " <>
+           "Subscribe to a paid plan to run Barkpark again.", :warning}
+
       "test" ->
         if muted?(payload) do
           {"Test notification",
@@ -144,6 +162,41 @@ defmodule BarkparkCloud.Notifications.Render do
     ]
     |> Enum.filter(fn {_label, value} -> is_binary(value) and value != "" end)
     |> Enum.map_join(" · ", fn {label, value} -> "#{label} #{value}" end)
+  end
+
+  @doc """
+  WHAT the trial teardown destroyed, as ONE clause — `"acme has been torn down"`,
+  `"acme and beta have been torn down"` (cch-w52-bl).
+
+  It lives here, and the alert email calls it, for exactly the reason
+  `deployment_identity/1` does: the inbox and the chat channels must not disagree
+  about which instances a team lost. The names come from the producer
+  (`TrialExpiryWorker`), which reads them off the box list it is tearing down —
+  `Registry.succeed_deprovision_job/1` DELETES the barkpark row, so this is the
+  last moment the names exist at all.
+
+  A payload with no usable names degrades to "your Barkpark instances have been
+  torn down" rather than rendering an empty subject. The payload reaching a chat
+  shaper is the Oban args map, so the key is read under both a string and an atom.
+  """
+  @spec teardown_clause(map()) :: String.t()
+  def teardown_clause(payload) when is_map(payload) do
+    case instance_names(payload) do
+      [] -> "your Barkpark instances have been torn down"
+      [one] -> "#{one} has been torn down"
+      many -> "#{join_names(many)} have been torn down"
+    end
+  end
+
+  defp instance_names(payload) do
+    (Map.get(payload, "instances") || Map.get(payload, :instances) || [])
+    |> List.wrap()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  end
+
+  defp join_names(names) do
+    {rest, [last]} = Enum.split(names, -1)
+    "#{Enum.join(rest, ", ")} and #{last}"
   end
 
   # The identity as its own paragraph, or nothing — a payload without one keeps

@@ -71,13 +71,21 @@ DOCKERFILE='cloud/Dockerfile'
 #
 # index.html is here because it is the SPA SHELL: it is the FIRST request of
 # every cold boot, and compressing the assets it pulls while shipping the shell
-# itself uncompressed is the residual half of the same lie (31,219 -> 7,860,
-# -74.8%). styleguide.html is in the same allowlist and compresses as well, but
-# it is not on the cold-boot path — it stays on cch-cloud-static-gzip-html.
-# favicon.ico and button.svg are too small for the sibling to pay for itself.
+# itself uncompressed is the residual half of the same lie (re-measured off the
+# tree: 33,912 -> 8,869, -73.8%). styleguide.html joined under
+# cch-cloud-static-gzip-html — same allowlist, same `gzip: true`, 52,722 ->
+# 12,097 (-77.1%) — on its own row rather than under the shell's cold-boot
+# urgency, because only a developer opening the styleguide ever pays it.
+# favicon.ico and button.svg are too small for the sibling to pay for itself;
+# robots.txt (~100 bytes) likewise.
+#
+# This list and the Dockerfile RUN are ONE change: check 3 below reds if the
+# RUN stops naming any entry here, so growing this list alone is a red, and
+# growing the RUN alone leaves the new file unguarded. Move both or neither.
 GZ_ASSETS='app.js
 app.css
-index.html'
+index.html
+styleguide.html'
 
 fail=0
 

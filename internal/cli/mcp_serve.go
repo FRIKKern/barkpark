@@ -111,6 +111,29 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 	return exitOK
 }
 
+// mcpToolsetTasksBestEffort is the toolset word the `--http` transport uses in
+// place of "tasks". Registration is IDENTICAL to "tasks" — the curated task
+// tools and nothing else — but a manifest that cannot back them DEGRADES with
+// one loud stderr line instead of refusing to start.
+//
+// Why --http and not stdio: a stdio server is launched per client with the
+// user's own credential, so a manifest without the task noun is a real
+// misconfiguration the operator should see as an immediate non-zero exit. An
+// --http server holds NO ambient credential by design (forward-through, charter
+// D18), so its ONE startup manifest is always the ANONYMOUS projection of GET
+// /v1/capabilities — which on a stock Barkpark carries doc/media/search/auth and
+// NO task noun. Failing fast there turns a correct, useful bridge into a systemd
+// crash loop (barkpark-mcp.service: NRestarts 2464, one exit-1 every 10 s) while
+// the endpoint 503s. The tools a caller's bearer would unlock cannot be
+// recovered per request anyway — the stateless per-request rebuild reuses this
+// same startup manifest — so the honest behaviour is to serve what the manifest
+// DOES back and say loudly, once, what is missing and why.
+//
+// This value is unreachable from user input: parseToolsSelector only ever
+// returns "tasks", "all", or "subset", so no `--tools <noun>` list can collide
+// with it.
+const mcpToolsetTasksBestEffort = "tasks-best-effort"
+
 // buildMCPServer assembles a fully registered MCP server: the curated task
 // tools, optionally the generic capabilities bridge (--tools all), and the
 // published-papers resources. Extracted from runMCPServe so the stdio path (one
@@ -174,11 +197,15 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 	}
 
 	if err := registerTaskTools(srv, g, ctx, m); err != nil {
-		if toolset != "all" {
+		if toolset != "all" && toolset != mcpToolsetTasksBestEffort {
 			return nil, fmt.Errorf("register task tools: %w", err)
 		}
 		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
-		out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
+		if toolset == mcpToolsetTasksBestEffort {
+			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --http holds no ambient credential (forward-through, charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun, and a caller's own bearer cannot restore them because the stateless per-request server is rebuilt from this same startup manifest; serving the chat tools and paper resources anyway instead of exiting 1 — point the server at a manifest that carries the task noun (--manifest / $BARKPARK_MANIFEST, or a Barkpark whose anonymous projection includes task) to get them back", strings.Join(curatedTaskToolNames, ", "), err)
+		} else {
+			out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
+		}
 	}
 	if toolset == "all" {
 		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
@@ -267,7 +294,7 @@ func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.M
 	// never a token byte: the process holds no credential to leak.
 	out.errf("bp mcp serve: %s tools over Streamable HTTP on %s (server %s, forward-through bearer) — Ctrl-C to stop", toolsetLabel(toolset, nouns), ln.Addr(), ctx.Server)
 
-	httpSrv := &http.Server{Handler: handler}
+	httpSrv := newMCPHTTPServer(handler)
 	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -287,6 +314,56 @@ func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.M
 			return exitGeneric
 		}
 		return exitOK
+	}
+}
+
+// Timeouts and header cap for the `--http` listener. The endpoint is
+// UNAUTHENTICATED at the transport layer by design (forward-through bearer,
+// charter D18): every TCP peer that reaches the port gets a connection before
+// any credential is looked at, so slowloris / slow-body is an availability
+// hazard with no auth gate in front of it. A bare &http.Server{Handler: …}
+// applies NO deadline at all and lets a dribbling client hold a connection
+// open forever.
+const (
+	// mcpHTTPReadHeaderTimeout bounds the request LINE + headers. This is the
+	// slowloris clamp: a peer that dribbles headers is closed here.
+	mcpHTTPReadHeaderTimeout = 10 * time.Second
+	// mcpHTTPReadTimeout bounds the whole request read (headers + body). MCP
+	// JSON-RPC bodies are small; a body that takes longer than this is a
+	// slow-read attack, not a client. It does NOT bound the response: Go arms
+	// this deadline for the request read only, so a long-running tool call whose
+	// SSE response outlives it still completes.
+	mcpHTTPReadTimeout = 30 * time.Second
+	// mcpHTTPIdleTimeout bounds an idle keep-alive connection between requests,
+	// so a flood cannot park sockets for free.
+	mcpHTTPIdleTimeout = 120 * time.Second
+	// mcpHTTPMaxHeaderBytes caps header size well under Go's 1 MiB default —
+	// this endpoint's largest legitimate header is an Authorization bearer.
+	mcpHTTPMaxHeaderBytes = 64 << 10
+)
+
+// newMCPHTTPServer wraps the Streamable-HTTP handler in an http.Server with
+// those deadlines armed.
+//
+// WriteTimeout is DELIBERATELY LEFT ZERO. In stateless mode the SDK answers a
+// POST /mcp with Content-Type text/event-stream (streamable.go: jsonResponse is
+// off unless StreamableHTTPOptions.JSONResponse is set), so the response is an
+// SSE stream whose length is the duration of the downstream Barkpark call.
+// Go arms WriteTimeout as an absolute deadline once the headers are read, so a
+// non-zero value TRUNCATES a slow tool call mid-stream — measured: a 1.5 s SSE
+// response under WriteTimeout=500 ms delivered 28 of 70 bytes and the client
+// read "unexpected EOF". The response side is instead bounded per request by
+// the caller's own client timeout and by the downstream HTTP client's, and a
+// stalled peer's socket is reclaimed by IdleTimeout once the stream ends.
+// (GET /mcp — the standalone SSE stream — is 405 in stateless mode, so there is
+// no unbounded server-initiated stream to worry about.)
+func newMCPHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: mcpHTTPReadHeaderTimeout,
+		ReadTimeout:       mcpHTTPReadTimeout,
+		IdleTimeout:       mcpHTTPIdleTimeout,
+		MaxHeaderBytes:    mcpHTTPMaxHeaderBytes,
 	}
 }
 
@@ -317,9 +394,18 @@ func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifes
 	// (belt-and-braces — getServer overwrites Token per request regardless).
 	base.Token = ""
 
-	// Fail fast at startup exactly like stdio: if the manifest cannot back the
-	// requested toolset, refuse to come up (and surface any bridge-only warning
-	// ONCE, here, instead of per request).
+	// A missing task noun must NOT take the endpoint down. The startup manifest
+	// here is fetched with no credential, so on a stock Barkpark it is the
+	// anonymous projection (doc/media/search/auth — no task), and fail-fast turns
+	// that into a systemd crash loop serving 503 (see mcpToolsetTasksBestEffort).
+	if toolset == "tasks" {
+		toolset = mcpToolsetTasksBestEffort
+	}
+
+	// Still fail fast on anything the manifest genuinely cannot back (a bad
+	// --tools all bridge, a broken subset): refuse to come up rather than 500
+	// every call — and surface any degrade/bridge-only warning ONCE, here,
+	// instead of per request.
 	if _, err := buildMCPServer(out, g, base, m, toolset, nouns, false); err != nil {
 		return nil, err
 	}
@@ -452,6 +538,11 @@ func toolsetLabel(toolset string, nouns []string) string {
 	if toolset == "subset" {
 		return "connector-subset[" + strings.Join(nouns, ",") + "]"
 	}
+	if toolset == mcpToolsetTasksBestEffort {
+		// The --http best-effort variant of "tasks" is an internal registration
+		// mode, not a selector the operator typed — print what they asked for.
+		return "tasks"
+	}
 	return toolset
 }
 
@@ -482,7 +573,12 @@ flags:
                       credential — the process itself holds NO token, and a
                       missing or invalid bearer fails closed with the API's own
                       401. Bind loopback behind a TLS reverse proxy; never
-                      expose the plain listener publicly.
+                      expose the plain listener publicly. Because it holds no
+                      credential, its startup manifest is the ANONYMOUS
+                      /v1/capabilities projection — if that cannot back the
+                      curated task tools, --http logs ONE loud line and serves
+                      what it can (chat tools, paper resources) rather than
+                      exiting; stdio still fails fast.
 
 Published papers are also exposed as read-only MCP resources
 (barkpark://papers/<id>), independent of --tools. In --http mode papers read

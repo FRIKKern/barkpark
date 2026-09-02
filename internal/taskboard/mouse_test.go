@@ -241,7 +241,7 @@ func TestFooterVerbClickCloseTwoStep(t *testing.T) {
 
 	var gotDoc, gotWorker string
 	var gotEpoch int
-	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int) ActionResult {
+	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int, _ string) ActionResult {
 		gotDoc, gotWorker, gotEpoch = docID, worker, epoch
 		return ActionResult{OK: true, Message: "closed · epoch 7"}
 	}
@@ -279,7 +279,7 @@ func TestFooterVerbClickCloseTwoStep(t *testing.T) {
 // guard clears instead of firing.
 func TestFooterCloseClickDisarmedByOtherClick(t *testing.T) {
 	m := mouseModel(activeOrphans(claimedTask("c1", 7)))
-	m.doClose = func(_ *apiclient.Client, _, _ string, _ int) ActionResult {
+	m.doClose = func(_ *apiclient.Client, _, _ string, _ int, _ string) ActionResult {
 		t.Fatal("close fired after the guard should have been disarmed")
 		return ActionResult{}
 	}
@@ -518,7 +518,7 @@ func TestWideFooterVerbClickCloseTwoStep(t *testing.T) {
 
 	var gotDoc, gotWorker string
 	var gotEpoch int
-	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int) ActionResult {
+	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int, _ string) ActionResult {
 		gotDoc, gotWorker, gotEpoch = docID, worker, epoch
 		return ActionResult{OK: true, Message: "closed · epoch 7"}
 	}
@@ -561,7 +561,7 @@ func TestWideFooterVerbClickCloseTwoStep(t *testing.T) {
 // away from any verb — the guard disarms exactly as the pre-D111 clear did.
 func TestWideChromeClickDisarms(t *testing.T) {
 	m := wideMouseModel(activeOrphans(claimedTask("c1", 7)))
-	m.doClose = func(_ *apiclient.Client, _, _ string, _ int) ActionResult {
+	m.doClose = func(_ *apiclient.Client, _, _ string, _ int, _ string) ActionResult {
 		t.Fatal("close fired after a chrome click should have disarmed it")
 		return ActionResult{}
 	}

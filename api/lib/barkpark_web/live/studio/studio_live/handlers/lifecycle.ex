@@ -83,6 +83,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       not socket.assigns.paper_block_mode ->
         {:noreply, Shared.refetch_paper(socket)}
 
+      # task-e175d91d93291b10 — a delta frame carries a block's html rendered in
+      # the WRITER's process, under the WRITER's scope and resolvers, and
+      # `apply_paper_delta/2` paints it straight into the viewer's stream. For a
+      # write-denied viewer that is the same unclamped feed one frame at a time,
+      # so the frame is advisory here too: re-read, and let
+      # `reader_paper_blocks/2` decide what they see. (Reachable on the
+      # canvas-OFF View arm, which is where the stream is the surface.)
+      Shared.write_denied?(socket) ->
+        {:noreply, Shared.refetch_paper(socket)}
+
+
       Shared.paper_gap?(socket.assigns.paper_rev, frame.rev) ->
         {:noreply, Shared.refetch_paper(socket)}
 
@@ -115,14 +126,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   end
 
   def paper_updated(%{html: html} = msg, socket) do
-    if socket.assigns[:editor_view] == :paper do
-      {:noreply,
-       socket
-       |> assign(:paper_html, html)
-       |> assign(:paper_block_mode, false)
-       |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
-    else
-      {:noreply, socket}
+    cond do
+      socket.assigns[:editor_view] != :paper ->
+        {:noreply, socket}
+
+      # THE THIRD `:paper_html` FEED (task-fa27740cb3162dbd). The two mount-side
+      # reads are clamped in `Shared.Paper.reader_paper_html/2`; this one
+      # re-assigns AFTER mount, so an unclamped arm here would hand the raw
+      # cache back to the same anonymous `:docs`-share viewer one broadcast
+      # later. For a write-denied (non-editing) socket the frame is ADVISORY —
+      # exactly what `BulldocsLive` already does with it: re-read the store and
+      # let the reader clamp decide, rather than painting bytes off the wire.
+      # A stale `paper_doc` cannot be sanitized into the fresh body, so the
+      # refetch (not the frame's html) is what keeps the view both current and
+      # safe; `refetch_paper/1` carries the store's own rev, which is the truth
+      # the frame's `rev` was only advertising.
+      Shared.write_denied?(socket) ->
+        {:noreply, Shared.refetch_paper(socket)}
+
+      true ->
+        {:noreply,
+         socket
+         |> assign(:paper_html, html)
+         |> assign(:paper_block_mode, false)
+         |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
     end
   end
 

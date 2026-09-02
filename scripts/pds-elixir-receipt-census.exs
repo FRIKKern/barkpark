@@ -658,7 +658,28 @@ defmodule PDS.Census do
     {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat, :status_only_receipt},
     {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate, :status_only_receipt},
     {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create, :status_only_receipt},
+    # THE ASKUSERQUESTION ANSWER SUBMIT (ct-bl-question-updatedinput). Same class,
+    # and for the same reason, as its /approval twin's siblings above: the success
+    # arm is a bare 204 — `send_resp(conn, :no_content, "")` after the scoped
+    # session read, the pending-question read, the per-question option validation
+    # and the `{:allow, updated}` forward — so there is no body at all, and in
+    # particular not the `ok: true` key this lens greps for, which is exactly what
+    # `status_only_receipt` names post-wave-40. The class is assigned on that
+    # predicate alone; whether the 204 is EARNED is a judgement the roster row on
+    # ChatController.approval/2 already carries for the shared
+    # `StudioChat.update_approval_status/3` fold, and this row does not restate it.
+    {:post, "/v1/chat/sessions/:id/answer", "BarkparkWeb.ChatController", :answer,
+     :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive, :status_only_receipt},
+    # THE CHAT-OWNED ATTACHMENT UPLOAD (ct-bl-chat-attachments). Same class, and
+    # for the same reason, as every sibling /v1/chat/sessions write above: the 201
+    # renders the STORED pointer projected through `Attachments.reference/2` — a
+    # real store-derived receipt — and simply does not spell the `ok: true` key
+    # this lens greps for, which is exactly what `status_only_receipt` names
+    # post-wave-40. The GET twin is not here because a read is not a ROUTED-WRITE
+    # member; only the POST is an arrival this table has to dispose.
+    {:post, "/v1/chat/sessions/:id/attachments", "BarkparkWeb.ChatAttachmentController", :create,
+     :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/state", "BarkparkWeb.ChatHostController", :report_state, :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/unarchive", "BarkparkWeb.ChatController", :unarchive, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment, :status_only_receipt},
@@ -1474,7 +1495,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2798"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2919"},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
@@ -1486,7 +1507,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:558
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.release/2", "64399052", "86587931"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:741"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:862"},
     # barkpark_web/controllers/tasks_controller.ex:587
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.close_response/3", "102889179", "17778956"},
@@ -1494,7 +1515,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:652
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3510"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3631"},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
@@ -1544,7 +1565,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1352
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1984"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2105"},
     # barkpark_web/controllers/tasks_controller.ex:1379
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},

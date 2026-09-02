@@ -16,6 +16,64 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
   `async: false` — sheet sessions are globally registered processes and
   presence diffs fan out across test-spawned LiveViews, same as the M2
   grid suite.
+
+  ## Two flake shapes this suite family is guarded against
+
+  ### 1. Peer-NAME refutations are scoped, never whole-document
+
+  Every `render/1` of a LiveView carries the mount's root id, and LiveView
+  builds it as `"phx-" <> Base.url_encode64(<<nanosecond::64, phash2::16,
+  unique_integer::16>>)` (`Phoenix.LiveView.Utils.random_encoded_bytes/0`) —
+  16 characters drawn from a 64-symbol alphabet. Any three-letter peer name
+  therefore lands inside that id with probability ~14/64³ ≈ 1/18_700 per
+  mount, and the draw `phx-GMYBobnrrpWUuvZB` really happened: it red-flagged
+  a PR that changed one shell script and zero Elixir. `refute html =~ "Bob"`
+  is not a check, it is a coin flip with long odds.
+
+  A peer's name renders in exactly ONE element — the `.sheet-peer-tag` span
+  inside `[data-test-id="sheet-peer-layer"]` (sheet_grid.ex `peer_layer/1`),
+  and the whole layer is `:if`-gated off once the last peer leaves. So the
+  rule for this family is: **peer-name assertions go through `peer_layer/1`
+  or `peer_cursor/2`; class-name assertions ("sheet-peer-tag",
+  "sheet-peer-editing") stay whole-document**, which is both collision-proof
+  and strictly stronger. The same fix is applied in
+  `sheets_m4_adversarial_test.exs` and `sheets_m4_proof_test.exs`.
+
+  ### 2. Wall-clock budget census — the whole Studio/Sheets family
+
+  The MEASURE test below is the only budget in this family whose bound sits
+  within an order of magnitude of the measured value, which is why it is the
+  only one that has ever flaked. Enumerated so the CLASS is closed, not the
+  instance (`grep -rn ':timer.tc\|System.monotonic_time' test/` reproduces
+  the sweep):
+
+    - `studio_live_sheet_presence_test.exs` — `assert frame_ms < 10`, below.
+      **min-of-10, baseline-subtracted.** The bound is ~3x the true cost and
+      sits BELOW the ~15ms regression it exists to catch. Stabilized at
+      #14414; the estimator rationale is inline at the assertion.
+    - `sheets/engine_perf_test.exs` — `assert ratio < 8.0` plus a 10_000ms
+      absolute bound. Wall-clock, ~8x headroom, widened with a recorded
+      rationale at `0027ed383` after the identical false-RED-under-load mode.
+    - `studio/chat_transcript_window_test.exs` — `assert ratio < 30`. IMMUNE
+      by construction: it counts BEAM **reductions**, not time, so scheduler
+      noise cannot move it. Prefer this shape for any new guard.
+    - `sheets_m1_proof_test.exs` — `assert latency_ms < 500`. A single
+      wall-clock sample, but ~100x headroom over the observed few-ms
+      op->delta round trip.
+    - `sheets/session_test.exs` and `sheets_m3_m5_proof_test.exs`
+      (`assert micros < 5_000_000`), `sheets/engine_test.exs`
+      (`assert micros < 1_000_000`) — single samples carrying two to three
+      orders of magnitude of headroom. They guard against hangs, not against
+      micro-benchmark drift, and cannot coin-flip.
+    - `sheets_grid_proof_test.exs` uses `System.monotonic_time/1` only as a
+      `wait_until` deadline. Not a budget assertion.
+
+  No other budget in the family is a coin flip. A NEW timing guard here
+  should count reductions like the chat-transcript one or, if it must use the
+  clock, take the MINIMUM of N — never a single sample, and never a median
+  (the estimator note at the assertion says why the median is the wrong
+  statistic for this particular measurement).
+
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -108,6 +166,22 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
   # boxes render as "" so `eventually` retries instead of raising.
   defp peer_cursor(view, ref) do
     selector = ~s(.sheet-peer-cursor[data-peer-cell="#{ref}"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+  end
+
+  # A peer's NAME is rendered in exactly one place: the `.sheet-peer-tag`
+  # span inside the presence overlay ([data-test-id="sheet-peer-layer"],
+  # sheet_grid.ex peer_layer/1), and the whole layer disappears once the
+  # last peer leaves. Refuting a short name against the WHOLE rendered
+  # document is therefore a coin flip, not a check: the document also
+  # carries LiveView's random base64url root id, and `phx-GMYBobnrrpWUuvZB`
+  # contains the literal substring "Bob" — one such draw red-flagged a PR
+  # that never touched sheets. Scope every peer-NAME refutation to this
+  # helper; class-name refutations ("sheet-peer-tag", "sheet-peer-editing")
+  # carry no collision risk and stay whole-document, which is stronger.
+  # Absent layer renders as "" so `eventually` retries instead of raising.
+  defp peer_layer(view) do
+    selector = ~s([data-test-id="sheet-peer-layer"])
     if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
   end
 
@@ -249,7 +323,10 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     Process.flag(:trap_exit, true)
     GenServer.stop(view2.pid)
 
-    eventually(fn -> refute render(view1) =~ "Bob" end)
+    eventually(fn ->
+      refute render(view1) =~ "sheet-peer-tag"
+      refute peer_layer(view1) =~ "Bob"
+    end)
   end
 
   # ── render cost (review-phase measurement) ─────────────────────────────────

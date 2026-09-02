@@ -130,4 +130,59 @@ defmodule Barkpark.PortableDoc.TiersTest do
                inspect(phantom)
     end
   end
+
+  describe "THE CANONICAL COUNT ANCHOR (mob-zb-bl-canonical-anchor)" do
+    # ONE number, run-derived, in one place.
+    #
+    # WHY A PIN AT ALL. The tests above prove the classification is well-FORMED
+    # (disjoint, duplicate-free, and set-equal to compose.ex's render surface).
+    # None of them says HOW MANY, and that absence is what kept the block-type
+    # number war alive across three waves: every rival count in circulation
+    # (Go-76, Go-82, Elixir-75, react-66/59, 79-vs-83) was a quoted-string
+    # census, and every one of them was wrong. This is the L1 run-proof those
+    # static claims lacked — a number a reader can cite because a test executed
+    # it, not because someone counted lines.
+    #
+    # WHY GREP CANNOT ANSWER THIS AND THE LANGUAGE CAN. `Tiers`'s :section list
+    # is an UNQUOTED `~w()` sigil, so a quoted-string census silently drops all
+    # three of its types; the two camelCase types (`arrayOf`, `localizedText`)
+    # are dropped again by any lowercase-only character class. Both mistakes are
+    # documented in the wave's own re-derivation ledgers. `length/1` over
+    # `known_types/0` is immune to both by construction: it counts the map the
+    # module actually built.
+    #
+    # WHEN THIS REDS, IT IS DOING ITS JOB. A block type landed or left. Fix the
+    # number here (and in the exclusions ledger,
+    # docs/decisions/0006-canonical-block-type-count.md) as part of that change —
+    # never the other way round. The number is downstream of the code; nothing
+    # is allowed to pin a count to make a sentence somewhere else come true.
+    @canonical_block_type_count 79
+
+    test "length(known_types/0) is EXACTLY the pinned canonical count" do
+      assert length(Tiers.known_types()) == @canonical_block_type_count
+    end
+
+    test "the tier lists SUM to the same number (the pin cannot hide a double-count)" do
+      # known_types/0 reads Map.keys(@tier_of), which silently de-duplicates. If
+      # the pin were checked only against that, a type appearing in two tiers
+      # would leave both counts equal and the drift invisible. Summing the raw
+      # lists is the independent arithmetic: sum > pin means a duplicate.
+      sum =
+        Tiers.by_tier()
+        |> Enum.map(fn {_tier, types} -> length(types) end)
+        |> Enum.sum()
+
+      assert sum == @canonical_block_type_count,
+             "tier lists sum to #{sum} but known_types/0 pins " <>
+               "#{@canonical_block_type_count} — a type is classified twice"
+    end
+
+    test "compose.ex's render surface carries the SAME count — two modules, one number" do
+      # The completeness tests above assert the two SETS are equal, so this is
+      # arithmetically implied — and it is written out anyway, because the whole
+      # point of the anchor is that a reader can cite the number for the RENDERER
+      # (not just for the classifier) and point at a line that executed it.
+      assert length(renderable_types()) == @canonical_block_type_count
+    end
+  end
 end

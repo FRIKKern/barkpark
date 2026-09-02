@@ -1569,12 +1569,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # status and — the part a hand-rolled body silently dropped — `request_id` stay
   # byte-identical to what every other v1 error carries, and an operator can
   # actually quote the failing request) and then has exactly ONE field replaced:
-  # the code-keyed `halted` hint, which reads "A plugin's lifecycle hook vetoed
-  # this write" and is the one sentence that would send an author editing a
-  # document that is fine (charter D542). The wire code/status stay `halted` 409
-  # (docs/api-v1.md §9) — the honest 503 `dedup_unavailable` code is a
-  # vocabulary change filed on its own task, because registering a new code
-  # forces an errors.ex + byte-capped docs edit.
+  # the hint, narrowed from the shared arm's wording to this door's noun ("paper"
+  # rather than "write"). The SHARED arm now answers 503 with its own transient
+  # hint (dr-w32-bl-dedup-unavailable-is-an-outage-called-a-veto), so the status
+  # below is retryable without a controller override; only the wire `code` still
+  # reads `halted` — the honest `dedup_unavailable` code is a vocabulary change
+  # filed on its own task, because registering a new code forces a served-OpenAPI
+  # enum regen plus a byte-capped docs/api-v1.md §9 edit.
   @dedup_unavailable_hint "Transient: the duplicate-scan could not complete, so this paper was neither written nor refused on its merits. Resend the identical request. If it keeps failing the database is degraded — this is an outage to report, not a document to fix."
 
   defp dedup_unavailable_error(conn, reason) do

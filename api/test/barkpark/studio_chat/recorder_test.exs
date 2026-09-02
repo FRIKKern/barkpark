@@ -2724,4 +2724,120 @@ defmodule Barkpark.StudioChat.RecorderTest do
       assert %{source_markdown: [_ | _]} = Ecto.Changeset.traverse_errors(cs, & &1)
     end
   end
+
+  # ── live ledger transitions re-broadcast for bp chat (tlv) ─────────────────
+  #
+  # The Recorder rides the SAME `documents:production` ledger stream Studio's
+  # chat_live does, folds it through the SAME pure rule, and re-broadcasts the
+  # scoped result on `topic/1` — the per-session topic the SSE forwarder (and
+  # only the SSE forwarder) subscribes to. That second broadcast is what gives
+  # `bp chat` a live transition without a second bus.
+  describe "task transitions re-broadcast on the session topic (tlv)" do
+    # A ledger broadcast in the shape Content.Broadcast.broadcast_document_mutation/3
+    # emits — the lean subset the fold reads.
+    defp task_doc_changed(doc_id, title, content, opts) do
+      {:document_changed,
+       %{
+         type: "task",
+         doc_id: doc_id,
+         rev: Keyword.get(opts, :rev, "rev-1"),
+         mutation: Keyword.fetch!(opts, :mutation),
+         event_id: Keyword.fetch!(opts, :event_id),
+         doc: %{
+           doc_id: doc_id,
+           title: title,
+           status: "published",
+           content: content,
+           updated_at: nil
+         }
+       }}
+    end
+
+    test "our worker's claim re-broadcasts a compact transition", %{
+      sid: sid,
+      recorder: recorder
+    } do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      worker = Barkpark.StudioChat.Runtime.worker_id("claude", sid)
+
+      frame(
+        recorder,
+        task_doc_changed(
+          "task-rec-1",
+          "Mend the fence",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-rec-1"
+        )
+      )
+
+      assert_receive {:chat_task_transition, ^sid, summary}
+      assert summary.event_id == "ev-rec-1"
+      assert summary.task_id == "task-rec-1"
+      assert summary.status == "in_progress"
+      assert summary.verb == "claimed"
+      assert summary.label == "Mend the fence → in_progress (claimed)"
+    end
+
+    test "a replayed event re-broadcasts ONCE", %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      worker = Barkpark.StudioChat.Runtime.worker_id("claude", sid)
+
+      msg =
+        task_doc_changed(
+          "task-rec-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-rec-2"
+        )
+
+      frame(recorder, msg)
+      frame(recorder, msg)
+
+      assert_receive {:chat_task_transition, ^sid, %{event_id: "ev-rec-2"}}
+      refute_receive {:chat_task_transition, _, %{event_id: "ev-rec-2"}}, 100
+    end
+
+    test "another worker's task never re-broadcasts", %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        task_doc_changed(
+          "task-rec-3",
+          "Not ours",
+          %{
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "claude-chat-deadbeef"}
+          },
+          mutation: "task.claimed",
+          event_id: "ev-rec-3"
+        )
+      )
+
+      refute_receive {:chat_task_transition, _, _}, 100
+    end
+
+    test "nothing is persisted — the transition is live-only chrome", %{
+      sid: sid,
+      recorder: recorder
+    } do
+      before = length(StudioChat.list_messages(sid))
+      worker = Barkpark.StudioChat.Runtime.worker_id("claude", sid)
+
+      frame(
+        recorder,
+        task_doc_changed(
+          "task-rec-4",
+          "Leave no row",
+          %{"lifecycle_status" => "done", "claim" => %{"worker" => worker}},
+          mutation: "task.closed",
+          event_id: "ev-rec-4"
+        )
+      )
+
+      assert length(StudioChat.list_messages(sid)) == before
+    end
+  end
 end

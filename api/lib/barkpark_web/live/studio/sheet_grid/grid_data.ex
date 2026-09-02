@@ -265,6 +265,34 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
     )
   end
 
+  @doc """
+  The workspace the live Sheets session for this grid is keyed under — the
+  MOUNTED ROW's own `workspace_id` (task-f0c064a406e8d363).
+
+  `Barkpark.Plugins.Sheets.Session` keys its registry by
+  `{dataset, workspace_id, published-id}` and scopes its document read to that
+  workspace, so every `Session.peek/3` and `Session.apply_ops/5` from this
+  component MUST name the same tenant or it addresses a different (usually
+  absent) session. It is the same value `Session.topic/3` and
+  `Session.presence_topic/3` already key on (`StudioLive.Shared`'s
+  `ensure_sheet_subscription/2` passes `doc.workspace_id`), so the delta topic
+  and the session process agree by construction.
+
+  Nil-safe: a socket without a `:doc` assign, or a legacy row with no
+  workspace, yields `nil` — the unscoped session key, byte-identical to the
+  pre-fix behaviour. ONE seam, so a new call site cannot quietly hand the
+  session a different tenant than the topic.
+  """
+  @spec session_workspace_id(Phoenix.LiveView.Socket.t() | map()) :: String.t() | nil
+  def session_workspace_id(%{assigns: assigns}), do: session_workspace_id(assigns)
+
+  def session_workspace_id(assigns) when is_map(assigns) do
+    case Map.get(assigns, :doc) do
+      %{workspace_id: ws} -> ws
+      _ -> nil
+    end
+  end
+
   # ── grid geometry ────────────────────────────────────────────────────────
 
   def tabs(socket), do: Map.get(socket.assigns.content || %{}, "tabs") || []

@@ -476,6 +476,18 @@ jobs:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
 
+      # Node is a TEST DEPENDENCY of this job, not a convenience: the required
+      # ExUnit case api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs
+      # shells `node` over the four api/assets/sheet-grid/__*.test.mjs harnesses
+      # (PR #15196) and FLUNKS — never skips — when node is absent. Until this
+      # step existed the case passed only because ubuntu-latest happens to ship
+      # node; a required gate must not depend on the runner image's luck. Same
+      # pinned action + major cloud.yml uses for its console plan-catalog mirror.
+      - name: Setup Node (js_harness_test.exs shells node over api/assets/sheet-grid)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       # ── unreachable-assert-message ratchet, riding this job ──────────────
       # A STEP, not a job, and deliberately so. The path-escape job's own
       # comment records why: each of security-gate-shape.test.sh and the three

@@ -2402,7 +2402,16 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert c4_nav =~ ~s(aria-selected="true")
   end
 
-  test "the /sheets/:slug reader keeps NO hook and NO aria-selected (out of scope)",
+  # SUPERSEDED BY THE RULING (pds-w43-bl-sheetgrid-reader-half). This used to
+  # assert the reader carried NO hook at all and pointed at that row as the open
+  # question. Main ruled on 2026-09-02 10:52Z: the reader gets a "client-only
+  # selection + copy layer in bp-sheet-grid.js for :reader — paints its own
+  # class, pushes ZERO events, reads data-v already on reader tds"; reversing
+  # the chrome policy was REJECTED. So the reader now carries a DIFFERENT hook,
+  # and everything this test was really guarding — no Studio hook, no
+  # role="application", no server-painted selection — is unchanged and still
+  # asserted below.
+  test "the /sheets/:slug reader carries the reader-only hook, never SheetGrid's server surface",
        %{conn: _conn} do
     doc = create_sheet!("sg-readmode-reader", one_tab(%{"A1" => %{"v" => "hello"}}))
 
@@ -2421,14 +2430,28 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
       )
 
     [wrap] = Regex.run(~r/<div[^>]*class="sheet-grid-wrap"[^>]*>/, html)
-    refute wrap =~ "phx-hook="
+    assert wrap =~ ~s(phx-hook="SheetReaderSelect")
+    # The Studio hook — cell-click / head-click / nav / nav-edge / nav-corner /
+    # select-all, every one a server round-trip — is still absent here.
+    refute wrap =~ ~s(phx-hook="SheetGrid")
+    # role="application" stays edit-only: it muted a screen reader's own
+    # table-navigation commands on the read-only reader.
     assert wrap =~ ~s(role="region")
+    refute wrap =~ ~s(role="application")
+    # No server-stamped cursor either — the reader hook sets
+    # aria-activedescendant from the client as its selection moves.
+    refute wrap =~ "aria-activedescendant"
 
-    # grid_sel(_, _, :reader) is {0,0,0,0} — off the 1-based grid, so no cell is
-    # ever selected and aria-selected is omitted entirely rather than stamping a
-    # meaningless "false" on every cell. Filed as pds-w43-bl-sheetgrid-reader-half.
+    # THE SERVER-SIDE POLICY IS UNCHANGED. grid_sel(_, _, :reader) is still
+    # {0,0,0,0} — off the 1-based grid — so no cell is ever server-selected and
+    # aria-selected is omitted entirely rather than stamping a meaningless
+    # "false" on every cell. The reader's own highlight is `sheet-rsel`, painted
+    # by the client hook, deliberately NOT this class.
     [a1_td] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, html)
     refute a1_td =~ "aria-selected"
     refute a1_td =~ "sheet-sel"
+    refute a1_td =~ "sheet-rsel"
+    # …and the data the client layer copies from is already stamped.
+    assert a1_td =~ ~s(data-v="hello")
   end
 end

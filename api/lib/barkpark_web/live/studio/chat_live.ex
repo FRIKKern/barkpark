@@ -37,11 +37,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.PlanPapers
+  alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
+  alias Barkpark.StudioChat.TaskTransition
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -288,6 +291,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
          hand_tasks: %{},
+         # Live task transitions (tlv-bl-chat-live-transition-stream). The
+         # STICKY set of published task ids this session has touched — grown
+         # from the session worker's claims (see StudioChat.TaskTransition's
+         # scoping rule) and seeded from its held claims on open — plus the
+         # idempotency set of already-rendered mutation_event ids, so a
+         # duplicate or Last-Event-ID-replayed lifecycle event renders once.
+         touched_tasks: MapSet.new(),
+         seen_task_events: MapSet.new(),
          # The ready-task picker: nil (closed) or the ready head as lean rows.
          # Loaded fresh on every open — never a cached queue.
          task_picker: nil,
@@ -1959,7 +1970,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
           do: Map.put(socket.assigns.hand_tasks, id, hand_task_row(msg.doc.title, content)),
           else: Map.delete(socket.assigns.hand_tasks, id)
 
-      {:noreply, assign(socket, hand_tasks: hand_tasks)}
+      {:noreply,
+       socket
+       |> assign(hand_tasks: hand_tasks)
+       |> fold_task_transition(msg, worker)}
     end
   end
 
@@ -2035,6 +2049,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # explicitly ignored here so the tick is documented, not merely swallowed by
   # the catch-all below.
   def handle_info({:chat_heartbeat, _sid, _ts}, socket), do: {:noreply, socket}
+
+  # The session's task-credential verdict changed under us
+  # (task-cth-bl-token-renewal). A long conversation must never discover its
+  # lost hands as an unexplained 401: the Session renews on its own clock and
+  # pushes the outcome through the Recorder, so the onboarding card flips in
+  # place — no browser reload, no Re-check click, no reconnect. The frame
+  # carries a VERDICT ATOM only; the credential itself never reaches the
+  # LiveView, the assigns, or the DOM.
+  def handle_info({:claude_chat_task_hands, verdict}, socket) do
+    {:noreply, assign(socket, readiness: readiness_for_hands(verdict))}
+  end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -2355,6 +2380,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span aria-hidden="true">✻</span> <%= @message.text %>
           </div>
         <% end %>
+      <% :task_transition -> %>
+        <%!-- A live ledger transition (tlv): one quiet mono row, tinted with the
+              row's `--life-*` lifecycle token so a chip and a transition agree on
+              what "done" or "blocked" looks like. Live-only chrome — never
+              persisted, so a replay of this conversation carries the settled
+              task_prime snapshot instead, unchanged. --%>
+        <div
+          class="text-xs text-dim"
+          style="font-family: var(--font-mono); display: flex; gap: 6px; align-items: baseline;"
+          data-task-transition={@message[:task_id]}
+          data-task-status={@message[:task_status]}
+          data-event-key={@message[:event_key]}
+        >
+          <span style={"color: #{@message[:task_color]}; flex: none;"} aria-hidden="true">◆</span>
+          <span style="min-width: 0; overflow-wrap: anywhere;"><%= @message.text %></span>
+        </div>
       <% _ -> %>
         <div class="text-xs text-dim" style="font-family: var(--font-mono);">
           <span aria-hidden="true">✻</span> <%= @message.text %>
@@ -3449,7 +3490,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
               named state + next step, never a silent Logger line). --%>
         <.chat_readiness_card
-          :if={@readiness in [:no_task_hands, :task_token_expired]}
+          :if={@readiness in [:no_task_hands, :task_token_expired, :task_token_rearmed]}
           readiness={@readiness}
           provider={@provider}
         />
@@ -3611,6 +3652,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp readiness_title(:task_token_expired, _provider),
     do: "The chat's task credential expired"
 
+  defp readiness_title(:task_token_rearmed, _provider),
+    do: "Task hands re-armed — restart to hand them over"
+
   defp readiness_title(_, _provider), do: "Checking readiness"
 
   # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
@@ -3638,13 +3682,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp readiness_body(:task_token_expired, _provider),
     do:
-      "This session's minted Barkpark task token has expired, so task tools stopped " <>
-        "working. Re-check, then your next send mints a fresh credential."
+      "This session's minted Barkpark task token has expired and Barkpark could not " <>
+        "mint a replacement, so its bp task tools are offline. The chat itself still " <>
+        "works. Start a new session to mint fresh task hands."
+
+  defp readiness_body(:task_token_rearmed, _provider),
+    do:
+      "This session's task credential was about to expire, so Barkpark minted a fresh " <>
+        "one and revoked the old. The new credential is already wired into this " <>
+        "session's MCP config; the running agent's shell still holds the retired one " <>
+        "until the session restarts — a live process's environment cannot be rewritten."
 
   defp readiness_body(_, provider), do: "Checking #{provider_name(provider)} readiness…"
 
   defp readiness_step(:not_logged_in, "claude"), do: "claude auth login"
   defp readiness_step(:not_logged_in, "codex"), do: "codex login"
+
+  # The named next step for a re-armed session: the MCP lane already has the
+  # fresh credential; the Bash lane is re-armed by the next spawn.
+  defp readiness_step(:task_token_rearmed, _provider), do: "Restart this session"
   defp readiness_step(_, _provider), do: nil
 
   defp provider_name("claude"), do: "Claude Code"
@@ -4250,6 +4306,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #   :not_logged_in      claude lane: CLI present, not authed  (locks composer)
   #   :no_task_hands      bp lane: the task-credential mint was refused
   #   :task_token_expired bp lane: the minted task credential expired
+  #   :task_token_rearmed bp lane: renewed — restart to re-arm the shell lane
   #   :ready              live composer
   #
   # The two claude-lane states REPLACE the composer (there is nothing to send
@@ -4299,16 +4356,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # moment. The default reads the spawn-env slice's queryable mint state
   # (provider `task_hands/1`: :minted | :mint_refused | :not_attempted |
   # :unknown); the config seam injects a verdict for deterministic tests.
-  # `:task_token_expired` is reachable only through the seam today —
-  # mid-session TTL expiry detection is backlogged (task-cth-bl-token-renewal);
-  # the card state is ready for it.
+  # `:expired` and `:rearmed` are now REAL provider verdicts, not seam-only
+  # placeholders (task-cth-bl-token-renewal): the session reads its own
+  # credential's clock, renews through the same mint before expiry, and reports
+  # `:rearmed` afterwards because a live child's environment still carries the
+  # retired value.
   defp hands_readiness(provider, session) do
-    case hands_state(provider, session) do
-      state when state in [:refused, :mint_refused] -> :no_task_hands
-      :expired -> :task_token_expired
-      _ -> :ready
-    end
+    readiness_for_hands(hands_state(provider, session))
   end
+
+  # One verdict->card mapping, shared by the probe path and the pushed
+  # `{:claude_chat_task_hands, verdict}` frame, so a renewal that lands
+  # mid-conversation and a Re-check can never disagree.
+  defp readiness_for_hands(state) when state in [:refused, :mint_refused], do: :no_task_hands
+  defp readiness_for_hands(:expired), do: :task_token_expired
+  defp readiness_for_hands(:rearmed), do: :task_token_rearmed
+  defp readiness_for_hands(_), do: :ready
 
   defp hands_state(_provider, nil), do: :ok
 
@@ -4542,6 +4605,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: nil,
       # No session → no worker → no held claims; the picker is per-view UI.
       hand_tasks: %{},
+      # A new chat is a new conversation: it has touched no task and rendered
+      # no transition, so BOTH the scope set and the idempotency set reset.
+      touched_tasks: MapSet.new(),
+      seen_task_events: MapSet.new(),
       task_picker: nil,
       mode: "plan",
       provider: "claude",
@@ -5066,9 +5133,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
     store_id = socket.assigns.store_session_id
 
     attachments =
-      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
+      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, _entry ->
+        # (entry ignored: the media type comes from the BYTES, not client_type)
+        # `Attachments.put/2` is the ONE store seam both surfaces write through
+        # (ct-bl-chat-attachments): the Studio composer and the
+        # `POST /v1/chat/sessions/:id/attachments` transport route land in the
+        # SAME content-addressed store, so a Studio-pasted image is readable by
+        # `bp chat` through the chat-owned read route with no second store and no
+        # per-surface fork. It also sniffs the media type from the bytes instead
+        # of trusting `entry.client_type` — a client-declared type is caller
+        # input, and the type the store records is what is served back.
         with {:ok, bytes} <- File.read(tmp_path),
-             {:ok, pointer} <- StudioChat.store_attachment(store_id, bytes, entry.client_type) do
+             {:ok, pointer} <- Attachments.put(store_id, bytes) do
           {:ok, Map.put(pointer, :bytes, bytes)}
         else
           {:error, reason} ->
@@ -5111,15 +5187,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # The jsonb pointer for a stored attachment — path/media_type/sha256/byte_size
-  # ONLY, never the bytes.
-  defp attachment_pointer_json(a) do
-    %{
-      "path" => a.path,
-      "media_type" => a.media_type,
-      "sha256" => a.sha256,
-      "byte_size" => a.byte_size
-    }
-  end
+  # ONLY, never the bytes. Delegated to `Attachments.pointer_json/1` so the
+  # Studio composer and the transport persist the IDENTICAL pointer shape; the
+  # wire projection (`Attachments.reference/2`, which drops `path`) then reads
+  # one shape rather than guessing between two writers.
+  defp attachment_pointer_json(a), do: Attachments.pointer_json(a)
 
   defp data_uri(media_type, bytes),
     do: "data:#{media_type};base64,#{Base.encode64(bytes)}"
@@ -5477,6 +5549,50 @@ defmodule BarkparkWeb.Studio.ChatLive do
     [workspace_id: ws && ws.id, project_id: proj && proj.id]
   end
 
+  # ── live task transitions in the transcript (tlv) ─────────────────────────
+  #
+  # The Doing strip above shows WHAT this session holds; this shows WHEN it
+  # changed. A lifecycle mutation of a task this session has touched appends one
+  # tinted mono row to the transcript, so a claim, a stage, a close, a release,
+  # or a lead's kill lands in the conversation within PubSub latency instead of
+  # waiting for the agent's next MCP re-fetch.
+  #
+  # No new bus and no new subscription: this rides the SAME
+  # `documents:<dataset>` stream `subscribe_hand_tasks/1` already joined, and
+  # the SAME `{:document_changed, …}` message the Doing strip folds. The scope
+  # rule, the idempotency key, and the label all live in
+  # `StudioChat.TaskTransition` — the ONE derivation `Recorder` re-broadcasts to
+  # `bp chat` from, so the two surfaces cannot drift.
+  #
+  # Idempotency (criterion 3): the mutation_events row id is the key. A
+  # duplicate broadcast, or a Last-Event-ID replay of the same event, is
+  # dropped BEFORE the append — so it renders exactly once and the rows that
+  # came after it keep their positions. The transition row is live-only chrome:
+  # it is never persisted, so the separate `task_prime` snapshot contract (the
+  # MCP chip renderer) is untouched.
+  defp fold_task_transition(socket, msg, worker) do
+    case TaskTransition.project(msg, worker, socket.assigns.touched_tasks) do
+      {:ok, transition, touched} ->
+        socket = assign(socket, touched_tasks: touched)
+
+        if MapSet.member?(socket.assigns.seen_task_events, transition.key) do
+          socket
+        else
+          socket
+          |> update(:seen_task_events, &MapSet.put(&1, transition.key))
+          |> append_message(:task_transition, transition.label,
+            task_id: transition.task_id,
+            task_status: transition.status,
+            task_color: transition.color,
+            event_key: transition.key
+          )
+        end
+
+      {:skip, touched} ->
+        assign(socket, touched_tasks: touched)
+    end
+  end
+
   # Re-read the session worker's held claims off the ledger (reopen/mount).
   # No session → no worker → empty strip, no query.
   defp hydrate_hand_tasks(%{assigns: %{store_session_id: nil}} = socket),
@@ -5492,7 +5608,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
       end)
 
-    assign(socket, hand_tasks: rows)
+    # SEED the transition scope off the SAME read (tlv, no second query): every
+    # claim this worker already holds is a task this session has touched, so a
+    # release/reap/kill arriving AFTER the reopen — which carries no
+    # claim.worker to match on — still renders as a transition.
+    socket
+    |> assign(hand_tasks: rows)
+    |> update(:touched_tasks, fn set ->
+      Enum.reduce(Map.keys(rows), set, &MapSet.put(&2, &1))
+    end)
   end
 
   defp hand_task_row(title, content) when is_map(content) do
@@ -5810,44 +5934,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
-  # Normalize the AskUserQuestion input into a render-ready question list. Each
-  # question: prompt string, optional header, multiSelect flag, and option chips
-  # (label + optional description). Tolerant of options given as bare strings.
-  defp parse_questions(%{"questions" => qs}) when is_list(qs) do
-    Enum.map(qs, fn q ->
-      %{
-        question: to_string(Map.get(q, "question", "")),
-        header: nonempty(Map.get(q, "header")),
-        multi: Map.get(q, "multiSelect", false) == true,
-        options: parse_options(Map.get(q, "options"))
-      }
-    end)
-  end
-
-  defp parse_questions(_), do: []
-
-  defp parse_options(opts) when is_list(opts) do
-    opts
-    |> Enum.map(fn
-      %{"label" => label} = o ->
-        %{label: to_string(label), description: nonempty(Map.get(o, "description"))}
-
-      label when is_binary(label) ->
-        %{label: label, description: nil}
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp parse_options(_), do: []
-
-  defp nonempty(s) when is_binary(s) do
-    if String.trim(s) == "", do: nil, else: s
-  end
-
-  defp nonempty(_), do: nil
+  # Normalize the AskUserQuestion input into a render-ready question list.
+  # Delegated to StudioChat.QuestionAnswer, which is the SAME parse the `/answer`
+  # transport validates against (ct-bl-question-updatedinput): what the human sees
+  # on this card and what the server will accept from the terminal cannot drift,
+  # because there is one parse.
+  defp parse_questions(input), do: QuestionAnswer.parse_questions(input)
 
   # Seed an empty answer form when a question card first arrives, so the render
   # never reads a missing map. Idempotent (put_new): a co-viewing replay never
@@ -5875,29 +5967,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # Collapse the form scratch state into the wire answer map (charter D32):
   # keyed by the QUESTION STRING; a non-empty custom field wins; multiSelect =
-  # comma-joined labels; unanswered questions are omitted.
-  defp build_answers(questions, form) do
-    questions
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {q, qidx}, acc ->
-      case answer_value(q, Map.get(form.selections, qidx, []), Map.get(form.custom, qidx)) do
-        nil -> acc
-        "" -> acc
-        value -> Map.put(acc, q.question, value)
-      end
-    end)
-  end
-
-  defp answer_value(q, selections, custom) do
-    trimmed = if is_binary(custom), do: String.trim(custom), else: ""
-
-    cond do
-      trimmed != "" -> trimmed
-      q.multi and selections != [] -> Enum.join(selections, ", ")
-      selections != [] -> List.first(selections)
-      true -> nil
-    end
-  end
+  # comma-joined labels; unanswered questions are omitted. Owned by
+  # StudioChat.QuestionAnswer so Studio and the `/answer` transport speak ONE
+  # answer dialect to the CLI (ct-bl-question-updatedinput).
+  defp build_answers(questions, form), do: QuestionAnswer.build_answers(questions, form)
 
   # Render helpers for the question form: is a chip selected, is a question
   # answered at all, and how many of N are answered (the N/M progress).
@@ -6540,9 +6613,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # The rail speaks the lifecycle palette (charter D60): a settled cycle is
   # --life-done, a live one --life-in_progress, an interrupted one --life-blocked.
+  #
+  # NOTE this rail colours the AGENT-WORKFLOW vocabulary (running / completed /
+  # interrupted), NOT the task lifecycle — the three cases below are exact and
+  # stay exact. What changed (TLV charter D14) is the DEFAULT: it used to be
+  # `--life-in_progress`, so ANY status this build has not heard of rendered as a
+  # bright live run — the worst possible direction for a wrong guess, since it
+  # reports work in flight that may not be. `running` is now its own explicit
+  # clause and the fall-through is neutral.
+  defp rail_status_color("running"), do: "var(--life-in_progress)"
   defp rail_status_color("completed"), do: "var(--life-done)"
   defp rail_status_color("interrupted"), do: "var(--life-blocked)"
-  defp rail_status_color(_), do: "var(--life-in_progress)"
+  defp rail_status_color(_), do: "var(--fg-dim)"
 
   # Phase-row glyph + color by journey status (charter D58/D60).
   defp rail_phase_glyph(:done), do: "✓"

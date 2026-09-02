@@ -81,17 +81,20 @@ async function verifyPublicReadToken(t, origin) {
   if (tier === 'read') return { token: t, note: '' }
 
   // `none` is a DIFFERENT failure from a privileged token: the value does not
-  // authenticate at all. Not a security problem — but baking it produces the
-  // silent count=0-forever trap (the channel joins green and finds nothing),
-  // which is worse than no live search, so it is still a hard stop.
+  // authenticate at all. Not a security problem — but baking it ships a browser
+  // bundle whose live-search path is dead on arrival (the socket handshake
+  // itself is refused), which is worse than no live search at all, so it is
+  // still a hard stop.
   if (tier === 'none' || tier == null) {
     throw new Error(
       `BARKPARK_TOKEN does not authenticate against ${origin} (auth_tier ` +
         `"${tier ?? 'absent'}").\n\n` +
-        `Baking it would join the live-search channel GREEN and then return ` +
-        `count=0 forever — a working-looking search that finds nothing. Fix the ` +
-        `token, or leave BARKPARK_TOKEN empty: both search engines still work ` +
-        `over the flat anonymous route, only the WebSocket upgrade stays dark.`,
+        `Baking it would ship a token the socket REFUSES: UserSocket.connect/3 ` +
+        `verifies it and returns :error, so the WebSocket never opens, the LIVE ` +
+        `badge never lights, and every keystroke silently falls back to the HTTP ` +
+        `route anyway. Fix the token, or leave BARKPARK_TOKEN empty: both search ` +
+        `engines still work over the flat anonymous route, only the WebSocket ` +
+        `upgrade stays dark.`,
     )
   }
 

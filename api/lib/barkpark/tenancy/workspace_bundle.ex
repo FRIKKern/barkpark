@@ -474,6 +474,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp run_import(manifest, dumps, mode, grant) do
     Repo.transaction(
       fn ->
+        # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs): each
+        # member restores through a single `COPY … FROM STDIN` fed in 64 KiB
+        # chunks off disk — the mirror image of the export COPY above, and this
+        # transaction has carried `timeout: :infinity` since it was written for
+        # the same reason. SET LOCAL, so it cannot leak past the COMMIT.
+        Repo.set_local_statement_timeout!(0)
+
         # FIRST OF ALL: refuse any manifest table the export could never have
         # written, before ANY write — the shell-adopt delete, the FK/trigger
         # DDL and every COPY/INSERT run only over membership-checked names.
@@ -1293,6 +1300,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         {:ok, acc} =
           Repo.transaction(
             fn ->
+              # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs):
+              # ONE `COPY … TO STDOUT` is one statement, run-proven at 9.34 s
+              # (mutation_events, 478 MB) on a WARM cache and longer cold, so the
+              # wall would cancel a legitimate export mid-dump. SET LOCAL, so it
+              # dies with this transaction and never rides the pooled connection
+              # back out. Issued INSIDE the existing transaction rather than by
+              # wrapping it in `with_statement_timeout/2`: an outer transaction
+              # would make the `timeout: copy_out_timeout()` below a savepoint
+              # option and INERT — the precise PDS-D42 trap two paragraphs up.
+              Repo.set_local_statement_timeout!(0)
+
               Repo
               |> Ecto.Adapters.SQL.stream(sql, [])
               |> Enum.reduce({0, :crypto.hash_init(:md5)}, fn chunk, {count, hash} ->

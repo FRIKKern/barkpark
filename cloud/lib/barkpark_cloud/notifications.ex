@@ -64,7 +64,13 @@ defmodule BarkparkCloud.Notifications do
   # mechanism, and wave 30's migration 20260804123000 set the precedent that a
   # producerless event name is DELETED, never wired. Wiring it would have
   # manufactured exactly the promise-with-no-mechanism this epic exists to kill.
-  @always_send ~w(test trial_expiring)a
+  #
+  # cch-w52-bl: `trial_expired` joins it for the same reason and with the same
+  # limit. It is the TEARDOWN's own notice — dispatched once, from
+  # `TrialExpiryWorker`'s teardown arm, naming the instances it just tore down —
+  # and a per-event opt-in toggle for "we destroyed your instances" would be an
+  # offer to be un-told a fact. It still honours `alerts_enabled`.
+  @always_send ~w(test trial_expiring trial_expired)a
 
   # Seconds a team must wait between "send test" presses (Coolify's 10s/team).
   @test_rate_limit_seconds 10
@@ -97,7 +103,11 @@ defmodule BarkparkCloud.Notifications do
   #     no vocabulary change, it refuses the opt-out route write, and it still
   #     honours `alerts_enabled` (the false clause precedes it at
   #     `should_send?/2` and `enqueue_chat/3`).
-  @chat_always_send ~w(test trial_expiring)
+  #
+  # cch-w52-bl: `trial_expired` rides the same rail, and the D359 argument
+  # applies unchanged — a Slack-only team told its trial was ENDING and never
+  # told its instances were GONE is the same silence one step later.
+  @chat_always_send ~w(test trial_expiring trial_expired)
 
   ## ── Settings ─────────────────────────────────────────────────────────────
 

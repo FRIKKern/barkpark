@@ -39,6 +39,12 @@ type (
 	// EpicGoal is the second card line's task-spine truth (wsc D9): epic title +
 	// slices closed/total. Absent "PRs open" is deliberate (D8: no data source).
 	EpicGoal = apiclient.ChatEpicGoal
+	// Attachment is ONE chat attachment reference (ct-bl-chat-attachments): the
+	// same {id, media_type, byte_size, url} shape Studio projects onto a
+	// transcript row and the upload/read routes answer with. By ALIAS, like every
+	// other wire type here — a second Go struct for this shape is exactly the
+	// per-surface fork the "one reference shape" requirement rules out.
+	Attachment = apiclient.ChatAttachment
 )
 
 // isCard reports whether this row is one of the three interactive card roles.

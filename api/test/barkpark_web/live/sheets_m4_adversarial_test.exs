@@ -127,6 +127,22 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
       eventually(fun, tries - 1)
   end
 
+  # A peer's NAME is rendered in exactly one place: the `.sheet-peer-tag`
+  # span inside the presence overlay ([data-test-id="sheet-peer-layer"],
+  # sheet_grid.ex peer_layer/1), and the whole layer disappears once the
+  # last peer leaves. Refuting a short name against the WHOLE rendered
+  # document is therefore a coin flip, not a check: the document also
+  # carries LiveView's random base64url root id, and `phx-GMYBobnrrpWUuvZB`
+  # contains the literal substring "Bob" — one such draw red-flagged a PR
+  # that never touched sheets. Scope every peer-NAME refutation to this
+  # helper; class-name refutations ("sheet-peer-tag", "sheet-peer-editing")
+  # carry no collision risk and stay whole-document, which is stronger.
+  # Absent layer renders as "" so `eventually` retries instead of raising.
+  defp peer_layer(view) do
+    selector = ~s([data-test-id="sheet-peer-layer"])
+    if has_element?(view, selector), do: view |> element(selector) |> render(), else: ""
+  end
+
   # ── interleaved undo on the same cell ───────────────────────────────────────
 
   test "two users undo interleaved ops on one cell — each restores the prior at THEIR op time" do
@@ -216,9 +232,8 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
     Process.exit(view2.pid, :kill)
 
     eventually(fn ->
-      html = render(view1)
-      refute html =~ "sheet-peer-editing"
-      refute html =~ "Bob"
+      refute render(view1) =~ "sheet-peer-editing"
+      refute peer_layer(view1) =~ "Bob"
     end)
   end
 

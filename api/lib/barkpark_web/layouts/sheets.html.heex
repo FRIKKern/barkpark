@@ -173,6 +173,19 @@
       .sheet-cell.sheet-err { color: #f87171; }
     }
     .sheet-cell.sheet-stale .sheet-cell-v::after { content: "•"; color: #f79009; margin-left: 3px; }
+    /* ── Reader range selection (client-only, wave 43) ──────────────────────
+       `sheet-rsel` is painted by the SheetReaderSelect hook alone — the server
+       never stamps it (Geometry.grid_sel(_, _, :reader) is {0,0,0,0}). It is
+       deliberately NOT the Studio's `sheet-sel`: aliasing would make the grid
+       harness's td.sheet-sel pins ambiguous about which grid produced them.
+       `sheet-rsel-on` is added by the same hook on mount, so the native
+       text-selection suppression a drag needs exists ONLY when the hook is
+       live — a no-JS reader keeps the browser's own select-and-copy. */
+    .sheet-rsel-on .sheet-scroll { user-select: none; -webkit-user-select: none; }
+    .sheet-cell.sheet-rsel { background: rgba(30, 83, 71, 0.15); }
+    @media (prefers-color-scheme: dark) {
+      .sheet-cell.sheet-rsel { background: rgba(217, 122, 95, 0.24); }
+    }
     /* Find-in-sheet (ALWAYS shown in the reader — no JS hook to Ctrl+F it
        open). .sheet-find/.sheet-find-hit track root.html.heex per the
        shared-.sheet-* cohesion contract; the form/input rules dress the
@@ -317,9 +330,25 @@
         golden rule), same discipline as the bulldocs reader layout. --%>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
+  <%!-- Non-defer ON PURPOSE (same discipline as root.html.heex): it must define
+        window.BarkparkSheetReaderSelect BEFORE the inline script below registers
+        it as a hook and connects the LiveSocket. Bottom-of-body, so Golden Rule
+        #4 (no blocking scripts in head) holds. This file also carries the
+        Studio's BarkparkSheetGrid, which is never registered here — the reader
+        page has no element with phx-hook="SheetGrid" (the grid's phx-hook keys
+        `chrome: :reader` onto SheetReaderSelect), so the Studio hook is inert
+        bytes and no editing affordance becomes reachable. --%>
+  <script src="/assets/bp-sheet-grid.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+    let Hooks = {};
+    // SheetReaderSelect — the public reader's CLIENT-ONLY selection + copy
+    // layer (main's ruling, 2026-09-02): it paints its own `sheet-rsel` class,
+    // reads the `data-v` already on every reader <td>, and pushes ZERO server
+    // events, so an anonymous principal never round-trips selection.
+    Hooks.SheetReaderSelect = window.BarkparkSheetReaderSelect;
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
+      hooks: Hooks,
       params: { _csrf_token: csrfToken }
     });
     liveSocket.connect();

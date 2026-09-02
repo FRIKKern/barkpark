@@ -4,7 +4,15 @@ import "time"
 
 // Task is the board's view of one /v1/tasks envelope.
 type Task struct {
-	DocID     string
+	DocID string
+	// Rev is the document revision this row was READ at (render_doc's top-level
+	// `rev`). It is the token the close-drift recovery pins: after a
+	// doc_changed_since_claim refusal, the retry closes with observed_rev = the
+	// Rev of the row currently on screen — the exact revision the user re-read —
+	// so a close can never land over a brief nobody looked at. Empty when the
+	// server omitted it (an older envelope), which simply leaves the fence armed
+	// and the plain refusal in place rather than guessing a rev.
+	Rev       string
 	Title     string
 	Lifecycle string // open|ready|in_progress|blocked|done|closed (as served)
 	Kind      string

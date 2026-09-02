@@ -44,10 +44,18 @@ defmodule Barkpark.Tasks.ClaimTest do
     end
   end
 
+  # PDS-D291: one MET criterion keeps this file's `done` closes out of the
+  # close-artifact gate, which refuses a `done` close of a criteria-less
+  # kind:task row whose reason names no PR+sha and pastes no run. These
+  # tests measure the claim queue, not the close reason.
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
       Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+        },
         content_extra
       )
 
@@ -299,7 +307,12 @@ defmodule Barkpark.Tasks.ClaimTest do
       task = mk_task!(doc_id, scope)
 
       assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-first", scope)
-      assert {:ok, closed} = Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+
+      assert {:ok, closed} =
+               Tasks.close(task.id, "worker-first",
+                 observed_epoch: claimed.content["claim"]["epoch"]
+               )
+
       assert closed.content["lifecycle_status"] == "done"
 
       # The shape the fix has to survive: worker KEPT, close stamped.
@@ -333,7 +346,10 @@ defmodule Barkpark.Tasks.ClaimTest do
 
       assert {:ok, claimed} = Tasks.claim("worker-first", queue_opts)
       assert claimed.id == task.id
-      {:ok, _closed} = Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+
+      {:ok, _closed} =
+        Tasks.close(task.id, "worker-first", observed_epoch: claimed.content["claim"]["epoch"])
+
       {:ok, _reopened} = Tasks.stage(task.id, "open")
 
       # RED BEFORE THE FIX: {:ok, nil} — the queue skipped its own reopened row.
