@@ -67,6 +67,26 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── the shared check-runs reader ─────────────────────────────────────────────
+# `rendered_names` below used to hand-roll the jq/awk pipeline that
+# scripts/lib/check-runs.sh owns, and required-checks-generate.sh kept a third
+# copy of the same function. One reader, one dedup, one sort. Resolution is
+# FAIL-CLOSED: no lib, no run — a private fallback copy is the defect being
+# removed here.
+#
+# BARKPARK_CHECK_RUNS_LIB exists for exactly one caller, and it is not a
+# production knob: required-checks.test.sh proves clauses by running sed-mutated
+# COPIES of this file out of a temp directory, whose $0-derived REPO_ROOT is
+# that temp directory. It is the same accommodation the mutants already make for
+# --workflows and --prose.
+CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
+[ -f "$CHECK_RUNS_LIB" ] || {
+  echo "FAIL: no check-runs reader at $CHECK_RUNS_LIB — refusing to run without the shared primitive" >&2
+  exit 1
+}
+# shellcheck source=scripts/lib/check-runs.sh
+. "$CHECK_RUNS_LIB"
 # THE FILE UNDER TEST, resolved absolutely. selftest's probe() re-execs THIS —
 # never "$REPO_ROOT/scripts/required-checks-verify.sh", which is the committed
 # copy and therefore always armed no matter what the running file says. A
@@ -328,23 +348,33 @@ EOF
 }
 
 # ── the deadlock detector ────────────────────────────────────────────────────
+# THE READ IS THE LIB'S; THE RULING ON EMPTINESS IS NOT, AND THAT LINE MATTERS.
+# check_runs_rows_ext/_file return an empty feed as ZERO ROWS AND EXIT 0 on
+# purpose: for the registration sampler a head whose feed is empty is the
+# cadence datum, so a primitive that died there could not be shared. For THIS
+# guard the opposite holds — an agreement declared against an empty feed is a
+# vacuous green — so the refusal stays HERE, at the call site, and §8 of
+# required-checks.test.sh mutation-proves that it fires. Inheriting the lib's
+# permissiveness would turn this fail-closed guard into a fail-open one.
 rendered_names() {
-  local sha="$1" json
+  local sha="$1" rows rc=0
   if [ -n "$RUNS_FILE" ]; then
-    [ -f "$RUNS_FILE" ] || fail "cannot read check-runs file $RUNS_FILE"
-    json="$(cat "$RUNS_FILE")"
+    # `--runs` names one FILE, not a fixture directory keyed by sha — the one
+    # shape difference that used to justify a private copy of the reader.
+    rows="$(check_runs_rows_file "$RUNS_FILE" "$sha")" || rc=$?
+    [ "$rc" -eq 0 ] || fail "cannot read check-runs file $RUNS_FILE"
   else
-    json="$(gh api "repos/$(spec_repo)/commits/$sha/check-runs?per_page=100" 2>/dev/null)" \
-      || fail "cannot read check runs for $sha — the guard has nothing to render names against (failure, not a skip)"
+    rows="$(check_runs_rows_ext "$(spec_repo)" "$sha")" || rc=$?
+    [ "$rc" -eq 0 ] || fail "cannot read check runs for $sha — the guard has nothing to render names against (failure, not a skip)"
   fi
-  jq -e '.check_runs | length > 0' <<<"$json" >/dev/null 2>&1 \
+  [ -n "$rows" ] \
     || fail "check-runs for $sha is EMPTY — refusing to declare agreement against an empty feed"
-  # latest row per name; a re-run leaves both and only the newest is the truth.
-  # Four columns: name, conclusion ("null" when unsettled), status, started_at.
-  # Downstream consumers key on $1/$2 and are untouched by the extra columns;
-  # the PENDING clause below is what reads $3/$4.
-  jq -r '.check_runs | sort_by(.started_at // "") | .[] | [.name, (.conclusion // "null"), (.status // ""), (.started_at // "")] | @tsv' <<<"$json" \
-    | awk -F'\t' '{ seen[$1] = $2 "\t" $3 "\t" $4 } END { for (n in seen) printf "%s\t%s\n", n, seen[n] }' | sort
+  # Four columns, unchanged: name, conclusion ("null" when unsettled), status,
+  # started_at. Downstream consumers key on $1/$2 and are untouched by the
+  # extra columns; the PENDING clause below is what reads $3/$4. The lib's
+  # fifth column (app.id) is the GENERATOR's business, so project it off here
+  # rather than leaking a column this file has no reader for.
+  printf '%s\n' "$rows" | cut -f1-4
 }
 
 # A SETTLED head, deliberately: a MERGED PR's checks have all reported, while
@@ -448,6 +478,11 @@ EOF
     concl="$(cut -f2 <<<"$row")"
     if [ "$concl" = "null" ]; then
       st="$(cut -f3 <<<"$row")"
+      # The lib renders a missing `status` as the literal `null` (it matches the
+      # API rather than inventing a sentinel); this line has always printed
+      # `status=unknown` for that case, so map it back rather than changing an
+      # operator-facing string as a side effect of the dedup.
+      if [ "$st" = "null" ]; then st=""; fi
       sat="$(cut -f4 <<<"$row")"
       echo "PENDING: $ctx has not settled (status=${st:-unknown}, started_at=${sat:-unknown})"
       pending_seen=1

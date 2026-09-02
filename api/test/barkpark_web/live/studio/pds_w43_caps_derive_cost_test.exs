@@ -92,6 +92,17 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
   @dataset "production"
   @ops 200
 
+  # THE ASSERTED ROWS, as attributes rather than literals. `Caps.derive/1`'s own
+  # @doc quotes these same five integers, and `the @doc for Caps.derive/1 names
+  # the numbers this file ASSERTS` below rebuilds the @doc's sentences from
+  # THESE names — so a number can no longer move in one place and stand still in
+  # the other (arpss-w10-caps-docstring-builtin-only).
+  @builtin_user_q 2
+  @builtin_token_q 1
+  @builtin_event_q 4
+  @custom_user_q 5
+  @custom_event_q 10
+
   # PDS-D633, verbatim. Printed with every row AND carried in the @moduledoc
   # above; `the blind-spot sentence is in BOTH places` pins that they agree.
   @blind_spot ":erlang.statistics(:runtime) is a VM-GLOBAL sum of BEAM scheduler + " <>
@@ -263,7 +274,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
 
       # 1 membership Repo.one (reused for :read/:write/:admin — was 3 identical
       # loads) + 1 UNCONDITIONAL grant Repo.all (the freshness load, kept).
-      assert queries == 2 * @ops
+      assert queries == @builtin_user_q * @ops
     end
 
     test "API-TOKEN principal: exactly 1 query per derive (was 2)", %{ws: ws, proj: proj} do
@@ -277,7 +288,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       # 1 membership Repo.one. No grant load at all: grants are bound to a
       # grantee USER, and `active_grants/1` returns [] without querying when the
       # socket carries no `current_user`.
-      assert queries == 1 * @ops
+      assert queries == @builtin_token_q * @ops
     end
 
     test "EVENT path (the two authorization derives an autosave performs): exactly 4 (was 8)", %{
@@ -298,7 +309,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       queries =
         meter("EVENT path — Caps.gate/3 + Shared.Paper.write_denied?/1", @ops, event_path)
 
-      assert queries == 4 * @ops
+      assert queries == @builtin_event_q * @ops
     end
 
     test "an unresolved workspace costs NOTHING — no principal load, no grant load", %{
@@ -347,7 +358,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       # `Repo.all`s (`role_permits?/3` for :read, for :write, and for
       # `admin_from` → `account_admin_from` — the resolution pds-w43 did NOT
       # collapse) + 1 unconditional grant `Repo.all`.
-      assert queries == 5 * @ops
+      assert queries == @custom_user_q * @ops
     end
 
     test "EVENT path on a CUSTOM role: 10 queries — a debounced keystroke, not 4",
@@ -368,7 +379,7 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
           event_path
         )
 
-      assert queries == 10 * @ops
+      assert queries == @custom_event_q * @ops
     end
   end
 
@@ -478,6 +489,51 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
       ExUnit.CaptureIO.capture_io(fn -> print_row("SENTENCE CHECK", 1, 1, 0, 1_000) end)
 
     assert output =~ @blind_spot
+  end
+
+  # THE PROSE-CATCHES-UP GUARD (arpss-w10-caps-docstring-builtin-only).
+  #
+  # The defect this closes: `Caps.derive/1`'s @doc read "a USER-principal derive
+  # is 2 queries (was 4), an API-TOKEN one is 1 (was 2)" with NO built-in-role
+  # qualifier, while this file measured 5 and 10 on a custom role. A docstring
+  # is not self-checking, so the correction would rot the same way — this test
+  # reads the SHIPPING @doc out of the compiled module and rebuilds the exact
+  # sentences from the attributes asserted above.
+  #
+  # It reds in both directions: put the universal wording back and the
+  # BUILT-IN/CUSTOM sentences vanish; change an asserted integer without
+  # touching the @doc and the interpolated sentence stops matching.
+  test "the @doc for Caps.derive/1 names the numbers this file ASSERTS, built-in AND custom" do
+    {:docs_v1, _anno, _lang, _fmt, _mod_doc, _meta, docs} = Code.fetch_docs(Caps)
+
+    doc =
+      Enum.find_value(docs, fn
+        {{:function, :derive, 1}, _anno, _sig, %{"en" => text}, _meta} -> text
+        _other -> nil
+      end)
+
+    assert is_binary(doc), "Caps.derive/1 has no @doc — there is nothing to keep honest"
+
+    flat = collapse(doc)
+
+    # (a) the qualifier. Its ABSENCE is the whole defect: without it the cheap
+    # rows below read as universal.
+    assert flat =~ "BUILT-IN ROLE ONLY",
+           "Caps.derive/1's @doc states its query counts without a built-in-role qualifier"
+
+    # (b) the built-in rows, spelled from the integers asserted above.
+    assert flat =~
+             "a USER-principal derive is #{@builtin_user_q} queries (was 4), " <>
+               "an API-TOKEN one is #{@builtin_token_q} (was 2), " <>
+               "and the EVENT path #{@builtin_event_q}"
+
+    # (c) the custom-role rows — the half the @doc never mentioned.
+    assert flat =~ "On a CUSTOM role the same USER derive costs #{@custom_user_q}"
+    assert flat =~ "the EVENT path #{@custom_event_q}, not #{@builtin_event_q}"
+
+    # (d) the REASON, without which the numbers are trivia: the role resolution
+    # was never collapsed.
+    assert flat =~ "THREE times per user principal"
   end
 
   defp collapse(text), do: text |> String.split() |> Enum.join(" ")
