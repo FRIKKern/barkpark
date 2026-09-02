@@ -1558,6 +1558,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def link_url(base, token), do: "#{base}/s/#{token}"
 
   @doc false
+  # `project_id` STAYS nil-able here on purpose (task-2da739b78e938be0): this
+  # function reports the socket's scope, it does not invent one. A nil reaches
+  # `ShareLink.changeset/2`, which REFUSES the write — a link bound to no project
+  # is revocable by no cascade. `ItemShare.item_share_create/2` short-circuits
+  # first so the refusal carries a reason. Substituting a default project HERE
+  # would bind the link to a project nobody chose.
   def item_link_attrs(socket, item, access) do
     %{
       workspace_id: socket.assigns.current_workspace.id,
