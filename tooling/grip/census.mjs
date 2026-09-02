@@ -1359,7 +1359,18 @@ export function validateArgv(argv) {
 // SILENT — the CLI becomes a no-op that exits 0 having measured nothing, which
 // reads exactly like a clean run.
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (isMain) {
+// THE BLOCK IS LABELLED so the arms below can leave it with `break cliMain`
+// instead of `process.exit` (charter D92). Node writes a PIPE asynchronously,
+// so process.exit() throws away whatever stdout has queued and not yet handed
+// the kernel: `--help | less` could lose the tail of the help screen and
+// `--json | jq` a JSON.parse error the caller blames on this tool's format,
+// while the same runs redirected to a file are whole. census's `--json` is the
+// output in this directory likeliest to outgrow the 64 KiB pipe buffer, which
+// is the size at which this stops being latent. `break` leaves the exit STATUS
+// identical in every arm (0 on --help, 2 on each named rejection) and lets the
+// event loop drain. A label rather than a wrapper function keeps this a
+// three-line change to the exits themselves.
+if (isMain) cliMain: {
   // FIRST ACT, BEFORE ANY ANSWER (D78). A census run that says "9 recipes"
   // means nothing until the operator knows WHICH tree's ledger it counted.
   // STDERR only — `--json` writes a document to stdout and a banner there
@@ -1369,7 +1380,7 @@ if (isMain) {
   const argv = process.argv.slice(2);
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(HELP);
-    process.exit(0);
+    break cliMain;
   }
   // A BOUND THAT SILENTLY UNBOUNDS ITSELF IS THE EPIC'S OWN DEFECT CLASS.
   // `--limit` with a missing or non-numeric value used to parse to NaN, fail
@@ -1379,7 +1390,8 @@ if (isMain) {
   const valid = validateArgv(argv);
   if (!valid.ok) {
     process.stderr.write(`census: ${valid.reason}\n`);
-    process.exit(2);
+    process.exitCode = 2;
+    break cliMain;
   }
   const limitAt = argv.indexOf("--limit");
   let limit = Infinity;
@@ -1387,14 +1399,16 @@ if (isMain) {
     limit = Number.parseInt(argv[limitAt + 1] ?? "", 10);
     if (!Number.isInteger(limit) || limit < 1) {
       process.stderr.write(`census: --limit needs a positive integer, got ${JSON.stringify(argv[limitAt + 1] ?? null)}\n`);
-      process.exit(2);
+      process.exitCode = 2;
+      break cliMain;
     }
   }
 
   const useLedger = argv.includes("--ledger");
   if (!useLedger && argv.includes("--all-rivals")) {
     process.stderr.write("census: --all-rivals only means something with --ledger — the fixture has no (subject, quantity) keys to have rivals over\n");
-    process.exit(2);
+    process.exitCode = 2;
+    break cliMain;
   }
 
   const ledgerSource = useLedger ? loadLedgerRecipes(LEDGER_DIR, { allRivals: argv.includes("--all-rivals") }) : null;

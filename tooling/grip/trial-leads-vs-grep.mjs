@@ -722,5 +722,12 @@ function main(argv) {
 // Only run when invoked directly, so the test can import the pure functions
 // without spawning the CLI.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  process.exit(main(process.argv.slice(2)));
+  // NO process.exit HERE (charter D92). main() writes the whole report — the
+  // `--json` document included — to stdout on the line before it returns, and
+  // Node writes a PIPE asynchronously: process.exit() discards whatever the
+  // kernel has not taken yet, so `--json | jq` gets a JSON.parse error the
+  // caller blames on this tool's format while `--json > file` is whole. The
+  // exit STATUS is unchanged in every arm (0 clean or selftest OK, 1 selftest
+  // FAIL, 2 no --store).
+  process.exitCode = main(process.argv.slice(2));
 }
