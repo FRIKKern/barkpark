@@ -16,6 +16,7 @@ predicate so it is a test, not a manual run.
 | `terminal-one-live-row.json` | TERMINAL refuted by one open row — the token is not the claim |
 | `terminal-one-considering-row.json` | TERMINAL refuted by one `considering` row |
 | `considering-residue.json` | a `considering` row is residue: counted into clause (a) and named, never silently exempt |
+| `considering-forwarded.json` | the same `considering` row WITH a forwarding address — clause (a) passes and the row is still printed by name, so the wave-28 bucket split reads as a re-labelling of UNNAMED residue and not as a new red |
 | `ladder-no-waiver.json` | the three-rung ladder unwaived — 2 measured HERE, 3 MEASURED-ELSEWHERE, 1 measured by nothing, which fails clause (b) by name |
 | `diff-is-only-the-subject.json` | a commit whose patch is only its own subject line fails clause (b) — commits are verified by DIFF, never by `%s` |
 

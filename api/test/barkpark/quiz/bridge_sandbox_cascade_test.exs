@@ -5,9 +5,12 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
       Client #PID<0.390.0> (Barkpark.Quiz.Bridge) is still using a connection
       from owner
-        lib/barkpark/quiz/content.ex:92  Quiz.Content.load_question/2
-        lib/barkpark/quiz/bridge.ex:113  apply_now/3
-        lib/barkpark/quiz/bridge.ex:73   handle_info/2
+        lib/barkpark/quiz/content.ex  Quiz.Content.load_question/2
+        lib/barkpark/quiz/bridge.ex   apply_now/3
+        lib/barkpark/quiz/bridge.ex   handle_info/2  (the :document_changed clause)
+
+  (The run's line numbers are dropped from the trace on purpose: they were
+  true of that sha and rot with every edit, while the symbols do not.)
 
   This module does NOT `use Barkpark.DataCase`, on purpose. DataCase owns the
   sandbox lifecycle in its own `setup`/`on_exit`, and the defect under test IS

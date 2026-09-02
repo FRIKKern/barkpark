@@ -5,13 +5,24 @@
 #
 # Installed + enabled by the provisioner's `configure` step
 # (internal/cli/cloud/warmpool.go agentInstallStep), which also writes:
-#   /etc/barkpark/agent.token  (0600)  — the per-instance report bearer, minted
-#                                        at claim time and stored hashed server-side
+#   /etc/barkpark/agent.token         (0600) — the per-instance report bearer,
+#                                        minted at claim time, stored hashed
+#                                        server-side
+#   /etc/barkpark/agent.health.token  (0600) — the HEALTH-GATE bearer the agent
+#                                        presents to this box's own
+#                                        GET /v1/instance/request-stats
 #   /etc/barkpark/agent.env             — BARKPARK_CONTROL_URL + BARKPARK_HEALTH_URL
 # The URLs live in agent.env (EnvironmentFile) — NOT baked into ExecStart — so
 # deploy/instance-deploy.sh can re-install this SAME committed unit on every
-# self-update without knowing the control URL. Keep the two token/env files off
-# this checkout; only the unit is source-controlled.
+# self-update without knowing the control URL. Keep the token/env files off this
+# checkout; only the unit is source-controlled.
+#
+# --health-token-file is a PATH, never a value: the unit stays a public,
+# committed artifact and the secret never enters this file or the process argv.
+# The file is OPTIONAL — a box provisioned before it existed simply has none, the
+# agent sends no bearer, and req_per_s / p95_ms / err_5xx_per_s keep their -1
+# unmeasured sentinels. It NEVER fails the unit, so a missing telemetry
+# credential can never take the whole beat down with it.
 [Unit]
 Description=Barkpark on-box agent (health + vitals beat)
 Documentation=file:///opt/barkpark/deploy/systemd/README.md
@@ -23,7 +34,7 @@ Type=simple
 User=root
 # Fail cleanly (not restart-looping) if the provisioner has not written these yet.
 EnvironmentFile=/etc/barkpark/agent.env
-ExecStart=/usr/local/bin/barkpark-agent --control-url ${BARKPARK_CONTROL_URL} --token-file /etc/barkpark/agent.token --checkout /opt/barkpark --health-url ${BARKPARK_HEALTH_URL}
+ExecStart=/usr/local/bin/barkpark-agent --control-url ${BARKPARK_CONTROL_URL} --token-file /etc/barkpark/agent.token --checkout /opt/barkpark --health-url ${BARKPARK_HEALTH_URL} --health-token-file /etc/barkpark/agent.health.token
 Restart=on-failure
 RestartSec=10
 

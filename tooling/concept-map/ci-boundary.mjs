@@ -16,10 +16,14 @@
 //        - sideways         feature→feature edges        (counts.sideways)
 //        - wrongDirection   kernel→feature edges          (counts.wrongDirection)
 //        - featureCycles    mutual feature↔feature pairs  (derived: A→B & B→A)
-//   5. compare vs boundary-baseline.json and EXIT NON-ZERO on REGRESSION:
+//   5. split those identities into the BASELINE-KNOWN SUBGRAPH and GROWTH
+//        (see "the growth partition" below), then compare ONLY the known
+//        subgraph vs boundary-baseline.json and EXIT NON-ZERO on REGRESSION:
 //        a count rose above baseline, OR a specific edge / cycle pair appears
 //        that is not in the baseline set. Equal-or-lower counts AND a subset of
 //        the baseline edges pass — that is "never worse, possibly better".
+//        Growth — anything touching a concept the baseline never saw — is
+//        itemised, counted and printed, and is NEVER a regression.
 //
 // A reshuffle that keeps the count flat but swaps one known edge for a brand-new
 // one is STILL a regression: we check both the aggregate count and the concrete
@@ -211,16 +215,112 @@ function loadBaseline() {
   return JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
 }
 
-// Compare current metrics vs baseline. Returns { regressed, regressions[] }.
-function compare(current, baseline) {
+// ── the growth partition ────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS. The identity check below is keyed on the CONCEPT NAME, and a
+// concept name is a directory: concepts.mjs derives it structurally from
+// `api/lib/barkpark/<name>` and `api/lib/barkpark/plugins/<name>`. So the moment
+// a new feature folder lands, every edge it participates in is an identity the
+// baseline has never seen — and a never-worse gate keyed on identity reds on ALL
+// of it, forever, for a reason nobody in the PR can act on.
+//
+// MEASURED, not assumed. Against the June baseline (46 concepts in the tree at
+// its own commit, 44 of them named somewhere in the file) the tree on main today
+// carries 79 — 33 concepts that did not exist when the baseline was captured.
+// Of the 108 identity regressions the WARM gate reported on main, 100 involve at
+// least one of those 33. Only 8 are edges between two concepts the baseline
+// already knew. The gate was reporting 108 and meaning 8.
+//
+// THE RULE. A concept is BASELINE-KNOWN if the baseline mentions it at all — in
+// `kernel`, as either endpoint of any edge, or as a member of any cycle pair.
+// An edge or cycle all of whose concepts are baseline-known is COMPARABLE: it is
+// checked by identity and by count exactly as before, and a new one still reds.
+// Anything touching a concept the baseline never saw is GROWTH: itemised in the
+// report, counted, printed — and never red, because the baseline holds no
+// opinion about a module that did not exist.
+//
+// THE TRADE-OFF, stated rather than buried. Deriving the roster from the
+// baseline's own text is inference, not a record: a concept that existed in June
+// but had NO boundary debt is indistinguishable from one that did not exist, so
+// its first sideways edge lands in the growth bucket instead of reddening. That
+// set is exactly two concepts today — `env_config` and `release`, present at the
+// baseline commit and named nowhere in the baseline — and neither appears in any
+// current violation, so the blind spot costs zero rows right now. Closing it for
+// good needs an ADDITIVE `conceptsKnownAtCapture` roster on the baseline; that is
+// a separate change, because writing to boundary-baseline.json is exactly the
+// move this gate must never make to go green.
+//
+// THE ONE GROWTH SHAPE THAT IS STILL WORTH SAYING OUT LOUD: a BASELINE KERNEL
+// concept reaching a brand-new feature. `content → preview` is not a new module
+// misbehaving; it is the substrate acquiring a dependency on a leaf that did not
+// exist. It stays informational (the leaf is growth, and reddening it would put
+// every new feature's first kernel caller on the hook) but it is bucketed and
+// named apart from ordinary growth so it cannot hide in a count.
+
+// Every concept the baseline has an opinion about. Anything else is growth.
+export function baselineConcepts(baseline) {
+  const known = new Set(baseline.kernel || []);
+  const edges = baseline.edges || {};
+  for (const dim of ["sideways", "wrongDirection"]) {
+    for (const e of edges[dim] || []) for (const c of String(e).split(">")) known.add(c);
+  }
+  for (const p of baseline.featureCyclePairs || []) {
+    for (const c of String(p).split("|")) known.add(c);
+  }
+  return known;
+}
+
+const conceptsOfEdge = (e) => String(e).split(">");
+const conceptsOfPair = (p) => String(p).split("|");
+
+// Compare current metrics vs baseline. Returns { regressed, regressions[], growth }.
+export function compare(current, baseline) {
   const regressions = [];
   const bc = baseline.counts || {};
-  const cc = current.counts;
+  const known = baselineConcepts(baseline);
+  const baselineKernel = new Set(baseline.kernel || []);
+  const isKnown = (parts) => parts.every((c) => known.has(c));
 
-  // dimension-by-dimension count check
+  // Split every current identity into COMPARABLE (both ends baseline-known) and
+  // GROWTH (touches a concept the baseline never saw) BEFORE anything is judged.
+  const comparable = { sideways: [], wrongDirection: [], featureCycles: [] };
+  const growth = { sideways: [], wrongDirection: [], featureCycles: [], kernelReach: [], newConcepts: [] };
+  const newConcepts = new Set();
+
+  const sortInto = (dim, keys, split) => {
+    for (const k of keys) {
+      const parts = split(k);
+      if (isKnown(parts)) {
+        comparable[dim].push(k);
+      } else {
+        growth[dim].push(k);
+        for (const c of parts) if (!known.has(c)) newConcepts.add(c);
+        // A kernel concept the baseline DID know, reaching a concept it did not.
+        if (baselineKernel.has(parts[0]) && !known.has(parts[parts.length - 1])) {
+          growth.kernelReach.push(k);
+        }
+      }
+    }
+  };
+  sortInto("sideways", current.edges.sideways, conceptsOfEdge);
+  sortInto("wrongDirection", current.edges.wrongDirection, conceptsOfEdge);
+  sortInto("featureCycles", current.featureCyclePairs, conceptsOfPair);
+  growth.newConcepts = [...newConcepts].sort();
+  for (const dim of ["sideways", "wrongDirection", "featureCycles", "kernelReach"]) {
+    growth[dim] = growth[dim].sort();
+  }
+
+  // dimension-by-dimension count check — on the BASELINE-KNOWN SUBGRAPH ONLY.
+  // Comparing the whole current graph against a baseline captured over a smaller
+  // one is not a never-worse comparison, it is a size comparison.
+  const comparableCounts = {
+    sideways: comparable.sideways.length,
+    wrongDirection: comparable.wrongDirection.length,
+    featureCycles: comparable.featureCycles.length,
+  };
   for (const dim of ["sideways", "wrongDirection", "featureCycles"]) {
     const base = bc[dim] ?? 0;
-    const now = cc[dim] ?? 0;
+    const now = comparableCounts[dim];
     if (now > base) {
       regressions.push({
         kind: "count",
@@ -228,15 +328,18 @@ function compare(current, baseline) {
         baseline: base,
         current: now,
         delta: now - base,
-        reason: `${dim} count rose from ${base} to ${now} (+${now - base})`,
+        reason:
+          `${dim} count among BASELINE-KNOWN concepts rose from ${base} to ${now} ` +
+          `(+${now - base}); growth in concepts absent at baseline is excluded`,
       });
     }
   }
 
-  // concrete-identity check — a NEW edge / cycle that isn't grandfathered,
-  // even if the aggregate count happens to be flat (a reshuffle).
+  // concrete-identity check — a NEW edge / cycle that isn't grandfathered, even
+  // if the aggregate count happens to be flat (a reshuffle). Growth identities
+  // never reach here.
   const baseSideways = new Set((baseline.edges && baseline.edges.sideways) || []);
-  for (const e of current.edges.sideways) {
+  for (const e of comparable.sideways) {
     if (!baseSideways.has(e)) {
       regressions.push({
         kind: "new-edge",
@@ -248,7 +351,7 @@ function compare(current, baseline) {
   }
 
   const baseWrong = new Set((baseline.edges && baseline.edges.wrongDirection) || []);
-  for (const e of current.edges.wrongDirection) {
+  for (const e of comparable.wrongDirection) {
     if (!baseWrong.has(e)) {
       regressions.push({
         kind: "new-edge",
@@ -260,7 +363,7 @@ function compare(current, baseline) {
   }
 
   const basePairs = new Set(baseline.featureCyclePairs || []);
-  for (const p of current.featureCyclePairs) {
+  for (const p of comparable.featureCycles) {
     if (!basePairs.has(p)) {
       regressions.push({
         kind: "new-cycle",
@@ -271,7 +374,23 @@ function compare(current, baseline) {
     }
   }
 
-  return { regressed: regressions.length > 0, regressions };
+  return {
+    regressed: regressions.length > 0,
+    regressions,
+    comparableCounts,
+    growth: {
+      newConcepts: growth.newConcepts,
+      counts: {
+        sideways: growth.sideways.length,
+        wrongDirection: growth.wrongDirection.length,
+        featureCycles: growth.featureCycles.length,
+      },
+      sideways: growth.sideways,
+      wrongDirection: growth.wrongDirection,
+      featureCycles: growth.featureCycles,
+      kernelReach: growth.kernelReach,
+    },
+  };
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -311,13 +430,19 @@ function main() {
   const boundary = runNodeJson(BOUNDARY);
   const current = deriveMetrics(boundary);
   const baseline = loadBaseline();
-  const { regressed, regressions } = compare(current, baseline);
+  const { regressed, regressions, comparableCounts, growth } = compare(current, baseline);
 
   const report = {
     builtAt: new Date().toISOString(),
     baselineCapturedAt: baseline.capturedAt || null,
     baseline: { counts: baseline.counts },
+    // THREE numbers, deliberately labelled apart, because collapsing them is the
+    // defect this gate had. `current` is the whole graph. `comparable` is the
+    // slice the baseline can actually speak to. `growth` is everything the
+    // baseline never saw. Only `comparable` is compared.
     current: { counts: current.counts },
+    comparable: { counts: comparableCounts },
+    growth,
     regressed,
     regressions,
   };
@@ -329,11 +454,31 @@ function main() {
   // human summary on stderr (always)
   note("");
   note("cqv8 — architecture boundary gate (never-worse)");
+  note("  compared on the BASELINE-KNOWN subgraph; growth reported apart, never red.");
   for (const dim of ["sideways", "wrongDirection", "featureCycles"]) {
     const base = (baseline.counts || {})[dim] ?? 0;
-    const now = current.counts[dim] ?? 0;
+    const now = comparableCounts[dim] ?? 0;
+    const whole = current.counts[dim] ?? 0;
     const arrow = now > base ? "WORSE" : now < base ? "better" : "flat ";
-    note(`  ${dim.padEnd(15)} baseline ${String(base).padStart(3)}  →  now ${String(now).padStart(3)}   [${arrow}]`);
+    note(
+      `  ${dim.padEnd(15)} baseline ${String(base).padStart(3)}  →  comparable ${String(now).padStart(3)}   [${arrow}]` +
+        `   (whole graph ${whole}, growth ${growth.counts[dim] ?? 0})`
+    );
+  }
+  note("");
+  note(
+    `ci-boundary: GROWTH (informational, never a regression) — ${growth.newConcepts.length} concepts absent at baseline:`
+  );
+  note(`  ${growth.newConcepts.join(", ") || "(none)"}`);
+  note(
+    `  carrying ${growth.counts.sideways} sideways, ${growth.counts.wrongDirection} wrong-direction, ` +
+      `${growth.counts.featureCycles} cycle identities the baseline cannot speak to.`
+  );
+  if (growth.kernelReach.length) {
+    // NOT red, but never silent: the substrate acquiring a dependency on a leaf
+    // that did not exist at baseline is the one growth shape worth reading.
+    note(`  NOTABLE — a BASELINE KERNEL concept reaches a concept absent at baseline:`);
+    for (const e of growth.kernelReach) note(`    · ${e}`);
   }
   note("");
 
@@ -341,8 +486,16 @@ function main() {
     note("ci-boundary: REGRESSION — new architectural debt vs baseline:");
     for (const r of regressions) note(`  ✗ ${r.reason}`);
     note("");
-    note("Fix the edge, or — if this debt is intentional and accepted — re-baseline with:");
-    note("  node tooling/concept-map/ci-boundary.mjs --write-baseline");
+    // DO NOT print a --write-baseline invitation here. Every row above is an
+    // edge between two concepts the baseline ALREADY KNEW — growth was filtered
+    // out before this list was built — so a re-baseline would not be paying debt
+    // down, it would be erasing a measurement that is working. A loud red is
+    // exactly where a gate gets talked into regenerating its own baseline; the
+    // remedy is the edge.
+    note("Fix the edge, or route it for an explicit intent decision.");
+    note("A re-baseline is NOT the remedy for these rows: every one is between two");
+    note("concepts the baseline already knew, so --write-baseline would erase a real");
+    note("measurement rather than record a paid-down one.");
     return 1;
   }
 
@@ -356,9 +509,19 @@ function main() {
 // exit() here would race the async pipe drain and cut the report at one 65536-
 // byte buffer. Assigning exitCode lets node flush and then exit with the same
 // status, so the gate keeps its 0 / 1 (regression) / 2 (fault) contract.
-try {
-  process.exitCode = main();
-} catch (err) {
-  if (!(err instanceof GateFault)) throw err;
-  process.exitCode = 2; // FAULT — the diagnosis is already on stderr.
+//
+// RUN ONLY WHEN INVOKED AS THE CLI. `compare` and `baselineConcepts` are exported
+// so ci-boundary.test.mjs can drive the predicate on synthetic baselines without
+// a symbol graph; without this guard, importing the module would rebuild the
+// graph and run the whole gate as an import side effect.
+const INVOKED_DIRECTLY =
+  !!process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (INVOKED_DIRECTLY) {
+  try {
+    process.exitCode = main();
+  } catch (err) {
+    if (!(err instanceof GateFault)) throw err;
+    process.exitCode = 2; // FAULT — the diagnosis is already on stderr.
+  }
 }

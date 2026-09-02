@@ -22,6 +22,28 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     refute Enum.any?(blocks, &(&1["role"] == "featured"))
   end
 
+  # task-a945b98cfd8d941f — the title argument is CONTENT. A title-less birth
+  # must seed an EMPTY heading, because whatever lands in "text" is text the
+  # author has to delete before typing (the Studio seeded the literal
+  # "Untitled" here, so the first keystroke appended to it). The second half
+  # pins that a REAL title still round-trips verbatim — the fix must not gut
+  # the API caller who genuinely supplies one.
+  test "seed: a title-less paper is born with an EMPTY title block, not a literal" do
+    assert [%{"id" => "tpl-title", "text" => ""}] = Template.template_blocks(nil)
+    assert [%{"id" => "tpl-title", "text" => ""}] = Template.template_blocks("")
+
+    # and an empty title block derives NO row title — the display fallbacks own
+    # the word "Untitled", the stored document does not.
+    refute Map.has_key?(Template.derive_title(%{}, Template.template_blocks(nil)), "title")
+
+    # a caller-supplied title is still copied verbatim (unchanged behaviour)
+    assert [%{"text" => "A real title"}] = Template.template_blocks("A real title")
+
+    # the birth path agrees: no title in attrs ⇒ an empty locked heading
+    assert [%{"role" => "title", "text" => ""}, %{"id" => "tpl-body"}] =
+             Template.maybe_seed([], nil, %{})
+  end
+
   test "seed: existing docs, nil blocks (HTML-only path) and explicit blocks untouched" do
     assert Template.maybe_seed(nil, nil, %{}) == nil
     assert Template.maybe_seed([%{"type" => "paragraph"}], nil, %{}) == [%{"type" => "paragraph"}]

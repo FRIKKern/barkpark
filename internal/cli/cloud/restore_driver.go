@@ -230,7 +230,11 @@ func (e *RestoreExecutor) InstallAgent(ctx context.Context, kind, agentToken, ip
 	if e.RunnerFor == nil {
 		return fmt.Errorf("resurrect configure: no runner factory wired")
 	}
-	return e.restoreRunner(kind, ip).Run(ctx, agentInstallStep(agentToken, e.ControlURL, restoreHealthURL))
+	// No health token: a resurrect carries the freshly-minted REPORT token, not
+	// the box's admin bearer, and agentInstallStep never deletes an existing
+	// /etc/barkpark/agent.health.token — so a resurrected box keeps whatever
+	// metering it had rather than being silently unmetered by the restore.
+	return e.restoreRunner(kind, ip).Run(ctx, agentInstallStep(agentToken, e.ControlURL, restoreHealthURL, ""))
 }
 
 // RestoreData is the content phase: fetch db.dump + media.tar.gz from the bundle
