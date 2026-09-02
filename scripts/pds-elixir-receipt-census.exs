@@ -1288,6 +1288,52 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/github_status_controller.ex",
             "BarkparkWeb.GithubStatusController.status/2", "63059312", "64996178"},
       verdict: "UNJUDGED", basis: :unexamined},
+    # ── THIS CONTROLLER'S `{:error, reason}` 5xx ARMS, DISPOSED (PDS w36 crit 3) ──
+    #
+    # THEY ARE NOT REGISTER ROWS, AND THE LENS IS WHY: `handle_inbound/2` (:131),
+    # `handle_intake/2` (:175) and `handle_pull_request/2` (:220) each answer 500
+    # with `%{error: %{code: ...}}` and spell NO `ok: true`, so this census's
+    # population cannot hold them and no row below can carry their verdict. The
+    # wave-36 filing said "the TWO github_webhook {:error, reason} 5xx arms";
+    # today's tree carries THREE. Their disposition is stated HERE so the absence
+    # is a judgment and not a silence:
+    #
+    #   :220 merge_reconcile_failed — BOUGHT, GENUINELY, at
+    #     api/test/barkpark_web/controllers/github_webhook_integration_test.exs:287.
+    #     No seam is stubbed: the REAL MergeEvents -> Tasks.reconcile_merge_gate ->
+    #     Postgres path runs and LOSES A REAL rev-CAS. `reconcile_merge_gate/3`
+    #     opens a txn, takes `pg_advisory_xact_lock`, reads the task by PK, then
+    #     CASes the stamp on the rev it read (`Internal.fenced_content_write/4`,
+    #     `:stale` on zero rows). A pid-fenced one-shot repo-query observer bumps
+    #     the row's rev in that window, on the same connection, so the CAS
+    #     genuinely matches nothing -> `{:error, :stale_rev}` -> the 500. The run
+    #     log carries the controller's own line, unstubbed: `github webhook: merge
+    #     reconcile failed for PR #4623: :stale_rev`. The arm's post-condition is
+    #     read back through Repo by the id the test created (gate still unmet, no
+    #     "merge_gate_autostamp" record, lifecycle untouched).
+    #
+    #   :175 intake_failed — UNJUDGED, WITH THE FIXTURE COST MEASURED, NOT GUESSED.
+    #     `Intake.ingest/2`'s 5xx-bound errors are `{:error, reason}` from
+    #     `Content.create_document` and `{:error, {:dedup_unavailable, _}}` from the
+    #     dedup gate. There is NO CAS in that path to lose, so the rev-race fixture
+    #     above does not transfer. `Tasks.Dedup.fetch_candidates/2`
+    #     (tasks/dedup.ex:440-467) degrades only from a `rescue` / `catch :exit`
+    #     around the candidate scan — a raised DB error or a query-timeout exit —
+    #     and its `:dedup_timeout_ms` opt is UNREACHABLE from the wire, because the
+    #     controller's `ingest_opts/0` threads only `:dataset` and `:workspace_id`.
+    #     So the only genuine fixtures are a forced database fault (statement
+    #     timeout, a dropped index/column) inside the request, against a test
+    #     database this host shares across concurrent agents. That is a separate
+    #     slice with its own isolated database or a sandbox-safe fault injector
+    #     that does not exist in this tree — NOT the ~40 lines the CAS race cost.
+    #
+    #   :131 inbound_failed — UNJUDGED, SAME COST, VERIFIED SEPARATELY.
+    #     `InboundEvents.detach/6` maps `Link.put/4`'s `{:error, reason}` here, and
+    #     `Link.put/4` (plugins/github/link.ex:122-151) ends in
+    #     `Content.upsert_document/4` with NO `if_rev`, so there is no fence to
+    #     lose either; the `{:error, :not_found}` race it DOES have is already the
+    #     2xx `:ignored` arm, not this one.
+    #
     # barkpark_web/controllers/github_webhook_controller.ex:86
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
@@ -1336,7 +1382,9 @@ defmodule PDS.Census do
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "107251666"},
       verdict: "UNJUDGED", basis: :partial_tag_coverage, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244",
       tags: [
-        %{tag: :already_stamped, verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244"},
+        %{tag: :already_stamped, verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244",
+          attestation:
+            "PDS w36 crit 4 — the no-write post-condition mutation-proven on the WRITE path, never the classifier. Wave 36's own mutation moved the classification, which flips the printed tag FIRST, so the `rev` assert was carried by the receipt assert and never stood alone. The mutation that isolates it: a stray touch inside `Tasks.Close.reconcile_merge_gate/3`'s transaction (`Repo.update_all(from(d in Document, where: d.id == ^task_id), set: [rev: generate_rev(), updated_at: DateTime.utc_now()])`, right after the advisory lock and BEFORE `reconcile_locked/4` classifies) — the receipt still reads `reconciled: \"already_stamped\"` and the `stamped:` case at :209 stays green, while :244's rev assert and the store-only sibling at :331 both red."},
         %{tag: :no_marker, verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
         %{tag: :no_guardable_marker, verdict: "UNJUDGED", basis: :no_observer, evidence: ""},
       ],
@@ -1543,9 +1591,23 @@ defmodule PDS.Census do
             "BarkparkWeb.TicketsController.inbox/2", "102026838", "113191402"},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/tickets_controller.ex:263
+    #
+    # THE FILING'S REASON FOR LEAVING THIS UNBOUGHT IS REFUTED BY THE TREE (PDS w36
+    # crit 2). The wave-36 row deferred it as ~60-80 lines "in a different call
+    # style" behind the `:plugin_routes` exclusion. The exclusion is real for the
+    # TAG (test_helper.exs:62) but `tickets_controller_test.exs` CARRIES NO TAG —
+    # not at module level, not on a case — so its 14 pre-existing tests already run
+    # in the default `mix test`, and the direct-action harness (`submitter_conn/1`,
+    # `operator_conn/2`, `file_ticket/3`, a registered ticket schema) was already
+    # there. The differential cost ~50 lines in the file's own style, and the
+    # exclusion never had to be named as a reason.
     %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
             "BarkparkWeb.TicketsController.render_ticket/3", "77961612", "114383917"},
-      verdict: "UNJUDGED", basis: :unexamined},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: "api/test/barkpark_web/controllers/tickets_controller_test.exs:237",
+      attestation:
+        "mutation on the WRITE path, not the renderer: `Thread.create/2` persists a `waiting_since` DIFFERENT from the one it returns (`Content.create_document` gets the mutated content, the caller gets the honest struct), so render_ticket/3 prints a faithful-looking 201 over a row that says something else — `mix test api/test/barkpark_web/controllers/tickets_controller_test.exs:237` reds on the stored-vs-printed compare while every receipt-only test in the file stays green.",
+    },
     # barkpark_web/controllers/v1/media_controller.ex:188
     %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
             "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
