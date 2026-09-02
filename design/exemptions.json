@@ -52,5 +52,51 @@
    "count": 114,
    "note": "Graph-view Canvas renderer (api-served copy), the byte-identical mirror of web/public/bp-graph.js above (pair reconciled by 5c10b76e / #2248): 33 hex + 58 literal rgb/rgba. Same Canvas-fillStyle-can't-take-var() rationale, same au-r6 tokenization backlog. MUST stay byte-identical to its web counterpart; if one baseline moves the other moves in the SAME diff. RAISED 91 -> 114 (+23) by stw9-graph-constellation (#6213): the constellation's type-hue palette (tag/command/metric/session hues), theme-aware tooltip chrome, and the light/dark legend+controls panel objects \u2014 all Canvas-paint-time or JS-injected inline styles under the same fillStyle-can't-take-var() rationale; au-r6 (init-time token resolution fed from the lockstep) remains the tokenization path."
   }
- ]
+ ],
+ "motion": {
+  "_rule": "Frozen baseline of hand-typed MOTION DURATION literals \u2014 the time twin of the colour ledger in `entries` above. design/check.mjs Part N re-counts each file and FAILS on ANY drift from `count`, up OR down: growth means a new hand-typed duration slipped into a transition/animation declaration, shrink means one was tokenized and the baseline must come down in the SAME diff so the ratchet keeps holding. Counting rule lives next to the implementation in design/check.mjs Part N: a duration literal is a `<number>s`/`<number>ms` inside the VALUE of a transition/transition-duration/transition-delay/animation/animation-duration/animation-delay declaration. `var(--dur-1|--dur-2|--dur-3)` is not a number, so it is not counted \u2014 that is what lets a literal->token sweep register as a shrink. Times outside a motion declaration are invisible on purpose (a `PUSH_TIMEOUT is 30000ms` comment, a phx-remove `time: 320`, a meta-refresh are not motion design). BEGIN/END GENERATED regions and comments are blanked first, so an emitted duration is never counted as a hand-stamp.",
+  "_note": "The ladder is three rungs (tokens.motion dur-1/-2/-3 = 0.15/0.18/0.28s). A residual count is NOT automatically debt: a spinner loop, an attention pulse and a marching-ants keyframe are periods, not chrome timings, and have no rung to spend. What the number buys is that they are COUNTED \u2014 before spd-b21 nothing in this repo could see a duration at all, because the only literal census counted colours.",
+  "entries": [
+   {
+    "path": "api/lib/barkpark_web/layouts/root.html.heex",
+    "count": 30,
+    "note": "Studio root layout. spd-b21 swept 100 -> 30 (-70): every on-ladder literal moved onto the emitted rungs \u2014 0.15s x36 and 0.1s x30 -> var(--dur-1), 0.2s x2 -> var(--dur-2), 0.3s + 0.30s -> var(--dur-3) \u2014 including the 0.15s spd-s5 hardcoded on .pane-column / .pane-column--collapsed, whose comment said in so many words that a var() there would resolve to nothing. The remaining 30 are OFF-LADDER and left deliberately: 0.12s x12 + 120ms x6 (the canvas/slash-menu chrome tier, one value written two ways), 0.08s x5 (the near-instant press feedback), 0.16s x2 and 0.14s x2 (the paper-editor toolbar + press chrome), and three periods that are not chrome timings at all (2.4s bp-update-pulse, 1.2s bp-ae-pulse, 0.5s sheet-ants). Snapping 0.08-0.12s onto the 0.15s rung would be a visible retune nobody asked for; the honest close is a FOURTH rung (a ~0.1s instant tier) in tokens.json, which is a token decision, not a sweep."
+   },
+   {
+    "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+    "count": 22,
+    "note": "Paper reader layout. Receives the ladder (a :root block at the head of its GENERATED region) but is NOT swept \u2014 spd-b21's sweep criterion names root.html.heex alone. 140ms x7 + 150ms x4 + 0.15s x2 are the on-ladder ones a follow-up sweep should take (150ms/0.15s are --dur-1 exactly; 140ms is within a rounding of it); 0.12s x6, 0.08s, and the two 0.6s mail-dot fades are off-ladder. Frozen so none can grow while the sweep is pending."
+   },
+   {
+    "path": "api/assets/paper-surface/paper-surface.css",
+    "count": 9,
+    "note": "The canonical paper-surface source. Receives the ladder on its own `.bp-paper-surface, .bp-paper-body` root scope, not swept. 0.12s x6 + 140ms are the chrome tier; 0.9s (bp-braille) and 3s (bp-shimmer) are keyframe PERIODS with no rung to spend."
+   },
+   {
+    "path": "api/assets/paper-editor/src/styles.css",
+    "count": 10,
+    "note": "Paper-editor bundle. It is on MOTION_SURFACES, but it gets the ladder through the de-scoping paper-surface mirror rather than from an emitter of its own \u2014 Part N asserts the bytes landed either way. Residue is the same 0.12s/120ms/0.08s chrome tier as its Studio twin, outside the mirrored region."
+   },
+   {
+    "path": "cloud/priv/static/app.css",
+    "count": 16,
+    "note": "Cloud SPA \u2014 the surface that already had this RIGHT by hand, and the one MOTION_SURFACES entry the emitter deliberately does NOT write. Its decision-29 token area declared --dur-1/-2/-3 with exactly tokens.json's values plus --ease, --t and a prefers-reduced-motion collapse to 0s, and four rules already consume them, so the task row's premise ('grep -rn -- \"--dur\" api/ cloud/ returns nothing') was true only of api/. The residue here is all period-shaped: 250ms x4 (view crossfades), 0.28s x3 (on-ladder by value but written as a literal), 1.4s/0.9s/1.6s/1.8s/1s/0.7s spinner and rail-breathe loops that the file's own comment exempts on purpose ('a progress indicator is state, not decoration')."
+   },
+   {
+    "path": "web/app/globals.css",
+    "count": 1,
+    "note": "Web demo. One on-ladder literal (`transition: rotate 0.15s ease`) that a follow-up should spend var(--dur-1) on; outside spd-b21's sweep lane."
+   },
+   {
+    "path": "api/lib/barkpark_web/controllers/session_html.ex",
+    "count": 1,
+    "note": "Login page. One on-ladder literal (`.bp-auth-btn { transition: background 0.15s }`) in the hand half of the heredoc; the ladder now reaches it from the .bp-auth scope in the GENERATED block, so the sweep is a one-line follow-up."
+   },
+   {
+    "path": "cloud/priv/static/styleguide.html",
+    "count": 1,
+    "note": "Living styleguide. NOT on MOTION_SURFACES: its generated region is a swatch TABLE (markup), with nowhere to declare a custom property. Its one literal is a 1.4s skeleton shimmer \u2014 a period, not a chrome timing. Ledgered for visibility only, exactly as deploy.sh and bp-graph.js are in the colour ledger."
+   }
+  ]
+ }
 }

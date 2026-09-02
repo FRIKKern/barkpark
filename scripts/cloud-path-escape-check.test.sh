@@ -1001,6 +1001,240 @@ else
 fi
 echo
 
+# ── case 12: the census reads a SEGMENT LIST, not only the quoted literal ───
+# cch-w53. The census used to extract exactly `grep -Eoh '"\.\./[^"]*"'`, which
+# made this ratchet evadable BY AUTHORING STYLE ALONE. Measured on origin/main:
+#
+#   Path.expand("../../../internal/provisioner", __DIR__)
+#       -> exit 1, `UNCOVERED repo-root read: internal/provisioner`
+#   Path.join([__DIR__, "..", "..", "..", "internal", "provisioner"])
+#       -> exit 0, `OK: every repo-root read … is dispatched on`, census flat
+#
+# The two resolve to the IDENTICAL directory, so the second one is precisely the
+# hole this shim exists to close: a Cloud test reads a repo-root path the
+# dispatcher does not dispatch on, a PR touching that path skips the only suite
+# that checks it, and the ratchet says OK. The forms must be indistinguishable
+# to this script, and these arms are what keep them that way.
+echo "case 12: a segment-list read is seen exactly like a quoted literal"
+
+# The fixture adds a SIXTH covered read to make_fixture's five, written ONLY as
+# a segment list. That is deliberate: it clears the floor of 6 only BECAUSE the
+# segment-list reader works, so a future edit that neuters that reader reds
+# these cases on the floor instead of leaving them quietly green.
+# A red from any fixture below must be THE COVERAGE RED, never the floor red.
+# Without this, a neutered segment-list reader drops these fixtures under the
+# floor of 6 and every rc-only arm reports `ok` for a failure that has nothing
+# to do with the form under test — a vacuous green wearing a pass's clothes.
+# Measured: against origin/main's extractor this discrimination turns four
+# wrong-reason passes into four honest reds.
+not_floor() {
+  if has "$1" "SCANNER is broken, not the repo clean"; then
+    no "$2 — it red on the FLOOR, not on the read under test"
+  else
+    ok "$2"
+  fi
+}
+
+seg_fixture() {
+  local root="$1"
+  make_fixture "$root"
+  mkdir -p "$root/deploy"
+  : >"$root/deploy/site-deploy.sh"
+  cat >"$root/cloud/test/barkpark_cloud/seg_covered_test.exs" <<'EX'
+  @f Path.join([__DIR__, "..", "..", "..", "deploy", "site-deploy.sh"])
+EX
+}
+
+# (a) an UNDECLARED repo-root read written as a segment list must red, and must
+#     name the resolved path and the file that reads it — same words the quoted
+#     form gets in case 3.
+FX6="$TMPROOT/seg-uncovered"
+seg_fixture "$FX6"
+mkdir -p "$FX6/nowhere"
+: >"$FX6/nowhere/secret.json"
+SEGFILE="$FX6/cloud/test/barkpark_cloud/seg_escape_test.exs"
+cat >"$SEGFILE" <<'EX'
+  @bad Path.join([__DIR__, "..", "..", "..", "nowhere", "secret.json"])
+EX
+# NON-VACUITY, asserted before the verdict: this file must be INVISIBLE to the
+# old literal-only extractor. If it ever carries a `"../…"` literal, the case
+# below would be re-proving case 3 and would pass even with the segment-list
+# reader deleted.
+old_form="$(grep -Eoh '"\.\./[^"]*"' "$SEGFILE" || true)"
+if [ -z "$old_form" ]; then
+  ok "the mutation file carries NO \"../…\" literal — only the new reader can see it"
+else
+  no "the mutation file carries a quoted literal ($old_form) — this case cannot fail for the right reason"
+fi
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX6" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a segment-list read of an undeclared path"
+else
+  no "PASSED with a segment-list escape — the authoring-style hole is open: $out"
+fi
+not_floor "$out" "…and the red is the coverage red, not the floor"
+if has "$out" "UNCOVERED repo-root read: nowhere/secret.json"; then
+  ok "names the path the segment list resolves to"
+else
+  no "did not name the segment-list path: $out"
+fi
+if has "$out" "read from: cloud/test/barkpark_cloud/seg_escape_test.exs"; then
+  ok "attributes the segment-list read to its file"
+else
+  no "did not attribute the segment-list read: $out"
+fi
+
+# (b) THE EQUIVALENCE. The same read written as a quoted literal must produce
+#     the same verdict and the same path — the two forms are one read.
+FX7="$TMPROOT/seg-equivalent"
+seg_fixture "$FX7"
+mkdir -p "$FX7/nowhere"
+: >"$FX7/nowhere/secret.json"
+cat >"$FX7/cloud/test/barkpark_cloud/seg_escape_test.exs" <<'EX'
+  @bad Path.expand("../../../nowhere/secret.json", __DIR__)
+EX
+out2="$(CLOUD_PATH_ESCAPE_ROOT="$FX7" "$SCRIPT" 2>&1)" && rc2=0 || rc2=$?
+if [ "$rc2" -eq "$rc" ]; then
+  ok "the quoted twin of the same read exits identically ($rc2)"
+else
+  no "quoted form exits $rc2, segment form exits $rc — the forms are not one read"
+fi
+seg_paths="$(CLOUD_PATH_ESCAPE_ROOT="$FX6" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+lit_paths="$(CLOUD_PATH_ESCAPE_ROOT="$FX7" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if [ "$seg_paths" = "$lit_paths" ]; then
+  ok "both forms resolve to the identical census path set"
+else
+  no "census differs by authoring form: segment=[$seg_paths] literal=[$lit_paths]"
+fi
+
+# (c) a segment-list read of a DECLARED path is COVERED, not merely detected —
+#     the new form participates in coverage, it is not a failure-only arm.
+FX8="$TMPROOT/seg-covered"
+seg_fixture "$FX8"
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX8" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — a segment-list read of a declared path is quiet"
+else
+  no "a declared segment-list read red (rc=$rc): $out"
+fi
+covered="$(CLOUD_PATH_ESCAPE_ROOT="$FX8" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$covered" 'deploy/site-deploy\.sh'; then
+  ok "the declared path IS in the census (the read was seen, not skipped)"
+else
+  no "the segment-list read of a declared path never entered the census: $covered"
+fi
+
+# (d) THE GREEDY-JOIN CONTROL. A run ends at the first separator that is not a
+#     comma. Without that, `Path.join([__DIR__, ".."]) == "nowhere/secret.json"`
+#     would splice the right-hand side onto the path and invent a read that no
+#     code performs — a FALSE RED that reads exactly like a true one.
+FX9="$TMPROOT/seg-greedy"
+seg_fixture "$FX9"
+mkdir -p "$FX9/nowhere"
+: >"$FX9/nowhere/secret.json"
+cat >"$FX9/cloud/test/barkpark_cloud/compare_test.exs" <<'EX'
+  test "the parent dir" do
+    assert Path.join([__DIR__, ".."]) == "nowhere/secret.json"
+  end
+EX
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX9" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — an equality against a path string is not spliced into a read"
+else
+  no "the joiner swallowed a non-comma-separated string (rc=$rc): $out"
+fi
+
+# (e) a list formatted ONE SEGMENT PER LINE is the shape a formatter produces.
+#     The run has to survive the newline or the fix only covers single-line code.
+FX10="$TMPROOT/seg-multiline"
+seg_fixture "$FX10"
+mkdir -p "$FX10/nowhere"
+: >"$FX10/nowhere/secret.json"
+cat >"$FX10/cloud/test/barkpark_cloud/multiline_test.exs" <<'EX'
+  @bad Path.join([
+         __DIR__,
+         "..",
+         "..",
+         "..",
+         "nowhere",
+         "secret.json"
+       ])
+EX
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX10" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) — a multi-line segment list is seen"
+else
+  no "a formatted (one-segment-per-line) list slipped through: $out"
+fi
+not_floor "$out" "…and the multi-line red is the coverage red, not the floor"
+if has "$out" "UNCOVERED repo-root read: nowhere/secret.json"; then
+  ok "names the path a multi-line list resolves to"
+else
+  no "did not name the multi-line segment-list path: $out"
+fi
+
+# (f) the charlist form. Path/File take charlists, and the double-quote grep
+#     cannot see one. Zero occurrences in the tree today — the arm closes the
+#     form before it is used, and this is what proves the arm is wired at all.
+FX11="$TMPROOT/seg-charlist"
+seg_fixture "$FX11"
+mkdir -p "$FX11/nowhere"
+: >"$FX11/nowhere/secret.json"
+cat >"$FX11/cloud/test/barkpark_cloud/charlist_test.exs" <<'EX'
+  @bad Path.expand('../../../nowhere/secret.json', __DIR__)
+EX
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX11" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a single-quoted charlist read"
+else
+  no "a charlist read slipped through: $out"
+fi
+not_floor "$out" "…and the charlist red is the coverage red, not the floor"
+if has "$out" "UNCOVERED repo-root read: nowhere/secret.json"; then
+  ok "names the path a charlist read resolves to"
+else
+  no "did not name the charlist path: $out"
+fi
+
+# (g) the IN-IMAGE arm must see the new form too. A cloud/lib reader escaping
+#     the docker build context is FATAL (the #11723 / D841 class); writing it as
+#     a segment list must not buy an exemption from that.
+FX12="$TMPROOT/seg-in-image"
+seg_fixture "$FX12"
+cat >"$FX12/cloud/lib/audit_reader.ex" <<'EX'
+  @actions Path.join([__DIR__, "..", "..", "deploy", "site-deploy.sh"])
+EX
+out="$(CLOUD_PATH_ESCAPE_ROOT="$FX12" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) — a cloud/lib segment-list escape is still fatal"
+else
+  no "a cloud/lib reader escaped the image via a segment list: $out"
+fi
+not_floor "$out" "…and the in-image red is the in-image red, not the floor"
+if has "$out" "IN-IMAGE READER ESCAPES THE BUILD CONTEXT: cloud/lib/audit_reader.ex reads deploy/site-deploy.sh"; then
+  ok "the in-image arm names the segment-list reader and its escaped path"
+else
+  no "in-image arm did not claim the segment-list read: $out"
+fi
+
+# (h) THE REAL TREE, not a fixture. billing_client_mirror_test.exs carries NO
+#     `"../…"` literal at all — every path it reads is a segment list — so on
+#     origin/main that file contributed NOTHING to the census while reading
+#     cloud/docker-compose.yml. Its row is the standing proof that the reader
+#     works on real code; neuter the reader and this row disappears.
+real_census="$("$SCRIPT" --list-escapes)"
+if has "$real_census" "docker-compose.yml	cloud/test/barkpark_cloud/billing_client_mirror_test.exs"; then
+  ok "the real census attributes a read to a file with no quoted literal in it"
+else
+  no "the real census lost the segment-list-only reader — either the reader is neutered, or billing_client_mirror_test.exs stopped reading cloud/docker-compose.yml (if so, repoint this arm at another segment-list reader, do not delete it)"
+fi
+if [ -z "$(grep -Eoh '"\.\./[^"]*"' "$REAL_ROOT/cloud/test/barkpark_cloud/billing_client_mirror_test.exs" || true)" ]; then
+  ok "…and that file genuinely has no \"../…\" literal for the old extractor to find"
+else
+  no "billing_client_mirror_test.exs now carries a quoted literal — arm (h) no longer proves the segment reader"
+fi
+echo
+
 echo "----"
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

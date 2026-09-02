@@ -159,6 +159,17 @@ type onbAuthCheck struct {
 	Reachable bool   `json:"reachable"`
 	Tier      string `json:"tier"`
 	Server    string `json:"server"`
+
+	// TokenSource names WHICH credential produced that tier — the same label
+	// `bp whoami -o json` publishes (flag | env:<NAME> | repo-file | saved |
+	// default | none), from the same resolver. A receipt that reports "auth_tier
+	// none" without saying which credential earned it cannot distinguish "you
+	// are not logged in" from "a stale env var buried the login you have".
+	TokenSource string `json:"token_source"`
+	// TokenShadow is the one-line env-shadows-config finding, present ONLY when
+	// an env token is standing in front of a different saved credential for this
+	// same server. Advisory; it never changes the receipt's ok.
+	TokenShadow string `json:"token_shadow,omitempty"`
 }
 
 type onbMCPCatalog struct {
@@ -197,7 +208,7 @@ func doctorOnboardingRequested(args []string) bool {
 // exitGeneric — so a script can gate on it. CLI freshness and Cloud session are
 // advisory (a self-hosted user legitimately has no Cloud session), so they inform
 // the receipt without sinking the exit code.
-func runDoctorOnboarding(out *writer, g globals, ctx manifest.Context, args []string) int {
+func runDoctorOnboarding(out *writer, g globals, ctx manifest.Context, args []string, prov tokenProvenance) int {
 	// The global flag parser strips -h/--help into g.help before dispatch, so
 	// honour it here (its own arg scan below still catches a literal that slipped
 	// through) — `bp doctor --onboarding --help` shows THIS help, not the receipt.
@@ -217,7 +228,7 @@ func runDoctorOnboarding(out *writer, g globals, ctx manifest.Context, args []st
 		}
 	}
 
-	r := buildOnboardingReceipt(g, ctx)
+	r := buildOnboardingReceipt(g, ctx, prov)
 
 	switch out.output {
 	case "json":
@@ -238,7 +249,7 @@ func runDoctorOnboarding(out *writer, g globals, ctx manifest.Context, args []st
 // swapped test seams). It loads the manifest ONCE and reuses it for both the auth
 // tier (e) and the read-only tool-call proof (g), so a single reachable target is
 // probed once.
-func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
+func buildOnboardingReceipt(g globals, ctx manifest.Context, prov tokenProvenance) onboardingReceipt {
 	cfg, _ := LoadConfig()
 
 	var m *manifest.Manifest
@@ -251,7 +262,7 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
 		CLI:          onboardingCLIFreshness(),
 		CloudSession: onboardingCloudSession(cfg),
 		Instance:     onboardingInstance(cfg, ctx),
-		Auth:         onboardingAuth(m, ctx),
+		Auth:         onboardingAuth(m, ctx, prov),
 		MCP:          onbMCPCatalog{Version: cliVersion, Count: len(mcpTaskToolNames), Tools: append([]string(nil), mcpTaskToolNames...)},
 		ToolCall:     onboardingToolCallProof(g, ctx, m),
 		Reload:       onboardingReloadInstruction,
@@ -591,11 +602,23 @@ func onboardingAliases(b cloudclient.Barkpark) []string {
 // onboardingAuth is (e): the manifest fetch. A reachable target yields its
 // auth_tier; an unreachable one is reported plainly (reachable:false) rather than
 // failing the whole receipt with a stack trace.
-func onboardingAuth(m *manifest.Manifest, ctx manifest.Context) onbAuthCheck {
-	a := onbAuthCheck{Server: ctx.Server}
+func onboardingAuth(m *manifest.Manifest, ctx manifest.Context, prov tokenProvenance) onbAuthCheck {
+	a := onbAuthCheck{Server: ctx.Server, TokenSource: prov.label()}
+	if prov.Source == "" {
+		a.TokenSource = tokenSourceUnknown
+		if ctx.Token == "" {
+			a.TokenSource = tokenSourceNone
+		}
+	}
 	if m != nil {
 		a.Reachable = true
 		a.Tier = m.AuthTier
+	}
+	// The shadow rides here on the SAME condition whoami uses: an env token in
+	// front of a different saved one, and a tier that shows the server did not
+	// accept it (unreachable is not a rejection, so it stays quiet).
+	if prov.shadowsSaved() && m != nil && (m.AuthTier == "" || m.AuthTier == "none") {
+		a.TokenShadow = prov.shadowWarning(shadowReasonTierNone) + " — " + prov.shadowFix()
 	}
 	return a
 }
@@ -734,6 +757,9 @@ func renderOnboardingReceipt(out *writer, r onboardingReceipt) {
 		out.outf("  ⚠ alias shadow        %s", r.Instance.AliasShadow)
 	}
 	out.outf("  %s Auth                %s", mark(r.Auth.Reachable), authDetail(r.Auth))
+	if r.Auth.TokenShadow != "" {
+		out.outf("  ⚠ credential shadow   %s", r.Auth.TokenShadow)
+	}
 	out.outf("  %s MCP catalog         %d tools: %s", mark(r.MCP.Count == len(mcpTaskToolNames)), r.MCP.Count, strings.Join(r.MCP.Tools, ", "))
 	out.outf("  %s Tool-call proof     %s", mark(r.ToolCall.OK), r.ToolCall.Summary)
 
@@ -852,13 +878,21 @@ func instanceDetail(i *onbInstance) string {
 
 func authDetail(a onbAuthCheck) string {
 	if !a.Reachable {
-		return a.Server + " — unreachable (check it's running or run `bp setup`)"
+		line := a.Server + " — unreachable (check it's running or run `bp setup`)"
+		if a.TokenSource != "" {
+			line += " · credential " + a.TokenSource
+		}
+		return line
 	}
 	tier := a.Tier
 	if tier == "" {
 		tier = "unknown"
 	}
-	return a.Server + " — reachable, auth_tier " + tier
+	line := a.Server + " — reachable, auth_tier " + tier
+	if a.TokenSource != "" {
+		line += " · credential " + a.TokenSource
+	}
+	return line
 }
 
 // printOnboardingDoctorHelp documents `bp doctor --onboarding`.

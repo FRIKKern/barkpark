@@ -455,7 +455,7 @@ func whoamiCloudPayload(t *testing.T, contentServer string) (map[string]any, str
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "json"
-	if code := runWhoami(w, globals{}, manifest.Context{Server: contentServer}); code != exitOK {
+	if code := runWhoami(w, globals{}, manifest.Context{Server: contentServer}, tokenProvenance{}); code != exitOK {
 		t.Fatalf("runWhoami exit = %d\n%s", code, stderr.String())
 	}
 	var payload map[string]any
@@ -552,7 +552,7 @@ func TestWhoamiCloudBlockRejectedSession(t *testing.T) {
 	var hOut, hErr bytes.Buffer
 	hw := newWriter(&hOut, &hErr)
 	hw.output = "table"
-	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}, tokenProvenance{}); code != exitOK {
 		t.Fatalf("runWhoami (human) exit = %d\n%s", code, hErr.String())
 	}
 	if !strings.Contains(hOut.String(), "REJECTED") || !strings.Contains(hOut.String(), "bp login") {
@@ -592,7 +592,7 @@ func TestWhoamiCloudBlockUnverifiedSession(t *testing.T) {
 	var hOut, hErr bytes.Buffer
 	hw := newWriter(&hOut, &hErr)
 	hw.output = "table"
-	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}, tokenProvenance{}); code != exitOK {
 		t.Fatalf("runWhoami (human) exit = %d\n%s", code, hErr.String())
 	}
 	if !strings.Contains(hOut.String(), "UNVERIFIED") {
@@ -614,7 +614,7 @@ func TestWhoamiCloudBlockLoggedOut(t *testing.T) {
 	var hOut, hErr bytes.Buffer
 	hw := newWriter(&hOut, &hErr)
 	hw.output = "table"
-	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}, tokenProvenance{}); code != exitOK {
 		t.Fatalf("runWhoami (human) exit = %d\n%s", code, hErr.String())
 	}
 	if !strings.Contains(hOut.String(), "not logged in") {
@@ -625,7 +625,7 @@ func TestWhoamiCloudBlockLoggedOut(t *testing.T) {
 	var jOut, jErr bytes.Buffer
 	jw := newWriter(&jOut, &jErr)
 	jw.output = "json"
-	if code := runWhoami(jw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+	if code := runWhoami(jw, globals{}, manifest.Context{Server: srv.URL}, tokenProvenance{}); code != exitOK {
 		t.Fatalf("runWhoami (json) exit = %d\n%s", code, jErr.String())
 	}
 	var payload map[string]any
