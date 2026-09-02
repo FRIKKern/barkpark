@@ -52,7 +52,25 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "eyebrow"} = b, d), do: text_tag("eyebrow", b, d)
 
   defp block(%{"type" => "heading", "level" => l} = b, d) when l in 1..3,
-    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
+    do: heading_line(l, b, d)
+
+  # The stored corpus spells the heading level BOTH ways: 283 integer levels and
+  # 225 numeric STRINGS ("2" 119, "3" 102, "1" 9) across the 26 published papers
+  # that refuse on a KERNEL block type (census 2026-08-24, re-measured
+  # 2026-09-02). A string level matched no heading clause and fell through to
+  # the fail-honest catch-all, so `bp paper pull` answered 422 with
+  # `block type "heading" is outside the BPML kernel vocabulary` — a refusal on
+  # a type this module spells, over the SPELLING of one scalar.
+  #
+  # Coercing is not a guess. The RENDER side already collapses both spellings
+  # onto one outline level (`heading_level("2") -> 2`,
+  # render/compose.ex heading_level/1), so printing them identically spells the
+  # heading every reader already sees.
+  #
+  # DELIBERATELY NARROW — exactly "1" / "2" / "3". "01", " 2", "4" and every
+  # junk spelling keep falling through; see the note above the catch-all.
+  defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3),
+    do: heading_line(String.to_integer(l), b, d)
 
   defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d)
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
@@ -192,6 +210,24 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("expandable", attrs, children, d)
   end
 
+  # THE HEADING-LEVEL DECISION, recorded. A NIL/ABSENT level (20 blocks / 4
+  # papers: barkpark-cli-reliability-wave-2026-07-22,
+  # bp-cloud-build-doneset-audit-2026-08-18,
+  # enterprise-auth-done-set-audit-wave-2026-08-18, felix-pristine-wave-2026-08-18)
+  # and a JUNK level ("h2" 6, "w14-h2" 5, "h3" 5, "state", "live", … — 28 blocks
+  # / 4 papers) both KEEP REFUSING, by decision, through the catch-all below.
+  #
+  # The renderer's own fallback for both is `heading_level(_) -> 2`
+  # (render/compose.ex heading_level/1) and this printer deliberately does NOT
+  # borrow it. The renderer's default is a DISPLAY choice: the stored block
+  # keeps its real shape and an author can still state the level later. This
+  # printer's output is what `bp paper push` writes BACK, so defaulting here
+  # would persist an invented `<h2>` over the block — a pull/push the author
+  # never edited would silently restructure the document outline, and
+  # "w14-h2" is not an outline level in the first place. Charter D3: a shape
+  # the kernel cannot spell HONESTLY takes the typed refusal. Those 8 papers
+  # stay at 422 until an author states a level.
+  #
   # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
   # typed refusal (UnprintableError) so the read path can label it 422 and the
   # sync path can tell "unprintable paper" from "printer bug" — never a bare
@@ -408,6 +444,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp text_value(_other), do: raise(UnprintableError.new(:inline, "text"))
 
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  defp heading_line(l, b, d),
+    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
 
   defp text_tag(tag, b, d),
     do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</#{tag}>"
