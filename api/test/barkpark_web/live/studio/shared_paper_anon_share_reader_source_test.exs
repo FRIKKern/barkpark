@@ -37,7 +37,16 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
 
   alias Barkpark.{Content, Repo, Sharing}
 
-  @dataset "production"
+  # ITS OWN DATASET — the remediation for CI run 33596312592, where this file was
+  # green alone and RED in the full suite (2 failures, both the `<article>` arm
+  # assertion; every security `refute` still passed). Everything this fixture
+  # leans on is DATASET-SCOPED and shared when the dataset is "production":
+  # `Content.Schema.get_schema/3` matches "this workspace OR global" and breaks
+  # the tie on `dataset_id` alone, so a foreign global `paper` schema decides
+  # this suite's reader verdict; the tag registry the publish wall reads is
+  # dataset-scoped too. A dataset no other file names cannot be raced, and the
+  # tags below make the wall's input this file's own.
+  @dataset "anon-share-reader-#{System.unique_integer([:positive])}"
 
   # A stored cache no renderer of ours would emit today: a credential-harvesting
   # form, a script, and one paragraph of real prose. `reader_source/3` keeps the
@@ -81,6 +90,10 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
     )
 
     seed_paper_schema!(ws, proj)
+    # The publish wall reads the tag REGISTRY of this dataset, and
+    # `LabelFixtures.paper_attrs/1` fills weighted `tags` — unregistered names
+    # make the wall the ambient input instead of the fixture.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
 
     {:ok, conn: conn, ws: ws, proj: proj}
   end
@@ -149,7 +162,18 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
   # `refute rendered =~ ~s(phx-update="stream")` is NOT this check: the desk
   # list around the pane streams too, and that guard reds on every page.)
   defp assert_readonly_article!(rendered, slug) do
-    assert rendered =~ ~r/<article id="paper-body-#{slug}" data-rev="\d+">/
+    articles = rendered |> then(&Regex.scan(~r/<article[^>]*>/, &1)) |> List.flatten()
+
+    assert Enum.any?(articles, &(&1 =~ ~r/^<article id="paper-body-#{slug}" data-rev="\d+">$/)),
+           """
+           expected the READ-ONLY raw arm for #{slug}.
+           A red here names the arm that rendered instead, so the next failure
+           does not need a bisect: `paper-body-unrenderable-…` is the clamp
+           refusing (the reader answered {:error, _}), a tag carrying
+           phx-update="stream" is block mode, `paper-body` bare is "no paper".
+           articles rendered: #{inspect(articles)}
+           """
+
     :ok
   end
 
