@@ -5786,74 +5786,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Project an approved plan into a Paper (charter D49). Gated on the matched
-  # row being a :plan card AND an allow decision; only then does a fire-and-forget
-  # Task publish + stamp + broadcast. The Task NEVER touches the socket — it talks
-  # to the session topic every tab (this one included) is subscribed to. A tab
-  # with no store session or no topic (a brand-new chat) has nothing to project.
+  # Project an approved plan into a Paper (charter D49) by DELEGATING to the one
+  # owner of that side effect, `PlanPapers.publish_approved_plan/3` — the same
+  # seam `POST /v1/chat/sessions/:id/approval` calls, so a plan approved from the
+  # TUI and one approved from this tab produce the identical Paper, stamp and
+  # broadcast (ct-bl-plan-paper-parity). The gates (allow-only, :plan-role-only,
+  # non-blank server-held markdown), the fire-and-forget task and the honest
+  # failure broadcast all live THERE, keyed on the row the Recorder persisted —
+  # never on this socket's in-memory copy. A tab with no store session (a
+  # brand-new chat) has nothing to project.
   defp maybe_publish_plan(socket, request_id, decision) do
-    with true <- plan_allow?(decision),
-         %{role: :plan} = m <- find_message_by_rid(socket, request_id),
-         sid when is_binary(sid) <- socket.assigns[:store_session_id],
-         topic when is_binary(topic) <- socket.assigns[:subscribed_topic] do
-      markdown = to_string(m[:plan_markdown] || "")
-
-      # Fire-and-forget under Barkpark.TaskSupervisor (same pattern as the AI
-      # title, D13) — supervised, `$callers`-scoped so the sandbox connection is
-      # inherited under test, and drained on test exit. The Task never touches
-      # the socket; it talks to the session topic.
-      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-        publish_plan_paper(sid, request_id, markdown, topic)
-      end)
+    with sid when is_binary(sid) <- socket.assigns[:store_session_id] do
+      PlanPapers.publish_approved_plan(sid, request_id, decision)
     end
 
     :ok
-  end
-
-  defp plan_allow?(:allow), do: true
-  defp plan_allow?({:allow, _}), do: true
-  defp plan_allow?(_), do: false
-
-  # The fire-and-forget body: publish the Paper, stamp its id/url onto the plan
-  # row's metadata (replay-durable, D49), and broadcast the outcome to the session
-  # topic so all tabs converge. A publish failure is honest, not silent, and never
-  # re-raises — the approve already succeeded.
-  defp publish_plan_paper(session_id, request_id, markdown, topic) do
-    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
-    # invariant) must degrade to the SAME honest failure broadcast as an
-    # `{:error, _}` return — a crashed fire-and-forget Task is silent, and the
-    # promised "couldn't publish" line would never appear. Scoped to the publish
-    # call only: a raise AFTER a successful publish must not lie "couldn't
-    # publish" about a Paper that exists.
-    result =
-      try do
-        PlanPapers.publish(session_id, request_id, markdown)
-      rescue
-        e -> {:error, e}
-      catch
-        kind, reason -> {:error, {kind, reason}}
-      end
-
-    case result do
-      {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
-        StudioChat.merge_approval_metadata(session_id, request_id, %{
-          "paper_id" => paper_id,
-          "paper_url" => paper_url
-        })
-
-        Phoenix.PubSub.broadcast(
-          Barkpark.PubSub,
-          topic,
-          {:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}
-        )
-
-      {:error, _reason} ->
-        Phoenix.PubSub.broadcast(
-          Barkpark.PubSub,
-          topic,
-          {:plan_paper_failed, request_id}
-        )
-    end
   end
 
   # Flip every card matching a request_id to a terminal status (idempotent over

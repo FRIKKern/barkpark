@@ -26,8 +26,110 @@ defmodule Barkpark.StudioChat.PlanPapers do
 
   alias Barkpark.Content
   alias Barkpark.PortableDoc.FromMarkdown
+  alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Recorder
 
   @dataset "production"
+
+  @doc """
+  Project an ALLOWED plan approval into its Paper — the ONE owner of the D49
+  side effect, shared by EVERY surface that can answer an ask: the flat
+  `POST /v1/chat/sessions/:id/approval` transport (TUI, `bp`, any HTTP client)
+  and the Studio LiveView, which delegates here.
+
+  Everything the projection needs is SERVER-HELD, so this seam is socket-free
+  and caller-shape-free: the decision, plus the plan row the Recorder already
+  persisted (`role: "plan"`, `metadata.input["plan"]` — the D7 source of truth).
+  A caller supplies only the two ids and the decision it just delivered.
+
+  ## Contract — what publishes NOTHING (every case a silent `:ok` no-op)
+
+    * a deny / keep-planning decision — a rejected plan stays chat ephemera
+      (D49: "create on APPROVE only");
+    * a needs-you row that is not a `plan` (an ordinary tool approval, an
+      AskUserQuestion) — only ExitPlanMode rows have a document to grow into;
+    * a `request_id` with no persisted needs-you row (a replayed/unknown ask);
+    * a plan row whose `metadata.input["plan"]` is absent or not a binary — the
+      transport is provider-neutral (D36) and a provider that shapes its
+      ExitPlanMode ask differently must degrade to "no Paper", never to a crash
+      or an empty one;
+    * a plan whose markdown is blank once trimmed — an empty Paper is a worse
+      artifact than no Paper.
+
+  On a real publish the work runs as a supervised, FIRE-AND-FORGET task
+  (`Barkpark.TaskSupervisor`, `$callers`-scoped so it inherits the sandbox
+  connection under test and is drained on test exit): the approve has already
+  hit the wire, and D49 is explicit that it must never block or fail on a
+  publish error. The task never touches a socket or a conn — it stamps the row
+  and broadcasts on the session topic every surface already listens to. Always
+  returns `:ok`.
+  """
+  @spec publish_approved_plan(String.t(), String.t(), term()) :: :ok
+  def publish_approved_plan(session_id, request_id, decision)
+      when is_binary(session_id) and is_binary(request_id) do
+    with true <- allow?(decision),
+         %{role: "plan"} = row <- StudioChat.get_needs_you_message(session_id, request_id),
+         markdown when is_binary(markdown) <- plan_markdown(row.metadata),
+         false <- String.trim(markdown) == "" do
+      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+        project(session_id, request_id, markdown)
+      end)
+    end
+
+    :ok
+  end
+
+  # Both decision vocabularies mean the same thing here: the transport validates
+  # to a bare `:allow` (D22 forbids caller-supplied updatedInput), while the
+  # LiveView can carry an engine `{:allow, updated_input}`. Anything else — a
+  # `{:deny, _}`, an unknown term — is not an approval.
+  defp allow?(:allow), do: true
+  defp allow?({:allow, _}), do: true
+  defp allow?(_), do: false
+
+  # The server-held plan markdown (D7). Anything but a binary under
+  # `input["plan"]` is "no plan to publish", not a crash.
+  defp plan_markdown(%{"input" => %{"plan" => plan}}) when is_binary(plan), do: plan
+  defp plan_markdown(_), do: nil
+
+  # The fire-and-forget body: publish the Paper, stamp its id/url onto the plan
+  # row's metadata (replay-durable, D49), and broadcast the outcome on the
+  # session topic so every co-viewing surface converges on the same link.
+  defp project(session_id, request_id, markdown) do
+    topic = Recorder.topic(session_id)
+
+    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
+    # invariant) must degrade to the SAME honest failure broadcast as an
+    # `{:error, _}` return — a crashed fire-and-forget task is silent, and the
+    # promised "couldn't publish" line would never appear. Scoped to the publish
+    # call only: a raise AFTER a successful publish must not lie "couldn't
+    # publish" about a Paper that exists.
+    result =
+      try do
+        publish(session_id, request_id, markdown)
+      rescue
+        e -> {:error, e}
+      catch
+        kind, reason -> {:error, {kind, reason}}
+      end
+
+    case result do
+      {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
+        StudioChat.merge_approval_metadata(session_id, request_id, %{
+          "paper_id" => paper_id,
+          "paper_url" => paper_url
+        })
+
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          topic,
+          {:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}
+        )
+
+      {:error, _reason} ->
+        Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, {:plan_paper_failed, request_id})
+    end
+  end
 
   @doc """
   Publish (or idempotently re-publish) the approved plan as a Paper.

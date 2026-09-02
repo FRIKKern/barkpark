@@ -2125,7 +2125,7 @@ defmodule Barkpark.StudioChat do
 
   @doc """
   Merge a patch into a needs-you row's metadata, keyed by `request_id` (charter
-  D49 — the plan-paper stamp seam). Reuses `find_approval/2` (already inclusive
+  D49 — the plan-paper stamp seam). Reuses `get_needs_you_message/2` (already inclusive
   of the `"plan"` role) + `Map.merge` + `Repo.update`, so the row's existing
   metadata (request_id, tool_name, input, approval_status, …) is preserved and
   only the patched keys are added/overwritten.
@@ -2139,7 +2139,7 @@ defmodule Barkpark.StudioChat do
           {:ok, Message.t()} | {:error, term()} | :noop
   def merge_approval_metadata(session_id, request_id, patch)
       when is_binary(session_id) and is_binary(request_id) and is_map(patch) do
-    case find_approval(session_id, request_id) do
+    case get_needs_you_message(session_id, request_id) do
       nil ->
         :noop
 
@@ -2150,10 +2150,21 @@ defmodule Barkpark.StudioChat do
     end
   end
 
-  # The needs-you message (approval | question | plan) for a request_id (unique
-  # per ask). Newest wins if a request_id were ever reused; never raises on 0/N
-  # rows.
-  defp find_approval(session_id, request_id) do
+  @doc """
+  The needs-you message (approval | question | plan) for a `request_id` (unique
+  per ask), or `nil`. Newest wins if a request_id were ever reused; never raises
+  on 0/N rows.
+
+  PUBLIC because the row is the SERVER-HELD truth about an ask, and the D49
+  plan-paper projection (`Barkpark.StudioChat.PlanPapers.publish_approved_plan/3`)
+  must read it from a surface that has no socket to read from — the flat
+  `/v1/chat` transport. One reader, one query: a second copy of this predicate is
+  exactly the fork that let the Studio LiveView and the transport disagree about
+  what an approved plan is.
+  """
+  @spec get_needs_you_message(String.t(), String.t()) :: Message.t() | nil
+  def get_needs_you_message(session_id, request_id)
+      when is_binary(session_id) and is_binary(request_id) do
     Message
     |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
     |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))
