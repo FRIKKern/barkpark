@@ -89,6 +89,17 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    example of an unrecognised function. Reserving distinct fixture rows prevents the DATA
    collision and not this one. When a PR makes names real, grep for EVERY name it implements, not
    the one the filing happens to mention.
+   **PRODUCER/CONSUMER drift is a DIFFERENT hazard from a mirror, with its own detector.** A
+   mirror is symmetric — two copies of one truth table. This is asymmetric: one side owns a wire
+   shape, the other parses it, and the consumer's tests run against a FIXTURE that is a snapshot
+   of the producer's output. The producer changes shape, the consumer's suite keeps passing
+   against the stale snapshot, production breaks. Only the DATA is copied, so the mirror rule
+   cannot see it. Detector, all three parts REQUIRED: (a) the fixture's field names are owned by
+   a producer in our own tree, (b) the consumer DECODES it into a typed struct rather than
+   byte-comparing its own output, (c) nothing on the producer side regenerates or freshness-checks
+   it. Any one part alone is a candidate generator, not a detector — measured 2026-09-02, the
+   naive "unreferenced fixture" form yields 67 hits of which roughly 90%% are not the hazard
+   (a renderer comparing its OWN output fails (a); a third-party API capture fails (b)).
    **The real cap is FILE saturation, not the PR count.** When the open PRs in your fence
    already touch the same handful of files, an extra PR is a guaranteed green-apart /
    red-together collision no matter how much WIP headroom you have. A lane that is saturated
