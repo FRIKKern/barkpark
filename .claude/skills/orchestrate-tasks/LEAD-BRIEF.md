@@ -69,6 +69,9 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
   on ten PRs). Pulse each held row every ~18 min until merge; re-claim before re-running a gate; a
   pulse bumps the epoch, so re-read before stamp/close.
 
+**No CronCreate ticks.** A cron tick that fires while you are blocked in a worker call is QUEUED, and the backlog then drains one prompt per idle turn — measured 2026-09-02: a 17-min cron produced wake-ups every ~40 s for an hour, twice, in two different lanes. Your pulse is a bash loop; your PR watch is ONE persistent Monitor that prints only when a verdict string differs from the previous poll. `CronList` must be empty.
+
+
 ## Fences and shared files
 
 - **Temp files are namespaced.** The session scratchpad root is SHARED by every agent in the
