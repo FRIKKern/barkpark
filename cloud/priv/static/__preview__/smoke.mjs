@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   SCENARIOS, SCENARIO_NAMES, route,
+  IDS as SCEN_IDS,
   RAIL_FAIL_CRUEL_DETAIL as SCEN_RAIL_CRUEL_DETAIL,
   DEPLOY_DETAIL_CRUEL as SCEN_DEPLOY_DETAIL_CRUEL,
   DEPLOY_DETAIL_KIND as SCEN_DEPLOY_DETAIL_KIND,
@@ -1303,7 +1304,17 @@ const EXPECTATIONS = {
     container: "instance-body",
     // #1180 (9eff1fee) retired the bp-tl-step* classes: the failed row is now
     // new-step failed (the bp-tl-fail block itself survived) — expectation lagged.
-    includes: ["bp-tl-fail", "new-step failed", "Setup failed", "Retry setup", "Studio never came up"],
+    // cch-w45-bl: `"Retry setup"` alone is the LABEL, and the label is what the
+    // REFUSED arm renders too (`<button … disabled title="You need the admin
+    // role…">Retry setup</button>`), so this line passed on a member's dead
+    // control just as happily as on an admin's live one. retryInstance has TWO
+    // live mounts — this timeline one and the verify card's
+    // [data-vf-reprovision] (paid by `verify-no-credentials` below) — and one
+    // census row covers both, so a green over one is not a green over the verb.
+    // `data-tl-retry` is the attribute wireInstanceTimeline binds on and
+    // `bp-tl-retry` is the viewport dock the refused arm deliberately drops.
+    includes: ["bp-tl-fail", "new-step failed", "Setup failed", "Retry setup", "data-tl-retry", "bp-tl-retry",
+      "Studio never came up"],
   },
   // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
   // Current chip, the prior live row offers rollback, the failed row neither.
@@ -2202,6 +2213,20 @@ const EXPECTATIONS = {
       assert.ok(body.includes('aria-controls="inst-lifecycle-actions"'), "the disclosure points at the card slot");
       // D-03 Overview: one composed pass — updates card, Sites card, card rail.
       assert.ok(body.includes("update-panel"), "the updates card renders");
+      // cch-w45-bl — patchAutoupdate, ON THE GRANT ARM. cch-w47-s2 put the CP's
+      // real policy block on every bpBase row, which is what makes
+      // hasAutoupdatePolicy true and paints these four toggles at all; until
+      // then they rendered in ZERO committed scenarios. The only corpus-level
+      // assertion that block had was `panel-overview-member`'s count of five
+      // disable-and-explain wrappers — a NEGATIVE, so reverting the fixture
+      // moved a number rather than naming a verb. These name it, positively, on
+      // the actor who is actually offered it.
+      assert.ok(body.includes('<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>'),
+        "patchAutoupdate: the admin arm paints the live Pause toggle (PATCH /v1/barkparks/:id/autoupdate)");
+      assert.ok(body.includes('<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>'),
+        "patchAutoupdate: …and the live Pin toggle, its independent freeze");
+      assert.ok(body.includes('rail-row"><span class="k">Autoupdate</span>'),
+        "patchAutoupdate: the policy chip the toggles act on renders beside them");
       assert.ok(body.includes("inst-sites-card"), "the Sites card renders");
       assert.ok(body.includes("detail-rail--cards"), "the rail renders as cards");
       for (const label of ["Identity", "Runtime", "Platform", "Activity"]) {
@@ -4080,6 +4105,92 @@ const EXPECTATIONS = {
       confirm.dispatchEvent({ type: "click" });
       await ctx.settle();
       assert.equal(posts(), 1, "clicking the terminal recovery issues NO second POST");
+    },
+  },
+
+  // ── cch-w45-bl: the three rail verbs that rendered in NO committed scenario ─
+  // Measured on origin/main dea37e8d19 by booting all 116 committed scenarios
+  // through this shim (0 boot errors) and scanning every registry entry's bytes:
+  //   id="inst-update"        0 hits
+  //   id="inst-remove-retry"  0 hits
+  //   data-vf-reprovision     0 hits
+  // Each absence is a STATE the corpus never produced, not a control that was
+  // missing, so every guard over them was green by construction.
+  //
+  // WHY THE FIRST TWO ARE SCORED AT RENDER LEVEL AND NOT CLICKED. Both mounts
+  // are read with `$("#inst-update")` / `$("#inst-remove-retry")`, and this
+  // shim's byId AUTO-CREATES a registry entry for any id asked for — so a click
+  // oracle there would dispatch against a phantom node that exists because the
+  // app asked for it, and would keep passing with the control deleted. The
+  // verify-card mount below is read with `box.querySelector("[data-vf-…]")`
+  // over the mount's own parsed kids, which CAN answer null — so that one is
+  // clicked, and its handler count is asserted positive.
+  "instance-behind": {
+    what: "a live box one release BEHIND paints the self-update CTA — the first committed scenario in which #inst-update exists at all",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      // The LIVE mount hook, not the label: the refused arm renders the same
+      // words on a disabled button, so a label-only assertion cannot tell an
+      // offered verb from a withheld one.
+      assert.ok(body.includes('<button class="btn btn-primary btn-sm" type="button" id="inst-update">Update to v0.9.2</button>'),
+        "the admin arm must paint the live #inst-update control, labelled with the release it would install");
+      // …and it is the BEHIND state that produces it. A box on `current` renders
+      // no CTA at all, which is what every other instance scenario proves.
+      assert.ok(body.includes("Update available"), "the pill states the same fact the CTA acts on");
+      assert.ok(!body.includes("inst-life-disabled"),
+        "this scenario's actor is an owner — a disable-and-explain wrapper here would mean the fixture lost its authority");
+    },
+  },
+  "instance-remove-failed": {
+    what: "a teardown that FAILED paints Retry removal — the first committed scenario in which deprovision_status is non-null",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      assert.ok(body.includes('<button class="btn btn-primary btn-sm" type="button" id="inst-remove-retry">Retry removal</button>'),
+        "the admin arm must paint the live #inst-remove-retry control");
+      // The removeFailed fold owns the WHOLE actions strip: nothing else may be
+      // offered on a box whose teardown is half-done.
+      assert.ok(!body.includes('id="inst-open-studio"'), "a box mid-failed-teardown offers no Studio link");
+      assert.ok(!body.includes('id="inst-update"'), "…nor an update");
+      // The server's verbatim reason, on the banner beside it.
+      assert.ok(body.includes("<b>Removal failed.</b> hcloud: server delete returned 409 (a volume is still attached)"),
+        "the deprovision_error is rendered verbatim, never summarised");
+    },
+  },
+  "verify-no-credentials": {
+    what: "the golden-path card's 404 no_admin_token note offers its ONE recovery — [data-vf-reprovision] renders, is wired, and POSTs /retry once",
+    async check(reg, hooks, ctx) {
+      const box = reg.get("instance-verify");
+      assert.ok(box, "#instance-verify was never touched");
+      const before = box.innerHTML || "";
+      assert.ok(!before.includes("data-vf-reprovision"),
+        "the note is a RESULT: nothing offers a re-provision before the check has been run");
+
+      // The run control is read the way app.js reads it — a single attribute
+      // selector over the mount's own kids, which can answer [] — so the
+      // positive handler count below is a real measurement, not a formality.
+      const run = box.querySelectorAll("[data-vf-run]");
+      assert.equal(run.length, 1, "exactly one Run-first-check control renders");
+      const ranHandlers = run[0].dispatchEvent({ type: "click" });
+      assert.ok(ranHandlers > 0, "the run control dispatched " + ranHandlers + " handlers — an unwired button is a false green");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("POST", "/v1/barkparks/" + SCEN_IDS.liveInstance + "/verify"), 1,
+        "the click issued exactly one POST /verify");
+
+      const after = (reg.get("instance-verify") || {}).innerHTML || "";
+      assert.ok(after.includes("<b>No stored credentials.</b>"), "the 404 renders the coded note, not a toast");
+      assert.ok(after.includes('<button class="btn btn-sm" type="button" data-vf-reprovision>Re-provision</button>'),
+        "the ONE recovery action is the live re-provision control (D25) — this is retryInstance's SECOND live mount, " +
+        "and it had never rendered in any committed scenario");
+      // Wired, and it calls the primitive the note's own sentence promises.
+      const rp = reg.get("instance-verify").querySelectorAll("[data-vf-reprovision]");
+      assert.equal(rp.length, 1, "exactly one re-provision control");
+      const rpHandlers = rp[0].dispatchEvent({ type: "click" });
+      assert.ok(rpHandlers > 0, "the re-provision control dispatched " + rpHandlers + " handlers");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("POST", "/v1/barkparks/" + SCEN_IDS.liveInstance + "/retry"), 1,
+        "…and it POSTs /retry exactly once — the primitive the note names in words");
     },
   },
 };
