@@ -2970,23 +2970,39 @@ const EXPECTATIONS = {
       // exactly one hit per string, app.js itself), so the sheet was free to
       // promise an erasure the plane does not perform. This leg already renders
       // the REAL sheet into #modal-body; it just never read the words.
-      // The three residues asserted here are all MEASURED, not stylistic: the
-      // archive bundle has no delete path at all, DELETE /v1/barkparks/:id
-      // reaches no Billing function, and a customer-owned DNS record is never
-      // retracted. The FORBIDDEN half matters as much: no window and
-      // no number of days may appear, because there is no reaper to back one.
+      // The residues asserted here are all MEASURED, not stylistic: DELETE
+      // /v1/barkparks/:id reaches no Billing function, and a customer-owned DNS
+      // record is never retracted.
+      //
+      // cch-w54-bl FLIPPED THE ARCHIVE-BUNDLE HALF. This leg used to FORBID a
+      // window ("no number of days may appear, because there is no reaper to
+      // back one"). There is a reaper now — ArchiveStore.delete_bundle/2 driven
+      // by Workers.ArchiveRetentionWorker on "45 3 * * *" — so the assertion is
+      // inverted: the sheet MUST name the 30 days the worker actually applies,
+      // and must no longer claim the plane cannot delete a bundle. The number
+      // is pinned here and in the worker's own test against
+      // ArchiveRetentionWorker.retention_days(), so a window changed on one
+      // side reds on the other.
       const sheet = reg.get("modal-body").innerHTML || "";
       assert.ok(sheet.includes('class="cm-consequences"'),
         "the destroy sheet must render its consequence list; got: " + sheet.slice(0, 200));
       assert.ok(sheet.includes("Tears down the server for good"),
         "the live arm must still say plainly what it destroys; got: " + sheet.slice(0, 400));
-      assert.ok(sheet.includes("archive bundle") && sheet.includes("no way to delete it"),
-        "the sheet must disclose the archive bundle the control plane cannot delete");
+      assert.ok(sheet.includes("archive bundle") && sheet.includes("30 days"),
+        "the sheet must state the archive bundle's real 30-day retention window; got: " + sheet.slice(0, 600));
+      assert.ok(sheet.includes("its most recent bundle is kept"),
+        "the sheet must state the live-team carve-out the sweep actually applies");
+      assert.ok(!sheet.includes("no way to delete it"),
+        "the sheet still claims the plane cannot delete a bundle — delete_bundle/2 exists and runs daily");
       assert.ok(sheet.includes("Billing does not stop here"),
         "the sheet must stop implying the teardown cancels the subscription");
-      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(sheet),
-        "the sheet named a window in days — there is no reaper, and inventing one is the very defect this fixes: " +
-        sheet.slice(0, 400));
+      // The window may be named ONLY as the 30 days the reaper applies. Any
+      // OTHER duration is an invented promise again, so the negative half
+      // survives the flip rather than being dropped.
+      const windows = sheet.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+      assert.ok(windows.length > 0, "the sheet named no retention window at all");
+      assert.ok(windows.every((w) => /^30\s*days$/i.test(w)),
+        "the sheet named a window the sweep does not apply: " + JSON.stringify(windows));
       assert.ok(sheet.includes("stays behind"),
         "the finality line must be about the row, with the residue named beside it");
       // THE CONDITIONAL, BOTH WAYS. The fixture instance carries NO custom host
@@ -3042,8 +3058,13 @@ const EXPECTATIONS = {
       // character would be red for a reason that has nothing to do with the copy.
       assert.ok(extSheet.includes("repoint the record for you"),
         "and the console must admit it cannot fix that record for them; got: " + extSheet.slice(0, 500));
-      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(extSheet),
-        "the custom-host branch named a window in days; got: " + extSheet.slice(0, 500));
+      // cch-w54-bl: same flip as the branch above — the only duration this
+      // sheet may name is the 30 days ArchiveRetentionWorker actually applies,
+      // and the DNS sentence itself must still name none of its own (the
+      // record dangles indefinitely; there is no sweep for it).
+      const extWindows = extSheet.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+      assert.ok(extWindows.every((w) => /^30\s*days$/i.test(w)),
+        "the custom-host branch named a window the plane does not apply: " + JSON.stringify(extWindows));
       // …and the PLATFORM side, whose zone the control plane does own end to end
       // (the attach modal accepts <name>.barkpark.cloud and nothing else), must
       // stay silent — the sentence is about a record we never held.
