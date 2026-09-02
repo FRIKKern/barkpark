@@ -195,3 +195,41 @@ work, filed as `tgw10-bl-park-reasons-not-durable`.
 31 present, plus exactly one row a sibling slice filed mid-run
 (`tgw9-bl-class-coverage-hyphen-blind-spot`). Gate: `pool 810 ns 33 ns_minus_root 32`, zero drafts
 in the namespace. Re-derive the whole census with R1 — never quote these numbers.
+
+## R8 — CORRECTION to R7, added 2026-09-02: R7's own CONTROL named a field that has no writer
+
+R7 above is right that the 45 park reasons did not persist, and wrong about why. Both of its
+commands read `content.engagement.note`, and its control asserts — verbatim —
+
+> `bp task get tgw2-bl-throw-liveness-observation -o json   # content.engagement.note is there, verbatim`
+
+**That sentence is false, and was false when it was written.** `bp task stage --note` has never
+written `content.engagement.note`. It writes `content.disposition_reason`, and `task.staged` carries
+the key it used as `staged.note_key`. `content.engagement` is an EPHEMERAL LEASE —
+`{object, holder, ts, lapse_ttl_seconds, lapses_at}`, no `note` member — that `Tasks.TtlSweeper`
+deletes WHOLESALE past `task_engagement_ttl_seconds` (900 s).
+
+So R7's census was a **pass-shaped absence**: reading a key nothing writes returns 0 on every row,
+whether or not a reason was ever recorded. "0 of 46 carry a note" could not have come out any other
+way. The observation was correct; the diagnosis attributed a real gap to the wrong mechanism, and
+then offered a control that certified the wrong mechanism as working.
+
+Re-derive it against the durable key instead:
+
+```
+bp task get <id> -o json     # read content.disposition_reason  (durable; no sweeper owns it)
+                             # content.engagement is a lease and has no note member at all
+```
+
+The gap R7 measured is nonetheless real and was paid: the 40 `considering` children of
+`truth-grip-epic` were re-adjudicated under `tgw10-bl-park-reasons-not-durable`, each carrying a
+reason on `content.disposition_reason` plus a `reopen_trigger`, and the row now reads 36 considering
+against 164 children with a control re-read on `tgw2-bl-throw-liveness-observation` showing
+`content.engagement` null and the reason present in full.
+
+The trap generalises past this file, which is why it is written here rather than only on the row: a
+criterion that measures a field NOTHING WRITES cannot fail, so it reads as a clean pass and hides the
+thing it was written to catch. Filed as `task-650b487285603d2d`; the durable/ephemeral split itself is
+`PDS-D306`, and the contract now states it in
+[docs/contracts/task-claim-lifecycle.md](../../../docs/contracts/task-claim-lifecycle.md) under the
+`Stage` verb. This ledger is append-only: R7 stays exactly as written, and this row supersedes it.
