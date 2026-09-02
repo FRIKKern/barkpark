@@ -352,10 +352,18 @@ health_gate() { # 0 healthy, 1 not
   # site answers 503, not 404 (a plain missing ASCII path 503s too) — the cause
   # was not derived. The assertion below is "not 200", so it holds either way;
   # the 503 mystery is its own backlog row (task ssw11-bl-static-miss-503-not-404).
-  local deep="" deep_code=000 site_base=""
+  # HEALTH_PY is the interpreter the two ASSERTION probes below run on — kept
+  # separate from the throwaway server's python3 (which may be caddy) so a
+  # broken probe interpreter cannot be mistaken for a single-page build. A
+  # probe that could not run is COULD-NOT-CHECK, never OK: see deep_probe_rc.
+  local HEALTH_PY="${BARKPARK_HEALTH_PY:-python3}"
+  local deep="" deep_code=000 site_base="" deep_probe_rc=0
   if [ "$code" = 200 ]; then
     site_base="$(meta_value "$body" bp-site-base)"
-    deep="$(python3 - "$body" "$site_base" <<'PY' 2>/dev/null || true
+    if ! command -v "$HEALTH_PY" >/dev/null 2>&1; then
+      deep_probe_rc=127
+    else
+    deep="$("$HEALTH_PY" - "$body" "$site_base" <<'PY' 2>/dev/null
 import re, sys, urllib.parse
 html = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
 base = (sys.argv[2] or "/").strip()
@@ -380,10 +388,11 @@ if cands:
     cands.sort(key=lambda p: (p.isascii(), not (p.endswith("/") or p.endswith(".html")), len(p), p))
     print(urllib.parse.quote(cands[0], safe="/"))
 PY
-)"
-    if [ -n "$deep" ]; then
+)" || deep_probe_rc=$?
+    if [ "$deep_probe_rc" = 0 ] && [ -n "$deep" ]; then
       deep_code="$(curl -sL -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port/$deep" 2>/dev/null || echo 000)"
       [ -n "$deep_code" ] || deep_code=000
+    fi
     fi
   fi
   kill "$srv" 2>/dev/null || true
@@ -434,6 +443,16 @@ PY
   # wordier draft cost 218 and left only 22, so the FIRST thing to truncate on the
   # BPSTAGE channel would have been the cause hint for the wave's own bug. If you
   # add words here, re-measure against emit()'s 240.
+  # THREE-VALUED, not two. An empty $deep used to mean BOTH "no internal link"
+  # (n/a, fine) and "the extractor never ran" (nothing was checked) — and the
+  # gate printed the n/a prose for both, so a missing or crashing interpreter
+  # PASSED every broken release while reading as "single-page build". A probe
+  # that could not run has made no claim, and a HEALTH gate that made no claim
+  # has not gated: refuse, and name the assertion that was not made.
+  if [ "$deep_probe_rc" != 0 ]; then
+    HEALTH_DETAIL="deep-path probe COULD-NOT-CHECK: the link extractor ($HEALTH_PY) did not run (exit $deep_probe_rc) — the deep-path assertion was NOT made, so this release is unverified, not healthy"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
   if [ -n "$deep" ] && [ "$deep_code" != 200 ]; then
     HEALTH_DETAIL="index.html links to /$deep — served HTTP $deep_code, want 200. Re-pack and re-upload; do not retry this artifact. Cause: a tar dropped or mangled a non-ASCII path component, or disk names are NFD vs NFC in the href"
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
@@ -462,7 +481,11 @@ PY
   local seed="$RELDIR/search-seed.json"
   if [ -f "$seed" ]; then
     local seed_shape
-    seed_shape="$(python3 - "$seed" <<'PY' 2>/dev/null || true
+    local seed_probe_rc=0
+    if ! command -v "$HEALTH_PY" >/dev/null 2>&1; then
+      seed_probe_rc=127
+    else
+    seed_shape="$("$HEALTH_PY" - "$seed" <<'PY' 2>/dev/null
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
@@ -471,7 +494,14 @@ except Exception:
 s = d.get("initialSeed")
 print("OK" if (s is None or isinstance(s, list)) else "BADSHAPE")
 PY
-)"
+)" || seed_probe_rc=$?
+    fi
+    # Same three-valued rule as the deep probe: an empty $seed_shape is not OK,
+    # it is "the #4020 seed-shape assertion was never made".
+    if [ "$seed_probe_rc" != 0 ] || [ -z "$seed_shape" ]; then
+      HEALTH_DETAIL="finder seed shape COULD-NOT-CHECK: the seed probe ($HEALTH_PY) did not run (exit $seed_probe_rc) — the #4020 seed-shape assertion was NOT made on a build that ships search-seed.json"
+      log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+    fi
     if [ "$seed_shape" = BADJSON ]; then
       HEALTH_DETAIL="search-seed.json is not valid JSON — the finder seed is corrupt"
       log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
@@ -968,6 +998,52 @@ RCF
     mkidx "$TD/hd_ext" none '<a href="https://example.com/a/b/">out</a><a href="mailto:a@b.c">mail</a><a href="#top">top</a>'
     check "external / mailto / fragment hrefs are not internal links (n/a, no refusal)" gate_log "$TD/hd_ext" "$TD/hd_ext.log"
     check "and that says n/a too"                         grep -q 'deep-path probe n/a' "$TD/hd_ext.log"
+
+    # ── COULD-NOT-CHECK is not OK ──────────────────────────────────────────
+    # The hole these rows close: both HEALTH assertion probes ran python3 with
+    # `2>/dev/null || true`, so an interpreter that was missing or that crashed
+    # produced an EMPTY result — and empty was read as "no internal link" /
+    # "seed fine". The gate then logged `deep-path probe n/a (single-page
+    # build)` and `finder integrity OK` and PASSED, on a release where nothing
+    # was checked at all. The suite's own SKIP note above (:~860) already knew
+    # this; the GATE did not. BARKPARK_HEALTH_PY names the probe interpreter
+    # (the throwaway server keeps its own python3), so these rows break exactly
+    # the thing the probe needs and nothing else.
+    cnc_before=$TESTS
+    mkidx "$TD/hd_cnc" none '<a href="d/hello/">hello</a>'
+    mkpage "$TD/hd_cnc/d/hello"
+    check "control: with a working probe the deep path is CERTIFIED" \
+      gate_log "$TD/hd_cnc" "$TD/hd_cnc.log"
+    check "control names the probed path" grep -q 'deep path /d/hello/ serves 200' "$TD/hd_cnc.log"
+    ( BARKPARK_HEALTH_PY="$TD/no-such-python"; export BARKPARK_HEALTH_PY
+      gate_log "$TD/hd_cnc" "$TD/hd_cnc_broken.log" ) && cnc_rc=0 || cnc_rc=1
+    check "a probe that COULD NOT RUN makes HEALTH REFUSE (was: silent pass)" [ "$cnc_rc" = 1 ]
+    check "and the refusal says COULD-NOT-CHECK, naming the unmade assertion" \
+      grep -q 'deep-path probe COULD-NOT-CHECK' "$TD/hd_cnc_broken.log"
+    check "and it does NOT claim the release is a single-page build" \
+      absent 'deep-path probe n/a' "$TD/hd_cnc_broken.log"
+
+    # the seed probe, same disease, same rule
+    mkidx "$TD/hd_cnc_seed" none '<h1>hello</h1>'
+    printf '{"initialSeed":[]}' > "$TD/hd_cnc_seed/search-seed.json"
+    check "control: a good seed with a working probe passes" \
+      gate_log "$TD/hd_cnc_seed" "$TD/hd_cnc_seed.log"
+    check "control says finder integrity OK" grep -q 'finder integrity OK' "$TD/hd_cnc_seed.log"
+    ( BARKPARK_HEALTH_PY="$TD/no-such-python"; export BARKPARK_HEALTH_PY
+      gate_log "$TD/hd_cnc_seed" "$TD/hd_cnc_seed_broken.log" ) && scnc_rc=0 || scnc_rc=1
+    check "a seed probe that COULD NOT RUN makes HEALTH REFUSE (was: 'integrity OK')" \
+      [ "$scnc_rc" = 1 ]
+    check "and it does NOT print 'finder integrity OK' over an unread seed" \
+      absent 'finder integrity OK' "$TD/hd_cnc_seed_broken.log"
+
+    # NON-VACUITY. Every row above lives behind a fixture that could fail to
+    # build and behind an `if` that could stop selecting this branch; a block
+    # that silently stops running is the exact defect these rows exist to
+    # catch, so the block asserts its OWN executed count instead of trusting
+    # an empty result.
+    cnc_ran=$((TESTS - cnc_before))
+    check "the COULD-NOT-CHECK block ran all 9 of its rows (got $cnc_ran)" \
+      [ "$cnc_ran" -eq 9 ]
 
     # NFC vs NFD. The VERDICT is deliberately not asserted: APFS is
     # normalization-INSENSITIVE (measured — a dir created with NFD bytes answers
