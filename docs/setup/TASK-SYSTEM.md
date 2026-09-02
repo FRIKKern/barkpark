@@ -110,12 +110,9 @@ POST /v1/tasks/drafts.t1/papers   {"add":["design-notes"]}
 bp task ready --limit 5 --offset 0     # deterministic queue page
 bp task ready --all                    # aggregate pages
 bp task ls --limit 20                  # all tasks, goals included
-bp task ls --all                       # every page, offset-walked
 ```
 
-**Pages by default.** `ls` serves **100** rows when you name no `--limit`, `ready` 50; both cap at **1000**. Every list response carries `page:{limit,offset,returned,has_more}` — `has_more` is `returned == limit`, so `returned < limit` proves the last page but a full page may over-report. A default page that fills prints `result page reached the default limit of 100` on **stderr**; the remedy is `--all` (offset-walked, lookahead-anchored) or a bigger `--limit`. Never read a 100-row `ls` as the whole board.
-
-Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Never cap paging at a round number** — a run stopped at offset 3000 read its cap as the end; the set held 7,652. A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
+Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Pages by default:** `ls` 100, `ready` 50, cap 1000; `has_more` = `returned == limit` (may over-report); a filled default page warns on stderr — use `--all` or a bigger `--limit`, never one page as the board. A misspelt key is a 400 `invalid_filter` naming the set. Order: priority/creation/UUID; `ls` is total-ordered (updated_at DESC; `parent` → inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
 
 **7. Watch the stream.** Both routes are in **What you get**. **Push:** SSE, `task.*`, no polling. **Pull:** `bp task events --since <id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic PK). Resume with the last `cursor` as `--since`; omit = from start, `has_more:true` → poll again. One `dataset` (default `production`), `type=task`.
 
