@@ -33,6 +33,19 @@ defmodule Barkpark.Tasks.Close do
   #     above was vacuously satisfied and could not see it.
   #     `blocked` is exempt BY NAME; `cancelled` deliberately is NOT — see
   #     `check_acknowledgement/3`.
+  #   * CLOSE ARTIFACT (PDS-D291) — a `done` close of a `kind: "task"` row that
+  #     carries ZERO acceptance criteria needs an ARTIFACT in its close_reason:
+  #     a PR number (`#123`) together with a 7-40 hex sha, or a pasted run
+  #     (a ``` fence, or a line starting with `$ `). Otherwise `:close_reason_override`
+  #     with a reason, recorded as `close_override.close_reason`. This is the
+  #     complement of the CRITERIA gate, not a duplicate of it: D289 measures
+  #     criteria that EXIST, so on a row with none it is vacuously satisfied and
+  #     a bare prose reason closed `done` unchallenged (LEAD3-jsweb measured 14
+  #     of 15 closes in one lane on exactly that shape). Container rows are
+  #     exempt BY NAME — `kind != "task"`, a `decision`/`goal` label segment, or
+  #     a row that HAS children (TASK-SYSTEM.md §5 "Decisions and goals may omit
+  #     them"; schema.ex: "a goal is a root task, a phase is a task with
+  #     children") — as are `cancelled` and `blocked` closes.
   #
   # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
   # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
@@ -58,7 +71,7 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
-  alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Content.{Document, DraftId, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edges
@@ -99,7 +112,16 @@ defmodule Barkpark.Tasks.Close do
       # report without telling them"), and folding them would let the first
       # silently buy the second — which is how a reporter gets orphaned by a
       # close that looked fully accounted for.
-      acknowledgement: override_reason(Keyword.get(opts, :ack_override))
+      acknowledgement: override_reason(Keyword.get(opts, :ack_override)),
+      # ALSO ITS OWN KEY, for the same reason `acknowledgement` is. The admission
+      # here is "this row named no criteria AND I am naming no artifact, and it is
+      # done anyway" — a different sentence from D289's "a criterion I can name is
+      # unproven". Folding it into `criteria_override` would let the override that
+      # gets reached for routinely buy the one that must not be routine, and on a
+      # ZERO-criteria row `criteria_override` is a no-op today, so reusing it would
+      # give an existing flag a second meaning that only bites where it currently
+      # means nothing — the worst place to hide a new refusal.
+      close_reason: override_reason(Keyword.get(opts, :close_reason_override))
     }
 
     cond do
@@ -400,6 +422,20 @@ defmodule Barkpark.Tasks.Close do
                          overrides.criteria,
                          overrides.acknowledgement
                        ),
+                     # LAST of the honesty gates on purpose. It fires ONLY on a
+                     # row D289 cannot see (zero criteria), so its order relative
+                     # to D289 is immaterial for correctness — but a caller whose
+                     # row DOES carry criteria must hear the specific
+                     # `criteria_unmet` refusal, never this one, and running last
+                     # makes that true by construction.
+                     {:ok, artifact_record} <-
+                       check_close_artifact(
+                         doc,
+                         new_status,
+                         reason,
+                         landed,
+                         overrides.close_reason
+                       ),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -413,6 +449,7 @@ defmodule Barkpark.Tasks.Close do
                            holder_record,
                            criteria_record,
                            ack_record,
+                           artifact_record,
                            worker_id
                          ),
                          caller_token_id
@@ -594,6 +631,188 @@ defmodule Barkpark.Tasks.Close do
   # catch-all standing in for one.
   defp check_acknowledgement(%Document{}, _status, _override), do: {:ok, nil}
 
+  # ─── CLOSE ARTIFACT GATE (PDS-D291) — the hole D289 cannot see ───────────
+  #
+  # D289 above measures the criteria a row HAS. On a row with NONE it is
+  # vacuously satisfied: `unmet_criteria/1` returns `[]`, the gate answers
+  # `{:ok, nil}`, and a `done` close lands on whatever prose the closer typed.
+  # That is not a corner: LEAD3-jsweb measured 14 of 15 closes in one lane
+  # sitting on zero-criteria rows, and the `gh-11555` close the acknowledgement
+  # gate above was built for went through the same hole ("carried ZERO criteria,
+  # so the CRITERIA gate was vacuously satisfied and could not see it").
+  #
+  # Main's ruling on task-ce0c0ffff6edde23 (2026-09-02) is the law this
+  # implements, verbatim: "a row with ZERO acceptance criteria may close done
+  # only when its close_reason names the merged PR number + sha (or the run
+  # output) that discharged its title; if no such artifact exists it is NOT
+  # done — add criteria or cancel with the reason. A merge condition written
+  # only in prose does not bind."
+  #
+  # WHAT COUNTS AS AN ARTIFACT (`close_artifact?/2`): a PR number (`#123`) AND a
+  # 7-40 hex sha, in either order, anywhere in the reason; or a pasted run — a
+  # ``` fence or a line beginning `$ `. Both name something a reader can go
+  # LOOK AT. A `landed` digest that carries both a PR and a commit counts too:
+  # it is the STRUCTURED form of the very same two facts, and refusing it would
+  # force the lead seal ritual to retype machine-readable values into prose.
+  #
+  # EXEMPT BY NAME, never by falling through:
+  #   * `cancelled` / `blocked` — same reasoning as D289; abandoning the work is
+  #     what cancelling MEANS, and the ruling itself offers "cancel with the
+  #     reason" as the honest exit.
+  #   * `kind != "task"` — the ruling is scoped to task rows.
+  #   * a `decision` or `goal` label segment — TASK-SYSTEM.md §5: "Real work
+  #     tasks carry acceptance_criteria … Decisions and goals may omit them."
+  #   * a row that HAS children. This is NOT an invented rule: the board decides
+  #     goal-ness by `parent_id` (Board.facets/1 reads `card.parent_id`; the
+  #     `:goal` swimlane groups on it), and `Tasks.Schema`'s own sentence is "a
+  #     goal is a root task, a phase is a task with children". A row somebody
+  #     else names as parent is a container in exactly that vocabulary, and its
+  #     artifacts live on its children, not in its own close_reason.
+  #
+  # Like every gate above this is REFUSE-UNLESS-YOU-SAY-WHY, not a wall:
+  # `--set close_reason_override="<why>"` always lands, on the record.
+  defp check_close_artifact(%Document{} = doc, "done", reason, landed, override_reason) do
+    cond do
+      close_artifact_exempt?(doc) -> {:ok, nil}
+      close_artifact?(reason, landed) -> {:ok, nil}
+      is_nil(override_reason) -> {:error, :close_reason_needs_artifact}
+      true -> {:ok, %{"reason" => override_reason, "close_reason" => reason}}
+    end
+  end
+
+  # Exempt BY NAME — `cancelled` and `blocked`, the same two D289 exempts.
+  defp check_close_artifact(%Document{}, status, _reason, _landed, _override)
+       when status in ~w(cancelled blocked),
+       do: {:ok, nil}
+
+  # The container exemptions, plus the precondition: a row that HAS acceptance
+  # criteria is D289's business, never this gate's.
+  defp close_artifact_exempt?(%Document{content: content} = doc) do
+    content = content || %{}
+
+    has_criteria?(content) or not task_kind?(content) or container_label?(content) or
+      has_children?(doc)
+  end
+
+  defp has_criteria?(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) -> list != []
+      _ -> false
+    end
+  end
+
+  # `Validation.kinds/0` is `~w(task)` — "task" is the ONLY kind a validated row
+  # can carry, so an ABSENT `kind` is a task ("Everything is a task", schema.ex),
+  # not an exemption. Reading a missing key as exempt would make this gate
+  # vacuous over every legacy row, which is the population it exists for.
+  defp task_kind?(content) do
+    case Map.get(content, "kind") do
+      nil -> true
+      kind when is_binary(kind) -> String.downcase(String.trim(kind)) == "task"
+      _ -> false
+    end
+  end
+
+  # Label matching is SEGMENT-wise on `:`, not substring. TASK-SYSTEM.md §5's own
+  # vocabulary is `phase:<goal|design|decision|build|verify>` plus the bare
+  # `decision` gate label, so `decision`, `phase:goal` and `kind:decision` all
+  # exempt — while `proj:goalkeeper-rewrite` does NOT. A substring rule would
+  # hand that row a SILENT permit, and a silent permit is the failure mode this
+  # whole family of gates exists to end; a false refusal is loud and recoverable.
+  defp container_label?(content) do
+    content
+    |> Map.get("labels")
+    |> List.wrap()
+    |> Enum.any?(fn
+      label when is_binary(label) ->
+        label
+        |> String.split(":")
+        |> Enum.any?(&(String.downcase(String.trim(&1)) in ~w(decision goal)))
+
+      _ ->
+        false
+    end)
+  end
+
+  # Does anybody name this row as their parent? Same prefix-agnostic predicate
+  # `Params.maybe_filter_parent_id/2` and `batch_child_counts/2` match on
+  # (`regexp_replace(…, '^drafts\.', '')`), so this agrees with the `child_count`
+  # a reader sees on `bp task get <id>`. Scoped to the ROW'S OWN
+  # workspace/project/dataset — an unscoped existence check would let another
+  # tenant's child hand this row an exemption it did not earn.
+  #
+  # Deliberately the LAST predicate in `close_artifact_exempt?/1`: it is the only
+  # one that touches the DB, and `or` short-circuits, so a row with criteria, a
+  # non-task kind, or a container label never pays for it.
+  defp has_children?(%Document{doc_id: doc_id} = doc) when is_binary(doc_id) do
+    key = DraftId.published_id(doc_id)
+
+    from(d in Document,
+      where: d.type == "task",
+      where: d.dataset == ^doc.dataset,
+      where: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) == ^key
+    )
+    |> scope_children(doc)
+    |> Repo.exists?()
+  end
+
+  defp has_children?(_doc), do: false
+
+  defp scope_children(query, %Document{workspace_id: nil, project_id: nil}), do: query
+
+  defp scope_children(query, %Document{workspace_id: ws, project_id: nil}),
+    do: from(d in query, where: d.workspace_id == ^ws)
+
+  defp scope_children(query, %Document{workspace_id: nil, project_id: pr}),
+    do: from(d in query, where: d.project_id == ^pr)
+
+  defp scope_children(query, %Document{workspace_id: ws, project_id: pr}),
+    do: from(d in query, where: d.workspace_id == ^ws and d.project_id == ^pr)
+
+  # ── What counts as an artifact ───────────────────────────────────────────
+  #
+  # `#\d+` AND a 7-40 hex sha, in either order and anywhere in the text; OR a
+  # pasted run. The sha floor of 7 is what keeps a PR number from doubling as
+  # its own sha — a 4-5 digit `#14383` cannot satisfy `[0-9a-f]{7,40}`.
+  @pr_number ~r/#\d+/
+  @hex_sha ~r/\b[0-9a-f]{7,40}\b/i
+  # A pasted run: a ``` fence, or a line whose first non-space characters are
+  # `$ ` (the shell-prompt convention every close packet in this repo uses).
+  @run_block ~r/```|(?:^|\n)[ \t]*\$ \S/
+
+  defp close_artifact?(reason, landed) do
+    landed_artifact?(landed) or
+      (is_binary(reason) and
+         (Regex.match?(@run_block, reason) or
+            (Regex.match?(@pr_number, reason) and Regex.match?(@hex_sha, reason))))
+  end
+
+  # The structured twin of the prose form: a land digest that names BOTH a PR and
+  # a commit. `%{"prs" => [...], "commit" => <sha>}` is written by the lead seal
+  # and by the merge-event bridge; demanding those same two facts be retyped into
+  # prose would break the ritual D288's comment above spells out, for no gain.
+  #
+  # It reads the SAME key vocabulary `landed_summary/1` reads — `prs` and
+  # `commit` OR `commits`, string or atom key, list or scalar. Accepting a
+  # narrower vocabulary HERE than the function that RENDERS the digest would
+  # refuse a close whose own receipt line names the merge: the merge-event
+  # bridge writes `commits`, the lead seal writes `commit`, and a gate that knew
+  # only one of them would refuse half the sealed closes in the repo.
+  defp landed_artifact?(landed) when is_map(landed) do
+    raw_prs = Map.get(landed, "prs") || Map.get(landed, safe_atom("prs"))
+
+    raw_commits =
+      Map.get(landed, "commit") || Map.get(landed, "commits") ||
+        Map.get(landed, safe_atom("commit")) || Map.get(landed, safe_atom("commits"))
+
+    prs = raw_prs |> normalize_landed_list() |> Enum.reject(&(&1 in [nil, ""]))
+    commits = normalize_landed_list(raw_commits)
+
+    prs != [] and Enum.any?(commits, &(is_binary(&1) and Regex.match?(@hex_sha, &1)))
+  end
+
+  defp landed_artifact?(_landed), do: false
+
   defp unmet_after_autostamp(%Document{content: content}, landed, ack_override) do
     autostamped =
       if is_map(landed) and map_size(landed) > 0 do
@@ -633,15 +852,22 @@ defmodule Barkpark.Tasks.Close do
   # `close_override` map so a re-read of the closed doc answers "was this close
   # honest?" in a single key — `actor` is who closed, `held_by` is who the ledger
   # thought held the lease, `reason` is why they overrode it anyway.
-  defp compose_override_record(nil, nil, nil, _worker_id), do: nil
+  defp compose_override_record(nil, nil, nil, nil, _worker_id), do: nil
 
-  defp compose_override_record(holder_record, criteria_record, ack_record, worker_id) do
+  defp compose_override_record(
+         holder_record,
+         criteria_record,
+         ack_record,
+         artifact_record,
+         worker_id
+       ) do
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
     %{}
     |> maybe_put_override("holder", holder_record, worker_id, ts_iso)
     |> maybe_put_override("criteria", criteria_record, worker_id, ts_iso)
     |> maybe_put_override("acknowledgement", ack_record, worker_id, ts_iso)
+    |> maybe_put_override("close_reason", artifact_record, worker_id, ts_iso)
   end
 
   defp maybe_put_override(acc, _key, nil, _worker_id, _ts_iso), do: acc

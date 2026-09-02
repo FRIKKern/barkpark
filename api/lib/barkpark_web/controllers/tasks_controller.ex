@@ -597,6 +597,12 @@ defmodule BarkparkWeb.TasksController do
         # `criteria_override` on purpose: closing an outsider's bug report
         # without telling them is its own admission and must be its own record.
         |> Params.put_opt(:ack_override, params["ack_override"])
+        # The close-artifact override (PDS-D291). Its own body param for the same
+        # reason `ack_override` is: "no criteria AND no artifact, done anyway" is
+        # a different admission from "a named criterion is unproven", and letting
+        # `criteria_override` buy both would make the routine flag discharge the
+        # rare one. Wire form: `bp task close … --set close_reason_override="…"`.
+        |> Params.put_opt(:close_reason_override, params["close_reason_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close

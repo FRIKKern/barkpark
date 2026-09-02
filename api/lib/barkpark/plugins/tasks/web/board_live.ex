@@ -475,6 +475,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
              "Stamp them with evidence first, or close it from the CLI with a recorded reason."
          )}
 
+      # PDS-D291 refuses a `done` close of a criteria-less row whose reason names
+      # no artifact. A DRAG can never satisfy it: the board sends no reason at
+      # all, so the honest message is that this row cannot be finished by
+      # dragging — not the catch-all's "its claim moved under you", which names a
+      # cause that did not happen and sends the reader to re-claim for nothing.
+      {:error, :close_reason_needs_artifact} ->
+        {:noreply,
+         rollback(
+           socket,
+           "Couldn't mark that done — this task names no acceptance criteria, so a close " <>
+             "has to name the PR + sha (or paste the run) that discharged it. Add criteria " <>
+             "and stamp them, or close it from the CLI with that reason."
+         )}
+
       {:error, _} ->
         {:noreply, rollback(socket, "Couldn't close that task — its claim moved under you.")}
     end

@@ -806,7 +806,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Three honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), and a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override), and none of them discharges another; see the set flag.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Four honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "write",
         args: [
@@ -878,8 +878,19 @@ defmodule Barkpark.Plugins.Tasks do
                 "way through is --set ack_override=\"<why the reporter is not being told>\", " <>
                 "recorded as close_override.acknowledgement. criteria_override does NOT discharge " <>
                 "it, and blocked closes are EXEMPT by name (cancelled deliberately is not — a " <>
-                "cancel is when silence hurts most). A blank reason is NOT an override for any of " <>
-                "the three keys. " <>
+                "cancel is when silence hurts most). THE CLOSE ARTIFACT GATE (PDS-D291): a done " <>
+                "close of a kind:task row carrying ZERO acceptance criteria is REFUSED — 409 " <>
+                "close_reason_needs_artifact — unless the reason names a PR number AND a 7-40 hex " <>
+                "sha, or pastes a run (a ``` fence or a line starting with \"$ \"). D289 above " <>
+                "measures the criteria a row HAS, so on a row with none it is vacuously satisfied " <>
+                "and a bare prose reason used to close done unchallenged. A landed digest naming " <>
+                "both a PR and a commit counts as the artifact. Goals and decisions (kind other " <>
+                "than task, a decision/goal label segment, or a row WITH children) are EXEMPT by " <>
+                "name, as are cancelled and blocked closes. The way through is --set " <>
+                "close_reason_override=\"<why it is done with no artifact>\", recorded as " <>
+                "close_override.close_reason; criteria_override does NOT discharge it. " <>
+                "A blank reason is NOT an override for any of " <>
+                "the four keys. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },

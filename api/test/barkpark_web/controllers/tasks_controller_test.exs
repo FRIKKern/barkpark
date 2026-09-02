@@ -52,12 +52,28 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # PDS-D291 (the close-artifact gate): the base fixture carries ONE MET
+  # acceptance criterion, because without it every `done` close in this file
+  # would 409 `close_reason_needs_artifact` — the gate refuses a `done` close of
+  # a kind:task row with ZERO criteria whose reason names no PR+sha and pastes no
+  # run. These tests measure routing, fencing, envelopes and help[]; a met
+  # criterion keeps each of them measuring THAT. Tests that pass their own
+  # `acceptance_criteria` through `content_extra` win the merge and are
+  # unaffected; the ones that genuinely need a criteria-less row opt out with
+  # `"acceptance_criteria" => []`, or with `nil` for a row carrying NO SUCH KEY
+  # (absent and empty are different facts on the read side, and two tests below
+  # exist precisely to tell them apart).
+  @fixture_criterion [%{"criterion" => "the fixture is closeable", "met" => true}]
+
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
-      Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
-        content_extra
-      )
+      %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "acceptance_criteria" => @fixture_criterion
+      }
+      |> Map.merge(content_extra)
+      |> drop_nil_criteria()
 
     {:ok, doc} =
       Content.create_document(
@@ -69,6 +85,13 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     doc
   end
+
+  # `"acceptance_criteria" => nil` in content_extra means "no such KEY", which a
+  # Map.merge cannot express on its own.
+  defp drop_nil_criteria(%{"acceptance_criteria" => nil} = content),
+    do: Map.delete(content, "acceptance_criteria")
+
+  defp drop_nil_criteria(content), do: content
 
   # dr-w34-s4: a task that really lives at its BARE (published) doc_id.
   # `mk_task!` can never produce one — `Content.Writer.create_document` forces
@@ -684,9 +707,14 @@ defmodule BarkparkWeb.TasksControllerTest do
         |> authed()
         |> post(
           "/v1/tasks/#{task.doc_id}/close",
+          # PDS-D291: this row is deliberately criteria-less, and holder_override
+          # does NOT discharge the close-artifact gate — one override per
+          # admission. A lead seal names the merge it is sealing, so the reason
+          # carries the artifact.
           Jason.encode!(%{
             worker_id: "oc-lead",
             observed_epoch: epoch,
+            reason: "lead seal — landed #14383 @ 63b89bef30",
             holder_override: "lead seal on merge"
           })
         )
@@ -1230,7 +1258,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     test "criteria-absent tasks OMIT the key entirely (never 0/0)",
          %{conn: conn, scope: scope} do
-      no_key = mk_task!(uniq("crit-absent"), scope)
+      no_key = mk_task!(uniq("crit-absent"), scope, %{"acceptance_criteria" => nil})
       empty = mk_task!(uniq("crit-empty"), scope, criteria([]))
 
       for task <- [no_key, empty] do
@@ -1311,11 +1339,21 @@ defmodule BarkparkWeb.TasksControllerTest do
       refute Map.has_key?(payload, "warnings")
     end
 
+    # Opts out of the fixture criterion: a criteria-less row IS the subject here.
+    # That makes it the one lvw-t6 case that meets PDS-D291, so the reason names
+    # the artifact — the close still has to LAND for "no warnings" to mean
+    # anything, and a 409 would make this assertion vacuous.
     test "close done with NO criteria carries no warnings (absent ≠ unmet)",
          %{conn: conn, scope: scope} do
-      task = mk_task!(uniq("crit-close-nocrit"), scope)
+      task = mk_task!(uniq("crit-close-nocrit"), scope, %{"acceptance_criteria" => []})
 
-      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1})
+      close_body =
+        Jason.encode!(%{
+          worker_id: "test-worker",
+          observed_epoch: 1,
+          reason: "landed #14383 @ 63b89bef30"
+        })
+
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
 
       payload = Jason.decode!(resp.resp_body)
@@ -2587,7 +2625,9 @@ defmodule BarkparkWeb.TasksControllerTest do
     test "minimal open card is exactly {doc_id, title, status, child_count, updated_at}",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-brief-min")
-      mk_task!(uniq("brief-min"), scope, %{"parent_id" => phase})
+      # No criteria on the doc is part of what this asserts (see the key list
+      # below), so it opts out of the PDS-D291 fixture criterion.
+      mk_task!(uniq("brief-min"), scope, %{"parent_id" => phase, "acceptance_criteria" => nil})
 
       payload =
         conn

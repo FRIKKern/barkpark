@@ -557,10 +557,19 @@ defmodule BarkparkWeb.MutateControllerTest do
       :ok
     end
 
+    # PDS-D291: one MET criterion keeps the sanctioned-path `done` closes below
+    # out of the close-artifact gate, which refuses a `done` close of a
+    # criteria-less kind:task row whose reason names no PR+sha. This file
+    # measures the mutate back door, not the close reason.
     defp create_task(conn, id, content_extra \\ %{}) do
       content =
         Map.merge(
-          %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1},
+          %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "priority" => 1,
+            "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+          },
           content_extra
         )
 

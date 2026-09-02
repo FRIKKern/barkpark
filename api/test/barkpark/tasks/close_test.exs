@@ -54,8 +54,28 @@ defmodule Barkpark.Tasks.CloseTest do
     :ok
   end
 
+  # PDS-D291 (the close-artifact gate): the base fixture carries ONE MET
+  # acceptance criterion. Not decoration — without it every `done` close in this
+  # file would trip the new gate, which refuses a `done` close of a kind:task row
+  # with ZERO criteria whose reason names no PR+sha and pastes no run. These
+  # tests are about the fencing epoch, the holder gate, the work digest, the land
+  # digest and the reason field; a met criterion keeps each of them measuring
+  # THAT and nothing else. Every criteria-specific test below already passes its
+  # own `acceptance_criteria` through `content_extra`, which wins the merge, so
+  # this default is invisible to them — and the two tests that genuinely need a
+  # criteria-less row opt out with `"acceptance_criteria" => []` and say why.
+  @fixture_criterion [%{"criterion" => "the fixture is closeable", "met" => true}]
+
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "acceptance_criteria" => @fixture_criterion
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -1655,13 +1675,21 @@ defmodule Barkpark.Tasks.CloseTest do
       refute Map.has_key?(closed.content, "close_override")
     end
 
+    # D289 has nothing to measure here, and that is the whole point: it answers
+    # `{:ok, nil}` VACUOUSLY. PDS-D291 is what now stands in that gap, so the
+    # close needs an artifact in its reason — the row is closed by naming the PR
+    # and sha, not by saying "done". Opts out of the fixture criterion on purpose.
     test "a task with NO acceptance criteria is unaffected", %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
-      task = mk_task!(uniq("crit-gate-none"), scope)
+      task = mk_task!(uniq("crit-gate-none"), scope, %{"acceptance_criteria" => []})
 
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 reason: "landed #14383 @ 63b89bef30"
+               )
 
       assert closed.content["lifecycle_status"] == "done"
     end

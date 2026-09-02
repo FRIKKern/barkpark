@@ -157,7 +157,7 @@ A scattered board is a defect — make every new task fit the structure:
 2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"* — never after provenance/process (`loop`, `cleanup`, `misc`) or a label.
 3. **Group by ancestry** — tasks sharing a goal nest beneath it; the parent tree is the spine.
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, plus gates `needs-human`/`decision`/`security`.
-5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. **State a CHECK TO RE-RUN, not a predicted state** — "X is intentionally in state Y" has a shelf life; nothing re-checks it and the stamp outlives it. Decisions and goals may omit them. Merge-gated criteria need `merge_gate:true` — a `landed` close auto-flips only the flag; wording alone just warns.
+5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions that define done. **State a CHECK TO RE-RUN, not a predicted state** — "X is in state Y" has a shelf life and nothing re-checks it. Decisions and goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or pastes the run. Merge gates need `merge_gate:true` — a `landed` close flips only the flag; wording alone warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
 
 ## Workspaces, projects, datasets — experiment without mess

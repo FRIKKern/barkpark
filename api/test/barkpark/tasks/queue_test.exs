@@ -68,9 +68,17 @@ defmodule Barkpark.Tasks.QueueTest do
     end
   end
 
+  # PDS-D291: one MET criterion keeps this file's `done` closes out of the
+  # close-artifact gate, which refuses a `done` close of a criteria-less
+  # kind:task row whose reason names no PR+sha and pastes no run. These
+  # tests measure the ready queue, not the close reason.
   defp mk_task!(doc_id, scope, dataset, content_extra \\ %{}) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
 
