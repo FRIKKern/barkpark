@@ -83,6 +83,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       not socket.assigns.paper_block_mode ->
         {:noreply, Shared.refetch_paper(socket)}
 
+      # task-e175d91d93291b10 — a delta frame carries a block's html rendered in
+      # the WRITER's process, under the WRITER's scope and resolvers, and
+      # `apply_paper_delta/2` paints it straight into the viewer's stream. For a
+      # write-denied viewer that is the same unclamped feed one frame at a time,
+      # so the frame is advisory here too: re-read, and let
+      # `reader_paper_blocks/2` decide what they see. (Reachable on the
+      # canvas-OFF View arm, which is where the stream is the surface.)
+      Shared.write_denied?(socket) ->
+        {:noreply, Shared.refetch_paper(socket)}
+
+
       Shared.paper_gap?(socket.assigns.paper_rev, frame.rev) ->
         {:noreply, Shared.refetch_paper(socket)}
 

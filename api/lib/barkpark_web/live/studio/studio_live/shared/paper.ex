@@ -1129,6 +1129,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def reader_paper_html(_socket, _paper), do: ""
 
+  @doc """
+  The BLOCK body this socket may be shown for `paper` (task-e175d91d93291b10).
+
+  The twin of `reader_paper_html/2`, same predicate and same reader. A
+  write-denied (non-editing) viewer gets the `{:blocks, …}` verdict —
+  Envelope-rendered and visibility-redacted — and `nil` for every other verdict,
+  which drops `paper_block_mode` so the refusal is answered by the never-blank
+  notice instead of the stored blocks. A write-capable socket keeps the raw
+  editor source.
+
+  `nil` and not `[]` on purpose: `is_list/1` is what `paper_block_mode` keys on,
+  and `[]` would claim "a block paper with no blocks" — a blank canvas, not a
+  refusal.
+  """
+  def reader_paper_blocks(socket, %{content: content} = paper) do
+    if write_denied?(socket) do
+      case Content.Papers.reader_source(
+             paper,
+             socket.assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+        {:blocks, blocks} -> blocks
+        _ -> nil
+      end
+    else
+      Projection.read_blocks(content || %{})
+    end
+  end
+
+  def reader_paper_blocks(_socket, _paper), do: nil
+
   defp reader_source_html(socket, paper) do
     dataset = socket.assigns.dataset
     scope = ScopeHelpers.scope_opts(socket)
@@ -1154,7 +1185,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   def setup_paper_view(socket, %{content: content} = paper) when is_map(content) do
-    blocks = Projection.read_blocks(content)
+    blocks = reader_paper_blocks(socket, paper)
     rev = Map.get(content, "rev") || 0
     html = reader_paper_html(socket, paper)
     {used_by, linked, unlinked} = load_backlinks(socket, paper)
@@ -1481,7 +1512,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       paper ->
         content = paper.content || %{}
 
-        case Projection.read_blocks(content) do
+        case reader_paper_blocks(socket, paper) do
           blocks when is_list(blocks) ->
             socket
             |> stream(
