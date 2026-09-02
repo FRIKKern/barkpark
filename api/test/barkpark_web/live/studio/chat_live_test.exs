@@ -3934,6 +3934,192 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   end
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Settle-gated tool-row gutter (task-d5083ae525902f28). The transcript's tool
+  # rows used to draw a CONSTANT ● with no completion semantics while the agents
+  # rail already flipped ✓/✕ on settle. Two gates, each with its own test so a
+  # mutation reds by NAME:
+  #
+  #   SETTLE gate     — a mid-turn tool_result does NOT flip the glyph; only the
+  #                     turn's terminal `result` frame settles the row.
+  #   PROVENANCE gate — after the settle, ✓ requires a result that actually
+  #                     arrived; a resultless row stays neutral forever.
+  #
+  # The glyph is drawn from ChatToolRenderer.settle_state/1 over three ENVELOPE
+  # facts (turn_settled / tool_error / output), which the Recorder persists and
+  # `message_json` already ships — so the Go TUI's toolRowGlyph reads the same
+  # truth and replay needs no re-derivation.
+  # ─────────────────────────────────────────────────────────────────────────
+  describe "settle-gated tool row gutter (task-d5083ae525902f28)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp settle_tool_use(sid, id, name, input) do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [%{"type" => "tool_use", "id" => id, "name" => name, "input" => input}]
+           }
+         }}
+      )
+    end
+
+    defp settle_tool_result(sid, id, content, opts \\ []) do
+      block =
+        %{"type" => "tool_result", "tool_use_id" => id, "content" => content}
+        |> then(fn b ->
+          if Keyword.get(opts, :error, false), do: Map.put(b, "is_error", true), else: b
+        end)
+
+      send_frame(
+        sid,
+        {:claude_chat_event, %{"type" => "user", "message" => %{"content" => [block]}}}
+      )
+    end
+
+    defp settle_turn(sid) do
+      send_frame(sid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+    end
+
+    test "the gutter is NEUTRAL while the turn runs — a mid-turn tool_result never flips it",
+         %{view: view, sid: sid} do
+      settle_tool_use(sid, "toolu_settle_1", "Bash", %{"command" => "ls -la"})
+
+      html = render(view)
+      assert html =~ ~s(data-tool-state="pending")
+      refute html =~ ~s(data-tool-state="ok")
+
+      # THE SETTLE GATE. The result for this tool has landed, but the TURN is
+      # still running — a row that reads "done" while its turn can still fail is
+      # a lie. Deleting the settle gate (flipping on tool_result alone) reds HERE.
+      settle_tool_result(sid, "toolu_settle_1", "total 0")
+
+      html = render(view)
+      assert html =~ ~s(data-tool-state="pending")
+      refute html =~ ~s(data-tool-state="ok")
+      refute html =~ "✓"
+    end
+
+    test "the turn's result frame flips a resulted row to ✓", %{view: view, sid: sid} do
+      settle_tool_use(sid, "toolu_settle_2", "Bash", %{"command" => "ls -la"})
+      settle_tool_result(sid, "toolu_settle_2", "total 0")
+      assert render(view) =~ ~s(data-tool-state="pending")
+
+      settle_turn(sid)
+
+      html = render(view)
+      assert html =~ ~s(data-tool-state="ok")
+      assert html =~ "✓"
+      assert html =~ "var(--life-done)"
+    end
+
+    test "an is_error tool_result settles the row to ✗", %{view: view, sid: sid} do
+      settle_tool_use(sid, "toolu_settle_3", "Bash", %{"command" => "false"})
+      settle_tool_result(sid, "toolu_settle_3", "command failed", error: true)
+      assert render(view) =~ ~s(data-tool-state="pending")
+
+      settle_turn(sid)
+
+      html = render(view)
+      assert html =~ ~s(data-tool-state="error")
+      assert html =~ "✗"
+      refute html =~ ~s(data-tool-state="ok")
+    end
+
+    test "a settled row whose tool_result NEVER arrived stays neutral — never a fabricated ✓",
+         %{view: view, sid: sid} do
+      settle_tool_use(sid, "toolu_settle_4", "Bash", %{"command" => "sleep 9000"})
+
+      # THE PROVENANCE GATE. The turn settles with no tool_result for this row
+      # (the CLI died / the frame was dropped). Deleting the provenance gate
+      # (✓ on settle alone) reds HERE.
+      settle_turn(sid)
+
+      html = render(view)
+      assert html =~ ~s(data-tool-state="pending")
+      refute html =~ ~s(data-tool-state="ok")
+      refute html =~ "✓"
+    end
+
+    test "a reopened session replays ✓ and ✗ off the persisted envelope", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Bash — REPLAYED_OK_ROW",
+          metadata: %{
+            "tool" => "Bash",
+            "tool_use_id" => "replay-ok",
+            "output" => "done",
+            "turn_settled" => true
+          }
+        })
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Bash — REPLAYED_ERR_ROW",
+          metadata: %{
+            "tool" => "Bash",
+            "tool_use_id" => "replay-err",
+            "output" => "boom",
+            "tool_error" => true,
+            "turn_settled" => true
+          }
+        })
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Bash — REPLAYED_RESULTLESS_ROW",
+          metadata: %{
+            "tool" => "Bash",
+            "tool_use_id" => "replay-none",
+            "turn_settled" => true
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "REPLAYED_OK_ROW"
+      assert html =~ "REPLAYED_ERR_ROW"
+      assert html =~ "REPLAYED_RESULTLESS_ROW"
+      # a settled session renders its outcomes on reopen — the whole point of
+      # persisting the settle rather than deriving it from a live-only turn.
+      assert html =~ ~s(data-tool-state="ok")
+      assert html =~ ~s(data-tool-state="error")
+      # …and the resultless row is STILL neutral after replay.
+      assert html =~ ~s(data-tool-state="pending")
+      assert html =~ "✓"
+      assert html =~ "✗"
+    end
+
+    test "the pure truth table is the ONE owner both surfaces read" do
+      # The Go TUI's toolRowGlyph mirrors exactly these five rows.
+      assert ChatToolRenderer.settle_state(%{turn_settled: false, output: "x"}) == :pending
+      assert ChatToolRenderer.settle_state(%{turn_settled: true, output: "x"}) == :ok
+      assert ChatToolRenderer.settle_state(%{turn_settled: true, output: nil}) == :pending
+      assert ChatToolRenderer.settle_state(%{turn_settled: true, output: ""}) == :pending
+
+      assert ChatToolRenderer.settle_state(%{turn_settled: true, output: "x", tool_error: true}) ==
+               :error
+
+      assert ChatToolRenderer.settle_glyph(%{turn_settled: false}) == "●"
+      assert ChatToolRenderer.settle_glyph(%{turn_settled: true, output: "x"}) == "✓"
+      assert ChatToolRenderer.settle_glyph(%{turn_settled: true, tool_error: true}) == "✗"
+    end
+  end
+
+  # ─────────────────────────────────────────────────────────────────────────
   # MCP result chips (charter D64). Chip dispatch is a DELIBERATE narrow
   # exception to D38: it keys on OUR tool NAME (mcp__barkpark__ prefix) plus a
   # Jason.decode of the single text block. The classifier is consumed identically
