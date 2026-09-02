@@ -109,6 +109,15 @@ type Model struct {
 	// header already says how long it took.
 	foldsExpanded bool
 
+	// runningFoldExpanded opens the RUNNING turn's "+N previous" control
+	// (task-b66928b2958c8cfa) — the rows that ran BEFORE the active one. One
+	// bit, like foldsExpanded and for the same reason (no pointer, no focus
+	// concept), and separate from it because the two folds answer different
+	// questions: one is history, this one is the turn you are watching right
+	// now. ctrl+o flips it; the zero value is COLLAPSED, which is the whole
+	// point — the live row must not scroll away.
+	runningFoldExpanded bool
+
 	// anchor is what scroll >= 0 actually MEANS (charter D80): the content the
 	// pinned top row was showing, as (block ordinal, intra-block line offset),
 	// recorded by pinScroll at the moment of the pin and relocated against the

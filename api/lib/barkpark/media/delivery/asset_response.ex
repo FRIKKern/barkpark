@@ -118,7 +118,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
   defp asset_schema(%Document{} = doc, dataset) do
     opts = [workspace_id: Map.get(doc, :workspace_id), project_id: Map.get(doc, :project_id)]
 
-    case Content.get_schema("mediaAsset", dataset, opts) do
+    case Content.Schema.get_schema_for_redaction("mediaAsset", dataset, opts) do
       {:ok, schema} -> schema
       _ -> nil
     end
