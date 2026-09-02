@@ -1186,7 +1186,23 @@ defmodule BarkparkCloud.Notifications do
   Fire the always-send `test` chat event. With no `channel_type`, fans to every
   enabled chat channel (the "Send test" button); with one, targets exactly that
   channel. Enqueues one Oban job per selected channel and returns `{:ok, n}`
-  where `n` is the number of channels it actually reached.
+  where `n` is the number of channels it actually reached, or
+  `{:error, {:rate_limited, seconds_remaining}}`.
+
+  cch-w32-bl — THE RATE LIMIT IS THE EMAIL LEG'S RATE LIMIT, not a second one.
+  This half of `POST /v1/notifications/test` had NO limit at all while the email
+  half had a 10s/team one, and the router's `cond` reaches the chat branch
+  first — so an authenticated caller could drive unbounded POSTs at a webhook
+  URL OF THEIR OWN CHOOSING, from Barkpark's IP. That is an outbound-abuse
+  amplifier, and it lived in the same endpoint as its own fix.
+
+  It is deliberately the SAME guard `deliver_test/2` uses — the same persisted
+  per-team `last_test_sent_at` column, read by `test_rate_limit_remaining/1`
+  and written by `stamp_test_sent/1` — and not a parallel limiter, because two
+  limiters is exactly how the two halves drifted apart in the first place. A
+  send on EITHER leg closes the window for BOTH, and the refusal is the
+  identical `{:error, {:rate_limited, remaining}}` the email leg returns, so a
+  caller reads one vocabulary across one endpoint.
 
   cch-w32-s1 — TWO THINGS THIS USED TO GET WRONG.
 
@@ -1207,20 +1223,33 @@ defmodule BarkparkCloud.Notifications do
   discloses it on the wire.
   """
   @spec send_test_chat(Team.t() | binary(), String.t() | nil) ::
-          {:ok, non_neg_integer()}
+          {:ok, non_neg_integer()} | {:error, {:rate_limited, non_neg_integer()}}
   def send_test_chat(team, channel_type \\ nil) do
     settings = get_or_create_settings(team)
-    payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    queued =
-      settings
-      |> channels_for_event("test")
-      |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
-      |> Enum.count(fn cfg ->
-        match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
-      end)
+    case test_rate_limit_remaining(settings) do
+      0 ->
+        payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    {:ok, queued}
+        queued =
+          settings
+          |> channels_for_event("test")
+          |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
+          |> Enum.count(fn cfg ->
+            match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
+          end)
+
+        # Burn the window only when the press ACTUALLY reached a channel — a
+        # fan-out to nobody sends no outbound POST, so it must not cost the team
+        # its next real test (the same reason `deliver_test/2` validates the
+        # recipient BEFORE stamping).
+        if queued > 0, do: stamp_test_sent(settings)
+
+        {:ok, queued}
+
+      remaining ->
+        {:error, {:rate_limited, remaining}}
+    end
   end
 
   @doc """

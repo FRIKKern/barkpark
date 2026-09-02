@@ -5813,6 +5813,15 @@ defmodule BarkparkCloud.Web.Router do
   # a fan-out to nobody read as accepted to the console, to `bp` and to curl
   # alike. `ok: true` still means "the request was accepted"; `queued` is the
   # separate question of whether anything was sent, and the console reads it.
+  #
+  # cch-w32-bl: the CHAT branch is rate-limited too, and by the SAME per-team
+  # 10s window as the email leg (persisted `last_test_sent_at`) — this `cond`
+  # reaches `chat_test?` BEFORE `test_email/1`, so the chat leg used to jump
+  # clean past the only guard on this endpoint and let an authenticated caller
+  # drive unbounded POSTs at a webhook URL of their choosing from Barkpark's IP.
+  # A refused chat test renders the identical 429 {error: "rate_limited",
+  # retry_after} the email leg renders. A send on either leg closes the window
+  # for both; a fan-out that reached 0 channels does not burn it.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
@@ -5821,10 +5830,18 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       chat_test?(conn.body_params) ->
-        {:ok, queued} =
-          Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
+        case Notifications.send_test_chat(
+               conn.assigns.current_team,
+               conn.body_params["channel"]
+             ) do
+          {:ok, queued} ->
+            json(conn, 202, %{ok: true, queued: queued})
 
-        json(conn, 202, %{ok: true, queued: queued})
+          # cch-w32-bl: byte-identical to the email leg's refusal below, because
+          # it IS the email leg's limit — one endpoint, one rate-limit vocabulary.
+          {:error, {:rate_limited, retry_after}} ->
+            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
+        end
 
       true ->
         test_email(conn)

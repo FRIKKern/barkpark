@@ -245,6 +245,97 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
     refute "trial_expiring" in settings["chat_events"]
   end
 
+  ## ── cch-w32-bl: the chat leg's rate limit IS the email leg's ──────────────
+  ##
+  ## This endpoint's `cond` reaches the `chat_test?` branch BEFORE `test_email`,
+  ## so the chat half jumped past the only guard on the route: three rapid
+  ## presses enqueued THREE ChatNotificationWorker jobs and stamped nothing. A
+  ## webhook URL is caller-chosen, so that is an authenticated way to aim
+  ## unbounded outbound POSTs from Barkpark's IP at a third party.
+
+  defp enable_discord(token) do
+    call(
+      :put,
+      "/v1/notifications/channels",
+      %{
+        "type" => "discord",
+        "enabled" => true,
+        "credentials" => %{"url" => "https://discord.com/x"}
+      },
+      token
+    )
+  end
+
+  test "three rapid chat presses enqueue ONE job; 2nd and 3rd are refused readably" do
+    {_team, token} = owner_with_team()
+    _ = enable_discord(token)
+
+    conn = call(:post, "/v1/notifications/test", %{"channel" => "discord"}, token)
+    assert conn.status == 202
+    assert body(conn) == %{"ok" => true, "queued" => 1}
+
+    for press <- 2..3 do
+      conn = call(:post, "/v1/notifications/test", %{"channel" => "discord"}, token)
+
+      assert conn.status == 429, "press #{press} was not refused"
+      # The SAME refusal the email leg renders — one endpoint, one vocabulary.
+      assert body(conn)["error"] == "rate_limited"
+      assert is_integer(body(conn)["retry_after"])
+    end
+
+    assert length(all_enqueued(worker: ChatNotificationWorker)) == 1
+  end
+
+  # THE ANTI-DRIFT GUARD (criterion 2). It reds if EITHER leg loses its limit,
+  # because it asserts the two halves share ONE persisted per-team window: a
+  # send on either leg refuses the other. A second, differently-shaped limiter
+  # bolted onto the chat leg would pass the test above and RED here — which is
+  # the point, since two limiters is how the halves drifted apart to begin with.
+  test "ONE guard, not two: a send on either leg closes the window for the OTHER" do
+    # (1) a CHAT send must refuse the EMAIL leg — reds if the chat leg stops
+    #     stamping the shared window.
+    {_team1, token1} = owner_with_team()
+    _ = enable_discord(token1)
+
+    conn = call(:post, "/v1/notifications/test", %{"channel" => "discord"}, token1)
+    assert conn.status == 202
+
+    conn = call(:post, "/v1/notifications/test", %{}, token1)
+    assert conn.status == 429, "the chat send did not close the EMAIL leg's window"
+    assert body(conn)["error"] == "rate_limited"
+
+    # (2) an EMAIL send must refuse the CHAT leg — reds if the chat leg stops
+    #     reading the shared window, or if the email leg stops writing it.
+    {_team2, token2} = owner_with_team()
+    _ = enable_discord(token2)
+
+    conn = call(:post, "/v1/notifications/test", %{}, token2)
+    assert conn.status == 200
+
+    conn = call(:post, "/v1/notifications/test", %{"channel" => "discord"}, token2)
+    assert conn.status == 429, "the email send did not close the CHAT leg's window"
+    assert body(conn)["error"] == "rate_limited"
+
+    # ...and the refused chat press queued nothing: team2 never enqueued a job.
+    assert all_enqueued(worker: ChatNotificationWorker) == []
+  end
+
+  # A fan-out that reached NOBODY sends no outbound POST, so it must not cost
+  # the team its next real test. (Also keeps the three-presses-queued-0 test
+  # above honest — it presses this route three times in one window.)
+  test "a queued: 0 chat press does NOT burn the shared window" do
+    {_team, token} = owner_with_team()
+
+    conn = call(:post, "/v1/notifications/test", %{"target" => "chat"}, token)
+    assert conn.status == 202
+    assert body(conn)["queued"] == 0
+
+    _ = enable_discord(token)
+    conn = call(:post, "/v1/notifications/test", %{"channel" => "discord"}, token)
+    assert conn.status == 202
+    assert body(conn) == %{"ok" => true, "queued" => 1}
+  end
+
   test "chat channel writes are admin-gated (a plain member is 403)" do
     {team, _owner_token} = owner_with_team()
     token = member_token(team)
