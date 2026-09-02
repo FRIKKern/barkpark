@@ -188,6 +188,12 @@ could still reach.
 
 ## Inventory verdicts (task-f3d5bc684c23c48d)
 
+**Do not optimise by duration.** The ten slowest workflows per run are also the ten with the FEWEST
+PR runs — 32 to 51 each — so moving the whole slow group off the PR path saves almost nothing. Cost
+here is `duration x frequency`, and frequency spans three orders of magnitude while duration spans
+one. Anyone who sorts this table by `min/exec` and starts at the top will spend the evening on the
+cheapest half of the problem.
+
 46 of 59 workflows are `pull_request`-triggered. Compute below is from six recent PR runs per
 workflow, measured off job steps.
 
