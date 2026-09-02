@@ -505,7 +505,7 @@ fi
 # makes both sides zero and the check agrees with itself. So the number is
 # pinned here, by hand. Adding or removing a cap row is therefore a two-line
 # edit: the row, and this number. That is intended friction, not an oversight.
-CAPS_ROWS_EXPECTED=32
+CAPS_ROWS_EXPECTED=34
 CAPS_ROWS_WALKED=0
 if [ "$SPAN_ONLY" != "1" ]; then
 while read -r path cap; do
