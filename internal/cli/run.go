@@ -326,6 +326,32 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		discardDeleteUnpublished, tail = extractDiscardDraftDeleteFlag(tail)
 	}
 
+	// `bp task ls --match <substring>`: the THIRD additive, opt-in flag the
+	// manifest never declares, stripped here for the same reason as the two
+	// above — GET /v1/tasks accepts no substring filter (its filter container is
+	// fail-closed on an unknown key), so the flag can only ever be honoured
+	// client-side and splitArgs would refuse it. See tasks_match.go for what it
+	// buys and why the server could not.
+	var taskMatch string
+	if cmd.ID == taskLsCommandID {
+		var merr error
+		taskMatch, tail, merr = extractTaskMatchFlag(tail)
+		if merr != nil {
+			if !renderErrorEnvelope(out, "usage", merr.Error(), "", "") {
+				out.userErr("%v", merr)
+				usageCommand(out, cmd)
+			}
+			return exitUsage
+		}
+		// A filtered listing is only honest if it saw every page: a `--match`
+		// that silently searched page one would answer "no such task" about a
+		// ledger it never read. So --match IMPLIES --all, whether or not the
+		// caller typed it.
+		if taskMatch != "" {
+			g.all = true
+		}
+	}
+
 	// Resolve the request-side view HERE, with the writer in hand — never
 	// inside buildManifestRequest, which is pure/writer-less and shared by the
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
@@ -400,9 +426,16 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return code
 	}
 
-	// Paginated reads with --all loop over offset pages.
+	// Paginated reads with --all loop over offset pages. A non-empty --match
+	// hands the walk a row filter; every other caller passes nil and the walk
+	// behaves exactly as it always has.
 	if cmd.Paginated && g.all && !cmd.Writes {
-		return runPaginatedAll(out, cmd, req.url, req.headers)
+		var opts paginatedAllOpts
+		if taskMatch != "" {
+			opts.filter = taskRowMatcher(taskMatch)
+			opts.pageSize = taskWalkPageSize
+		}
+		return runPaginatedAll(out, cmd, req.url, req.headers, opts)
 	}
 
 	status, respBody, respCT, err := sendManifestRequest(req)
@@ -426,7 +459,16 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		emitMovementDoctrine(out, cmd)
 		emitHelpHints(out, respBody)
 	}
-	code := handleResponse(out, m, cmd, status, respBody)
+	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
+	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
+	// hinter is a CLOSURE, not a precomputed string, so the page walk behind the
+	// prefix suggestion runs only when the refusal actually IS an unannotated
+	// not_found — a 403, a 500, or a server that sent its own hint pays nothing.
+	var hinter func() string
+	if typed := taskGetTypedID(cmd, tail); typed != "" {
+		hinter = func() string { return taskGetNotFoundHint(out, m, ctx, typed) }
+	}
+	code := handleResponseHinted(out, m, cmd, status, respBody, hinter)
 
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
@@ -2021,6 +2063,21 @@ func renderError(out *writer, ae apiError) {
 // takes the manifest, not just the command, so a refusal can name the command
 // that would ANSWER it — see notFoundHint.
 func handleResponse(out *writer, m *manifest.Manifest, cmd manifest.Command, status int, respBody []byte) int {
+	return handleResponseHinted(out, m, cmd, status, respBody, nil)
+}
+
+// handleResponseHinted is handleResponse with one seam: hinter, when non-nil,
+// supplies a command-specific not_found remedy that outranks the manifest-derived
+// notFoundHint.
+//
+// It is a FUNCTION, not a string, because the hint it exists for
+// (taskGetNotFoundHint) pays HTTP round-trips to compute its "did you mean"
+// half. Passing a string would mean paying them on every dispatch, including
+// every success. Passing a closure means paying them only where the refusal
+// actually reaches the local-hint branch — an unannotated not_found — which is
+// also the only place a hint is ever rendered. A hinter that returns "" falls
+// back to notFoundHint, so a command can opt in without promising an answer.
+func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Command, status int, respBody []byte, hinter func() string) int {
 	if status >= 200 && status < 300 {
 		renderSuccess(out, cmd, respBody)
 		return exitOK
@@ -2039,7 +2096,13 @@ func handleResponse(out *writer, m *manifest.Manifest, cmd manifest.Command, sta
 	// server knows more than we do — and notFoundHint returns "" rather than
 	// inventing a verb the manifest cannot confirm.
 	if ae.code == "not_found" && ae.serverHint == "" {
-		ae.localHint = notFoundHint(m, cmd)
+		ae.localHint = ""
+		if hinter != nil {
+			ae.localHint = hinter()
+		}
+		if ae.localHint == "" {
+			ae.localHint = notFoundHint(m, cmd)
+		}
 	}
 	renderError(out, ae)
 	return ae.exit
@@ -2576,9 +2639,40 @@ const paginationShiftedHint = "the collection changed while --all was walking it
 // runPaginatedAll fetches every offset page of a paginated read and prints the
 // concatenated documents in the resolved output shape. A walk that caught the
 // collection moving is retried, then refused; see paginatedAllWalk.
-func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers map[string]string) int {
+// paginatedAllOpts tunes one --all walk. The zero value is the walk every
+// caller got before `--match` existed, which is why it is a struct: a new knob
+// must not be able to change what an existing call site does.
+type paginatedAllOpts struct {
+	// filter, when non-nil, selects which walked rows are PRINTED. It never
+	// touches which rows are FETCHED, nor the lookahead anchor or the stall
+	// fingerprint — those are computed over the server's rows exactly as
+	// before, so a filtered walk detects a shifting collection with the same
+	// teeth as an unfiltered one.
+	filter func(json.RawMessage) bool
+	// pageSize overrides the rows requested per page; 0 means
+	// defaultWalkPageSize.
+	//
+	// WHY THIS IS TUNABLE AT ALL. 100 is the size every --all walk has always
+	// used, and the #5588 order lock reads its offsets (0, 100, 200, …), so it
+	// stays the default for every existing caller. But `bp task ls --match`
+	// exists to make resolving a truncated id CHEAP, and GET /v1/tasks clamps
+	// limit at 1000 (Params.parse_limit(params["limit"], 1000, 1000)) — so at
+	// 100 it pays 82 round-trips for the 8,120-row ledger where 9 would do.
+	// That is 9x the latency and 9x the exposure to any per-request failure,
+	// on the one command whose whole premise is that the old remedy cost too
+	// much. The anchor and stall machinery are page-size agnostic; only the
+	// window changes.
+	pageSize int
+}
+
+const defaultWalkPageSize = 100
+
+func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers map[string]string, opts paginatedAllOpts) int {
+	if opts.pageSize <= 0 {
+		opts.pageSize = defaultWalkPageSize
+	}
 	for attempt := 1; ; attempt++ {
-		code, shifted := paginatedAllWalk(out, cmd, baseURL, headers, attempt == paginationWalkAttempts)
+		code, shifted := paginatedAllWalk(out, cmd, baseURL, headers, attempt == paginationWalkAttempts, opts)
 		if !shifted {
 			return code
 		}
@@ -2617,8 +2711,12 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 // them), and a server that ignores `limit` simply returns no lookahead row, in
 // which case that one boundary goes unverified and says so on stderr rather
 // than being quietly assumed.
-func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers map[string]string, final bool) (int, bool) {
-	const pageSize = 100
+func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers map[string]string, final bool, opts paginatedAllOpts) (int, bool) {
+	pageSize := opts.pageSize
+	if pageSize <= 0 {
+		pageSize = defaultWalkPageSize
+	}
+	filter := opts.filter
 	offset := 0
 	var all []json.RawMessage
 	seenFullPages := map[string]int{}
@@ -2708,7 +2806,15 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 				return exitGeneric, false
 			}
 		}
-		all = append(all, docs...)
+		if filter == nil {
+			all = append(all, docs...)
+		} else {
+			for _, row := range docs {
+				if filter(row) {
+					all = append(all, row)
+				}
+			}
+		}
 		if len(docs) < pageSize {
 			// A walk that never advanced past page one has the server's OWN
 			// envelope in hand — render it VERBATIM, exactly as the non---all
@@ -2720,7 +2826,14 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			// exactly the emptiest page (pds-w27-bl-task-next-and-all-corrupt-
 			// the-honest-shape). Multi-page walks keep the re-wrap: a stitched
 			// result has no single server body to pass through.
-			if offset == 0 {
+			// ...but ONLY for an unfiltered walk. Under --match the server's
+			// body is the UNFILTERED page: passing it through verbatim would
+			// print every row on it as though it had matched — the loudest
+			// possible way for a filter to fail, and invisible on any ledger
+			// small enough to fit in one page. A filtered walk always takes the
+			// re-wrap below, whose mustArray pins an empty result to [] rather
+			// than null.
+			if offset == 0 && filter == nil {
 				renderSuccess(out, cmd, respBody)
 				return exitOK, false
 			}
