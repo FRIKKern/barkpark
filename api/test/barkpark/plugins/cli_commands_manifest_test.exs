@@ -58,6 +58,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/close",
                  "/v1/tasks/:doc_id/release",
                  "/v1/tasks/:doc_id/stamp",
+                 "/v1/tasks/:doc_id/landed",
                  "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/move",
                  "/v1/tasks/:doc_id/stage",
@@ -214,7 +215,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the thirteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
+    test "declares the fourteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -231,16 +232,18 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.next" in ids
       assert "task.move" in ids
       assert "task.stage" in ids
+      # task-59fe7b40b719b379: the non-holder landing mark, added ADDITIVELY.
+      assert "task.landed" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
       # #5627 (listener presence) added the two fleet verbs to this plugin —
-      # 13 task.* + fleet.roster/fleet.beat = 15.
+      # 14 task.* (13 + task.landed) + fleet.roster/fleet.beat = 16.
       assert "fleet.roster" in ids
       assert "fleet.beat" in ids
-      assert length(cmds) == 15
+      assert length(cmds) == 16
 
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 

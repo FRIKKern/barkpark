@@ -64,6 +64,9 @@ defmodule Barkpark.Tasks.Close do
       insert_mutation_event!: 5,
       caller_stamp: 1,
       merge_criteria: 2,
+      merge_landed: 2,
+      normalize_landed_list: 1,
+      safe_atom: 1,
       task_broadcast: 4,
       emit_broadcasts: 1,
       close_holder: 2,
@@ -1012,29 +1015,10 @@ defmodule Barkpark.Tasks.Close do
   # definition shared with `Tasks.Stamp`, so mid-claim stamps and close-time
   # flips cannot drift. Imported above.
 
-  # Land digest merge. UNION into any existing digest so a re-close or a CI
-  # backfill accumulates rather than clobbers. A nil/empty/malformed payload
-  # leaves content untouched (never erases a prior digest).
-  @landed_keys ~w(prs files capability_slugs)
-  defp merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
-    existing =
-      case Map.get(content, "landed") do
-        m when is_map(m) -> m
-        _ -> %{}
-      end
-
-    merged =
-      Enum.reduce(@landed_keys, existing, fn key, acc ->
-        case normalize_landed_list(Map.get(landed, key) || Map.get(landed, safe_atom(key))) do
-          [] -> acc
-          incoming -> Map.put(acc, key, Enum.uniq((Map.get(acc, key) || []) ++ incoming))
-        end
-      end)
-
-    if map_size(merged) == 0, do: content, else: Map.put(content, "landed", merged)
-  end
-
-  defp merge_landed(content, _), do: content
+  # Land digest merge moved to `Tasks.Internal.merge_landed/2` — ONE definition
+  # shared with `Tasks.Landed` (the non-holder landing mark), so a close's land
+  # digest and a CI landing sentence accumulate under one rule instead of two.
+  # Imported above.
 
   # A close that overrode nothing writes nothing (no empty `close_override` key
   # to make an honest close look confessed). A prior override on a re-closed
@@ -1246,16 +1230,6 @@ defmodule Barkpark.Tasks.Close do
       true ->
         "merge"
     end
-  end
-
-  defp normalize_landed_list(nil), do: []
-  defp normalize_landed_list(list) when is_list(list), do: Enum.reject(list, &is_nil/1)
-  defp normalize_landed_list(scalar), do: [scalar]
-
-  defp safe_atom(k) do
-    String.to_existing_atom(k)
-  rescue
-    ArgumentError -> :__missing__
   end
 
   # After a task flips to `done`, walk every inbound `blocks` edge and flip the
