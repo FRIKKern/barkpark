@@ -1419,7 +1419,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `json:"site"` was REPLACED by `SpawnSiteCreated.Site`, not added to.
   # Measured by the scanner's own expression on the MERGED tree (names 302 ->
   # 303, sites 561 -> 566), never summed.
-  @go_tag_pinned 303
+  # dr-bl-w7 (the space residual): 303 -> 313. TEN names land at once, all on
+  # the two structs that finally give `bp` a reader for the space payload's
+  # consumer roots — which this package decoded NONE of before, so the CLI could
+  # not name what was eating a box's disk while the rows sat in the database.
+  #
+  #   MetricsSpace                — consumer_roots
+  #   MetricsSpaceConsumerRoot    — path, degraded, degraded_count, excluded_reason
+  #   MetricsSpaceResidual        — of_bytes, measured_bytes, counted_roots,
+  #                                 excluded_roots, pg_source
+  #
+  # The other EIGHT tags those two structs declare are names this package
+  # ALREADY had — `status`, `bytes` (x2 each), `count`, `top`, `reason`,
+  # `residual` — so they ride free on the NAME union and move ROWS of the site
+  # register below instead, crossing no class boundary. That is the merge hazard
+  # the register's own header warns about, and it is why 18 new tag SITES show
+  # up as only 10 new NAMES.
+  #
+  # Measured by the scanner's own expression on this tree (names 303 -> 313,
+  # sites 566 -> 584), never summed.
+  @go_tag_pinned 313
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1486,7 +1505,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "build_log_url" => 2,
     # MetricsSpaceSites.Bytes joined the two existing `bytes` declarations
     # with the deployed-sites directory total (host-space report, W6 S4).
-    "bytes" => 3,
+    # dr-bl-w7: 3 -> 5. MetricsSpaceConsumerRoot.Bytes (a root's tree size) and
+    # MetricsSpaceResidual.Bytes (the unaccounted figure, which keeps the -1
+    # sentinel when the residual refuses). Both ride free on the NAME union.
+    "bytes" => 5,
     "censored" => 3,
     "clock" => 3,
     "code" => 3,
@@ -1498,7 +1520,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # in Go on purpose — the producer OMITS the key when the box published no
     # total, so absent and zero are different answers — but a `*int` field
     # carries the same ONE tag site an `int` would.
-    "count" => 7,
+    # dr-bl-w7: 7 -> 8. MetricsSpaceConsumerRoot.Count — how many children the
+    # walk FOUND, so a capped `top` list can say it is capped.
+    "count" => 8,
     # Pressure's HOST cpu busy-percent and RunawayProc's PER-PROCESS lifetime
     # average share one name and are different measurements — exactly the
     # collision this register exists to keep visible.
@@ -1571,12 +1595,22 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "provider" => 3,
     "quantile" => 2,
     "reachable" => 3,
-    "reason" => 9,
+    # dr-bl-w7: 9 -> 10. MetricsSpaceResidual.Reason — the machine-readable slug
+    # a surface branches on to word a refusal ("roots-overlap-or-cross-a-mount"),
+    # never prose parsed back into a decision.
+    "reason" => 10,
     "refused" => 4,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
     "reported_at" => 2,
     "required" => 2,
+    # dr-bl-w7: `residual` crossed INTO this register. It was declared ONCE
+    # (DeployCensus, the attempted-rows remainder) and is now declared on
+    # MetricsSpace too — the space reading's own remainder, the bytes no
+    # configured root accounts for. Two different remainders, one name:
+    # `@go_tag_pinned` structurally CANNOT see the second site, so this row is
+    # the only guard that can notice it being deleted.
+    "residual" => 2,
     "role" => 4,
     "runtime_target" => 3,
     "sample" => 6,
@@ -1597,7 +1631,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # ssw8 (PR #14610): ContentBinding.Status is the fourteenth — "bound" or
     # "unverified", the create-time verdict itself. Rides free on the NAME
     # union, so only this row can notice the site being deleted.
-    "status" => 14,
+    # dr-bl-w7: 14 -> 16. MetricsSpaceConsumerRoot.Status (read/degraded/absent/
+    # unmeasured — the field that stops an absent root rendering as 0 bytes) and
+    # MetricsSpaceResidual.Status (computed/undefined/unmeasured). Both are the
+    # field a reader BRANCHES on, so only this row can notice a site dying.
+    "status" => 16,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -1611,6 +1649,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "theme" => 2,
     "to" => 2,
     "token" => 2,
+    # dr-bl-w7: `top` crossed INTO this register. It was declared ONCE
+    # (MetricsSpaceSites.Top, the biggest site slugs) and is now declared on
+    # MetricsSpaceConsumerRoot too, naming a root's biggest children — the thing
+    # an operator actually acts on (io.containerd.snapshotter.v1.overlayfs, not
+    # /var/lib/containerd). The name was already in the union, so this row is
+    # the only guard over that second site.
+    "top" => 2,
     # W6 S4: MetricsSpace.TopRelations joined MetricsLatest.TopRelations.
     "top_relations" => 2,
     # W6 S4: MetricsSpaceRoot.TotalBytes joined MetricsSwap.TotalBytes.

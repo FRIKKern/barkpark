@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -960,14 +961,14 @@ func TestGatherSpaceHonestUnknowns(t *testing.T) {
 // with the identical `signal: killed` error, so the caller cannot tell. This
 // test exists so a future edit cannot quietly reintroduce a shell.
 func TestSitesProbeArgvIsDirect(t *testing.T) {
-	f := &spaceFakeRunner{out: map[string]string{"nice": "628M\t/opt/barkpark/sites/a\n4.0G\t/opt/barkpark/sites\n"}}
+	f := &spaceFakeRunner{out: map[string]string{"nice": "643072\t/opt/barkpark/sites/a\n4194304\t/opt/barkpark/sites\n"}}
 	probe := newSitesSpaceProbeWith(f.run, "/opt/barkpark/sites")
 	if _, _, err := probe(); err != nil {
 		t.Fatalf("probe err = %v, want nil", err)
 	}
 
 	got := f.callFor("nice")
-	want := []string{"nice", "-n", "19", "ionice", "-c3", "du", "-hx", "-d1", "/opt/barkpark/sites"}
+	want := []string{"nice", "-n", "19", "ionice", "-c3", "du", "-kx", "-d1", "/opt/barkpark/sites"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}
@@ -981,8 +982,9 @@ func TestSitesProbeArgvIsDirect(t *testing.T) {
 	// -x and -d1 are mandatory (never cross a filesystem, bounded depth), and
 	// -s must NOT appear: it conflicts with -d1 in coreutils 9.4.
 	joined := strings.Join(got, " ")
-	if !strings.Contains(joined, "-hx") || !strings.Contains(joined, "-d1") {
-		t.Errorf("argv %q must carry -x (no filesystem crossing) and -d1 (bounded depth)", joined)
+	if !strings.Contains(joined, "-kx") || !strings.Contains(joined, "-d1") {
+		t.Errorf("argv %q must carry -k (EXACT 1024-blocks, never -h's rounded-up string), "+
+			"-x (no filesystem crossing) and -d1 (bounded depth)", joined)
 	}
 	if strings.Contains(joined, " -s ") {
 		t.Errorf("argv %q carries -s, which conflicts with -d1 in coreutils 9.4", joined)
@@ -996,11 +998,11 @@ func TestSitesProbeArgvIsDirect(t *testing.T) {
 // must report UNMEASURED — under-reporting space is the exact failure the space
 // payload exists to prevent.
 func TestSitesProbeNonZeroExitDiscardsPartialOutput(t *testing.T) {
-	partial := "628M\t/opt/barkpark/sites/search-ember\n" +
-		"628M\t/opt/barkpark/sites/search-capstone\n" +
-		"577M\t/opt/barkpark/sites/next-proof\n" +
-		"412M\t/opt/barkpark/sites/docs-site\n" +
-		"120M\t/opt/barkpark/sites/blog\n"
+	partial := "643072\t/opt/barkpark/sites/search-ember\n" +
+		"643072\t/opt/barkpark/sites/search-capstone\n" +
+		"590848\t/opt/barkpark/sites/next-proof\n" +
+		"421888\t/opt/barkpark/sites/docs-site\n" +
+		"122880\t/opt/barkpark/sites/blog\n"
 
 	// Two shapes, and the second is the one that keeps this test honest. The
 	// first is the real killed-du (rows, no root row — du prints its total
@@ -1013,7 +1015,7 @@ func TestSitesProbeNonZeroExitDiscardsPartialOutput(t *testing.T) {
 		out  string
 	}{
 		{name: "killed mid-walk, no total row", out: partial},
-		{name: "killed with a parseable total row", out: partial + "4.0G\t/opt/barkpark/sites\n"},
+		{name: "killed with a parseable total row", out: partial + "4194304\t/opt/barkpark/sites\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			probe := newSitesSpaceProbeWith(func(string, ...string) (string, error) {
@@ -1641,36 +1643,60 @@ func (errRunner) Run(string, ...string) (string, error) {
 
 // --- the consumer roots (the build plane's disk) ------------------------------
 //
-// realBuildPlaneDu is VERBATIM `nice -n 19 ionice -c3 du -hx -d1 <dir>` output,
-// captured 2026-08-22 over ssh from the build-plane box at 91.98.139.58 — the
-// box that motivated this axis, whose root filesystem read 100% full with
-// 285 MB free at capture time.
+// realBuildPlaneDu is VERBATIM `nice -n 19 ionice -c3 du -kx -d1 <dir>` output,
+// captured 2026-09-01 over ssh from the build-plane box at 91.98.139.58 — the
+// box that motivated this axis.
+//
+// IT WAS RE-CAPTURED IN -k, AND THE RE-CAPTURE IS ITSELF THE FINDING. The
+// original fixture was the same trees read with `du -h`, and comparing the two
+// captures of the same directories is what measured the rounding this axis now
+// refuses:
+//
+//	root                        du -h landed   du -k exact    over by
+//	/var/lib/containerd         15032385536    14136475648    +895 MB
+//	/var/lib/barkpark-builder   11811160064    11575521280    +236 MB
+//	/var/log/journal             2040109466     1971761152     +68 MB
+//
+// Every -h figure is an exact multiple of 0.1 GiB — the signature of a rounded
+// string re-inflated by parseHumanBytes. The payload was reporting a precision
+// it never had, and always in the same direction: UP.
 //
 // It is a REAL fixture on purpose. A synthesised one is written in the shape
 // the parser is already assumed to handle, which makes a green here mean
 // nothing; these strings carry the actual coreutils spacing, the actual
-// containerd directory names, and the "4.0K" rows a hand-written fixture would
-// have tidied away.
+// containerd directory names, and the "4"-block rows a hand-written fixture
+// would have tidied away.
 var realBuildPlaneDu = map[string]string{
-	"/var/lib/containerd": "4.0K\t/var/lib/containerd/tmpmounts\n" +
-		"3.1M\t/var/lib/containerd/io.containerd.metadata.v1.bolt\n" +
-		"2.0G\t/var/lib/containerd/io.containerd.content.v1.content\n" +
-		"8.0K\t/var/lib/containerd/io.containerd.grpc.v1.introspection\n" +
-		"12K\t/var/lib/containerd/io.containerd.runtime.v2.task\n" +
-		"4.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.btrfs\n" +
-		"4.0K\t/var/lib/containerd/io.containerd.sandbox.controller.v1.shim\n" +
-		"12G\t/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs\n" +
-		"4.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.blockfile\n" +
-		"8.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.native\n" +
-		"4.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.erofs\n" +
-		"14G\t/var/lib/containerd\n",
-	"/var/lib/barkpark-builder": "11G\t/var/lib/barkpark-builder/images\n" +
-		"1.8M\t/var/lib/barkpark-builder/uploads\n" +
-		"11G\t/var/lib/barkpark-builder\n",
-	"/var/log/journal": "8.1M\t/var/log/journal/f8537ed2a6984286b86d626a60059275\n" +
-		"881M\t/var/log/journal/e82ca0d33eb64f0f84e134be7b72c656\n" +
-		"889M\t/var/log/journal\n",
+	"/var/lib/containerd": "4\t/var/lib/containerd/tmpmounts\n" +
+		"3152\t/var/lib/containerd/io.containerd.metadata.v1.bolt\n" +
+		"2012392\t/var/lib/containerd/io.containerd.content.v1.content\n" +
+		"8\t/var/lib/containerd/io.containerd.grpc.v1.introspection\n" +
+		"12\t/var/lib/containerd/io.containerd.runtime.v2.task\n" +
+		"4\t/var/lib/containerd/io.containerd.snapshotter.v1.btrfs\n" +
+		"4\t/var/lib/containerd/io.containerd.sandbox.controller.v1.shim\n" +
+		"11789556\t/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs\n" +
+		"4\t/var/lib/containerd/io.containerd.snapshotter.v1.blockfile\n" +
+		"8\t/var/lib/containerd/io.containerd.snapshotter.v1.native\n" +
+		"4\t/var/lib/containerd/io.containerd.snapshotter.v1.erofs\n" +
+		"13805152\t/var/lib/containerd\n",
+	"/var/lib/barkpark-builder": "11302376\t/var/lib/barkpark-builder/images\n" +
+		"1840\t/var/lib/barkpark-builder/uploads\n" +
+		"11304220\t/var/lib/barkpark-builder\n",
+	"/var/log/journal": "8196\t/var/log/journal/f8537ed2a6984286b86d626a60059275\n" +
+		"1917348\t/var/log/journal/e82ca0d33eb64f0f84e134be7b72c656\n" +
+		"1925548\t/var/log/journal\n",
 }
+
+// The build-plane box's exact bytes, from the -k capture above. They are named
+// constants because three tests assert against them and a hand-copied literal
+// that drifts in one of the three is a green that means nothing.
+const (
+	buildPlaneContainerdBytes = int64(13805152) * 1024 // 14,136,475,648
+	buildPlaneBuilderBytes    = int64(11304220) * 1024 // 11,575,521,280
+	buildPlaneJournalBytes    = int64(1925548) * 1024  //  1,971,761,152
+	buildPlaneOverlayfsBytes  = int64(11789556) * 1024 // 12,072,505,344
+	buildPlaneImagesBytes     = int64(11302376) * 1024 // 11,573,633,024
+)
 
 // buildPlaneRunner is a probeRunner that replays realBuildPlaneDu for the roots
 // that box has and reproduces coreutils' actual failure for the one it does
@@ -1754,14 +1780,22 @@ func TestConsumerRootAbsentIsNeverZero(t *testing.T) {
 	}
 }
 
-// TestConsumerRootsNameTheBuildPlanesTwentyFiveGigabytes replays the REAL du
-// output from the box and asserts the payload names the 25 GiB that the sites
+// TestConsumerRootsNameTheBuildPlanesTwentyFourGigabytes replays the REAL du
+// output from the box and asserts the payload names the bytes that the sites
 // axis structurally could not see.
 //
-// The number is the finding: containerd 14 GiB + barkpark-builder 11 GiB on a
-// 37 GiB root filesystem. If this test ever goes quiet about them, the space
-// payload is back to naming ~1 GiB of a 34 GiB problem.
-func TestConsumerRootsNameTheBuildPlanesTwentyFiveGigabytes(t *testing.T) {
+// IT USED TO BE NAMED "TwentyFive", AND THAT IS THE POINT OF THIS TEST NOW.
+// "25 GiB" was never a measurement: it is 14G + 11G, two `du -h` strings that
+// coreutils had already rounded UP, added together and then repeated — into
+// this test's name, into DefaultConsumerRoots' doc comment, into a task title,
+// and into the console's copy. Read with `du -kx`, the same two trees on the
+// same box are 13.166 GiB and 10.781 GiB: 23.95 GiB, not 25. The prose was
+// over a gigabyte heavier than the disk.
+//
+// The number is still the finding — containerd plus the builder are two thirds
+// of that box's used space, and the sites axis sees none of it. What changed is
+// that the number is now the one the filesystem reports.
+func TestConsumerRootsNameTheBuildPlanesTwentyFourGigabytes(t *testing.T) {
 	s := gatherSpace(SpaceConfig{
 		ConsumerRoots:      DefaultConsumerRoots,
 		ConsumerRootExists: func(p string) bool { _, ok := realBuildPlaneDu[p]; return ok },
@@ -1778,31 +1812,47 @@ func TestConsumerRootsNameTheBuildPlanesTwentyFiveGigabytes(t *testing.T) {
 		t.Fatalf("build-plane roots = (%+v, %+v), want both read", containerd, builder)
 	}
 
+	if containerd.Bytes != buildPlaneContainerdBytes {
+		t.Errorf("/var/lib/containerd = %d bytes, want %d (13.17 GiB exact — the box's biggest "+
+			"single consumer). `du -h` called this 14G; the difference is 895 MB of precision "+
+			"the payload never had", containerd.Bytes, buildPlaneContainerdBytes)
+	}
+	if builder.Bytes != buildPlaneBuilderBytes {
+		t.Errorf("/var/lib/barkpark-builder = %d bytes, want %d (10.78 GiB exact; `du -h` called it 11G)",
+			builder.Bytes, buildPlaneBuilderBytes)
+	}
+	if sum, want := containerd.Bytes+builder.Bytes, buildPlaneContainerdBytes+buildPlaneBuilderBytes; sum != want {
+		t.Errorf("build plane names %d bytes, want %d — 23.95 GiB, which is what the two trees "+
+			"actually hold. Anything that reads 26843545600 here is the old 25-GiB `du -h` sum, "+
+			"and it is 1.05 GiB of bytes that are not on the disk", sum, want)
+	}
+
+	// EXACTNESS IS THE ASSERTION, not a nicety. A rounded reading is a multiple
+	// of a power of ten in GiB; an exact one is not. This is the cheap,
+	// direction-free tripwire for a future edit that puts -h back.
 	const gib = int64(1) << 30
-	if containerd.Bytes != 14*gib {
-		t.Errorf("/var/lib/containerd = %d bytes, want %d (14G, the box's biggest single consumer)", containerd.Bytes, 14*gib)
-	}
-	if builder.Bytes != 11*gib {
-		t.Errorf("/var/lib/barkpark-builder = %d bytes, want %d (11G)", builder.Bytes, 11*gib)
-	}
-	if sum := containerd.Bytes + builder.Bytes; sum != 25*gib {
-		t.Errorf("build plane names %d bytes, want %d — the 25 GiB measured on the box", sum, 25*gib)
+	for _, r := range []ConsumerRoot{containerd, builder, byPath["/var/log/journal"]} {
+		if r.Bytes%(gib/10) == 0 {
+			t.Errorf("%s = %d bytes, an exact multiple of 0.1 GiB. Real trees are not; this is a "+
+				"`du -h` string re-inflated, which over-reports by up to a whole unit per root and "+
+				"drives a multi-root residual negative", r.Path, r.Bytes)
+		}
 	}
 
 	// The biggest child is named, not just the total: an operator acts on
 	// io.containerd.snapshotter.v1.overlayfs, never on "/var/lib/containerd".
 	if len(containerd.Top) == 0 || containerd.Top[0].Name != "io.containerd.snapshotter.v1.overlayfs" {
-		t.Errorf("containerd Top = %+v, want the overlayfs snapshotter (12G) named first", containerd.Top)
+		t.Errorf("containerd Top = %+v, want the overlayfs snapshotter named first", containerd.Top)
 	}
-	if containerd.Top[0].Bytes != 12*gib {
-		t.Errorf("containerd biggest child = %d bytes, want %d (12G)", containerd.Top[0].Bytes, 12*gib)
+	if containerd.Top[0].Bytes != buildPlaneOverlayfsBytes {
+		t.Errorf("containerd biggest child = %d bytes, want %d (11.24 GiB)", containerd.Top[0].Bytes, buildPlaneOverlayfsBytes)
 	}
-	if len(builder.Top) == 0 || builder.Top[0].Name != "images" || builder.Top[0].Bytes != 11*gib {
-		t.Errorf("builder Top = %+v, want images at 11G named first", builder.Top)
+	if len(builder.Top) == 0 || builder.Top[0].Name != "images" || builder.Top[0].Bytes != buildPlaneImagesBytes {
+		t.Errorf("builder Top = %+v, want images at %d bytes named first", builder.Top, buildPlaneImagesBytes)
 	}
-	if journal := byPath["/var/log/journal"]; journal.Status != ConsumerRootRead || journal.Bytes != 932184064 {
-		t.Errorf("/var/log/journal = %+v, want a read of 889M — measured as a tree, so a box "+
-			"without journald still gets an answer", journal)
+	if journal := byPath["/var/log/journal"]; journal.Status != ConsumerRootRead || journal.Bytes != buildPlaneJournalBytes {
+		t.Errorf("/var/log/journal = %+v, want a read of %d bytes (1.84 GiB) — measured as a tree, "+
+			"so a box without journald still gets an answer", journal, buildPlaneJournalBytes)
 	}
 }
 
@@ -2163,15 +2213,15 @@ func TestParseDuTreeRejectsTheWrongUnit(t *testing.T) {
 // quotes the path; macOS/BSD emits it FIRST and does not quote. Any parser that
 // assumes a position is a flake on one of the two, so both are pinned.
 const (
-	duDegradedGNU = "200K\t/opt/barkpark/sites/ok\n" +
-		"100K\t/opt/barkpark/sites/ok2\n" +
-		"300K\t/opt/barkpark/sites\n" +
+	duDegradedGNU = "200\t/opt/barkpark/sites/ok\n" +
+		"100\t/opt/barkpark/sites/ok2\n" +
+		"300\t/opt/barkpark/sites\n" +
 		"du: cannot read directory '/opt/barkpark/sites/locked': Permission denied\n"
 
 	duDegradedBSD = "du: /opt/barkpark/sites/locked: Permission denied\n" +
-		"200K\t/opt/barkpark/sites/ok\n" +
-		"100K\t/opt/barkpark/sites/ok2\n" +
-		"300K\t/opt/barkpark/sites\n"
+		"200\t/opt/barkpark/sites/ok\n" +
+		"100\t/opt/barkpark/sites/ok2\n" +
+		"300\t/opt/barkpark/sites\n"
 )
 
 // TestParseDuTreeRoutesDuDiagnosticsToDegraded is the contained fix for the
@@ -2188,7 +2238,7 @@ func TestParseDuTreeRoutesDuDiagnosticsToDegraded(t *testing.T) {
 		{"BSD: bare path, diagnostic FIRST", duDegradedBSD},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			total, rows, degraded, err := parseDuTree(c.out, "/opt/barkpark/sites", duUnitHuman)
+			total, rows, degraded, err := parseDuTree(c.out, "/opt/barkpark/sites", duUnitKiB)
 			if err != nil {
 				t.Fatalf("parseDuTree hard-failed on a du diagnostic: %v — the total was right "+
 					"there in the same bytes", err)
@@ -2289,7 +2339,7 @@ func TestConsumerRootDegradedLandsTheFloorAndNamesTheShortfall(t *testing.T) {
 // denominator can never say when it binds.
 func TestConsumerRootDegradedNamesAreCappedButCounted(t *testing.T) {
 	var b strings.Builder
-	b.WriteString("300K\t/opt/barkpark/sites\n")
+	b.WriteString("300\t/opt/barkpark/sites\n")
 	const found = consumerDegradedLimit + 4
 	for i := 0; i < found; i++ {
 		fmt.Fprintf(&b, "du: cannot read directory '/opt/barkpark/sites/locked-%02d': Permission denied\n", i)
@@ -2318,7 +2368,7 @@ func TestConsumerRootDegradedNamesAreCappedButCounted(t *testing.T) {
 // its prefix happens to be.
 func TestConsumerRootDiscardsWhatWasCutShort(t *testing.T) {
 	const dir = "/opt/barkpark/sites"
-	partial := "200K\t/opt/barkpark/sites/ok\n100K\t/opt/barkpark/sites/ok2\n"
+	partial := "200\t/opt/barkpark/sites/ok\n100\t/opt/barkpark/sites/ok2\n"
 
 	for _, c := range []struct {
 		name string
@@ -2340,7 +2390,7 @@ func TestConsumerRootDiscardsWhatWasCutShort(t *testing.T) {
 		},
 		{
 			name: "non-zero exit, total row, but nothing named",
-			out:  partial + "300K\t/opt/barkpark/sites\n",
+			out:  partial + "300\t/opt/barkpark/sites\n",
 			err:  errors.New("signal: killed"),
 			why:  "an unexplained rc!=0 is not a permission shortfall; without a named path there is nothing to land",
 		},
@@ -2351,7 +2401,7 @@ func TestConsumerRootDiscardsWhatWasCutShort(t *testing.T) {
 			// veto can refuse this. Each veto has to be able to refuse ALONE, or
 			// one of them is decoration.
 			name: "non-zero exit, a named diagnostic ALREADY seen, but an unparseable row",
-			out:  "du: /opt/barkpark/sites/locked: Permission denied\nnot-a-size\t/opt/barkpark/sites/x\n300K\t/opt/barkpark/sites\n",
+			out:  "du: /opt/barkpark/sites/locked: Permission denied\nnot-a-size\t/opt/barkpark/sites/x\n300\t/opt/barkpark/sites\n",
 			err:  errors.New("exit status 1"),
 			why:  "a row we could not read is a hole of unknown size, which is not a floor",
 		},
@@ -2552,4 +2602,514 @@ func TestBeatPreservesWindowS(t *testing.T) {
 			t.Fatalf("Report.WindowS = %d, want -1 with no probe", r.WindowS)
 		}
 	})
+}
+
+// --- the residual: what the reading did NOT measure ---------------------------
+//
+// The box these fixtures come from is the build plane at 91.98.139.58, read
+// live on 2026-09-01. Its shape, from `df -P -k /`, `stat -c %d` and
+// `du -kx -d1`:
+//
+//	/                                                 78408684 KiB total, 37560944 used, st_dev 2049
+//	/var/lib/containerd                               13805152 KiB, st_dev 2049
+//	/var/lib/barkpark-builder                         11304220 KiB, st_dev 2049
+//	/var/log/journal                                   1925548 KiB, st_dev 2049
+//	/var/lib/postgresql                                 157684 KiB, st_dev 2049
+//	/var/lib/docker                                      13516 KiB, st_dev 2049
+//	/var/lib/docker/rootfs/overlayfs/63036f65…         1506432 KiB, st_dev 44   <- A MOUNT
+//
+// The last row is the guard-2 hazard in one line: du -x reads the overlay in
+// full when it is ROOTED there (1506432 KiB) and sees 8 KiB of it from
+// /var/lib/docker's side, because -x will not cross INTO a mount. Those bytes
+// are not on the root filesystem and must never be subtracted from its total.
+const (
+	jarlRootUsedBytes  = int64(37560944) * 1024 // 38,462,406,656
+	jarlRootTotalBytes = int64(78408684) * 1024 // 80,290,492,416
+	jarlPostgresBytes  = int64(157684) * 1024   //     161,468,416
+	jarlOverlayBytes   = int64(1506432) * 1024  //   1,542,586,368
+	jarlRootDev        = uint64(2049)
+	jarlOverlayDev     = uint64(44)
+)
+
+// jarlDevices is the box's real st_dev map: everything on the root filesystem
+// except the overlay.
+func jarlDevices(overrides map[string]uint64) func(string) (uint64, bool) {
+	return func(p string) (uint64, bool) {
+		if d, ok := overrides[p]; ok {
+			return d, true
+		}
+		return jarlRootDev, true
+	}
+}
+
+// TestResidualNamesWhatWasNotMeasured is criterion 1. The reading must carry an
+// explicit unaccounted figure, and it must be the SUBTRACTION — root used minus
+// the measured roots — not a share of anything else.
+//
+// The failure it repairs is a confident subset. The shipped probe read one root
+// that exists on one of six boxes and covers 14.9% of that one, and it said so
+// in the same voice it would have used for the whole disk.
+func TestResidualNamesWhatWasNotMeasured(t *testing.T) {
+	s := gatherSpace(SpaceConfig{
+		RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+		ConsumerRoots:      DefaultConsumerRoots,
+		ConsumerRootExists: func(p string) bool { _, ok := realBuildPlaneDu[p]; return ok },
+		ConsumerRootProbe:  newConsumerRootProbeWith(buildPlaneRunner(t)),
+		DeviceProbe:        jarlDevices(nil),
+	})
+
+	r := s.Residual
+	if r == nil {
+		t.Fatal("Residual = nil — the reading must state what it did not measure, or refuse; " +
+			"silence is the confident subset this field exists to end")
+	}
+	if r.Status != ResidualComputed {
+		t.Fatalf("Status = %q reason %q, want %q — three disjoint roots on one device is the "+
+			"computable case", r.Status, r.Reason, ResidualComputed)
+	}
+
+	measured := buildPlaneContainerdBytes + buildPlaneBuilderBytes + buildPlaneJournalBytes
+	if r.MeasuredBytes != measured {
+		t.Errorf("MeasuredBytes = %d, want %d (containerd + builder + journal, exact)", r.MeasuredBytes, measured)
+	}
+	if want := jarlRootUsedBytes - measured; r.Bytes != want {
+		t.Errorf("Residual.Bytes = %d, want %d — RootUsedBytes minus the measured roots, "+
+			"and nothing else", r.Bytes, want)
+	}
+	// The denominator travels WITH the value. A share whose whole is missing is
+	// the number this axis replaced.
+	if r.OfBytes != jarlRootUsedBytes {
+		t.Errorf("OfBytes = %d, want %d — the denominator must ride beside the value so no "+
+			"surface can render a percentage it cannot check", r.OfBytes, jarlRootUsedBytes)
+	}
+	if r.CountedRoots != 3 || r.ExcludedRoots != 0 {
+		t.Errorf("counted/excluded = %d/%d, want 3/0", r.CountedRoots, r.ExcludedRoots)
+	}
+	if r.Reason != "" {
+		t.Errorf("Reason = %q, want empty — a reason on a computed residual is a refusal that did not happen", r.Reason)
+	}
+
+	// Coverage on THIS box, from THIS payload: 71.98%, leaving 28.02%
+	// unaccounted. That is the whole point — the roots name a bit under three
+	// quarters of the used disk and the residual names the quarter nobody was
+	// looking at, instead of the payload implying it had seen everything.
+	if pct := float64(measured) / float64(jarlRootUsedBytes) * 100; pct < 71.5 || pct > 72.5 {
+		t.Errorf("coverage = %.2f%%, want 71.98%% on the build-plane box's real numbers "+
+			"(27683758080 measured of 38462406656 used)", pct)
+	}
+
+	body, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"residual":{`, `"status":"computed"`, `"of_bytes":38462406656`, `"pg_source":"none"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("payload missing %s; got %s", want, body)
+		}
+	}
+}
+
+// TestResidualDenominatorIsRootUsedNeverPercent is guard 4, and it is a test
+// about a number that must NOT appear.
+//
+// `df`'s capacity column is ceil(used/(used+avail)) and excludes root-reserved
+// blocks, so it is a share of a DIFFERENT WHOLE — not the same quantity in
+// different units. On this box the two disagree by 1.7 points, and a residual
+// built from the percent would invent bytes that do not exist.
+func TestResidualDenominatorIsRootUsedNeverPercent(t *testing.T) {
+	// The real df line from the box: 78408684 total, 37560944 used, 37602472
+	// available, capacity 50%.
+	const dfCapacityPercent = 50.0
+	usedOfTotal := float64(jarlRootUsedBytes) / float64(jarlRootTotalBytes) * 100
+	if math.Abs(usedOfTotal-dfCapacityPercent) < 0.5 {
+		t.Fatalf("this test is vacuous: used-of-total (%.2f%%) and df capacity (%.0f%%) agree, so "+
+			"nothing here can tell a residual built from one apart from the other", usedOfTotal, dfCapacityPercent)
+	}
+
+	const measured = int64(10) << 30
+	s := gatherSpace(SpaceConfig{
+		RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+		ConsumerRoots:      []string{"/var/lib/containerd"},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+			return measured, []DirSize{{Name: "images", Bytes: measured}}, nil, nil
+		},
+		DeviceProbe: jarlDevices(nil),
+	})
+
+	if want := jarlRootUsedBytes - measured; s.Residual.Bytes != want {
+		t.Fatalf("Residual.Bytes = %d, want %d", s.Residual.Bytes, want)
+	}
+	// What the percent-derived answer WOULD have been. It is off by 636 MB on a
+	// box that is only half full; on the 96%-vs-91.09% box that motivated this
+	// guard it invents 1.83 GiB.
+	fromPercent := int64(dfCapacityPercent/100*float64(jarlRootTotalBytes)) - measured
+	if s.Residual.Bytes == fromPercent {
+		t.Errorf("the residual equals the percent-derived figure (%d) — the denominator must be "+
+			"RootUsedBytes, and df capacity is a share of a different whole", fromPercent)
+	}
+}
+
+// TestResidualExcludesAndNamesACrossMountRoot is criterion 2's mount half, on
+// the real overlay that makes it necessary.
+//
+// The overlay reads 1.44 GiB when du is rooted at it and 8 KiB from
+// /var/lib/docker's side, because `du -x` will not cross INTO a mount. Both
+// readings are correct; only one of them is bytes on the root filesystem.
+// Summing the 1.44 GiB against a root-filesystem denominator subtracts bytes
+// that are not in it — and that is the arithmetic that produced -1.29 GiB of
+// phantom on this box when the fifth root was added.
+func TestResidualExcludesAndNamesACrossMountRoot(t *testing.T) {
+	const overlay = "/var/lib/docker/rootfs/overlayfs/63036f651e8bc20ff9c2d962d24dc1b881d503e793115c7bac15105bab6118d0"
+	bytesFor := map[string]int64{
+		"/var/lib/containerd": buildPlaneContainerdBytes,
+		overlay:               jarlOverlayBytes,
+	}
+	s := gatherSpace(SpaceConfig{
+		RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+		ConsumerRoots:      []string{"/var/lib/containerd", overlay},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(p string) (int64, []DirSize, []string, error) {
+			return bytesFor[p], []DirSize{{Name: "x", Bytes: bytesFor[p]}}, nil, nil
+		},
+		DeviceProbe: jarlDevices(map[string]uint64{overlay: jarlOverlayDev}),
+	})
+
+	// The root is still MEASURED — the reading is correct and stays on the wire.
+	// What it is not is subtractable.
+	var row *ConsumerRoot
+	for i := range s.ConsumerRoots {
+		if s.ConsumerRoots[i].Path == overlay {
+			row = &s.ConsumerRoots[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("no row for the overlay root — an excluded root must stay in the payload; " +
+			"a row that vanishes is indistinguishable from a root nobody configured")
+	}
+	if row.Status != ConsumerRootRead || row.Bytes != jarlOverlayBytes {
+		t.Errorf("overlay row = %+v, want a completed read of %d — exclusion is about the "+
+			"SUBTRACTION, not about the measurement", row, jarlOverlayBytes)
+	}
+	if row.ExcludedReason != excludedCrossMount {
+		t.Fatalf("overlay ExcludedReason = %q, want %q — a root held out of the sum must say so, "+
+			"BY NAME, or the residual is a number with a silent asterisk", row.ExcludedReason, excludedCrossMount)
+	}
+
+	r := s.Residual
+	if r.Status != ResidualComputed {
+		t.Fatalf("Status = %q reason %q, want computed — excluding the overlay is what MAKES it computable", r.Status, r.Reason)
+	}
+	if r.MeasuredBytes != buildPlaneContainerdBytes {
+		t.Errorf("MeasuredBytes = %d, want %d — only the same-device root", r.MeasuredBytes, buildPlaneContainerdBytes)
+	}
+	if r.CountedRoots != 1 || r.ExcludedRoots != 1 {
+		t.Errorf("counted/excluded = %d/%d, want 1/1", r.CountedRoots, r.ExcludedRoots)
+	}
+
+	// The exclusion is not cosmetic: including it changes the answer by the
+	// overlay's whole size, which is what this guard is worth.
+	if got, without := r.Bytes, jarlRootUsedBytes-buildPlaneContainerdBytes-jarlOverlayBytes; got == without {
+		t.Errorf("the residual (%d) equals the figure that INCLUDES the overlay — the guard did nothing", got)
+	}
+}
+
+// TestResidualExcludesAndNamesAnOverlappingRoot is criterion 2's disjointness
+// half. /var/lib's du total already contains /var/lib/containerd, so adding
+// both subtracts containerd twice.
+func TestResidualExcludesAndNamesAnOverlappingRoot(t *testing.T) {
+	const parent, child = "/var/lib", "/var/lib/containerd"
+	// A realistic pair: /var/lib as measured on this box contains containerd.
+	bytesFor := map[string]int64{parent: int64(27) << 30, child: buildPlaneContainerdBytes}
+	s := gatherSpace(SpaceConfig{
+		RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+		ConsumerRoots:      []string{parent, child},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(p string) (int64, []DirSize, []string, error) {
+			return bytesFor[p], []DirSize{{Name: "x", Bytes: bytesFor[p]}}, nil, nil
+		},
+		DeviceProbe: jarlDevices(nil),
+	})
+
+	byPath := map[string]ConsumerRoot{}
+	for _, r := range s.ConsumerRoots {
+		byPath[r.Path] = r
+	}
+	if got := byPath[parent].ExcludedReason; got != "" {
+		t.Errorf("%s ExcludedReason = %q, want empty — the CONTAINING root is the one that keeps "+
+			"its bytes; excluding the parent would drop everything under it that has no root of its own", parent, got)
+	}
+	if want := excludedUnderPrefix + parent; byPath[child].ExcludedReason != want {
+		t.Fatalf("%s ExcludedReason = %q, want %q — an exclusion must name WHAT covered it, or the "+
+			"operator has to work out which pair collided", child, byPath[child].ExcludedReason, want)
+	}
+	if s.Residual.MeasuredBytes != bytesFor[parent] {
+		t.Errorf("MeasuredBytes = %d, want %d — the child's bytes are already inside the parent's du total",
+			s.Residual.MeasuredBytes, bytesFor[parent])
+	}
+
+	// A prefix match on strings alone is the bug this guard must not have:
+	// /var/lib must not swallow /var/libvirt.
+	t.Run("a shared prefix is not containment", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+			ConsumerRoots:      []string{"/var/lib", "/var/libvirt"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+				return int64(1) << 30, []DirSize{{Name: "x", Bytes: 1 << 30}}, nil, nil
+			},
+			DeviceProbe: jarlDevices(nil),
+		})
+		if s.Residual.ExcludedRoots != 0 || s.Residual.CountedRoots != 2 {
+			t.Errorf("counted/excluded = %d/%d, want 2/0 — /var/libvirt is not under /var/lib, and a "+
+				"bare strings.HasPrefix says it is", s.Residual.CountedRoots, s.Residual.ExcludedRoots)
+		}
+	})
+}
+
+// TestResidualCountsPostgresOnce is criterion 3. Postgres is the one consumer
+// this payload can measure twice: `du -x -k -s /var/lib/postgresql` read
+// 3,615,160 KiB on one box against sum(pg_database_size) 3,528,933 KiB — 97.6%
+// the SAME bytes, 3.37 GiB and 12.5% of that box's used total. Adding both
+// subtracts it twice, and the payload must say which one it used.
+func TestResidualCountsPostgresOnce(t *testing.T) {
+	const pgSize = int64(3528933) * 1024
+
+	base := func(roots []string) SpaceConfig {
+		return SpaceConfig{
+			RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+			PGSizeProbe:        func() (int64, error) { return pgSize, nil },
+			ConsumerRoots:      roots,
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe: func(p string) (int64, []DirSize, []string, error) {
+				if p == DefaultPGDataDir {
+					return jarlPostgresBytes, []DirSize{{Name: "14", Bytes: jarlPostgresBytes}}, nil, nil
+				}
+				return buildPlaneContainerdBytes, []DirSize{{Name: "x", Bytes: buildPlaneContainerdBytes}}, nil, nil
+			},
+			DeviceProbe: jarlDevices(nil),
+			PGDataDir:   DefaultPGDataDir,
+		}
+	}
+
+	t.Run("a du root over PGDATA wins, and pg_size_bytes is NOT added", func(t *testing.T) {
+		s := gatherSpace(base([]string{"/var/lib/containerd", DefaultPGDataDir}))
+		if s.Residual.PGSource != PGSourceDURoot {
+			t.Fatalf("PGSource = %q, want %q — the payload must STATE which of the two "+
+				"measurements it used", s.Residual.PGSource, PGSourceDURoot)
+		}
+		want := buildPlaneContainerdBytes + jarlPostgresBytes
+		if s.Residual.MeasuredBytes != want {
+			t.Errorf("MeasuredBytes = %d, want %d — pg counted ONCE, via the du root. %d would be "+
+				"both", s.Residual.MeasuredBytes, want, want+pgSize)
+		}
+	})
+
+	t.Run("no du root over PGDATA, so pg_size_bytes IS added", func(t *testing.T) {
+		s := gatherSpace(base([]string{"/var/lib/containerd"}))
+		if s.Residual.PGSource != PGSourceSizeBytes {
+			t.Fatalf("PGSource = %q, want %q", s.Residual.PGSource, PGSourceSizeBytes)
+		}
+		if want := buildPlaneContainerdBytes + pgSize; s.Residual.MeasuredBytes != want {
+			t.Errorf("MeasuredBytes = %d, want %d — with nothing walking PGDATA, the database's own "+
+				"size is the only measurement of those bytes and dropping it hides them in the residual",
+				s.Residual.MeasuredBytes, want)
+		}
+	})
+
+	t.Run("a PARENT of PGDATA also covers it", func(t *testing.T) {
+		s := gatherSpace(base([]string{"/var/lib"}))
+		if s.Residual.PGSource != PGSourceDURoot {
+			t.Errorf("PGSource = %q, want %q — /var/lib's walk already counted /var/lib/postgresql; "+
+				"containment, not equality, is the test", s.Residual.PGSource, PGSourceDURoot)
+		}
+	})
+
+	t.Run("no postgres on this box at all", func(t *testing.T) {
+		cfg := base([]string{"/var/lib/containerd"})
+		cfg.PGSizeProbe = nil
+		s := gatherSpace(cfg)
+		if s.Residual.PGSource != PGSourceNone {
+			t.Errorf("PGSource = %q, want %q", s.Residual.PGSource, PGSourceNone)
+		}
+	})
+}
+
+// TestResidualNegativeIsRefusedNeverPrinted is criterion 4, and it is the guard
+// that keeps this whole field from becoming a new dishonest number inside the
+// fix for dishonest numbers.
+//
+// Disjoint trees on one device cannot sum past that device's used total, so a
+// negative result is PROOF the root set is not what it claims. The honest
+// output is a refusal that names the reason — never a negative gigabyte, and
+// never a clamp to zero, because "0 B unaccounted" is the strongest claim this
+// axis can make and reaching it by clamping would render the worst-measured box
+// as the best-measured one.
+func TestResidualNegativeIsRefusedNeverPrinted(t *testing.T) {
+	// Two roots that each claim most of the disk. Whatever produced this — an
+	// overlap the device check could not see, a du that followed a bind mount —
+	// the arithmetic is impossible and the payload must say so.
+	s := gatherSpace(SpaceConfig{
+		RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+		ConsumerRoots:      []string{"/var", "/usr"},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+			return jarlRootUsedBytes - 1, []DirSize{{Name: "x", Bytes: 1}}, nil, nil
+		},
+		DeviceProbe: jarlDevices(nil),
+	})
+
+	r := s.Residual
+	if r.Status != ResidualUndefined {
+		t.Fatalf("Status = %q, want %q — a sum that exceeds its denominator is proof the root set "+
+			"is wrong, and the only honest output is a refusal", r.Status, ResidualUndefined)
+	}
+	if r.Bytes >= 0 {
+		t.Errorf("Bytes = %d, want the -1 sentinel. A NEGATIVE figure here is the phantom gigabyte "+
+			"this guard exists to refuse, and a CLAMP to 0 is worse: it renders the least-measured "+
+			"box as a box where everything was accounted for", r.Bytes)
+	}
+	if r.Reason != residualReasonOverlap {
+		t.Errorf("Reason = %q, want %q — machine-readable, so a surface branches on it rather than "+
+			"parsing prose", r.Reason, residualReasonOverlap)
+	}
+	// The evidence for the refusal travels with it: an operator who can see the
+	// sum AND the denominator finds the overlapping root in one step.
+	if r.MeasuredBytes <= r.OfBytes {
+		t.Errorf("MeasuredBytes %d must exceed OfBytes %d and both must travel — a refusal without "+
+			"its arithmetic is a shrug", r.MeasuredBytes, r.OfBytes)
+	}
+
+	// And nothing on the wire carries a minus sign in front of a byte count.
+	body, err := json.Marshal(s.Residual)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(body), `"status":"undefined"`) || !strings.Contains(string(body), `"bytes":-1`) {
+		t.Errorf("payload = %s, want an undefined status with the -1 sentinel", body)
+	}
+}
+
+// TestResidualRefusesRatherThanGuessWhenItCannotVerify pins the two arms where
+// the subtraction is not attempted at all. Both are refusals with a named
+// reason, because "we could not check" is not "it checks out".
+func TestResidualRefusesRatherThanGuessWhenItCannotVerify(t *testing.T) {
+	measured := func() (int64, []DirSize, []string, error) {
+		return buildPlaneContainerdBytes, []DirSize{{Name: "x", Bytes: 1}}, nil, nil
+	}
+
+	t.Run("no root-filesystem denominator", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			ConsumerRoots:      []string{"/var/lib/containerd"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, []string, error) { return measured() },
+			DeviceProbe:        jarlDevices(nil),
+		})
+		if s.Residual.Status != ResidualUnmeasured || s.Residual.Reason != residualReasonRootUnmeasured {
+			t.Errorf("residual = %+v, want unmeasured/%s — with no RootUsedBytes there is no whole to "+
+				"subtract from, and disk_used_percent is NOT a substitute for it",
+				s.Residual, residualReasonRootUnmeasured)
+		}
+		if s.Residual.Bytes != -1 {
+			t.Errorf("Bytes = %d, want -1", s.Residual.Bytes)
+		}
+	})
+
+	t.Run("no way to verify the roots' device", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+			ConsumerRoots:      []string{"/var/lib/containerd"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, []string, error) { return measured() },
+			// DeviceProbe unwired.
+		})
+		if s.Residual.Status != ResidualUnmeasured || s.Residual.Reason != residualReasonDeviceUnverified {
+			t.Errorf("residual = %+v, want unmeasured/%s — roots that cannot be placed on a device "+
+				"cannot be subtracted from that device's total", s.Residual, residualReasonDeviceUnverified)
+		}
+	})
+
+	t.Run("one root's device is unreadable — that root only", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+			ConsumerRoots:      []string{"/var/lib/containerd", "/var/lib/barkpark-builder"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, []string, error) { return measured() },
+			DeviceProbe: func(p string) (uint64, bool) {
+				if p == "/var/lib/barkpark-builder" {
+					return 0, false
+				}
+				return jarlRootDev, true
+			},
+		})
+		if s.Residual.Status != ResidualComputed || s.Residual.CountedRoots != 1 || s.Residual.ExcludedRoots != 1 {
+			t.Errorf("residual = %+v, want computed with 1 counted and 1 excluded — one unreadable "+
+				"root must not erase the one that WAS placed", s.Residual)
+		}
+		for _, r := range s.ConsumerRoots {
+			if r.Path == "/var/lib/barkpark-builder" && r.ExcludedReason != excludedDeviceUnverified {
+				t.Errorf("ExcludedReason = %q, want %q — unknown is not the same as same-device",
+					r.ExcludedReason, excludedDeviceUnverified)
+			}
+		}
+	})
+}
+
+// TestResidualCountsTheSitesTreeToo: the sites axis is a measured root like any
+// other, and leaving it out of the sum would over-report the residual by the
+// whole sites tree on every content box.
+func TestResidualCountsTheSitesTreeToo(t *testing.T) {
+	const sitesBytes = int64(4194304) * 1024
+	s := gatherSpace(SpaceConfig{
+		RootProbe: func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+		SitesDir:  "/opt/barkpark/sites",
+		SitesProbe: func() (int64, []SiteSize, error) {
+			return sitesBytes, []SiteSize{{Slug: "search-ember", Bytes: 643072 * 1024}}, nil
+		},
+		ConsumerRoots:      []string{"/var/lib/containerd"},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+			return buildPlaneContainerdBytes, []DirSize{{Name: "x", Bytes: 1}}, nil, nil
+		},
+		DeviceProbe: jarlDevices(nil),
+	})
+	if want := buildPlaneContainerdBytes + sitesBytes; s.Residual.MeasuredBytes != want {
+		t.Errorf("MeasuredBytes = %d, want %d — the sites tree is a measured root and must be "+
+			"subtracted like one", s.Residual.MeasuredBytes, want)
+	}
+	if s.Residual.CountedRoots != 2 {
+		t.Errorf("CountedRoots = %d, want 2 (the consumer root and the sites tree)", s.Residual.CountedRoots)
+	}
+
+	t.Run("a consumer root covering the sites dir counts it once", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			RootProbe:          func() (int64, int64, error) { return jarlRootUsedBytes, jarlRootTotalBytes, nil },
+			SitesDir:           "/opt/barkpark/sites",
+			SitesProbe:         func() (int64, []SiteSize, error) { return sitesBytes, nil, nil },
+			ConsumerRoots:      []string{"/opt/barkpark"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+				return sitesBytes + (1 << 20), []DirSize{{Name: "sites", Bytes: sitesBytes}}, nil, nil
+			},
+			DeviceProbe: jarlDevices(nil),
+		})
+		if s.Residual.CountedRoots != 1 || s.Residual.ExcludedRoots != 1 {
+			t.Errorf("counted/excluded = %d/%d, want 1/1 — /opt/barkpark's walk already contains the "+
+				"sites tree", s.Residual.CountedRoots, s.Residual.ExcludedRoots)
+		}
+	})
+}
+
+// TestResidualIsAbsentNotZeroWhenNothingIsWired: an agent with no space probes
+// at all must not report "0 B unaccounted", which is the strongest possible
+// claim on this axis.
+func TestResidualIsAbsentNotZeroWhenNothingIsWired(t *testing.T) {
+	s := gatherSpace(SpaceConfig{})
+	if s.Residual == nil {
+		t.Fatal("Residual = nil, want a stated refusal — nil is for an agent that computes no residual at all")
+	}
+	if s.Residual.Status != ResidualUnmeasured || s.Residual.Bytes != -1 || s.Residual.OfBytes != -1 {
+		t.Errorf("residual = %+v, want unmeasured with both sentinels — 0 unaccounted is the claim "+
+			"\"we saw everything\", made by an agent that measured nothing", s.Residual)
+	}
 }
