@@ -1,0 +1,30 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [
+    {
+      "row": "cch-w28-s1-empty-roster-control-asserts-clause-a",
+      "arm": "B",
+      "pr": 9356,
+      "class": "FULL"
+    },
+    {
+      "row": "drafts.cch-w32-r2-notifications-withhold-branches",
+      "arm": "A",
+      "pr": 9685,
+      "class": "FULL"
+    }
+  ],
+  "arm_b_rescues": [
+    "cch-w28-s1-empty-roster-control-asserts-clause-a"
+  ],
+  "must_contain": [
+    "RESULT: 2 of 3 open rows carry a merge receipt  (FULL 2 · PARTIAL 0)",
+    "a trailer-only detector would have MISSED these): 1",
+    "criterion 6 names #9356, which is MERGED",
+    "THIS IS A FLOOR ON THE FALSE-OPEN RATE. IT IS NOT AN ESTIMATE OF IT."
+  ],
+  "must_not_contain": [
+    "cch-bl-quiet-control-no-receipt-anywhere   ["
+  ]
+}

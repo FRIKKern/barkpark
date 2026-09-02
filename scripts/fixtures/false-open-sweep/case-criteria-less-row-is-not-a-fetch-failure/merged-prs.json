@@ -1,0 +1,20 @@
+[
+  {
+    "number": 14001,
+    "title": "fix(cli): decode suspended_at",
+    "body": "Decodes the field.\n\nTask: task-85c531c2adbf0dff\n",
+    "mergedAt": "2026-08-29T00:00:00Z",
+    "mergeCommit": {
+      "oid": "1111aaaa2222bbbb"
+    }
+  },
+  {
+    "number": 14002,
+    "title": "chore: noise",
+    "body": "Unrelated.\n\nTask: some-other-row\n",
+    "mergedAt": "2026-08-30T00:00:00Z",
+    "mergeCommit": {
+      "oid": "3333cccc4444dddd"
+    }
+  }
+]

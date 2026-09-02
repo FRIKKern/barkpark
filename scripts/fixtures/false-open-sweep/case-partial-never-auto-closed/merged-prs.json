@@ -1,0 +1,20 @@
+[
+  {
+    "number": 8394,
+    "title": "feat(gates): flip behind a generator that cannot lose",
+    "body": "The four-context spec lands.\n\nTask: cch-w11-s1-flip-behind-a-generator-that-cannot-lose\n",
+    "mergedAt": "2026-07-31T03:22:43Z",
+    "mergeCommit": {
+      "oid": "dcd8c9ceff0e4505e5071ce8dbae7ee01aa0ac28"
+    }
+  },
+  {
+    "number": 8743,
+    "title": "fix(site): phone overflow at 390px",
+    "body": "Clamps the hero.\n\nTask: some-unrelated-row\n",
+    "mergedAt": "2026-08-01T12:00:00Z",
+    "mergeCommit": {
+      "oid": "b1c80eda5c0afcd31d532c554d7872024d353b1e"
+    }
+  }
+]
