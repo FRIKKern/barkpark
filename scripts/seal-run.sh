@@ -49,6 +49,10 @@
 # EXIT CODES — A REFUSAL IS NEVER A NO-SEAL
 #
 #   0  SEAL          the predicate exited 0 over a tree this wrapper vouches for
+#                    — OR, when the token reports a partial reading (LADDER-ONLY,
+#                    or any a=/c=NOT-READ), a COMPLETED READING that is not a
+#                    verdict. Exit 0 alone does not distinguish the two; the
+#                    printed line does, and never says SEAL for the second.
 #   1  NO SEAL       the predicate exited 1 over a tree this wrapper vouches for
 #   2  INFRA FAULT   the predicate exited 2 (or an exit this wrapper cannot map)
 #   3  REFUSED — the PREDICATE refused: it measured nothing (its own exit 3)
@@ -284,6 +288,48 @@ TOK_BUNAVAIL="$(tok b-unavailable)"
 # Only the REFUSED token carries `reason=`; it is empty on every other verdict.
 TOK_REASON="$(tok reason)"
 
+# The word immediately after `SEAL-PREDICATE` is the token's own name for what it
+# is: SEAL, NO-SEAL, REFUSED, LADDER-ONLY. Read positionally because it is the one
+# field the predicate emits WITHOUT a `name=` prefix.
+TOK_VERDICT="$(printf '%s\n' "$TOKEN" | awk '{print $3}')"
+TOK_A="$(tok a)"
+TOK_C="$(tok c)"
+TOK_RUNGS="$(tok b-rungs)"
+
+# ---------------------------------------------------------------------------
+# NOT EVERY EXIT 0 IS A SEAL (task-5e2a9e6cb5b6fe74).
+#
+# `--ladder-only` reads clause (b) and DELIBERATELY reads neither clause (a) nor
+# bucket (c). It exits 0 on purpose — charter D335: an instrument that reads and
+# then exits 1 gets wired into CI as a gate, and a gate is a verdict again. So the
+# predicate carries the condition in LETTERS, and says so at length: a ladder-only
+# run prints five numbered paragraphs headed WHAT THIS READING IS NOT, the second
+# of which states it is not clause (a) and not bucket (c), "printed a=NOT-READ
+# c=NOT-READ below, in the token itself, so no reader can quote this run as the
+# seal".
+#
+# This wrapper then quoted it as the seal. Measured 2026-09-02 over origin/main at
+# 185c07d034: `seal-run.sh --repo <tip> -- --successor TERMINAL --ladder-only`
+# printed `seal-run: VOUCHED — SEAL (predicate exit 0)` on the line directly below
+# a token reading `LADDER-ONLY … a=NOT-READ c=NOT-READ`. The wrapper's whole
+# purpose is that a reading which cannot be quoted must not arrive in quotable
+# form; this was that promise running backwards, in the one line an operator greps.
+#
+# THE TEST IS THE CLAUSES, NOT THE MODE NAME. Keying only on the literal
+# `LADDER-ONLY` would leave the next partial mode to be born unguarded under a new
+# name. A verdict is a statement about (a), (b) AND (c) together, so exit 0 earns
+# the word SEAL only when the token declines to say that any clause went unread.
+# The mode name is kept as a third, independent trigger so a token that omits the
+# a=/c= fields entirely still cannot be laundered.
+#
+# THE EXIT CODE DOES NOT MOVE. D335 makes ladder-only's 0 load-bearing, and this
+# defect was never in the code — it was in the letters. Changing the exit here
+# would re-create the gate D335 forbids while fixing nothing an operator reads.
+IS_PARTIAL=0
+if [ "$TOK_VERDICT" = "LADDER-ONLY" ] || [ "$TOK_A" = "NOT-READ" ] || [ "$TOK_C" = "NOT-READ" ]; then # MUT:G-PARTIAL
+  IS_PARTIAL=1
+fi
+
 # ---------------------------------------------------------------------------
 # REFUSAL 5 — post-run leg, read off the token itself.
 #
@@ -345,7 +391,17 @@ fi
 cat "$OUT_FILE"
 echo
 case "$PRED_EXIT" in
-  0) echo "seal-run: VOUCHED — SEAL (predicate exit 0)" ;;
+  # A PARTIAL READING IS NOT A SEAL. The tree is vouched for and the reading is
+  # quotable AS WHAT IT IS — a clause-(b) rung tally — which is why it prints in
+  # full above and exits 0. What it is not is a verdict, and the word SEAL appears
+  # nowhere on this line: an operator grepping for it must not land here.
+  0) if [ "$IS_PARTIAL" -eq 1 ]; then
+       echo "seal-run: NOT A VERDICT — this is a PARTIAL READING (${TOK_VERDICT:-mode unnamed}), a=${TOK_A:-<absent>} c=${TOK_C:-<absent>}."
+       echo "          Clause (b) was read${TOK_RUNGS:+ (b-rungs=$TOK_RUNGS)}; clause (a) and bucket (c) were NOT. Nothing above certifies this epic."
+       echo "          Exit 0 says the reading completed, never that it sealed. For a verdict, re-run WITHOUT --ladder-only and name a successor."
+     else
+       echo "seal-run: VOUCHED — SEAL (predicate exit 0)"
+     fi ;;
   1) echo "seal-run: VOUCHED — NO SEAL (predicate exit 1)" ;;
   2) echo "seal-run: the predicate reported an INFRA FAULT (exit 2). No verdict was taken." ;;
   # NOT "VOUCHED", and NOT an infra fault. The tree is quotable; the PREDICATE
