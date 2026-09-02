@@ -15,29 +15,29 @@ defmodule Barkpark.PortableDoc.Render.Figures do
 
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
-  # The code-block bar is a reading-character cue (its TUI twin is
-  # `Theme.CodeBar`/`ReadingAccent`), so it draws on the article reading accent —
-  # the terracotta `--paper-reading-accent`, tokenized in `TokensGen` and threaded
-  # through the palette (charter D8). Compile-time bound from `Palettes` (same as
-  # `@font_mono`) so the fallback hex stays sourced, never a re-typed literal.
-  @reading_accent Barkpark.PortableDoc.Render.Palettes.article_reading_accent()
-
   # ── article block HTML emission (code / section divider) ───────────────────
 
-  # A single styled `<pre>` code block for article mode: monospace, cool
-  # near-white `--paper-bg-deep` ground, a 3px **terracotta** left-border (the
-  # reading accent, `var(--paper-reading-accent, #a23925)`), padding, and
-  # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
-  # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
+  # A single styled `<pre>` code block for article mode: monospace, a set-in
+  # `--paper-bg-deep` slab on the `--paper-bg` page, padding, and horizontal
+  # scroll on overflow. No left bar: the 3px terracotta reading-accent bar was
+  # drawn while the page and the slab shared one colour (bulldocs painted the
+  # body with --paper-bg-deep) and the bar was all that marked a code block; the
+  # reader now stands on --paper-bg, the slab itself is the mark, and the rule
+  # ladder already carries evidence (task-ddb1e0ab09a62466, lead taste ruling).
+  # The value is HTML-escaped (the `<pre>` shows source verbatim, so no Mermaid
+  # `pre.mermaid` selector concern here).
   def code_block_html(value) do
-    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid #{@reading_accent};color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
       ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
       ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end
 
   # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
-  # rule. The glyph sits in an inline-block box with the parchment page colour
-  # as its background, masking the rule that runs behind it across the column.
+  # rule. The glyph sits in an inline-block box with the PAGE colour as its
+  # background, masking the rule that runs behind it across the column — so it
+  # paints `--paper-bg`, the token the reader body and the Studio surface stand
+  # on. It painted `--paper-bg-deep` while the reader body did too; once the
+  # page moved to `--paper-bg` a deep mask would read as a tile around the §.
   #
   # The `bp-section-divider` class carries NO styling here — every value stays
   # inline, and view_edit_parity_test.exs §8 still compares those inline
@@ -52,7 +52,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   def section_divider_html do
     ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
       ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
-      ~s|background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
+      ~s|background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
   end
 
   # ── diagram / figure HTML emission ─────────────────────────────────────────

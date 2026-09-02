@@ -125,7 +125,6 @@ check("paper-surface.css defines a distinct --bp-codeblock-* family (not a --bp-
     "--bp-codeblock-pad:",
     "--bp-codeblock-margin:",
     "--bp-codeblock-radius:",
-    "--bp-codeblock-accent-w:",
   ]) {
     assert.ok(
       surface.includes(tok),
@@ -136,6 +135,16 @@ check("paper-surface.css defines a distinct --bp-codeblock-* family (not a --bp-
   // Guard against collapsing into the generic pre tokens (would regress the 14px
   // generic <pre> and the inline-code chip).
   assert.ok(surface.includes("--bp-pre-size: 14px"), "generic --bp-pre-size must stay 14px, untouched by S9.");
+  // task-ddb1e0ab09a62466: the 3px left bar is RETIRED. The token that sized it
+  // must not come back into the source, and the bundle's frame rule must not
+  // paint a border-left — the --paper-bg-deep slab on the --paper-bg page is the
+  // whole mark now, byte-identical with the reader <pre> and the Studio mirror.
+  // Keyed on the DECLARATION form (`name:`) — the retirement note in the source
+  // names the token in prose, and prose is not a token.
+  assert.ok(!surface.includes("--bp-codeblock-accent-w:"), "--bp-codeblock-accent-w is a dead token; do not re-add it.");
+  const frame = bundleCss.match(/\.bp-paper-editor-body pre\.bp-canvas-code\s*\{([^}]*)\}/);
+  assert.ok(frame, ".bp-paper-editor-body pre.bp-canvas-code frame rule missing from the bundle");
+  assert.ok(!frame[1].includes("border-left"), "pre.bp-canvas-code must not paint a border-left (the code bar was retired).");
 });
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
