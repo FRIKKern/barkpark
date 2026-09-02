@@ -1,5 +1,5 @@
 {
-  "_comment": "CONSIDERING is residue. A resolvable successor, ZERO open/in_progress rows, and one `considering` row that nobody forwarded. The predecessor shape sealed this at exit 0 with the row disclosed nowhere; here it is counted into clause (a), named as an orphan, and printed on its own disclosure line.",
+  "_comment": "CONSIDERING is residue. A resolvable successor, ZERO open/in_progress rows, and one `considering` row that nobody forwarded. The predecessor shape sealed this at exit 0 with the row disclosed nowhere; here it is counted into clause (a) and printed on its own disclosure line — and, since wave 28, counted in the `considering` bucket rather than under UNNAMED RESIDUE, because a row printed by name is not unnamed. It still fails clause (a): disclosure is not a forwarding address.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {

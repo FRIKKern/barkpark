@@ -3,15 +3,21 @@
 
 `@barkpark/bulldocs-sdk` is a thin TypeScript authoring SDK for **Barkpark Bulldocs** papers — typed block constructors, a `Paper` builder, and an ingest client that publishes papers and submits block-ops over the `/v1/plugins/bulldocs/*` endpoints.
 
-For the general Barkpark JS SDK (query, mutate, listen, etc.) see `js/packages/core/`.
+For the general Barkpark JS SDK (query, mutate, listen, etc.) see `js/packages/core/` — that one *is* on npm as `@barkpark/core`.
 
 ---
 
-## Install
+## Install — not published yet
+
+`@barkpark/bulldocs-sdk` is **not published yet** — never on npm;
+`npm view @barkpark/bulldocs-sdk version` answers `E404`. Consume it from this repo:
 
 ```bash
-npm install @barkpark/bulldocs-sdk
+cd sdk && npm install && npm run build   # tsc -> dist/src
+npm install /abs/path/to/barkpark/sdk    # or "@barkpark/bulldocs-sdk": "file:../sdk"
 ```
+
+In-repo code imports the source (`sdk/examples/author-and-submit.ts` → `../src/index.js`).
 
 Requires global `fetch` (Node 22+) or pass your own.
 

@@ -2,7 +2,7 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
   @moduledoc """
   Drives the P7 stream B (github-webhook) surface added to the control plane:
 
-      POST   /v1/sites/:id/github           user-auth — link repo + branch + secret
+      POST   /v1/sites/:id/github           TEAM-ADMIN auth — link repo + branch + secret
       POST   /v1/webhooks/github/:site_id   NO auth — verified via HMAC-SHA256
 
   The webhook route is the sensitive one — it has to:
@@ -52,6 +52,14 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
     team = team_fixture()
     {:ok, _} = Accounts.add_member(team, user, "owner")
     {user, team}
+  end
+
+  # A second principal on an EXISTING team, at `role`. The tier tests need a
+  # plain member and a non-owner admin on the same team as the site.
+  defp member_of(team, role) do
+    user = user_fixture()
+    {:ok, _} = Accounts.add_member(team, user, role)
+    user
   end
 
   defp barkpark_fixture(team) do
@@ -256,6 +264,84 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
 
       assert conn.status == 200
       assert json_body(conn)["site"]["github_branch"] == "main"
+    end
+
+    # THE THREE DOORS. Binding a repo mints a deploy trigger: the webhook secret
+    # is the HMAC key for POST /v1/webhooks/github/:site_id, a route with no
+    # bearer auth by design. /github/connect and DELETE /v1/sites/:id/github have
+    # always been team-admin; this route was `with_team_site`'s :session default,
+    # so a plain MEMBER could create a binding only an ADMIN could clear — and
+    # could OVERWRITE an admin-established link, rotating its secret, in the same
+    # call. All three doors now enforce the same tier.
+    test "member (not admin) -> 403, and NO binding is written" do
+      {_owner, team} = user_with_team()
+      member = member_of(team, "member")
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/github",
+          %{repo: "attacker/whatever", branch: "main"},
+          login_token(member)
+        )
+
+      assert conn.status == 403
+
+      # The refusal is the WHOLE refusal: the site row is untouched, so no repo,
+      # no branch override and above all no secret the member could ever learn.
+      reloaded = Registry.get_site(site.id)
+      assert is_nil(reloaded.github_repo)
+      assert is_nil(reloaded.github_webhook_secret_encrypted)
+    end
+
+    test "member (not admin) cannot OVERWRITE an admin's binding or rotate its secret" do
+      {_owner, team} = user_with_team()
+      member = member_of(team, "member")
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, bound} = Registry.set_site_github(site, "acme/prod", "main", "the-admin-secret")
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/github",
+          %{repo: "attacker/whatever", branch: "main"},
+          login_token(member)
+        )
+
+      assert conn.status == 403
+
+      reloaded = Registry.get_site(site.id)
+      assert reloaded.github_repo == "acme/prod"
+      # Byte-identical ciphertext: the secret was not rotated, so the member
+      # never learned the HMAC key for the unauthenticated webhook route.
+      assert reloaded.github_webhook_secret_encrypted == bound.github_webhook_secret_encrypted
+      {:ok, plaintext} = Registry.reveal_site_github_secret(reloaded)
+      assert plaintext == "the-admin-secret"
+    end
+
+    # ADMIN, not OWNER: the gate is Auth.require_team_admin, and every 200 test
+    # above authenticates as the team owner — which would stay green under an
+    # owner-only gate too. This is the test that says which tier it really is.
+    test "a plain team ADMIN (not the owner) -> 200" do
+      {_owner, team} = user_with_team()
+      admin = member_of(team, "admin")
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/github",
+          %{repo: "FRIKKern/barkpark", branch: "main"},
+          login_token(admin)
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["site"]["github_repo"] == "FRIKKern/barkpark"
+      assert Registry.get_site(site.id).github_repo == "FRIKKern/barkpark"
     end
   end
 

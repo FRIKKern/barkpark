@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w40-bl-billing-is-owner-is-honest-only-by-position-after-10005",
+    "kind": "task",
+    "type": "task",
+    "title": "billingIsOwner stays honest only by position",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "billingIsOwner() is honest ONLY because a sibling return two lines above it happens to run first, a position #10005 established.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "The read becomes strictly boolean and stops depending on statement order.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "A test drives the three-state read that #10005 left reachable.",
+          "evidence": "",
+          "met": false
+        }
+      ]
+    }
+  }
+}

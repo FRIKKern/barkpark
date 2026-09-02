@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "task-85c531c2adbf0dff",
+    "kind": "task",
+    "type": "task",
+    "title": "bp can say a box is suspended and why, but still not since when",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "brief": "the Go client does not decode suspended_at",
+      "description": "filed without acceptance criteria",
+      "priority": 2,
+      "tags": []
+    }
+  }
+}

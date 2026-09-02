@@ -1,11 +1,30 @@
-// bp-paper-mermaid.js — Mermaid runtime for `diagram` blocks OUTSIDE the
-// Bulldocs reader (first consumer: the Studio Claude chat transcript).
+// bp-paper-mermaid.js — THE Mermaid runtime for `diagram` blocks.
 //
-// Defines `window.BarkparkPaperMermaid` (a LiveView hook) and initialises the
-// mermaid engine in manual mode with the same evergreen `--paper-*` palette
-// the papers reader bakes in (bulldocs.html.heex is the source of these
-// literals; a shared-asset dedup so the reader consumes this file too is
-// filed as follow-up — the reader's proven wiring stays untouched for now).
+// One hook, one palette, for every surface that paints a `pre.mermaid`:
+// the Studio Claude chat transcript (root.html.heex) AND the Bulldocs papers
+// reader (layouts/bulldocs.html.heex). The reader carried a byte-identical
+// inline copy of the hook + palette until task-e96ac3b80506cf32 pointed it
+// here; do not fork it again.
+//
+// Defines `window.BarkparkPaperMermaid`: a LiveView hook (mounted/updated →
+// runMermaid) PLUS three seams a consumer may override BEFORE `load`:
+//
+//   * `isDark()`   — how this surface decides dark vs light. Default: the raw
+//                    `prefers-color-scheme` query (what Studio chat wants).
+//                    The reader replaces it with its effective-mode reader
+//                    (the pre-paint `html[data-theme]` stamp wins over the OS).
+//   * `autoScheme` — whether an OS scheme flip alone re-renders. Default true.
+//                    The reader sets it false and drives `rerenderAll()` from
+//                    its own `bp:mode` event, which fires for a toggle click
+//                    AND for an OS flip that actually changes effective mode —
+//                    never for a no-op OS flip under a stored choice.
+//   * `init()` / `rerenderAll()` — re-initialise the engine under the current
+//                    `isDark()`, and re-render every processed diagram from its
+//                    stashed source (mermaid bakes the palette into the SVG).
+//
+// runAsciicast (asciinema) is deliberately NOT here: it is reader-only and
+// stays in the reader's own hook, so Studio chat never pays for a player it
+// does not paint.
 //
 // mermaid.min.js loads `defer` (Golden Rule #4: never a blocking script in
 // <head>), so every entry point re-checks for `window.mermaid` and retries on
@@ -90,19 +109,17 @@
       window.mermaid.initialize({
         startOnLoad: false,
         theme: "base",
-        themeVariables: themeVariables(scheme.matches),
+        themeVariables: themeVariables(api.isDark()),
         flowchart: { useMaxWidth: true },
         sequence: { useMaxWidth: true }
       });
     }
   }
 
-  if (document.readyState === "complete") initMermaid();
-  else window.addEventListener("load", initMermaid, { once: true });
-
-  // Re-render every processed diagram from its stashed source when the OS
-  // scheme flips — mermaid bakes the palette into the SVG.
-  scheme.addEventListener("change", () => {
+  // Re-render every processed diagram from its stashed source under the
+  // CURRENT palette — mermaid bakes the colors into the SVG, so a mode flip
+  // would otherwise strand light diagrams on a dark page (and vice versa).
+  function rerenderAll() {
     initMermaid();
     document.querySelectorAll("pre.mermaid[data-processed]").forEach((pre) => {
       if (pre.dataset.bpSrc != null) {
@@ -117,9 +134,16 @@
         )
       );
     }
-  });
+  }
 
-  window.BarkparkPaperMermaid = {
+  const api = {
+    // Overridable seams — see the file header. A consumer replaces these
+    // BEFORE the window load event; the deferred init below reads them then.
+    isDark: () => scheme.matches,
+    autoScheme: true,
+    init: initMermaid,
+    rerenderAll: rerenderAll,
+
     runMermaid() {
       const nodes = Array.from(
         this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
@@ -155,4 +179,16 @@
       this.runMermaid();
     }
   };
+
+  window.BarkparkPaperMermaid = api;
+
+  if (document.readyState === "complete") initMermaid();
+  else window.addEventListener("load", initMermaid, { once: true });
+
+  // An OS scheme flip re-renders only where the OS is the authority. A surface
+  // with its own mode control (the reader) sets `autoScheme = false` and calls
+  // `rerenderAll()` from its own event instead.
+  scheme.addEventListener("change", () => {
+    if (api.autoScheme) rerenderAll();
+  });
 })();

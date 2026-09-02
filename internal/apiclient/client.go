@@ -281,11 +281,19 @@ func (c *Client) authGet(url string) (*http.Response, error) {
 }
 
 // ConditionalGetResult carries the outcome of GetConditional: the HTTP status,
-// the response body (nil on 304), and the response ETag header (if any).
+// the response body (nil on 304), the response ETag header (if any), and the
+// raw Retry-After header (if any).
+//
+// RetryAfter is carried UNPARSED and unvalidated. HTTP allows two forms
+// (delta-seconds and an HTTP-date) and a caller that acts on it owns the policy
+// question — how long is too long to wait inside an interactive CLI — which the
+// transport has no business answering. Empty means the server sent no header;
+// see manifest.retryAfterDelay for the one caller that reads it today.
 type ConditionalGetResult struct {
 	StatusCode int
 	Body       []byte
 	ETag       string
+	RetryAfter string
 }
 
 // GetConditional issues an authenticated GET to an ABSOLUTE url, attaching
@@ -335,6 +343,7 @@ func (c *Client) getConditionalBounded(url, ifNoneMatch string, maxBytes int64, 
 	res := &ConditionalGetResult{
 		StatusCode: resp.StatusCode,
 		ETag:       resp.Header.Get("ETag"),
+		RetryAfter: resp.Header.Get("Retry-After"),
 	}
 	if resp.StatusCode != http.StatusNotModified {
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))

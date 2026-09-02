@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w42-bl-ambiguously-named",
+    "kind": "task",
+    "type": "task",
+    "title": "ambiguously named",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "half built.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "MERGE-GATED: merged to main.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}
