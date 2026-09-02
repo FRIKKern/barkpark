@@ -17,7 +17,18 @@ const MERGE_AREA_CAP = 10_000
 
 // Engine error vocabulary (Sheets.Engine.error_values) — a cell whose entire
 // value is one of these renders red + bold.
-const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!'])
+//
+// This is a MIRROR of `Barkpark.Plugins.Sheets.Engine.error_values/0`
+// (@canonical capability:engine-error-vocabulary). Until now it was the one
+// unchecked mirror: nothing compared it to the engine, so a code added
+// engine-side would render as plain text here while every other surface marked
+// it red. `tests/sheet-error-vocabulary.test.ts` now locks it to the SAME
+// engine-generated fixture the web mirror consumes
+// (`web/__tests__/fixtures/engine-errors.json`, asserted equal to
+// `Engine.error_values/0` by api/test/barkpark/sheets_parity_test.exs), so
+// neither side can drift alone. Exported for that test only — it is not part
+// of the package's public entry points.
+export const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!'])
 
 // A cell whose ENTIRE value is an http(s) URL renders as an anchor.
 const SHEET_URL_RE = /^https?:\/\/[^\s<>"']+$/i

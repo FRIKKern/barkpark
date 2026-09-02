@@ -20,12 +20,24 @@ on:
       # to either must run the drift gate below.
       - "web/lib/barkpark.schema.json"
       - "web/lib/barkpark.types.ts"
+      # The engine error-vocabulary fixture: @barkpark/react's sheet emitter is
+      # locked to it (packages/react/tests/sheet-error-vocabulary.test.ts), so a
+      # vocabulary bump regenerated engine-side must run the js suite HERE —
+      # otherwise the react mirror goes stale green and reds later on an
+      # unrelated js PR.
+      - "web/__tests__/fixtures/engine-errors.json"
   pull_request:
     paths:
       - "js/**"
       - ".github/workflows/js-tests.yml"
       - "web/lib/barkpark.schema.json"
       - "web/lib/barkpark.types.ts"
+      # The engine error-vocabulary fixture: @barkpark/react's sheet emitter is
+      # locked to it (packages/react/tests/sheet-error-vocabulary.test.ts), so a
+      # vocabulary bump regenerated engine-side must run the js suite HERE —
+      # otherwise the react mirror goes stale green and reds later on an
+      # unrelated js PR.
+      - "web/__tests__/fixtures/engine-errors.json"
 
 concurrency:
   group: js-tests-${{ github.ref }}
