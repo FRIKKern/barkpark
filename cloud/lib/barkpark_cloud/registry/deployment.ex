@@ -71,6 +71,19 @@ defmodule BarkparkCloud.Registry.Deployment do
   # HEALTH certified bytes this fleet produced.
   @sources ~w(box-build prebuilt)
 
+  # cch-w34: the `git_ref` column's own ceiling, restated where the WRITE PATH
+  # can see it. `deployments.git_ref` is `varchar(255)`; until this attribute
+  # existed the only thing enforcing it was Postgres, which does not return an
+  # error — it RAISES 22001 (`string_data_right_truncation`) out of the INSERT,
+  # so a caller who sent a too-long ref got a 500 `server_error` from
+  # `Plug.ErrorHandler` instead of "your git_ref is too long".
+  #
+  # Protective, not corrective: on the live control plane every stored ref is a
+  # 40-character SHA (28 non-null of 37,597 rows, min = p50 = p99 = max = 40,
+  # zero rows over 255), so nothing existing is near this and nothing needs
+  # backfilling. It exists so a route can NAME the bad input.
+  @git_ref_max_length 255
+
   # The legal from → to status graph the moduledoc promises. `live`, `failed`,
   # and `cancelled` are terminal (no outgoing edges). A same-status write is
   # always legal (see `legal_transition?/2`) so field-only updates — image_tag,
@@ -328,6 +341,7 @@ defmodule BarkparkCloud.Registry.Deployment do
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:trigger, @triggers)
     |> validate_inclusion(:source, @sources)
+    |> validate_git_ref_length()
     |> assoc_constraint(:site)
     # site-spawner W1: PLAN idempotency backstop. A repeat build_id for the same
     # site surfaces as a changeset error (the router can turn it into a 200
@@ -394,6 +408,7 @@ defmodule BarkparkCloud.Registry.Deployment do
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:environment, @environments)
     |> validate_inclusion(:source, @sources)
+    |> validate_git_ref_length()
     |> assoc_constraint(:site)
     # dwb-18 twins for the preview path: the same globally-unique delivery_id
     # index, plus at most one ACTIVE preview build per (site, branch) — the DB
@@ -463,4 +478,28 @@ defmodule BarkparkCloud.Registry.Deployment do
     ])
     |> validate_inclusion(:status, @statuses)
   end
+
+  @doc """
+  The `git_ref` ceiling (255) as the schema knows it — the column's width, so a
+  caller building a ref can ask instead of re-spelling the literal.
+  """
+  @spec git_ref_max_length() :: pos_integer()
+  def git_ref_max_length, do: @git_ref_max_length
+
+  # cch-w34: applied on BOTH create changesets — `changeset/2` (the manual
+  # deploy route, the promote route, the GitHub push webhook, `Sites.Deploy`
+  # and `Sites.AutoDeployWorker`, all via `Registry.create_deployment/2`) and
+  # `preview_changeset/2` (`Registry.create_preview_deployment/4`), which is an
+  # INDEPENDENT FORK rather than a delegation, so a validation added only to
+  # the first would leave the preview push path raising 22001.
+  #
+  # `transition_changeset/2` deliberately does NOT get it: it never casts
+  # `:git_ref`, so a ref cannot arrive through it.
+  #
+  # WRITE-PATH ONLY, by construction: `validate_length/3` reads the CHANGE, so a
+  # changeset over an already-stored row that does not put `:git_ref` (e.g.
+  # `Sites.Deploy.store_artifact/3` stamping `artifact_sha256`) is untouched.
+  # No stored row can be invalidated by this.
+  defp validate_git_ref_length(changeset),
+    do: validate_length(changeset, :git_ref, max: @git_ref_max_length)
 end
