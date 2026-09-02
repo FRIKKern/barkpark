@@ -540,7 +540,17 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     {"GET", "/v1/instance/metrics"} =>
       {:global,
        "instance-operational, no tenant rows: Prometheus text exposition of this BEAM's own " <>
-         "telemetry aggregates out of ETS. Source carries no scope marker at all."},
+         "telemetry aggregates out of ETS. The CONTROLLER PATH is tenant-blind — it calls no " <>
+         "scope_opts/1 and reads no :current_workspace — so :global still holds for the " <>
+         "route's own scope handling. The `workspace_id` this source carries is MODULEDOC, " <>
+         "not a read: it names the four series that carry a :workspace_id Prometheus LABEL " <>
+         "(content.mutate.stop.duration, search.query.stop.duration, " <>
+         "content.lifecycle.stop.duration, media.mutate.count), so ONE scrape enumerates the " <>
+         "box's workspace roster plus each tenant's write/search/publish volume. Tenant " <>
+         "identifiers ride the LABEL SET even though no tenant row rides the body — which is " <>
+         "why PR #14793 moved this route onto [:api, :require_admin]. The route is global; " <>
+         "the PAYLOAD is not, and the gate for that is admission, not scope. Operator-tier " <>
+         "home: task-c7e2b87f1bbca815."},
     # RequestStatsController.show
     {"GET", "/v1/instance/request-stats"} =>
       {:global,
@@ -549,7 +559,11 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     # InstanceSiteDeployController.show
     {"GET", "/v1/instance/site-deploy"} =>
       {:global,
-       "instance-operational, no tenant rows: a capability probe over " <>
+       "admin-gated since PR #14793 ([:api, :require_admin]) because door.in_flight_slugs " <>
+         "names OTHER tenants' sites — the payload crosses tenants even though the read does " <>
+         "not, same shape as /v1/instance/metrics above; operator-tier home " <>
+         "task-c7e2b87f1bbca815. Still :global on the route's own scope handling: " <>
+         "instance-operational, no tenant rows: a capability probe over " <>
          "DeployRunner.enabled?/0, Process.whereis/1, door_census/0 and ServingMemory.read/1. " <>
          "Source carries no scope marker at all."},
     # V1.MediaController.index
