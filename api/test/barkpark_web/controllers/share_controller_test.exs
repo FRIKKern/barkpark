@@ -197,6 +197,50 @@ defmodule BarkparkWeb.ShareControllerTest do
       resp = conn |> admin_conn() |> delete("/v1/shares/tokens/not-a-uuid")
       assert json_response(resp, 404)["error"]["code"] == "not_found"
     end
+
+    test "the CHOKEPOINT, not a local wrapper, denies a malformed workspace id", %{
+      admin: token
+    } do
+      # WHY THIS TEST EXISTS. `ShareController.workspace_admin?/2` used to
+      # hand-roll `case {actor, Repo.uuid_or_nil(workspace_id)}` before calling
+      # `Tenancy.Auth.workspace_admin?/2`, because that predicate once raised
+      # (FunctionClauseError on a nil id, Ecto.Query.CastError on a non-UUID
+      # binary). The wrapper is GONE — the controller now calls the chokepoint
+      # directly — so the denial has to be the chokepoint's own, and that is
+      # what this asserts. Made total by #12616 (c8cb3e35e9, the membership/2
+      # fail-closed seam) and #12710 (7a42b45576, which moved the
+      # `Repo.uuid_or_nil/1` pair INTO membership/3 and gave that arity its own
+      # terminal `-> nil`).
+      #
+      # NOT AN HTTP TEST ON PURPOSE: no route on this surface can DELIVER a
+      # malformed workspace id — every id handed to the predicate comes from
+      # `Tenancy.get_workspace_by_slug/1` or from an `ApiToken` row's own
+      # `workspace_id` column, both real UUIDs or nil (see "malformed scopes are
+      # denials, never 500s" below). The wrapper's job was to survive an id the
+      # HTTP layer cannot produce; the only honest place to prove the
+      # replacement holds is at the predicate itself.
+      #
+      # MUTATION RECEIPT: disarm `Barkpark.Repo.uuid_or_nil/1` (make it return
+      # its argument unchanged) and the first assertion below reds with
+      # `Ecto.Query.CastError` — a 500 in controller terms. That is the proof
+      # the denial rests on the chokepoint and not on the removed wrapper.
+      real_ws = Ecto.UUID.generate()
+
+      # uncastable workspace ids — a DENIAL, never a raise
+      refute TenancyAuth.workspace_admin?(token, "not-a-uuid")
+      refute TenancyAuth.workspace_admin?(token, "")
+      refute TenancyAuth.workspace_admin?(token, "11111111-1111-1111-1111-11111111111")
+
+      # nil / non-binary workspace id — the terminal clause, not FunctionClauseError
+      refute TenancyAuth.workspace_admin?(token, nil)
+      refute TenancyAuth.workspace_admin?(token, 42)
+
+      # a nil or unrecognised PRINCIPAL — what `conn.assigns[:api_token]` is on
+      # an unauthenticated conn, and the other half the wrapper used to filter.
+      refute TenancyAuth.workspace_admin?(nil, real_ws)
+      refute TenancyAuth.workspace_admin?(%{not: :a_principal}, real_ws)
+      refute TenancyAuth.workspace_admin?(nil, "not-a-uuid")
+    end
   end
 
   # ── add (POST) ──────────────────────────────────────────────────────────
@@ -518,8 +562,11 @@ defmodule BarkparkWeb.ShareControllerTest do
       # Nothing malformed can reach `TenancyAuth.workspace_admin?/2`: the scope
       # is parsed first, and the id handed to the predicate always comes from
       # `Tenancy.get_workspace_by_slug/1` (a real UUID) or the request never
-      # gets there. The slice-1 helper additionally routes every id through
-      # `Repo.uuid_or_nil/1`, so a nil/garbage id is a DENIAL, not a crash.
+      # gets there. CORRECTED: the slice-1 helper no longer routes ids through
+      # `Repo.uuid_or_nil/1` itself — that wrapper was removed once the
+      # chokepoint became total (#12616 / #12710). A nil/garbage id is still a
+      # DENIAL and not a crash, and "the CHOKEPOINT, not a local wrapper,
+      # denies a malformed workspace id" above is what pins it.
       for scope <- ["", "*/p/production", " /x/production", "a//production", "w/x/y/z"] do
         resp =
           conn |> admin_conn() |> post("/v1/shares", %{scope: scope, surfaces: "papers"})
