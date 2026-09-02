@@ -4743,6 +4743,22 @@
     .bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; box-shadow: 1px 0 0 0 var(--paper-rule), 0 1px 0 0 var(--paper-rule); }
     .bp-paper-editor-body .bp-stats .bp-stat::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 1px; height: 1px; background: var(--paper-rule); }
     .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+    /* THE ONE FIGCAPTION mirror. The reader styles every article <figcaption>
+       through ONE class (paper-surface.css `.bp-paper-surface .bp-figcaption`)
+       instead of the ~200 bytes of inline caption styling it used to repeat at
+       three emit sites — one of which had drifted to a bare ink hex that is
+       2.97:1 on the dark ground. The canvas mounts figures through the SAME
+       reader producer, so the class arrives here too and needs the twin.
+       Values byte-copied from the View rule; view_edit_parity_test.exs §2
+       guards the drift. This note is a CSS comment, deliberately NOT a HEEx one:
+       that test strips CSS comments only, and its rule scanner reads everything
+       since the last `}` as the selector — so a HEEx comment here silently
+       swallows the selector and the gate goes vacuous. For the same reason the
+       note must never spell either CSS comment delimiter, which would close it
+       early and feed the remainder of this prose to the same scanner. Both
+       mistakes were made here and both were caught by the gate this rule arms.
+       Keep byte-aligned with assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
     /* Explicit column compositions use the same evidence band as the reader;
        prose surrounding the component remains on the measured column. */
     .bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
@@ -4983,8 +4999,11 @@
        margin:1.6rem 0), overriding .bp-canvas-readonly's 1em. The child paint hole is
        .bp-paper-surface (data-bp-fleet-body), the canonical paper-surface sink, so the
        injected child HTML styles itself identically to /papers with NO extra CSS (D8).
-       The editable caption reproduces the reader <figcaption> INLINE styles (compose.ex
-       figure_html:924) + an input reset; the empty-caption resting-hide is JS, not CSS.
+       The editable caption reproduces the reader <figcaption>, which since
+       papers/captions-floor is styled by ONE class (.bp-figcaption, mirrored above)
+       rather than by inline styles — so it copies THAT rule's values (serif, roman,
+       0.9rem/1.45, --paper-ink-soft) plus an input reset, because an <input> inherits
+       none of it. The empty-caption resting-hide is JS, not CSS.
        MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
     .bp-canvas-figure { margin: 1.6rem 0; }
     .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
@@ -4992,8 +5011,8 @@
       display: block; width: 100%; box-sizing: border-box;
       border: none; background: transparent; padding: 0; margin: 0;
       color: var(--paper-ink-soft, #6a6a6a);
-      font-style: italic; font-size: 0.9rem;
-      font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
+      font-size: 0.9rem; line-height: 1.45;
+      font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
     }
     .bp-canvas-figure-caption-input:focus { outline: none; }
     /* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly

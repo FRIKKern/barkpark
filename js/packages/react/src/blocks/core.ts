@@ -404,7 +404,7 @@ const diff: Emit = (b) => {
   const leadHtml = lead === '' ? '' : `${lead} · `
 
   const counts =
-    `<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">` +
+    `<div class="text-dim" style="font-size: 12px; margin-bottom: 4px;">` +
     leadHtml +
     `<span style="color: var(--ok);">+${added}</span> ` +
     `<span style="color: var(--danger);">−${removed}</span></div>`
@@ -415,7 +415,7 @@ const diff: Emit = (b) => {
     body =
       `<details><summary style="cursor: pointer; list-style: none;">` +
       diffSectionRowsHtml(head) +
-      `<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +${overflow} more lines</div>` +
+      `<div class="text-dim" style="font-size: 12px; padding: 1px 0;">… +${overflow} more lines</div>` +
       `</summary>${diffSectionRowsHtml(rest)}</details>`
   } else {
     body = diffSectionRowsHtml(head)
@@ -433,7 +433,7 @@ const diff: Emit = (b) => {
 // semantic carrier; the legend row disambiguates locally).
 const FILETREE_MARKERS: Array<[string, string]> = [
   [' ● ', 'var(--ok)'],
-  [' ○ ', 'var(--fg-dim)'],
+  [' ○ ', 'var(--paper-ink-soft)'],
   [' ✕ ', 'var(--danger)'],
 ]
 
@@ -462,7 +462,7 @@ const filetree: Emit = (b) => {
   const legendHtml =
     legend === ''
       ? ''
-      : `<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">${escapeHtml(legend)}</div>`
+      : `<div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">${escapeHtml(legend)}</div>`
   return (
     `<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
     rows +
@@ -668,17 +668,16 @@ function figcaptionInner(caption: string): string {
   return escapeHtml(caption)
 }
 
+// ONE caption for all three article figure emitters (figure / diagram / asciicast),
+// mirroring Figures.diagram_html + Figures.asciicast_html + Compose.figure_frame_html.
+// There used to be TWO functions here because the Elixir asciicast emitter had
+// drifted to a bare ink hex where its siblings read `var(--paper-ink-soft, …)` —
+// 2.97:1 on the dark ground — and this fork had to reproduce the drift byte for
+// byte. papers/captions-floor moved all three to the ONE `.bp-figcaption` class in
+// paper-surface.css, so the divergence (and the second function) is gone.
 function articleFigcaption(caption: string): string {
   if (caption === '') return ''
-  return `<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">${figcaptionInner(caption)}</figcaption>`
-}
-
-// asciicast_html/3 (:article) uses a PLAIN `#55635e` figcaption color — NOT the
-// `var(--paper-ink-soft, …)` the figure/diagram captions use (figures.ex line 124
-// vs 88). Mirror that divergence exactly, or the DOM-shape style attribute diverges.
-function asciicastFigcaption(caption: string): string {
-  if (caption === '') return ''
-  return `<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">${figcaptionInner(caption)}</figcaption>`
+  return `<figcaption class="bp-figcaption">${figcaptionInner(caption)}</figcaption>`
 }
 
 // Entity-encode ONLY & < > for the Mermaid source (Figures.encode_mermaid/1).
@@ -722,7 +721,7 @@ const asciicast: Emit = (b) => {
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
     `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
-    asciicastFigcaption(caption) +
+    articleFigcaption(caption) +
     `</figure>`
   )
 }
@@ -823,7 +822,7 @@ function paperLinkCard(ref: PaperLinkRef): string {
   const metadata =
     metadataParts.length === 0
       ? ''
-      : `<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.72rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">${escapeHtml(metadataParts.join(' · '))}</span>`
+      : `<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">${escapeHtml(metadataParts.join(' · '))}</span>`
 
   return (
     `<a data-paper-link-card href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #dde7e2);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none">` +
