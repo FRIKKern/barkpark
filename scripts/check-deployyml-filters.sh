@@ -403,6 +403,172 @@ EOF
   return 0
 }
 
+# ── behaviour: the changed-file PRODUCER, driven, not grepped ────────────────
+#
+# THE BUG THIS ARM EXISTS FOR
+#
+# Everything above judges the two LISTS. It says nothing about the line that
+# feeds them. The `changes` job built `$changed` with the plain producer:
+#
+#     changed="$(git diff --name-only "$base" "${{ github.sha }}")"
+#
+# and that line drops files SILENTLY in two shapes, both of which decide whether
+# PRODUCTION ROLLS:
+#
+#   • `--name-only` prints a path containing `"` QUOTED (`"cloud/we\"ird.ex"`),
+#     even under core.quotepath=false, so the anchored `^(cloud|…)/` filter
+#     misses it — cp=false, control plane does not deploy, run reports GREEN;
+#   • rename detection prints only the DESTINATION, so `cloud/x.ex` renamed to
+#     `docs/x.ex` never appears as a cloud/ path at all. Code LEFT the control
+#     plane's tree and the control plane was never rebuilt.
+#
+# Neither shape is visible to a text scan of the two lists — every fixture the
+# arms above use is ASCII and rename-free, which is exactly why the drift gate
+# could pass over this for as long as it did.
+#
+# So this arm EXTRACTS the `changes` step body out of the file under test and
+# EXECUTES it against real git fixtures. It cannot paraphrase what CI runs. The
+# `${{ … }}` expressions are substituted from the environment (the only way to
+# run an Actions body outside Actions) and `gh` is stubbed to return nothing, so
+# the base resolution falls to the supplied anchor and no network is touched.
+#
+# --selftest case 11 restores the pre-fix producer on a copy and proves both
+# shapes go RED here, so this arm has been shown to lose.
+
+PRODUCER_TMP=""
+producer_cleanup() { [ -n "$PRODUCER_TMP" ] && rm -rf "$PRODUCER_TMP"; return 0; }
+trap producer_cleanup EXIT
+
+# Built once and reused: every fixture branch hangs off one base commit, so the
+# repeated check_file calls inside --selftest do not each pay for a git init.
+producer_fixture() {
+  [ -n "$PRODUCER_TMP" ] && return 0
+  PRODUCER_TMP="$(mktemp -d)"
+  local dr="$PRODUCER_TMP/repo"
+  mkdir -p "$dr/cloud" "$dr/docs" "$dr/api"
+  printf 'plain\n' >"$dr/api/thing.ex"
+  # NON-EMPTY on purpose — rename detection needs a real similarity source.
+  printf 'cp-a\ncp-b\ncp-c\ncp-d\n' >"$dr/cloud/moved.ex"
+  printf 'guide\n' >"$dr/docs/guide.md"
+  git -C "$dr" init -q
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
+  PRODUCER_BASE="$(git -C "$dr" rev-parse HEAD)"
+
+  # (1) a control-plane file whose name contains a DOUBLE QUOTE. Written from a
+  # variable, never threaded through a nested quoting layer: this arm is ABOUT
+  # quote-bearing paths and a fixture that breaks on its own quoting proves
+  # nothing.
+  local dq='cloud/we"ird.ex'
+  git -C "$dr" checkout -q -b dquote "$PRODUCER_BASE"
+  printf 'weird\n' >"$dr/$dq"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm dquote >/dev/null 2>&1
+
+  # (2) a control-plane file renamed OUT of cloud/. The CP must still roll: code
+  # it used to build just left its tree.
+  git -C "$dr" checkout -q -b renameout "$PRODUCER_BASE"
+  git -C "$dr" mv cloud/moved.ex docs/moved.ex >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm renameout >/dev/null 2>&1
+
+  # (3) the control: a docs-only change must still classify cp=false, so a pass
+  # above is a filter answering, not a tautology that says true to everything.
+  git -C "$dr" checkout -q -b docsonly "$PRODUCER_BASE"
+  printf 'more\n' >>"$dr/docs/guide.md"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm docsonly >/dev/null 2>&1
+
+  # the gh stub: `gh run list` answers empty, so `base` falls through to the
+  # anchor this harness supplies. No token, no network, no live GitHub.
+  mkdir -p "$PRODUCER_TMP/bin"
+  printf '#!/bin/sh\nexit 0\n' >"$PRODUCER_TMP/bin/gh"
+  chmod +x "$PRODUCER_TMP/bin/gh"
+  return 0
+}
+
+# extract_changes_step <yml> <dest.sh> — fails loudly rather than writing an
+# empty body that would "pass" every case below.
+extract_changes_step() {
+  python3 - "$1" "$2" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+steps = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "f"]
+if len(steps) != 1 or "run" not in steps[0]:
+    sys.exit("expected exactly 1 run-bearing step id 'f' in the changes job, found %d"
+             % len(steps))
+body = (steps[0]["run"]
+        .replace("${{ github.sha }}", "${T_SHA}")
+        .replace("${{ github.event.before }}", "${T_BEFORE}"))
+open(sys.argv[2], "w").write(body)
+PY
+}
+
+# classify <step.sh> <branch> <key> -> prints the emitted value, or nothing
+classify() {
+  local step="$1" br="$2" key="$3" dr="$PRODUCER_TMP/repo"
+  local out="$PRODUCER_TMP/gh_output"
+  git -C "$dr" checkout -q "$br"
+  : >"$out"
+  ( cd "$dr" && env -u DISPATCH_TARGETS -u DISPATCH_REASON \
+      PATH="$PRODUCER_TMP/bin:$PATH" \
+      GITHUB_EVENT_NAME=push \
+      GITHUB_OUTPUT="$out" \
+      T_SHA="$(git -C "$dr" rev-parse HEAD)" \
+      T_BEFORE="$PRODUCER_BASE" \
+      bash --noprofile --norc "$step" ) >"$PRODUCER_TMP/step.out" 2>&1 || true
+  sed -n "s/^${key}=//p" "$out" | tail -1
+}
+
+# check_producer <yml> <label> — 0 if both false-green shapes still classify
+# correctly, 1 otherwise.
+check_producer() {
+  local yml="$1" label="$2" step got rc=0
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "HARNESS-UNAVAILABLE[$label]: python3 not on PATH — the producer arm cannot run." >&2
+    return 2
+  fi
+  producer_fixture
+  step="$PRODUCER_TMP/changes-step.sh"
+  if ! extract_changes_step "$yml" "$step" 2>"$PRODUCER_TMP/extract.err"; then
+    echo "FAIL[$label]: could not extract the 'changes' job's step id 'f': $(cat "$PRODUCER_TMP/extract.err")" >&2
+    return 1
+  fi
+
+  got="$(classify "$step" dquote cp)"
+  if [ "$got" = "true" ]; then
+    echo "  produce  a cloud/ path containing a double quote  ->  cp=true"
+  else
+    echo "  ESCAPE   a cloud/ path containing a double quote  ->  cp=${got:-<none>}, wanted true" >&2
+    echo "           The producer prints it QUOTED, so the anchored ^(cloud|...)/ filter misses it" >&2
+    echo "           and the control plane silently does not deploy under a GREEN run. Fix:" >&2
+    echo "           git -c core.quotepath=false diff -z --name-only --no-renames <range> | tr '\\0' '\\n'" >&2
+    rc=1
+  fi
+
+  got="$(classify "$step" renameout cp)"
+  if [ "$got" = "true" ]; then
+    echo "  produce  a cloud/ file renamed OUT of cloud/       ->  cp=true"
+  else
+    echo "  ESCAPE   a cloud/ file renamed OUT of cloud/       ->  cp=${got:-<none>}, wanted true" >&2
+    echo "           Rename detection prints only the DESTINATION, so code that LEFT the control" >&2
+    echo "           plane's tree never appears as a cloud/ path. Fix: --no-renames." >&2
+    rc=1
+  fi
+
+  # The control. Without it, a producer that emitted every path in the repo
+  # would satisfy both cases above and this arm would certify a tautology.
+  got="$(classify "$step" docsonly cp)"
+  if [ "$got" = "false" ]; then
+    echo "  produce  a docs-only change                        ->  cp=false (the filter still answers)"
+  else
+    echo "  FAIL     a docs-only change  ->  cp=${got:-<none>}, wanted false — the filter says true to" >&2
+    echo "           everything, so the two cases above prove nothing." >&2
+    rc=1
+  fi
+
+  return "$rc"
+}
+
 # ── the check ────────────────────────────────────────────────────────────────
 
 check_file() {
@@ -482,7 +648,16 @@ EOF
     return 1
   fi
 
-  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ]; then
+  # The behaviour arm: the lists are only as good as the producer that feeds
+  # them. Runs unconditionally alongside the others so ONE run reports every
+  # drift it can see.
+  local producer_rc=0
+  check_producer "$yml" "$label" || producer_rc=$?
+  if [ "$producer_rc" -eq 2 ]; then
+    return 2
+  fi
+
+  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ]; then
     return 1
   fi
 
@@ -503,14 +678,14 @@ selftest() {
   local rc=0
   local out sub_rc
 
-  echo "selftest 1/10: the real workflow passes"
+  echo "selftest 1/11: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/10: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/11: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -523,7 +698,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/10: an unexplained targetless path must FAIL"
+  echo "selftest 3/11: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   sub_rc=0
@@ -548,7 +723,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/10: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/11: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
@@ -572,7 +747,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/10: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/11: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -604,7 +779,7 @@ YML
   fi
 
   echo
-  echo "selftest 6/10: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  echo "selftest 6/11: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
   # Mirror of case 2, but for DELETION not drift: strip the required push-path
   # line entirely. The drift arm now sees nothing to judge — the false-green W35
   # exists to close (charter D275). (Since the reverse arm landed, this half also
@@ -623,7 +798,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/10: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
+  echo "selftest 7/11: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
   # `web` is dispatched by the control-plane filter, but no on.push.paths entry
   # delivers a web/ file — so a web-only merge never starts the workflow and that
   # arm of the filter can only ever fire on somebody else's co-triggering merge.
@@ -647,7 +822,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/10: the reverse arm must actually RUN on the real workflow (non-vacuity)"
+  echo "selftest 8/11: the reverse arm must actually RUN on the real workflow (non-vacuity)"
   # A direction that silently checks nothing is worse than no direction: it puts
   # the word "reverse" in a green line. So the count must be non-zero AND the
   # per-prefix verdicts must be present, on the REAL file.
@@ -670,7 +845,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/10: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
+  echo "selftest 9/11: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
   # The D275 shape, and the reason the allowlist is not made redundant by the
   # reverse arm: with the push-path line AND its regex prefix both gone, the
   # forward arm has no path to judge and the reverse arm has no prefix to judge.
@@ -702,7 +877,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/10: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
+  echo "selftest 10/11: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
   # The fail-closed arm of prefixes_of, proven rather than asserted. A dispatch
   # filter that is not an anchored alternation is a filter this direction cannot
   # answer for — and "could not look" must never print as "it is fine". Without
@@ -724,6 +899,64 @@ YML
       rc=1
     else
       echo "  ok: an unreadable dispatch filter reds instead of being passed over"
+    fi
+  fi
+
+  echo
+  echo "selftest 11/11: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
+  # THE MUTATION THAT MATTERS. Every case above mutates a LIST; this one mutates
+  # the line that feeds them, back to exactly what deploy.yml carried before the
+  # wave-10 sweep. Both false-green shapes must reappear, or the behaviour arm is
+  # a green line that has never been shown to lose.
+  #
+  # The anchor is asserted to match EXACTLY ONCE and the copy asserted to DIFFER:
+  # a mutation that never applied yields a red meaning nothing and, worse, a
+  # green meaning less.
+  python3 - "$real" "$tmp/prefix-producer.yml" <<'PYMUT'
+import sys
+s = open(sys.argv[1]).read()
+new = ('          changed="$(git -c core.quotepath=false diff -z --name-only '
+       '--no-renames "$base" "${{ github.sha }}" | tr \'\\0\' \'\\n\')"\n')
+old = '          changed="$(git diff --name-only "$base" "${{ github.sha }}")"\n'
+n = s.count(new)
+if n != 1:
+    sys.exit("MUTATION ANCHOR matched %d times, wanted exactly 1 — the producer line no "
+             "longer looks as this selftest expects. Fix the anchor, do not loosen it." % n)
+out = s.replace(new, old)
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(sys.argv[2], "w").write(out)
+PYMUT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the producer mutation could not be applied — case 11 proves nothing" >&2
+    rc=1
+  elif cmp -s "$real" "$tmp/prefix-producer.yml"; then
+    echo "SELFTEST FAIL: the producer mutation changed nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/prefix-producer.yml" "prefix-producer" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: the PRE-FIX producer read GREEN — the behaviour arm cannot fail" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! printf '%s\n' "$out" | grep -q 'ESCAPE   a cloud/ path containing a double quote'; then
+      echo "SELFTEST FAIL: the quote-bearing path did not escape under the pre-fix producer" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! printf '%s\n' "$out" | grep -q 'ESCAPE   a cloud/ file renamed OUT of cloud/'; then
+      echo "SELFTEST FAIL: the rename-out case did not escape under the pre-fix producer" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif printf '%s\n' "$out" | grep -qE 'DRIFT|UNREACHABLE|MISSING'; then
+      echo "SELFTEST FAIL: a LIST arm also red — this fixture is meant to prove the list arms" >&2
+      echo "               see NOTHING when only the producer regresses, which is why the" >&2
+      echo "               behaviour arm is load-bearing and not redundant" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: both false-green shapes escape; the list arms read clean, only behaviour reds"
     fi
   fi
 
