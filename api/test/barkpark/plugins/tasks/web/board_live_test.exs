@@ -20,6 +20,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
   alias Barkpark.Auth
   alias Barkpark.Content.Document
   alias Barkpark.Content.MutationEvent
+  alias Barkpark.Plugins.Tasks.Web.BoardLive
   alias Barkpark.Repo
   alias Barkpark.Tasks.Board
   alias Barkpark.Tasks.Edge
@@ -2202,8 +2203,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ "all 2 done"
       assert html =~ ~s(data-role="done-ledger")
       assert html =~ "Shipped one"
-      # …so the ONLY columns on the page are the live lane's five.
-      assert occurrences(html, ~s(data-role="column")) == 5
+      # …so the ONLY columns on the page are the live lane's. Counted off
+      # `Board.columns/0` rather than a literal 5: what this test PINS is "one
+      # lane's worth of columns, not two", and tlv-s5 grew the ladder by the two
+      # thought columns. A literal here would have to be re-typed every time the
+      # ladder legitimately changes, which is exactly how a pin stops pinning.
+      assert occurrences(html, ~s(data-role="column")) == length(Board.columns())
     end
 
     test "the flat board with live work renders the deck, never the settled state",
@@ -2237,6 +2242,225 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ ~s(data-role="momentum")
       assert html =~ ~s(data-role="done-ledger")
       assert html =~ "First shipped"
+    end
+  end
+
+  # ── tlv-s5: thought columns · col ≠ color_role · fail-open labels ───────────
+  #
+  # TLV charter D11/D12/D14. Every assertion below is about a surface FAILING
+  # OPEN: a lifecycle value this build does not recognise must stay VISIBLE, must
+  # never be dropped, and must never borrow a brighter state's meaning.
+  describe "thought columns + the col ≠ color_role decouple (tlv-s5, pure)" do
+    test "Board.columns/0 puts the two thought columns at the LADDER BOTTOM" do
+      assert Board.columns() == [
+               :open,
+               :ready,
+               :in_progress,
+               :blocked,
+               :done,
+               :considering,
+               :researching
+             ]
+    end
+
+    test "considering/researching bucket into their OWN columns with the manifest glyphs" do
+      board =
+        Board.build(
+          [
+            card("considering", doc_id: "th-c", title: "Weighing the rewrite"),
+            card("researching", doc_id: "th-r", title: "Reading the prior art")
+          ],
+          now: ~U[2026-07-19 12:00:00Z]
+        )
+
+      assert Enum.map(board.columns.considering, & &1.doc_id) == ["th-c"]
+      assert Enum.map(board.columns.researching, & &1.doc_id) == ["th-r"]
+
+      c = board.cards_by_id["th-c"]
+      r = board.cards_by_id["th-r"]
+
+      # ◌ U+25CC · ◎ U+25CE — the GENERATED manifest's own characters (tlv-s2),
+      # cross-checked against Board.glyphs/0 so this can never pin a fork.
+      assert {c.col, c.color_role, c.glyph} == {:considering, :considering, "◌"}
+      assert {r.col, r.color_role, r.glyph} == {:researching, :researching, "◎"}
+      assert c.glyph == Board.glyphs()[:considering]
+      assert r.glyph == Board.glyphs()[:researching]
+    end
+
+    test "an UNKNOWN lifecycle status homes in :open but colors :unknown — dim, never bright backlog" do
+      board =
+        Board.build([card("marinating", doc_id: "u-1", title: "From a newer server")],
+          now: ~U[2026-07-19 12:00:00Z]
+        )
+
+      u = board.cards_by_id["u-1"]
+
+      # PLACEMENT: never dropped. The cond's fall-through still lands it somewhere
+      # a human will look.
+      assert u.col == :open
+      assert Enum.map(board.columns.open, & &1.doc_id) == ["u-1"]
+
+      # MEANING: decoupled from placement. `color_role: col` used to make this
+      # card indistinguishable from a claimable backlog task — the surface
+      # asserting a state it has no evidence for.
+      assert u.color_role == :unknown
+      assert u.glyph == Board.glyphs()[:unknown]
+      refute u.color_role == u.col
+      refute u.glyph == Board.glyphs()[:open]
+    end
+
+    test "the derived ready overlay still owns its BRIGHT role after the decouple" do
+      # The one role that is legitimately derived rather than stored: an
+      # open/blocked card whose blockers are all done IS claimable, and the bright
+      # ○ reports exactly that. The decouple must not dim it back to :open.
+      board =
+        Board.build(
+          [
+            card("open", doc_id: "rd-open"),
+            card("blocked", doc_id: "rd-unblocked", blocker_statuses: ["done"])
+          ],
+          now: ~U[2026-07-19 12:00:00Z]
+        )
+
+      for id <- ["rd-open", "rd-unblocked"] do
+        c = board.cards_by_id[id]
+        assert c.col == :ready, "#{id} should derive the ready overlay"
+        assert c.color_role == :ready, "#{id} lost its bright ready role to the decouple"
+      end
+    end
+
+    test "glyph_for/1 is TOTAL — every column and role resolves to a character" do
+      # It was `Map.fetch!/2`: the first role the map had not heard of RAISED,
+      # which is the one thing a fail-open surface must not do.
+      glyphs = Board.glyphs()
+
+      for col <- Board.columns() do
+        assert is_binary(glyphs[col]) and glyphs[col] != "",
+               "column #{col} has no glyph — glyph_for/1 would fall back to :unknown"
+      end
+
+      assert glyphs[:unknown] == "·"
+    end
+  end
+
+  describe "col_label/1 fails OPEN (tlv-s5)" do
+    test "every column Board.columns/0 names carries an explicit, non-empty label" do
+      assert BoardLive.col_label(:considering) == "Considering"
+      assert BoardLive.col_label(:researching) == "Researching"
+
+      for col <- Board.columns() do
+        label = BoardLive.col_label(col)
+        assert is_binary(label) and label != "", "column #{col} rendered no label"
+      end
+    end
+
+    test "an UNLABELLED column atom humanizes instead of crashing the render" do
+      # THE REGRESSION this pins: col_label/1 had NO catch-all. The header is
+      # drawn inside `:for={col <- Board.columns()}`, so the first column atom
+      # without an explicit clause raised FunctionClauseError and took down EVERY
+      # column on the board — not just its own. Growing the ladder must never be
+      # able to blank the board.
+      assert BoardLive.col_label(:some_future_state) == "Some Future State"
+      assert BoardLive.col_label(:marinating) == "Marinating"
+
+      for col <- Board.columns() ++ [:a_column_that_does_not_exist_yet] do
+        label = BoardLive.col_label(col)
+
+        assert is_binary(label) and label != "",
+               "col_label/1 must be TOTAL; #{col} produced #{inspect(label)}"
+      end
+    end
+  end
+
+  describe "thought columns on the live board (tlv-s5)" do
+    setup do
+      task("tc-idea", "Weighing the rewrite", lifecycle: "considering")
+      task("tc-dig", "Reading the prior art", lifecycle: "researching")
+      task("tc-work", "Actually building it", lifecycle: "in_progress", assignee: "studio:w10")
+      :ok
+    end
+
+    test "the desktop grid renders a labelled column for EVERY Board.columns/0 entry",
+         %{conn: conn} do
+      # The flat default view is the DECK; the column grid is the grouped
+      # drill-down (see the wave-18 deck describe, which refutes data-role=column).
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      for col <- Board.columns() do
+        assert html =~ ~s(data-role="column" data-col="#{col}"),
+               "no column section rendered for #{col}"
+
+        assert html =~ BoardLive.col_label(col), "column #{col} rendered no label"
+      end
+
+      assert card_in_column?(html, "tc-idea", "considering")
+      assert card_in_column?(html, "tc-dig", "researching")
+    end
+
+    test "thought cards paint their own dim role class, never a work state's", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      assert html =~ ~s(class="gi gi--considering")
+      assert html =~ ~s(class="gi gi--researching")
+      # the glyphs are the manifest's, identical to the TUI's
+      assert html =~ "◌"
+      assert html =~ "◎"
+    end
+
+    test "the deck rail is the WORK funnel — thought cards are deliberately off it",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      deck = deck |> String.split("</main>", parts: 2) |> hd()
+
+      assert deck =~ ~s(data-doc-id="tc-work")
+      refute deck =~ ~s(data-doc-id="tc-idea")
+      refute deck =~ ~s(data-doc-id="tc-dig")
+    end
+  end
+
+  describe "peek roles fail open dim (tlv-s5)" do
+    setup do
+      t = task("pr-task", "The peeked task", lifecycle: "open")
+      considering = task("pr-blk-considering", "Still being weighed", lifecycle: "considering")
+
+      # A NON-task blocker document. `peek_blockers/1` joins ANY document by edge
+      # and reads `content.lifecycle_status` verbatim, and the DB CHECK only
+      # governs `type = 'task'` — so a foreign vocabulary genuinely reaches
+      # `safe_role/1` through the real render, no test-only seam.
+      foreign =
+        Repo.insert!(%Document{
+          doc_id: "pr-blk-foreign",
+          type: "note",
+          dataset: "production",
+          status: "published",
+          title: "A foreign-vocabulary blocker",
+          rev: "rev-pr-foreign",
+          content: %{"lifecycle_status" => "marinating"}
+        })
+
+      Repo.insert!(%Edge{from_id: t.id, to_id: considering.id, kind: "blocks"})
+      Repo.insert!(%Edge{from_id: t.id, to_id: foreign.id, kind: "blocks"})
+      :ok
+    end
+
+    test "a peeked considering blocker paints its OWN role, not a bright open ○",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=pr-task")
+
+      assert peek_blockers_html(html) =~ ~s(class="gi gi--considering")
+    end
+
+    test "a blocker whose status is OUTSIDE the vocabulary paints :unknown, never :open",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=pr-task")
+      blockers = peek_blockers_html(html)
+
+      assert blockers =~ ~s(class="gi gi--unknown")
+      # the whole point: the default used to be :open, so an unrecognised state
+      # rendered as claimable, ready-to-pick-up work.
+      refute blockers =~ ~s(class="gi gi--open")
     end
   end
 
@@ -2319,6 +2543,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     [_before, rest] = String.split(html, anchor, parts: 2)
     [_h, tail] = String.split(rest, ~s(data-role="col-count">), parts: 2)
     tail |> String.trim_leading() |> Integer.parse() |> elem(0)
+  end
+
+  # The peek's "Blocked by" section only — every glyph assertion about blocker
+  # rows must be scoped to it (the board behind the peek paints its own glyphs).
+  defp peek_blockers_html(html) do
+    [_, rest] = String.split(html, ~s(data-role="peek-blockers"), parts: 2)
+    rest |> String.split("</section>", parts: 2) |> hd()
   end
 
   # Does the rendered board place `doc_id`'s card inside `col`'s <section>? We
