@@ -669,3 +669,109 @@ test("the fact path ADMITS specimen 103 — R3 is enforced NOWHERE on it", () =>
     "a vacuously-controlled but honestly-levelled fact is admitted with no reason recorded — that IS the gap this specimen freezes");
   assert.equal(ruling.level, "L3");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C6 — THE TWO GUARDS THAT HAD ONLY EVER BEEN ASSERTED ABSENT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Everything above proves a mutation turns some specimen red. Two of this
+// module's own failure names were never in that set, and the shapes of their
+// non-coverage are different:
+//
+//   PROBE-DRIFT was asserted TWICE, both times as an ABSENCE — `probe_drift`
+//   is empty on the shipped tree. An absence assertion is green whether the
+//   guard works or has been deleted, and this is the guard that decides whether
+//   any other line of the report means anything: it returns FATALLY, before a
+//   single specimen is judged. So the one control standing between "6/6 PASS"
+//   and "6/6 PASS against a model that does not model the specimens" had never
+//   been shown able to speak.
+//
+//   REASONS had ZERO occurrences under test/ in any spelling. Its sibling
+//   VERDICT is mutation-proven twice over; REASONS — the check that a ratified
+//   specimen is rejected for the REASON the doctrine says, and not merely
+//   rejected — was carried entirely by the fact that it happened to be green.
+//
+// Both are fired POSITIVELY below, and both name the drift they found.
+
+test("PROBE-DRIFT FIRES: a probe moved off its level voids the whole run before any specimen is judged", async () => {
+  // The mutation is the realistic one — someone "simplifies" the L2 probe into a
+  // local read. `wc -l README.md` derives L3, so the L2 row of the model is a
+  // lie, and every specimen modelled through it would be judged against a fact
+  // that does not model the specimen.
+  const mod = await importMutated("acceptance.mjs", (src) => {
+    const patched = src.replace('L2: "git show origin/main:README.md",', 'L2: "wc -l README.md",');
+    assert.notEqual(patched, src, "the L2 probe moved — this mutation no longer mutates anything");
+    return patched;
+  });
+
+  // checkProbes NAMES the drift: which level, which command, what it derives now.
+  assert.deepEqual(mod.checkProbes(), [{ level: "L2", command: "wc -l README.md", derived: "L3" }]);
+
+  const outcome = mod.runAcceptance(FIXTURE);
+  assert.equal(outcome.ok, false, "a broken read-level model reported PASS");
+  assert.deepEqual(outcome.probe_drift, [{ level: "L2", command: "wc -l README.md", derived: "L3" }]);
+
+  // THE FATAL HALF, which is the entire point of the guard and the half an
+  // absence assertion can never reach: NOTHING was judged. A version that
+  // reported drift and then went on to print six confident specimen rows would
+  // satisfy every previous assertion about PROBE-DRIFT in this file.
+  assert.deepEqual(outcome.results, [], "specimens were judged against a broken model");
+  assert.deepEqual(outcome.findings, []);
+
+  // And the report says so instead of printing a tally nobody should trust.
+  const text = mod.report(outcome);
+  assert.match(text, /PROBE-DRIFT — the read-level model is broken; no specimen was judged\./);
+  assert.match(text, /L2 probe now derives L3: wc -l README\.md/);
+  assert.doesNotMatch(text, /ratified specimens adjudicate as expected/,
+    "a drifted run must not print a specimen tally at all");
+});
+
+test("PROBE-DRIFT never cries wolf: the shipped probe table derives its own levels, drift-free", () => {
+  // The other direction, so the control above cannot be satisfied by a guard
+  // that simply always fires. Note this is the SAME shape as the absence
+  // assertion that used to be the only coverage — it is honest here only
+  // because the firing half above exists to pair with it.
+  assert.deepEqual(checkProbes(), []);
+  assert.deepEqual(runAcceptance().probe_drift, []);
+});
+
+test("REASONS FIRES: a specimen still REJECTED, but for a reason the doctrine did not name", () => {
+  // The gap REASONS exists to hold. Specimen 2's verdict is REJECTED and stays
+  // REJECTED — so VERDICT, CAUGHT-BY and the divergence checks all stay green —
+  // while the reason set gains a rejection the ratified expectation never named.
+  // Giving the specimen's title a path-less line reference is enough: the title
+  // becomes the fact's `subject`, which record.mjs scans for D9 refs.
+  const outcome = withMutatedFixture((fixture) => {
+    const s = specimen(fixture, 2);
+    s.title = `${s.title} — notifications.ex:389-397`;
+  }, (path) => runAcceptance(path));
+
+  assert.equal(outcome.ok, false, "a specimen rejected under an unexpected reason reported PASS");
+
+  const row = rowFor(outcome, 2);
+  const kinds = row.failures.map((f) => f.kind);
+  assert.deepEqual(kinds, ["REASONS"],
+    `REASONS must be the failure, and the ONLY one — the verdict never moved. Got ${kinds.join("+") || "none"}`);
+  assert.equal(row.failures[0].detail, "expected [LEVEL-SKIP], got [LEVEL-SKIP+PATHLESS-REF]");
+
+  // THE DISCRIMINATION, asserted rather than assumed: the verdict half is
+  // untouched. A suite that only checked the verdict would call this row clean.
+  assert.equal(row.verdict, "REJECTED");
+  assert.equal(row.caught, true);
+  assert.equal(kinds.includes("VERDICT"), false, "the verdict held — only the reason set drifted");
+
+  // ATTRIBUTION — only the mutated specimen goes red.
+  const others = outcome.results.filter((r) => r.id !== 2 && r.failures.length > 0);
+  assert.deepEqual(others, [], "the reason-set mutation leaked into other specimens");
+});
+
+test("REASONS never cries wolf: the shipped specimens carry exactly the reason sets EXPECTED names", () => {
+  const outcome = runAcceptance();
+  const reasoned = outcome.results.filter((r) => r.failures.some((f) => f.kind === "REASONS"));
+  assert.deepEqual(reasoned, []);
+  // Measured, not restated — the row's reasons ARE the expectation's, per specimen.
+  for (const row of outcome.results) {
+    assert.deepEqual(row.reasons, [...EXPECTED[row.id].reasons].sort(),
+      `specimen ${row.id}'s reason set drifted from EXPECTED`);
+  }
+});

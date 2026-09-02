@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "child_count": 2,
+  "children": [
+    {
+      "doc_id": "cch-w11-s1-flip-behind-a-generator-that-cannot-lose",
+      "title": "flip behind a generator that cannot lose",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 9,
+        "total": 13
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "doc_id": "cch-w14-bl-site-open-phone-overflow",
+      "title": "site open phone overflow",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 3,
+        "total": 5
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "doc": {
+    "doc_id": "fixture-epic",
+    "kind": "task",
+    "type": "task",
+    "title": "fixture epic",
+    "lifecycle_status": "in_progress",
+    "content": {
+      "kind": "task"
+    }
+  }
+}

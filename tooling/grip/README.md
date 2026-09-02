@@ -116,6 +116,46 @@ which means every row in it crossed `admitRecipe`. That is the population the
 D89 control asserts folds clean, and it grows automatically — every honestly
 written run attests itself.
 
+### The arming — every count names its reading path
+
+The same committed store used to report **two different row counts** depending on
+how you read it: `foldLedger()` called as a library returned 360 rows / 307
+subjects, while `node ledger.mjs fold` returned 354 / 302 over the same bytes.
+The CLI injected `screenCommand`; the library injected nothing, and a silently
+unscreened read is not a smaller answer — it is a **different** answer wearing
+the same field names.
+
+`screen` therefore **defaults on**. A library caller who passes nothing gets the
+same screen the CLI injects, so both paths agree. `now` does **not** default —
+this module owns no clock (D19), the CLI supplies `date -u`, and a library
+caller who wants the future bound passes one. Every fold reports which bounds
+were in force, in `arming`, top-level in the JSON and on the `[grip-fold]`
+stderr line:
+
+```json
+"arming": { "screen": "screen.mjs", "now": "2026-09-01T23:37:57Z" }
+```
+
+| `arming.screen` | what it means |
+|---|---|
+| `screen.mjs` | the default — the same predicate the `fold` CLI injects |
+| `caller` | a caller-supplied screen function |
+| `none` | the **explicit** opt-out, `foldLedger(dir, { screen: null })` — the unscreened population, said out loud |
+| `invalid` | the bound was neither: `admitRecipe` rejects every row `BAD-OPTION`. A broken read, never a population |
+
+`arming.now` is the instant in force or `null`. Two folds of one store that
+agree on `arming` agree on rows / subjects / unreadable; two that differ carry
+the reason in the same object as the counts.
+
+**Why the refusal count is not the row count.** On the store as it stands, the
+screened read reports 74 `REFUSED-COMMAND` entries but only **6** fewer rows and
+**5** fewer subjects than the unscreened one. Rejections accumulate: 68 of those
+74 rows were already rejected on other grounds (`UNKNOWN-FIELD`, `LEVEL-SKIP`,
+`VALUE-STORED`, `MALFORMED-ROW`), so the refusal costs them nothing they had not
+already lost. Of the 6 rows it does cost, 5 were the only recipe on their key
+and 1 shared a key with 21 siblings that survive — hence 6 rows but 5 subjects.
+**Never quote the refusal count as a row count.**
+
 **Why not a pinned file list.** Re-pointing the mint regression floor at
 `binding.test.mjs`'s three census files turns "307 of 631 rows moved" into
 "0 of 62" and passes: 9.8% of the rows carrying 0.0% of the drift, invisible
