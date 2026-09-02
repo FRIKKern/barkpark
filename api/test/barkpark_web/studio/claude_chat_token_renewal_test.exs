@@ -77,6 +77,25 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
     })
   end
 
+  # Close AND WAIT. A chat Session is a live GenServer with a Port child and,
+  # since this slice, a credential clock that touches the Repo. Letting one
+  # outlive its test leaves it ticking against a sandbox that is being torn
+  # down — which reds whichever test runs next, not this one.
+  defp stop_chat(session) do
+    if Process.alive?(session) do
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+
+      receive do
+        {:DOWN, ^ref, :process, ^session, _} -> :ok
+      after
+        5_000 -> :timeout
+      end
+    else
+      :ok
+    end
+  end
+
   # A REAL task verb, through the real router and the real token chokepoint.
   defp task_verb_status(raw) do
     build_conn()
@@ -104,7 +123,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
 
       old_raw = config_token(sid)
       assert String.starts_with?(old_raw, "bpcs_")
@@ -144,11 +163,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       # A credential minted inside its own renew-ahead skew is due immediately,
       # so the session's own timer does the work — no `renew_task_token/1` call
       # anywhere in this test, and no expiry ever reached.
-      chat_config(task_token_ttl_s: 120, task_token_renew_skew_s: 3600, task_token_check_ms: 20)
+      chat_config(task_token_ttl_s: 120, task_token_renew_skew_s: 3600, task_token_check_ms: 50)
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
 
       original = config_token(sid)
 
@@ -159,6 +178,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       assert ClaudeChat.task_hands(session) == :rearmed
       # It renewed ahead of expiry: the retired credential still had ~2 minutes.
       assert {:error, :unauthorized} = Auth.verify_token(original)
+
+      # Stop the fast-ticking session here, not at on_exit — nothing after this
+      # line needs it, and a 50ms Repo-touching timer has no business outliving
+      # the assertion it exists to prove.
+      stop_chat(session)
     end
   end
 
@@ -194,9 +218,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
 
       # NO TOKEN OUTLIVES TEARDOWN — the predecessor died at renewal, the
       # replacement dies here.
-      ref = Process.monitor(session)
-      ClaudeChat.close(session)
-      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+      assert stop_chat(session) == :ok
 
       assert live_session_tokens(sid) == []
       assert {:error, :unauthorized} = Auth.verify_token(new_raw)
@@ -209,7 +231,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
       old_raw = config_token(sid)
 
       log =
@@ -242,7 +264,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
       old_raw = config_token(sid)
 
       # Take the minter's rights away mid-session: the very next mint is
@@ -273,7 +295,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       on_exit(fn -> File.rm_rf(config_path(sid)) end)
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
 
       assert length(session_tokens(sid)) == 1
       assert {:error, :no_refreshable_consumer} = ClaudeChat.renew_task_token(session)
@@ -286,7 +308,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
 
       results =
         1..6
@@ -335,7 +357,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
 
       assert ClaudeChat.task_hands(session) == :minted
       assert {:ok, info} = ClaudeChat.renew_task_token(session)
@@ -355,7 +377,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       {:ok, session} =
         ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: sid}})
 
-      on_exit(fn -> if Process.alive?(session), do: ClaudeChat.close(session) end)
+      on_exit(fn -> stop_chat(session) end)
 
       assert {:error, :not_attempted} = ClaudeChat.renew_task_token(session)
       assert session_tokens(sid) == []
@@ -366,9 +388,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
       sid = Ecto.UUID.generate()
 
       {:ok, session} = start_chat(sid, minter)
-      ref = Process.monitor(session)
-      ClaudeChat.close(session)
-      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+      assert stop_chat(session) == :ok
 
       assert {:error, :session_gone} = ClaudeChat.renew_task_token(session)
     end
