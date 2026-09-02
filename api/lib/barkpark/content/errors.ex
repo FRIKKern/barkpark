@@ -557,18 +557,40 @@ defmodule Barkpark.Content.Errors do
   # into a permanently dropped GitHub issue, logged as a policy refusal that
   # never happened. The tag split is what lets Intake route the two apart.
   #
-  # ON THE WIRE it deliberately keeps `halted` / 409, unchanged from before this
-  # wave. A new public code must be registered in `@hints`, which puts it in
-  # `known_codes/0`, which `errors_doc_coverage_test` requires in
-  # `docs/api-v1.md` §9 — a file sitting on 3 bytes of headroom against a
-  # CI-enforced cap that PDS wave 24 spent its last cheap dedup to clear. So the
-  # honest 503 `dedup_unavailable` is deferred to a slice that can pay those
-  # bytes, and is NOT claimed here. What ships is the part that fixes the
-  # unattended data loss; the residual imperfection is that an external client
-  # still reads a transient outage as a 409 whose registered hint talks about
-  # plugin vetoes. The MESSAGE is exact either way.
+  # ON THE WIRE it is a 503 carrying its OWN hint — the same transient shape
+  # `storage_unavailable` (below) already uses, and the answer a caller can act
+  # on: the scan never ran, so nothing was written and nothing was refused on
+  # the merits, and the correct move is to RESEND THE IDENTICAL REQUEST. It
+  # shipped as a 409 whose code-keyed `halted` hint reads "adjust the document
+  # to satisfy it" — an OUTAGE described to the caller as a policy decision,
+  # sending an author to edit a document that is fine (charter D542). 409 also
+  # told every generic client the opposite of the truth: a 4xx is the caller's
+  # fault and terminal, while this is the server's and retryable.
+  #
+  # WHY THE `code` STAYS "halted". A new public code must be registered in
+  # `@hints`, which puts it in `known_codes/0`, which drives BOTH the served
+  # OpenAPI `Error.code` enum (docs/openapi.json — a committed artifact behind a
+  # CI drift gate) and `docs/api-v1.md` §9 (errors_doc_coverage_test), a file
+  # sitting on ~1 byte of headroom under a CI-enforced cap. The rename is a
+  # VOCABULARY change with its own regeneration cost and stays filed on its own
+  # row; the status and the hint are the half a caller actually acts on, and
+  # they are not worth holding hostage to it. `reason` discriminates the two
+  # senses of `halted` for a client that wants the split without parsing prose
+  # — exactly as `:replay` does under "unauthorized" and `:forbidden_membership`
+  # under "forbidden" — and the arm carries its OWN `hint`, so `put_hint/1`
+  # never reaches the plugin-veto sentence for this term.
   defp build({:error, {:dedup_unavailable, reason}}),
-    do: %{code: "halted", message: halt_message(reason), status: 409}
+    do: %{
+      code: "halted",
+      message: halt_message(reason),
+      status: 503,
+      reason: "dedup_unavailable",
+      hint:
+        "Transient: the duplicate-scan could not complete, so this write was " <>
+          "neither stored nor refused on its merits. Resend the identical " <>
+          "request. If it keeps failing the database is degraded — this is an " <>
+          "outage to report, not a document to fix."
+    }
 
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
