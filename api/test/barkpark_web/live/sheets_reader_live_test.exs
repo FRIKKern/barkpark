@@ -657,6 +657,36 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       # Dead-rule guard: nothing emits sheet-cap-notice anymore.
       refute css =~ ".sheet-cap-notice"
     end
+
+    # The unsupported-function ruling (2026-09-02), end to end through the
+    # save-time recompute and the shared read-only grid render. BOTH arms:
+    # a typed =FOO(1) with nothing cached becomes #NAME? and reads as an error
+    # cell; an imported cell that KEPT its cached value keeps rendering that
+    # value but error-styled and titled — never a quiet orange dot.
+    test "an unsupported function reads as #NAME?, and a kept import reads loud",
+         %{conn: conn} do
+      create_draft!(
+        "rdr-name",
+        one_tab(%{
+          "A1" => %{"f" => "=FOO(1)"},
+          "B1" => %{"f" => "=A1+1"},
+          "C1" => %{"f" => "=FOO(1)", "v" => 42, "t" => "n"}
+        })
+      )
+
+      publish!("rdr-name")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-name")
+      html = render(view)
+
+      # Arm 1 — nothing cached: the error VALUE is on screen and propagates.
+      assert html =~ "#NAME?"
+      assert html =~ "sheet-err"
+
+      # Arm 2 — the imported value survives, and says why it is not live.
+      assert html =~ "not evaluated: FOO is not supported"
+      assert html =~ "42"
+    end
   end
 
   # ── reader row paging ────────────────────────────────────────────────────────

@@ -362,6 +362,43 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       assert result =~ "sheet-stale"
     end
 
+    test "a #NAME? cell gets 'sheet-err' like every other engine error" do
+      result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, %{"v" => "#NAME?", "t" => "e"})
+      assert result =~ "sheet-err"
+    end
+
+    # The import-fidelity arm of the unsupported-function ruling: the cell KEEPS
+    # its imported value, so it is not an error VALUE — but it must not hide
+    # behind the quiet stale dot either. Error-styled AND stale-marked.
+    test "an unsupported-function cell that kept its import is error-styled, not just dotted" do
+      cell = %{"f" => "=FOO(1)", "v" => 42, "t" => "n", "stale" => true, "stale_fn" => "FOO"}
+      result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, cell)
+
+      assert result =~ "sheet-err"
+      assert result =~ "sheet-stale"
+    end
+
+    test "a bare stale cell with no named function keeps the plain stale marker" do
+      result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, %{"v" => "old", "stale" => true})
+
+      assert result =~ "sheet-stale"
+      refute result =~ "sheet-err"
+    end
+  end
+
+  describe "cell_title/1" do
+    test "names the function the engine could not evaluate" do
+      cell = %{"f" => "=FOO(1)", "v" => 42, "t" => "n", "stale" => true, "stale_fn" => "FOO"}
+      assert Cells.cell_title(cell) == "not evaluated: FOO is not supported"
+    end
+
+    test "is nil for an ordinary cell, a bare stale cell, and a missing cell" do
+      assert Cells.cell_title(%{"v" => 1}) == nil
+      assert Cells.cell_title(%{"v" => "old", "stale" => true}) == nil
+      assert Cells.cell_title(%{"stale_fn" => ""}) == nil
+      assert Cells.cell_title(nil) == nil
+    end
+
     test "normal string value does not get err class" do
       result = Cells.cell_class(1, 1, {5, 6, 5, 6}, {9, 9}, %{"v" => "hello"})
       refute result =~ "sheet-err"
