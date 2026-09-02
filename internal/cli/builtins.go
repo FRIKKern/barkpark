@@ -65,12 +65,14 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 	switch out.output {
 	case "json":
 		out.renderJSON(machine)
+		out.errf("%s", builtinPointerLine())
 	case "yaml":
 		// Round-trip through JSON to a generic value for the YAML emitter.
 		b, _ := json.Marshal(machine)
 		var v any
 		_ = json.Unmarshal(b, &v)
 		out.renderYAML(v)
+		out.errf("%s", builtinPointerLine())
 	default:
 		tree := m.Tree()
 		out.outf("server:    %s (%s)", m.Server.Name, m.Server.Version)
@@ -82,6 +84,19 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		for _, n := range tree.Nouns {
 			for _, c := range n.Verbs {
 				out.outf("  %-10s %-16s %s", c.Noun, c.Verb, c.Summary)
+			}
+		}
+		// The manifest is not the whole command surface: a handful of verbs are
+		// dispatched CLIENT-SIDE (nounBuiltins, noun_builtins.go) and can never
+		// appear in a server document. `bp task create` was invisible here for
+		// months and readers concluded it did not exist. Additive and CLI-side
+		// only — the manifest contract, the brief projection, and every byte of
+		// machine stdout are untouched; machine mode gets the same fact as ONE
+		// stderr line above.
+		if lines := builtinCapabilityLines(); len(lines) > 0 {
+			out.outf("")
+			for _, line := range lines {
+				out.outf("%s", line)
 			}
 		}
 	}

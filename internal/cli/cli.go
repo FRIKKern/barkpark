@@ -106,6 +106,21 @@ func Execute(args []string) int {
 	// Resolve the target context (flags > env > repo file > active > defaults).
 	ctx := resolveContext(g)
 
+	// VERB-LEVEL built-ins (`task create`, `task frontier`, `server ls`,
+	// `mcp serve`, `context pack`, …) dispatch from ONE registry —
+	// nounBuiltins in noun_builtins.go — which is also what every noun's help
+	// renders its "built-ins" block from. Before this table each intercept was
+	// a hand-written `if verb == "…"` in the switch below, invisible to the
+	// manifest-driven help: `bp task create` ran for months while
+	// `bp task --help` and `bp capabilities` both said it did not exist, and
+	// readers filed tasks through a raw doc mutate instead. Dispatching and
+	// printing from the same slice is what makes that state unreachable.
+	// A gated entry (task next --frontier) that declines falls through here
+	// untouched, exactly as its `if` did.
+	if b, ok := lookupNounBuiltin(noun, verb, g, tail); ok {
+		return b.Run(out, g, ctx, tail)
+	}
+
 	// Built-ins are CLI-native and do not consult the manifest tree for
 	// dispatch (capabilities/version need no command; whoami composes /v1/meta
 	// + the manifest's caller auth_tier).
@@ -182,53 +197,15 @@ func Execute(args []string) int {
 			out.errf("note: `task %s` is not a verb — running `barkpark task %s`", verb, alias)
 			verb = alias
 		}
-		// `bp task tui` is the discoverable singular-noun spelling of the same
-		// full-screen reader as `bp tasks`. Keep one implementation and one
-		// renderer; this alias exists so a user already navigating `bp task …`
-		// does not have to discover a separate noun to read rich task briefs.
-		if verb == "tui" {
-			return runTasksBoard(out, g, ctx, tail)
-		}
-		// `bp task frontier` — the dispatch surface (wave 13): the maximal set of
-		// ready tasks that can run in parallel without their blast radii colliding.
-		// A built-in because it computes the interference model client-side over the
-		// board snapshot; the manifest `task` noun carries no `frontier` verb, so
-		// this intercept shadows nothing. Every OTHER `task` verb falls through to
-		// the manifest dispatch below (no return here).
-		if verb == "frontier" {
-			return runTaskFrontier(out, g, ctx, tail)
-		}
-		// `bp task lint` — an advisory metadata NUDGE (df-lint-area-nudge): every
-		// workable leaf (ready, no children) carrying no authored area: label, the
-		// gap that starves the frontier's interference model. Same client-side
-		// intercept as frontier (the manifest `task` noun has no `lint` verb), and
-		// it ALWAYS exits 0 — a nudge, never a gate.
-		if verb == "lint" {
-			return runTaskLint(out, g, ctx, tail)
-		}
-		// `bp task create [<title>]` — file a new task. A client-side builtin
-		// like frontier/lint: the manifest `task` noun declares only the eight
-		// lifecycle/read verbs (no `create`), so this intercept shadows nothing.
-		// It injects the task schema's required kind/lifecycle_status defaults
-		// and sends the create via the same mutate contract `bp doc create` uses
-		// — the ergonomic front door that a bare `bp doc create task` (which does
-		// not know those required fields) can't be.
-		if verb == "create" {
-			return runTaskCreate(out, g, ctx, tail)
-		}
-		// `bp task next <worker> --frontier` — the frontier-aware atomic claim
-		// (df-next-frontier). Fires ONLY when --frontier is present; a BARE
-		// `bp task next <worker>` falls through untouched to the manifest queue
-		// endpoint (POST /v1/tasks/claim). --frontier computes the non-colliding
-		// ready set and claims the top pick by id via the epoch-CAS claim,
-		// skipping to the next pick on a lost race or a file-scope conflict.
-		if verb == "next" && hasFlag(tail, "--frontier") {
-			worker, fopts, err := parseNextFrontierArgs(tail)
-			if err != nil {
-				return usageErrf(out, func() { printTaskFrontierHelp(out) }, "%v", err)
-			}
-			return runTaskNextFrontier(out, g, ctx, worker, fopts)
-		}
+		// `bp task tui` / `frontier` / `lint` / `create`, and `next --frontier`,
+		// are VERB-LEVEL BUILT-INS: they dispatch from the nounBuiltins registry
+		// above (noun_builtins.go), which is the same table `bp task --help`
+		// renders its built-ins block from. Nothing intercepts them here — an
+		// `if verb == "…"` in this block would run a verb the help never prints,
+		// which is the exact defect the registry exists to make unreachable.
+		// A bare `bp task next <worker>` (no --frontier) is NOT intercepted and
+		// falls through to the manifest queue endpoint, as it always has.
+		//
 		// `bp task ready` capacity header — prepend one honest line naming the
 		// dispatch frontier size before the normal manifest ready list renders
 		// ("FRONTIER · N independent · P proven · U unproven"). Human/table output
@@ -271,9 +248,7 @@ func Execute(args []string) int {
 		// this intercept shadows nothing and needs no server change. It loads the
 		// manifest ONCE (inside runMCPServe, honouring --manifest/$BARKPARK_MANIFEST)
 		// and reuses the manifest-driven request machinery to back each MCP tool.
-		if verb == "serve" {
-			return runMCPServe(out, g, ctx, tail)
-		}
+		// `serve` itself dispatches from the nounBuiltins registry above.
 		if g.help || verb == "" {
 			printMCPServeHelp(out)
 			return exitOK
@@ -295,9 +270,7 @@ func Execute(args []string) int {
 		// onramp: `context` is not a manifest noun, so this intercept shadows
 		// nothing and needs no server change. Local file I/O only — no network.
 		// Research trail: /papers/optical-compression-research-report.
-		if verb == "pack" {
-			return runContextPack(out, g, tail)
-		}
+		// `pack` itself dispatches from the nounBuiltins registry above.
 		if g.help || verb == "" {
 			printContextPackHelp(out)
 			return exitOK
@@ -441,10 +414,14 @@ func Execute(args []string) int {
 		}
 		return runDoctor(out, rest[1:])
 	case "server":
-		// `bp server ls` is an alias for `bp servers`. Any other `server <verb>`
-		// is not a built-in; fall through to the manifest tree below.
-		if verb == "ls" {
-			return runServers(out, tail)
+		// `bp server ls` is an alias for `bp servers`; it dispatches from the
+		// nounBuiltins registry above. `server` is NOT a manifest noun, so no
+		// manifest help would ever list that verb — print the registry's block
+		// here instead of falling through to "unknown command". Any other
+		// `server <verb>` still falls through to the manifest tree below.
+		if g.help {
+			printServerNounHelp(out)
+			return exitOK
 		}
 	case "setup":
 		// setup's own --flags are not global flags, so parseGlobals passed them

@@ -152,7 +152,12 @@ func usageTreeTop(out *writer, m *manifest.Manifest, tree *manifest.Tree) {
 	}
 }
 
-// usageNoun lists the verbs under one noun.
+// usageNoun lists the verbs under one noun: the manifest's verbs, then — for a
+// noun that carries any — the CLI-native built-ins the manifest never declares,
+// rendered from the SAME nounBuiltins registry Execute dispatches them from
+// (noun_builtins.go). `bp task create` shipped for months as a built-in this
+// block did not print, so `bp task --help` actively told readers a working verb
+// did not exist; the block is derived, never hand-listed, so that cannot recur.
 func usageNoun(out *writer, tree *manifest.Tree, noun string) {
 	n, ok := lookupNoun(tree, noun)
 	if !ok {
@@ -166,6 +171,12 @@ func usageNoun(out *writer, tree *manifest.Tree, noun string) {
 	out.errf("verbs:")
 	for _, c := range sortedVerbs(n) {
 		out.errf("  %-16s %s", c.Verb, c.Summary)
+	}
+	if lines := builtinVerbLines(noun); len(lines) > 0 {
+		out.errf("")
+		for _, line := range lines {
+			out.errf("%s", line)
+		}
 	}
 }
 
