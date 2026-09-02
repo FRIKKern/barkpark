@@ -56,6 +56,11 @@ var (
 	// colour carry the state (same discipline as railGlyph).
 	tickDoneStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	tickActiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+
+	// A tool row that settled on an ERROR result — the ✗ half of the
+	// settle-gated gutter (toolRowGlyph). ANSI index, like every style above;
+	// internal/chat carries no hex, so the go-literal gate stays quiet.
+	toolFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 )
 
 // cardRoles are the interactive card rows (charter D27/D28: approval/question/
@@ -76,13 +81,18 @@ var cardRoles = map[string]string{
 
 // blockRoles are the structural rows now promoted to dual-surface PortableDoc
 // block types (charter D25, Law 1): the server carries a typed block
-// (chat-tool-diff / chat-todo / chat-thinking) on the message, so the transcript
-// renders a REAL diff / checklist / thought row through the same pdrender seam
-// the assistant reply body uses — no longer collapsed to one dim line. When the
-// block is absent (a mid-persist or thinner frame) the render degrades honestly
-// to the dim provenance line, never a blank or a crash.
+// (chat-todo / chat-thinking) on the message, so the transcript renders a REAL
+// checklist / thought row through the same pdrender seam the assistant reply
+// body uses — no longer collapsed to one dim line. When the block is absent (a
+// mid-persist or thinner frame) the render degrades honestly to the dim
+// provenance line, never a blank or a crash.
+//
+// `tool` is NOT here: a tool row draws a GUTTER HEADER (its settle glyph plus
+// the tool line) above whatever block it carries, so it routes to renderToolRow
+// — and most tool rows (Bash/Read/Grep) carry no block at all, which is exactly
+// why the glyph is an envelope fact rather than block content.
 var blockRoles = map[string]bool{
-	"tool": true, "todo": true, "thinking": true,
+	"todo": true, "thinking": true,
 }
 
 // structuralRoles are the remaining Recorder provenance rows that the MVP
@@ -214,6 +224,8 @@ func renderMessage(width int, msg Message, focused bool, inflight string) []stri
 		return append(renderUserEcho(w, msg.SourceMarkdown), renderAttachments(w, msg.Attachments)...)
 	case cardRoles[msg.Role] != "":
 		return cardView(w, msg, focused, inflight)
+	case msg.Role == "tool":
+		return renderToolRow(chatRegistry, width, msg)
 	case blockRoles[msg.Role]:
 		return renderStructuralDoc(chatRegistry, width, msg)
 	case structuralRoles[msg.Role]:
@@ -266,6 +278,93 @@ func renderStructuralDoc(reg *pdrender.Registry, width int, msg Message) []strin
 		out = append(out, strings.TrimRight(ln, " "))
 	}
 	return out
+}
+
+// ── the tool row's settle-gated gutter glyph (both-surfaces truth table) ──────
+//
+// The Go twin of BarkparkWeb.Studio.ChatToolRenderer.settle_state/1. Both
+// surfaces read the SAME three ENVELOPE facts off the row's `metadata`, which
+// chat_controller.message_json already ships verbatim for every row:
+//
+//	turn_settled — stamped by the Recorder (StudioChat.settle_tool_rows/1) when
+//	               the row's TURN emitted its terminal `result` frame;
+//	tool_error   — stamped by attach_tool_result/4 when the row's `tool_result`
+//	               block carried `is_error: true`;
+//	output       — the tool_result's text, stamped by the same seam.
+//
+// SETTLE gate: while the turn runs, the gutter is neutral ● — a mid-turn
+// tool_result never flips it. PROVENANCE gate: after the settle, only a row
+// that actually carries a result may claim ✓; a row whose result never arrived
+// stays ● forever rather than fabricate a completion. This is a truth table
+// over the envelope, NOT a re-derivation — so `bp chat` and Studio cannot drift.
+func toolRowState(msg Message) string {
+	if !metaTrue(msg, "turn_settled") {
+		return "pending"
+	}
+	if metaTrue(msg, "tool_error") {
+		return "error"
+	}
+	if out, ok := msg.Metadata["output"].(string); ok && out != "" {
+		return "ok"
+	}
+	return "pending"
+}
+
+// toolRowGlyph is the drawn form of toolRowState: the glyph plus the style that
+// carries its meaning without color being load-bearing (the glyph differs too,
+// so a NoColor profile or a monochrome terminal still reads the outcome).
+func toolRowGlyph(msg Message) (string, lipgloss.Style) {
+	switch toolRowState(msg) {
+	case "ok":
+		return "✓", tickDoneStyle
+	case "error":
+		return "✗", toolFailStyle
+	default:
+		return "●", dimStyle
+	}
+}
+
+// metaTrue reads a boolean envelope fact off a row's raw metadata map — false
+// when the map, the key, or the JSON type is absent (forward-compatible: an
+// older server that never stamped turn_settled renders every row neutral, which
+// is the honest reading, not a crash).
+func metaTrue(msg Message, key string) bool {
+	if msg.Metadata == nil {
+		return false
+	}
+	b, ok := msg.Metadata[key].(bool)
+	return ok && b
+}
+
+// renderToolRow paints one transcript tool row: the settle-gated gutter glyph +
+// the tool line, then whatever typed block the row carries (a chat-tool-diff for
+// a file mutation; nothing at all for Bash/Read/Grep, which is the common case).
+// This mirrors Studio's `● Edit — path` header above its diff card, so the same
+// session reads the same way on both surfaces.
+func renderToolRow(reg *pdrender.Registry, width int, msg Message) []string {
+	w := bodyWidth(width)
+	glyph, style := toolRowGlyph(msg)
+	out := []string{style.Render(glyph) + " " + truncate(toolRowLabel(msg), w-2)}
+
+	blocks, err := pdrender.Decode([]byte(msg.Blocks))
+	if err != nil || len(blocks) == 0 {
+		return out
+	}
+	doc := reg.RenderDoc(blocks, pdrender.RenderCtx{Width: w, Profile: chatProfile})
+	for _, ln := range strings.Split(doc, "\n") {
+		out = append(out, strings.TrimRight(ln, " "))
+	}
+	return out
+}
+
+// toolRowLabel is the tool row's one-line text — the Recorder's `tool_line`
+// preview, persisted as source_markdown. Never empty, so the gutter glyph always
+// has a row to sit on.
+func toolRowLabel(msg Message) string {
+	if s := firstLine(msg.SourceMarkdown); s != "" {
+		return s
+	}
+	return "tool"
 }
 
 // provenanceLabel is the honest one-line fallback for a structural row that has

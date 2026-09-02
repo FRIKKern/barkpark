@@ -111,6 +111,25 @@ defmodule PDS.Census do
     "for the plain census, which spawns nobody, that is the whole price."
   ]
 
+  # PDS-D633'S SENTENCE, VERBATIM, AS A CONSTANT — the epic-wide one, distinct
+  # from @blind_spot above, which is THIS instrument's own fan-out caveat. Both
+  # print; only this one is byte-compared across the whole epic.
+  #
+  # IT IS A COPY, AND THE COPY IS CHECKED. The canonical text lives in
+  # scripts/pds-blind-spot.sh as `$PDS_BLIND_SPOT`; a .exs run standalone from a
+  # mutated tmp copy (which is exactly what `--selftest` does — it writes this
+  # file into a scratch dir and runs it there with `cd:` set) cannot read a
+  # sibling shell file, so a runtime read would refuse on every selftest case.
+  # scripts/pds-blind-spot-check.sh instead REDS if this literal has drifted one
+  # byte from the shell constant. A byte-compared copy is as close to one
+  # constant as a shell file and a build-free BEAM script can get, and the
+  # comparison — not anyone's discipline — is the mechanism.
+  @blind_spot_sentence ":erlang.statistics(:runtime) is a VM-GLOBAL sum of BEAM scheduler + " <>
+                         "async-thread CPU. It is accurate to <1% for pure in-BEAM work, blind to port " <>
+                         "children (2.58 s read as 6 ms), blind to I/O wait and to Postgres' own CPU, " <>
+                         "floored at 1 ms, and inflated by any concurrent process in the same VM (5.0x " <>
+                         "under 8 siblings)."
+
   @moduledoc """
   A build-free AST census of the `api/lib` success surface. See the header comment
   above `defmodule` for the lens, the exits, and what this is NOT (it is not a gate).
@@ -118,6 +137,10 @@ defmodule PDS.Census do
   ## Price, and the blind spot in measuring it
 
   #{Enum.map_join(@blind_spot, "\n  ", & &1)}
+
+  ## The blind spot itself, verbatim (PDS-D633)
+
+  #{@blind_spot_sentence}
   """
 
   # ---------------------------------------------------------------- constants
@@ -1649,6 +1672,19 @@ defmodule PDS.Census do
     # the blind spot above, scoped to this process. The FIRST element is total runtime
     # since VM start; the second is time-since-last-call, which is GLOBAL STATE — reading
     # a delta of the first perturbs nothing a later caller depends on.
+    # PDS-BLIND-SPOT-METER: `:erlang.statistics(:runtime)`, IN-BEAM, inside this
+    # very process's own VM. This is the placement PDS-D633's law (a) calls the
+    # WRONG one for a PRICE — an OS meter around a SHELL is the right one — and it
+    # is used here anyway, deliberately and narrowly: the plain census spawns NO
+    # port children, so for THIS path the in-BEAM sum is the whole cost and is
+    # sound to <1% against an independent OS delta (338 ms vs 340 ms on D633's
+    # 40M-op reduce). The moment a path fans out — `--selftest`, which spawns one
+    # child BEAM per case — this meter goes blind by ~50x and the figure below
+    # stops being a price, which is why the fan-out is metered leaf-by-leaf and
+    # never from here. It is also VM-GLOBAL (5.0x inflation under 8 siblings) and
+    # floored at 1 ms, so it is a FIGURE WITH A LOAD STAMP, never a ratchet: a
+    # regression ratchet under a required gate takes `Process.info(pid,
+    # :reductions)`, byte-identical at 0, 4 and 8 noise processes.
     {cpu0, _since_last} = :erlang.statistics(:runtime)
     show_sites? = opts.sites?
     files = corpus(opts)
@@ -7589,6 +7625,11 @@ defmodule PDS.Census do
     # hand-typing it into @blind_spot is the substance of PDS-D633; keeping it on this
     # line is what stops that fix from breaking a neighbouring one.
     p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: 9 x #{ms} = #{9 * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
+    # THE SENTENCE, BESIDE THE FIGURE, ON A NON-VOLATILE LINE. It is a constant,
+    # so D605's "byte-identical except the volatile line" recipe still holds: the
+    # volatile line count stays at ONE.
+    p("meter     :erlang.statistics(:runtime), IN-BEAM, this process only — sound here because the plain census spawns no port children; the fan-out `--selftest` takes is metered leaf-by-leaf, never from inside this VM (PDS-D633 placement (a) is an OS meter around a SHELL)")
+    p("blind spot #{@blind_spot_sentence}")
 
     if Enum.all?(checks, &elem(&1, 1)) do
       p("CENSUS OK")

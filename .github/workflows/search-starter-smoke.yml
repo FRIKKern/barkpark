@@ -105,9 +105,15 @@ jobs:
       # Through the floor, never bare `node --test`: a bare run whose glob
       # matches nothing prints "# tests 0" and exits 0, so this job would go
       # green having proven nothing at all.
+      #
+      # `--floor 4` is a COMMITTED literal, not a derived one. Everything else
+      # the runner checks comes out of this same glob, so a partial deletion --
+      # 3 of the 4 spec files removed -- shrinks the expectation with the tree
+      # and stays green. Four cannot shrink without an edit to this line.
+      # Adding a spec reds with `raise the floor to 5`; bump it here.
       - name: Run the finder unit specs
         working-directory: templates/search-starter
-        run: node ../../scripts/node-test-floor.mjs 'lib/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 4 'lib/**/*.test.ts'
 
   live-journey:
     name: Journey smoke — live demo (report mode, never gates)

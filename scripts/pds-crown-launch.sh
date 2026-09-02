@@ -134,6 +134,13 @@ REPO_ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"
 API_DIR="$REPO_ROOT/api"
 HARNESS="${PDS_LAUNCH_HARNESS:-$SCRIPT_DIR/pds-pull-proof.sh}"
 
+# THE BLIND-SPOT SENTENCE, BY REFERENCE (PDS-D633) — `$PDS_BLIND_SPOT` and
+# `pds_blind_spot_note`. Sourced, never retyped; scripts/pds-blind-spot-check.sh
+# reds if a copy drifts. Fail-closed: an instrument that cannot find the sentence
+# it is obliged to print beside a duration must refuse, not print the duration.
+# shellcheck source=scripts/pds-blind-spot.sh
+. "$SCRIPT_DIR/pds-blind-spot.sh"
+
 STATE_DIR="${PDS_LAUNCH_STATE_DIR:-/tmp/pds-crown-launch}"
 
 # The full-export bookkeeping the harness owns. We READ the counter and we READ
@@ -578,6 +585,16 @@ cmd_arm() {
     fi
   fi
 
+  # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK, around the arming sequence in
+  # THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock outside
+  # every BEAM — but the UNIT is deliberately not a price: `armed in Ns` is a
+  # LATENCY the operator is owed (did arming return promptly, or did it hang?),
+  # never a CPU cost, and PDS-D605 forbids a wall-clock second standing in for
+  # one. Wall swung 2.5x on an unchanged census where user CPU moved 9%, so this
+  # figure grades the HOST as much as the code. A CPU price for this instrument
+  # comes from `pds-door-census.sh --measure`, never from here; a regression
+  # ratchet would need `Process.info(pid, :reductions)`, which a shell has not
+  # got at all.
   t0="$(date +%s)"
   run_id="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   run_tag="$(derive_run_tag "$run_id")"
@@ -664,6 +681,9 @@ cmd_arm() {
   arm_floor_summary
   info "poll        every ${INTERVAL}s, up to $MAX_DRAWS draws, inside the child"
   info "armed in    $(( t1 - t0 ))s"
+  pds_blind_spot_note \
+    "date +%s, WALL CLOCK around the arming sequence in this shell — an OS clock outside every BEAM (PDS-D633 placement (a)), and a LATENCY, not a price: PDS-D605 forbids a wall-clock second standing in for CPU" \
+    "armed in"
   rule
   say "DO NOT POLL FROM HERE. This turn is done; the child is not."
   say "A later actor reads the outcome with:"
@@ -1011,6 +1031,10 @@ printf 'RESULT: PASS (dummy)\n'
 printf 'EXIT: 0\n'
 DUMMY
 
+  # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around fire_detached in THIS
+  # shell — placement (a), outside every BEAM. The arm asserts a 60 s CEILING on
+  # arming latency, which is the one thing a wall figure is honestly good for; it
+  # is NOT a price and no CPU claim descends from it (PDS-D605).
   t0="$(date +%s)"
   fire_detached "deadbeef" "$scratch/full/attempts" \
     "$scratch/dummy.log" "exec /bin/bash $(printf '%q' "$scratch/dummy.sh")" \
@@ -1021,6 +1045,9 @@ DUMMY
   pid="$(cat "$scratch/dummy.pid" | tr -d ' \n')"
   if is_int "$pid"; then ok "pid file holds exactly one integer ($pid)"; else bad "pid file holds '$pid'"; fi
   if [ "$elapsed" -lt 60 ]; then ok "arming returned in ${elapsed}s (< 60s)"; else bad "arming took ${elapsed}s"; fi
+  pds_blind_spot_note \
+    "date +%s, WALL CLOCK around fire_detached in this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); a LATENCY CEILING, never a price (PDS-D605)" \
+    "arming returned in"
 
   # ── 2. own pgid, own session, reparented to init ─────────────────────────
   say ""
