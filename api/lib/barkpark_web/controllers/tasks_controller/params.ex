@@ -681,6 +681,72 @@ defmodule BarkparkWeb.TasksController.Params do
   # second filter semantic to drift.
   @index_filter_keys ~w(kind label lifecycle_status parent parent_id phase_id type)
 
+  # ─── The sibling read routes (task-e1b74c19174cb2c1) ─────────────────────
+  #
+  # The container above was fail-CLOSED on `GET /v1/tasks` alone. Its three
+  # sibling READ routes in the same controller still ignored `filter` outright,
+  # so a caller who learned the spelling on `/v1/tasks` and carried the habit
+  # one route over got the ORIGINAL defect back — a 200 carrying an unfiltered
+  # page. Measured live against guerrilla on 2026-09-01:
+  #
+  #   GET /v1/tasks/ready?filter[parent_id]=task-96a908af98698118
+  #     → 200, 200 rows spanning 47 DISTINCT parent_ids
+  #   GET /v1/tasks/ready?phase_id=task-96a908af98698118  (the honoured spelling)
+  #     → 200, 18 rows, ONE parent_id
+  #
+  # `ready` is the queue agents CLAIM from, so that false confirmation is one
+  # step from a write against a foreign epic.
+  #
+  # ONE parser, FOUR whitelists. Each route's whitelist is exactly the set of
+  # narrowings the route's own machinery can actually apply — never a key it
+  # would have to fake:
+  #
+  #   * `:index`  — the flat params `index/2` composes as Ecto where-clauses.
+  #   * `:ready`  — `parent` / `parent_id` / `phase_id`. `Tasks.Queue.ready_query/1`
+  #     narrows on exactly ONE parent axis (`:phase_id`, a prefix-agnostic
+  #     `content.parent_id` match), so all three spellings name that ONE edge.
+  #     `kind` / `lifecycle_status` / `type` / `label` are OUT: the ready query
+  #     PINS `kind = "task"` and `lifecycle_status ∈ claimable_statuses/0` in its
+  #     base WHERE — honouring them would either contradict the queue's own
+  #     definition or need a second query the route does not have.
+  #   * `:prime` — `worker` only, the one narrowing `Tasks.Prime.prime/1` takes.
+  #     A parent axis is OUT even though prime's ready HEAD could take one:
+  #     prime answers with FOUR slices (in_progress, ready, recent_events,
+  #     counts) and only one of them could be narrowed. Applying a parent
+  #     filter to a quarter of the response is a NEW false confirmation of
+  #     exactly this shape, so the key is refused instead.
+  #   * `:events` — nothing. The feed's rows are `mutation_events`, not tasks:
+  #     none of the task filter keys exists on an event row, and reaching them
+  #     needs the join to `documents` that `Tasks.Events` deliberately refuses
+  #     (a row-local tenant boundary so delete tombstones survive). Its only
+  #     narrowing axes are the keyset cursor `since` and the page size `limit`,
+  #     and both are flat params. So every `filter[...]` key is named and
+  #     refused rather than silently dropped.
+  @ready_filter_keys ~w(parent parent_id phase_id)
+  @prime_filter_keys ~w(worker)
+  @events_filter_keys []
+
+  @route_filters %{
+    index: %{
+      label: "GET /v1/tasks",
+      keys: @index_filter_keys,
+      flat: "kind, lifecycle_status, parent, phase_id, label, type"
+    },
+    ready: %{
+      label: "GET /v1/tasks/ready",
+      keys: @ready_filter_keys,
+      flat: "phase_id, order, limit, offset"
+    },
+    prime: %{label: "GET /v1/tasks/prime", keys: @prime_filter_keys, flat: "worker, order, limit"},
+    events: %{label: "GET /v1/tasks/events", keys: @events_filter_keys, flat: "since, limit"}
+  }
+
+  @doc "The `filter[...]` keys `route` can honour (`:index` / `:ready` / `:prime` / `:events`)."
+  def filter_keys(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:keys)
+
+  @doc "The wire label for `route` — what an error message names."
+  def filter_route_label(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:label)
+
   def index_filter_keys, do: @index_filter_keys
 
   @doc """
@@ -688,72 +754,147 @@ defmodule BarkparkWeb.TasksController.Params do
 
   `{:ok, %{"parent_id" => "…"}}` for a map of whitelisted string→string pairs
   (absent container → `{:ok, %{}}`), or `{:error, reason}` — never a silently
-  dropped filter:
+  dropped filter. The `:index` seat of `parse_route_filters/2`.
+  """
+  def parse_index_filters(params) when is_map(params), do: parse_route_filters(params, :index)
 
-    * `{:unknown_filter_key, key}` — `?filter[bogus]=1`
-    * `{:invalid_filter_value, key}` — a non-string value: the operator form
-      `?filter[parent_id][eq]=x` (Plug → a map) or the list form
-      `?filter[parent_id][]=x` (Plug → a list). Both would fall through the
-      `maybe_filter_*` non-binary catch-alls as a no-op, i.e. the original
-      defect wearing a different spelling.
-    * `{:invalid_filter_container, raw}` — a bare `?filter=x` / `?filter[]=x`.
+  @doc """
+  Parse the optional `filter[...]` container for `route`.
+
+  `{:ok, map}` of whitelisted string→string pairs (absent container →
+  `{:ok, %{}}`), or `{:error, reason}` — never a silently dropped filter:
+
+    * `{:unknown_filter_key, key, route}` — `?filter[bogus]=1`, and every key
+      on a route whose whitelist is empty.
+    * `{:invalid_filter_value, key, route}` — a non-string value: the operator
+      form `?filter[k][eq]=x` (Plug → a map) or the list form `?filter[k][]=x`
+      (Plug → a list). Both would fall through the `maybe_filter_*` non-binary
+      catch-alls as a no-op, i.e. the original defect wearing a different
+      spelling.
+    * `{:invalid_filter_container, raw, route}` — a bare `?filter=x` / `?filter[]=x`.
 
   Keys are checked in sorted order so a request with several bad keys names the
   same one on every run.
   """
-  def parse_index_filters(params) when is_map(params) do
+  def parse_route_filters(params, route) when is_map(params) and is_atom(route) do
+    allowed = filter_keys(route)
+
     case Map.get(params, "filter") do
       nil -> {:ok, %{}}
-      %{} = filter -> validate_index_filters(filter)
-      raw -> {:error, {:invalid_filter_container, raw}}
+      %{} = filter -> validate_route_filters(filter, route, allowed)
+      raw -> {:error, {:invalid_filter_container, raw, route}}
     end
   end
 
-  defp validate_index_filters(filter) do
+  defp validate_route_filters(filter, route, allowed) do
     filter
     |> Enum.sort_by(fn {k, _} -> to_string(k) end)
     |> Enum.reduce_while({:ok, %{}}, fn {key, value}, {:ok, acc} ->
       key = to_string(key)
 
       cond do
-        key not in @index_filter_keys -> {:halt, {:error, {:unknown_filter_key, key}}}
-        not is_binary(value) -> {:halt, {:error, {:invalid_filter_value, key}}}
+        key not in allowed -> {:halt, {:error, {:unknown_filter_key, key, route}}}
+        not is_binary(value) -> {:halt, {:error, {:invalid_filter_value, key, route}}}
         true -> {:cont, {:ok, Map.put(acc, key, value)}}
       end
     end)
   end
 
   @doc """
-  Human-readable message for a `parse_index_filters/1` error — it must TEACH
+  The single parent narrowing `GET /v1/tasks/ready` will apply, folded from the
+  flat `?phase_id=` and the three bracket spellings that name the SAME edge.
+
+  `index/2` can afford to compose several spellings as independent AND clauses
+  (a caller who passes two different values gets the honest zero rows).
+  `ready_query/1` has ONE `:phase_id` slot, so there is no conjunction to
+  compose: two different values would mean one spelling quietly winning — the
+  very failure this row exists to close. Distinct values are therefore a 400
+  that names every spelling the request used.
+  """
+  def ready_phase_id(params, filters) do
+    fold_single_narrowing(
+      [
+        {"phase_id", params["phase_id"]},
+        {"filter[parent]", filters["parent"]},
+        {"filter[parent_id]", filters["parent_id"]},
+        {"filter[phase_id]", filters["phase_id"]}
+      ],
+      :ready
+    )
+  end
+
+  @doc """
+  The single `worker` narrowing `GET /v1/tasks/prime` will apply, folded from
+  the flat `?worker=` and `filter[worker]`. Same one-slot rule as
+  `ready_phase_id/2`.
+  """
+  def prime_worker(params, filters) do
+    fold_single_narrowing(
+      [{"worker", params["worker"]}, {"filter[worker]", filters["worker"]}],
+      :prime
+    )
+  end
+
+  defp fold_single_narrowing(spellings, route) do
+    given = Enum.reject(spellings, fn {_spelling, value} -> is_nil(value) end)
+
+    case given |> Enum.map(fn {_spelling, value} -> value end) |> Enum.uniq() do
+      [] -> {:ok, nil}
+      [one] -> {:ok, one}
+      _ -> {:error, {:conflicting_filter, Enum.map(given, fn {s, _} -> s end), route}}
+    end
+  end
+
+  @doc """
+  Human-readable message for a `parse_route_filters/2` error — it must TEACH
   (name the offending key and list what this route accepts), because the caller
   it refuses is one who believed the request was already filtered.
   """
-  def index_filter_message({:unknown_filter_key, key}) do
-    "unknown filter key #{inspect(key)} on GET /v1/tasks; supported: " <>
-      supported_filter_list()
+  def filter_message({:unknown_filter_key, key, route}) do
+    "unknown filter key #{inspect(key)} on #{filter_route_label(route)}; " <>
+      supported_clause(route)
   end
 
-  def index_filter_message({:invalid_filter_value, key}) do
+  def filter_message({:invalid_filter_value, key, route}) do
     "filter[#{key}] must be a single string value; the operator form " <>
       "(filter[#{key}][eq]=…) and the list form (filter[#{key}][]=…) are not " <>
-      "supported on GET /v1/tasks"
+      "supported on #{filter_route_label(route)}"
   end
 
-  def index_filter_message({:invalid_filter_container, _raw}) do
-    "filter must be given as filter[<key>]=<value>; supported: " <> supported_filter_list()
+  def filter_message({:invalid_filter_container, _raw, route}) do
+    "filter must be given as filter[<key>]=<value>; " <> supported_clause(route)
   end
 
-  defp supported_filter_list,
-    do: @index_filter_keys |> Enum.map(&"filter[#{&1}]") |> Enum.join(", ")
+  def filter_message({:conflicting_filter, spellings, route}) do
+    "#{Enum.join(spellings, " and ")} name the same narrowing on " <>
+      "#{filter_route_label(route)} but carry different values; this route applies " <>
+      "exactly one — pass a single spelling"
+  end
 
-  def index_filter_details({:unknown_filter_key, key}),
-    do: %{key: key, supported: @index_filter_keys}
+  defp supported_clause(route) do
+    case filter_keys(route) do
+      [] ->
+        "#{filter_route_label(route)} honours no filter[] key — it narrows only " <>
+          "with its flat params (#{flat_clause(route)})"
 
-  def index_filter_details({:invalid_filter_value, key}),
-    do: %{key: key, supported: @index_filter_keys}
+      keys ->
+        "supported: " <> (keys |> Enum.map(&"filter[#{&1}]") |> Enum.join(", "))
+    end
+  end
 
-  def index_filter_details({:invalid_filter_container, _raw}),
-    do: %{supported: @index_filter_keys}
+  defp flat_clause(route), do: @route_filters |> Map.fetch!(route) |> Map.fetch!(:flat)
+
+  def filter_details({:unknown_filter_key, key, route}),
+    do: %{key: key, route: filter_route_label(route), supported: filter_keys(route)}
+
+  def filter_details({:invalid_filter_value, key, route}),
+    do: %{key: key, route: filter_route_label(route), supported: filter_keys(route)}
+
+  def filter_details({:invalid_filter_container, _raw, route}),
+    do: %{route: filter_route_label(route), supported: filter_keys(route)}
+
+  def filter_details({:conflicting_filter, spellings, route}),
+    do: %{conflicting: spellings, route: filter_route_label(route), supported: filter_keys(route)}
 
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
