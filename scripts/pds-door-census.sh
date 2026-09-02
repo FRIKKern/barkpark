@@ -331,6 +331,8 @@ pds-crown-stamp.sh	ENVIRONMENT	writes bp ledger rows and hard-requires python3 (
 pds-crown-launch.sh	ENVIRONMENT	a long-running launcher that ssh-es a live host with a deploy key (scripts/pds-crown-launch.sh:319-323).
 pds-climb-preflight.sh	ENVIRONMENT	needs `gh` workflow state and an ssh key for the source host (scripts/pds-climb-preflight.sh:210,273-283).
 pds-export-peak-measure.sh	ENVIRONMENT	samples a live host over ssh (scripts/pds-export-peak-measure.sh:242).
+pds-blind-spot-check.sh	PRICE	CPU=0.22+0.44=0.67s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=12.08 2026-09-02 (--selftest, rc=0; 3 trials gave 0.67/0.59/0.58s CPU, observed band 0.58-0.67 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Its ungated arm is the plain census at CPU=0.40+0.26=0.65s at the same load1=12.08 (3 trials 0.65/0.66/0.65s, a 1.5 percent spread). RE-TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.67 s keeps no door shut. Same shape as pds-scratch-target_test.sh above, whose row already reads "PRICE today only because nothing required runs it" — this instrument is cheap, hermetic (it reads the tree and writes only a mktemp -d it removes; it issues no network call and reads no credential) and green, and the ONLY thing between it and THROUGH is an ExUnit rider under api/test, which is outside the fence of the PR that added it. Filed as the follow-up named in that PR body. NOT VACUOUS: a separate un-metered run exits 0 and prints `SELFTEST: 10 PASS / 0 FAIL of 10 arms`, and the green descends from arms that can fail — arm 4 deletes the sentence from a compliant fixture and demands rc=1, arm 8 is a mutation this check FAILED on its first run (a source COMMENT naming the constant satisfied the emission scan, so deleting every emitter call from the real pds-pull-proof.sh left the tree GREEN) and now reds.
+pds-blind-spot.sh	NOT-YET-BUILT	IT IS NOT A PROGRAM, and the denominator glob cannot tell: `scripts/pds-*.{sh,exs}` keys on the NAME, and this file is a SOURCED CONSTANT — three SYMBOLS, cited by name and not by line so the citation cannot rot on an insertion: `PDS_BLIND_SPOT`, `PDS_BLIND_SPOT_PLACEMENT` and `pds_blind_spot_note()` in scripts/pds-blind-spot.sh, which five instruments read with `.`. It sets no shell options, reads nothing, writes nothing, and executed directly it prints its two constants and exits 0 WHATEVER the tree looks like — so there is no verdict here for a required gate to run, which is the NOT-YET-BUILT clause as pds-window-sentinel.sh states it above. AND IT IS NOT UNCHECKED, which is the part a bare class would hide: its correctness is asserted by scripts/pds-blind-spot-check.sh, which sources it and whose 10 arms red on a one-byte drift of the constant (arm 6, `a one-byte DRIFTED copy of the sentence REDS`, rc=1 by run 2026-09-02). NO PRICE ROW: pricing a file that is never invoked as a program would be a figure for a workload nothing runs, which is precisely the rot the PRICE pen above documents.
 pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (scripts/pds-idle-sampler.sh:7,182).'
 
 # ---------------------------------------------------------------------------
@@ -383,6 +385,14 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 SCAN_ROOT="${PDS_DOOR_CENSUS_ROOT:-$REPO_ROOT}"
 ESCAPE_CHECK="$SCRIPT_DIR/elixir-path-escape-check.sh"
+
+# THE BLIND-SPOT SENTENCE, BY REFERENCE (PDS-D633). Sourced, never retyped:
+# `$PDS_BLIND_SPOT` and `pds_blind_spot_note` come from here, and
+# scripts/pds-blind-spot-check.sh reds if any instrument's copy has drifted from
+# it. Fail-closed on purpose — an instrument that cannot find the sentence it is
+# obliged to print must refuse, not print a price without it.
+# shellcheck source=scripts/pds-blind-spot.sh
+. "$SCRIPT_DIR/pds-blind-spot.sh"
 
 # ---------------------------------------------------------------------------
 # THE DENOMINATOR (PDS-D650)
@@ -1362,6 +1372,10 @@ EOF
   echo
   printf '%s\n' "$BLIND_SPOT"
   echo
+  pds_blind_spot_note \
+    "the PRICE column above: every row is an OS meter around a SHELL (bash times builtin around LC_ALL=C bash -c), taken by --measure, never inside a BEAM parent" \
+    "the price column"
+  echo
 
   if [ -n "$error_lines" ]; then
     printf '::error::%s: unclassifiable or malformed rows:%s\n' "$SELF" "$error_lines" >&2
@@ -1620,6 +1634,20 @@ run_measure() {
   # THE RECIPE. `times` is the FINAL command of the metering shell; the subject's
   # output is DISCARDED and its rc is stashed by a BUILTIN (printf) so that stays
   # true. LC_ALL is pinned around the WHOLE recipe, not just the summer.
+  #
+  # PDS-BLIND-SPOT-METER: bash's `times` builtin, around a SHELL (`bash -c`) that
+  # runs the subject — an OS-level meter OUTSIDE any BEAM, which is placement (a)
+  # of PDS-D633's law. `times` reports the shell's own CPU plus RUSAGE_CHILDREN,
+  # which accumulates grandchildren, so the port children an in-BEAM meter is
+  # blind to ARE charged here. The forbidden placement is the other one: a figure
+  # taken from inside a BEAM parent (`:erlang.statistics(:runtime)`, or
+  # /usr/bin/time wrapped around a BEAM that fans out) reads under HALF the price
+  # of ONE of its children. This is why `--via "mix test ..."` reports 2.16s for
+  # four census arms that cost 42.30s leaf-metered: it is the same 19.6x
+  # blindness, in the one direction a price column must not err. For a REGRESSION
+  # RATCHET under a required gate the unit is not seconds at all but
+  # `Process.info(pid, :reductions)`, byte-identical at 0, 4 and 8 noise
+  # processes where milliseconds moved 5x.
   raw="$(
     cd "$REPO_ROOT" &&
       LC_ALL="$PDS_DOOR_MEASURE_METER_LC" PDS_DOOR_MEASURE_DEPTH=1 \
@@ -1642,6 +1670,15 @@ run_measure() {
       "${RUNNER_OS:-unknown}" "${GITHUB_RUN_ID:-unknown}" "${GITHUB_SHA:-unknown}"
   fi
   printf '\n'
+
+  # THE SENTENCE, ON STDERR, BESIDE THE FIGURE. Not on stdout: the row above is
+  # PASTEABLE into the ledger by contract ("one pasteable row, nothing else"),
+  # and a sentence inside it would be pasted into a ledger cell. stderr keeps it
+  # on the same terminal, next to the number, where a reader quoting the figure
+  # cannot miss it, without making it part of the artefact.
+  pds_blind_spot_note \
+    "bash times builtin around LC_ALL=$PDS_DOOR_MEASURE_METER_LC bash -c — an OS meter around a SHELL, outside every BEAM (PDS-D633 placement (a))" \
+    "$base" >&2
   return 0
 }
 
@@ -2402,6 +2439,10 @@ EOF
 
   echo
   printf '%s\n' "$BLIND_SPOT"
+  echo
+  pds_blind_spot_note \
+    "the PRICE column above: every row is an OS meter around a SHELL (bash times builtin around LC_ALL=C bash -c), taken by --measure, never inside a BEAM parent" \
+    "the price column"
   echo
   echo "SELFTEST: $pass PASS / $fail FAIL of $((pass + fail)) arms"
   if [ "$fail" -gt 0 ]; then

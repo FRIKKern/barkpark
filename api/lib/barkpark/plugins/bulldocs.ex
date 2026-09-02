@@ -649,8 +649,11 @@ defmodule Barkpark.Plugins.Bulldocs do
 
     * embed/sheet blocks carrying a `"ref"` (an internal doc id) → a
       `references` edge.
-    * inline `PdLink` / `link` nodes whose `href` points at an internal
-      `/papers/<slug>` → a `references` edge to `<slug>`.
+    * any node whose `href` points at an internal paper → a `references` edge
+      to `<slug>`. BOTH shapes count: the root-relative `/papers/<slug>` the
+      picker writes, and the absolute `https://<own-host>/papers/<slug>` an
+      author pastes from the browser (the `action`/bp-button block keeps the
+      URL verbatim). A url on ANY OTHER host mints nothing.
     * inline `wikilink` nodes → a `references` edge to the picker-stamped
       `"docId"`/`"doc_id"` when present, else the raw `"target"`. This is the
       wire §7 "wikilink resolving to a task → `references`" row: a task chip is
@@ -720,8 +723,9 @@ defmodule Barkpark.Plugins.Bulldocs do
   # every internal-reference target as a `{to_id, kind}` pair. Pure — no DB.
   # Four signals per node:
   #   * a "ref" string (embed/sheet block)            → {pubid(ref), "references"}
-  #   * an "href" of the internal "/papers/<slug>" form → {slug, "references"}
-  #     (external http… and anchor #… hrefs are skipped)
+  #   * an "href" naming an internal paper → {slug, "references"} — either the
+  #     root-relative "/papers/<slug>" or an absolute url on THIS instance's own
+  #     public host (foreign-host and anchor #… hrefs are skipped)
   #   * a "type":"wikilink" node                      → {pubid(docId || target), "references"}
   #   * a "type":"valueref" node                      → {pubid(target), "valueref"}
   defp collect_edge_targets(content) do
@@ -737,11 +741,72 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   defp ref_target(_ref), do: []
 
-  defp href_target("/papers/" <> slug) when slug != "" do
-    [{slug |> String.split(["?", "#"]) |> List.first(), "references"}]
+  defp href_target(href) when is_binary(href) do
+    case internal_paper_path(href) do
+      "/papers/" <> slug when slug != "" ->
+        [{slug |> String.split(["?", "#"]) |> List.first(), "references"}]
+
+      _ ->
+        []
+    end
   end
 
   defp href_target(_href), do: []
+
+  # An internal paper link reaches us in TWO shapes. The root-relative
+  # "/papers/<slug>" is what the picker writes. The ABSOLUTE
+  # "https://<own-host>/papers/<slug>" is what an author pastes after copying a
+  # paper's address out of the browser — the action/bp-button block stores the
+  # URL verbatim — and until this clause existed it fell to the catch-all, so
+  # ~7% of the paper→paper citation channel minted no `references` edge and the
+  # linked paper reported zero backlinks.
+  #
+  # Only THIS instance's own public host is unwrapped: a url naming another
+  # Barkpark would otherwise mint a LOCAL edge to whatever local paper happens
+  # to share that slug. "Own host" is the endpoint's configured public host
+  # (`BarkparkWeb.Endpoint.url()` — PHX_HOST at runtime), the same source
+  # `BarkparkWeb.SessionController.instance_host/0` and `Barkpark.SSO.SAML` use;
+  # no new env var.
+  #
+  # The comparison is HOST ONLY, case-insensitive — scheme and port are
+  # deliberately ignored:
+  #
+  #   * the public scheme need not equal PHX_SCHEME. Prod fronts the app with a
+  #     TLS terminator while the app itself is configured http (Golden Rule #5
+  #     keeps force_ssl off), so the browser shows https:// on a box whose
+  #     endpoint says http — matching on scheme would drop exactly the links
+  #     this fixes.
+  #   * the public port need not equal the url port. `url_port` is the
+  #     scheme-standard 80/443 unless PHX_PORT overrides, while the proxy and
+  #     the blue/green pair listen on 4000/4001; an author's pasted url may
+  #     carry an explicit port or none.
+  #
+  # A url is therefore accepted with or without an explicit port and under
+  # either scheme, and protocol-relative "//<own-host>/papers/<slug>" too.
+  # Note this is a HOST check, not a prefix check: userinfo smuggling
+  # ("https://own-host@evil.example/papers/x") parses to host "evil.example"
+  # and is correctly refused.
+  defp internal_paper_path("/papers/" <> _ = path), do: path
+
+  defp internal_paper_path(href) do
+    case URI.parse(href) do
+      %URI{host: host, path: path} when is_binary(host) and is_binary(path) ->
+        if own_public_host?(host), do: path, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp own_public_host?(host) do
+    case URI.parse(BarkparkWeb.Endpoint.url()) do
+      %URI{host: own} when is_binary(own) and own != "" ->
+        String.downcase(host) == String.downcase(own)
+
+      _ ->
+        false
+    end
+  end
 
   # The wikilink's edge target prefers the picker-stamped doc id (camelCase
   # "docId" on the wire; "doc_id" also accepted — mirroring the render-side
