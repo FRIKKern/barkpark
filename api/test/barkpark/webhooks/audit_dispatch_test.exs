@@ -58,6 +58,13 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
 
   setup do
     prev = Application.get_env(:barkpark, :webhook_http_adapter)
+
+    # `fetch_env/2`, not `get_env/2`. The SSRF kill switch is a BOOLEAN: a
+    # `false` default is indistinguishable from "never set", and putting an
+    # explicit `false` back where there was no key leaves the guard in a state
+    # this module chose rather than the one it found.
+    prev_private = Application.fetch_env(:barkpark, :allow_private_outbound)
+
     Application.put_env(:barkpark, :webhook_http_adapter, PidEcho)
     Application.put_env(:barkpark, :audit_dispatch_test_pid, self())
     Application.put_env(:barkpark, :allow_private_outbound, true)
@@ -66,6 +73,14 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
       if prev,
         do: Application.put_env(:barkpark, :webhook_http_adapter, prev),
         else: Application.delete_env(:barkpark, :webhook_http_adapter)
+
+      # Application env is VM-global. Leaked ON, the SSRF guard is disarmed for
+      # whatever module ExUnit shuffles in next, and one of its tests can then
+      # pass for the wrong reason.
+      case prev_private do
+        {:ok, v} -> Application.put_env(:barkpark, :allow_private_outbound, v)
+        :error -> Application.delete_env(:barkpark, :allow_private_outbound)
+      end
 
       Application.delete_env(:barkpark, :audit_dispatch_test_pid)
       Application.delete_env(:barkpark, :audit_dispatch_test_dwell_ms)

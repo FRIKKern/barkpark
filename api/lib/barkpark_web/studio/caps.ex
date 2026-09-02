@@ -186,8 +186,24 @@ defmodule BarkparkWeb.Studio.Caps do
   autosave path `derive/1` runs TWICE per event (the socket gate, then
   `Shared.Paper.write_denied?/1`), so a debounced keystroke cost 8 round-trips.
   The membership row is now loaded ONCE per principal and the three decisions
-  are read off it — a USER-principal derive is 2 queries (was 4), an
-  API-TOKEN one is 1 (was 2).
+  are read off it.
+
+  BUILT-IN ROLE ONLY (relabelled arpss-w10). The collapse figures are true for
+  owner/admin/member and for nothing else: a USER-principal derive is 2 queries
+  (was 4), an API-TOKEN one is 1 (was 2), and the EVENT path 4. On a CUSTOM
+  role the same USER derive costs 5 — 1 membership `Repo.one` + 3 `db_actions`
+  `Repo.all` + 1 grant `Repo.all` — and the EVENT path 10, not 4. The reason is
+  that pds-w43 collapsed the MEMBERSHIP load and never touched the ROLE
+  resolution, which `derive/1` still performs THREE times per user principal
+  (`:read`, `:write`, and `admin_from` → `account_admin_from`):
+  `Tenancy.Auth.role_permits?/3` costs ZERO queries for a built-in name
+  (`granted_actions/2` answers from the compiled-in `@builtin_role_actions` map
+  before `db_actions/2` runs) and ONE `Repo.all` for a custom one.
+
+  Every number above is ASSERTED row-by-row in
+  `test/barkpark_web/live/studio/pds_w43_caps_derive_cost_test.exs`, and that
+  file re-reads THIS @doc via `Code.fetch_docs/1` so the prose and the
+  assertions cannot drift apart again.
 
   What did NOT change: the grant `Repo.all` (`active_grants/1`) is still
   UNCONDITIONAL and still per-`derive/1` — it is the load that buys mid-session
@@ -240,10 +256,31 @@ defmodule BarkparkWeb.Studio.Caps do
     }
   end
 
-  # ONE `Repo.one` per principal, reused for :read/:write/:admin. Returns
-  # `[{principal, membership_or_nil}]`. Mirrors `authorize/3`'s own totality:
-  # an unresolved workspace, or a principal shape `authorize/3` would have hit
-  # its catch-all `{:error, :forbidden}` clause with, contributes nothing.
+  # ONE `Repo.one` per principal, reused for the MEMBERSHIP half of the
+  # :read/:write/:admin decision (the ROLE resolution behind `role_permits?/3`
+  # is NOT collapsed and still runs three times per user principal — see
+  # `derive/1`'s @doc). Returns `[{principal, membership_or_nil}]`.
+  #
+  # WHAT THE GUARD ON THIS CLAUSE ACTUALLY IS: `is_binary(ws_id)`, a SHAPE
+  # guard. This comment used to read "Mirrors `authorize/3`'s own totality",
+  # which asserted a property inherited rather than proved — `authorize/3`'s
+  # catch-all is itself a SHAPE catch-all, so mirroring it buys shape, not
+  # totality. Corrected arpss-w10 / task-cd491bf64265ba6b.
+  #
+  # WHAT IS TRUE. A nil or otherwise non-binary `ws_id` falls to the `[]`
+  # clause below and never reaches the DB; so does any principal
+  # `loadable_principal?/1` rejects. A non-UUID BINARY ws_id ("", "not-a-uuid")
+  # DOES pass `is_binary/1` and DOES reach `Tenancy.Auth.membership/2` — and it
+  # DENIES rather than raising, but that guarantee belongs to the CHOKEPOINT,
+  # not to this clause: `Tenancy.Auth.membership/3` runs both the principal id
+  # and the workspace id through `Barkpark.Repo.uuid_or_nil/1` (the
+  # uuid-guarded-fetch canonical) and answers `nil` on a cast failure, so no
+  # malformed id is ever bound to a `:binary_id` column and no
+  # `Ecto.Query.CastError` is ever raised on this path. A nil membership then
+  # denies at `membership_authorizes?/4`'s first clause. If that chokepoint
+  # guard is ever removed, THIS clause offers no second line of defence.
+  # Pinned end-to-end by
+  # `test/barkpark_web/live/studio/caps_non_uuid_workspace_denies_test.exs`.
   defp load_memberships(principals, ws_id) when is_binary(ws_id) do
     for principal <- principals, loadable_principal?(principal) do
       {principal, Tenancy.Auth.membership(principal, ws_id)}

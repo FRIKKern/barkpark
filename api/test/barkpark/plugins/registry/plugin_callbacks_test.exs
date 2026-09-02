@@ -70,6 +70,38 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
     # Deliberately implements none of the optional callbacks.
   end
 
+  # ── Capture-term restore ─────────────────────────────────────────────────
+  #
+  # The fake plugins above record that their callback fired by writing a
+  # `:persistent_term`. That store is not merely global, it is global AND
+  # UNOWNED — nothing tears it down between tests, modules or files, and no
+  # case template knows these keys exist. `RegistryCase` restores its own
+  # snapshot key and never these.
+  #
+  # Each test `erase`s its key BEFORE reading it, which protects that test and
+  # protects nobody else: the term outlives the module and is still there for
+  # whatever ExUnit shuffles in next. Capture the prior value and put it back —
+  # erasing when there was none, so an absent key stays absent.
+
+  setup do
+    keys = [
+      {SeederPlugin, :ran},
+      {MediaUploadPlugin, :upload_ctx},
+      {MediaDeletePlugin, :delete_ctx}
+    ]
+
+    prior = Enum.map(keys, &{&1, :persistent_term.get(&1, :__absent__)})
+
+    on_exit(fn ->
+      Enum.each(prior, fn
+        {key, :__absent__} -> :persistent_term.erase(key)
+        {key, value} -> :persistent_term.put(key, value)
+      end)
+    end)
+
+    :ok
+  end
+
   # ── run_codelist_seeders_by_name/1 ──────────────────────────────────────
 
   describe "run_codelist_seeders_by_name/1" do

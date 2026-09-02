@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  116 scenarios, 26 rendered, 90 in a COMMITTED residue literal.
+//   SCENARIO  119 scenarios, 26 rendered, 93 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -67,8 +67,14 @@
 //  required set is `Elixir gate` and `PR references an active task` only. So
 //  this leg RUNS on every console-touching PR and its red is VISIBLE, but it
 //  does not block a merge by itself. Say that plainly rather than implying
-//  otherwise. Leg B (--render) is wired to NOTHING and must not be: it costs
-//  MINUTES, not seconds (see COST below).
+//  otherwise. Leg B (--render) is not wired IN FULL and must not be: it costs
+//  MINUTES, not seconds (see COST below). A one-cell one-width SLICE of it is
+//  wired — console-harness.yml's `tier-floor-render` job runs `--render --widths
+//  901 --cell billing-trial` (`grep -n 'breakpoint-sweep' .github/workflows/
+//  console-harness.yml`), which is ~1s. This sentence used to read "wired to
+//  NOTHING", which was true when written and stopped being true the day that job
+//  landed. Leg T (--tiers5) IS wired to nothing, deliberately, and says so in
+//  its own header.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  LEG A — THE COVERAGE REFUSAL (default mode; browserless; ~50ms)
@@ -417,7 +423,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 85
 // name-keyed entries below, which is what makes a 112th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 23 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 11 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 10 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
@@ -550,7 +556,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 23
+  // hash:#instance — 26
   "sites-on-instance": "hash:#instance",
   "panel-overview-member": "hash:#instance",
   "instance-cruel-detail": "hash:#instance",
@@ -574,6 +580,18 @@ export const SCENARIO_RESIDUE = {
   "offload-working": "hash:#instance",
   "offload-done": "hash:#instance",
   "offload-blocked": "hash:#instance",
+  // cch-w45-bl — the three instance states no cell renders and no scenario used
+  // to produce: a box one release BEHIND (#inst-update), a teardown that FAILED
+  // (#inst-remove-retry) and a /verify that answers 404 no_admin_token
+  // ([data-vf-reprovision]). They are RENDER-STATE fixtures for smoke.mjs's
+  // shim, not geometry: each one paints the same instance-detail layout every
+  // hash:#instance cell above already walks at every declared breakpoint, so a
+  // cell here would re-measure a geometry this sweep has 23 samples of and add
+  // nothing. What they carry that no cell can score is a BUTTON that exists,
+  // which is smoke.mjs's axis.
+  "instance-behind": "hash:#instance",
+  "instance-remove-failed": "hash:#instance",
+  "verify-no-credentials": "hash:#instance",
   // hash:#overview — 11
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
@@ -2037,6 +2055,30 @@ async function legRender(rep) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  LEG T — THE FIVE-TIER SEAM (--tiers5)
 // ─────────────────────────────────────────────────────────────────────────────
+//  NO WORKFLOW INVOKES THIS LEG — IT IS HAND-RUN, AND THAT IS SAID HERE SO A
+//  READER NEVER INFERS OTHERWISE (cch-w16-bl-tiers5-leg-runs-nowhere). Re-derive
+//  in one command: `git grep -n tiers5 -- .github/` exits 1 with no output. The
+//  reason is that this leg guards a catalog that does not exist yet: the shipped
+//  PLAN_CATALOG has THREE plans, the two extra tier cards below are a FIXTURE,
+//  and the leg's own staleness guard REFUSES (exit 2, "the shipped catalog now
+//  has N plans") the day a real fourth plan lands. Wiring a guard whose green
+//  certifies a hypothetical, and whose refusal fires on a routine product
+//  change, would put a red in front of every console PR that had nothing to do
+//  with it — so this is deliberately an instrument you REACH FOR, not one that
+//  reaches for you. The committed job that does run on every console PR is
+//  `tier-floor-render` in console-harness.yml, which drives the REAL three-plan
+//  screen (`--render --widths 901 --cell billing-trial`); this leg answers the
+//  different question of what happens when the catalog GROWS.
+//    RUN IT BY HAND before adding a plan to the catalog, and after any change to
+//  `.tier-grid`'s track floor:
+//      node cloud/priv/static/__preview__/breakpoint-sweep.mjs --tiers5
+//  COST, measured on this tree and not estimated: 5 renders, ~6s wall including
+//  Chrome bring-up (2026-09-02, Chrome 152, node v22.22.0), exit 0 printing
+//  `five tier cards fit at every width in [619,901,1040,1200,1700]`. It is
+//  cheap enough to wire — the objection is the fixture's staleness, not the
+//  seconds — and if the catalog is ever frozen at a known plan count that
+//  objection expires and the step belongs in `tier-floor-render`.
+//
 //  WHY A FIXTURE AT ALL. The shipped catalog has THREE plans, and at wide
 //  viewports a three-plan corpus is BLIND to the `.tier-grid` track floor:
 //  `auto-fit` collapses the surplus tracks to a literal `0px`, so floors 230

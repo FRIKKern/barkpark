@@ -70,8 +70,40 @@ on:
       # from "silently dropped".
       - ".github/workflows/deploy.yml"
 
+# ── ONE GROUP PER PUSH SHA (task-8e5eae5c71635a5e) ──────────────────────────
+#
+# WAS: `group: deploy-production` — a single group for every push. GitHub keeps
+# exactly ONE not-yet-started run per group, and a new run does not inherit the
+# evicted one's place: the survivor is queued FRESH, at the BACK of the runner
+# FIFO. So under a merge storm the group does not coalesce deploys, it RESETS
+# their queue position on every merge. MEASURED 2026-09-02: 390 runs queued,
+# ~1 h to a runner, the last SIX push runs cancelled before starting, and
+# guerrilla sat on b8ab70298 for 1.5 h while main had already gained the
+# ready-queue index migration. Two hand deploys were the only repair. The
+# eviction was DESIGNED as coalescing; what it actually bought, once the wait
+# exceeded the merge interval, was starvation — the deploy could not win a race
+# it was restarted from the back of.
+#
+# NOW: each push gets its OWN group, so nothing is ever evicted and the OLDEST
+# queued deploy keeps the FIFO position it earned. `cancel-in-progress: false`
+# stays — it is the never-cancel choice scripts/never-cancel-main-check.sh
+# explicitly permits for deploy/release workflows.
+#
+# WHAT STOPS TWO RUNS DEPLOYING AT ONCE, now that GitHub no longer does: the
+# BOX does, and already did. `deploy/instance-deploy.sh` and
+# `deploy/cp-deploy.sh` both open the deploy lock and, on contention, log
+# "another deploy holds the lock — queueing (max 30 min)" and `flock -w 1800`.
+# The queued run then pulls AFTER taking the lock — "git fetch origin main +
+# reset --hard" onto origin/main's TIP — so it deploys the newest commit rather
+# than its own, and if the run ahead of it already shipped that tree it exits at
+# the coalesce arm: "HEAD … already deployed healthy — nothing to do". Serialised
+# and idempotent, without a queue-position reset.
+#
+# workflow_dispatch keeps a SINGLE group. A dispatch deploys the REF's tip, not
+# a fixed sha, so two of them are genuinely interchangeable and coalescing them
+# costs nothing.
 concurrency:
-  group: deploy-production
+  group: deploy-production-${{ github.event_name == 'push' && github.sha || 'dispatch' }}
   cancel-in-progress: false
 
 permissions:
@@ -100,15 +132,26 @@ jobs:
           DISPATCH_REASON: ${{ inputs.reason }}
         run: |
           # Diff since the last SUCCESSFUL deploy of THIS workflow, not just the
-          # previous push. GitHub keeps only one pending run per concurrency
-          # group, so under burst merges an intermediate run is cancelled before
-          # it deploys. Basing the path filter on `github.event.before` (that
-          # run's own range) would then silently drop its paths. Anchoring to the
-          # last success means the surviving run always deploys the UNION of every
-          # push since — no cancelled range is ever skipped — while still letting
-          # a docs-only stretch resolve to "nothing changed".
+          # previous push. Every push now gets its own concurrency group (see the
+          # stanza above), so a run is no longer evicted before it starts — but it
+          # can still be OVERTAKEN: the box resets to origin/main's tip, so the
+          # run ahead of us routinely ships commits from later pushes than its
+          # own. Basing the path filter on `github.event.before` (this run's own
+          # range) would then re-deploy a range someone else already carried, and
+          # under the OLD single-group scheme would silently DROP the paths of an
+          # evicted run. Anchoring to the last success means a run always deploys
+          # the UNION of every push not yet shipped — no range is ever skipped —
+          # while still letting a docs-only stretch resolve to "nothing changed".
           base="$(gh run list --workflow=deploy.yml --branch=main --status=success \
                     --limit=1 --json headSha --jq '.[0].headSha' 2>/dev/null || true)"
+          # Kept SEPARATELY from $base, because the two fallbacks below replace
+          # $base with a plain diff anchor. A parent commit says where to start a
+          # diff; it is NOT evidence that anything was ever deployed, and the
+          # already-covered test below must never read one as if it were.
+          last_deployed=""
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            last_deployed="$base"
+          fi
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             base="${{ github.event.before }}"
           fi
@@ -117,6 +160,38 @@ jobs:
             base="${{ github.sha }}~1"
           fi
           echo "diff base: $base"
+          # ── ALREADY COVERED — end here, in one short job ────────────────────
+          #
+          # Per-sha groups mean a merge storm queues N deploy runs instead of
+          # one. That is the point (no run loses its FIFO place), and the box
+          # already makes the extras harmless — they serialise on the deploy lock
+          # and hit instance-deploy.sh's coalesce arm, "HEAD … already deployed
+          # healthy — nothing to do". Harmless is not free: each one still takes a
+          # runner, an SSH session and the lock for minutes.
+          #
+          # So answer it here. If the last SUCCESSFUL deploy's head already
+          # CONTAINS our sha, the tree we would ship is on the box by ancestry —
+          # not by a wall-clock guess. `--is-ancestor <ours> <deployed>` is the
+          # same descendancy test scripts/deploy-convergence-check.sh uses to
+          # decide supersession, and it is true for the identical sha too.
+          # cp=false + instance=false skips both deploy jobs, and record-delivery
+          # and convergence require `needs.control-plane.result == 'success' ||
+          # needs.instance.result == 'success'` — a skipped leg is neither — so
+          # they stay skipped rather than reporting a delivery nobody made.
+          #
+          # PUSH ONLY. A workflow_dispatch is the DELIBERATE repair named in
+          # report-convergence-failure's issue body; talking it out of deploying
+          # with the very anchor it was invoked to bypass would remove the only
+          # no-wait repair this workflow has. It also must not skip the dispatch
+          # override block below, which is what makes `targets: both` mean both.
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ -n "$last_deployed" ] &&
+             git merge-base --is-ancestor "${{ github.sha }}" "$last_deployed" 2>/dev/null; then
+            echo "already covered: ${{ github.sha }} is contained in the last successful deploy's head $last_deployed"
+            echo "nothing to deploy — the box already serves a descendant of this commit"
+            echo "cp=false" >> "$GITHUB_OUTPUT"
+            echo "instance=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           changed="$(git diff --name-only "$base" "${{ github.sha }}")"
           echo "changed files:"; echo "$changed"
           # internal/ + cmd/ ride the control plane too: bp-provisioner is
@@ -555,11 +630,15 @@ jobs:
     #
     #   * `failure()` NOT `always()`. `failure()` is FALSE for `cancelled`, and
     #     that is deliberate: 344 of the window's 1,378 runs were cancelled, and
-    #     cancellation here is DESIGNED coalescing, not loss — `concurrency` has
-    #     `cancel-in-progress: false`, and the `changes` job anchors its diff
-    #     base to the last SUCCESSFUL run, so the surviving run deploys the
-    #     UNION of every push since. Filing for those is the noise that trains
-    #     people to ignore the real ones.
+    #     a cancellation here is never a lost delivery. It is now nearly extinct
+    #     as well — since task-8e5eae5c71635a5e each push holds its OWN
+    #     concurrency group, so no queued push run is evicted by the next merge;
+    #     what remains is a hand-cancel or a superseded dispatch. Either way
+    #     nothing is dropped: `cancel-in-progress: false`, the box serialises on
+    #     the deploy lock and resets to origin/main's tip, and the `changes` job
+    #     anchors its diff base to the last SUCCESSFUL run, so the next run
+    #     deploys the UNION of every push not yet shipped. Filing for those is
+    #     the noise that trains people to ignore the real ones.
     #
     #   * NO `continue-on-error`, here or anywhere in this file. A job-level
     #     `continue-on-error` still paints a red check but LAUNDERS THE RUN
@@ -591,11 +670,13 @@ jobs:
     # workflow a cancelled run is silence wearing a non-red conclusion. Here it
     # is not: the bullet forty lines above already measured it — 344 of 1,378
     # runs cancelled, `concurrency` is `cancel-in-progress: false`, and the
-    # `changes` job anchors its diff base to the last SUCCESSFUL run, so the
-    # surviving run of a burst merge deploys the UNION of every push since.
-    # Cancellation here is DESIGNED coalescing, prod is not left stale by it, and
-    # filing on it would bury the `deploy-production` key — this epic's own
-    # loudest alarm — under exactly the noise that trains people to ignore it.
+    # `changes` job anchors its diff base to the last SUCCESSFUL run, so the next
+    # run deploys the UNION of every push not yet shipped. Since
+    # task-8e5eae5c71635a5e a push run is not even EVICTABLE — its concurrency
+    # group carries its own sha — so the class shrank to hand-cancels and
+    # superseded dispatches. Prod is not left stale by either, and filing on them
+    # would bury the `deploy-production` key — this epic's own loudest alarm —
+    # under exactly the noise that trains people to ignore it.
     # A cancelled run that DID lose a delivery is caught on its own key by
     # report-recorder-failure below, which names `needs.record-delivery.result ==
     # 'cancelled'` explicitly.
@@ -768,8 +849,11 @@ jobs:
             echo "leg windows: control-plane=${BUILD_CP} instance=${BUILD_INSTANCE} (a skipped leg has no window and stays NULL)"
 
             # queued_self_seconds — the part of the wait this repository caused
-            # ITSELF, by serializing behind its own earlier deploys
-            # (`concurrency: deploy-production`, cancel-in-progress:false). It is
+            # ITSELF, by serializing behind its own earlier deploys. Since
+            # task-8e5eae5c71635a5e the GitHub-side concurrency group is per push
+            # sha (`deploy-production-<sha>`, cancel-in-progress:false), so this
+            # wait is now runner-pool contention plus the box-side deploy lock
+            # rather than a single group's queue. It is
             # the union of prior deploy.yml job windows overlapped with our wait
             # window, so overlapping siblings are counted once.
             #
@@ -1558,14 +1642,18 @@ jobs:
             paths, so the path diff can resolve to "nothing changed" on a box
             that is genuinely stale.
 
-            WHY THIS HAPPENS. GitHub resolves the `deploy-production` concurrency
-            group by wall clock, and wall clock is not commit ancestry: a run can
-            start later and still carry the older commit (a re-run of an old
-            workflow is the pure case). `cancel-in-progress: false` narrows this
-            but does not close it — only one run stays pending per group, so a
-            third push replaces the queued one. `scripts/deploy-convergence-check.sh
-            survivor` decides supersession the right way, by descendancy, and its
-            `--selftest` reproduces the 2026-07-19 shape.
+            WHY THIS HAPPENS. Deploy order is wall clock, and wall clock is not
+            commit ancestry: a run can start later and still carry the older
+            commit (a re-run of an old workflow is the pure case). The GitHub
+            concurrency group is now per push sha (`deploy-production-<sha>`,
+            cancel-in-progress:false), so the old eviction shape is gone — no
+            queued push run is replaced by the next merge, and none is sent to
+            the back of the runner queue. What remains is ordering: the box
+            serialises on the deploy lock and resets to origin/main's tip, so a
+            late-starting run normally carries MORE than its own commit, not
+            less. `scripts/deploy-convergence-check.sh survivor` decides
+            supersession the right way, by descendancy, and its `--selftest`
+            reproduces the 2026-07-19 shape.
 
             This issue is idempotent per key (`deploy-convergence`): a continuing
             gap appends a comment rather than opening a new issue. CLOSE IT once a
