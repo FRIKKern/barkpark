@@ -1,0 +1,25 @@
+{
+  "run_id": "grip-20260902T001307Z",
+  "recipes": [
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "wc:-l",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-09-02T00:13:07Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "grep:-c:_BLOCK = `",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -c '_BLOCK = `'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-09-02T00:13:07Z"
+    }
+  ]
+}

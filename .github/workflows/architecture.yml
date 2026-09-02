@@ -47,6 +47,27 @@ jobs:
         with:
           node-version: "20"
 
+      # THE PREDICATE'S OWN SELFTEST, BEFORE THE INSTRUMENT IT GOVERNS.
+      #
+      # ci-boundary.mjs compares only the BASELINE-KNOWN SUBGRAPH and reports
+      # growth apart (see the "growth partition" block in that file). That rule is
+      # the difference between a gate that reported 108 regressions and meant 8,
+      # and one that names the 8. It is a pure function over two JSON shapes, so
+      # it is pinned here on synthetic baselines — no symbol graph, no mix, no
+      # network, seconds not minutes.
+      #
+      # DELIBERATELY BEFORE the warm-graph and gate steps: a red here SKIPS them,
+      # and that is the intent. A predicate that fails its own both-directions
+      # cases must not go on to publish a verdict about the repo.
+      #
+      # Run through node-test-floor.mjs, not bare `node --test`: a bare run exits
+      # 0 on a zero-match glob, on a silently-dropped path, and on a file that
+      # registers no tests. The floor asserts a non-zero tally and prints it.
+      - name: Boundary predicate selftest
+        run: |
+          set -euo pipefail
+          node scripts/node-test-floor.mjs tooling/concept-map/ci-boundary.test.mjs
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
