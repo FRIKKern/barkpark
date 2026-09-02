@@ -126,21 +126,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # global-admin token holding a plain `member` row in B) PASSES it. Swapping
   # this call for `authorize/3` turns the leak tests green on a leaking handler.
   #
-  # ONE DIVERGENCE SURVIVES AND IS DECLARED, NOT HIDDEN — THE GHOST SHARE.
-  # `create/2` answers 422 for a scope naming a workspace that does not exist,
-  # so no foreign `:edit` share can be pre-planted for whoever registers that
-  # slug later. This handler still ALLOWS it: an unresolvable workspace keeps
-  # the answer `instance_declare_authority?` already gave. That is not a
-  # judgement that the controller is wrong — it is that closing it here is a
-  # BEHAVIOUR CHANGE beyond this row's proof obligation ("a workspace-A admin
-  # ... against workspace B", a workspace that exists), and it reds two
-  # `studio_live_shares_test.exs` cases that declare and revoke
-  # `gyldendal/default/production` — a slug with no workspace row — as the
-  # panel's own happy path. Filed rather than smuggled in.
+  # THE GHOST SHARE IS FAIL-CLOSED (lead-security ruling, 2026-09-02).
   #
-  # `delete/2` does NOT confine an unresolvable workspace either, deliberately:
-  # it is the only cleanup path for ghost rows. So the REMOVE half is at exact
-  # parity; only the ADD half carries the divergence.
+  # An earlier revision of this comment declared an ALLOW here as a "divergence
+  # that survives": an unresolvable workspace kept the answer
+  # `instance_declare_authority?` already gave, on the argument that closing it
+  # exceeded the filing row's obligation. THAT ALLOW IS RETRACTED. The ruling:
+  #
+  #   A ghost share is an AUTHORISATION ATTACHED TO A NAME. Whoever later
+  #   creates that slug inherits a public exposure they never made — the
+  #   registry says the scope is shared before its owner exists to object.
+  #   The legitimate pre-provisioning path is the OPERATOR ENV REGISTRY
+  #   (`BARKPARK_SHARES` / `Sharing.shares_env/0`), which is not this handler.
+  #
+  # So an unresolvable slug is now a REFUSAL, and it is deliberately THE SAME
+  # refusal a foreign workspace gets: `@not_workspace_admin_error`, from the
+  # same `false`. NO EXISTENCE ORACLE — a caller cannot distinguish "workspace
+  # B exists and you do not administer it" from "workspace B does not exist",
+  # so this surface cannot be walked to enumerate which slugs are taken. That
+  # is why the two cases collapse into one `false` arm below rather than into
+  # two arms that happen to return the same value.
+  #
+  # NOT folded in: a scope that fails the GRAMMAR (wildcard, empty segment,
+  # too many segments). `Sharing.add_share/1` keeps owning the "Invalid share"
+  # sentence, exactly as `create/2` answers 422 `:invalid_scope` rather than
+  # 403 there. A grammar refusal reveals nothing about which workspaces exist,
+  # so it is not an existence oracle and does not need to be laundered through
+  # the authorization message.
+  #
+  # THE COST, STATED: the panel is no longer a cleanup path for pre-existing
+  # ghost rows. `ShareController.delete/2` still declines to confine an
+  # unresolvable workspace precisely so that path stays open, and the env
+  # registry is unaffected. The REMOVE half here is confined WITH the add half
+  # — the ruling names declare AND remove — so the two are at parity again,
+  # both refusing.
   defp target_workspace_admits?(socket, ws_slug) do
     if mounted_workspace?(socket, ws_slug) do
       true
@@ -149,16 +168,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
         {%ApiToken{} = token, %Tenancy.Workspace{id: ws_id}} ->
           TenancyAuth.workspace_admin?(token, ws_id)
 
-        # No tenant to authorize against — see the ghost-share note above. Only
-        # a principal that reached here through `instance_declare_authority?`
-        # (an %ApiToken{} carrying global `admin`, the LiveView analogue of
-        # `:require_admin`) is here at all.
-        {%ApiToken{}, _unresolvable} ->
-          true
-
-        # Defensive default-deny. Unreachable today: `declarable_scope?/2` runs
-        # first at both callsites and its foreign arm demands an %ApiToken{}.
-        _no_token_principal ->
+        # EVERYTHING ELSE IS ONE REFUSAL, ON PURPOSE — see the ghost-share note
+        # above. This single arm covers BOTH an unresolvable workspace (the
+        # ghost, fail-closed per the 2026-09-02 ruling) AND the defensive
+        # no-token-principal default-deny. Keeping them as one clause is the
+        # enforcement of "no existence oracle": there is no branch that could
+        # drift into answering the two cases differently.
+        _unresolvable_or_no_token_principal ->
           false
       end
     end
@@ -212,8 +228,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
         # THE HTTP-EDGE MIRROR. Reached only on the foreign arm, which
         # `declarable_scope?/2` just admitted on the global `admin` permission
         # alone. `create/2` additionally demands an admin MEMBERSHIP in the
-        # scope's workspace. (Its 422 for a workspace that does not exist is
-        # the one divergence left standing — see `target_workspace_admits?/2`.)
+        # scope's workspace. A workspace that does not exist is refused HERE
+        # too, with this same sentence — the fail-closed ghost rule and its
+        # no-existence-oracle requirement live in `target_workspace_admits?/2`.
         not add_scope_admitted?(socket, scope) ->
           {:noreply, assign(socket, shares_error: @not_workspace_admin_error)}
 
@@ -277,8 +294,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
             # runs — the verb is destructive beyond the row (it also stamps
             # `revoked_at` on every live edit token under the scope), which is
             # the cross-tenant DoS #12701 closed at the HTTP door only.
-            # An unresolvable workspace stays allowed: that is the ghost-row
-            # cleanup path `delete/2` deliberately leaves open.
+            # An unresolvable workspace is REFUSED here as well (2026-09-02
+            # ruling): the remove half is confined with the add half, and the
+            # ghost-row cleanup path is `delete/2`, not this panel.
             not target_workspace_admits?(socket, ws) ->
               {:noreply, assign(socket, shares_error: @not_workspace_admin_error)}
 

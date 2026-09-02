@@ -45,7 +45,10 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
       original `arpss-w10` defect;
     * the LIST half (`task-c91e5e19da811fe5`);
     * the TOKEN arm (`task-9e9b49d5787a90be`) — the foreign-scope arm held to
-      `ShareController`'s own predicate, with the ghost-share divergence pinned.
+      `ShareController`'s own predicate, including the GHOST SHARE (a scope
+      naming a workspace that does not exist), which is fail-closed per the
+      lead-security ruling of 2026-09-02 and denied with the SAME sentence a
+      foreign workspace gets, so this surface is not an existence oracle.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -581,14 +584,39 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
     test "a malformed scope is a refusal, never a crash", %{view: view} do
       before_count = stored_share_count()
 
-      for bad <- ["*/default/production", "//production", "a/b/c/d/e", "ws:docs:read"] do
+      # GRAMMAR failures — a wildcard, an empty segment, too many segments.
+      # `Sharing.add_share/1` owns this sentence, exactly as `create/2` answers
+      # 422 `:invalid_scope` rather than 403. Deliberately NOT folded into the
+      # authorization denial: a grammar refusal reveals nothing about which
+      # workspaces exist, so it is not an existence oracle.
+      for bad <- ["*/default/production", "//production", "a/b/c/d/e"] do
         render_hook(view, "shares-add", %{"scope" => bad, "surfaces" => ["docs"]})
 
         html = render(view)
         assert html =~ "Network shares", "the panel died on scope #{inspect(bad)}"
-        assert html =~ "Invalid share" or html =~ "Scope is required."
+        assert html =~ "Invalid share"
       end
 
+      assert stored_share_count() == before_count
+    end
+
+    # A COLON-INJECTED SCOPE IS NOT A GRAMMAR FAILURE, and the distinction is
+    # worth pinning. `Sharing.scope_triple/1` splits on "/" only, so
+    # "ws:docs:read" is a well-formed BARE SLUG naming a workspace called
+    # "ws:docs:read" — which does not exist. It is therefore refused by the
+    # fail-closed ghost rule (the authorization denial), NOT by `add_share/1`'s
+    # "Invalid share". It never reaches `parse/1`, where the extra colons would
+    # have made it a 4-segment entry. Either way it is a refusal with no store
+    # change; this test records WHICH refusal, so a future reordering of
+    # grammar-vs-authorize is visible rather than silent.
+    test "a colon-injected scope is refused as an unresolvable workspace", %{view: view} do
+      before_count = stored_share_count()
+
+      render_hook(view, "shares-add", %{"scope" => "ws:docs:read", "surfaces" => ["docs"]})
+
+      html = render(view)
+      assert html =~ "Network shares"
+      assert html =~ "not an admin of that scope&#39;s workspace"
       assert stored_share_count() == before_count
     end
 
@@ -604,44 +632,58 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
       end
     end
 
-    test "a scope naming a workspace that does not exist does not crash the panel", %{view: view} do
+    test "a scope naming a workspace that does NOT exist is refused, on both halves", %{
+      view: view
+    } do
       ghost = "no-such-workspace-#{System.unique_integer([:positive])}"
       ghost_scope = "#{ghost}/default/#{@dataset}"
+      before_count = stored_share_count()
 
       render_hook(view, "shares-add", %{"scope" => ghost_scope, "surfaces" => ["docs"]})
 
-      # THE ONE DECLARED DIVERGENCE FROM THE HTTP TWIN, PINNED HERE RATHER THAN
-      # LEFT UNDESCRIBED.
+      # FAIL-CLOSED (lead-security ruling, 2026-09-02). A ghost share is an
+      # AUTHORISATION ATTACHED TO A NAME: whoever later creates that slug would
+      # inherit a public exposure they never made, because the registry already
+      # says the scope is shared. Pre-provisioning belongs to the operator env
+      # registry (`BARKPARK_SHARES` / `Sharing.shares_env/0`), not this panel.
       #
-      # `ShareController.create/2` answers 422 for an unresolvable workspace
-      # (THE GHOST SHARE, cef6ee8465 / #12701). This panel still ALLOWS it: an
-      # unresolvable slug keeps the answer `instance_declare_authority?/1`
-      # already gave, because closing it is a behaviour change beyond this row's
-      # proof obligation ("a workspace-A admin … against workspace B", a
-      # workspace that EXISTS) and it reds two `studio_live_shares_test.exs`
-      # cases that declare and revoke `gyldendal/default/production` — a slug
-      # with no workspace row — as the panel's own happy path.
-      #
-      # THE CEILING ON THAT DIVERGENCE, which is why it can wait: `shares_add/2`
-      # hardcodes `:read`, so this surface cannot pre-plant the `:edit` share
-      # `Auth.create_share_token/5` requires. The HTTP 422 exists to stop a
-      # forged `:edit` ghost; there is no `:edit` to forge here.
-      #
-      # ASSERTED AS-IS SO A CHANGE IS LOUD: if the ghost arm is ever closed,
-      # this line reds and whoever closes it must also move the two sibling
-      # cases, rather than discovering the coupling in CI.
-      assert Sharing.shared?(ghost, "default", @dataset, :docs)
-      assert Sharing.access_for(ghost, "default", @dataset) == :read
-
-      # What this test is FOR: no 500, no raised LiveView.
-      assert render(view) =~ "Network shares"
-
-      # The REMOVE half is at exact parity with `delete/2`, which also declines
-      # to confine an unresolvable workspace — it is the only cleanup path for
-      # ghost rows.
-      render_hook(view, "shares-remove", %{"scope" => ghost_scope})
+      # THE STORE IS THE PROOF, not the flash.
       refute Sharing.shared?(ghost, "default", @dataset, :docs)
+      assert stored_share_count() == before_count
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
+
+      # The REMOVE half is confined WITH the add half — the ruling names both.
+      render_hook(view, "shares-remove", %{"scope" => ghost_scope})
+      assert render(view) =~ "not an admin of that scope&#39;s workspace"
       assert render(view) =~ "Network shares"
+    end
+
+    # THE POINT OF THE RULING, ASSERTED DIRECTLY. If a nonexistent slug were
+    # refused with a DIFFERENT sentence than a foreign one, this surface would
+    # be an existence oracle: an admin of A could walk slugs and learn which
+    # workspaces are taken without administering any of them. The two denials
+    # must be indistinguishable, so they are compared byte for byte.
+    test "NO EXISTENCE ORACLE: nonexistent and foreign-but-real deny identically", %{
+      view: view,
+      ws_b: ws_b
+    } do
+      ghost = "no-such-workspace-#{System.unique_integer([:positive])}"
+
+      render_hook(view, "shares-add", %{
+        "scope" => "#{ghost}/default/#{@dataset}",
+        "surfaces" => ["docs"]
+      })
+
+      ghost_render = render(view)
+
+      render_hook(view, "shares-add", %{
+        "scope" => "#{ws_b.slug}/default/#{@dataset}",
+        "surfaces" => ["docs"]
+      })
+
+      assert render(view) == ghost_render,
+             "the panel distinguishes a nonexistent workspace from a foreign one — " <>
+               "that difference is an existence oracle"
     end
   end
 end
