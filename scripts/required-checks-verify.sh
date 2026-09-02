@@ -67,6 +67,26 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── the shared check-runs reader ─────────────────────────────────────────────
+# `rendered_names` below used to hand-roll the jq/awk pipeline that
+# scripts/lib/check-runs.sh owns, and required-checks-generate.sh kept a third
+# copy of the same function. One reader, one dedup, one sort. Resolution is
+# FAIL-CLOSED: no lib, no run — a private fallback copy is the defect being
+# removed here.
+#
+# BARKPARK_CHECK_RUNS_LIB exists for exactly one caller, and it is not a
+# production knob: required-checks.test.sh proves clauses by running sed-mutated
+# COPIES of this file out of a temp directory, whose $0-derived REPO_ROOT is
+# that temp directory. It is the same accommodation the mutants already make for
+# --workflows and --prose.
+CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
+[ -f "$CHECK_RUNS_LIB" ] || {
+  echo "FAIL: no check-runs reader at $CHECK_RUNS_LIB — refusing to run without the shared primitive" >&2
+  exit 1
+}
+# shellcheck source=scripts/lib/check-runs.sh
+. "$CHECK_RUNS_LIB"
 # THE FILE UNDER TEST, resolved absolutely. selftest's probe() re-execs THIS —
 # never "$REPO_ROOT/scripts/required-checks-verify.sh", which is the committed
 # copy and therefore always armed no matter what the running file says. A
@@ -328,23 +348,33 @@ EOF
 }
 
 # ── the deadlock detector ────────────────────────────────────────────────────
+# THE READ IS THE LIB'S; THE RULING ON EMPTINESS IS NOT, AND THAT LINE MATTERS.
+# check_runs_rows_ext/_file return an empty feed as ZERO ROWS AND EXIT 0 on
+# purpose: for the registration sampler a head whose feed is empty is the
+# cadence datum, so a primitive that died there could not be shared. For THIS
+# guard the opposite holds — an agreement declared against an empty feed is a
+# vacuous green — so the refusal stays HERE, at the call site, and §8 of
+# required-checks.test.sh mutation-proves that it fires. Inheriting the lib's
+# permissiveness would turn this fail-closed guard into a fail-open one.
 rendered_names() {
-  local sha="$1" json
+  local sha="$1" rows rc=0
   if [ -n "$RUNS_FILE" ]; then
-    [ -f "$RUNS_FILE" ] || fail "cannot read check-runs file $RUNS_FILE"
-    json="$(cat "$RUNS_FILE")"
+    # `--runs` names one FILE, not a fixture directory keyed by sha — the one
+    # shape difference that used to justify a private copy of the reader.
+    rows="$(check_runs_rows_file "$RUNS_FILE" "$sha")" || rc=$?
+    [ "$rc" -eq 0 ] || fail "cannot read check-runs file $RUNS_FILE"
   else
-    json="$(gh api "repos/$(spec_repo)/commits/$sha/check-runs?per_page=100" 2>/dev/null)" \
-      || fail "cannot read check runs for $sha — the guard has nothing to render names against (failure, not a skip)"
+    rows="$(check_runs_rows_ext "$(spec_repo)" "$sha")" || rc=$?
+    [ "$rc" -eq 0 ] || fail "cannot read check runs for $sha — the guard has nothing to render names against (failure, not a skip)"
   fi
-  jq -e '.check_runs | length > 0' <<<"$json" >/dev/null 2>&1 \
+  [ -n "$rows" ] \
     || fail "check-runs for $sha is EMPTY — refusing to declare agreement against an empty feed"
-  # latest row per name; a re-run leaves both and only the newest is the truth.
-  # Four columns: name, conclusion ("null" when unsettled), status, started_at.
-  # Downstream consumers key on $1/$2 and are untouched by the extra columns;
-  # the PENDING clause below is what reads $3/$4.
-  jq -r '.check_runs | sort_by(.started_at // "") | .[] | [.name, (.conclusion // "null"), (.status // ""), (.started_at // "")] | @tsv' <<<"$json" \
-    | awk -F'\t' '{ seen[$1] = $2 "\t" $3 "\t" $4 } END { for (n in seen) printf "%s\t%s\n", n, seen[n] }' | sort
+  # Four columns, unchanged: name, conclusion ("null" when unsettled), status,
+  # started_at. Downstream consumers key on $1/$2 and are untouched by the
+  # extra columns; the PENDING clause below is what reads $3/$4. The lib's
+  # fifth column (app.id) is the GENERATOR's business, so project it off here
+  # rather than leaking a column this file has no reader for.
+  printf '%s\n' "$rows" | cut -f1-4
 }
 
 # A SETTLED head, deliberately: a MERGED PR's checks have all reported, while
@@ -448,6 +478,11 @@ EOF
     concl="$(cut -f2 <<<"$row")"
     if [ "$concl" = "null" ]; then
       st="$(cut -f3 <<<"$row")"
+      # The lib renders a missing `status` as the literal `null` (it matches the
+      # API rather than inventing a sentinel); this line has always printed
+      # `status=unknown` for that case, so map it back rather than changing an
+      # operator-facing string as a side effect of the dedup.
+      if [ "$st" = "null" ]; then st=""; fi
       sat="$(cut -f4 <<<"$row")"
       echo "PENDING: $ctx has not settled (status=${st:-unknown}, started_at=${sat:-unknown})"
       pending_seen=1
@@ -582,6 +617,320 @@ advisory_prose_check() {
     return 1
   fi
   say "  ok     no workflow calls any of the $nctx required context(s) advisory ($nfiles workflow file(s) scanned)"
+  return 0
+}
+
+# ── the merge-truth prose clause, OUTSIDE .github/workflows ──────────────────
+# THE BLIND SPOT THIS CLOSES (cch-w34). advisory_prose_check above scans exactly
+# `find "$WORKFLOWS_DIR" -maxdepth 1` — .github/workflows, one level, two YAML
+# spellings. It cannot see `.claude/workflows/*.md`, `docs/**` or `CLAUDE.md`,
+# and those are where the fleet actually reads its merge truth: a charter is
+# loaded into an agent's context BY NAME, in full, before that agent has run a
+# single `gh api`. The founding defect (cch-w32-s4) was a workflow comment
+# calling `Console gate` advisory while it was required; the SAME sentence,
+# re-copied into a charter, was invisible to every clause in this file.
+#
+# MEASURED, and the number is the whole design argument. Pointing the clause
+# ABOVE at `.claude/workflows/*.md` unchanged returns 17 rows. Sixteen are
+# PROXIMITY, not attribution: `Elixir gate ... Format is advisory-by-design`,
+# `Cloud gate, Console gate} ... doc-gates ... is NOT required`, and — purely
+# lexical — `per-doc advisory lock`. One is real. A clause that is 94% noise on
+# the corpus it was just handed does not get switched on; it gets switched off.
+# So the corpus widens and the LENS TIGHTENS with it, and the two arms are
+# deliberately not merged: a workflow comment is terse and directive, where
+# proximity is the right reading, and narrative prose is not.
+#
+# MEASURED AGAIN, at the full width. Over all 2359 TRACKED *.md/*.markdown/*.txt
+# in the repository the tightened lens returns THREE rows: the charter claim
+# pinned below, one wave-ledger row REPORTING that a workflow made the claim,
+# and one wave ledger with a probe fixture pasted inside a ``` block. Rules
+# 3(a) and 3(c) take the second and third, so the census is the whole tracked
+# corpus and the residue is one sentence. That is why the scan below is
+# `git ls-files` over the repository and not a list of three directories.
+#
+# THE LENS: ATTRIBUTION, NOT PROXIMITY. Three rules, each structural.
+#
+#   1. THE SPAN STOPS AT THE CLAUSE. From the end of the context name, read
+#      forward to the FIRST of `;`, `)`, an em/en dash, a table pipe, `. `, or
+#      ANY required-context name (a new name is a new subject) — never a flat
+#      200 characters. `Cloud gate, Console gate} (branch-protection API) —
+#      doc-gates ... is NOT required` therefore blames nobody.
+#   2. THE DISCLAIMER MUST BE PREDICATED OF THE CONTEXT. The span has to OPEN
+#      with a copula — is / are / was / were / remains / stays / reads / counts
+#      as / has been. `Console gate` are ADVISORY today` opens with `are` and
+#      fires; ``Elixir gate` with an advisory PASSES the count floor` opens with
+#      `with` and does not, because there `advisory` is a noun.
+#   3. IT DISTINGUISHES ASSERTING THE FALSEHOOD FROM RECORDING THAT IT WAS
+#      FALSE — the thing this repo's corpus is mostly made of, and the reason a
+#      naive widening would red on its own audit trail. THREE fences, every one
+#      on the matched text or on markdown structure and none on a path (a path
+#      fence is a directory exemption wearing a hat, and §18 of the suite
+#      already refused that):
+#        (a) RECORD — the claim or its immediate left context carries a
+#            retraction/dating marker, or a REPORTED-SPEECH verb: RETRACTED,
+#            RETIRED, STRUCK, CORRECTED, SUPERSEDED, "no longer", "used to",
+#            "at the time", "as measured", "BEFORE (", "still says", "was
+#            false", "now false", "dated", "claims/claimed".
+#            `required-checks-drift.yml`s own header does exactly this ("Until
+#            wave 53 this header labelled the spec-gate job BLOCKING. It is
+#            not") and must stay green; so does a ledger row reading "two prose
+#            blocks in console-harness.yml CLAIM `Console gate` is ADVISORY",
+#            which names the claim's owner and is therefore a report of it.
+#        (b) QUOTE — the context name is inside a quotation (a `"` within the
+#            four characters to its left). A quoted past reason string is
+#            evidence about a claim, not the claim.
+#        (c) TRANSCRIPT — the line sits inside a ``` or ~~~ fenced block. The
+#            wave ledgers paste planted fixtures and shell sessions verbatim as
+#            evidence; a fixture written to make this suite RED is not a
+#            sentence telling an agent anything.
+#      All three fences are counted and PRINTED on a green run. A fence nobody
+#      can see the size of is a fence that quietly becomes an exemption.
+#
+# WHAT IT STILL CANNOT DO, stated rather than discovered: rule 2 is a copula
+# test, so a fresh paraphrase that never predicates ("you can merge over Console
+# gate") walks straight through, and rule 3(a) is a marker list, so an UNMARKED
+# dated record reds and needs a pin. It is a tripwire on the phrasing that
+# actually rotted here twice, not a proof that every charter sentence is true.
+PROSE_ROOT_OVERRIDE=""
+# Rule 2. Anchored at the head of the attributed span, so it is the CONTEXT the
+# disclaimer is predicated of and never the next noun along.
+PROSE_COPULA='^[^a-z]*(is|are|was|were|remains|stays|reads|counts as|has been|have been)[^a-z]'
+# Rule 3(a). Ordered loosest-last, matched case-insensitively.
+PROSE_RECORD_MARKERS='retracted|retired|struck|corrected|superseded|obsolete|no longer|used to|at the time|as measured|before [(]|still say|still said|still read|was false|now false|dated|claim'
+
+# THE PIN LIST — the same contract §18 of required-checks.test.sh runs on, for
+# the same reason: a census is a SET EQUALITY, never a count. A pinned line that
+# DISAPPEARS is reported STALE, so the commit that fixes a claim has to drop its
+# pin in the same breath, and a pin cannot rot into a permanent exemption.
+#
+# The key is `<repo-relative path>|<context>|<the attributed span, 60 chars>` —
+# deliberately the SENTENCE and not a whole-file hash, so editing the claim
+# un-pins it and brings it back for a human reading, while an unrelated edit to
+# the file does not.
+#
+# THE LIST IS EMPTY, AND THE HISTORY OF ITS ONE ENTRY IS THE CONTRACT IN ACTION.
+# When this clause was first run at full width it found exactly ONE class-A
+# claim: `.claude/workflows/bp-cloud-console-hardening-charter.md` (D163, under
+# "AND THE FACT A BUILDER MUST NOT MISREAD") told a builder that `Cloud gate`
+# and `Console gate` "are ADVISORY today — a red one does not stop the merge
+# button", in the same sentence that correctly said the committed spec carries
+# FOUR contexts with `enforced: true`. Live protection has required all four
+# since 2026-08-03 — the cch-w32-s4 defect, verbatim, in this epic's OWN
+# charter. The builder pinned it (fenced out of the charters); the lead then
+# corrected the sentence into a dated record (CORRECTED 2026-09-02, "used to
+# say") and dropped the pin IN THE SAME COMMIT, which is the only order the
+# STALE arm permits. A future entry here must carry its owner and its
+# replacement, and must not outlive one wave: a pin that is still here a wave
+# later means this clause has become the thing it was written to catch.
+PROSE_CLAIM_PINS=''
+
+merge_truth_prose_check() {
+  local files
+  # The same refusal advisory_prose_check makes, for the same reason: scanning
+  # zero files is the vacuous pass this whole file exists to attack.
+  if [ -n "$PROSE_ROOT_OVERRIDE" ]; then
+    # A fixture tree is not a git checkout, so the override reads the filesystem.
+    # RECURSIVE on purpose — no -maxdepth. The depth-1 glob above is precisely
+    # the shape this clause exists to stop repeating.
+    files="$(find "$PROSE_ROOT_OVERRIDE" -type f \( -name '*.md' -o -name '*.markdown' -o -name '*.txt' \) 2>/dev/null | sort)"
+    [ -n "$files" ] \
+      || fail "no *.md/*.markdown/*.txt under $PROSE_ROOT_OVERRIDE — scanning zero files is a vacuous pass, not a green"
+  else
+    # TRACKED, and the WHOLE repository — deliberately not a root list. This
+    # started as `.claude/workflows docs CLAUDE.md` and the measurement killed
+    # it: a root list is a directory allowlist wearing a hat, and a directory
+    # allowlist is the exact shape (`.github/workflows -maxdepth 1`) this clause
+    # exists to stop repeating. `git ls-files` is the census §13 and §18 of the
+    # suite already run on; it cannot be widened by a stray untracked file, and
+    # it cannot be narrowed by forgetting a directory — a new docs tree, a new
+    # charter folder, a README added under api/ all arrive already scanned.
+    # 2359 files at the time of writing, against 217 under the three roots.
+    # `[ -f ]` because a tracked path deleted in the worktree is still listed,
+    # and awk would abort on it — a scan that dies is not a verdict.
+    files="$(cd "$REPO_ROOT" && git ls-files -- '*.md' '*.markdown' '*.txt' 2>/dev/null \
+      | while IFS= read -r f; do [ -f "$f" ] && printf '%s/%s\n' "$REPO_ROOT" "$f"; done | sort)"
+    [ -n "$files" ] \
+      || fail "git ls-files listed no tracked *.md/*.markdown/*.txt under $REPO_ROOT — scanning zero files is a vacuous pass, not a green (is this a git checkout?)"
+  fi
+
+  local tmp ctxfile nctx nfiles raw
+  tmp="$(mktemp -d)"
+  ctxfile="$tmp/contexts.txt"
+  # Spec-derived, exactly like the clause above: adding a required context
+  # widens this scan on its own and removing one narrows it. Nothing is typed.
+  jq -r '.protection.required_status_checks.checks[].context' "$SPEC" > "$ctxfile"
+  nctx="$(grep -c . "$ctxfile" || true)"
+  nfiles="$(printf '%s\n' "$files" | grep -c . || true)"
+
+  # THE PRE-FILTER, and it is not an exemption. Every rule below is anchored on
+  # an occurrence of a required-context NAME, so a file containing none of them
+  # cannot produce a row: `grep -ilFf` selects exactly the set the awk would
+  # reach, and does it two orders of magnitude cheaper. That is the difference
+  # between 13s and a fraction of a second per run, and the suite drives this
+  # script 27 times. The candidate count is PRINTED beside the scanned count on
+  # every green run — a pre-filter that quietly matched nothing would otherwise
+  # be indistinguishable from a clean corpus, which is the vacuous pass this
+  # whole file exists to refuse.
+  local candidates ncand
+  if [ -n "$PROSE_ROOT_OVERRIDE" ]; then
+    candidates="$(printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 grep -ilFf "$ctxfile" 2>/dev/null || true)"
+  else
+    # `git grep` over `xargs grep` on the committed corpus: same 214 files out of
+    # the same 2359, six times faster (0.16s against 0.93s), and it is already
+    # the tracked-file census the rest of the suite runs on.
+    candidates="$(cd "$REPO_ROOT" && git grep -ilF -f "$ctxfile" -- '*.md' '*.markdown' '*.txt' 2>/dev/null \
+      | while IFS= read -r f; do printf '%s/%s\n' "$REPO_ROOT" "$f"; done || true)"
+  fi
+  ncand="$(printf '%s\n' "$candidates" | grep -c . || true)"
+
+  # LC_ALL=C, and it is not a style preference. The tracked corpus carries bytes
+  # that are not valid in the ambient UTF-8 locale (a mojibake'd em dash in one
+  # wave ledger), and BWK awk does not skip those — it ABORTS the whole run with
+  # "towc: multibyte conversion failure", mid-corpus, taking every file after it
+  # with it. That is a scan that stops early and a `fail` that names a locale
+  # instead of a claim. Every comparison below is a byte comparison and every
+  # tolower() is on ASCII context names, so the C locale changes no verdict.
+  # `if`, not a pipeline into xargs: with an empty candidate list `xargs -0 awk`
+  # runs awk with NO file operands, which reads STDIN — the run would hang, and
+  # a gate that hangs is worse than one that lies.
+  if [ "$ncand" -eq 0 ]; then raw=""; else
+  raw="$(printf '%s\n' "$candidates" | tr '\n' '\0' | xargs -0 env LC_ALL=C awk \
+    -v CTXFILE="$ctxfile" -v WINDOW="$PROSE_WINDOW" -v DISC="$PROSE_DISCLAIMERS" \
+    -v COP="$PROSE_COPULA" -v REC="$PROSE_RECORD_MARKERS" -v ROOT="$REPO_ROOT/" '
+    function clip(s, n) { gsub(/[[:space:]]+/, " ", s); return (length(s) > n ? substr(s, 1, n) : s) }
+    # RULE 1 — the attributed span: end of the context name to the first clause
+    # boundary or the next context name, whichever comes first.
+    function clausespan(s,   i, j, best, other) {
+      best = length(s)
+      if ((i = index(s, ";"))   > 0 && i - 1 < best) best = i - 1
+      if ((i = index(s, ")"))   > 0 && i - 1 < best) best = i - 1
+      if ((i = index(s, " — ")) > 0 && i - 1 < best) best = i - 1
+      if ((i = index(s, " – ")) > 0 && i - 1 < best) best = i - 1
+      if ((i = index(s, "|"))   > 0 && i - 1 < best) best = i - 1
+      if (match(s, /\. /) && RSTART - 1 < best) best = RSTART - 1
+      for (j = 1; j <= nctx; j++) {
+        other = tolower(ctx[j])
+        if ((i = index(s, other)) > 0 && i - 1 < best) best = i - 1
+      }
+      return substr(s, 1, best)
+    }
+    function flushfile(   i, j, p, abs, start, ctxlc, streamlc, span, left, exc, ln, rel, verdict) {
+      if (fname == "") return
+      stream = stream buf; buf = ""
+      rel = fname; sub("^" ROOT, "", rel)
+      streamlc = tolower(stream)
+      for (i = 1; i <= nctx; i++) {
+        ctxlc = tolower(ctx[i]); start = 1
+        while ((p = index(substr(streamlc, start), ctxlc)) > 0) {
+          abs = start + p - 1
+          span = clausespan(substr(streamlc, abs + length(ctxlc), WINDOW))
+          if (span ~ COP && span ~ DISC) {
+            left = substr(streamlc, (abs > 160 ? abs - 160 : 1), (abs > 160 ? 160 : abs - 1))
+            exc  = substr(stream, abs, length(ctxlc) + WINDOW); gsub(/\|/, " ", exc)
+            ln = 1; for (j = 1; j <= nmark; j++) if (markoff[j] <= abs) ln = markline[j]
+            verdict = "CLAIM"
+            if ((left span) ~ REC) verdict = "RECORD"
+            else if (index(substr(stream, (abs > 4 ? abs - 4 : 1), 4), "\"") > 0) verdict = "QUOTE"
+            printf "%s|%s|%d|%s|%s|%s\n", verdict, rel, ln, ctx[i], clip(span, 60), clip(exc, 150)
+            break
+          }
+          start = abs + 1
+        }
+      }
+    }
+    BEGIN { while ((getline c < CTXFILE) > 0) if (length(c) > 0) ctx[++nctx] = c }
+    FNR == 1 { flushfile(); fname = FILENAME; stream = ""; buf = ""; slen = 0; nmark = 0; infence = 0 }
+    {
+      line = $0
+      # RULE 3(c) — A FENCED CODE BLOCK IS A TRANSCRIPT, NOT PROSE, and it is
+      # the third thing this corpus is made of. The wave ledgers paste planted
+      # probe fixtures, workflow snippets and shell sessions VERBATIM inside
+      # ``` fences as evidence of what was measured; `# PROBE: `Elixir gate` is
+      # ADVISORY here` is a fixture somebody wrote to make this very suite red,
+      # not a sentence telling an agent anything. Reading a transcript as an
+      # assertion is the same error as reading a quotation as one, so it gets
+      # the same structural fence — on markdown STRUCTURE, never on a path.
+      # The blanked lines still take a marker slot, so line attribution below
+      # is unchanged.
+      if (line ~ /^[[:space:]]*(```|~~~)/) { infence = !infence; line = ""; nfenced++ }
+      else if (infence)                    { line = ""; nfenced++ }
+      sub(/^[[:space:]]*#[[:space:]]?/, "", line)
+      gsub(/[[:space:]]+/, " ", line)
+      nmark++; markoff[nmark] = slen + 1; markline[nmark] = FNR
+      # CHUNKED, and this one is measured too. `stream = stream line " "` copies
+      # the whole accumulated string once per line, which is quadratic in file
+      # length — on a 4600-line charter it is most of the runtime, and a single
+      # 217-file pass took 13s. Appending through an 8KB buffer divides that
+      # copying by ~8192 and the same pass over 2359 files runs in a fraction of
+      # the old time. `slen` carries the true offset so nothing else changes.
+      buf = buf line " "; slen += length(line) + 1
+      if (length(buf) > 8192) { stream = stream buf; buf = "" }
+    }
+    END { flushfile(); printf "FENCED|%d\n", nfenced }
+  ' 2>&1)" || { rm -rf "$tmp"; fail "merge-truth prose scan could not run: $raw"; }
+  fi
+  rm -rf "$tmp"
+
+  local nrec nqt nfence unpinned="" pinned_seen="" key
+  nrec="$(printf '%s\n' "$raw" | grep -c '^RECORD|' || true)"
+  nqt="$(printf '%s\n' "$raw" | grep -c '^QUOTE|'  || true)"
+  # Rule 3(c)'s size, so the transcript fence is visible on a green run for the
+  # same reason (a) and (b) are: a fence nobody can see the size of is a fence
+  # that quietly becomes an exemption.
+  nfence="$(printf '%s\n' "$raw" | sed -n 's/^FENCED|//p' | tail -1)"
+  nfence="${nfence:-0}"
+
+  # Both directions, always. UNPINNED = a claim nobody has read; STALE = a pin
+  # whose sentence is gone, i.e. somebody fixed the text and left the exemption
+  # behind to rot into a silencer.
+  while IFS='|' read -r verdict rel ln ctx span exc; do
+    [ "$verdict" = "CLAIM" ] || continue
+    key="$rel|$ctx|$span"
+    if printf '%s\n' "$PROSE_CLAIM_PINS" | grep -qxF "$key"; then
+      pinned_seen="$pinned_seen$key
+"
+      say "  UNRESOLVED  $rel:$ln  says \"$ctx\" is not blocking (PINNED — see PROSE_CLAIM_PINS; fixing the sentence must drop the pin)"
+    else
+      unpinned="$unpinned$rel|$ln|$ctx|$exc
+"
+    fi
+  done <<EOF
+$raw
+EOF
+
+  # STALE is asserted only against the COMMITTED corpus. Under --prose the scan
+  # root is a fixture tree that cannot satisfy a pin keyed on a repo-relative
+  # path, so enforcing it there would make every fixture probe red for a reason
+  # that has nothing to do with what the probe is about.
+  local stale=""
+  if [ -z "$PROSE_ROOT_OVERRIDE" ]; then
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      printf '%s' "$pinned_seen" | grep -qxF "$key" || stale="$stale$key
+"
+    done <<EOF
+$PROSE_CLAIM_PINS
+EOF
+  fi
+
+  if [ -n "$unpinned" ] || [ -n "$stale" ]; then
+    echo "FAIL: tracked prose OUTSIDE .github/workflows describes a REQUIRED context as advisory / non-blocking." >&2
+    echo "      The committed spec ($SPEC) says these contexts BLOCK the merge, and a charter is loaded" >&2
+    echo "      into an agent's context by name long before that agent reads the protection API." >&2
+    printf '%s' "$unpinned" | while IFS='|' read -r f l c e; do
+      [ -n "$f" ] || continue
+      echo "      UNPINNED  $f:$l  claims \"$c\" is not blocking" >&2
+      echo "        … ${e} …" >&2
+    done
+    printf '%s' "$stale" | while IFS= read -r k; do
+      [ -n "$k" ] || continue
+      echo "      STALE  the pin \"$k\" matches nothing — if the sentence was fixed, drop its pin in the SAME commit" >&2
+    done
+    echo "      Fix the PROSE, not the spec. If the context genuinely should stop being required," >&2
+    echo "      regenerate .github/required-checks.json and this clause narrows with it." >&2
+    return 1
+  fi
+  say "  ok     no tracked prose predicates a disclaimer of any of the $nctx required context(s) ($nfiles tracked file(s) scanned outside .github/workflows, $ncand naming a required context; $nrec dated record(s), $nqt quotation(s) and $nfence code-fence line(s) fenced)"
   return 0
 }
 
@@ -1019,6 +1368,8 @@ run_full() {
     advisory_prose_check || return 1
     say "── blocking-authority clause (the inverse: prose claiming authority the spec denies) ──"
     blocking_authority_check || return 1
+    say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
+    merge_truth_prose_check || return 1
     local drc0=0
     deadlock_check "${HEAD_SHA:-$(recent_pr_head)}" || drc0=$?
     [ "$drc0" -eq 3 ] && return 3
@@ -1034,6 +1385,8 @@ run_full() {
   advisory_prose_check || rc=1
   say "── blocking-authority clause (the inverse: prose claiming authority the spec denies) ──"
   blocking_authority_check || rc=1
+  say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
+  merge_truth_prose_check || rc=1
   say "── deadlock detector ──"
   local sha="${HEAD_SHA:-$(recent_pr_head)}"
   local drc=0
@@ -1069,6 +1422,8 @@ run_ci() {
   advisory_prose_check || rc=1
   say "── blocking-authority clause (the inverse: prose claiming authority the spec denies) ──"
   blocking_authority_check || rc=1
+  say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
+  merge_truth_prose_check || rc=1
 
   if [ "$(spec_enforced)" = "true" ]; then
     say "── enforced=true: live protection must match ──"
@@ -1076,12 +1431,23 @@ run_ci() {
     actual="$(live_protection)"
     compare_protection "$actual" || rc=1
   else
-    say "── enforced=false ──"
-    say "  The committed spec says protection has NOT been applied yet. That is a"
-    say "  COMMITTED, reviewable state visible in the file's diff — not an"
-    say "  unreadable input silently swallowed. The deadlock detector above still"
-    say "  ran against a real head. hgw2-s7 flips enforced to true, and from that"
-    say "  commit an unreadable protection API is a hard failure here."
+    # THE ARM THAT USED TO DECLINE TO LOOK (cchi-w51). Until this commit these
+    # five lines were the WHOLE of the enforced=false path in --ci: four
+    # sentences arguing that `enforced=false` is a committed, reviewable state,
+    # and not one read of the live branch. cch-w51-s6 had already closed the
+    # identical hole in `run_full` — deliberately scoping itself there, because
+    # --ci is what `required-checks-drift.yml` runs on every PR and flipping its
+    # polarity is a merge-path change. That review is this commit.
+    #
+    # The prose was not wrong; it was answering a question nobody asked. That
+    # the state is committed and reviewable says nothing about whether it is
+    # TRUE, and the one direction a spec-reader can never see is SPEC SAYS THE
+    # GATE IS OFF WHILE THE GATE IS ON. So the argument stays (as one line) and
+    # the clause it used to stand in for now runs.
+    say "── enforced=false: the spec CLAIMS nothing has been applied — checking that against the live branch ──"
+    say "  A committed enforced=false is a reviewable state, not an unreadable input."
+    say "  Reviewable is not the same as TRUE: this asks the live branch."
+    unapplied_spec_matches_reality || rc=1
   fi
   [ "$rc" -eq 0 ] || { echo "FAIL: required-checks guard is RED." >&2; return 1; }
   [ "$drc" -eq 3 ] && return 3
@@ -1168,9 +1534,28 @@ JSON
 ] }
 JSON
 
+  # THE NEUTRAL PROSE CORPUS, and it is the same isolation `--workflows` already
+  # buys every probe that plants a fixture workflow. Nearly every probe below
+  # overrides the SPEC — two contexts, one context, a `Widget gate` that does not
+  # exist — and merge_truth_prose_check is SPEC-DERIVED in both directions: the
+  # names it hunts AND rule 1's clause boundary, which stops the attributed span
+  # at the next required-context name. Narrow the spec and a span in the REAL
+  # charter that used to stop at `Cloud gate` runs on into a disclaimer 150
+  # characters later, so probe 21 reds on a sentence it has nothing to do with.
+  # Measured, not predicted: before this default, `--selftest` failed at 21/29
+  # with an UNPINNED row at charter.md:7213 and a STALE pin, both artefacts of
+  # the two-context fixture spec. A probe must red on the clause it names.
+  local neutral_prose="$tmp/prose-neutral"
+  mkdir -p "$neutral_prose"
+  printf '%s\n' "Neutral corpus. It names no required context, so the merge-truth clause has something real to scan and nothing to say about it." \
+    > "$neutral_prose/neutral.md"
+
   probe() { # label expect_rc <args…>
     local label="$1" expect="$2"; shift 2
     local out rc=0
+    # Only when the caller has not chosen its own corpus — probes 24-27 are ABOUT
+    # this clause and pass their own --prose, which must win.
+    case " $* " in *" --prose "*) : ;; *) set -- "$@" --prose "$neutral_prose" ;; esac
     out="$(bash "$SELF" "$@" 2>&1)" || rc=$?
     if [ "$rc" -eq "$expect" ]; then
       echo "  ok   $label (exit $rc)"
@@ -1197,49 +1582,49 @@ JSON
     return 1
   }
 
-  probe "1/23 honest read-back passes" 0 \
+  probe "1/29 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks[0].context = "Elixir gat"' "$good_spec" > "$tmp/typo.json"
-  probe "2/23 a typo'd context reds (GitHub accepts it; we must not)" 1 \
+  probe "2/29 a typo'd context reds (GitHub accepts it; we must not)" 1 \
     --spec "$tmp/typo.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = null' "$good_rb" > "$tmp/nullapp.json"
-  probe "3/23 app_id:null where the spec pins an id is HARD" 1 \
+  probe "3/29 app_id:null where the spec pins an id is HARD" 1 \
     --spec "$good_spec" --readback "$tmp/nullapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = 8329' "$good_rb" > "$tmp/wrongapp.json"
-  probe "4/23 a wrong app_id reds" 1 \
+  probe "4/29 a wrong app_id reds" 1 \
     --spec "$good_spec" --readback "$tmp/wrongapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.enforce_admins.enabled = false' "$good_rb" > "$tmp/breakglass.json"
-  probe "5/23 a left-open break-glass (enforce_admins false) reds" 1 \
+  probe "5/29 a left-open break-glass (enforce_admins false) reds" 1 \
     --spec "$good_spec" --readback "$tmp/breakglass.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_linear_history.enabled = true' "$good_rb" > "$tmp/oob.json"
-  probe "6/23 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
+  probe "6/29 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
     --spec "$good_spec" --readback "$tmp/oob.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '. + {"required_deployments": {"enabled": true}}' "$good_rb" > "$tmp/extra.json"
-  probe "7/23 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
+  probe "7/29 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
     --spec "$good_spec" --readback "$tmp/extra.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.strict = true' "$good_rb" > "$tmp/strict.json"
-  probe "8/23 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
+  probe "8/29 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
     --spec "$good_spec" --readback "$tmp/strict.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' "$good_spec" > "$tmp/deadspec.json"
-  probe "9/23 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
+  probe "9/29 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
-  probe "10/23 an unreadable protection read-back FAILS (never skips)" 1 \
+  probe "10/29 an unreadable protection read-back FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/23 an unreadable check-run feed FAILS (never skips)" 1 \
+  probe "11/29 an unreadable check-run feed FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/23 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
+  probe "12/29 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
 
   # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
@@ -1249,7 +1634,7 @@ JSON
   # 13 must be 4 and 14 must be 0, and reverting the clause makes 13 return 0.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/cancelledruns.json"
-  probe "13/23 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
+  probe "13/29 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --deadlock || rc=1
 
   # The mirror clause: cancellation on a NON-required check is none of our
@@ -1257,13 +1642,13 @@ JSON
   # checks are cancelled by concurrency groups all day.
   jq '(.check_runs[] | select(.name == "Boundary gate (advisory)") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/advcancelled.json"
-  probe "14/23 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
+  probe "14/29 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/advcancelled.json" --sha probe --deadlock || rc=1
 
   # The caller-scope clause above, proven rather than asserted: --ci must NOT
   # turn a cancelled run on an arbitrary sampled head into a red, while
   # --deadlock (13/15) still exits 4 on the identical input.
-  probe "15/23 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
+  probe "15/29 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --ci || rc=1
 
   # 16 pins the scope of the RE-RUN set from the other side. GitHub counts a
@@ -1274,7 +1659,7 @@ JSON
   # out and pinned the removal here, so re-adding it reds this probe.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "skipped"' \
     "$good_runs" > "$tmp/skippedruns.json"
-  probe "16/23 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
+  probe "16/29 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/skippedruns.json" --sha probe --deadlock || rc=1
 
   # 17 & 18 are the cch-w32-s4 clause, and they are ONE mutation proven from
@@ -1294,7 +1679,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "17/23 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
+  probe "17/29 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   # The mirror, and the whole point: the guard tracks the SPEC, not a frozen
@@ -1306,7 +1691,7 @@ YML
   jq '.required_status_checks.contexts = ["PR references an active task"]
       | .required_status_checks.checks = [{"context":"PR references an active task","app_id":15368}]' \
     "$good_rb" > "$tmp/noelixir_rb.json"
-  probe "18/23 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
+  probe "18/29 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
     --spec "$tmp/noelixir_spec.json" --readback "$tmp/noelixir_rb.json" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   # 19-22 are the cgsiw-s1 clause, the INVERSE of 17/18: a workflow claiming
@@ -1326,7 +1711,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "19/23 a workflow claiming BLOCKING authority for a context the spec does NOT require reds (the inverse of 17; nothing caught this before cgsiw-s1)" 1 \
+  probe "19/29 a workflow claiming BLOCKING authority for a context the spec does NOT require reds (the inverse of 17; nothing caught this before cgsiw-s1)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-block" || rc=1
 
   # The mirror, and the whole point: the subject set is the COMPLEMENT of the
@@ -1340,7 +1725,7 @@ YML
     "$good_rb" > "$tmp/widget_rb.json"
   jq '.check_runs += [{"name":"Widget gate (blocking)","conclusion":"success","started_at":"2026-07-28T01:00:00Z"}]' \
     "$good_runs" > "$tmp/widget_runs.json"
-  probe "20/23 the SAME claim in the SAME file goes GREEN once that context IS required (the clause reads the complement of the committed set, not a frozen string)" 0 \
+  probe "20/29 the SAME claim in the SAME file goes GREEN once that context IS required (the clause reads the complement of the committed set, not a frozen string)" 0 \
     --spec "$tmp/widget_spec.json" --readback "$tmp/widget_rb.json" --runs "$tmp/widget_runs.json" --sha probe --workflows "$tmp/wf-block" || rc=1
 
   # 21/23 establishes the escape hatch, and 22/23 is why it is an escape hatch
@@ -1359,7 +1744,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "21/23 the escape hatch WITH a reason greens the identical violation (a spec-authority advisory-ok comment carrying a real why)" 0 \
+  probe "21/29 the escape hatch WITH a reason greens the identical violation (a spec-authority advisory-ok comment carrying a real why)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-hatch" || rc=1
 
   mkdir -p "$tmp/wf-hatch-empty"
@@ -1374,7 +1759,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "22/23 the hatch with an EMPTY reason REDS — a bare token is a silencer, a reason is a decision somebody can review" 1 \
+  probe "22/29 the hatch with an EMPTY reason REDS — a bare token is a silencer, a reason is a decision somebody can review" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-hatch-empty" || rc=1
 
   # The hatch checked in the OTHER direction. An annotation saying "the spec
@@ -1383,8 +1768,76 @@ YML
   # it must red rather than exempt. Same fixture as 21, only the spec moves: the
   # identical annotated file is fine while the context is denied, and a failure
   # the moment it is required.
-  probe "23/23 an advisory-ok annotation on a context the spec REQUIRES reds (the hatch lying in the other direction)" 1 \
+  probe "23/29 an advisory-ok annotation on a context the spec REQUIRES reds (the hatch lying in the other direction)" 1 \
     --spec "$tmp/widget_spec.json" --readback "$tmp/widget_rb.json" --runs "$tmp/widget_runs.json" --sha probe --workflows "$tmp/wf-hatch" || rc=1
+
+  # ── 24-27: the merge-truth clause, OUTSIDE .github/workflows (cch-w34) ─────
+  # The fixture is a CHARTER, nested two directories deep and named `*.md` —
+  # the two properties the clause above is structurally blind to. Its four
+  # decision rows are the four cases that have to be told apart, and they live
+  # in ONE file on purpose: a fixture with one line per probe would prove the
+  # regexes and not the discrimination.
+  mkdir -p "$tmp/prose/nested/deeper"
+  cat > "$tmp/prose/nested/deeper/bp-fixture-charter.md" <<'MD'
+# Fixture charter
+
+- **D1 — the ASSERTION.** Land on green. `Elixir gate` is ADVISORY today, so a red
+  one does not stop the merge button; treat it as blocking anyway.
+- **D2 — a dated RECORD, which must stay green.** At the time this wave was
+  written `Elixir gate` was advisory; it is required now.
+- **D3 — a QUOTED past reason, which must stay green.** The seal printed
+  *"`Elixir gate` is NOT a required status check on main"* under the old spec.
+- **D4 — PROXIMITY, not attribution, which must stay green.** The required set
+  is `Elixir gate` and `PR references an active task`; doc-gates hosts the
+  shell check but is NOT required.
+MD
+  probe "24/29 a charter TWO directories deep, named .md, calling a required context advisory REDS — the corpus the depth-1 workflow glob cannot reach" 1 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
+
+  # Delete ONLY D1. Everything left is the audit trail this repo is mostly made
+  # of — a dated retraction, a quoted past reason, and a required name sitting
+  # near somebody ELSE'S disclaimer. If any of the three red, the widening is
+  # 94% noise and gets switched off in a wave; that is the measured failure this
+  # probe exists to hold shut.
+  sed -e '/D1 — the ASSERTION/,+1d' "$tmp/prose/nested/deeper/bp-fixture-charter.md" > "$tmp/prose/nested/deeper/x" \
+    && mv "$tmp/prose/nested/deeper/x" "$tmp/prose/nested/deeper/bp-fixture-charter.md"
+  probe "25/29 …and with ONLY the claim removed the dated record, the quoted past reason and the proximity row all stay GREEN (assertion vs. record, told apart)" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
+
+  # SPEC-DERIVED, the same pair probes 17/18 make for the clause above: the
+  # identical sentence is a lie about a REQUIRED context and merely true about a
+  # denied one. Nothing here is a frozen string.
+  mkdir -p "$tmp/prose-denied"
+  cat > "$tmp/prose-denied/charter.md" <<'MD'
+- **D1.** `Widget gate` is ADVISORY today, so a red one does not stop the merge.
+MD
+  probe "26/29 the SAME sentence about a context the committed spec does NOT require is green — the clause reads the spec, never a frozen name" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-denied" || rc=1
+
+  # Scanning nothing is the vacuous pass this whole file exists to refuse, and
+  # the clause has to make that refusal for its OWN corpus too.
+  mkdir -p "$tmp/prose-empty"
+  probe "27/29 a prose root with no readable text file FAILS — scanning zero files is never a green" 1 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-empty" || rc=1
+
+  # ── 28-29: --ci reads live protection on enforced=false too (cchi-w51) ─────
+  # run_full has been checked here since cch-w51-s6; --ci had the same shape and
+  # printed prose instead. It is the arm required-checks-drift.yml runs on every
+  # PR, so it gets its own pair rather than inheriting run_full's.
+  local unapplied="$tmp/spec-unapplied.json"
+  jq '.enforced = false' "$good_spec" > "$unapplied"
+  local unprotected="$tmp/rb-unprotected.json"
+  printf '%s\n' '{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection"}' > "$unprotected"
+  probe "28/29 --ci on an enforced=false spec against a PROTECTED branch REDS — the direction no amount of spec-reading can see" 1 \
+    --ci --spec "$unapplied" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
+  probe "29/29 …and --ci on the same spec against a genuinely unprotected branch still exits 0 — the fix is not \"always red here\"" 0 \
+    --ci --spec "$unapplied" --readback "$unprotected" --runs "$good_runs" --sha probe \
+    --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
   rm -rf "$tmp"
   echo
@@ -1405,6 +1858,10 @@ main() {
       --runs) RUNS_FILE="$2"; shift 2 ;;
       --sha) HEAD_SHA="$2"; shift 2 ;;
       --workflows) WORKFLOWS_DIR="$2"; shift 2 ;;
+      # The merge-truth clause's scan root. Same contract as --workflows: an
+      # override exists ONLY so the suite can point the identical clause at a
+      # fixture tree; every real invocation reads the committed corpus.
+      --prose) PROSE_ROOT_OVERRIDE="$2"; shift 2 ;;
       --deadlock) MODE="deadlock"; shift ;;
       --ci) MODE="ci"; shift ;;
       --selftest) MODE="selftest"; shift ;;

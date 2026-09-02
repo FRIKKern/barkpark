@@ -202,7 +202,7 @@ func New(cfg Config) *Client {
 	// HTTP 500 only, error.code "internal_error" only, announced on stderr.
 	// Installed here rather than at ~20 call sites so there is ONE owner of the
 	// policy and no read path can be forgotten.
-	rt := &retryTransport{onRetry: stderrRetryNotifier}
+	rt := &retryTransport{onRetry: stderrRetryNotifier, onExhausted: stderrExhaustedNotifier}
 	return &Client{
 		baseURL:     cfg.BaseURL,
 		token:       cfg.Token,
@@ -1395,6 +1395,47 @@ func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNo
 		return nil, nil, err
 	}
 	return env.Notices, env.Help, nil
+}
+
+// TaskPulse writes the claim's now-line AND renews the lease in one atomic
+// server write via POST /v1/tasks/:doc_id/pulse ({"worker_id","now"}).
+//
+// It is NOT a claim. Three differences matter to every caller:
+//
+//   - It is HOLDER-ONLY. There is no epoch argument and no fence — pulse IS the
+//     renewal — but a lost lease (reaped, released, closed, or held by someone
+//     else) comes back as a 409 whose reason taskPost surfaces VERBATIM
+//     ("not_holder"), never as a silent re-claim. A claim in that same
+//     situation would take the row BACK; a pulse refuses.
+//   - It keeps `work_digest` untouched, so the close-side work-digest fence
+//     still catches a brief edited under the claim.
+//   - It emits a `task.pulse` mutation_event, so the heartbeat is VISIBLE on
+//     boards and the events feed — a bare re-claim is not.
+//
+// Like TaskClaimN it returns the claim epoch the server wrote. Pulse BUMPS the
+// epoch (Tasks.Pulse.apply_pulse: current_epoch + 1), exactly like a renew, so
+// the returned value — not the one the caller last held — is the token a later
+// close must echo as observed_epoch. A 2xx that carries no positive epoch is a
+// HARD failure for the same reason it is on a claim: proceeding with epoch 0
+// defeats the CAS fencing.
+//
+// now is the required now-line (the server caps it at 500 bytes; a longer one
+// is a 400, not a truncation, so callers bound it themselves).
+func (c *Client) TaskPulse(docID, workerID, now string) (int, []string, error) {
+	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/pulse",
+		map[string]interface{}{"worker_id": workerID, "now": now})
+	if err != nil {
+		return 0, nil, err
+	}
+	var doc struct {
+		Claim struct {
+			Epoch int `json:"epoch"`
+		} `json:"claim"`
+	}
+	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
+		return 0, nil, fmt.Errorf("pulse %s: server returned no fencing epoch", docID)
+	}
+	return doc.Claim.Epoch, env.Help, nil
 }
 
 // TaskRelabel adds and/or removes content.labels on a task via

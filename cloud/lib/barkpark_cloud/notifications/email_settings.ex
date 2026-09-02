@@ -147,7 +147,7 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     |> validate_inclusion(:transport, @transports)
     |> validate_inclusion(:smtp_encryption, @encryptions)
     |> validate_number(:smtp_port, greater_than: 0, less_than: 65_536)
-    |> validate_format(:from_address, ~r/^[^\s@]+@[^\s@]+$/, message: "must be a valid email")
+    |> validate_format(:from_address, ~r/^[^\s@]+@[^\s@]+$/u, message: "must be a valid email")
     |> assoc_constraint(:team)
     |> unique_constraint(:team_id)
   end

@@ -1447,6 +1447,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             append_message(acc, :tool, tool_line(name, input),
               tool_use_id: block["id"],
               output: nil,
+              # The settle gate's two facts, seeded honest: the row is born
+              # UNSETTLED (its turn is running) and error-free. The turn's
+              # terminal result frame flips `turn_settled`; a tool_result block
+              # carrying `is_error` flips `tool_error`.
+              turn_settled: false,
+              tool_error: false,
               tool: name,
               input: input,
               parent_tool_use_id: parent_id,
@@ -1472,6 +1478,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # A turn that thought then produced no prose/tool still settles its pulse
     # here so the ✻ row is never lost (charter D41).
     socket = settle_thinking(socket)
+
+    # The TURN boundary is the settle gate: every tool row of this turn may now
+    # show its outcome glyph. A row whose tool_result never arrived stays
+    # neutral (the provenance gate lives in ChatToolRenderer.settle_state/1).
+    socket = settle_tool_rows(socket)
 
     # An interrupted turn arrives as `error_during_execution` too — the ONLY
     # way to tell it from a genuine error is that WE asked to stop
@@ -1520,8 +1531,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # The async AI title landed (the store's clobber guard already refused any
   # write that would stomp a human rename) — refresh the sidebar so the row
   # shows it, whichever session it belongs to.
-  def handle_info({:chat_title, _session_id, _title}, socket) do
-    {:noreply, refresh_sessions(socket)}
+  #
+  # ONE accepted write reaches this tab TWICE: `Recorder.broadcast_title/2`
+  # publishes on the activity topic (subscribed at mount) AND on the on-screen
+  # session's topic (subscribed by `subscribe_session/2`) so the SSE forwarder
+  # gets it too (ct-bl-recorder-titles). The second delivery is DROPPED here —
+  # not merely tolerated: `refresh_sessions/1` is a store read, and firing it
+  # again for a row we already render would re-query on every title and let a
+  # concurrent edit land as a flicker the user never asked for. The drop is
+  # keyed on what is RENDERED, so a genuinely new title always refreshes.
+  def handle_info({:chat_title, session_id, title}, socket) do
+    if title_rendered?(socket, session_id, title) do
+      {:noreply, socket}
+    else
+      {:noreply, refresh_sessions(socket)}
+    end
   end
 
   # The CLI's advertised slash commands landed (charter D36a), broadcast by the
@@ -1647,8 +1671,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     else
       messages =
         Enum.map(socket.assigns.messages, fn m ->
-          case Enum.find(results, fn {id, _out} -> id == m[:tool_use_id] end) do
-            {_id, out} -> Map.put(m, :output, out)
+          case Enum.find(results, fn {id, _out, _error?} -> id == m[:tool_use_id] end) do
+            {_id, out, error?} -> m |> Map.put(:output, out) |> Map.put(:tool_error, error?)
             nil -> m
           end
         end)
@@ -2121,20 +2145,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
               keeps the generic ⎿ row below. --%>
         <% mcp_chip = ChatToolRenderer.chip(@message[:tool], @message[:output]) %>
         <%!-- A Task/agent spawn (charter D40) gets a headline row: the
-              ● gutter plus the sub-agent's description; the frames it
+              gutter glyph plus the sub-agent's description; the frames it
               emits interleave below, indented under it. A plain tool row
               keeps the terse mono line. --%>
         <%!-- Hanging indent: glyph and text are flex columns, so a
-              wrapped line continues under the TEXT, never under the ●. --%>
+              wrapped line continues under the TEXT, never under the glyph. --%>
+        <%!-- The gutter is SETTLE-GATED (ChatToolRenderer.settle_state/1): ●
+              neutral while the row's turn is live, ✓ once the turn settled with
+              a result, ✗ once it settled with an error — and ● forever if the
+              result never arrived. Live and replay thread the identical three
+              facts, so a reopened session draws the same glyph. --%>
         <div :if={@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
-          <span style="color: var(--primary); flex: none;">●</span>
+          <span
+            style={"color: #{ChatToolRenderer.settle_color(@message)}; flex: none;"}
+            data-tool-state={ChatToolRenderer.settle_state(@message)}
+          >{ChatToolRenderer.settle_glyph(@message)}</span>
           <span style="min-width: 0; overflow-wrap: anywhere;">
             <span style="font-weight: 650;" data-gutter-text>{@message[:spawn_label] || @message.text}</span>
             <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
           </span>
         </div>
         <div :if={!@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
-          <span style="color: var(--primary); flex: none;">●</span>
+          <span
+            style={"color: #{ChatToolRenderer.settle_color(@message)}; flex: none;"}
+            data-tool-state={ChatToolRenderer.settle_state(@message)}
+          >{ChatToolRenderer.settle_glyph(@message)}</span>
           <span style="min-width: 0; overflow-wrap: anywhere;" data-gutter-text>{@message.text}</span>
         </div>
         <%!-- D38 + D25: a file-mutating tool call renders as a real colored
@@ -4557,6 +4592,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
     )
   end
 
+  # Is `title` for `session_id` ALREADY what the sidebar shows? The duplicate-
+  # delivery guard for `{:chat_title, …}`: the Recorder publishes one accepted
+  # write on two topics this LiveView subscribes to, and the repeat must not
+  # re-read the store. A session absent from the list (a row this tenant cannot
+  # see, or a list not yet loaded) is NOT "rendered", so it falls through to the
+  # refresh — the guard only ever suppresses a no-op.
+  defp title_rendered?(socket, session_id, title) do
+    Enum.any?(
+      socket.assigns[:sessions] || [],
+      &(&1.id == session_id and &1.title == title)
+    )
+  end
+
   defp refresh_sessions(socket) do
     # The sidebar LIST. The store call stays `:global` and the tenant clamp is
     # applied HERE — `StudioChat`'s own workspace scope is a strict
@@ -5241,6 +5289,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       text: md,
       html: nil,
       output: Map.get(meta, "output"),
+      # Settle-gated gutter, REPLAY half: the Recorder stamped `turn_settled` on
+      # this row when its turn's result frame landed, and `tool_error` when the
+      # tool_result said `is_error` — so a reopened session draws the SAME ✓/✗/●
+      # the live tab drew, off the persisted envelope, with no re-derivation.
+      turn_settled: Map.get(meta, "turn_settled") == true,
+      tool_error: Map.get(meta, "tool_error") == true,
       tool: name,
       input: input,
       tool_use_id: Map.get(meta, "tool_use_id"),
@@ -6089,17 +6143,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
     _ -> ""
   end
 
-  # Extract {tool_use_id, output_string} pairs from a wire user-frame. The
-  # result content may be a plain string or a block list; anything else (our
-  # own echoed sends through the cat test fake) yields [] and is ignored.
+  # Extract {tool_use_id, output_string, is_error?} triples from a wire
+  # user-frame. The result content may be a plain string or a block list;
+  # anything else (our own echoed sends through the cat test fake) yields [] and
+  # is ignored. `is_error` rides along because it is the ONLY wire fact that can
+  # turn a settled row's glyph ✗ — and an ERROR result with empty text is kept
+  # (a failing tool often has nothing to print, and dropping it would leave the
+  # row falsely neutral); a plain empty result is still ignored as before.
   defp tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
     content
     |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
-    |> Enum.map(fn block -> {block["tool_use_id"], tool_result_text(block["content"])} end)
-    |> Enum.reject(fn {_id, out} -> out in [nil, ""] end)
+    |> Enum.map(fn block ->
+      {block["tool_use_id"], tool_result_text(block["content"]), block["is_error"] == true}
+    end)
+    |> Enum.reject(fn {_id, out, error?} -> out in [nil, ""] and not error? end)
   end
 
   defp tool_results(_), do: []
+
+  # Settle EVERY tool row on the turn's terminal result frame (the SETTLE gate's
+  # live half; the Recorder writes the same truth durably via
+  # `StudioChat.settle_tool_rows/1`, which replay reads back). Rows of earlier
+  # turns are already settled, so this is idempotent — and the any?/guard keeps
+  # a settled transcript from paying an O(n) reassign + regroup per result.
+  defp settle_tool_rows(socket) do
+    messages = socket.assigns.messages
+
+    if Enum.any?(messages, &(&1.role == :tool and Map.get(&1, :turn_settled) != true)) do
+      assign_messages(
+        socket,
+        Enum.map(messages, fn
+          %{role: :tool} = m -> Map.put(m, :turn_settled, true)
+          m -> m
+        end)
+      )
+    else
+      socket
+    end
+  end
 
   defp tool_result_text(content) when is_binary(content), do: content
 

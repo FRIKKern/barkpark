@@ -340,9 +340,9 @@ green forever after `b` is renamed or was never written. A glob
 it to what exists — but it also silently shrinks, so it proves "the files that
 exist pass", never "the files that should exist pass".
 
-**Two live instances in this module.** `tooling/grip/test/record.test.mjs`
-**does not exist** — any prior artifact citing a `record.test.mjs` pass is
-vacuous green. And `admitFact`, which carries this epic's central ceiling law,
-has **no suite of its own**: it is exercised only incidentally inside
-`adjudicate.test.mjs` (5 references) and `level.test.mjs` (17), where the
-subject under test is something else.
+**Two instances, both CLOSED — past-tense (D102).** Until `41b16d78db`
+(2026-08-18) `tooling/grip/test/record.test.mjs` did not exist and `admitFact`
+had no suite of its own; an artifact citing a `record.test.mjs` pass from
+before it is vacuous green. That commit landed it as `admitFact`'s own
+BAD-DEPS mutation suite — 6 tests, 18 refs. Re-derive:
+`git ls-tree origin/main tooling/grip/test/record.test.mjs`.

@@ -98,25 +98,52 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
       refute Map.has_key?(row, "token_hash")
     end
 
-    test "an UNFILTERED list withholds the label — it is not a user directory", %{admin: admin} do
-      mail = email()
-      _raw = mint_custom_labelled!(admin, mail)
+    test "an UNFILTERED list returns the label — the directory risk moved to the ROWS",
+         %{admin: admin} do
+      # THIS TEST ASSERTED THE OPPOSITE UNTIL `task-aa07355fa8a53355`. It read
+      # "an UNFILTERED list withholds the label — it is not a user directory",
+      # and justified `label_redacted == true` this way: "returning them
+      # unfiltered would hand one workspace's admin every user's address on the
+      # instance — the admin gate here is permission-only, with no tenancy
+      # predicate."
+      #
+      # That premise is the part that changed. The gate is no longer
+      # permission-only in what it READS: `Auth.list_app_tokens/2` confines
+      # every arm to workspaces the bearer administers, so the sweep can no
+      # longer reach the instance's user list at all — not because the label is
+      # hidden, but because the ROWS are. Withholding the label from a caller
+      # who already administers the workspace hid nothing and cost the operator
+      # the one field naming whose token a row is.
+      #
+      # The cross-workspace proof lives in
+      # `BarkparkWeb.AppTokenCrossWorkspaceListTest`; this file's admin holds a
+      # single seeded workspace, so it can only assert the label posture.
+      custom_label = "custody-#{System.unique_integer([:positive])}"
+
+      conn =
+        json_conn(admin)
+        |> post("/v1/auth/app-tokens", Jason.encode!(%{email: email(), label: custom_label}))
+
+      assert conn.status in [200, 201], "mint failed: #{conn.status} #{conn.resp_body}"
 
       body = json_conn(admin) |> get("/v1/auth/app-tokens") |> json_response(200)
 
-      # Labels follow `app:<email>`, so returning them unfiltered would hand one
-      # workspace's admin every user's address on the instance — the admin gate
-      # here is permission-only, with no tenancy predicate.
-      assert body["label_redacted"] == true
+      # Kept-and-false, not dropped: a client keying on the envelope flag keeps
+      # parsing, and `false` states "nothing withheld" where an absent key
+      # would read as "unknown".
+      assert body["label_redacted"] == false
 
-      assert Enum.all?(body["tokens"], &is_nil(&1["label"])),
-             "an unfiltered list returned labels — that is a directory of every user"
+      # Asserted on THE ROW THIS TEST MINTED, found by its unique label —
+      # never `Enum.all?` over the whole response, which in a shared test
+      # database would be answering for another agent's rows.
+      labels = Enum.map(body["tokens"], & &1["label"])
 
-      refute body |> Jason.encode!() |> String.contains?(mail),
-             "an unfiltered list leaked an email address"
+      assert custom_label in labels,
+             "the unfiltered list still withholds the label — the redaction was not lifted"
 
       # present-and-null, never absent: a missing key would read as "this token
-      # has no label", a different and false statement.
+      # has no label", a different and false statement — and now that is the
+      # ONLY thing a null label can mean.
       assert Enum.all?(body["tokens"], &Map.has_key?(&1, "label"))
     end
 

@@ -621,7 +621,15 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "note": {
       "type": "string",
-      "description": "What was tried and why it missed. Required + non-empty when miss is true."
+      "description": "What was tried and why it missed (with miss), or WHY the criterion is being withdrawn (with withdraw — it is persisted on the withdrawals record and is the only place the reason survives). Required + non-empty for both."
+    },
+    "withdraw": {
+      "type": "boolean",
+      "description": "WITHDRAW a met criterion that review refuted: met goes to FALSE (criteria_progress drops), the original evidence is LEFT IN PLACE, and a {note,ts,worker,superseded_evidence} record is appended to the criterion's withdrawals list. REQUIRES note (why) and criterion_text (the same off-by-one guard met carries — lowering the wrong neighbour is as much a lie as raising it). Unlike met/miss this is allowed on a CLOSED or CANCELLED row, because a review that refutes a proof normally lands after the close; any row that is not in_progress needs observed_rev (the rev you read) instead of the epoch fence. Refused with 409 criterion_not_met if the criterion is already met=false."
+    },
+    "observed_rev": {
+      "type": "string",
+      "description": "The doc rev you read (task_get -> doc.rev). REQUIRED for a withdraw on a row that is NOT in_progress — such a row has no LIVE lease to fence against (a closed row keeps its claim only as a receipt), so the rev is the read-before-write proof instead (409 observed_rev_required otherwise). Ignored on an in_progress row, where the epoch fence applies."
     }
   }
 }`),
@@ -636,6 +644,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			Evidence      string `json:"evidence"`
 			Miss          bool   `json:"miss"`
 			Note          string `json:"note"`
+			Withdraw      bool   `json:"withdraw"`
+			ObservedRev   string `json:"observed_rev"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -652,14 +662,23 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		// Exactly one outcome, with its required companion — validated here so the
 		// caller gets immediate, precise feedback instead of a server 400 round-trip
 		// (the server enforces the same rules as a backstop).
-		if in.Met == in.Miss {
-			return mcpArgError(fmt.Errorf("pass exactly one of met / miss, not both (and not neither)")), nil
+		outcomes := 0
+		for _, on := range []bool{in.Met, in.Miss, in.Withdraw} {
+			if on {
+				outcomes++
+			}
+		}
+		if outcomes != 1 {
+			return mcpArgError(fmt.Errorf("pass exactly one of met / miss / withdraw — not two, and not none")), nil
 		}
 		if in.Met && strings.TrimSpace(in.Evidence) == "" {
 			return mcpArgError(fmt.Errorf("met requires non-empty evidence")), nil
 		}
 		if in.Miss && strings.TrimSpace(in.Note) == "" {
 			return mcpArgError(fmt.Errorf("miss requires non-empty note")), nil
+		}
+		if in.Withdraw && strings.TrimSpace(in.Note) == "" {
+			return mcpArgError(fmt.Errorf("withdraw requires non-empty note (why review refuted the proof — it is the only place the reason survives)")), nil
 		}
 		// Positionals mirror `bp task stamp <id> <worker> <epoch>` (observed_epoch
 		// rides as a string the server coerces via fetch_int, same as close);
@@ -669,9 +688,15 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if strings.TrimSpace(in.CriterionText) != "" {
 			tail = append(tail, "--criterion-text", in.CriterionText)
 		}
-		if in.Met {
+		switch {
+		case in.Met:
 			tail = append(tail, "--met", "--evidence", in.Evidence)
-		} else {
+		case in.Withdraw:
+			tail = append(tail, "--withdraw", "--note", in.Note)
+			if strings.TrimSpace(in.ObservedRev) != "" {
+				tail = append(tail, "--observed-rev", in.ObservedRev)
+			}
+		default:
 			tail = append(tail, "--miss", "--note", in.Note)
 		}
 		status, body, rerr := execManifestCommand(g, ctx, m, stampCmd, tail)

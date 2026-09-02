@@ -169,6 +169,45 @@ defmodule Barkpark.StudioChat.Recorder do
   @spec activity_topic() :: String.t()
   def activity_topic, do: "studio_chat:activity"
 
+  @doc """
+  Publish a session's settled title — the ONE title event every surface consumes
+  (`ct-bl-recorder-titles`). Called by `Titles.kick_title/2` only AFTER the
+  store's clobber guard accepted the write, so what ships here is the title now
+  in Postgres, never a candidate.
+
+  Two broadcasts of the SAME `{:chat_title, session_id, title}` tuple, the shape
+  `broadcast_workflow/2` already uses (charter D22):
+
+    * `activity_topic/0` — the GLOBAL fleet/sidebar channel. Studio's session
+      list and the `FleetHub` (which re-projects it onto `GET /v1/chat/events`)
+      key off this one; it is the pre-existing D69h delivery, kept verbatim.
+    * `topic/1` — the PER-SESSION channel the SSE forwarder in `ChatController`
+      subscribes to (and ONLY that: D24). This is the new half — it is what lets
+      `bp chat` and any other headless client learn the AI title from the
+      transport it already holds, retiring the D15 "GET the session each turn
+      boundary" workaround.
+
+  A module function, deliberately: title generation races the Recorder's own
+  lifecycle (a one-shot `bp chat` send can settle its title after the runtime
+  idles out), and routing through `whereis/1` would silently drop the event
+  whenever no Recorder happened to be alive. `Phoenix.PubSub.broadcast/3` with
+  zero subscribers returns `:ok` and cannot raise, so this stays safe inside
+  `kick_title`'s fire-and-forget task.
+
+  Exactly ONE event per topic per accepted write. A Studio tab subscribed to
+  both topics therefore sees the tuple twice by construction — `ChatLive`'s
+  handler drops the repeat rather than re-reading the store.
+  """
+  @spec broadcast_title(String.t(), String.t()) :: :ok
+  def broadcast_title(session_id, title) when is_binary(title) do
+    msg = {:chat_title, session_id, title}
+
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, activity_topic(), msg)
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, topic(session_id), msg)
+
+    :ok
+  end
+
   def start_link(%{session_id: id} = opts) do
     GenServer.start_link(__MODULE__, opts, name: {:via, Registry, {@registry, id}})
   end
@@ -544,6 +583,14 @@ defmodule Barkpark.StudioChat.Recorder do
     # to result) still flushes its pulse row so the thought is never lost.
     state = flush_thinking(state)
     record_result(state.session_id, ev)
+    # The TURN SETTLED — stamp every unsettled tool row of this session so a
+    # reopened transcript (Studio replay AND the Go TUI, which reads the same
+    # row metadata off message_json) draws the outcome glyph instead of a
+    # forever-neutral gutter. Stateless: rows of earlier turns are already
+    # stamped, so this settles exactly this turn's rows and survives a Recorder
+    # restart mid-turn. A row whose tool_result never arrived is settled but
+    # RESULTLESS — the renderers' provenance gate keeps it neutral, never ✓.
+    StudioChat.settle_tool_rows(state.session_id)
     # A live accumulator here means text streamed but no assistant frame ever
     # carried it durably, so there is nothing to verify the segments against:
     # abandon them rather than claim a settle we cannot prove (D61).
@@ -636,8 +683,8 @@ defmodule Barkpark.StudioChat.Recorder do
   # Attach it to the persisted tool row so replay shows the terminal's ⎿ line;
   # the frame also rebroadcasts so live tabs update their in-memory row.
   def handle_info({:claude_chat_event, %{"type" => "user"} = ev} = msg, state) do
-    for {tool_use_id, output} <- user_tool_results(ev) do
-      StudioChat.attach_tool_result(state.session_id, tool_use_id, output)
+    for {tool_use_id, output, error?} <- user_tool_results(ev) do
+      StudioChat.attach_tool_result(state.session_id, tool_use_id, output, error?)
     end
 
     broadcast(state, msg)
@@ -2117,14 +2164,23 @@ defmodule Barkpark.StudioChat.Recorder do
     Application.get_env(:barkpark, :studio_chat_idle_reap_ms, @idle_after_ms)
   end
 
-  # {tool_use_id, output} pairs off a wire user-frame; [] for anything else
-  # (our own echoed sends through test fakes never match). Output capped so a
-  # huge tool result can't bloat the jsonb row.
+  # {tool_use_id, output, is_error?} triples off a wire user-frame; [] for
+  # anything else (our own echoed sends through test fakes never match). Output
+  # capped so a huge tool result can't bloat the jsonb row. `is_error` is the
+  # ONLY wire fact that turns a settled row's gutter ✗, so an ERROR result with
+  # empty text is KEPT (a failing tool often prints nothing, and dropping it
+  # would leave the replayed row falsely neutral); a plain empty result is still
+  # ignored, exactly as before.
   defp user_tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
     content
     |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
-    |> Enum.map(fn b -> {b["tool_use_id"], result_text(b["content"])} end)
-    |> Enum.reject(fn {_id, out} -> out in [nil, ""] end)
+    |> Enum.map(fn b ->
+      # `result_text/1` answers nil for a contentless block — normalize to ""
+      # so an ERROR result with no text still reaches the persist seam (whose
+      # guard is `is_binary(output)`) instead of raising a FunctionClauseError.
+      {b["tool_use_id"], result_text(b["content"]) || "", b["is_error"] == true}
+    end)
+    |> Enum.reject(fn {_id, out, error?} -> out == "" and not error? end)
   end
 
   defp user_tool_results(_), do: []

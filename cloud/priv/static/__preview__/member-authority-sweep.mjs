@@ -351,7 +351,16 @@ const PIN_MEMBER_SCENARIOS = 10;
 // sweep and reading the number it PRINTED, not by adding one. Its actor is the
 // same owner `me("Acme Inc", …)` every site-detail scenario carries, so the
 // member slice is unmoved and PIN_MEMBER_SCENARIOS stays at 10.
-const PIN_TOTAL_SCENARIOS = 116;
+// 116 -> 119: cch-w45-bl-four-rail-verbs added `instance-behind`,
+// `instance-remove-failed` and `verify-no-credentials` — the three instance
+// states that make #inst-update, #inst-remove-retry and [data-vf-reprovision]
+// render at all. RE-DERIVED by running this sweep and reading the number it
+// PRINTED, not by adding three. All three carry the same owner actor
+// `me("Acme Inc", …)` the rest of the instance corpus does, so the member slice
+// is unmoved and PIN_MEMBER_SCENARIOS stays at 10 — the member arm of these
+// verbs is pinned in __app.test.mjs's cch-w38-s1 eleven-offer table, which
+// asserts both directions on all seven.
+const PIN_TOTAL_SCENARIOS = 119;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

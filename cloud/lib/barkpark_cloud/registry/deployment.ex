@@ -172,6 +172,32 @@ defmodule BarkparkCloud.Registry.Deployment do
 
     field :became_live_at, :utc_datetime_usec
 
+    # site-spawner (node slot truth): WHICH SLOT IS SERVING THIS BUILD, and
+    # WHETHER ITS HEALTH GATE ACTUALLY RAN.
+    #
+    #   * `slot` / `port` — the blue/green position Caddy was MEASURED to be
+    #     proxying to after SWITCH, plus the loopback port it answers on. Read
+    #     back out of the box's own Caddyfile (`deploy/site-deploy-node.sh`'s
+    #     report-only SERVED marker) and mapped onto the site's `port_base` by
+    #     `Sites.Deploy` — never the slot the control plane INTENDED. In a
+    #     blue/green deploy the Caddy upstream port IS the slot truth, and a slot
+    #     derived from intent would report intent while looking like state. NULL
+    #     on every static row and on any node build that died before SWITCH;
+    #     `slot` is additionally NULL (while `port` stands) when the served port
+    #     matched neither of this site's two allocated slots — "we do not know
+    #     which half" is not "we did not look".
+    #
+    #   * `health_exit_code` — 0 (HEALTH ran and passed), 14 (ran and failed —
+    #     the cross-engine convention), or NIL (never measured). NULLABLE AND
+    #     NEVER DEFAULTED, because 0 IS SUCCESS: an integer that defaulted to
+    #     zero would render "the health stage never ran" as "the health stage
+    #     passed", so a build that died in BUILD would read as health-certified.
+    #     The same discipline `internal/cloudclient`'s Deployment states for its
+    #     six pointer fields, for the same reason and after the same defect.
+    field :slot, :string
+    field :port, :integer
+    field :health_exit_code, :integer
+
     # deploy-reliability W12 (S6): THE CHAIN, AS DATA. Until now a deferral's
     # position in its chain existed only as English inside `failure_reason`
     # ("refusal 3 of 12 in this site's current chain") and the Go CLI read it
@@ -409,6 +435,14 @@ defmodule BarkparkCloud.Registry.Deployment do
       # phase of the six-stage pipeline (latest-wins). Distinct from the coarse
       # `status` lifecycle it rides alongside.
       :stage,
+      # site-spawner (node slot truth): the box's MEASUREMENTS, cast here and
+      # nowhere else. They belong on the transition for the same reason `stage`
+      # does — they are things the box observed while driving this build, not
+      # things a caller may declare at create. A create-castable `slot` would let
+      # a request be born claiming a Caddy upstream nobody flipped.
+      :slot,
+      :port,
+      :health_exit_code,
       # deploy-reliability W12 (S6): the chain, as data. Cast HERE and nowhere
       # else — a deferral is a TRANSITION (`queued|building|pushing → deferred`),
       # so the structured chain is written by the same fenced write that settles

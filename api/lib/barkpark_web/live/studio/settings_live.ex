@@ -626,12 +626,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         </p>
       <% end %>
 
-      <%= if msg = Phoenix.Flash.get(@flash, :info) do %>
-        <div role="status" style="background:var(--success-bg); color:var(--success); padding:.5rem; margin:.5rem 0;">{msg}</div>
-      <% end %>
-      <%= if msg = Phoenix.Flash.get(@flash, :error) do %>
-        <div role="alert" style="background:var(--destructive-bg); color:var(--destructive); padding:.5rem; margin:.5rem 0;">{msg}</div>
-      <% end %>
+      <%!-- No flash markup here ON PURPOSE (sup-w5bk). The `:studio` live
+            layout this route mounts under renders `<.studio_flash flash={@flash} />`
+            (nav.ex) with role=status/aria-live=polite for :info and
+            role=alert/aria-live=assertive for :error. This page used to render
+            its OWN copy as well, so one `put_flash/3` painted TWO banners and
+            announced TWICE to assistive tech. The layout is the single sink;
+            do not re-add a page-local one. --%>
 
       {render_theme_section(assigns)}
 
