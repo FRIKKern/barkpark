@@ -1272,17 +1272,36 @@ echo "== §10 in-place bp copy recipes =="
 # BEFORE any formatting, because `cmd | sed` reports sed's exit code unless
 # pipefail happens to be set, and a gate whose red is laundered by its own
 # pretty-printer is worse than no gate.
-set +e
-BPCP_OUT=$("$REPO_ROOT/scripts/no-inplace-bp-copy-check.sh" 2>&1)
-BPCP_RC=$?
-set -e
-printf '%s
-' "$BPCP_OUT" | sed 's/^/      /'
-if [ "$BPCP_RC" -eq 0 ]; then
-  echo "ok:   §10 no in-place bp copy recipe on this tree"
-else
-  echo "FAIL: §10 an in-place bp copy recipe is present (rc=$BPCP_RC, see above)"
+#
+# It also needs §9's TWO guards, and shipped with neither. A delegating arm
+# resolves its script through $REPO_ROOT, and under --selftest $REPO_ROOT is the
+# FIXTURE — a four-file tree with no scripts/ directory — so the invocation was
+# "no such file", rc=127, and every selftest case that expects a clean exit 0
+# red. That is not a gate catching anything: it is an arm that CANNOT pass,
+# which reds the job on every PR and teaches the repo to stop reading it.
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO — same precedent as §8b and §9.
+  echo "ok:   §10 in-place bp copy check not applicable to a custom DOCS_ANCHORS_ROOT"
+elif [ ! -x "$REPO_ROOT/scripts/no-inplace-bp-copy-check.sh" ]; then
+  # The skip above is scoped to a custom root ON PURPOSE. On the real tree a
+  # missing or non-executable delegate is a REAL fault — a tripwire that has
+  # been deleted, or lost its +x, still reads as "no recipe found" if you let
+  # this fall through to ok. Silence is the failure mode this whole arm exists
+  # to prevent, so it is a red, not a skip.
+  echo "FAIL: §10 scripts/no-inplace-bp-copy-check.sh is missing or not executable"
   FAIL=1
+else
+  set +e
+  BPCP_OUT=$("$REPO_ROOT/scripts/no-inplace-bp-copy-check.sh" 2>&1)
+  BPCP_RC=$?
+  set -e
+  printf '%s\n' "$BPCP_OUT" | sed 's/^/      /'
+  if [ "$BPCP_RC" -eq 0 ]; then
+    echo "ok:   §10 no in-place bp copy recipe on this tree"
+  else
+    echo "FAIL: §10 an in-place bp copy recipe is present (rc=$BPCP_RC, see above)"
+    FAIL=1
+  fi
 fi
 
 # --- summary ------------------------------------------------------------------
