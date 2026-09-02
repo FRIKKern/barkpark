@@ -353,8 +353,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Returns `{:ok, %{rev: n, applied: n, errors: [%{index:, code:, message:}]}}`,
   `{:error, :not_found}` when no sheet resolves for the slug,
   `{:error, :batch_too_large, n}` when `ops` exceeds `max_ops_per_call/0`,
-  or `{:error, :session_unavailable}` when the session died twice in a row
-  (see `call_session/4`).
+  `{:error, :session_unavailable}` when the session died twice in a row
+  (see `call_session/4`), or `{:error, :replay_unavailable}` when a
+  `request_id` was supplied and the replay ring cannot be read (fail-closed:
+  applying without the ring could double-apply — see `ReplayRing`'s
+  "Ownership" section).
 
   ## Exactly-once retry (`request_id`)
 
@@ -674,6 +677,24 @@ defmodule Barkpark.Plugins.Sheets.Session do
         # the cached reply verbatim (+ replayed: true) and apply NOTHING, so a
         # retried non-idempotent batch (insert_rows) never runs twice.
         {:reply, {:ok, Map.put(cached, :replayed, true)}, schedule_idle(state)}
+
+      :unavailable ->
+        # The ring cannot answer — there is no table to read. This is NOT a
+        # miss: "never applied" is a claim only a readable ring can make, and
+        # treating the two alike is exactly how a retry used to re-apply a
+        # non-idempotent batch in silence. Fail CLOSED. The ring has already
+        # logged at :error naming this key; the caller retries once the ring is
+        # back, and the batch is applied at most once either way.
+        #
+        # HTTP surface, named because it is a real residual: `OpsController`'s
+        # `apply_ops_error/4` has no clause for this reason, so it currently
+        # renders through the catch-all as 422 `session_start_failed`. The
+        # CORRECT surface is the transient 503 + `retry-after` that
+        # `:session_unavailable` already gets. Out of this change's fence
+        # (`ops_controller.ex`), and reachable only when the table is deleted
+        # outright — a ring CRASH no longer reaches here at all, because the
+        # heir keeps the table.
+        {:reply, {:error, :replay_unavailable}, schedule_idle(state)}
 
       _ ->
         {reply, state} = do_apply_ops(ops, state)
