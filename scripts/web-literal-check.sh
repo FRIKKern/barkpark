@@ -90,7 +90,7 @@ TSX
     if out="$(WEB_LIT_SELFTEST="$tmp/planted.tsx" bash "$0" 2>&1)"; then
         fail "planted #ff0000 was NOT caught (gate is blind)." "$out"
     fi
-    printf '%s' "$out" | grep -q 'planted.tsx:2' \
+    grep -q 'planted.tsx:2' <<<"$out" \
         || fail "RED did not name the planted file:line." "$out"
 
     # 2) A clean token-consuming file MUST pass.
@@ -156,7 +156,7 @@ CSS
     if out="$(WEB_LIT_SELFTEST="$tmp/generated_edge.css" bash "$0" 2>&1)"; then
         fail "an hsl() just OUTSIDE the GENERATED block was NOT caught." "$out"
     fi
-    printf '%s' "$out" | grep -q 'generated_edge.css:6' \
+    grep -q 'generated_edge.css:6' <<<"$out" \
         || fail "RED did not name the line just outside the GENERATED block." "$out"
 
     # 7) A lit-allow spoofed from a JSX ATTRIBUTE STRING MUST fail (cgsi-s4).
@@ -201,7 +201,7 @@ TSX
     if out="$(bash "$tmp/relocated/scripts/web-literal-check.sh" 2>&1)"; then
         fail "a RELOCATED copy scanning no files PASSED (vacuous green)." "$out"
     fi
-    printf '%s' "$out" | grep -q 'file floor' \
+    grep -q 'file floor' <<<"$out" \
         || fail "the zero-file RED did not name the corpus floor." "$out"
 
     echo "web-literal-check --selftest: PASS — gate REDs on a planted literal (naming file:line), on"
@@ -362,9 +362,10 @@ def corpus():
 # WEB_LIT_SELFTEST single-file mode (that mode scans exactly one fixture on
 # purpose), so it does NOT catch that env var leaking into the real CI step —
 # only the gate step keeping its environment clean does.
-# 56 files scanned today, and the corpus is flat
-# (55 two thousand commits ago); the floor sits far below that so ordinary
-# deletions never trip it, and far above 0/1 so neither vacuous-green path can.
+# 55 files scanned today (re-measured spd-w19r; the comment said 56 when the
+# floor landed), and the corpus is flat — 55 two thousand commits ago as well.
+# The floor sits far below that so ordinary deletions never trip it, and far
+# above 0/1 so neither vacuous-green path can.
 # The --selftest relocated-copy case is what keeps this floor honest.
 MIN_WEB_FILES = 30
 
