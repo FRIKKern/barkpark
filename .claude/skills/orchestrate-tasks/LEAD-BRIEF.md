@@ -72,6 +72,13 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    different answers. The fix is ONE fixture file read by BOTH suites, with the mutation proved
    in both directions — a lock only one side checks is half a lock. Before you ship a value to a
    second surface, ask where the lock is; if the answer is "both are tested", there is none.
+   Two refinements measured the same day: PRECEDENCE is part of the contract, so a fixture that
+   pins the value SET still misses an arm ORDER swapped on one side only — mutate the order
+   separately from the characters. And this is not a witch hunt: the repo has TWO working lock
+   patterns (one shared file both suites read, or copies plus a freshness test that decodes both
+   and asserts them term-identical). A mirror is a finding only when NEITHER is present, and you
+   VERIFY the lock rather than trusting a comment that says "mirrors X" — that word is the tell
+   for hand-maintained.
    **The real cap is FILE saturation, not the PR count.** When the open PRs in your fence
    already touch the same handful of files, an extra PR is a guaranteed green-apart /
    red-together collision no matter how much WIP headroom you have. A lane that is saturated
