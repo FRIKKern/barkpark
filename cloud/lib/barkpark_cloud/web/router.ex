@@ -10623,6 +10623,23 @@ defmodule BarkparkCloud.Web.Router do
       agent_status: bp.agent_status,
       version: bp.version,
       git_commit: bp.git_commit,
+      # dr-w22-bl SINCE WHEN this box has served that commit. The `(sha,
+      # first_seen)` history already existed — every 60 s beat lands in
+      # `agent_events` with the full report and AgentRetentionWorker keeps 14
+      # days of it (measured on prod 2026-09-01: 132,120 rows spanning
+      # 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z) — but its ONLY reader is
+      # `GET /v1/barkparks/:id/events`, which is `Auth.require_user` and pages
+      # at 200 rows: about three hours of a fourteen-day record, handed to a
+      # NARROWER caller than this route's `require_user_or_pat` + `read`. The
+      # materialised column answers the question here instead, so no page and
+      # no auth widening is needed to get it.
+      #
+      # NULL is UNMEASURED, never "now" — the same contract `commit_distance`
+      # carries below. A box that has not changed sha since the column shipped,
+      # and a box whose stored sha was empty when a sha first arrived, both read
+      # NULL because neither transition was OBSERVED. Renderers must paint it as
+      # unmetered and must not sort it as fresh.
+      git_commit_first_seen_at: bp.git_commit_first_seen_at,
       last_seen_at: bp.last_seen_at,
       # Reachability bookkeeping (health-status) — the raw counters behind the
       # health axis, so a client can state the EVIDENCE ("N consecutive missed

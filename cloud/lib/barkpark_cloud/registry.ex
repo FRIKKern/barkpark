@@ -988,6 +988,7 @@ defmodule BarkparkCloud.Registry do
           {:ok, Barkpark.t()} | {:recovered, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def record_agent_report(%Barkpark{} = bp, attrs) do
     was_latched = bp.unreachable_notification_sent
+    attrs = stamp_git_commit_first_seen(bp, attrs)
 
     with {:ok, bp} <- upsert_health(bp, attrs),
          {:ok, bp} <-
@@ -1000,6 +1001,70 @@ defmodule BarkparkCloud.Registry do
       if was_latched, do: {:recovered, bp}, else: {:ok, bp}
     end
   end
+
+  # dr-w22-bl — the ONE datum the 14-day `agent_events` history is actually
+  # asked for, materialised onto the row so a PAT-reachable surface can answer
+  # it. `GET /v1/barkparks/:id/events` is `Auth.require_user` and pages at 200
+  # rows (≈3 h of a 14-day record); `GET /v1/barkparks` is
+  # `require_user_or_pat` + `require_ability("read")`. Stamping here means the
+  # wider surface answers "since when has this box served this commit?" without
+  # paging anything and without widening the events route's auth.
+  #
+  # THE RULE, and both of its refusals:
+  #
+  #   * stored sha and incoming sha are BOTH non-empty and DIFFER → stamp `now`.
+  #     This is the only case where we OBSERVED the transition, so it is the
+  #     only case we can date.
+  #   * stored sha is nil/empty (a fresh row, an offline agent, an agent that
+  #     predates `git_commit` in the report) → REFUSE. That sha may have been
+  #     running for days before the first beat carrying it reached us; stamping
+  #     `now` would report a weeks-old commit as freshly deployed. NULL means
+  #     UNMEASURED, and this is the case that makes that promise true.
+  #   * same sha as the row already carries → REFUSE, and DO NOT re-stamp. A
+  #     steady box beats every 60 s; a re-stamp would turn "first seen" into
+  #     "last seen", which the row already has under its own name.
+  #
+  # `Map.drop/2` is not tidiness. `attrs` on the live path is built by the
+  # `POST /v1/agent/report` handler from named report fields, but this function
+  # is public and the column must be SERVER-COMPUTED on every call — dropping
+  # both the atom and the string spelling first means a caller-supplied value
+  # can never reach `health_changeset/2`.
+  defp stamp_git_commit_first_seen(%Barkpark{} = bp, attrs) do
+    attrs = Map.drop(attrs, [:git_commit_first_seen_at, "git_commit_first_seen_at"])
+
+    stored = presence(bp.git_commit)
+
+    {key, incoming} =
+      cond do
+        Map.has_key?(attrs, :git_commit) -> {:git_commit_first_seen_at, attrs[:git_commit]}
+        Map.has_key?(attrs, "git_commit") -> {"git_commit_first_seen_at", attrs["git_commit"]}
+        true -> {:git_commit_first_seen_at, nil}
+      end
+
+    incoming = presence(incoming)
+
+    if stored && incoming && stored != incoming do
+      # THE KEY SPELLING IS NOT COSMETIC. `Ecto.Changeset.cast/4` REFUSES a map
+      # with mixed atom and string keys outright (`Ecto.CastError`), so putting
+      # an atom key into a string-keyed attrs map does not merely fail to stamp —
+      # it makes the whole health report raise, and the live
+      # `POST /v1/agent/report` path would 500 on the one beat that changes the
+      # sha. The stamp therefore takes its spelling from the `git_commit` key it
+      # was derived from.
+      Map.put(attrs, key, DateTime.truncate(DateTime.utc_now(), :microsecond))
+    else
+      attrs
+    end
+  end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_), do: nil
 
   @doc """
   Seconds since `last_seen_at` before a heartbeat counts as missed. Default
