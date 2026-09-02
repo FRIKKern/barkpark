@@ -154,8 +154,7 @@ defmodule Barkpark.PluginFreeBootTest do
     # dataset STRING in the Default project and 404d every workspace-scoped
     # asset). Two struct fields -> a scope keyword list, nils dropped; no
     # DB/network/config touch, so it is identical under `:plugins []`.
-    {"Barkpark.Plugins.Media",
-     "lib/barkpark_web/controllers/v1/media_processing_controller.ex"},
+    {"Barkpark.Plugins.Media", "lib/barkpark_web/controllers/v1/media_processing_controller.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/processing.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/checkout.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/collections.ex"},

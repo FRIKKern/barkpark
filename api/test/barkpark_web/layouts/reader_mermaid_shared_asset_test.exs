@@ -36,7 +36,8 @@ defmodule BarkparkWeb.Layouts.ReaderMermaidSharedAssetTest do
       Content.upsert_paper(
         Barkpark.LabelFixtures.paper_attrs(%{
           slug: @slug,
-          body_html: ~s(<section id="b1"><pre class="mermaid">graph TD; A--&gt;B;</pre></section>),
+          body_html:
+            ~s(<section id="b1"><pre class="mermaid">graph TD; A--&gt;B;</pre></section>),
           event_type: "plan-written"
         })
       )
@@ -149,8 +150,10 @@ defmodule BarkparkWeb.Layouts.ReaderMermaidSharedAssetTest do
       {dark, light} = palettes(asset())
 
       assert dark != []
-      assert dark == light, "dark/light palette key sets diverge: #{inspect(dark -- light)} / " <>
-                              inspect(light -- dark)
+
+      assert dark == light,
+             "dark/light palette key sets diverge: #{inspect(dark -- light)} / " <>
+               inspect(light -- dark)
     end
 
     test "the palette values are the reader's proven evergreen literals, unchanged by the dedup" do
