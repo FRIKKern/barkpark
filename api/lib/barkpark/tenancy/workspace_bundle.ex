@@ -495,6 +495,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # at every DDL point. Transaction-scoped; no privilege required.
         Repo.query!("SET CONSTRAINTS ALL IMMEDIATE", [])
 
+        # Reserved-slug seat guard (task-545166efceb1bc91) — BEFORE the PDS-D9
+        # pre-flight, so a bundle aimed at a vacant reserved seat never reaches
+        # the adopt branch's delete. The snapshot it returns is re-read after
+        # the members land; see the section comment on
+        # assert_root_slug_not_vacant_reserved!/2.
+        vacant_reserved = vacant_reserved_slugs()
+        assert_root_slug_not_vacant_reserved!(manifest, vacant_reserved)
+
         # PDS-D9 pre-flight runs FIRST among the import's own writes, before
         # any trigger/constraint DDL, so the empty-shell delete's FK cascades
         # AND teardown triggers (workspaces_teardown_cycle_ledger) fire with
@@ -536,6 +544,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
         alter_user_triggers!(live, "ENABLE")
         restore_member_fks!(member_fks)
+
+        # The manifest's declared root slug is a CLAIM; the workspaces COPY
+        # member carries the actual slug. Re-read the seats that were vacant at
+        # pre-flight so a manifest that under-declares itself is caught by the
+        # rows it actually landed, not by what it said about them.
+        assert_reserved_seats_still_vacant!(vacant_reserved)
 
         # LAST, and deliberately AFTER restore_member_fks!/1: the grant is the
         # only row this transaction writes through Ecto rather than COPY, and
@@ -1407,6 +1421,98 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             # return value and COMMIT (the FK-abort scar).
             Repo.rollback({:operator_grant_failed, changeset})
         end
+    end
+  end
+
+  # ── Reserved-slug seat guard (task-545166efceb1bc91) ────────────────────────
+  #
+  # THE HOLE. `copy_where("workspaces", :root, ctx)` restores the root
+  # workspaces row by a bare `COPY`. No `Workspace.changeset/2` is ever built,
+  # so the row reaches the table through NEITHER of the two guards that police
+  # every other way a workspace comes into existence:
+  #
+  #   * `Tenancy.singleton_slug_error/1` — refuses a PRINCIPAL claiming the
+  #     instance-default singleton slug, and
+  #   * `Workspace.changeset/2`'s `validate_exclusion(:slug, @reserved_slugs)`
+  #     — refuses the routing-prefix names (admin, api, studio, media, …).
+  #
+  # WHY THAT MATTERS. `Tenancy.get_default_workspace/0` is
+  # `Repo.get_by(Workspace, slug: "default")`. Whoever holds that slug IS the
+  # instance default: `AssignDefaultScope` binds every flat route to it, and
+  # `Content.WriteScope.resolve_write_scope/1` stamps an UNSCOPED WRITE with
+  # it. The `unique_index(:workspaces, [:slug])` the import route's own comment
+  # leans on refuses a squat only while the seat is OCCUPIED — with the seat
+  # VACANT there is no row to collide with and the COPY simply lands.
+  #
+  # THE RULE, AND ITS EXACT EDGE. A reserved seat that is VACANT on this
+  # instance at pre-flight time may not be filled by an import. That is
+  # deliberately narrower than "an import may never hold a reserved slug",
+  # because the wider rule would break a SUPPORTED production flow:
+  # `bp cloud support add --ws default` (internal/cli/cloud_support_cmd.go)
+  # runs SupportResetDefaultWorkspaceStep → SupportAdminTokenStep (whose
+  # `Seeds.Shared.ensure_default_scope/0` re-mints an EMPTY default workspace)
+  # → merge-import, and the PDS-D9 adopt branch below then replaces that empty
+  # shell with the imported workspace ON PURPOSE. At that import the seat is
+  # OCCUPIED, so this guard is silent and the adopt branch is unchanged.
+  #
+  # STATED PLAINLY, because it is the residue: the shell-eviction arm — a
+  # bundle whose root slug is `default` landing while the seat is held by an
+  # EMPTY workspace — is state-identical to that supported flow. Nothing the
+  # engine can read off the database tells the two apart; only the CALLER'S
+  # INTENT does, and the intent signal exists but does not reach here:
+  # `POST /api/workspaces/:workspace_slug/import` carries the operator's named
+  # target in the path and `WorkspaceController.import/2` discards it (its
+  # sibling `export/2` binds on it). Closing that arm means threading the
+  # request's `:workspace_slug` into the engine as an expectation and refusing
+  # a manifest that disagrees — a controller change, filed separately rather
+  # than guessed at here.
+  #
+  # The refusal is an `InvalidBundleError`, matching `assert_member_tables!/1`:
+  # a bundle that cannot be landed on THIS instance is a caller-fixable 422 at
+  # the HTTP edge, not an opaque 500.
+  defp vacant_reserved_slugs do
+    reserved = Tenancy.reserved_workspace_slugs()
+
+    held =
+      Repo.query!("SELECT slug FROM workspaces WHERE slug = ANY($1::text[])", [reserved]).rows
+      |> List.flatten()
+      |> MapSet.new()
+
+    Enum.reject(reserved, &MapSet.member?(held, &1))
+  end
+
+  defp assert_root_slug_not_vacant_reserved!(manifest, vacant_reserved) do
+    slug = manifest["workspace_slug"]
+
+    if slug in vacant_reserved do
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message:
+          "bundle root workspace slug #{inspect(slug)} is reserved on this instance and its " <>
+            "seat is currently VACANT — a raw-COPY import would CLAIM it without ever " <>
+            "reaching Workspace.changeset/2. Re-establish the seat first " <>
+            "(Seeds.Shared.ensure_default_scope/0, or the support chain's " <>
+            "SupportAdminTokenStep) so the import lands on the PDS-D9 adopt branch, or " <>
+            "re-export the bundle under a slug that is not reserved."
+    end
+  end
+
+  defp assert_reserved_seats_still_vacant!(vacant_reserved) do
+    claimed =
+      Repo.query!(
+        "SELECT slug, id::text FROM workspaces WHERE slug = ANY($1::text[]) ORDER BY slug",
+        [vacant_reserved]
+      ).rows
+
+    if claimed != [] do
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message:
+          "the bundle's rows CLAIMED reserved workspace slug(s) whose seat was vacant before " <>
+            "the import: " <>
+            Enum.map_join(claimed, ", ", fn [slug, id] -> "#{inspect(slug)} -> #{id}" end) <>
+            " — the manifest's declared workspace_slug did not match the workspaces row it " <>
+            "carried."
     end
   end
 
