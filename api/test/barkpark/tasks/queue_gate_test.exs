@@ -91,6 +91,67 @@ defmodule Barkpark.Tasks.QueueGateTest do
     assert Tasks.execution_class(legacy_claimed, "worker-a") == "executable"
   end
 
+  test "a CLOSED claim is not live — a reopened row is executable for a NEW worker" do
+    # The exact shape `close` leaves behind: worker KEPT, closed_by + closed_at
+    # stamped (close.ex "Stamp close metadata into the claim lease"), and then
+    # `Stage` reopens `done → open` without touching `content.claim` at all.
+    reopened = %{
+      "kind" => "task",
+      "lifecycle_status" => "open",
+      "claim" => %{
+        "worker" => "worker-a",
+        "epoch" => 3,
+        "ts_iso" => "2026-07-26T18:00:00Z",
+        "closed_by" => "worker-a",
+        "closed_at" => "2026-07-26T18:29:53Z"
+      }
+    }
+
+    # RED BEFORE: both of these were "foreign_claimed"/false, forever.
+    assert Tasks.execution_class(reopened, "worker-b") == "executable"
+    assert QueueGate.executable?(reopened, "worker-b")
+
+    # The residual holder is not privileged over a contender either.
+    assert Tasks.execution_class(reopened, "worker-a") == "executable"
+
+    # A persisted gate is still honoured once the dead claim stops shadowing it.
+    parked = put_in(reopened["queue_gate"], %{"version" => 1, "state" => "parked", "reason" => "later"})
+    assert Tasks.execution_class(parked, "worker-b") == "parked"
+    refute QueueGate.executable?(parked, "worker-b")
+
+    # closed_at ALONE is enough (a lease killed without a closer name).
+    at_only = update_in(reopened["claim"], &Map.delete(&1, "closed_by"))
+    assert Tasks.execution_class(at_only, "worker-b") == "executable"
+
+    # And closed_by ALONE is enough.
+    by_only = update_in(reopened["claim"], &Map.delete(&1, "closed_at"))
+    assert Tasks.execution_class(by_only, "worker-b") == "executable"
+  end
+
+  test "a LIVE claim still derives foreign_claimed for other workers" do
+    # Guard against over-widening: no close stamp, blank close stamps, and the
+    # in_progress lease all stay foreign to a contender.
+    live = %{
+      "kind" => "task",
+      "lifecycle_status" => "in_progress",
+      "claim" => %{"worker" => "worker-a", "epoch" => 1, "ts_iso" => "2026-07-26T18:00:00Z"}
+    }
+
+    assert Tasks.execution_class(live, "worker-b") == "foreign_claimed"
+    refute QueueGate.executable?(live, "worker-b")
+    assert Tasks.execution_class(live, "worker-a") == "executable"
+    assert QueueGate.executable?(live, "worker-a")
+
+    for blank <- ["", "   "] do
+      blanked = update_in(live["claim"], &Map.merge(&1, %{"closed_at" => blank, "closed_by" => blank}))
+      assert Tasks.execution_class(blanked, "worker-b") == "foreign_claimed"
+      refute QueueGate.executable?(blanked, "worker-b")
+    end
+
+    nils = update_in(live["claim"], &Map.merge(&1, %{"closed_at" => nil, "closed_by" => nil}))
+    assert Tasks.execution_class(nils, "worker-b") == "foreign_claimed"
+  end
+
   test "executable predicate admits only absent, null, or exact executable v1 gates" do
     assert QueueGate.executable?(%{})
     assert QueueGate.executable?(%{"queue_gate" => nil})
