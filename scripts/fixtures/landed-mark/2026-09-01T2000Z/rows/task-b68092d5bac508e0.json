@@ -1,0 +1,17 @@
+{
+ "ok": true,
+ "doc": {
+  "doc_id": "task-b68092d5bac508e0",
+  "rev": "fixture-2026-09-01T2000Z",
+  "title": "cloud/ 2FA exports a replay-blind OTP verifier with zero callers",
+  "lifecycle_status": "open",
+  "content": {
+   "assignee": "lead9-cloud",
+   "lifecycle_status": "open",
+   "kind": "task",
+   "claim": {
+    "epoch": 8
+   }
+  }
+ }
+}

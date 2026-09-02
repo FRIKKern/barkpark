@@ -1,0 +1,14 @@
+{
+ "ok": true,
+ "doc": {
+  "doc_id": "task-076ca42e29836029",
+  "rev": "fixture-2026-09-01T2000Z",
+  "title": "site-domain uniqueness is one-directional",
+  "lifecycle_status": "open",
+  "content": {
+   "assignee": "cloud-domain-guard",
+   "lifecycle_status": "open",
+   "kind": "task"
+  }
+ }
+}
