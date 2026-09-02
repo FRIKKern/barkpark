@@ -17,6 +17,10 @@ name: reland-check
 # empty ledger (`curl -sS` has no `--fail`), and a 16%-of-the-corpus scan
 # (limit=1000, no offset walk, 6212 live tasks). The fetch now runs through
 # tooling/task-obsession/reland_fetch.py, which captures the HTTP status code,
+# and whose 401/403-with-a-token note is now surfaced as its OWN advisory
+# warning naming BARKPARK_TASK_TOKEN rather than as a generic "did not run"
+# (2026-09-01: the shared secret was a revoked admin token, and every surface
+# that read it reported an outage),
 # offset-walks to exhaustion under a page cap, asks for ?count=true so `total` is
 # known, and prints a tri-state `status=ok|infra|skipped`. NOTHING here reads
 # `findings` without first reading `status`. `continue-on-error: true` stays —
@@ -177,8 +181,29 @@ jobs:
 
           # STATUS FIRST — a fetch that did not happen must never render as a
           # clean scan. Loud, but still advisory: ::warning, never ::error.
+          #
+          # AND A REFUSED CREDENTIAL GETS ITS OWN SENTENCE. This job reads the
+          # SAME secret the pr-task-gate required check reads, and on
+          # 2026-09-01T20:26Z that secret — then an instance admin token — was
+          # revoked. reland_fetch.py already classifies the answer correctly
+          # (`HTTP 401 from the ledger on page N — the token may have been
+          # rotated`), but that note was then poured into the generic
+          # `DID NOT RUN` warning alongside genuine outages, so the one class of
+          # failure a re-run can never clear read identically to the one a
+          # re-run always clears. This job is ADVISORY, so the remedy is a loud
+          # ::warning that NAMES the secret — never an ::error, which would turn
+          # a rotated token into a blocking red on an advisory check.
+          # Matched with `case`, not grep: this step runs under GitHub's
+          # `bash -e {0}` and a non-matching grep would abort it outright.
           if [ "$status" = "infra" ]; then
-            echo "::warning title=Re-land check DID NOT RUN::${note:-the ledger fetch failed}. This is NOT a clean scan — overlap was not evaluated (advisory, non-blocking)."
+            case "$note" in
+              *"HTTP 401 from the ledger"*|*"HTTP 403 from the ledger"*)
+                echo "::warning title=BARKPARK_TASK_TOKEN was REFUSED — the re-land scan did not run::The ledger ANSWERED and rejected this job's credential (${note}). This is NOT a ledger outage and re-running will not clear it: fix the repository secret BARKPARK_TASK_TOKEN, which must be a least-privilege app token scoped read,write — never the instance admin token (one was set there and revoked 2026-09-01T20:26Z). No overlap was evaluated; this is advisory and non-blocking either way."
+                ;;
+              *)
+                echo "::warning title=Re-land check DID NOT RUN::${note:-the ledger fetch failed}. This is NOT a clean scan — overlap was not evaluated (advisory, non-blocking)."
+                ;;
+            esac
             echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if [ "$status" = "skipped" ]; then
