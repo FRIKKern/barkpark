@@ -890,4 +890,115 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     %{applied: 1, errors: []} = apply!("u-bg-nl", [meta.("#ff0000")])
     assert peek_cells("u-bg-nl") == %{"A1" => %{"v" => "x", "s" => %{"bg" => "#ff0000"}}}
   end
+
+  # ── lossless delete_* undo (task-bb0b8faf5a9a2a37) ────────────────────────
+  #
+  # A delete_rows/delete_cols rewrites every dead ref to the literal `#REF!`
+  # (own tab) and every dead CROSS-TAB ref in other tabs' formulas. That
+  # rewrite used to be documented "lossy by design": undo gave the span back
+  # and left the `#REF!`s standing — data loss by a keyboard shortcut. The
+  # structural inverse now carries the PRE-rewrite cells of exactly the
+  # formulas the pass touched, and undo overlays them before the recompute.
+
+  test "undo of a delete_cols restores a formula the rewrite turned into #REF!" do
+    create_sheet("u-refloss", %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3}
+    })
+
+    %{applied: 1, errors: []} = apply!("u-refloss", [set_cell("C1", "=SUM(A1:A3)", "alice")])
+
+    total = peek_cells("u-refloss")["C1"]
+    assert total["f"] == "SUM(A1:A3)"
+    assert total["v"] == 6
+
+    %{applied: 1, errors: []} =
+      apply!("u-refloss", [
+        %{"op" => "delete_cols", "tab" => 0, "at" => 1, "count" => 1, "user" => "alice"}
+      ])
+
+    # The lossy step: the formula shifted to B1 and its range died.
+    assert peek_cells("u-refloss")["B1"]["f"] == "SUM(#REF!)"
+
+    %{applied: 1, errors: []} = apply!("u-refloss", [undo("alice")])
+
+    # Formula TEXT and computed VALUE both back — the pre-change session left
+    # `SUM(#REF!)` standing here.
+    assert peek_cells("u-refloss")["C1"] == total
+
+    # Redo re-deletes and re-rewrites; a second undo restores again (the redo
+    # counter re-captures, so the round trip is stable).
+    %{applied: 1, errors: []} = apply!("u-refloss", [redo("alice")])
+    assert peek_cells("u-refloss")["B1"]["f"] == "SUM(#REF!)"
+
+    %{applied: 1, errors: []} = apply!("u-refloss", [undo("alice")])
+    assert peek_cells("u-refloss")["C1"] == total
+  end
+
+  test "undo of a delete_cols restores a CROSS-TAB formula the sweep turned into #REF!" do
+    create_tabs("u-refloss-ct", ["Sheet1", "Sheet2"])
+
+    %{applied: 2, errors: []} =
+      apply!("u-refloss-ct", [
+        set_cell_on(1, "A1", 42, "alice"),
+        set_cell_on(0, "B1", "=Sheet2!A1", "alice")
+      ])
+
+    dependent = peek_cells("u-refloss-ct", 0)["B1"]
+    assert dependent["f"] == "Sheet2!A1"
+
+    # Delete Sheet2's column A — the cross-tab sweep rewrites Sheet1's formula.
+    %{applied: 1, errors: []} =
+      apply!("u-refloss-ct", [
+        %{"op" => "delete_cols", "tab" => 1, "at" => 1, "count" => 1, "user" => "alice"}
+      ])
+
+    assert peek_cells("u-refloss-ct", 0)["B1"]["f"] == "#REF!"
+
+    %{applied: 1, errors: []} = apply!("u-refloss-ct", [undo("alice")])
+
+    # The OTHER tab's formula is restored too — this is the capture the
+    # own-tab inverse could not carry.
+    assert peek_cells("u-refloss-ct", 0)["B1"] == dependent
+    assert peek_cells("u-refloss-ct", 1)["A1"]["v"] == 42
+  end
+
+  test "the delete_* capture is BOUNDED — 1000 cells, 3 rewritten formulas, 3 captured" do
+    # 997 plain values in column A (untouched by a delete of column B) plus 3
+    # formulas in column D that read the EMPTY column B. Deleting B kills no
+    # cell (the span is empty) and rewrites exactly 3 formulas.
+    values = for r <- 1..997, into: %{}, do: {"A#{r}", %{"v" => r}}
+
+    formulas =
+      for r <- 1..3, into: %{}, do: {"D#{r}", %{"f" => "B#{r}"}}
+
+    create_sheet("u-refloss-bound", Map.merge(values, formulas))
+
+    %{applied: 1, errors: []} =
+      apply!("u-refloss-bound", [
+        %{"op" => "delete_cols", "tab" => 0, "at" => 2, "count" => 1, "user" => "alice"}
+      ])
+
+    # The tab is a thousand cells wide and the delete killed none of them
+    # (column B was empty) — only the 3 formulas reading B were rewritten.
+    assert map_size(peek_cells("u-refloss-bound")) == 1000
+
+    assert peek_cells("u-refloss-bound")["C1"]["f"] == "#REF!"
+
+    state = :sys.get_state(Session.whereis("u-refloss-bound", @dataset))
+    [entry] = Map.fetch!(state.undo, "alice")
+    {:structural_restore, op_map, captured, cross} = entry
+
+    assert op_map["op"] == "insert_cols"
+    # Proportional to REWRITTEN cells, never a tab snapshot: 3, not 1000.
+    assert map_size(captured) == 3
+    assert Map.keys(captured) |> Enum.sort() == ["D1", "D2", "D3"]
+    assert cross == %{}
+
+    %{applied: 1, errors: []} = apply!("u-refloss-bound", [undo("alice")])
+    # The formula text is back (the `#REF!` is gone); the recompute settles its
+    # value against the restored — still empty — column B.
+    assert peek_cells("u-refloss-bound")["D1"]["f"] == "B1"
+  end
 end

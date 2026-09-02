@@ -128,7 +128,8 @@ defmodule Barkpark.Content.Writer do
     # {:ok, attrs} | {:error, reason} — a refused dataset resolution surfaces
     # here instead of silently stamping dataset_id=NULL. The stamp stays BEFORE
     # Sheets.hydrate_sheet_embed_snapshots (it reads the stamped scope keys).
-    with {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
+    with :ok <- refuse_non_map_block_elements(attrs),
+         {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
          attrs =
            attrs
            |> Sheets.maybe_recompute_sheet_formulas(type)
@@ -510,7 +511,8 @@ defmodule Barkpark.Content.Writer do
     # refused dataset resolution errors out here, never a silent NULL stamp.
     # The stamp stays BEFORE Sheets.hydrate_sheet_embed_snapshots and the
     # body_html render path (both read the stamped scope keys).
-    with {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
+    with :ok <- refuse_non_map_block_elements(attrs),
+         {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
          attrs =
            attrs
            |> Sheets.maybe_recompute_sheet_formulas(type)
@@ -1163,6 +1165,67 @@ defmodule Barkpark.Content.Writer do
     do:
       "move through the sanctioned task lifecycle verbs instead (`bp task stage` for " <>
         "considering|researching|open, `bp task claim`, `bp task close`)."
+
+  # THE ELEMENT-TYPE FLOOR ON THE WRITE PATH (task-f8c7b0387f50534e).
+  #
+  # `Render.render_blocks/2` guards the LIST (`when is_list(blocks)`) and then
+  # maps `render_block/2` — which guards the ELEMENT (`when is_map(block)`) —
+  # over it, with nothing in between. A create carrying
+  # `{"body":{"blocks":["notamap"]}}` therefore cleared the list guard and
+  # raised FunctionClauseError from inside the write projection:
+  #
+  #   mutate_controller → Mutations.apply_one → Writer.create_document
+  #     → scaffold_expectation → Projection.project/4 (projection.ex, "body")
+  #     → Projection.project_body/2 → Render.render_blocks/2 → render_block/2 ✗
+  #
+  # The transaction rolled back correctly, so no bad data landed — but the
+  # caller got a 500 with an HTML debug page instead of the §9 JSON envelope,
+  # with no `request_id` to correlate.
+  #
+  # WHY HERE AND NOT AT `render_blocks/2`. A guard clause on the renderer can
+  # only DROP or coerce the element; it cannot tell the caller their request was
+  # malformed, and the row asks for a 400 envelope. This is the first step of
+  # both writer doors (`create_document/4` — which the whole create family
+  # funnels through — and `upsert_document/4`), i.e. immediately after
+  # `from_envelope/1` and BEFORE the scaffold, the id backfill, the normalizer
+  # and the projection, so the refusal is side-effect-free and the renderer is
+  # never reached with an input it has no clause for.
+  #
+  # SCOPE. Only the keys whose value the write path actually projects as a block
+  # list are inspected — `content["blocks"]`, the body region in either of its
+  # two shapes (`Projection.read_blocks/1`'s `%{"blocks" => […]}` and bare-list
+  # forms), and any OTHER content value shaped `%{"blocks" => [...]}` (a schema
+  # whose Expectation names its region something other than "body";
+  # `Synthesis.scaffold/4` reads `values[region]`). A plain array FIELD — the
+  # `"slug": ["a","b"]` shape that writes 200 today — is never a block list and
+  # is deliberately not touched.
+  defp refuse_non_map_block_elements(attrs) do
+    case Map.get(attrs, "content") do
+      content when is_map(content) ->
+        Enum.reduce_while(content, :ok, fn {key, value}, :ok ->
+          case validate_content_block_root(key, value) do
+            :ok -> {:cont, :ok}
+            error -> {:halt, error}
+          end
+        end)
+
+      _ ->
+        :ok
+    end
+  end
+
+  # `content["blocks"]` and a bare-list body are block lists by name; any map
+  # carrying a `"blocks"` list is a body-region shape whatever its key is called.
+  defp validate_content_block_root("blocks", value) when is_list(value),
+    do: BlockOps.validate_block_elements(value)
+
+  defp validate_content_block_root("body", value) when is_list(value),
+    do: BlockOps.validate_block_elements(value)
+
+  defp validate_content_block_root(_key, %{"blocks" => blocks}) when is_list(blocks),
+    do: BlockOps.validate_block_elements(blocks)
+
+  defp validate_content_block_root(_key, _value), do: :ok
 
   # R2 chokepoint (id-less backfill). When a document write carries a
   # `content["blocks"]` LIST, route it through the canonical

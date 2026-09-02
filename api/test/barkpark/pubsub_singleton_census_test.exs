@@ -127,6 +127,31 @@ defmodule Barkpark.PubSubSingletonCensusTest do
       end
     end
 
+    test "the barrier can actually find every @drained member" do
+      # The trap this catches: `drain!/1` locates a member with
+      # `Process.whereis/1`, which answers only for a module-NAMED process. Add
+      # a `{:via, Registry, …}` member (Recorder runs one per live chat
+      # session) without teaching `@registries` about it and `whereis` returns
+      # nil, `quiesce/2` takes the "not running" arm, and the barrier is a
+      # silent no-op that READS as coverage. Derived from source, so it loses
+      # on the next such member rather than on this one.
+      for module <- PubSubSingletons.drained() do
+        source = module |> source_path!() |> File.read!()
+        module_named? = source =~ ~r/name:\s*__MODULE__/
+        registry = PubSubSingletons.registry_of(module)
+
+        assert module_named? or registry != nil,
+               """
+               #{inspect(module)} is declared @drained but is not registered under
+               `name: __MODULE__`, and Barkpark.PubSubSingletons.registry_of/1 has
+               no Registry for it. drain!/1 would call Process.whereis/1, get nil,
+               and quiesce nothing — the barrier would be decoration.
+
+               Add it to @registries with the Registry it is named under.
+               """
+      end
+    end
+
     test "@drained and @no_repo are disjoint" do
       overlap =
         MapSet.intersection(

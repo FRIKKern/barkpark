@@ -455,8 +455,20 @@ defmodule Barkpark.TasksTest do
 
   defp s2_uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # PDS-D291: one MET criterion keeps this file's `done` closes out of the
+  # close-artifact gate, which refuses a `done` close of a criteria-less
+  # kind:task row whose reason names no PR+sha and pastes no run. These tests
+  # measure the claim/close machinery, not the close reason.
   defp s2_mk_task!(doc_id, scope, content_extra) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      Map.merge(
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+        },
+        content_extra
+      )
 
     {:ok, doc} =
       Content.create_document(
@@ -497,7 +509,7 @@ defmodule Barkpark.TasksTest do
       # The worker tries to "refresh" the way the OLD hint implies — a same-worker
       # re-claim (renewal). It mints a FRESH epoch (so a later close clears the
       # epoch fence) but do_renew DELIBERATELY keeps the ORIGINAL work_digest
-      # (claim.ex:357). The re-read/renewal reconciled nothing the fence compares.
+      # (`do_renew/3` in claim.ex). The re-read/renewal reconciled nothing the fence compares.
       assert {:ok, renewed} = Tasks.claim_by_id(doc_id, "w", scope)
       fresh_epoch = renewed.content["claim"]["epoch"]
       assert fresh_epoch != epoch

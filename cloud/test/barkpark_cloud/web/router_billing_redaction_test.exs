@@ -66,8 +66,9 @@ defmodule BarkparkCloud.Web.RouterBillingRedactionTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
-  # Swap Billing to the real StripeGateway with a priced plan + a webhook secret
-  # (so checkout_capability/0 is :available and the route reaches the gateway),
+  # Swap Billing to the real StripeGateway with a priced plan, a webhook secret
+  # and a LIVE-shaped secret key (so checkout_capability/0 is :available and the
+  # route reaches the gateway),
   # and inject an http_client stub that returns a NON-2xx Stripe response whose
   # body carries the sentinel. Restore the prior env on exit.
   defp put_leaky_gateway do
@@ -106,7 +107,13 @@ defmodule BarkparkCloud.Web.RouterBillingRedactionTest do
       :barkpark_cloud,
       StripeGateway,
       Keyword.merge(prev_gateway || [],
-        secret_key: "sk_test_x",
+        # cch-w50-bl: was "sk_test_x". A `sk_test_` prefix now answers
+        # :test_mode, and Billing.checkout/2 refuses that BEFORE the gateway —
+        # which would make this redaction test vacuous (its own non-vacuity
+        # guard, `error == "checkout_failed"`, catches exactly that and is why
+        # the move was forced rather than discovered late). The key shape is
+        # incidental to what this file proves; reaching the gateway is not.
+        secret_key: "sk_live_x",
         webhook_secret: "whsec_test",
         http_client: stub
       )

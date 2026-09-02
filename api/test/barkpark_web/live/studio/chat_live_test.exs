@@ -568,6 +568,47 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "task token has expired"
       assert has_element?(view, "form[phx-submit=send]")
     end
+
+    # task-cth-bl-token-renewal. A renewal cannot re-arm a RUNNING child (its
+    # environment was fixed at Port.open), so the card must say the one true
+    # next step rather than report a success the shell lane did not get.
+    test ":task_token_rearmed names the restart instead of claiming a live re-arm",
+         %{conn: conn} do
+      put_hands_state(fn _session -> :rearmed end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_rearmed")
+      assert html =~ "Restart this session"
+      # The chat itself keeps working — this is a bp-lane banner, not a lock.
+      assert has_element?(view, "form[phx-submit=send]")
+    end
+
+    # The renewal happens on the SESSION's clock, mid-conversation, with nobody
+    # watching. It must reach the card with no reload and no Re-check click.
+    test "a renewal that lands mid-session flips the card in place — no reload",
+         %{conn: conn} do
+      put_hands_state(fn _session -> :ok end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+      refute render(view) =~ ~s(data-readiness="task_token_rearmed")
+
+      # Exactly what the Recorder rebroadcasts when the Session renews.
+      send(view.pid, {:claude_chat_task_hands, :rearmed})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_rearmed")
+      assert html =~ "Restart this session"
+
+      # …and a later expiry the renewal could not fix arrives the same way.
+      send(view.pid, {:claude_chat_task_hands, :expired})
+      assert render(view) =~ ~s(data-readiness="task_token_expired")
+    end
   end
 
   describe "runtime auth guard (unauthed stream replay — chat-task-hands, decision 5)" do
@@ -645,6 +686,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
              "root.html.heex must register PaperMermaid in the LiveSocket Hooks map"
 
       assert File.exists?("priv/static/assets/bp-paper-mermaid.js")
+    end
+
+    # Same three-part wiring for the turn clock (task-dd2dcc348335be2f). The
+    # server no longer ticks the elapsed label at all, so a dropped script tag
+    # or an unregistered hook does not degrade the label — it DELETES it.
+    test "root layout loads the turn-clock asset AND registers both its hooks" do
+      root = File.read!("lib/barkpark_web/layouts/root.html.heex")
+
+      assert root =~ "/assets/bp-chat-turn-clock.js",
+             "root.html.heex must load the turn-clock hook asset, else the elapsed label never ticks"
+
+      assert root =~ "Hooks.ChatElapsed",
+             "root.html.heex must register ChatElapsed in the LiveSocket Hooks map"
+
+      assert root =~ "Hooks.ChatSpinWord",
+             "root.html.heex must register ChatSpinWord in the LiveSocket Hooks map"
+
+      # Golden Rule 4: a chat asset is never a blocking <script> in <head>.
+      [head, _body] = String.split(root, "</head>", parts: 2)
+      refute head =~ "/assets/bp-chat-turn-clock.js"
+
+      asset = File.read!("priv/static/assets/bp-chat-turn-clock.js")
+      assert asset =~ "window.BarkparkChatElapsed"
+      assert asset =~ "window.BarkparkChatSpinWord"
     end
   end
 
@@ -2316,9 +2381,18 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "sending an image stores a pointer (no base64 in the DB), renders inline, no /media route",
          %{view: view} do
+      # A REAL PNG, not a stand-in string: the composer now stores through
+      # `Attachments.put/2` (ct-bl-chat-attachments), the ONE store seam the
+      # `/v1/chat` upload route also writes through, and that seam derives the
+      # media type from the bytes' own magic prefix instead of trusting the
+      # browser-declared `client_type`. Bytes that are not one of the four
+      # accepted images are refused — which is what keeps an SVG/HTML payload out
+      # of a store whose contents are served back to other clients.
+      png = png_fixture()
+
       avatar =
         file_input(view, "#chat-composer-form", :attachments, [
-          %{name: "pic.png", content: "PNGDATA", type: "image/png"}
+          %{name: "pic.png", content: png, type: "image/png"}
         ])
 
       render_upload(avatar, "pic.png")
@@ -2331,7 +2405,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
 
       # Live bubble inlines the image server-side as a data-URI — never /media.
-      assert html =~ "data:image/png;base64,#{Base.encode64("PNGDATA")}"
+      assert html =~ "data:image/png;base64,#{Base.encode64(png)}"
       assert html =~ "look at this"
       refute html =~ "/media/files"
 
@@ -2342,11 +2416,38 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert [ptr] = user_msg.metadata["attachments"]
       assert ptr["media_type"] == "image/png"
-      assert ptr["sha256"] == :sha256 |> :crypto.hash("PNGDATA") |> Base.encode16(case: :lower)
-      assert ptr["byte_size"] == byte_size("PNGDATA")
+      assert ptr["sha256"] == :sha256 |> :crypto.hash(png) |> Base.encode16(case: :lower)
+      assert ptr["byte_size"] == byte_size(png)
       # the jsonb pointer carries NO base64 / bytes
       refute Map.has_key?(ptr, "data")
       refute Map.has_key?(ptr, "bytes")
+    end
+
+    test "a non-image payload is refused by the shared store seam, never persisted",
+         %{view: view} do
+      # The browser can call anything image/png. The store seam does not take its
+      # word for it — so the turn sends, and NO attachment pointer is written.
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{
+            name: "evil.png",
+            content: "<svg xmlns='http://www.w3.org/2000/svg'/>",
+            type: "image/png"
+          }
+        ])
+
+      render_upload(avatar, "evil.png")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "look at this"})
+      html = render(view)
+
+      assert html =~ "look at this"
+      refute html =~ "data:image/png;base64,"
+
+      user_msg =
+        view |> store_id() |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+
+      refute Map.has_key?(user_msg.metadata, "attachments"),
+             "a refused payload must not land a pointer on the message row"
     end
 
     test "replay inlines the stored image as a data-URI, server-side (no route)", %{conn: conn} do
@@ -2394,6 +2495,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "data:image/png;base64,"
       assert Process.alive?(view.pid)
     end
+  end
+
+  # A genuine 1x1 PNG — the chat attachment store sniffs the media type from
+  # these magic bytes, so a fixture that merely CLAIMS to be a PNG is refused.
+  defp png_fixture do
+    Base.decode64!(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
   end
 
   defp attachment_json(ptr) do
@@ -3261,10 +3370,38 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # reuses the module-level plan_ask/2 helper from the proposed-plan describe
     @d49_plan_md "# Ship the migration\n\nSteps:\n\n1. Inventory\n2. Port\n3. Delete the shim"
 
+    # In production the Recorder persists every permission ask BEFORE any surface
+    # renders it (see the `{:claude_chat_permission, _}` handler: "The Recorder
+    # already persisted the pending row"). These tests inject the ask straight
+    # into the LiveView, bypassing the Recorder — so they must seed the row it
+    # would have written. That row is not decoration: since
+    # `PlanPapers.publish_approved_plan/3` became the ONE owner of the D49 side
+    # effect (shared with `POST /v1/chat/sessions/:id/approval`), it is the
+    # SERVER-HELD source the projection reads (`metadata.input["plan"]`, D7) and
+    # the row the paper id/url is stamped onto. Reading the socket's in-memory
+    # copy instead is exactly what made a TUI-origin allow publish nothing.
+    defp persist_ask(sid, request_id, role, tool_name, input, markdown) do
+      {:ok, _} =
+        StudioChat.append_message(sid, %{
+          role: role,
+          source_markdown: markdown,
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => tool_name,
+            "input" => input,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    defp persist_plan_ask(sid, request_id, plan),
+      do: persist_ask(sid, request_id, "plan", "ExitPlanMode", %{"plan" => plan}, plan)
+
     test "approving a plan publishes a real published Paper and the card links to it",
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
+      persist_plan_ask(sid, "plan-pub", @d49_plan_md)
       send(view.pid, plan_ask("plan-pub", @d49_plan_md))
       render(view)
 
@@ -3290,6 +3427,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # card grows its "→ published as Paper" link pointing at /papers/:slug
       await(fn -> render(view) =~ "published as Paper" end)
       assert render(view) =~ ~s(href="/papers/#{slug}")
+
+      # …and the stamp lands on the SHARED row, not just this socket — the same
+      # persisted paper_id/paper_url a TUI-origin allow produces, which is what
+      # makes the two origins converge instead of diverge.
+      row = Enum.find(StudioChat.list_messages(sid), &(&1.metadata["request_id"] == "plan-pub"))
+      assert row.metadata["paper_id"] == slug
+      assert row.metadata["paper_url"] == "/papers/#{slug}"
     end
 
     test "the {:plan_paper} broadcast stamps the link on a co-viewing tab (converge)",
@@ -3319,6 +3463,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
+      # a REAL, publishable plan row exists — the ONLY thing stopping the Paper is
+      # the deny, so the "no paper" below cannot pass for want of a row
+      persist_plan_ask(sid, "plan-keep2", @d49_plan_md)
       send(view.pid, plan_ask("plan-keep2", @d49_plan_md))
       render(view)
 
@@ -3337,6 +3484,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
+
+      # the row exists and is ALLOWED — only its role (not its absence) withholds
+      # the Paper
+      persist_ask(sid, "appr-1", "approval", "Write", %{"file_path" => "/opt/x"}, "Allow Write?")
 
       send(
         view.pid,
@@ -3564,42 +3715,80 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "go"
     end
 
-    test "the turn clock ticks while working and the spinner shows", %{view: view} do
+    test "the elapsed label is a CLIENT clock: an empty span stamped with the turn's start",
+         %{view: view} do
       html = render(view)
       assert html =~ "bp-chat-spinner"
       assert spinner_word_shown?(html)
 
-      send(view.pid, :turn_tick)
-      send(view.pid, :turn_tick)
-      assert render(view) =~ "2s"
+      # The hook's contract: the element is mounted on Hooks.ChatElapsed, is
+      # left for the browser to write (phx-update="ignore"), and carries the
+      # turn's start as EPOCH MILLISECONDS — the only thing the server says
+      # about elapsed time, said exactly once.
+      assert html =~ ~s(id="chat-turn-elapsed")
+      assert html =~ ~s(phx-hook="ChatElapsed")
+
+      [_, stamp] = Regex.run(~r/id="chat-turn-elapsed"[^>]*data-started-at="(\d+)"/, html)
+      started = String.to_integer(stamp)
+      now = System.system_time(:millisecond)
+      assert started <= now and now - started < 60_000
+
+      # The server renders NO count into it — the span ships empty.
+      assert html =~ ~r/id="chat-turn-elapsed"[^>]*>\s*<\/span>/
+      assert Regex.run(~r/id="chat-turn-elapsed"[^>]*phx-update="ignore"/, html)
     end
 
-    test "the busy row's word rotates on the turn clock (never sticks)", %{view: view} do
-      before = shown_spinner_word(render(view))
-      assert before
+    # THE point of the client clock (T3 re-render hygiene #10): a running turn
+    # must cost the server nothing per second. Two proofs, because either alone
+    # can go vacuous: the message that used to drive the loop is now inert, AND
+    # nothing fires on its own inside a window the old 1 s loop always hit.
+    test "a running turn produces NO per-second render diff", %{view: view} do
+      # Scoped to #chat-transcript (the messages + the live busy row + the
+      # elapsed label) on purpose: the Studio chrome around it carries an
+      # os_mon host-metrics strip whose CPU/load numbers move on their own, and
+      # that has nothing to do with the turn.
+      transcript = fn -> view |> element("#chat-transcript") |> render() end
+      before = transcript.()
+      assert before =~ ~s(id="chat-turn-elapsed")
 
-      # 7 ticks = one rotation window; next_spinner_word excludes the current
-      # word, so the swap is guaranteed visible.
-      for _ <- 1..7, do: send(view.pid, :turn_tick)
-      after_rotation = shown_spinner_word(render(view))
-      assert after_rotation
-      assert after_rotation != before
+      # a simulated 3 s of the tick that used to exist
+      for _ <- 1..3, do: send(view.pid, :turn_tick)
+      assert transcript.() == before
+
+      # ...and 1.1 s of real time, the window the old Process.send_after loop
+      # could never sit through silently.
+      Process.sleep(1_100)
+      assert transcript.() == before
     end
 
     test "the busy row's word wears the shimmer, stopping… stays plain", %{view: view} do
       assert render(view) =~ "bp-chat-spin-word"
     end
 
-    test "the thinking pulse's word rotates on the turn clock too", %{view: view} do
+    test "the busy row's word rotates CLIENT-side: the span carries the vocabulary + dwell",
+         %{view: view} do
+      html = render(view)
+      assert html =~ ~s(id="chat-turn-word")
+      assert html =~ ~s(phx-hook="ChatSpinWord")
+      assert Regex.run(~r/id="chat-turn-word"[^>]*data-rotate-ms="7000"/, html)
+
+      # The park's one canonical vocabulary reaches the hook whole — the words
+      # never fork into a copy in the JS.
+      assert stamped_words(html, "chat-turn-word") ==
+               BarkparkWeb.Studio.ChatLive.spinner_words()
+    end
+
+    test "the thinking pulse's word wears the same client rotation", %{view: view} do
       # a live pulse hides the busy row, so the shown word IS the pulse's
       send(view.pid, {:claude_chat_event, thinking_tokens(64)})
-      before = shown_spinner_word(render(view))
-      assert before
+      html = render(view)
+      assert shown_spinner_word(html)
 
-      for _ <- 1..7, do: send(view.pid, :turn_tick)
-      after_rotation = shown_spinner_word(render(view))
-      assert after_rotation
-      assert after_rotation != before
+      assert html =~ ~s(id="chat-pulse-word")
+      assert Regex.run(~r/id="chat-pulse-word"[^>]*phx-hook="ChatSpinWord"/, html)
+
+      assert stamped_words(html, "chat-pulse-word") ==
+               BarkparkWeb.Studio.ChatLive.spinner_words()
     end
   end
 
@@ -3677,6 +3866,208 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       )
 
       refute render(view) =~ "data-role=\"chat-hand-task\""
+    end
+
+    # ── live ledger transitions in the transcript (tlv) ───────────────────
+    #
+    # The Doing strip shows WHAT this session holds; these rows show WHEN it
+    # changed. The scope rule under test is the STICKY worker rule: a task is
+    # in scope while this session's worker holds its claim, and STAYS in scope
+    # afterwards — which is the only way a release/reap/kill (all of which
+    # clear or never carry the claim) can ever reach the transcript.
+
+    test "a claim by THIS session's worker renders a live transition row", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-1",
+          "Stage the candidate",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-1"
+        )
+      )
+
+      html = render(view)
+      assert html =~ ~s(data-role="task_transition")
+      assert html =~ ~s(data-task-transition="task-tlv-1")
+      assert html =~ ~s(data-task-status="in_progress")
+      assert html =~ "Stage the candidate → in_progress (claimed)"
+      # The lifecycle tint is a DESIGN TOKEN, never a literal colour.
+      assert html =~ "var(--life-in_progress)"
+    end
+
+    test "a transition arriving over the REAL dataset topic renders", %{view: view, sid: sid} do
+      # The direct `send/2` tests above bypass PubSub entirely, so they cannot
+      # tell a live subscription from a dead one. This one broadcasts on the
+      # SAME `documents:<dataset>` topic the ledger writes to, proving the
+      # subscription chat_live already holds is what carries the transition.
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      dataset = List.first(Barkpark.Content.list_datasets()) || "production"
+
+      {:document_changed, msg} =
+        task_changed(
+          "task-tlv-pubsub",
+          "Arrived over the bus",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-pubsub"
+        )
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:#{dataset}",
+        {:document_changed, msg}
+      )
+
+      # One round-trip through the LiveView process to settle the async cast.
+      html = render(view)
+      assert html =~ ~s(data-task-transition="task-tlv-pubsub")
+      assert html =~ "Arrived over the bus → in_progress (claimed)"
+    end
+
+    test "a replayed lifecycle event renders ONCE and keeps transcript order", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      claim =
+        task_changed(
+          "task-tlv-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-claim"
+        )
+
+      close =
+        task_changed(
+          "task-tlv-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "done", "claim" => %{"worker" => worker}},
+          mutation: "task.closed",
+          event_id: "ev-tlv-close"
+        )
+
+      send(view.pid, claim)
+      send(view.pid, close)
+      # The duplicate: byte-identical to the claim, mutation_event id and all —
+      # a Last-Event-ID replay, or a two-topic double delivery.
+      send(view.pid, claim)
+
+      html = render(view)
+
+      assert transition_rows(html, "task-tlv-2") == 2,
+             "a replayed event must render once, not twice"
+
+      # ORDER preserved: the claim row still precedes the close row. A dedupe
+      # that re-appended (or that moved the row to the tail) would invert this.
+      claim_at = :binary.match(html, "Dig the trench → in_progress (claimed)")
+      close_at = :binary.match(html, "Dig the trench → done (closed)")
+      assert claim_at != :nomatch and close_at != :nomatch
+      assert elem(claim_at, 0) < elem(close_at, 0)
+    end
+
+    test "a release AFTER the claim still renders — the scope set is sticky", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-3",
+          "Hold the lease",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-3a"
+        )
+      )
+
+      # Tasks.Release CLEARS the claim lease, so this carries NO worker to match
+      # on. Only the sticky set can keep it in scope.
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-3",
+          "Hold the lease",
+          %{"lifecycle_status" => "open"},
+          mutation: "task.released",
+          event_id: "ev-tlv-3b"
+        )
+      )
+
+      html = render(view)
+      assert html =~ "Hold the lease → open (released)"
+      assert transition_rows(html, "task-tlv-3") == 2
+    end
+
+    test "another worker's task never reaches the transcript", %{view: view} do
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-4",
+          "Someone else's yard",
+          %{
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "claude-chat-deadbeef"}
+          },
+          mutation: "task.claimed",
+          event_id: "ev-tlv-4"
+        )
+      )
+
+      html = render(view)
+      refute html =~ ~s(data-task-transition="task-tlv-4")
+      refute html =~ "Someone else's yard →"
+    end
+
+    test "a pulse heartbeat is not a transition", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      content = %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}}
+
+      send(
+        view.pid,
+        task_changed("task-tlv-5", "Keep the lease warm", content,
+          mutation: "task.claimed",
+          event_id: "ev-tlv-5a"
+        )
+      )
+
+      send(
+        view.pid,
+        task_changed("task-tlv-5", "Keep the lease warm", content,
+          mutation: "task.pulse",
+          event_id: "ev-tlv-5b"
+        )
+      )
+
+      # The claim rendered; the timer-driven pulse that followed it did not.
+      assert transition_rows(render(view), "task-tlv-5") == 1
+    end
+
+    test "a draft-twin echo never renders a transition", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "drafts.task-tlv-6",
+          "Draft twin",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-6"
+        )
+      )
+
+      refute render(view) =~ ~s(data-role="task_transition")
     end
 
     test "the picker opens on the ready head and hands a task to Claude", %{view: view} do
@@ -4046,6 +4437,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send_frame(sid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
     end
 
+    # A settled turn now FOLDS (task-8f904a88b9bc3d59) — its rows live behind the
+    # "Worked for …" header. These gutter tests are about the GLYPH, so they open
+    # the fold first and assert on the rows the reader would see after one click.
+    defp expand_folds(view) do
+      view |> element("[data-turn-fold-toggle]") |> render_click()
+    end
+
     test "the gutter is NEUTRAL while the turn runs — a mid-turn tool_result never flips it",
          %{view: view, sid: sid} do
       settle_tool_use(sid, "toolu_settle_1", "Bash", %{"command" => "ls -la"})
@@ -4072,7 +4470,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       settle_turn(sid)
 
-      html = render(view)
+      html = expand_folds(view)
       assert html =~ ~s(data-tool-state="ok")
       assert html =~ "✓"
       assert html =~ "var(--life-done)"
@@ -4085,7 +4483,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       settle_turn(sid)
 
-      html = render(view)
+      html = expand_folds(view)
       assert html =~ ~s(data-tool-state="error")
       assert html =~ "✗"
       refute html =~ ~s(data-tool-state="ok")
@@ -4100,7 +4498,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # (✓ on settle alone) reds HERE.
       settle_turn(sid)
 
-      html = render(view)
+      html = expand_folds(view)
       assert html =~ ~s(data-tool-state="pending")
       refute html =~ ~s(data-tool-state="ok")
       refute html =~ "✓"
@@ -4174,6 +4572,206 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert ChatToolRenderer.settle_glyph(%{turn_settled: false}) == "●"
       assert ChatToolRenderer.settle_glyph(%{turn_settled: true, output: "x"}) == "✓"
       assert ChatToolRenderer.settle_glyph(%{turn_settled: true, tool_error: true}) == "✗"
+    end
+  end
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # THE TURN FOLD (task-8f904a88b9bc3d59), Studio half. Once a turn settles, its
+  # tool rows collapse under ONE header row reading "Worked for 3m 12s" — or
+  # "You stopped after 42s" when a Stop ended it — which expands on click. A LIVE
+  # turn NEVER folds: the fold key is the server's `turn_settled_at`, and a
+  # running turn has none, so "unfoldable while live" is structural rather than a
+  # condition someone has to remember to write.
+  #
+  # The mutation reds by NAME:
+  #
+  #   SETTLE gate   — "a LIVE turn never folds". Fold before the settle (drop the
+  #                   turn_settled check from turn_fold_key/1) and this reds: the
+  #                   running turn's rows vanish behind a header mid-turn.
+  #   DURATION stamp — "a settled turn folds under its Worked for header" and the
+  #                   interrupt test. Drop turn_duration_ms from the stamp and
+  #                   both labels read "0s".
+  #
+  # The label text itself is byte-locked to `bp chat` by the shared fixture
+  # (chat_fold_on_settle_test.exs + internal/chat/fold_test.go).
+  # ─────────────────────────────────────────────────────────────────────────
+  describe "fold-on-settle (task-8f904a88b9bc3d59)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp fold_tool_use(sid, id, command) do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => id,
+                 "name" => "Bash",
+                 "input" => %{"command" => command}
+               }
+             ]
+           }
+         }}
+      )
+    end
+
+    defp fold_settle(sid, extra) do
+      send_frame(
+        sid,
+        {:claude_chat_event, Map.merge(%{"type" => "result", "subtype" => "success"}, extra)}
+      )
+    end
+
+    test "a LIVE turn never folds — the rows stay flat while the turn runs",
+         %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_live_1", "FOLD_LIVE_ONE")
+      fold_tool_use(sid, "toolu_fold_live_2", "FOLD_LIVE_TWO")
+
+      html = render(view)
+      refute html =~ ~s(data-role="turn-fold")
+      refute html =~ "Worked for"
+      assert html =~ "FOLD_LIVE_ONE"
+      assert html =~ "FOLD_LIVE_TWO"
+    end
+
+    test "a settled turn folds under ONE header carrying the server's duration",
+         %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_1", "FOLD_ROW_ONE")
+      fold_tool_use(sid, "toolu_fold_2", "FOLD_ROW_TWO")
+      assert render(view) =~ "FOLD_ROW_ONE"
+
+      fold_settle(sid, %{"duration_ms" => 192_000})
+
+      html = render(view)
+      assert html =~ ~s(data-role="turn-fold")
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "2 steps"
+      # The rows are BEHIND the header now — that is the fold.
+      refute html =~ "FOLD_ROW_ONE"
+      refute html =~ "FOLD_ROW_TWO"
+    end
+
+    test "an interrupted turn reads You stopped after", %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_stop", "FOLD_STOPPED_ROW")
+
+      # The Stop the reader pressed. The runtime answers with the same
+      # `error_during_execution` a genuine failure wears, so the request is the
+      # only witness that this was a stop and not a crash.
+      render_click(view, "stop_turn", %{})
+      fold_settle(sid, %{"subtype" => "error_during_execution", "duration_ms" => 42_000})
+
+      html = render(view)
+      assert html =~ "You stopped after 42s"
+      refute html =~ "Worked for"
+      refute html =~ "FOLD_STOPPED_ROW"
+    end
+
+    test "the fold expands on click, and collapses again", %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_click", "FOLD_CLICK_ROW")
+      fold_settle(sid, %{"duration_ms" => 192_000})
+      refute render(view) =~ "FOLD_CLICK_ROW"
+
+      opened = view |> element("[data-turn-fold-toggle]") |> render_click()
+      assert opened =~ "FOLD_CLICK_ROW"
+      # The header stays — an expanded fold is still a fold, and its label is
+      # still the reader's way back.
+      assert opened =~ "Worked for 3m 12s"
+      assert opened =~ ~s(aria-expanded="true")
+      # Singular, because the fold stands for exactly one row.
+      assert opened =~ "1 step"
+
+      closed = view |> element("[data-turn-fold-toggle]") |> render_click()
+      refute closed =~ "FOLD_CLICK_ROW"
+      assert closed =~ ~s(aria-expanded="false")
+    end
+
+    test "two settled turns fold SEPARATELY, each with its own label",
+         %{view: view, sid: sid} do
+      fold_tool_use(sid, "toolu_fold_t1", "FOLD_TURN_ONE_ROW")
+      fold_settle(sid, %{"duration_ms" => 192_000})
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "again"})
+      fold_tool_use(sid, "toolu_fold_t2", "FOLD_TURN_TWO_ROW")
+      fold_settle(sid, %{"duration_ms" => 42_000})
+
+      html = render(view)
+      # Turn one keeps ITS duration: the live mirror must not restamp an
+      # already-settled row with the newer turn's facts.
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "Worked for 42s"
+      refute html =~ "FOLD_TURN_ONE_ROW"
+      refute html =~ "FOLD_TURN_TWO_ROW"
+    end
+
+    test "a REOPENED session folds off the persisted stamp, byte-identically",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      for {tuid, label} <- [
+            {"replay-fold-a", "REPLAY_FOLD_A"},
+            {"replay-fold-b", "REPLAY_FOLD_B"}
+          ] do
+        {:ok, _} =
+          StudioChat.append_message(id, %{
+            role: "tool",
+            source_markdown: "Bash — #{label}",
+            metadata: %{
+              "tool" => "Bash",
+              "tool_use_id" => tuid,
+              "output" => "done",
+              "turn_settled" => true,
+              "turn_settled_at" => "2026-09-02T10:03:12.000000Z",
+              "turn_duration_ms" => 192_000,
+              "turn_outcome" => "settled"
+            }
+          })
+      end
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "Worked for 3m 12s"
+      assert html =~ "2 steps"
+      refute html =~ "REPLAY_FOLD_A"
+
+      opened = view |> element("[data-turn-fold-toggle]") |> render_click()
+      assert opened =~ "REPLAY_FOLD_A"
+      assert opened =~ "REPLAY_FOLD_B"
+    end
+
+    test "a settled row from a server too old to stamp the fold facts stays FLAT",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Bash — OLD_SERVER_ROW",
+          metadata: %{
+            "tool" => "Bash",
+            "tool_use_id" => "old-row",
+            "output" => "done",
+            "turn_settled" => true
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      # Forward-compatible in the honest direction: no fold facts, no fold — the
+      # transcript this row has always drawn, never a "Worked for 0s" header
+      # invented on its behalf.
+      assert html =~ "OLD_SERVER_ROW"
+      refute html =~ ~s(data-role="turn-fold")
     end
   end
 
@@ -4455,6 +5053,105 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert html =~ "0 ready"
       refute html =~ "more"
+    end
+
+    # ── tlv-s5: chips speak the lifecycle (TLV charter D12/D14) ───────────────
+
+    test "a task chip carries the lifecycle glyph + hue from the payload's lifecycle_status" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-c1","title":"Weighing the rewrite",) <>
+            ~s("type":"task","lifecycle_status":"considering",) <>
+            ~s("engagement":{"object":"research","holder":"cycle-42"}}})
+        )
+
+      assert chip.state == "considering"
+      assert chip.object == "research"
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      # ◌ is the GENERATED manifest's considering glyph — the identical character
+      # the board and the Go TUI paint (the chip folds TokensGen.lifecycle/0).
+      assert html =~ ~s(data-life-state="considering")
+      assert html =~ "◌"
+      assert html =~ "var(--life-considering)"
+      # the CONSIDERING object marker: what the task is being weighed FOR (D12)
+      assert html =~ ~s(data-engagement-object="research")
+      assert html =~ "research"
+      # tokens only — no copied hex/hsl literal (studio-literal-check doctrine)
+      refute html =~ ~r/#[0-9a-fA-F]{3,6}\b/
+    end
+
+    test "an UNKNOWN chip state draws the NEUTRAL token, never a known state's hue" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-x","title":"From a newer server",) <>
+            ~s("type":"task","lifecycle_status":"marinating"}})
+        )
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      assert html =~ ~s(data-life-state="marinating")
+      assert html =~ "var(--fg-dim)"
+      # borrowing ANY --life-* hue would report a queue state that does not exist
+      refute html =~ "var(--life-"
+    end
+
+    test "a payload with NO lifecycle_status draws no state mark at all" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_create",
+          ~s({"ok":true,"id":"task-n","title":"No state here"})
+        )
+
+      # NOT defaulted to "open": an entity payload that simply omits the field
+      # tells us nothing, and inventing "open" would report claimable work.
+      assert chip.state == nil
+      assert chip.object == nil
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      refute html =~ "data-life-state"
+      refute html =~ "data-engagement-object"
+      assert html =~ "var(--primary)"
+    end
+
+    test "the engagement object marker is drawn ONLY for the thought states" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-w","title":"Already building",) <>
+            ~s("type":"task","lifecycle_status":"in_progress","engagement":{"object":"build"}}})
+        )
+
+      # a stale engagement left on a card that has MOVED ON is not a live
+      # deliberation — drawing it would report thinking that already ended.
+      assert chip.object == nil
+
+      refute render_component(&ChatToolRenderer.tool_chip/1, chip: chip) =~
+               "data-engagement-object"
+    end
+
+    test "search hits carry their own lifecycle mark, and an unknown one stays neutral" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_ready",
+          ~s({"ok":true,"docs":[) <>
+            ~s({"doc_id":"task-a","title":"Ready one","type":"task","lifecycle_status":"ready"},) <>
+            ~s({"doc_id":"task-b","title":"Thinking","type":"task","lifecycle_status":"researching"},) <>
+            ~s({"doc_id":"task-c","title":"Newer server","type":"task","lifecycle_status":"marinating"}]})
+        )
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      assert html =~ ~s(data-life-state="ready")
+      assert html =~ ~s(data-life-state="researching")
+      assert html =~ ~s(data-life-state="marinating")
+      assert html =~ "var(--life-researching)"
+      assert html =~ "var(--fg-dim)"
+      assert html =~ "◎"
     end
   end
 
@@ -5242,6 +5939,58 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
       assert rail_html(view) =~ ~s(data-rail-phase="done")
       assert rail_html(view) =~ "Strategize"
+    end
+
+    # ── tlv-s5: the rail's fall-through is neutral (TLV charter D14) ──────────
+
+    test "a rail status OUTSIDE the workflow vocabulary is neutral, never a bright live run",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      # A rail_snapshot REPLAYS verbatim on reopen (charter D57), so a status a
+      # different build wrote reaches the renderer untouched. The default used to
+      # be --life-in_progress: an unrecognised value rendered as a live run —
+      # the worst direction for a wrong guess, since it claims work is in flight.
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "queued epic"},
+            "status" => "queued",
+            "seq" => 1
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      html = rail_html(view)
+
+      assert html =~ ~s(data-rail-status="queued")
+      assert html =~ "var(--fg-dim)"
+      refute html =~ "var(--life-in_progress)"
+    end
+
+    test "the three REAL workflow statuses keep their exact hues after the default flip",
+         %{conn: conn} do
+      for {status, token} <- [
+            {"running", "var(--life-in_progress)"},
+            {"completed", "var(--life-done)"},
+            {"interrupted", "var(--life-blocked)"}
+          ] do
+        {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+        {:ok, _} =
+          StudioChat.set_rail_snapshot(s.id, %{
+            "t" => %{
+              "row" => %{"task_type" => "local_workflow", "description" => "an epic"},
+              "status" => status,
+              "seq" => 1
+            }
+          })
+
+        {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+
+        assert rail_html(view) =~ token,
+               "the #{status} rail row lost its hue to the default flip"
+      end
     end
 
     test "an INTERRUPTED cycle shows exactly the frontier phase, with agents visible but NOT breathing (D58)",
@@ -6916,19 +7665,51 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   # A task-document broadcast as the Doing strip sees it — the lean mirror of
   # Content.Broadcast.broadcast_document_mutation/3's :document_changed shape.
-  defp task_changed(doc_id, title, content) do
-    {:document_changed,
-     %{
-       type: "task",
-       doc_id: doc_id,
-       doc: %{
-         doc_id: doc_id,
-         title: title,
-         status: "published",
-         content: content,
-         updated_at: nil
-       }
-     }}
+  #
+  # `opts` adds the two fields the LIVE-TRANSITION fold reads
+  # (tlv-bl-chat-live-transition-stream): `:mutation`, the mutation_events kind
+  # string, and `:event_id`, the durable row id that IS the idempotency key.
+  # Omitting them reproduces the Doing-strip-only shape the strip tests use —
+  # and a broadcast with no mutation kind projects to no transition, which is
+  # exactly why those tests still assert a strip and no transcript row.
+  defp task_changed(doc_id, title, content, opts \\ []) do
+    msg =
+      %{
+        type: "task",
+        doc_id: doc_id,
+        rev: Keyword.get(opts, :rev, "rev-1"),
+        doc: %{
+          doc_id: doc_id,
+          title: title,
+          status: "published",
+          content: content,
+          updated_at: nil
+        }
+      }
+      |> then(fn m ->
+        case Keyword.get(opts, :mutation) do
+          nil -> m
+          kind -> Map.put(m, :mutation, kind)
+        end
+      end)
+      |> then(fn m ->
+        case Keyword.get(opts, :event_id) do
+          nil -> m
+          id -> Map.put(m, :event_id, id)
+        end
+      end)
+
+    {:document_changed, msg}
+  end
+
+  # How many live transition rows the transcript is currently painting for a
+  # task id. Counts the row's own data attribute, so a second render of the SAME
+  # event is a COUNT of 2 — the shape an idempotency regression takes.
+  defp transition_rows(html, task_id) do
+    html
+    |> String.split(~s(data-task-transition="#{task_id}"))
+    |> length()
+    |> Kernel.-(1)
   end
 
   # Register the tasks plugin's schema definitions under the flat default scope
@@ -7273,9 +8054,19 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     Enum.any?(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
   end
 
-  # WHICH park word is currently showing (nil if none) — for asserting the
-  # tick rotation actually swaps it.
+  # WHICH park word is currently showing (nil if none).
   defp shown_spinner_word(html) do
     Enum.find(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
+  end
+
+  # The vocabulary the server stamped on a spin-word span for the client-side
+  # rotation, decoded back out of the escaped `data-words` attribute.
+  defp stamped_words(html, id) do
+    [_, raw] = Regex.run(~r/id="#{id}"[^>]*data-words="([^"]*)"/, html)
+
+    raw
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&amp;", "&")
+    |> Jason.decode!()
   end
 end

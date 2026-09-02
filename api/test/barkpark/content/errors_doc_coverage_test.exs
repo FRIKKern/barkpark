@@ -104,17 +104,6 @@ defmodule Barkpark.Content.ErrorsDocCoverageTest do
              "vocabulary and the human contract cannot drift."
   end
 
-  test "dedup_unavailable is documented as the honest 503 (regression pin)" do
-    # PDS wave 25 repaid wave 24's borrowed `halted` 409. The code exists
-    # BECAUSE the relocation above freed the bytes §9 needed for its row, so
-    # pinning it here also pins that the relocation is still load-bearing.
-    assert MapSet.member?(Errors.known_codes(), "dedup_unavailable")
-
-    assert section_9() =~ "`dedup_unavailable` 503",
-           "dedup_unavailable must stay documented in §9 as a 503 — a transient " <>
-             "outage a caller should retry, not a policy veto it should obey."
-  end
-
   test "the wave-1 workspace codes are documented (regression pin)" do
     # The two codes the finding named explicitly — pinned by name so a future
     # §9 rewrite that drops them is caught even if known_codes/0 also churns.

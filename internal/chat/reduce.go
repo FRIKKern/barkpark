@@ -162,8 +162,35 @@ type State struct {
 	// flips it (or the POST errors and it clears).
 	AnswerInFlight map[string]string
 
+	// TaskTransitions is the session's live ledger-transition log
+	// (tlv-bl-chat-live-transition-stream): one row per `event: task` frame the
+	// Recorder re-broadcast for a task THIS session touched. Append-only in
+	// ARRIVAL order, so a duplicate or replayed frame can never reorder what is
+	// already painted; seenTaskEvents is the dedupe set keyed on the frame's own
+	// event_id (the mutation_events row id), which is why a second delivery of
+	// the same transition renders exactly once. These rows are LIVE-ONLY: the
+	// server never persists them, so a tail refetch neither duplicates nor
+	// erases them, and the settled task_prime snapshot contract is untouched.
+	TaskTransitions []TaskTransition
+	seenTaskEvents  map[string]bool
+
 	Notice string // one-line footer status (never an error screen)
 	Exited bool   // the session process exited (event:exit)
+}
+
+// TaskTransition is one decoded `event: task` frame — the compact summary
+// Recorder.transition_summary/1 builds from the SAME
+// Barkpark.StudioChat.TaskTransition projection Studio's transcript renders, so
+// the terminal prints the server's `label` verbatim rather than re-deriving a
+// second wording that could drift.
+type TaskTransition struct {
+	EventID  string `json:"event_id"`
+	TaskID   string `json:"task_id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Mutation string `json:"mutation"`
+	Verb     string `json:"verb"`
+	Label    string `json:"label"`
 }
 
 // Event is anything Reduce consumes.
@@ -206,6 +233,18 @@ type AnswerEvent struct {
 	Decision  string
 }
 
+// QuestionAnswerEvent is the user answering an AskUserQuestion card with a
+// SPECIFIC option rather than a blanket allow (ct-bl-question-updatedinput,
+// closing the D28 deferral). Answers is the constrained wire map — question
+// string → the chosen label — built from the card's OWN server-held ask, so the
+// TUI can only ever name options the model offered. The server re-validates it
+// against that same stored ask and rebuilds `updatedInput` itself; D22 is intact
+// because nothing here is free-form.
+type QuestionAnswerEvent struct {
+	RequestID string
+	Answers   map[string]any
+}
+
 // AnsweredEvent is the answer POST completing. On success it triggers a FULL
 // refetch so the server-resolved card flips pending → allowed/denied in place (a
 // resolved row keeps its seq — only its metadata changes — so a since=0 refetch,
@@ -215,13 +254,14 @@ type AnsweredEvent struct {
 	Err       error
 }
 
-func (FrameEvent) isChatEvent()       {}
-func (SendEvent) isChatEvent()        {}
-func (InterruptEvent) isChatEvent()   {}
-func (TickEvent) isChatEvent()        {}
-func (TailFetchedEvent) isChatEvent() {}
-func (AnswerEvent) isChatEvent()      {}
-func (AnsweredEvent) isChatEvent()    {}
+func (FrameEvent) isChatEvent()          {}
+func (SendEvent) isChatEvent()           {}
+func (InterruptEvent) isChatEvent()      {}
+func (TickEvent) isChatEvent()           {}
+func (TailFetchedEvent) isChatEvent()    {}
+func (AnswerEvent) isChatEvent()         {}
+func (QuestionAnswerEvent) isChatEvent() {}
+func (AnsweredEvent) isChatEvent()       {}
 
 // Effect is an IO instruction the shell executes (the reducer never does IO).
 type Effect interface{ isChatEffect() }
@@ -254,10 +294,24 @@ type AnswerEffect struct {
 	Decision  string
 }
 
+// AnswerQuestionEffect — the rich AskUserQuestion answer POST. Separate from
+// AnswerEffect because it hits a DIFFERENT route with a different body: the
+// allow/deny hot path keeps no map-shaped surface at all.
+type AnswerQuestionEffect struct {
+	RequestID string
+	Answers   map[string]any
+}
+
 func (FetchTailEffect) isChatEffect() {}
 func (SendEffect) isChatEffect()      {}
 func (InterruptEffect) isChatEffect() {}
 func (AnswerEffect) isChatEffect()    {}
+
+// AnswerQuestionEffect — POST {request_id, answers} to
+// /v1/chat/sessions/:id/answer. Answered by the SAME AnsweredEvent an
+// AnswerEffect is, so the pending → resolved refetch has exactly one landing
+// path (no second settle grammar to drift).
+func (AnswerQuestionEffect) isChatEffect() {}
 
 // Reduce is the single transition function. It never blocks, never does IO,
 // and never panics on malformed frames — an unknown or unparseable frame is
@@ -276,6 +330,8 @@ func Reduce(st State, ev Event, now time.Time) (State, []Effect) {
 		return reduceTailFetched(st, ev)
 	case AnswerEvent:
 		return reduceAnswer(st, ev)
+	case QuestionAnswerEvent:
+		return reduceQuestionAnswer(st, ev)
 	case AnsweredEvent:
 		return reduceAnswered(st, ev)
 	}
@@ -308,6 +364,26 @@ func reduceAnswer(st State, ev AnswerEvent) (State, []Effect) {
 		}
 	}
 	return st, []Effect{AnswerEffect{RequestID: ev.RequestID, Decision: ev.Decision}}
+}
+
+// reduceQuestionAnswer records the in-flight answer and emits the rich POST. It
+// is the option-picking twin of reduceAnswer: a blank request_id or an empty
+// answers map is inert (nothing to say), and the card's terminal flip is still
+// server truth arriving on the AnsweredEvent refetch — never guessed locally, so
+// a Studio answer and a TUI answer converge on the SAME Postgres row.
+//
+// The in-flight badge reads "allow" because that is what the decision IS on the
+// wire: an AskUserQuestion answer is an allow carrying the picked labels.
+func reduceQuestionAnswer(st State, ev QuestionAnswerEvent) (State, []Effect) {
+	if ev.RequestID == "" || len(ev.Answers) == 0 {
+		return st, nil
+	}
+	if st.AnswerInFlight == nil {
+		st.AnswerInFlight = map[string]string{}
+	}
+	st.AnswerInFlight[ev.RequestID] = "allow"
+	st.Notice = answeringNotice("allow")
+	return st, []Effect{AnswerQuestionEffect{RequestID: ev.RequestID, Answers: ev.Answers}}
 }
 
 // reduceAnswered handles the POST completing. A transport error clears the
@@ -441,6 +517,28 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 				st.Title = t
 			}
 		}
+		return st, nil
+	case "task":
+		// A live ledger transition (tlv-bl-chat-live-transition-stream): a task
+		// THIS session touched changed lifecycle state mid-conversation. NO
+		// Effect — the point of the frame is that the transcript learns about the
+		// move WITHOUT a re-fetch. A malformed frame is inert (forward-compatible,
+		// the same tolerance the workflow/exit paths show), and a frame carrying
+		// no event_id is dropped rather than rendered twice, because an
+		// unkeyable row cannot be deduped.
+		var t TaskTransition
+		if err := json.Unmarshal(ev.Data, &t); err != nil || t.EventID == "" {
+			return st, nil
+		}
+		if st.seenTaskEvents[t.EventID] {
+			return st, nil
+		}
+		if st.seenTaskEvents == nil {
+			st.seenTaskEvents = map[string]bool{}
+		}
+		st.seenTaskEvents[t.EventID] = true
+
+		st.TaskTransitions = append(st.TaskTransitions, t)
 		return st, nil
 	case "permission":
 		// The ask row is persisted by the Recorder — refetch the tail so the

@@ -188,20 +188,17 @@ defmodule Barkpark.Tasks.DedupTest do
 
       refute env.code == "internal_error"
       refute env.message == "unknown error"
-      # 503 `dedup_unavailable`, not the plugin-veto 409 `halted`: a dedup
-      # outage is TRANSIENT, and the CODE is what tells an unattended caller
-      # (Github.Intake) to come back rather than treat the refusal as a
-      # permanent policy decision and drop the row. Wave 24 had to borrow
-      # `halted`/409 because registering a new public code puts it in
-      # known_codes/0, which docs/api-v1.md §9 must then document — against a
-      # CI-enforced byte cap that had no room. Wave 25 relocated §9's
-      # endpoint-specific tail into docs/api/error-codes.md and repaid it.
-      #
-      # Both halves are asserted: a future change that reverts EITHER the code
-      # or the status back to the veto's values reds here.
-      assert env.code == "dedup_unavailable"
+      # 503, not the plugin-veto 409: a dedup outage is TRANSIENT, and the STATUS
+      # is what tells an unattended caller (Github.Intake, a generic SDK retry
+      # policy) to come back rather than treat the refusal as a permanent policy
+      # decision and drop the row. The wire `code` still reads `halted` — a new
+      # public code must be registered in known_codes/0, which drives both the
+      # served OpenAPI enum and docs/api-v1.md §9 under a CI-enforced byte cap —
+      # so the arm carries a `reason` discriminator and its OWN retry hint, and
+      # the code rename stays filed on its own row.
       assert env.status == 503
-      refute env.code == "halted"
+      assert env.reason == "dedup_unavailable"
+      assert env.hint =~ "Resend the identical request"
 
       # THE TRIPWIRE. `:halted` is the plugin-VETO tag, and consumers treat it
       # as deterministic: `Plugins.Github.Intake` answers a clean 2xx on

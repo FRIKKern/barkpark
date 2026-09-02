@@ -47,6 +47,67 @@ defmodule BarkparkWeb.SearchChannel do
   updates through the same shaper it already uses for replies, without polling.
   Channels with no cached query (e.g. an empty `""` or no query yet) get a
   no-op; the channel only wakes for queries the user is actively running.
+
+  ## The per-socket query throttle (and why it cannot be a plug)
+
+  A `"query"` frame runs a full `Content.search_documents/3` against Postgres.
+  The HTTP twin of that exact capability is capped at 300 reads/min by
+  `BarkparkWeb.Plugs.RateLimit`, mounted on both search routes. **A channel
+  frame never reaches it**: `socket "/socket", BarkparkWeb.UserSocket`
+  (endpoint.ex) enters BELOW the router, so no plug in the `:api` /
+  `:scoped_api` pipelines runs, and no plug could be mounted that would. The
+  cap therefore has to live here, in the channel, per socket — which is
+  precisely the shape both sibling channels already use off
+  `System.monotonic_time/1`: `PulseChannel`'s `"cursor"` (80ms) and
+  `QuizChannel`'s `"submit_answer"` / `"cursor"` / `"hover"` (250/33/50ms).
+
+  One difference from the siblings, deliberate: this bucket carries BURST
+  credit rather than a bare minimum interval. Their frames are fire-and-forget
+  (a PubSub broadcast, a GenServer cast) and a dropped one costs nothing; a
+  dropped `"query"` frame darks a keystroke on the flagship search-as-you-type
+  surface the charter's D38/D52 acceptance requires to keep working. So the
+  bucket is sized so human typing never touches it (`:query_burst` frames of
+  credit) while the SUSTAINED rate is exactly the 300/min the HTTP twin
+  already enforces. Over budget the frame is refused with a named
+  `"rate_limited"` reason rather than dropped silently, so the client can back
+  off instead of rendering a stale box.
+
+  Tunable via `config :barkpark, :search_channel, query_per_minute: _,
+  query_burst: _`.
+
+  ### What this does NOT cap
+
+  One channel process serialises its own frames, so the per-socket bucket
+  bounds one socket. The unbounded quantity is the number of SOCKETS, and that
+  is capped separately, at connect, in `BarkparkWeb.UserSocket` — see its
+  moduledoc. Neither cap subsumes the other.
+  ## How long the join's decision survives (revocation + seat removal)
+
+  Both inputs to the join decision are re-resolved, because both can change
+  under a socket that stays open for hours.
+
+  **The credential.** `UserSocket.connect/3` runs `Auth.verify_token/1` exactly
+  once. Revoking the token afterwards used to change nothing here: the channel
+  kept answering `"query"` frames AND kept streaming a `"results"` push on
+  every co-tenant document mutation, indefinitely. The fix is at the socket
+  layer — `UserSocket.id/1` returns a token-derived topic and
+  `Auth.revoke_token/1` broadcasts `"disconnect"` on it, which closes the
+  transport. This channel ALSO subscribes to that topic and stops itself,
+  deliberately: a channel process is what actually serves the reads, so it is
+  what must be provably dead, and this way the teardown does not depend on the
+  transport's own handling — one message, consumed at both levels.
+
+  **The seat.** `TenancyAuth.authorize/3` was likewise called once, at join,
+  and membership is the OTHER thing it reads. Deleting the token's membership
+  row (a roster operation, which revokes no credential) left the same socket
+  reading. So the authorization is re-resolved before every `"query"` frame and
+  before every live push; losing it refuses the frame with `"unauthorized"` and
+  stops the channel. That costs one indexed membership read per served search
+  — against a full-text search whose own fixed cost the charter measures in
+  hundreds of milliseconds, which is the trade being made on purpose.
+
+  A periodic re-resolve was NOT chosen as the revocation route: it leaves a
+  window whose width is the poll interval, and the id route has none.
   """
   use Phoenix.Channel
 
@@ -55,10 +116,20 @@ defmodule BarkparkWeb.SearchChannel do
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Content.CallerContext
   alias Barkpark.Search.HitEnvelope
+  alias BarkparkWeb.UserSocket
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   @max_limit 100
+
+  # Sustained rate, deliberately EQUAL to `Plugs.RateLimit`'s read budget
+  # (rate_limit.ex `default_per_minute(_, :read)`), so the socket door and the
+  # HTTP door price the same capability the same way.
+  @default_query_per_minute 300
+  # Burst credit: how many back-to-back frames a socket may spend before the
+  # sustained rate binds. Sized for a human hammering a search box, not for a
+  # loop.
+  @default_query_burst 30
 
   @impl true
   def join("search:" <> scope, _params, socket) do
@@ -83,12 +154,27 @@ defmodule BarkparkWeb.SearchChannel do
       # never reaches this channel even though both share the dataset string.
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{ws.id}:#{dataset}")
 
+      # Revocation teardown: the SAME topic `UserSocket.id/1` returns, so the
+      # `"disconnect"` broadcast `Auth.revoke_token/1` emits reaches this
+      # channel process directly and not only the transport that owns it. The
+      # topic is built by `disconnect_topic/1` rather than assembled here —
+      # the broadcast side and the listening side only meet if one function
+      # owns the string's shape.
+      subscribe_to_revocation(socket)
+
       socket =
         socket
         |> assign(:current_workspace, ws)
         |> assign(:current_project, proj)
         |> assign(:dataset, dataset)
         |> assign(:last_query, nil)
+        # Seed the query bucket FULL, off a real monotonic reading. Note the
+        # lesson pulse_channel.ex records in the same place: monotonic time is
+        # usually NEGATIVE, so a `0` sentinel would look like an enormous
+        # elapsed interval (or, for the mirror bug, throttle forever). Take the
+        # actual clock.
+        |> assign(:query_allowance, query_burst() * 1.0)
+        |> assign(:query_last_ms, System.monotonic_time(:millisecond))
 
       {:ok, socket}
     else
@@ -102,6 +188,21 @@ defmodule BarkparkWeb.SearchChannel do
   def handle_in("query", %{"q" => q} = params, socket) do
     seq = params["seq"]
 
+    # RE-RESOLVE, every frame. The join's `authorize/3` is a decision about a
+    # moment, and this socket outlives it — a seat removed after join must not
+    # keep serving reads (see the moduledoc). `{:stop, …, reply, socket}` both
+    # refuses THIS frame and ends the channel, so a caller who lost access
+    # cannot simply push again.
+    case reauthorize(socket) do
+      {:error, :forbidden} ->
+        {:stop, {:shutdown, :unauthorized}, {:error, %{reason: "unauthorized", seq: seq}}, socket}
+
+      :ok ->
+        serve_query(q, seq, params, socket)
+    end
+  end
+
+  defp serve_query(q, seq, params, socket) do
     # Mirror SearchController: ONLY a truly empty string is "no query". A single
     # space is the BROWSE sentinel (enumerate + facet the dataset) — it must pass
     # through to the engine, not be trimmed away to empty (that returned 0 hits
@@ -114,45 +215,136 @@ defmodule BarkparkWeb.SearchChannel do
         {:reply, {:ok, empty_reply(seq, "")}, socket}
 
       query ->
-        opts_base = [
-          type: params["type"],
-          types: parse_types(params["types"]),
-          # PINNED — never read from `params`. See the moduledoc.
-          perspective: :published,
-          limit: clamp_limit(params["limit"]),
-          offset: parse_int(params["offset"], 0),
-          engine: params["engine"] || "indx"
-        ]
+        # The throttle is charged HERE and not on the `""` branch above: the
+        # empty branch answers from a literal and never touches Postgres, so
+        # billing it would spend a real search's budget on a frame that costs
+        # nothing. What is being rationed is `Content.search_documents/3`.
+        case take_query_token(socket) do
+          {:rate_limited, retry_after_ms, socket} ->
+            {:reply,
+             {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms, seq: seq}},
+             socket}
 
-        opts = opts_base ++ scope_opts(socket)
-
-        {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
-
-        reply =
-          build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
-
-        # Cache the latest query parameters so a downstream
-        # `{:document_changed, _}` PubSub message can re-run the SAME search
-        # without the client re-pushing. `opts_base` excludes the tenancy scope
-        # — that is re-derived from the socket on each re-run via `scope_opts/1`
-        # so a workspace move (today purely defensive) cannot stale-pin the old
-        # tenant filter. `view` rides along so a brief subscriber's live pushes
-        # stay brief.
-        socket =
-          assign(socket, :last_query, %{
-            seq: seq,
-            query: query,
-            opts_base: opts_base,
-            fields: params["fields"],
-            view: params["view"]
-          })
-
-        {:reply, {:ok, reply}, socket}
+          {:ok, socket} ->
+            run_query(query, seq, params, socket)
+        end
     end
   end
 
+  defp run_query(query, seq, params, socket) do
+    opts_base = [
+      type: params["type"],
+      types: parse_types(params["types"]),
+      # PINNED — never read from `params`. See the moduledoc.
+      perspective: :published,
+      limit: clamp_limit(params["limit"]),
+      offset: parse_int(params["offset"], 0),
+      engine: params["engine"] || "indx"
+    ]
+
+    opts = opts_base ++ scope_opts(socket)
+
+    {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
+
+    reply =
+      build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
+
+    # Cache the latest query parameters so a downstream
+    # `{:document_changed, _}` PubSub message can re-run the SAME search
+    # without the client re-pushing. `opts_base` excludes the tenancy scope
+    # — that is re-derived from the socket on each re-run via `scope_opts/1`
+    # so a workspace move (today purely defensive) cannot stale-pin the old
+    # tenant filter. `view` rides along so a brief subscriber's live pushes
+    # stay brief.
+    socket =
+      assign(socket, :last_query, %{
+        seq: seq,
+        query: query,
+        opts_base: opts_base,
+        fields: params["fields"],
+        view: params["view"]
+      })
+
+    {:reply, {:ok, reply}, socket}
+  end
+
+  # The bucket itself: monotonic-time refill, burst-capped, held in socket
+  # assigns so it is per-socket and dies with the socket.
+  #
+  # Two details that are easy to get wrong and are load-bearing here:
+  #
+  #   * `query_last_ms` advances on a REFUSED frame too. `RateLimiter.debit/4`
+  #     famously does not (its own moduledoc records the consequence), which
+  #     freezes the clock at the last ADMITTED frame; here the elapsed interval
+  #     is what earns credit, so freezing it would mean a socket that keeps
+  #     hammering never earns its way back — a refusal would be permanent under
+  #     sustained load.
+  #   * a refused frame CARRIES its fractional allowance forward instead of
+  #     resetting it, so being denied costs nothing but the frame.
+  defp take_query_token(socket) do
+    burst = query_burst()
+    refill_per_ms = query_per_minute() / 60_000
+    now = System.monotonic_time(:millisecond)
+    last = socket.assigns[:query_last_ms] || now
+    held = socket.assigns[:query_allowance] || burst * 1.0
+
+    allowance = min(burst * 1.0, held + (now - last) * refill_per_ms)
+    socket = assign(socket, :query_last_ms, now)
+
+    if allowance >= 1.0 do
+      {:ok, assign(socket, :query_allowance, allowance - 1.0)}
+    else
+      retry_after_ms = ceil((1.0 - allowance) / refill_per_ms)
+      {:rate_limited, retry_after_ms, assign(socket, :query_allowance, allowance)}
+    end
+  end
+
+  defp query_per_minute do
+    :barkpark
+    |> Application.get_env(:search_channel, [])
+    |> Keyword.get(:query_per_minute, @default_query_per_minute)
+    |> max(1)
+  end
+
+  defp query_burst do
+    :barkpark
+    |> Application.get_env(:search_channel, [])
+    |> Keyword.get(:query_burst, @default_query_burst)
+    |> max(1)
+  end
+
+  # The forced teardown. `Auth.revoke_token/1` broadcasts this on the topic
+  # `UserSocket.disconnect_topic/1` names; the transport closes the socket and
+  # this stops the channel that was doing the reading. The shutdown reason is
+  # tagged so it reads as a policy teardown in logs, never as a crash.
+  #
+  # The clause is matched on the Broadcast STRUCT rather than the bare event
+  # because Phoenix only routes a broadcast to `handle_out/3` when its topic
+  # equals the channel's own; this one is a foreign topic, so it arrives here
+  # whole.
   @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "disconnect"}, socket) do
+    {:stop, {:shutdown, :credential_revoked}, socket}
+  end
+
   def handle_info({:document_changed, _msg}, socket) do
+    # The live-push leg is the one a query-frame test cannot see: this channel
+    # subscribed to the workspace topic at join and will keep pushing search
+    # results on every co-tenant write with NO client frame involved. So the
+    # authorization is re-resolved here too, on the same terms.
+    case reauthorize(socket) do
+      {:error, :forbidden} -> {:stop, {:shutdown, :unauthorized}, socket}
+      :ok -> push_live_results(socket)
+    end
+  end
+
+  # Defensive: ignore any other message that may end up in the channel's
+  # mailbox (e.g. a future PubSub fan-out we haven't filtered). The channel
+  # must never crash on an unexpected message.
+  @impl true
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
+  defp push_live_results(socket) do
     case socket.assigns[:last_query] do
       nil ->
         {:noreply, socket}
@@ -173,11 +365,34 @@ defmodule BarkparkWeb.SearchChannel do
     end
   end
 
-  # Defensive: ignore any other message that may end up in the channel's
-  # mailbox (e.g. a future PubSub fan-out we haven't filtered). The channel
-  # must never crash on an unexpected message.
-  @impl true
-  def handle_info(_msg, socket), do: {:noreply, socket}
+  # Re-run the join's authorization against the CURRENT state of the world.
+  # `TenancyAuth.authorize/3` reads the membership row on every call, so a seat
+  # deleted after join denies here even though the token struct in assigns is
+  # unchanged. Revocation does NOT flow through this path — a revoked token
+  # keeps its membership row — which is exactly why the disconnect broadcast
+  # exists as well; the two cover different inputs and neither substitutes for
+  # the other.
+  defp reauthorize(socket) do
+    case socket.assigns[:current_workspace] do
+      %Tenancy.Workspace{id: ws_id} ->
+        TenancyAuth.authorize(socket.assigns.api_token, ws_id, :read)
+
+      # No resolved workspace means this channel never completed a join;
+      # fail closed rather than serving on an unresolvable scope.
+      _ ->
+        {:error, :forbidden}
+    end
+  end
+
+  defp subscribe_to_revocation(socket) do
+    case socket.assigns[:api_token] do
+      %{id: token_id} when is_binary(token_id) ->
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, UserSocket.disconnect_topic(token_id))
+
+      _ ->
+        :ok
+    end
+  end
 
   # ONE shared envelope builder (AXI R3) — the same `HitEnvelope.build/5` the
   # HTTP routes consume, so the client renders identically whether the hit came

@@ -87,6 +87,108 @@ defmodule Barkpark.PortableDoc.Render.ReaderDarkTokenParityTest do
            """
   end
 
+  # ── PRINT: the paged sheet is a LIGHT surface ───────────────────────────────
+  # Sibling of the guard above, one medium over. BOTH dark routes survive into
+  # paged output — a print preview keeps the OS `prefers-color-scheme` AND keeps
+  # whatever `data-theme` the pre-paint toggle stamped — while the reader's
+  # `@media print` block forces a WHITE ground. So before the print palette
+  # re-stamp an OS-dark reader printed the DARK ink onto that white: #e7ede9 on
+  # #fff, ~1.2:1, a page that looks blank.
+  #
+  # The re-stamp is GENERATED (design/emit.mjs `printRestamp`) from the same
+  # token data the light blocks use, so it cannot drift by hand — but nothing
+  # stopped a future emitter change from dropping a token, or from stamping a
+  # value that is not the light one. This pins both: every token the reader's
+  # own prefers-dark block re-skins must be re-stamped under @media print, with
+  # a value byte-identical to the `html[data-theme="light"]` companion's.
+  #
+  # Scoped to the BASE palette (everything before the data-bp-theme banner):
+  # the themed blocks repeat all three shapes per theme, and unioning them would
+  # collide five different values onto one token name.
+  @print_exempt_prefix "--mail-"
+
+  test "the reader's @media print block re-stamps every dark token with its LIGHT value" do
+    base =
+      @bulldocs
+      |> File.read!()
+      |> String.split("theme identity (data-bp-theme)", parts: 2)
+      |> hd()
+
+    assert String.contains?(base, "@media print"),
+           "parsed no @media print block out of the BASE reader palette — the split marker " <>
+             "or the generated print block moved (distrust-vacuous-green)."
+
+    dark = decls_in_blocks(base, ~r/@media\s*\(prefers-color-scheme:\s*dark\)\s*\{/)
+    light = decls_in_blocks(base, ~r/html\[data-theme="light"\] body:has/)
+    print = decls_in_blocks(base, ~r/@media print\s*\{/)
+
+    for {label, m} <- [{"dark", dark}, {"light", light}, {"print", print}] do
+      assert map_size(m) > 0,
+             "parsed ZERO declarations from the reader's #{label} block — its selector or " <>
+               "media header changed shape (distrust-vacuous-green)."
+    end
+
+    problems =
+      for {name, _dark_value} <- Enum.sort(dark),
+          not String.starts_with?(name, @print_exempt_prefix),
+          reduce: [] do
+        acc ->
+          light_value = Map.get(light, name)
+          print_value = Map.get(print, name)
+
+          cond do
+            is_nil(light_value) ->
+              # Not this test's job to fix, but a dark token with no light
+              # companion has nothing for print to fall back to either.
+              ["#{name} — the html[data-theme=\"light\"] companion never declares it" | acc]
+
+            is_nil(print_value) ->
+              ["#{name} — NOT re-stamped under @media print (prints its DARK value)" | acc]
+
+            print_value != light_value ->
+              ["#{name} — print value #{print_value} is not the light value #{light_value}" | acc]
+
+            true ->
+              acc
+          end
+      end
+
+    assert problems == [],
+           """
+           Reader PRINT palette gap — paged output would carry dark-mode values.
+           The reader's @media print block must re-stamp every token its
+           prefers-color-scheme:dark block re-skins, with the LIGHT value (the
+           `html[data-theme="light"]` companion's). It is generated: fix
+           design/emit.mjs `printRestamp` and re-run `node design/emit.mjs --write`,
+           never by hand-editing the marker block.
+
+           #{Enum.join(Enum.sort(problems), "\n           ")}
+           """
+  end
+
+  # `--mail-*` is exempt: #bp-mailapp is `display: none !important` under
+  # @media print (the Email view is an alternate VIEW of the article, not part
+  # of the printed paper), so its chrome tokens are never painted on paper.
+  # A token earns a place here only by being provably unpainted in print.
+
+  # Collect `--custom-prop: value` PAIRS inside every block whose header matches
+  # `header_re`, brace-matched like tokens_in_blocks/2. Later blocks win, which
+  # matches the cascade for equal-specificity rules in source order.
+  defp decls_in_blocks(source, header_re) do
+    header_re
+    |> Regex.scan(source, return: :index)
+    |> Enum.reduce(%{}, fn [{start, len} | _], acc ->
+      after_open = binary_part(source, start + len, byte_size(source) - start - len)
+      body = brace_body(after_open)
+
+      ~r/(--[a-z0-9-]+)\s*:\s*([^;{}]+)/
+      |> Regex.scan(body)
+      |> Enum.reduce(acc, fn [_, name, value], a ->
+        Map.put(a, name, value |> String.trim() |> String.replace(~r/\s+/, " "))
+      end)
+    end)
+  end
+
   # Collect every `--custom-prop` NAME declared inside every block whose header
   # matches `header_re`, brace-matched so nested rules (an @media wrapping an
   # inner selector) are included. Unions across all matching blocks.

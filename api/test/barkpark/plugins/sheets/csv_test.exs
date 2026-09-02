@@ -237,6 +237,26 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
       assert Csv.export(%{"tabs" => [%{"name" => "Empty"}]}, 0, ",") == {:ok, ""}
     end
 
+    # #NAME? is an error VALUE like every other `t: "e"` code — the exporter
+    # writes the cell's "v" verbatim, so the error survives the round trip
+    # instead of exporting as a blank the reader would read as a real gap.
+    test "a #NAME? cell exports as the error string" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "T",
+            "cells" => %{
+              "A1" => %{"v" => "Label"},
+              "A2" => %{"f" => "=FOO(1)", "v" => "#NAME?", "t" => "e"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, csv} = Csv.export(content, 0, ",")
+      assert csv =~ "#NAME?"
+    end
+
     test "formula-looking TEXT values are neutralized (CSV injection guard)" do
       content = %{
         "tabs" => [

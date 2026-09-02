@@ -31,11 +31,25 @@ var filetreeGlyphs = []string{"●", "○", "✕"}
 
 func (filetreeRenderer) Render(b Block, ctx RenderCtx) []string {
 	text := attrStr(b.Attrs, "text")
-	if strings.TrimSpace(text) == "" {
+
+	// EMPTY-CHROME INVARIANT (blank.go): blank is `text` AND `legend`, never
+	// `text` alone. This guard used to key on `text` only, so a tree whose
+	// legend had been authored ahead of its lines rendered a legend row on the
+	// web (`blank_filetree?/1`, #14991) and NOTHING in the terminal — the same
+	// parity break in the other direction. A legend-only tree now renders its
+	// legend row, and nothing else.
+	if blankFiletree(b.Attrs) {
 		return nil
 	}
 	w := clampWidth(ctx.Width)
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+
+	// Blank text with a legend must contribute NO tree rows: splitting "" would
+	// hand the loop one empty line and paint a phantom blank row above the
+	// legend.
+	var lines []string
+	if strings.TrimSpace(text) != "" {
+		lines = strings.Split(strings.TrimRight(text, "\n"), "\n")
+	}
 
 	// Drop-chrome-first: too narrow for styled spans + legend — plain
 	// preformatted tree, still truncated (never wrapped).

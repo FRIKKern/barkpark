@@ -62,7 +62,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
   | Studio LiveView panes (`live/studio/**`, `studio_chrome.ex`) | — | **NO CALL EXISTS.** Zero hits repo-wide. They call `Tenancy.create_workspace_with_owner/2`, never the PAT mint. |
   | `api/lib/mix/tasks/**` | — | **NO CALL EXISTS.** Zero hits across all 33 mix tasks. |
   | `api/priv/**` | — | **NO CALL EXISTS.** Zero hits. |
-  | `cloud/lib/barkpark_cloud/accounts.ex:930` | separate function in a separate OTP app (`BarkparkCloud.Accounts`), not this one | out of scope for this row; its own role gate is at `accounts.ex:838` |
+  | `create_personal_access_token/3` in `cloud/lib/barkpark_cloud/accounts.ex` | separate function in a separate OTP app (`BarkparkCloud.Accounts`), not this one | out of scope for this row; its own role gate is `pat_abilities_allowed?/2` in the same file |
   """
   use BarkparkWeb.ConnCase, async: false
 

@@ -144,6 +144,22 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		// for a write that was never attempted.
 		return exitGeneric
 	}
+	// THE AUTHORING ADVISORIES, WHICH THIS VERB USED TO DROP ON THE FLOOR.
+	// The mutate SUCCESS envelope may carry `warnings: [{code,severity,message}]`
+	// — `Barkpark.Content.Warnings.drain/0` folds in whatever the task quality
+	// gate collected while the batch applied, and the one that matters most here
+	// is `merge_gate_unflagged`: a criterion that OPENS with the MERGE-GATED
+	// marker but carries no `"merge_gate": true`. That row is UNDER-DECLARED —
+	// `bp task stamp --met` refuses it on the prose fallback while the lead's
+	// close-time autostamp, which keys on the FLAG alone, never flips it — so the
+	// criterion can be closed by nobody. The plugin that raises it says the bp CLI
+	// prints it (`emitWarnings`), and on the manifest dispatch path it does; but
+	// `bp task create` is a BUILT-IN that composes /v1/data/mutate itself and went
+	// from `sendCreateTaskMutations` straight to the receipt, so on the one path
+	// that FILES criteria the warning reached nobody. Collected here, rendered by
+	// renderTaskCreated.
+	warnings := mutateWarnings(respBody)
+
 	created, ok := firstMutationRecord(respBody)
 	if !ok {
 		out.userErr("task create: server returned no id")
@@ -191,9 +207,12 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			return exitGeneric
 		}
 		record = published
+		// The publish mutation re-runs the same before_save gate, so it can raise
+		// the same advisory again; dedupeMutateWarnings keeps one copy of each.
+		warnings = append(warnings, mutateWarnings(pBody)...)
 	}
 
-	return renderTaskCreated(out, draftID, record)
+	return renderTaskCreated(out, draftID, record, dedupeMutateWarnings(warnings))
 }
 
 // taskCreateRecord is the record the SERVER persisted for one mutation:
@@ -266,8 +285,24 @@ func firstMutationRecord(body []byte) (taskCreateRecord, bool) {
 // the printed value could never disagree with what was sent — a tautology no
 // test could have caught. A field the server did not echo is now reported as
 // unknown rather than filled in from what we asked for.
-func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord) int {
+// `warnings` are the server's authoring advisories for this write (see
+// mutateWarnings). They are printed to stderr in EVERY output shape and also
+// ride the machine receipt's `warnings` field. That is a deliberate divergence
+// from renderSuccess, which shows advisories only in the human shapes and leaves
+// json/yaml consumers to read the field: an advisory saying the row's WORDS and
+// its SHAPE disagree describes a criterion that no verb will ever be able to
+// close, and a scripted filer that does not know to look for a new field is
+// exactly the caller that stranded four rows this way.
+func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord, warnings []mutateWarning) int {
 	bareID := strings.TrimPrefix(rec.id, "drafts.")
+
+	for _, w := range warnings {
+		if w.Code != "" {
+			out.errf("warning[%s]: %s", w.Code, w.Message)
+			continue
+		}
+		out.errf("warning: %s", w.Message)
+	}
 
 	status := "unconfirmed"
 	if rec.hasDraft {
@@ -291,6 +326,9 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord) int {
 			// word for ready. on_board answers the only question a caller of a
 			// verb named "create the task" is actually asking.
 			"on_board": onBoard,
+		}
+		if len(warnings) > 0 {
+			receipt["warnings"] = warnings
 		}
 		if rec.lifecycle != "" {
 			receipt["lifecycle_status"] = rec.lifecycle
@@ -802,4 +840,69 @@ with the drafts. prefix — bp doc get task drafts.<id> --perspective raw. A bar
 bp doc get task <id> reads the PUBLISHED perspective and 404s (or shows the
 pre-write row) for an unpublished draft: that draft-vs-published asymmetry is
 why a successful write can look like it "read back unchanged" until you publish.`)
+}
+
+// mutateWarning is ONE advisory off a mutate success envelope. The wire carries
+// two shapes and both are real: the authoring wall's {code,severity,message}
+// objects (Barkpark.Content.Warnings) and bare strings from older emitters —
+// emitWarnings already renders both, so the decode here tolerates both too
+// rather than inventing a narrower contract on the same field.
+type mutateWarning struct {
+	Code     string `json:"code,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Message  string `json:"message"`
+}
+
+// mutateWarnings decodes the top-level {"warnings":[…]} of a mutate response.
+// A body that does not decode, carries no warnings, or carries message-less
+// entries yields nothing: an advisory with no message is not renderable and
+// inventing text for it would be worse than silence. Never an error — a
+// warning is advisory by construction and must never change what the caller
+// concludes about the WRITE.
+func mutateWarnings(body []byte) []mutateWarning {
+	var env struct {
+		Warnings []any `json:"warnings"`
+	}
+	if json.Unmarshal(body, &env) != nil {
+		return nil
+	}
+	var out []mutateWarning
+	for _, w := range env.Warnings {
+		switch v := w.(type) {
+		case string:
+			if v != "" {
+				out = append(out, mutateWarning{Message: v})
+			}
+		case map[string]any:
+			msg, _ := v["message"].(string)
+			if msg == "" {
+				continue
+			}
+			code, _ := v["code"].(string)
+			sev, _ := v["severity"].(string)
+			out = append(out, mutateWarning{Code: code, Severity: sev, Message: msg})
+		}
+	}
+	return out
+}
+
+// dedupeMutateWarnings keeps the first occurrence of each (code, message). A
+// `--publish` create runs the same before_save gate twice — once for the draft,
+// once for the published twin — so the same advisory arrives twice and printing
+// it twice reads as two separate problems.
+func dedupeMutateWarnings(in []mutateWarning) []mutateWarning {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[[2]string]bool, len(in))
+	out := make([]mutateWarning, 0, len(in))
+	for _, w := range in {
+		k := [2]string{w.Code, w.Message}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, w)
+	}
+	return out
 }

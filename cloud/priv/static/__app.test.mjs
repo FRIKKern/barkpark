@@ -2963,16 +2963,272 @@ test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO
   assert.match(hooks.operatorDigestCardHtml(null), /Digest log unavailable/);
 });
 
-test("gr-p5: operatorPageHtml composes the four cards, each with its own body slot", () => {
+test("gr-p5: operatorPageHtml composes the five cards, each with its own body slot", () => {
   const html = hooks.operatorPageHtml();
-  for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest"])
+  // FIVE since dr-w1-s2 added the Deploy ledger card. The count is asserted, not
+  // just the membership, so a card that stops mounting reds here rather than
+  // going quietly missing.
+  for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest", "Deploy ledger"])
     assert.ok(html.includes(heading), "the page carries the " + heading + " card");
-  for (const id of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body"])
+  for (const id of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body", "op-census-body"])
     assert.ok(html.includes('id="' + id + '"'), "each card owns its body slot: " + id);
-  assert.equal((html.match(/class="set-section"/g) || []).length, 4, "four cards on the shared .set-* anatomy");
+  assert.equal((html.match(/class="set-section"/g) || []).length, 5, "five cards on the shared .set-* anatomy");
+  assert.equal((html.match(/<div class="loading">Loading/g) || []).length, 5,
+    "and every one of them owns a loading line, so no card is ever EMPTY while its read is in flight");
   // No instance-lifecycle verbs live on this page (EXIT.md:13).
   assert.ok(!/Suspend|Decommission|Archive|Delete instance/i.test(html), "no lifecycle admin verbs");
 });
+
+// ── dr-w1-s2 · THE DEPLOY LEDGER CENSUS, FINALLY READ ───────────────────────
+// `DeployLedger.census/3` and GET /v1/operator/deploy-ledger/census shipped in
+// deploy-reliability W1 S2 and NOTHING RENDERED ONE BYTE OF THEM. These pin the
+// reader, and specifically the three states that are not the happy one: the
+// ledger's own sample-size REFUSAL, an EMPTY window, and a read that failed.
+//
+// THE RULE THESE ENFORCE: the console never computes a percentage, never names
+// a class, and never expands a label. Every one of those is `DeployLedger`'s,
+// read off the payload — a second derivation is a second truth that drifts from
+// classify/2 the first time a class is added upstream.
+
+// The wire shape `rate/2` emits. @min_sample is 200, so a sample below it comes
+// back refused with pct: null and the server's own sentence.
+const censusRate = (numerator, sample, basis) => {
+  const enough = sample >= 200;
+  return {
+    sample,
+    pct: enough ? Math.round((numerator * 10000) / sample) / 100 : null,
+    numerator,
+    min_sample: 200,
+    refused: !enough,
+    reason: enough ? null : `sample ${sample} below min_sample 200`,
+    basis,
+  };
+};
+const CENSUS_ATTEMPTED = "attempted rows in the window (D19)";
+const CENSUS_FAILED = "settled failed rows in the window — the failure numerator";
+const censusClass = (name, label, count, failed) => ({
+  class: name, label, agency: "box", count, share: censusRate(count, failed, CENSUS_FAILED),
+});
+// n=74 — the exact below-threshold reading the row quotes.
+const CENSUS_REFUSED = {
+  window: { from: "2026-08-25T00:00:00.000000Z", to: "2026-08-26T00:00:00.000000Z" },
+  volume: 74, failed: 12, live: 58, in_flight: 3, cancelled: 1, residual: 0, deferred_total: 0,
+  failure_rate: censusRate(12, 74, CENSUS_ATTEMPTED),
+  live_rate: censusRate(58, 74, CENSUS_ATTEMPTED),
+  classes: [censusClass("BUILD_FAILED", "the site build exited non-zero", 9, 12)],
+  min_sample: 200,
+};
+const CENSUS_ANSWERED = {
+  window: { from: "2026-08-19T00:00:00.000000Z", to: "2026-08-26T00:00:00.000000Z" },
+  volume: 1840, failed: 312, live: 1402, in_flight: 21, cancelled: 6, residual: 0, deferred_total: 99,
+  failure_rate: censusRate(312, 1840, CENSUS_ATTEMPTED),
+  live_rate: censusRate(1402, 1840, CENSUS_ATTEMPTED),
+  classes: [
+    censusClass("BUILD_FAILED", "the site build exited non-zero", 181, 312),
+    censusClass("BOX_UNREACHABLE", "the instance could not be reached at all", 74, 312),
+  ],
+  min_sample: 200,
+};
+const CENSUS_EMPTY = {
+  window: { from: "2026-08-25T00:00:00.000000Z", to: "2026-08-26T00:00:00.000000Z" },
+  volume: 0, failed: 0, live: 0, in_flight: 0, cancelled: 0, residual: 0, deferred_total: 0,
+  failure_rate: censusRate(0, 0, CENSUS_ATTEMPTED),
+  live_rate: censusRate(0, 0, CENSUS_ATTEMPTED),
+  classes: [],
+  min_sample: 200,
+};
+
+test("dr-w1-s2: the census reader rides the ONE test hook", () => {
+  for (const name of [
+    "operatorCensusWindow", "operatorCensusPath", "operatorCensusRateHtml",
+    "operatorCensusRefusalText", "operatorCensusClassRowHtml", "operatorCensusCardHtml",
+  ]) assert.equal(typeof hooks[name], "function", name + " is exported");
+  assert.equal(hooks.OPERATOR_DEPLOY_CENSUS, "/v1/operator/deploy-ledger/census");
+  assert.equal(hooks.OPERATOR_CENSUS_DAYS, 7);
+});
+
+test("dr-w1-s2: the console PINS its own window — both bounds ride the URL, and neither is defaulted server-side", () => {
+  // The route answers 422 without both bounds ON PURPOSE: daily volume fell
+  // 2,766 → 332 over six days, so an unpinned "now minus" window compares two
+  // populations and reads a volume collapse as a repair.
+  const at = Date.parse("2026-08-26T12:00:00.000Z");
+  const w = hooks.operatorCensusWindow(at);
+  assert.equal(w.to, "2026-08-26T12:00:00.000Z");
+  assert.equal(w.from, "2026-08-19T12:00:00.000Z", "seven whole days back, computed, never a server default");
+  const path = hooks.operatorCensusPath(at);
+  assert.ok(path.startsWith("/v1/operator/deploy-ledger/census?"), "the census route, with a query: " + path);
+  assert.match(path, /[?&]from=2026-08-19T12%3A00%3A00\.000Z/, "from rides the URL: " + path);
+  assert.match(path, /[?&]to=2026-08-26T12%3A00%3A00\.000Z/, "to rides the URL: " + path);
+});
+
+test("dr-w1-s2 (criterion 0): a rate the ledger ANSWERED renders WITH its denominator — never a bare percentage", () => {
+  const html = hooks.operatorCensusCardHtml(CENSUS_ANSWERED);
+  assert.ok(html.includes("16.96%"), "the server's own pct, verbatim; got: " + html);
+  assert.ok(html.includes("312 of 1840"),
+    "the numerator AND the denominator travel with it — a percentage with no population is unreadable; got: " + html);
+  assert.ok(html.includes(CENSUS_ATTEMPTED), "and the basis names WHAT the denominator counts (D34)");
+  // The class table is the payload's, top to bottom.
+  assert.ok(html.includes("BUILD_FAILED") && html.includes("BOX_UNREACHABLE"), "every class row renders");
+  assert.ok(html.includes("the site build exited non-zero"), "the server's LABEL renders — this file owns no label map");
+  assert.ok(html.includes("58.01% of 312"), "each class share is the payload's own rate node over `failed`");
+  // Every named state, as a COUNT beside the rate — never folded into it.
+  for (const bit of ["volume 1840", "failed 312", "live 1402", "in flight 21", "deferred 99"])
+    assert.ok(html.includes(bit), "the population names itself: " + bit);
+  assert.ok(!html.includes("not enough data"), "an answered rate is not a refusal");
+});
+
+test("dr-w1-s2 (criterion 0): the ledger's REFUSAL renders as 'not enough data (n=74)' — and NO percentage escapes", () => {
+  const html = hooks.operatorCensusCardHtml(CENSUS_REFUSED);
+  // THE QUOTED RENDER, verbatim from the shipped card:
+  //   Failure rate · not enough data (n=74) — sample 74 below min_sample 200
+  assert.ok(html.includes("not enough data (n=74)"),
+    "the refusal is rendered with the SERVER's own n; got: " + html);
+  assert.ok(html.includes("sample 74 below min_sample 200"),
+    "and the server's reason rides along so the threshold is legible; got: " + html);
+
+  // THE GUARD THAT CAN LOSE. Mutate the refusal arm of operatorCensusRateHtml to
+  // print a percentage and THIS assertion reds by name. There is no percent sign
+  // anywhere on a refused card — not at the top level (12/74 = 16.22%) and not
+  // on the class row (9/12 = 75%), because `share` refuses on the same rule.
+  assert.ok(!/%/.test(html), "NOT ONE percent sign may appear on a refused reading; got: " + html);
+  assert.ok(!html.includes("16.22") && !html.includes("75"),
+    "and nothing client-side re-derives the ratio from the counts sitting beside it; got: " + html);
+
+  // THE COUNTS STAY. D9's ruling: a refused RATIO does not delete real rows.
+  assert.ok(html.includes("volume 74") && html.includes("failed 12"), "the counts survive the refusal");
+  assert.ok(html.includes("BUILD_FAILED"), "so does the class table");
+  assert.ok(!html.includes("No deployments in this window"),
+    "74 rows is a measured population, not an empty window");
+
+  // The same rule one level down, pinned directly on the row renderer.
+  const row = hooks.operatorCensusClassRowHtml(censusClass("BOX_500", "the box errored on the deploy (HTTP 500)", 9, 12));
+  assert.ok(row.includes("not enough data (n=12)"), "a class SHARE refuses on the same node: " + row);
+  assert.ok(!/%/.test(row), "and prints no percentage either: " + row);
+});
+
+test("dr-w1-s2 (criterion 3): ZERO rows is 'no deployments in this window' — never a zeroed table that reads like health", () => {
+  const html = hooks.operatorCensusCardHtml(CENSUS_EMPTY);
+  assert.ok(html.includes("No deployments in this window"), "the empty window says so in words; got: " + html);
+  assert.ok(!html.includes("set-row"), "and draws NO class table — a table of zeroes reads as health");
+  assert.ok(!/%/.test(html), "no rate, not even 0%, off a window with nothing in it");
+  assert.ok(!html.includes("unavailable"), "an empty window is a READING, never an error");
+  assert.ok(!html.includes("not enough data"),
+    "and it is not the sample-size refusal either — 'nothing was attempted' is its own fact");
+  // It still names the window it read, so nobody mistakes WHICH window was empty.
+  assert.ok(html.includes("2026-08-25T00:00:00.000000Z"), "the pinned window is printed: " + html);
+});
+
+test("dr-w1-s2 (criterion 3): a FAILED census fetch renders the error — and never a reading", () => {
+  const render = (d) => hooks.operatorCensusCardHtml(d);
+  const denied = hooks.operatorCardBody({ ok: false, status: 403, data: { error: "forbidden" } }, render);
+  assert.match(denied, /refused this read \(403\)/, "a determination is named as one");
+  assert.match(denied, /platform_operator/, "and it names the authority that made it");
+
+  const boom = hooks.operatorCardBody({ ok: false, status: 500, data: {} }, render);
+  assert.match(boom, /Deploy ledger unavailable/, "a 5xx gets the card's own honest degrade: " + boom);
+  assert.match(boom, /didn't answer/, "…which says the card could not READ, not that the fleet is fine");
+
+  const offline = hooks.operatorCardBody({ ok: false, status: 0, data: { error: "network_error" } }, render);
+  assert.match(offline, /never reached the control plane/, "a request that never landed says so");
+
+  // NONE of the three may be mistaken for a measurement.
+  for (const [name, html] of [["403", denied], ["500", boom], ["offline", offline]]) {
+    assert.ok(!/%/.test(html), name + " must draw no percentage off a read that did not happen");
+    assert.ok(!html.includes("No deployments in this window"),
+      name + " must never report a failed read as a measured empty window");
+    assert.ok(!html.includes("not enough data"), name + " is not the ledger's sample-size refusal");
+  }
+  // A shapeless 200 is unreadable, not empty — the same distinction.
+  assert.match(hooks.operatorCensusCardHtml({}), /Deploy ledger unavailable/);
+  assert.match(hooks.operatorCensusCardHtml(null), /Deploy ledger unavailable/);
+  assert.match(hooks.operatorCensusCardHtml({ volume: 5 }), /Deploy ledger unavailable/,
+    "a payload with no classes array is a shape this cannot read, not a fleet with no classes");
+});
+
+test("dr-w1-s2 (criterion 3): the census card owns a LOADING line, painted before its read lands", () => {
+  const page = hooks.operatorPageHtml();
+  assert.ok(page.includes('id="op-census-body"'), "the census card owns its own body slot");
+  // The slot is painted with the loading line by operatorPageHtml itself, so the
+  // card is never EMPTY while its request is in flight — an empty card and a
+  // card that measured nothing are the two states this whole slice separates.
+  const slot = page.slice(page.indexOf('id="op-census-body"'));
+  assert.match(slot.slice(0, 120), /<div class="loading">Loading/,
+    "the census slot carries the loading line at paint time; got: " + slot.slice(0, 120));
+  // And operatorPaint REPLACES it — no card is left spinning (smoke drives this
+  // live in operator-unreadable, where every route 403s).
+  assert.match(APP_SRC, /operatorPaint\("#op-census-body", operatorCensusPath\(\)/,
+    "the census slot is read through the ONE funnel, so its degrade is the shared one");
+});
+
+// ── dr-w1-s2 (criterion 1) · failure_class ON THE ROW, READ OFF THE PAYLOAD ──
+// `deployment_json/1` carries `failure_class: DeployLedger.classify(d)`. The
+// row renders that string and NOTHING ELSE: no allowlist, no label map, no
+// client-side classifier. A second derivation is a second truth that drifts
+// from classify/2 the first time a class is added upstream.
+
+test("dr-w1-s2 (criterion 1): the failure_class pill renders the payload's string VERBATIM — including one the client has never heard of", () => {
+  const row = (d) => hooks.deployRow(Object.assign({ id: "d1", status: "failed", inserted_at: "2026-08-26T00:00:00Z" }, d), null, null);
+
+  assert.ok(row({ failure_class: "BUILD_FAILED" }).includes(">BUILD_FAILED<"), "a known class renders");
+
+  // THE ARBITRARY STRING. If any lookup, allowlist or re-derivation stood
+  // between the payload and the pixel, this class would render as something
+  // else — or vanish, which is worse, because a missing pill reads like health.
+  const invented = "ZZ_A_CLASS_THIS_CLIENT_HAS_NEVER_SEEN_9";
+  assert.ok(row({ failure_class: invented }).includes(">" + invented + "<"),
+    "an arbitrary class the client cannot know renders as itself");
+
+  // AND THE PAYLOAD WINS OVER THE PROSE. A row whose failure_reason would tempt
+  // a client-side classifier into a different answer still renders the server's
+  // class, because the client never reads the prose to decide.
+  const conflicting = row({
+    failure_class: "STALE_LEASE",
+    failure_reason: "the build failed: exit status 1 (HTTP 500 from the box)",
+  });
+  assert.ok(conflicting.includes(">STALE_LEASE<"),
+    "the ledger's class wins; the prose is not a second input: " + conflicting);
+
+  // Absent / empty / non-string → NO pill. A row that carries no class must not
+  // grow an invented one, and "unknown" is not a class name the ledger emits.
+  for (const bad of [undefined, null, "", 0, {}, ["BUILD_FAILED"]]) {
+    const html = hooks.deployFailureClassPillHtml({ failure_class: bad });
+    assert.equal(html, "", "no pill for " + JSON.stringify(bad) + "; got: " + html);
+  }
+  assert.equal(hooks.deployFailureClassPillHtml(null), "", "and none for no row at all");
+
+  // The pill is escaped like every other server string on this row.
+  assert.ok(hooks.deployFailureClassPillHtml({ failure_class: '<img src=x onerror=1>' })
+    .includes("&lt;img"), "a hostile class name is escaped, never injected");
+});
+
+test("dr-w1-s2 (criterion 1): the taxonomy is NOT re-derived client-side — app.js contains no class vocabulary and no classifier", () => {
+  // THE ABSENCE IS THE ASSERTION. Every one of these is a `DeployLedger`
+  // @classes / @deferred_classes / @not_attempted_classes member. If any of
+  // them ever appears in app.js, somebody has begun re-implementing
+  // classify/2 in the browser — which is exactly the drift this criterion
+  // exists to forbid, and it fails HERE rather than in production six months
+  // later when a new class renders under the wrong name.
+  const TAXONOMY = [
+    "BOX_BUSY_409", "ABANDONED_AT_CAPACITY", "ABANDONED_BOX_STUCK", "ABANDONED_UNCLASSIFIED",
+    "CONTENT_API_500", "CONTENT_API_503", "CONTENT_API_UNREACHABLE", "CONTENT_API_403",
+    "DOC_ID_EMPTY", "BOX_500", "FORBIDDEN_403", "BUILD_FAILED", "BOX_DEPLOY_DISABLED_503",
+    "BOX_RUNNER_UNAVAILABLE_503", "BOX_UNAVAILABLE_503", "BOX_UNREACHABLE", "HEALTH_GATE_FAILED",
+    "BOX_RATE_LIMITED_429", "DEPLOY_TIMEOUT", "SOURCE_UNFETCHABLE", "STALE_LEASE", "PROCESS_DIED",
+    "UNCLASSIFIED", "BOX_BUSY_DEFERRED", "BOX_AT_CAPACITY_DEFERRED", "DEFERRED_UNCLASSIFIED",
+    "GITHUB_PUSH_UNBUILDABLE",
+  ];
+  for (const cls of TAXONOMY)
+    assert.equal(APP_SRC.includes(cls), false,
+      "app.js names the ledger class " + cls + " — the taxonomy is being re-derived client-side");
+
+  // Nor may it re-derive the CENSUS's arithmetic: the pill and the card read
+  // `failure_class`, `pct`, `sample`, `numerator` and `label` and compute none
+  // of them. The one guard a grep can carry: no percentage is ever computed in
+  // this file from a census count.
+  assert.equal(/failed\s*[*/]\s*(volume|sample)/.test(APP_SRC), false,
+    "app.js computes a failure ratio — the rate is the ledger's, node and all");
+});
+
 
 // ── cch-w36-s4: the refusal has a voice, and the funnel keeps the status ─────
 // Charter D411 carves ONE additive emission out of GR49's fail-closed bounce,
@@ -14602,6 +14858,65 @@ test("tierCardHtml: a trial team's Free card never offers a doomed checkout (rev
   assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
 });
 
+// ── cch-w50-bl · THE TEST-MODE DISCLOSURE ────────────────────────────────────
+//
+// The live control plane runs a Stripe TEST secret key with real prices and a
+// real webhook secret wired (measured read-only on cloud-control_plane_green-1,
+// 2026-09-02: STRIPE_SECRET_KEY begins sk_test_). Before this slice the money
+// screen offered a live Subscribe there, which opened a REAL hosted Checkout
+// Session no real card can pay, and disclosed nothing. The server now declares
+// `billing_capability.checkout == "test_mode"` on GET /v1/subscription and
+// refuses the POST itself; these pin the console half — the fourth argument
+// tierCardHtml takes, driven through the real renderer.
+//
+// The END-TO-END pair (server declaration → this renderer) lives in
+// cloud/test/barkpark_cloud/billing_test_mode_console_mirror_test.exs, so a
+// collapse of :test_mode into :available in billing.ex reds a rendered
+// assertion too, not only an Elixir one.
+
+test("tierCardHtml: a test-mode plane renders Subscribe DISABLED and states why", () => {
+  const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
+  const html = hooks.tierCardHtml(supporter, "free", false, "test_mode");
+
+  assert.ok(!html.includes('data-plan="supporter"'),
+    "no checkout wire — renderTiers binds click handlers off [data-plan], so the card must not carry one");
+  assert.ok(html.includes("disabled"), "the affordance is disabled, not hidden");
+  assert.ok(html.includes("Subscribe unavailable"), "the button is LABELLED, not a bare ghost");
+  assert.ok(html.includes("Checkout runs in Stripe test mode — no real card can pay."),
+    "the disclosure sentence renders verbatim");
+  // Past/present tense only: it says what IS, and promises no live key.
+  assert.ok(!/\bwill\b/i.test(html), "no future tense in the disclosure");
+  // The disclosure precedes the button — `.tier .btn { margin-top: auto }`
+  // bottom-aligns the grid's buttons only while the button is the last child.
+  assert.ok(html.indexOf("no real card can pay") < html.indexOf("<button"),
+    "the disclosure sits above the button, so the button stays the card's last child");
+});
+
+test("tierCardHtml: every OTHER capability renders exactly what it rendered before", () => {
+  // The disclosure is a state, not a permanent downgrade — and an UNKNOWN
+  // capability (cold cache, older payload, failed read) must not invent one.
+  // The server refuses :test_mode on its own, so the honest cold render is the
+  // ordinary button.
+  const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
+  const baseline = hooks.tierCardHtml(supporter, "free", false);
+  for (const cap of ["available", "unconfigured", "unverifiable", "", undefined, null]) {
+    assert.equal(hooks.tierCardHtml(supporter, "free", false, cap), baseline,
+      "capability " + String(cap) + " moved the card");
+  }
+  assert.ok(baseline.includes('data-plan="supporter"'), "the baseline really is the live Subscribe");
+  assert.ok(!baseline.includes("test mode"), "and it discloses nothing, because there is nothing to disclose");
+});
+
+test("checkoutCapability(): a declaration is only read when the server actually sent one", () => {
+  // Pure over the module cache; "" is the honest unknown. Pinned because the
+  // whole disclosure hangs off this string, and a helper that answered
+  // "test_mode" on a missing payload would disable the money screen for every
+  // deploy that has not shipped the declaration yet.
+  assert.equal(typeof hooks.checkoutCapability, "function");
+  assert.equal(hooks.checkoutCapability(), "", "no load has happened in this sandbox");
+  assert.equal(hooks.testModeDisclosure, "Checkout runs in Stripe test mode — no real card can pay.");
+});
+
 // ── cch-tier-note-undefined-render ───────────────────────────────────────────
 //
 // THE FILED ROW IS REFUTED ON ITS STATED HARM, and the refutation is the reason
@@ -21106,6 +21421,13 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     network_error: "Network error — is the control plane running?",
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // cch-w50-bl — pinned in the same commit that registered it. The slug is the
+    // 422 POST /v1/billing/checkout sends on a test-keyed plane, and the copy is
+    // BYTE-IDENTICAL to Billing.test_mode_disclosure/0 (the server puts the same
+    // sentence in the envelope's `reason`). Deleting the ERRORS entry reds this
+    // sweep BY NAME — and would also red console_reader_census_test.exs, which
+    // refuses a minted code the console has no reader for.
+    billing_test_mode: "Checkout runs in Stripe test mode — no real card can pay.",
     forbidden: FORBIDDEN_GENERIC,
     // cch-w50-s2 — moved with the ERRORS map's own server_error entry in the
     // same commit (re-derive it with grep -n 'server_error:' app.js, inside the
@@ -21159,7 +21481,7 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     "validation_failed", "name_required", "no_active_subscription", "plan_invalid",
     "invalid_code", "rate_limited", "no_team", "invalid", "not_live",
     "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
-    "billing_not_configured", "forbidden", "server_error", "malformed_body",
+    "billing_not_configured", "billing_test_mode", "forbidden", "server_error", "malformed_body",
     "malformed_request", "unsupported_media_type", "request_too_large",
     // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
     // same commit that registered them; each must stay free of a support-channel.

@@ -72,8 +72,16 @@ defmodule Barkpark.Tasks.PrimeTest do
   # near-duplicates the first — so every fixture carries its OWN wording, not a
   # shared boilerplate string.
   defp mk_draft!(doc_id, status, description, scope) do
+    # PDS-D291: one MET criterion keeps this file's `done` closes out of the
+    # close-artifact gate (a criteria-less `done` close whose reason names no
+    # PR+sha is refused). These tests measure the published/draft twin.
     content =
-      %{"kind" => "task", "lifecycle_status" => status, "description" => description}
+      %{
+        "kind" => "task",
+        "lifecycle_status" => status,
+        "description" => description,
+        "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
 
     {:ok, doc} =

@@ -199,6 +199,11 @@ defmodule Barkpark.Tasks.Fleet do
   # `workspace_id IS NULL`, nil → `where: false` (fail closed, barkpark-s6t1).
   # The global arm is `scope_to_workspace_global/1`, the codebase's named
   # "I want all tenants' rows" opt-in — deliberate and greppable, not a default.
+  # Reached ONLY when `opts[:global] == true` (`roster_scope/1`): a nil
+  # `workspace_id` never lands here — it takes the fail-closed
+  # `scope_to_workspace/3` arm below (`where: false`), and no HTTP route can
+  # pass `:global` (tripwire: no-route-passes-global test). Tenant-scope gate:
+  # global-read: the :ops-gated Studio fleet tile's explicit cross-tenant opt-in
   defp scope_to(query, :global), do: Scope.scope_to_workspace_global(query)
 
   defp scope_to(query, {:workspace, workspace_id}),

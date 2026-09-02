@@ -238,6 +238,25 @@ type Model struct {
 	// that lands while a snapshot fetch is still out is dropped, never queued.
 	fetchInFlight bool
 
+	// resyncClose arms the OBSERVED_REV close for one doc id: it is set only when
+	// the server refused that doc's close with doc_changed_since_claim (the brief
+	// moved under the claim), and the next close of that row is then pinned to
+	// the Rev of the row ON SCREEN instead of running rev-less.
+	//
+	// Why it is a separate, LONGER-LIVED flag than pendingClose: the recovery IS
+	// a re-read, so the arm must survive every keypress and every landed snapshot
+	// that pendingClose is deliberately cleared by — otherwise the refresh that
+	// makes recovery possible would also cancel it. It is cleared only by a close
+	// that actually lands (handleActionResult's OK path), so a rev-CAS refusal
+	// (someone edited AGAIN between the snapshot and the close) leaves it armed
+	// for the next re-read rather than dropping the user back into the dead end.
+	//
+	// THE FENCE IS ARMED FIRST (the cmux Stop hook's law, internal/cli/
+	// cmux_hook.go): an ordinary close sends NO observed_rev, so the server's
+	// work-digest fence still protects every close the drift never touched. The
+	// bypass opens only after the server itself said the brief moved.
+	resyncClose string
+
 	// injected seams (defaults wired in newModel; tests override). fetch is the
 	// full-hydration seam (charter D28): FetchSnapshotFull returns the board
 	// Snapshot AND the TaskDetail DetailIndex in one round-trip. fetchEvents is
@@ -251,7 +270,10 @@ type Model struct {
 	tick    func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 	build   func(Snapshot, RepoContext, time.Time) Board
 	doClaim func(*apiclient.Client, string, string) ActionResult
-	doClose func(*apiclient.Client, string, string, int) ActionResult
+	// doClose takes the observed_rev as its last argument (DoCloseRev): "" is the
+	// ordinary fence-armed close, a non-empty rev is the post-drift retry pinned
+	// to the revision the user re-read.
+	doClose func(*apiclient.Client, string, string, int, string) ActionResult
 	now     func() time.Time
 
 	debounceDelay time.Duration
@@ -287,7 +309,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		tick:          tea.Tick,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
-		doClose:       DoClose,
+		doClose:       DoCloseRev,
 		now:           time.Now,
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
@@ -1123,19 +1145,55 @@ func (m Model) claimTask(t Task) (Model, tea.Cmd) {
 // epoch OBSERVED on the row (the CAS token). handleKey has already disarmed
 // pendingClose for any non-x key, so reaching here with pendingClose == this row
 // means a genuine second consecutive x.
+//
+// The close also carries an observed_rev WHENEVER this row is armed for the
+// post-drift retry (resyncClose) — and never otherwise, so the work-digest fence
+// stays armed on every ordinary close. The rev is read off the row ON SCREEN,
+// deliberately NOT re-fetched at close time: a just-in-time GET would silently
+// swallow a second concurrent edit, whereas the on-screen rev makes the close
+// land at exactly the revision the user re-read and refuse (rev CAS) at any
+// other.
 func (m Model) closeTask(t Task) (Model, tea.Cmd) {
 	if !hasLiveClaim(t) {
 		m.pendingClose = ""
 		m.setStrip("nothing to close here — x closes a task with a live claim", RoleWarn)
 		return m, nil
 	}
+	rev := m.closeRevFor(t)
 	if m.pendingClose == t.DocID {
 		m.pendingClose = ""
-		return m, m.closeCmd(t.DocID, CmuxWorkerID(), t.Claim.Epoch)
+		return m, m.closeCmd(t.DocID, CmuxWorkerID(), t.Claim.Epoch, rev)
 	}
 	m.pendingClose = t.DocID
+	if rev != "" {
+		m.setStrip(fmt.Sprintf("press x again to close '%s' pinned to the revision on screen (observed_rev %s)", t.Title, shortRev(rev)), RoleWarn)
+		return m, nil
+	}
 	m.setStrip(fmt.Sprintf("press x again to close '%s'", t.Title), RoleWarn)
 	return m, nil
+}
+
+// closeRevFor is the observed_rev this row's next close should pin: the row's
+// own Rev once the server has refused it with doc_changed_since_claim, and ""
+// (fence armed, no bypass) in every other case — including a row the server has
+// never refused, and a drifted row whose envelope carried no rev at all (an
+// older server), where inventing one is impossible and guessing is not a thing
+// this layer does.
+func (m Model) closeRevFor(t Task) string {
+	if m.resyncClose != t.DocID {
+		return ""
+	}
+	return t.Rev
+}
+
+// shortRev abbreviates a rev digest for the one-line strip. The full rev goes on
+// the wire; the prefix is only there so the user can SEE that two consecutive
+// prompts name different revisions after a re-read.
+func shortRev(rev string) string {
+	if len(rev) <= 8 {
+		return rev
+	}
+	return rev[:8]
 }
 
 // openTask is 'o': open the task in Studio. The deep link is ALWAYS surfaced on
@@ -1169,6 +1227,20 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 	// the user managed to set while this request was in flight. The prompt is
 	// the close guard's only visible face, so disarm with it (armed iff shown).
 	m.pendingClose = ""
+	// A close that LANDED retires the observed_rev arm: the drift is reconciled,
+	// and leaving the bypass armed would quietly disarm the work-digest fence for
+	// the row's next close.
+	if msg.res.OK && msg.docID != "" && m.resyncClose == msg.docID {
+		m.resyncClose = ""
+	}
+	// The brief moved under this claim. Arm the observed_rev close for THIS row
+	// so the next x pins the revision the user re-reads (closeRevFor) — the only
+	// close the server can accept; a rev-less retry repeats this very refusal.
+	// Deliberately NOT cleared on a later refusal: a rev-CAS miss means someone
+	// edited again, and the answer to that is another re-read, not the dead end.
+	if !msg.res.OK && msg.res.Resync == ResyncObservedRev && msg.docID != "" {
+		m.resyncClose = msg.docID
+	}
 	if msg.res.OK {
 		// A landed claim/close is green by default, but a result carrying a
 		// rail-awareness notice overrides the role (warn for a blocker that landed
@@ -1199,12 +1271,14 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 // the command is self-contained.
 func (m Model) claimCmd(docID, worker string) tea.Cmd {
 	do, client := m.doClaim, m.client
-	return func() tea.Msg { return actionResultMsg{res: do(client, docID, worker)} }
+	return func() tea.Msg { return actionResultMsg{docID: docID, res: do(client, docID, worker)} }
 }
 
-func (m Model) closeCmd(docID, worker string, epoch int) tea.Cmd {
+func (m Model) closeCmd(docID, worker string, epoch int, observedRev string) tea.Cmd {
 	do, client := m.doClose, m.client
-	return func() tea.Msg { return actionResultMsg{res: do(client, docID, worker, epoch)} }
+	return func() tea.Msg {
+		return actionResultMsg{docID: docID, res: do(client, docID, worker, epoch, observedRev)}
+	}
 }
 
 // setStrip records the one-line action status the renderer paints above the

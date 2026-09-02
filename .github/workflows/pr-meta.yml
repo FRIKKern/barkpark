@@ -50,9 +50,33 @@ name: pr-meta
 #                              path-unfiltered home of the workflow-job-shape
 #                              ratchet.
 #   compose-smoke.yml,         Already dispatcher+aggregator shaped: one always-on
-#   security.yml               dispatcher, expensive arms behind a job-level `if:`,
-#                              an aggregator name that CAN be required. That is the
-#                              same fan-out answer, reached the other way.
+#   security.yml,              dispatcher, expensive arms behind a job-level `if:`,
+#   go-tests.yml               an aggregator name that CAN be required. That is the
+#                              same fan-out answer, reached the other way. go-tests
+#                              reached it in #15218 and belongs on this list with
+#                              the other two.
+#   mobile.yml,                Nothing to do: both already carry a `pull_request:
+#   paper-editor.yml           paths:` filter, and have since before the fan-out was
+#                              measured.
+#
+# ── FAN-OUT DIET 2 MEASURED THE REST OF THAT LIST AND FILED NOTHING ──────────
+#
+# A follow-up P1 row named compose-smoke, security, go-tests, mobile and
+# paper-editor as "no paths: filter, fires on every push of every PR" and asked
+# for one on each. Measured on six consecutive campaign heads (2026-09-02
+# 11:53Z): mobile started a run on ONE of the six and paper-editor on NONE —
+# their filters already work. The other three do start a run on every head, and
+# that is the shim doing its job, not a defect. Their whole skip path costs 7
+# runner jobs and about 85 seconds across all three:
+#
+#   compose-smoke  Dispatch 22s + `Compose smoke` 3s;  2 arms skipped
+#   security       Dispatch 22s + shape ratchet 12s + `Security gate` 2s;  4 skipped
+#   go-tests       Dispatch 21s + `Go gate` 3s;  1 skipped
+#
+# Filtering their triggers would buy 3 queue slots per push and cost every one
+# of those names its right to exist on an out-of-path head. The ratchet that now
+# refuses the trade lives in scripts/shim-trigger-filter-check.sh and runs as a
+# step of this job.
 #   elixir / cloud /           The four required contexts. A workflow-level `paths:`
 #   console-harness /          on any of them makes a required context ABSENT, and
 #   pr-task-gate               an absent required context reports `expected` forever.
@@ -119,6 +143,26 @@ jobs:
       - name: Prove the gate can fail (--selftest)
         run: bash scripts/committed-symlink-check.sh --selftest
 
+      # tooling/status's own tests ran NOWHERE on a pull request (task-ccb1e4f7e7439711):
+      # codebase-intel.yml invokes status.mjs on release/schedule/dispatch only, so the
+      # 12-test pin from #15059 (an absent coverage report renders N/A, never 0%) was
+      # re-earned by nobody — a future edit restoring the `{ pct: 0 }` default would
+      # have landed green. This job already runs on every pull request and owns no
+      # runner-heavy step, so the run rides here: ~1 s, no new run, no new name.
+      # node-test-floor.mjs (not bare `node --test`): a zero-match glob, a dropped
+      # path or a file that registers no tests is a red, and `--floor 1` pins the
+      # file count; the tally assert pins the 12 tests the pin was filed with.
+      - name: tooling/status tests (node-test-floor, 12-test tally)
+        run: |
+          set -euo pipefail
+          node scripts/node-test-floor.mjs --floor 1 'tooling/status/test/*.test.mjs' 2>&1 | tee /tmp/status-tests.txt
+          tally=$(sed -nE 's/^node-test floor: ran ([0-9]+) tests .*/\1/p' /tmp/status-tests.txt | tail -1)
+          if [ "${tally:-0}" -lt 12 ]; then
+            echo "::error::tooling/status: ran ${tally:-0} test(s), the pin was filed with 12 — a test file stopped being discovered or tests were deleted; lower the floor here deliberately or restore them"
+            exit 1
+          fi
+          echo "tooling/status: ${tally} tests, floor 12 — pin re-earned"
+
       - name: No symlink is committed to this repo
         run: bash scripts/committed-symlink-check.sh
 
@@ -134,6 +178,27 @@ jobs:
 
       - name: Every run-level reader is adjudicated
         run: bash scripts/run-level-reader-census.sh
+
+      # ── shim-trigger-filter-check ─────────────────────────────────────────────
+      # SIX workflows in this repo carry the dispatcher + `always()` aggregator
+      # shim, and the whole point of that shape is that their aggregator name
+      # renders on every head. A workflow-level `on: … paths:` filter emits no
+      # workflow run and no check run at all on a non-matching head, so putting
+      # one back on a shimmed workflow makes its name ABSENT exactly where the
+      # shim exists to keep it present. Three files argued that in prose and
+      # prose is not a ratchet; this is the machine version. It reads the shape
+      # out of the YAML rather than carrying a roster, so a seventh shim is
+      # protected the day it lands. Advisory here, like everything else in this
+      # job: it reports and never blocks.
+      #
+      # Same selftest-first discipline as the two above, and for the same
+      # reason: a clean tree and a broken scanner print the same green, so the
+      # mutation matrix runs before the scan and cannot rot unexecuted.
+      - name: Prove the shim-trigger ratchet can fail (--selftest)
+        run: bash scripts/shim-trigger-filter-check.sh --selftest
+
+      - name: No shimmed workflow filters its own pull_request trigger
+        run: bash scripts/shim-trigger-filter-check.sh
 
       # ── aesthetics-guard (ADVISORY) ───────────────────────────────────────────
       # `!cancelled()` and not `success()`: a red from either gate above must not

@@ -41,6 +41,21 @@
 //      a 900px viewport but #modal-root is NOT scrollable (961 vs 961)" — the
 //      footer, i.e. Log out and 2FA, is permanently unreachable. This is the
 //      exact shape that broke prod and the exact shape a screenshot cannot see.
+//      ⚠️  AND FOR EVERY WAVE UNTIL cch-w21-bl-token-reveal-modal-oracle IT
+//      NEVER ONCE RAN. Measured on origin/main: all eight account states print
+//      "tall-card scroll: N/A (card 474px fits the 900px viewport)" — the
+//      tallest account card is 726px in a 900px viewport, so this detector took
+//      its skip branch on every state, every run, and the note it printed reads
+//      exactly like a pass. The token-reveal state below drives it for real.
+//
+//   5. REQUIRED-CONTROL REACHABILITY (per state; the token reveal only)
+//      A control the state names must be on screen AFTER the modal's own scroll
+//      path is driven to its end, and must hit-test to itself. "It has a box"
+//      is not reachability: on a card taller than the viewport the control is
+//      below the fold BY CONSTRUCTION, and the whole question is whether the
+//      scroll path brings it back. On the write-once token sheet that control
+//      is Done, and a sheet that says "this is the only time you will see this
+//      token" and then puts Done out of reach is unrecoverable, not cosmetic.
 //
 //   4. HIT-TEST ABOVE BACKDROP + BUTTON REACHABILITY   ❌ DOES **NOT** DETECT #4592
 //      Both still PASSED under the mutation. Reason, measured: `.modal-card`
@@ -56,11 +71,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //    node cloud/priv/static/__preview__/modal-oracle.mjs
 //    SCEN=account-modal-tall THEME=dark node modal-oracle.mjs
+//    SCEN=tokens-reveal node modal-oracle.mjs
 //    ACCENT=iris node modal-oracle.mjs
 //
-//  Env: SCEN (comma-list, default the four account-modal scenarios) · THEME
-//  (comma-list of light|dark, default both) · ACCENT (optional single identity)
-//  · CHROME (binary override) · PORT (preview port; default = a free port).
+//  Env: SCEN (comma-list, default the four account-modal scenarios + the token
+//  reveal) · THEME (comma-list of light|dark, default both) · ACCENT (optional
+//  single identity) · CHROME (binary override) · PORT (preview port; default =
+//  a free port) · WIDTH/HEIGHT (the ACCOUNT states' viewport only — the token
+//  reveal carries its own cells, see TOKEN_REVEAL_CELLS and why).
+//
+//  A "state" is a scenario × theme × CELL. Every account state has one cell
+//  (1440x900); the token reveal has two of its own, so the default run asserts
+//  4×2×1 + 1×2×2 = 12 states.
 //
 //  Exit codes:  0 = every state asserted clean · 1 = an assertion FAILED (the
 //  mechanism is named on stderr) · 2 = GUARD — refused BEFORE measuring: an
@@ -109,7 +131,84 @@ const DEFAULT_SCEN = [
   "account-modal-tall",
   "account-modal-2fa-on",
   "account-modal-2fa-badcode",
+  "tokens-reveal",
 ];
+
+// ── THE TOKEN REVEAL AS A DRIVEN STATE (cch-w21-bl-token-reveal-modal-oracle)
+// The one-time plaintext sheet is a `.modal-card` in `#modal-root` like every
+// state above it - `revealToken()` calls `openModal(tokenRevealHtml(...))` -
+// but nothing drove it here, and smoke.mjs pins it only as a STRING through the
+// `hooks.tokenRevealHtml` node pin. A string pin can assert the token is
+// PRESENT; only a browser can assert that the Done button dismissing a secret
+// you will never see again is on screen.
+//
+// NOT A HOOK. The reveal is reached the way a person reaches it - the real mint
+// gesture chain #token-add -> #token-name -> .token-ab -> #token-submit -> 201
+// -> revealToken() - so a routing, mock or wiring regression anywhere on that
+// chain reds this state instead of being routed around by calling the hook.
+const TOKEN_REVEAL_SCEN = "tokens-reveal";
+
+// The length the SERVER mints, not the fixture's round number: accounts.ex
+// `plaintext = "bpc_pat_" <> generate_token()` over
+// `:crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)` = 8 + 43.
+// Asserted per cell, because the WRAPPED token is what makes this card tall: a
+// corpus that quietly drifts back to a shorter secret would shrink the card and
+// evaporate this state's coverage without failing anything. It reds here.
+const PAT_LEN = 51;
+
+// GEOMETRY IS PART OF THIS STATE, not the run's global viewport. Two cells,
+// each buying something the other cannot:
+//   * 320x667 - the phone. The criterion is literally "the Done control is
+//     reachable at 320x667", and Done is the only control that dismisses a
+//     write-once secret.
+//   * 320x<short> - a viewport the card EXCEEDS, so the TALL-CARD SCROLL
+//     assertion is exercised rather than skipped. Read the baseline output of
+//     this file before this state existed: every one of the eight account
+//     states printed `tall-card scroll: N/A`, because a 1440x900 viewport is
+//     taller than every account card. Assertion 3 - the one the header calls a
+//     #4592 detector - had never once run. `requireTall` makes a cell that
+//     stops being tall RED, so that cannot happen again silently.
+const TOKEN_REVEAL_CELLS = [
+  { w: 320, h: 667, requireTall: false },
+  // MEASURED, not guessed: the reveal card is 352-355px tall at 320 wide (the
+  // 51-char token wraps to 3 lines there), so 667 does NOT exercise the scroll
+  // path and 360 does not either — the card fits both. 300 is a SYNTHETIC short
+  // viewport, and saying so is the point: no phone is 300px tall, but assertion
+  // 3 has never once run in this file's history (every account state at
+  // 1440x900 prints "tall-card scroll: N/A"), and an assertion that has never
+  // run is a claim nobody has tested. `requireTall` below turns this cell RED
+  // the moment the card stops exceeding it, so it can never quietly go back to
+  // measuring nothing.
+  { w: 320, h: 300, requireTall: true },
+];
+
+// The landed tokens screen, before a single gesture. `?scen=` alone does not
+// route; the deep link does, and this asserts it arrived.
+const TOKENS_VIEW_PROBE =
+  `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+  `return !!(v && v.id==='view-tokens' && document.getElementById('token-add'));})()`;
+
+// THE REAL MINT GESTURE CHAIN. Identical in shape to overflow-guard.mjs's
+// W21-token-reveal-readable leg, deliberately: the two instruments must reach
+// the same screen the same way, so a chain that breaks breaks both.
+const MINT_CHAIN_JS =
+  `(function(){` +
+  `document.getElementById('token-add').click();` +
+  `var n=document.getElementById('token-name'); n.value='Oracle probe key';` +
+  `var ab=document.querySelector('.token-ab'); if(ab) ab.checked=true;` +
+  `document.getElementById('token-submit').click();` +
+  `return true;})()`;
+
+// Open probes. The generic one is what the account states have always polled;
+// the reveal's also demands the secret host, so "some modal opened" can never
+// be mistaken for "the reveal opened".
+const MODAL_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card'));})()`;
+const REVEAL_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('token-reveal-text'));})()`;
 
 // The honest scope of this file's font pin, printed on EVERY run — a healthy
 // one and a refusing one. Measured, not assumed:
@@ -121,7 +220,15 @@ const DEFAULT_SCEN = [
 // never-visits-a-phone-width): its W22-2fa-enroll-phone-band leg drives the
 // REAL enroll phase at 320-480 in both themes under the CI-blocking gate,
 // because a phone-band assertion in a file nothing runs enforces nothing.
-// This oracle stays the 1440 behavioural instrument.
+// This oracle stays the 1440 behavioural instrument for the ACCOUNT states.
+// THE ONE EXCEPTION, and it is not a land grab: the token-reveal state below
+// carries its own 320x667 and 320x360 cells, because its criterion names that
+// phone and because a scroll-path assertion is meaningless at a height no card
+// reaches. Everything it buys is still EVIDENCE, not enforcement, for exactly
+// the reason this paragraph exists - and overflow-guard keeps the reveal's
+// READABILITY (W21-token-reveal-readable, 320-430, under the gate). Two
+// instruments, two questions: is every character legible (there) and can the
+// dialog be dismissed at all (here).
 // ZERO CI jobs and ZERO scripts invoke this oracle, so its exit 2 is read by
 // nobody today. The pin below buys EVIDENCE — a human running this by hand
 // learns which face resolved — and NOT enforcement. Saying so here is the
@@ -303,8 +410,13 @@ class Cdp {
 // ── 3. THE ASSERTIONS, as they run inside the page ───────────────────────────
 // One expression, returned by value. Everything it measures is reported, pass
 // or fail, so a run is readable without re-running it.
-const ASSERT_JS = `(function () {
-  var out = { failures: [], notes: [] };
+function assertJs(cfg) { return `(function () {
+  // The state's own contract, injected as data. The four account states carry
+  // an empty one and behave exactly as they always have; the token reveal
+  // carries the secret host, the required control and the tallness it must
+  // actually reach. Sections 1-4 below are IDENTICAL for every state.
+  var CFG = ${JSON.stringify(cfg)};
+  var out = { failures: [], notes: [], state: CFG.state };
 
   // ── 1. CSSOM BASE-RULE ─────────────────────────────────────────────────────
   // Walk every reachable stylesheet, recursing into grouping rules (@media,
@@ -350,7 +462,7 @@ const ASSERT_JS = `(function () {
   var card = root.querySelector(".modal-card");
   out.modalOpen = !root.hidden && !!card;
   if (!out.modalOpen) {
-    out.failures.push("STATE: the account modal never opened (#modal-root hidden=" + root.hidden + ", .modal-card=" + !!card + ") — nothing below was measured on a real dialog");
+    out.failures.push("STATE: the " + (CFG.state || "account") + " modal never opened (#modal-root hidden=" + root.hidden + ", .modal-card=" + !!card + ") — nothing below was measured on a real dialog");
     return out;
   }
 
@@ -413,8 +525,158 @@ const ASSERT_JS = `(function () {
   }
   out.controls = wanted;
 
+  // ── 5. THE STATE'S OWN CONTRACT ────────────────────────────────────────────
+  // Everything below runs only for a state that declares it. It is where the
+  // token reveal earns its place as a state rather than a screenshot.
+
+  // (a) IS THIS THE DIALOG UNDER TEST? A mint chain that opens SOME modal and
+  //     not the reveal must not be able to buy a green off sections 1-4, which
+  //     ask questions about the .modal-root rule that ANY modal would answer.
+  //     (No backticks anywhere in this string: it IS a template literal, and a
+  //     stray one in a comment closes it — that cost one debug cycle here.)
+  if (CFG.tokenHost) {
+    var host = document.querySelector(CFG.tokenHost);
+    if (!host) {
+      out.failures.push(
+        "REVEAL: no '" + CFG.tokenHost + "' in the open dialog - the mint chain opened a modal, " +
+        "but not the plaintext reveal. Sections 1-4 above would have passed on any modal at all, " +
+        "so treat their green as measuring nothing about this state."
+      );
+    } else {
+      var secret = host.textContent || "";
+      out.tokenChars = secret.length;
+      var hcs = getComputedStyle(host);
+      var hlh = parseFloat(hcs.lineHeight) || (parseFloat(hcs.fontSize) * 1.5) || 16;
+      out.tokenLines = Math.max(1, Math.round(host.getBoundingClientRect().height / hlh));
+      if (secret.length < CFG.tokenLen) {
+        out.failures.push(
+          "REVEAL: the sheet is showing a " + secret.length + "-character token, but the server mints " +
+          CFG.tokenLen + " ('bpc_pat_' + 43 base64url chars). The fixture understates the string whose " +
+          "WRAPPING is what makes this card tall - a shorter secret shrinks the card and quietly " +
+          "un-measures the scroll path this state exists to drive."
+        );
+      }
+      // Focus, REPORTED and not asserted: cch-w21-s4 moved focus from the copy
+      // buffer onto the <code>, and a reader of this output should be able to
+      // see whether that still holds. It is not one of this state's criteria,
+      // and this leg does not manufacture a red it was not asked for.
+      out.focusIsSecret = document.activeElement === host;
+      out.notes.push(
+        "focus on open: " + (out.focusIsSecret
+          ? "the secret itself (" + CFG.tokenHost + ")"
+          : "NOT the secret - activeElement is " +
+            (document.activeElement ? (document.activeElement.id || document.activeElement.tagName.toLowerCase()) : "null")) +
+        " (reported, not asserted - this state's criteria are geometric)"
+      );
+    }
+  }
+
+  // (b) ANTI-VACUITY. A cell whose whole job is to exercise the tall-card
+  //     scroll path and which turns out to FIT measured nothing: assertion 3
+  //     took the "N/A" branch, and the note it printed reads like a pass.
+  if (CFG.requireTall && !out.tallCard) {
+    out.failures.push(
+      "VACUITY: this cell exists to drive the TALL-CARD SCROLL path, but the card is " + cardH +
+      "px in a " + window.innerHeight + "px viewport - it fits, so assertion 3 took its N/A branch " +
+      "and nothing about the scroll path was measured. Shorten the cell or delete it; a note that " +
+      "reads like a pass is the failure mode this check exists to stop."
+    );
+  }
+
+  // (c) THE CONTROL THAT DISMISSES THE DIALOG, reachable at THIS geometry.
+  //     Not "it has a box" - a thumb must be able to land on it. On a card
+  //     taller than the viewport the control is below the fold BY CONSTRUCTION,
+  //     and the entire question is whether the modal's own scroll path brings
+  //     it back. So scroll that path to its end first, then measure.
+  if (CFG.requiredControl) {
+    var ctrl = card.querySelector(CFG.requiredControl);
+    var cname = CFG.requiredControlLabel || CFG.requiredControl;
+    if (!ctrl) {
+      out.failures.push(
+        "REACHABILITY: the state's required control '" + CFG.requiredControl + "' (" + cname +
+        ") is not in the dialog at all."
+      );
+    } else {
+      root.scrollTop = root.scrollHeight;
+      out.rootScrollTop = root.scrollTop;
+      out.rootScrollMax = root.scrollHeight - root.clientHeight;
+      var rc = ctrl.getBoundingClientRect();
+      out.ctrlBox = {
+        w: Math.round(rc.width), h: Math.round(rc.height),
+        top: Math.round(rc.top), bottom: Math.round(rc.bottom),
+      };
+      if (rc.width <= 0 || rc.height <= 0) {
+        out.failures.push(
+          "REACHABILITY: '" + cname + "' has a zero-area box (" + Math.round(rc.width) + "x" +
+          Math.round(rc.height) + ") at " + window.innerWidth + "x" + window.innerHeight + "."
+        );
+      } else if (rc.bottom > window.innerHeight + 1 || rc.top < -1) {
+        out.failures.push(
+          "REACHABILITY: after scrolling #modal-root to its end (scrollTop " + root.scrollTop + " of " +
+          out.rootScrollMax + "), '" + cname + "' still sits top " + Math.round(rc.top) + " bottom " +
+          Math.round(rc.bottom) + " in a " + window.innerHeight + "px viewport at " + window.innerWidth +
+          "px wide - the only control that dismisses a write-once secret cannot be reached."
+        );
+      } else {
+        var cx = Math.round(rc.left + rc.width / 2);
+        var cy = Math.round(rc.top + rc.height / 2);
+        var onTop = document.elementFromPoint(cx, cy);
+        out.ctrlHit = onTop ? (onTop.id || onTop.tagName.toLowerCase()) : null;
+        if (!(onTop && (onTop === ctrl || ctrl.contains(onTop)))) {
+          out.failures.push(
+            "REACHABILITY: '" + cname + "' is on screen but its own centre point (" + cx + "," + cy +
+            ") hit-tests to '" + out.ctrlHit + "' - something is painting over the only control that " +
+            "dismisses this dialog."
+          );
+        }
+      }
+    }
+  }
+
   return out;
-})()`;
+})()`; }
+
+// ── 3b. HOW A STATE IS REACHED ───────────────────────────────────────────────
+// A state is a scenario x theme x CELL. Everything that differs between the
+// account family and the token reveal lives here, in data, so the run loop
+// below has exactly one shape:
+//
+//   suffix — what is appended to `?scen=&theme=`. `&modal=account` opens the
+//            account sheet over whatever screen is live (mock.js honours it on
+//            ANY scenario, which is precisely why the roster guard exists);
+//            the reveal instead deep-links to its screen and is GESTURED open.
+//   land   — the screen that must exist before the gesture chain runs. null
+//            for a state that needs no gesture.
+//   drive  — the gesture chain itself.
+//   open   — the poll that says the dialog under test is up.
+//   cells  — the geometries this state is asserted at.
+//   cfg    — the state's own contract, handed to assertJs().
+function planFor(scen) {
+  if (scen === TOKEN_REVEAL_SCEN) {
+    return {
+      suffix: "#settings/tokens",
+      land: TOKENS_VIEW_PROBE,
+      drive: MINT_CHAIN_JS,
+      open: REVEAL_OPEN_PROBE,
+      cells: TOKEN_REVEAL_CELLS,
+      cfg: {
+        state: "token-reveal",
+        tokenHost: "#token-reveal-text",
+        tokenLen: PAT_LEN,
+        requiredControl: "#token-done",
+        requiredControlLabel: "Done",
+      },
+    };
+  }
+  return {
+    suffix: "&modal=account",
+    land: null,
+    drive: null,
+    open: MODAL_OPEN_PROBE,
+    cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+    cfg: { state: "account" },
+  };
+}
 
 // ── 4. the run ───────────────────────────────────────────────────────────────
 
@@ -599,86 +861,125 @@ async function main() {
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
     await cdp.send("Page.enable", {}, sessionId);
     await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: VIEW_W, height: VIEW_H, deviceScaleFactor: 1, mobile: false,
-    }, sessionId);
+    // Viewport is set PER CELL below, not once here: the token-reveal state
+    // owns its own geometry (WIDTH/HEIGHT still govern every account state).
 
     // ── assert each state ────────────────────────────────────────────────────
     for (const scen of scens) {
+      const plan = planFor(scen);
       for (const theme of themes) {
-        const label = `${scen} · ${theme}${accent ? " · " + accent : ""}`;
-        const s0 = Date.now();
-        const url =
-          `http://127.0.0.1:${port}/?scen=${encodeURIComponent(scen)}&theme=${theme}` +
-          (accent ? `&accent=${accent}` : "") +
-          `&modal=account`;
+        for (const cell of plan.cells) {
+          const label =
+            `${scen} · ${theme}${accent ? " · " + accent : ""} · ${cell.w}x${cell.h}`;
+          const s0 = Date.now();
 
-        await cdp.send("Page.navigate", { url }, sessionId);
+          await cdp.send("Emulation.setDeviceMetricsOverride", {
+            width: cell.w, height: cell.h, deviceScaleFactor: 1, mobile: false,
+          }, sessionId);
 
-        // Wait for the REAL modal, by polling the page — the account modal opens
-        // on a click that mock.js drives only after /v1/me paints, so there is no
-        // single load event to key on.
-        let opened = false;
-        for (let w = 0; w < MODAL_CAP; w += 100) {
-          const probe = await cdp.send("Runtime.evaluate", {
-            expression:
-              `(function(){var r=document.getElementById('modal-root');` +
-              `return !!(r && !r.hidden && r.querySelector('.modal-card'));})()`,
-            returnByValue: true,
-          }, sessionId).catch(() => null);
-          if (probe && probe.result && probe.result.value === true) { opened = true; break; }
-          await sleep(100);
-        }
-        if (!opened) await sleep(300); // let the assertion report the honest not-open state
+          const url =
+            `http://127.0.0.1:${port}/?scen=${encodeURIComponent(scen)}&theme=${theme}` +
+            (accent ? `&accent=${accent}` : "") +
+            plan.suffix;
 
-        // ── THE FONT PIN (D218) ───────────────────────────────────────────────
-        // card= heights, root scroll heights and every clipping verdict below
-        // are layouts of whatever face resolved. Pinned AFTER the modal-open
-        // poll (the modal must exist before its type matters) and BEFORE the
-        // assertion runs.
-        //
-        // EXIT 2 BY HAND, NOT BY THROW. The enclosing catch maps every throw to
-        // process.exit(1) — "a modal defect was measured". A missing woff2 is
-        // an ENVIRONMENT fault; laundering it into exit 1 is exactly the
-        // confusion this pin exists to end, so the refusal tears down and exits
-        // here rather than raising.
-        const pin = await cdp.send("Runtime.evaluate", {
-          expression: FONT_PIN_JS, returnByValue: true, awaitPromise: true,
-        }, sessionId).catch((err) => ({ __cdpError: err }));
-        const pinReport = pin && pin.__cdpError === undefined && !pin.exceptionDetails
-          ? pin.result.value
-          : null;
-        if (!pinReport || !pinReport.ok) {
-          await teardown();
-          process.stderr.write(
-            "\n!! ORACLE (exit 2): " + fontPinRefusal(label, pinReport) + "\n",
+          await cdp.send("Page.navigate", { url }, sessionId);
+
+          // Poll the page for a boolean expression — the account modal opens on
+          // a click that mock.js drives only after /v1/me paints, and the reveal
+          // opens on a 201 from the mint, so neither has a load event to key on.
+          const poll = async (expression) => {
+            for (let w = 0; w < MODAL_CAP; w += 100) {
+              const probe = await cdp.send("Runtime.evaluate", {
+                expression, returnByValue: true,
+              }, sessionId).catch(() => null);
+              if (probe && probe.result && probe.result.value === true) return true;
+              await sleep(100);
+            }
+            return false;
+          };
+
+          // ── A GESTURED STATE ────────────────────────────────────────────────
+          // Land on the real screen, then perform the real gestures. A route
+          // that never lands THROWS rather than falling through: the assertion
+          // would otherwise report "the modal never opened" and leave a reader
+          // to guess whether the dialog is broken or the deep link is.
+          if (plan.land) {
+            if (!(await poll(plan.land))) {
+              throw new Error(
+                `${label}: the deep link never landed on the state's screen ` +
+                  `(probe: ${plan.land}). The gesture chain was never run, so nothing ` +
+                  `about this dialog was measured — an unreached screen is not a clean screen.`,
+              );
+            }
+            await cdp.send("Runtime.evaluate", {
+              expression: plan.drive, returnByValue: true,
+            }, sessionId);
+          }
+
+          const opened = await poll(plan.open);
+          if (!opened) await sleep(300); // let the assertion report the honest not-open state
+
+          // ── THE FONT PIN (D218) ─────────────────────────────────────────────
+          // card= heights, root scroll heights and every clipping verdict below
+          // are layouts of whatever face resolved. Pinned AFTER the modal-open
+          // poll (the modal must exist before its type matters) and BEFORE the
+          // assertion runs.
+          //
+          // EXIT 2 BY HAND, NOT BY THROW. The enclosing catch maps every throw
+          // to process.exit(1) — "a modal defect was measured". A missing woff2
+          // is an ENVIRONMENT fault; laundering it into exit 1 is exactly the
+          // confusion this pin exists to end, so the refusal tears down and
+          // exits here rather than raising.
+          const pin = await cdp.send("Runtime.evaluate", {
+            expression: FONT_PIN_JS, returnByValue: true, awaitPromise: true,
+          }, sessionId).catch((err) => ({ __cdpError: err }));
+          const pinReport = pin && pin.__cdpError === undefined && !pin.exceptionDetails
+            ? pin.result.value
+            : null;
+          if (!pinReport || !pinReport.ok) {
+            await teardown();
+            process.stderr.write(
+              "\n!! ORACLE (exit 2): " + fontPinRefusal(label, pinReport) + "\n",
+            );
+            process.stderr.write(`   ${ORACLE_CI_SCOPE}\n`);
+            process.stderr.write(`   teardown ${teardownMs}ms\n`);
+            process.exit(2);
+          }
+
+          const evald = await cdp.send("Runtime.evaluate", {
+            // The CELL's expectation is merged into the STATE's contract here.
+            // Measured: without this merge `requireTall` never reached the page
+            // and the anti-vacuity check was itself vacuous — the 320x360 cell
+            // printed "tall-card scroll: N/A" and still said ok.
+            expression: assertJs({ ...plan.cfg, requireTall: !!cell.requireTall }),
+            returnByValue: true, awaitPromise: false,
+          }, sessionId);
+          if (evald.exceptionDetails) {
+            throw new Error(`assertion threw on ${label}: ${evald.exceptionDetails.text}`);
+          }
+          const r = evald.result.value;
+          r.label = label;
+          r.ms = Date.now() - s0;
+          results.push(r);
+
+          const bad = r.failures.length > 0;
+          const extra = r.tokenChars === undefined
+            ? ""
+            : ` · tok=${r.tokenChars}c/${r.tokenLines}L` +
+              ` done=${r.ctrlBox ? `${r.ctrlBox.w}x${r.ctrlBox.h}@${r.ctrlBox.top}..${r.ctrlBox.bottom}` : "-"}` +
+              ` scrolled=${r.rootScrollTop ?? "-"}/${r.rootScrollMax ?? "-"}` +
+              ` hitDone=${r.ctrlHit ?? "-"}`;
+          process.stdout.write(
+            `${bad ? "FAIL" : " ok "}  ${label.padEnd(46)} ` +
+              `rules exact=${r.exactRuleCount} substr=${r.substrRuleCount} · ` +
+              `pos=${r.computedPosition ?? "-"} overflow-y=${r.computedOverflowY ?? "-"} · ` +
+              `card=${r.cardHeight ?? "-"}px root=${r.rootScrollHeight ?? "-"}/${r.rootClientHeight ?? "-"} · ` +
+              `hit=${r.hitTestAboveBackdrop === undefined ? "-" : r.hitTestAboveBackdrop}` +
+              `${extra} · ${r.ms}ms\n`,
           );
-          process.stderr.write(`   ${ORACLE_CI_SCOPE}\n`);
-          process.stderr.write(`   teardown ${teardownMs}ms\n`);
-          process.exit(2);
+          for (const f of r.failures) process.stdout.write(`      ✗ ${f}\n`);
+          for (const n of r.notes) process.stdout.write(`      · ${n}\n`);
         }
-
-        const evald = await cdp.send("Runtime.evaluate", {
-          expression: ASSERT_JS, returnByValue: true, awaitPromise: false,
-        }, sessionId);
-        if (evald.exceptionDetails) {
-          throw new Error(`assertion threw on ${label}: ${evald.exceptionDetails.text}`);
-        }
-        const r = evald.result.value;
-        r.label = label;
-        r.ms = Date.now() - s0;
-        results.push(r);
-
-        const bad = r.failures.length > 0;
-        process.stdout.write(
-          `${bad ? "FAIL" : " ok "}  ${label.padEnd(42)} ` +
-            `rules exact=${r.exactRuleCount} substr=${r.substrRuleCount} · ` +
-            `pos=${r.computedPosition ?? "-"} overflow-y=${r.computedOverflowY ?? "-"} · ` +
-            `card=${r.cardHeight ?? "-"}px root=${r.rootScrollHeight ?? "-"}/${r.rootClientHeight ?? "-"} · ` +
-            `hit=${r.hitTestAboveBackdrop === undefined ? "-" : r.hitTestAboveBackdrop} · ${r.ms}ms\n`,
-        );
-        for (const f of r.failures) process.stdout.write(`      ✗ ${f}\n`);
-        for (const n of r.notes) process.stdout.write(`      · ${n}\n`);
       }
     }
   } catch (err) {

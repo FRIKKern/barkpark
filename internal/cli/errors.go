@@ -165,8 +165,20 @@ var codeExit = map[string]int{
 	"invalid_lifecycle":     exitValidation,
 	"sentinel_worker_id":    exitValidation,
 	"merge_gated_criterion": exitValidation,
-	"rate_limited":          exitRateLimit,
-	"internal_error":        exitServer,
+	// The close-artifact gate (PDS-D291). A `done` close of a kind:task row with
+	// ZERO acceptance criteria whose reason names no PR+sha and pastes no run
+	// output. It buckets with `criteria_unmet` and NOT with the conflict family
+	// for the same reason the whole 5/6 split exists: nothing moved under the
+	// caller, and re-sending the identical command can never succeed. Every fix
+	// is an act OUTSIDE this request — name the artifact in the reason, add the
+	// acceptance criteria the row should have carried, close it `cancelled`, or
+	// pass `--set close_reason_override="<why>"`. Minted BARE (no `:<detail>`
+	// suffix): the refusal's whole content is the ruling, which rides the
+	// top-level `message` the server computes (tasks_controller/params.ex
+	// criteria_hint/2) and `bodyMessage` prints in place of this token.
+	"close_reason_needs_artifact": exitValidation,
+	"rate_limited":                exitRateLimit,
+	"internal_error":              exitServer,
 
 	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
 	//
@@ -260,7 +272,6 @@ var codeExit = map[string]int{
 	// retry is the right reflex, and the class exit 1 made indistinguishable
 	// from a permanently-refused payload.
 	"storage_unavailable":       exitServer, // 503, errors.ex:712
-	"dedup_unavailable":         exitServer, // 503, the duplicate scan could not run — resend
 	"runtime_unavailable":       exitServer, // 503, chat_controller.ex:943
 	"runtime_capacity":          exitServer, // 503, chat_controller.ex:934
 	"chat_create_failed":        exitServer, // 503, chat_controller.ex:146

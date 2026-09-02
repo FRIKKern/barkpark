@@ -174,7 +174,16 @@ func itemNodes(item any) []any {
 		}
 		return []any{v}
 	case map[string]any:
-		if content, ok := v["content"].([]any); ok {
+		// The map-shaped item: 2,033 of the 10,455 published list items in the
+		// live corpus are maps, not inline arrays ({content:[…]} ×2,020,
+		// {text:…} ×13 — full-corpus census, 537 papers, 2026-07-25). Read
+		// `content` FIRST and the flat `text` second, the content ⟂ text law
+		// paragraph_inline/1 holds on the Elixir side. An EMPTY content array is
+		// NOT a body: it falls through to `text` exactly as the Elixir guard
+		// (`is_list(content) and content != []`) does, or the two runtimes
+		// disagree about the {content:[],text:"…"} item and the Go reader alone
+		// renders a blank bullet.
+		if content, ok := v["content"].([]any); ok && len(content) > 0 {
 			return content
 		}
 		if text, ok := v["text"].(string); ok {

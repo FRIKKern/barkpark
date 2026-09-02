@@ -13,11 +13,17 @@ defmodule BarkparkWeb.ChatControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Auth
+  alias Barkpark.Content
+  alias Barkpark.Content.Document
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.BlockedSweeper
   alias Barkpark.StudioChat.Message
+  alias Barkpark.StudioChat.PlanPapers
+  alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.Webhooks
   alias BarkparkWeb.ChatController
@@ -37,7 +43,21 @@ defmodule BarkparkWeb.ChatControllerTest do
     # A codex-style NON-:ok delivery: the double-answer race returns
     # {:error, :unknown_approval}. chat_controller.approval/2 must swallow this
     # (soft-match) and still flip the status + 204, never MatchError → 500.
-    def answer_approval(_ref, _request_id, _decision), do: {:error, :unknown_approval}
+    #
+    # The echo is what makes the /answer contract OBSERVABLE
+    # (ct-bl-question-updatedinput): the decision the controller hands the runtime
+    # is the ONLY place the rebuilt updatedInput exists, so a test that only
+    # inspected the flipped row would be vacuous about the whole point of the
+    # route. Guarded on a configured pid, so every pre-existing codex test is
+    # byte-identical.
+    def answer_approval(_ref, request_id, decision) do
+      case Application.get_env(:barkpark, :chat_answer_test_pid) do
+        pid when is_pid(pid) -> send(pid, {:answered, request_id, decision})
+        _ -> :ok
+      end
+
+      {:error, :unknown_approval}
+    end
   end
 
   defmodule SweepEcho do
@@ -184,6 +204,7 @@ defmodule BarkparkWeb.ChatControllerTest do
           {:post, "/v1/chat/sessions/#{sid}/messages"},
           {:post, "/v1/chat/sessions/#{sid}/interrupt"},
           {:post, "/v1/chat/sessions/#{sid}/approval"},
+          {:post, "/v1/chat/sessions/#{sid}/answer"},
           {:post, "/v1/chat/sessions/#{sid}/archive"},
           {:post, "/v1/chat/sessions/#{sid}/unarchive"},
           {:get, "/v1/chat/sessions/#{sid}/events"}
@@ -293,6 +314,17 @@ defmodule BarkparkWeb.ChatControllerTest do
           |> post(
             "/v1/chat/sessions/#{sid}/approval",
             Jason.encode!(%{request_id: "r", decision: "allow"})
+          )
+        end,
+        # ct-bl-question-updatedinput: answering ANOTHER tenant's question is the
+        # same not-found oracle. The body is VALID in shape, so what produces the
+        # 404 is `fetch_scoped`, not a 400 — a wrong-tenant answer is
+        # indistinguishable from a missing id.
+        fn ->
+          json_conn(conn_b)
+          |> post(
+            "/v1/chat/sessions/#{sid}/answer",
+            Jason.encode!(%{request_id: "r", answers: %{"Pick one" => "Blue"}})
           )
         end,
         fn -> json_conn(conn_b) |> get("/v1/chat/sessions/#{sid}/events") end
@@ -1732,6 +1764,508 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
   end
 
+  # ── D49 adopted into the transport (ct-bl-plan-paper-parity) ────────────────
+  #
+  # Before this, a TUI-origin plan allow flipped the card on BOTH surfaces
+  # (`update_approval_status` is role-agnostic) but published NO Paper: the
+  # projection was a Studio-LiveView-only `defp` reading the socket's copy of the
+  # plan. A colleague watching in Studio therefore saw the SAME approved plan
+  # carry a different durable artifact depending on who clicked Allow. These
+  # tests pin the convergence at the wire and the whole "publishes nothing"
+  # contract around it.
+  describe "POST /sessions/:id/approval — plan → Paper (studio-chat D49)" do
+    @plan_md "# Ship the migration\n\nInventory, port, delete the shim."
+
+    defp pending_plan(sid, request_id, input \\ %{"plan" => @plan_md}) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: "plan",
+          source_markdown: @plan_md,
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "ExitPlanMode",
+            "input" => input,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    defp answer(raw, sid, request_id, decision) do
+      json_conn(raw)
+      |> post(
+        "/v1/chat/sessions/#{sid}/approval",
+        Jason.encode!(%{request_id: request_id, decision: decision})
+      )
+    end
+
+    defp await(fun, tries \\ 100) do
+      cond do
+        fun.() -> :ok
+        tries <= 0 -> flunk("condition never became true")
+        true -> Process.sleep(20) && await(fun, tries - 1)
+      end
+    end
+
+    defp settle, do: Process.sleep(150)
+
+    defp paper_rows(slug) do
+      Repo.all(
+        from(d in Document,
+          where: d.doc_id == ^slug and d.type == "paper" and d.dataset == ^@dataset
+        )
+      )
+    end
+
+    # EVERY plan paper in the (sandbox-isolated) dataset — a duplicate written
+    # under a DIFFERENT slug is exactly what "one Paper per approved plan"
+    # forbids, and a slug-keyed count cannot see it.
+    defp all_plan_paper_ids do
+      Repo.all(
+        from(d in Document,
+          where: like(d.doc_id, "chat-plan-%") and d.type == "paper" and d.dataset == ^@dataset,
+          select: d.doc_id,
+          order_by: d.doc_id
+        )
+      )
+    end
+
+    setup do
+      ensure_default_scope!()
+      :ok
+    end
+
+    test "a TUI-origin allow publishes the Paper and stamps paper_id/url on the shared row",
+         %{admin: a1, sid: sid} do
+      pending_plan(sid, "tui-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      assert answer(a1, sid, "tui-plan", "allow") |> response(204)
+
+      slug = PlanPapers.slug_for(sid, "tui-plan")
+      url = "/papers/#{slug}"
+
+      # a REAL published paper at the deterministic slug — the row /papers/:slug serves
+      await(fn ->
+        match?(%{status: "published", type: "paper"}, Content.get_paper(slug, @dataset))
+      end)
+
+      # the SAME {:plan_paper, request_id, %{paper_id, paper_url}} frame the Studio
+      # LiveView broadcasts, on the same session topic — a co-viewing Studio tab
+      # grows its "→ published as Paper" link off a TUI-origin allow
+      assert_receive {:plan_paper, "tui-plan", %{paper_id: ^slug, paper_url: ^url}}, 3_000
+
+      await(fn ->
+        m = StudioChat.get_needs_you_message(sid, "tui-plan")
+        {m.metadata["paper_id"], m.metadata["paper_url"]} == {slug, url}
+      end)
+
+      # …and the card is resolved on that same row (the parity that already held)
+      assert StudioChat.get_needs_you_message(sid, "tui-plan").metadata["approval_status"] ==
+               "allowed"
+    end
+
+    test "TUI-origin and Studio-origin allows converge on ONE Paper — a repeat mints no duplicate",
+         %{admin: a1, sid: sid} do
+      pending_plan(sid, "conv-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      slug = PlanPapers.slug_for(sid, "conv-plan")
+
+      # origin 1: the flat transport (TUI / bp / any HTTP client)
+      assert answer(a1, sid, "conv-plan", "allow") |> response(204)
+      await(fn -> paper_rows(slug) != [] end)
+
+      # origin 2: the Studio LiveView, which delegates to the SAME seam with the
+      # SAME two ids (`maybe_publish_plan/3` → `publish_approved_plan/3`). Its ask
+      # is already terminal here, exactly as a second answer would find it.
+      assert :ok == PlanPapers.publish_approved_plan(sid, "conv-plan", :allow)
+      settle()
+
+      # …and a third answer over the wire, for good measure
+      assert answer(a1, sid, "conv-plan", "allow") |> response(204)
+      settle()
+
+      assert all_plan_paper_ids() == [slug],
+             "three allows across both surfaces must converge on ONE Paper (under any slug)"
+
+      m = StudioChat.get_needs_you_message(sid, "conv-plan")
+      assert m.metadata["paper_id"] == slug
+      assert m.metadata["paper_url"] == "/papers/#{slug}"
+    end
+
+    test "a deny on a plan publishes nothing", %{admin: a1, sid: sid} do
+      pending_plan(sid, "deny-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert answer(a1, sid, "deny-plan", "deny") |> response(204)
+      settle()
+
+      assert Content.get_paper(PlanPapers.slug_for(sid, "deny-plan"), @dataset) == nil
+      assert StudioChat.get_needs_you_message(sid, "deny-plan").metadata["paper_id"] == nil
+    end
+
+    test "an allow on an ordinary tool approval publishes nothing", %{admin: a1, sid: sid} do
+      pending_approval(sid, "appr-nopaper")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert answer(a1, sid, "appr-nopaper", "allow") |> response(204)
+      settle()
+
+      assert Content.get_paper(PlanPapers.slug_for(sid, "appr-nopaper"), @dataset) == nil
+    end
+
+    test "a blank plan and a provider-shaped ask with no input.plan publish nothing",
+         %{admin: a1, sid: sid} do
+      pending_plan(sid, "blank-plan", %{"plan" => "   \n  "})
+      pending_plan(sid, "shaped-plan", %{"steps" => ["a", "b"]})
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      for rid <- ~w(blank-plan shaped-plan) do
+        assert answer(a1, sid, rid, "allow") |> response(204)
+      end
+
+      settle()
+
+      for rid <- ~w(blank-plan shaped-plan) do
+        assert Content.get_paper(PlanPapers.slug_for(sid, rid), @dataset) == nil,
+               "#{rid} must not produce a Paper"
+
+        # the CARD still resolves — the missing document is not a failed approval
+        assert StudioChat.get_needs_you_message(sid, rid).metadata["approval_status"] == "allowed"
+      end
+    end
+
+    test "a foreign workspace is 404'd and publishes NOTHING" do
+      # Workspace-bound CONNECTOR tokens (a :global admin keeps instance-wide
+      # reach by D21, so it is the wrong instrument for a tenancy proof).
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      raw_a = "chat-plan-conn-a-#{System.unique_integer([:positive])}"
+      raw_b = "chat-plan-conn-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_a, "plan-conn-a", @dataset, ["read", "chat"], ws_a.id)
+      {:ok, _} = Auth.create_token(raw_b, "plan-conn-b", @dataset, ["read", "chat"], ws_b.id)
+
+      # ws-A creates the session over the wire, so it is stamped owner ws-A
+      owned =
+        json_conn(raw_a) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      sid = owned["id"]
+
+      pending_plan(sid, "foreign-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert answer(raw_b, sid, "foreign-plan", "allow") |> json_response(404)
+      settle()
+
+      assert Content.get_paper(PlanPapers.slug_for(sid, "foreign-plan"), @dataset) == nil,
+             "a tenant that cannot see the session must not be able to mint its Paper"
+
+      assert StudioChat.get_needs_you_message(sid, "foreign-plan").metadata["approval_status"] ==
+               "pending"
+
+      # the 404 is ISOLATION, not a dead seam: the OWNER's allow on the very same
+      # row DOES publish — so the assertion above cannot pass vacuously
+      assert answer(raw_a, sid, "foreign-plan", "allow") |> response(204)
+
+      await(fn ->
+        Content.get_paper(PlanPapers.slug_for(sid, "foreign-plan"), @dataset) != nil
+      end)
+    end
+  end
+
+  # ── POST /sessions/:id/answer — the AskUserQuestion answer contract ─────────
+  #
+  # ct-bl-question-updatedinput (charter D28's backlog, D22/D23-clean). The
+  # engine could always carry `{:allow, updated_map}`; the gap was the wire, and
+  # the wire is exactly where "let the caller send updatedInput" would have been
+  # a hole. These tests pin the constrained shape: the caller SELECTS among
+  # server-persisted labels, and the controller rebuilds updatedInput from the
+  # STORED ask.
+
+  describe "POST /sessions/:id/answer — constrained AskUserQuestion answers (ct-bl-question-updatedinput)" do
+    @ask %{
+      "questions" => [
+        %{
+          "question" => "Which color?",
+          "header" => "Color",
+          "options" => [
+            %{"label" => "Blue", "description" => "the cold one"},
+            %{"label" => "Red"}
+          ]
+        },
+        %{
+          "question" => "Which toppings?",
+          "multiSelect" => true,
+          "options" => [%{"label" => "Cheese"}, %{"label" => "Basil"}, %{"label" => "Olive"}]
+        }
+      ]
+    }
+
+    defp pending_question(sid, request_id, input \\ @ask) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: "question",
+          source_markdown: "AskUserQuestion",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "AskUserQuestion",
+            "input" => input,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    # A codex-provider session so FakeCodexAdapter observes the decision. It is
+    # ALSO the non-:ok delivery leg: the adapter returns {:error, :unknown_approval}
+    # and /answer must still 204 + flip, exactly as approval/2's D32 seal does.
+    defp codex_session_with_question(request_id, input \\ @ask) do
+      {:ok, session} =
+        StudioChat.create_session(%{
+          id: Ecto.UUID.generate(),
+          cwd: ClaudeChat.cwd(),
+          mode: "plan",
+          provider: "codex"
+        })
+
+      pending_question(session.id, request_id, input)
+      {:ok, _} = Recorder.ensure(%{session_id: session.id, mode: "plan", resume: false})
+      session.id
+    end
+
+    setup do
+      Application.put_env(:barkpark, :chat_answer_test_pid, self())
+      on_exit(fn -> Application.delete_env(:barkpark, :chat_answer_test_pid) end)
+      :ok
+    end
+
+    test "the runtime receives {:allow, SERVER-rebuilt updatedInput} — the caller's map is a selection, never the input",
+         %{admin: a1} do
+      sid = codex_session_with_question("q-answer")
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/answer",
+               Jason.encode!(%{request_id: "q-answer", answers: %{"Which color?" => "Blue"}})
+             )
+             |> response(204)
+
+      assert_receive {:answered, "q-answer", {:allow, updated}}, 1_000
+
+      # The WHOLE original ask is still there (the controller echoed the
+      # server-held input, D22) with only `answers` stamped on.
+      assert updated["questions"] == @ask["questions"]
+      assert updated["answers"] == %{"Which color?" => "Blue"}
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "a multiSelect list is comma-joined exactly as the Studio form joins its chips",
+         %{admin: a1} do
+      sid = codex_session_with_question("q-multi")
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/answer",
+               Jason.encode!(%{
+                 request_id: "q-multi",
+                 answers: %{"Which toppings?" => ["Cheese", "Olive"]}
+               })
+             )
+             |> response(204)
+
+      assert_receive {:answered, "q-multi", {:allow, updated}}, 1_000
+      assert updated["answers"] == %{"Which toppings?" => "Cheese, Olive"}
+    end
+
+    test "Studio's builder and the wire validator agree on the SAME normalisation (one dialect)" do
+      questions = QuestionAnswer.parse_questions(@ask)
+
+      studio =
+        QuestionAnswer.build_answers(questions, %{
+          selections: %{0 => ["Red"], 1 => ["Cheese", "Olive"]},
+          custom: %{}
+        })
+
+      {:ok, wire} =
+        QuestionAnswer.validate_answers(@ask, %{
+          "Which color?" => "Red",
+          "Which toppings?" => ["Cheese", "Olive"]
+        })
+
+      assert studio == wire
+      assert wire == %{"Which color?" => "Red", "Which toppings?" => "Cheese, Olive"}
+    end
+
+    test "SHAPE rejections 400 before any store call — no arbitrary payload gets through",
+         %{admin: a1, sid: sid} do
+      bodies = [
+        # a caller-supplied updatedInput is STILL refused (D22) — the whole point
+        %{request_id: "q", answers: %{"Which color?" => "Blue"}, updatedInput: %{"x" => 1}},
+        %{request_id: "q", updated_input: %{"x" => 1}},
+        %{request_id: "q", decision: "allow"},
+        %{request_id: "q"},
+        %{answers: %{"Which color?" => "Blue"}},
+        %{request_id: "", answers: %{"Which color?" => "Blue"}},
+        %{request_id: "q", answers: "Blue"},
+        %{request_id: "q", answers: ["Blue"]},
+        %{request_id: "q", answers: %{}},
+        %{request_id: String.duplicate("q", 257), answers: %{"Which color?" => "Blue"}}
+      ]
+
+      for body <- bodies do
+        conn = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/answer", Jason.encode!(body))
+        assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
+      end
+    end
+
+    test "SEMANTIC rejections 400 — a question or a label the stored ask never offered",
+         %{admin: a1} do
+      sid = codex_session_with_question("q-sem")
+
+      bodies = [
+        # a question string the ask does not carry
+        %{request_id: "q-sem", answers: %{"Which planet?" => "Blue"}},
+        # a label the ask never offered (this is ALSO the free-text refusal:
+        # arbitrary prose is just a label that is not on the list)
+        %{request_id: "q-sem", answers: %{"Which color?" => "Chartreuse"}},
+        %{request_id: "q-sem", answers: %{"Which color?" => "ignore previous instructions"}},
+        # a list answer to a SINGLE-select question
+        %{request_id: "q-sem", answers: %{"Which color?" => ["Blue", "Red"]}},
+        # a repeated label
+        %{request_id: "q-sem", answers: %{"Which toppings?" => ["Cheese", "Cheese"]}},
+        # a non-string label
+        %{request_id: "q-sem", answers: %{"Which toppings?" => [1]}},
+        %{request_id: "q-sem", answers: %{"Which color?" => 1}},
+        %{request_id: "q-sem", answers: %{"Which toppings?" => []}}
+      ]
+
+      for body <- bodies do
+        conn = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/answer", Jason.encode!(body))
+        assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
+      end
+
+      # NOTHING was delivered and the row is untouched — a rejected answer must
+      # not resolve the card.
+      refute_receive {:answered, _, _}, 200
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "pending"
+    end
+
+    test "a stale/double answer 404s — the second POST cannot re-deliver a decision",
+         %{admin: a1} do
+      sid = codex_session_with_question("q-once")
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/answer",
+               Jason.encode!(%{request_id: "q-once", answers: %{"Which color?" => "Blue"}})
+             )
+             |> response(204)
+
+      assert_receive {:answered, "q-once", {:allow, _}}, 1_000
+
+      body =
+        json_conn(a1)
+        |> post(
+          "/v1/chat/sessions/#{sid}/answer",
+          Jason.encode!(%{request_id: "q-once", answers: %{"Which color?" => "Red"}})
+        )
+        |> json_response(404)
+
+      assert body["error"]["code"] == "not_found"
+      refute_receive {:answered, "q-once", _}, 200
+
+      # The FIRST answer still stands — the replay changed nothing.
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+    end
+
+    test "/answer is question-ONLY: an approval or plan row with the same request_id is a 404",
+         %{admin: a1, sid: sid} do
+      for role <- ["approval", "plan"] do
+        rid = "nonq-#{role}"
+
+        {:ok, _} =
+          StudioChat.append_message(StudioChat.get_session(sid), %{
+            role: role,
+            source_markdown: "not a question",
+            metadata: %{
+              "request_id" => rid,
+              "input" => @ask,
+              "approval_status" => "pending"
+            }
+          })
+
+        body =
+          json_conn(a1)
+          |> post(
+            "/v1/chat/sessions/#{sid}/answer",
+            Jason.encode!(%{request_id: rid, answers: %{"Which color?" => "Blue"}})
+          )
+          |> json_response(404)
+
+        assert body["error"]["code"] == "not_found", role
+      end
+
+      # Both rows are still pending: /answer never touched them.
+      for message <- StudioChat.list_messages(sid) do
+        assert message.metadata["approval_status"] == "pending"
+      end
+    end
+
+    test "an unknown request_id and an absent session both join the not-found oracle",
+         %{admin: a1, sid: sid} do
+      pending_question(sid, "q-real")
+
+      for path <- [
+            "/v1/chat/sessions/#{sid}/answer",
+            "/v1/chat/sessions/#{Ecto.UUID.generate()}/answer"
+          ] do
+        assert json_conn(a1)
+               |> post(
+                 path,
+                 Jason.encode!(%{request_id: "q-missing", answers: %{"Which color?" => "Blue"}})
+               )
+               |> json_response(404)
+      end
+    end
+
+    test "a question row whose stored ask carries no questions cannot be answered", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_question(sid, "q-empty", %{"questions" => []})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/answer",
+               Jason.encode!(%{request_id: "q-empty", answers: %{"Which color?" => "Blue"}})
+             )
+             |> json_response(400)
+    end
+
+    test "without a live runtime the answer is a 204 that still flips the row", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_question(sid, "q-noruntime")
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/answer",
+               Jason.encode!(%{request_id: "q-noruntime", answers: %{"Which color?" => "Blue"}})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+  end
+
   # ── F. SSE exit secrecy — the internal tail cannot reach the wire (D23) ──────
 
   describe "SSE exit frame secrecy (obligation F / D23)" do
@@ -1788,6 +2322,44 @@ defmodule BarkparkWeb.ChatControllerTest do
         |> Jason.decode!()
 
       assert data == %{"type" => "assistant", "text" => "hi"}
+    end
+
+    test "task frame is the compact transition JSON with NO SSE id (tlv)" do
+      # A live ledger transition (tlv-bl-chat-live-transition-stream): id-less
+      # like chat/workflow/permission/exit, so it is never a Last-Event-ID
+      # resume cursor. Its OWN `event_id` field is the reducer's dedupe key —
+      # a payload field, deliberately NOT the SSE frame id.
+      transition = %{
+        event_id: "ev-9",
+        task_id: "task-tlv-1",
+        title: "Sweep the yard",
+        status: "done",
+        mutation: "task.closed",
+        verb: "closed",
+        label: "Sweep the yard → done (closed)"
+      }
+
+      frame = ChatController.sse_task_frame(transition)
+      assert String.starts_with?(frame, "event: task\ndata: ")
+      assert String.ends_with?(frame, "\n\n")
+      refute frame =~ "id:"
+
+      data =
+        frame
+        |> String.split("data: ", parts: 2)
+        |> List.last()
+        |> String.trim()
+        |> Jason.decode!()
+
+      assert data == %{
+               "event_id" => "ev-9",
+               "task_id" => "task-tlv-1",
+               "title" => "Sweep the yard",
+               "status" => "done",
+               "mutation" => "task.closed",
+               "verb" => "closed",
+               "label" => "Sweep the yard → done (closed)"
+             }
     end
 
     test "workflow frame is the compact summary JSON with NO id (live delta, D23)" do

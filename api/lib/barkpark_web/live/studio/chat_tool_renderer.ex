@@ -58,6 +58,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   alias Barkpark.Chat.ToolRows
   alias Barkpark.Papers.TextDiff
+  alias BarkparkWeb.Studio.TokensGen
 
   # Lines shown before a diff collapses behind a details/summary. The terminal
   # shows a compact hunk; anything larger folds with an honest overflow count.
@@ -332,6 +333,79 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
     end
   end
 
+  # ── the turn fold (task-8f904a88b9bc3d59) ───────────────────────────────────
+  #
+  # A settled turn's tool rows collapse under ONE header row. The three
+  # functions below are that fold's whole vocabulary, and the Go twin
+  # (`internal/chat/render.go` turnFoldKey/foldLabel/formatDuration) is a
+  # line-for-line mirror of them, pinned byte-for-byte by the SHARED fixture
+  # `api/test/support/fixtures/chat_fold_labels.json` which both suites read.
+  # A label change that lands on one surface only reds the other surface's test.
+  # (Search vocabulary: turn fold / fold-on-settle / "Worked for" header /
+  # collapse tool rows / "You stopped after".)
+
+  @doc """
+  The fold GROUP KEY for one tool row — the turn it belongs to, or `nil` when
+  the row's turn has not settled.
+
+  `turn_settled_at` IS the identity: every row of one turn is stamped by ONE
+  `settle_tool_rows/2` UPDATE, so they all carry the same instant, and the next
+  turn's UPDATE carries a different one. Nothing is re-derived and no turn id
+  had to be invented — a LIVE turn simply has no key, which is exactly why a
+  live turn can never fold.
+  """
+  @spec turn_fold_key(map()) :: String.t() | nil
+  def turn_fold_key(message) when is_map(message) do
+    with true <- Map.get(message, :turn_settled) == true,
+         key when is_binary(key) and key != "" <- Map.get(message, :turn_settled_at) do
+      key
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The fold header's label: `"Worked for 3m 12s"` for a turn that ran to its own
+  end, `"You stopped after 42s"` for one a Stop ended. Reads `turn_outcome` and
+  `turn_duration_ms` — both SERVER-stamped (`StudioChat.turn_settle_stamp/1`) —
+  and never classifies anything itself.
+  """
+  @spec fold_label(map()) :: String.t()
+  def fold_label(message) when is_map(message) do
+    fold_label(Map.get(message, :turn_outcome), Map.get(message, :turn_duration_ms))
+  end
+
+  @doc """
+  The label formatter, by outcome + duration. THE one place Studio builds this
+  string (`internal/chat.foldLabel` is the one place `bp chat` builds it).
+  """
+  @spec fold_label(String.t() | nil, integer() | nil) :: String.t()
+  def fold_label("interrupted", duration_ms),
+    do: "You stopped after " <> format_duration(duration_ms)
+
+  def fold_label(_outcome, duration_ms), do: "Worked for " <> format_duration(duration_ms)
+
+  @doc """
+  A turn duration as the fold header spells it: `42s`, `3m 12s`, `1h 4m 5s`.
+  Sub-second and missing//negative durations read `0s` — an honest zero beats a
+  blank header or a crash on a thinner frame.
+  """
+  @spec format_duration(integer() | nil) :: String.t()
+  def format_duration(ms) when is_integer(ms) and ms > 0 do
+    total = div(ms, 1000)
+    h = div(total, 3600)
+    m = rem(div(total, 60), 60)
+    s = rem(total, 60)
+
+    cond do
+      h > 0 -> "#{h}h #{m}m #{s}s"
+      m > 0 -> "#{m}m #{s}s"
+      true -> "#{s}s"
+    end
+  end
+
+  def format_duration(_ms), do: "0s"
+
   @doc "The lifecycle color token for a tool row's settle state (tokens only)."
   @spec settle_color(map()) :: String.t()
   def settle_color(message) when is_map(message) do
@@ -451,6 +525,22 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   # Emitted token, never a copied literal (studio-literal-check).
   @life_neutral "var(--fg-dim)"
 
+  # state -> glyph, folded at COMPILE time from the ONE generated lifecycle
+  # manifest (`design/tokens.json` -> `BarkparkWeb.Studio.TokensGen.lifecycle/0`,
+  # the same table the Go TUI and the board's `Board.glyphs/0` mirror). Folding
+  # the generated source is the point: a chip glyph can never drift from the
+  # board's, because neither is typed here.
+  @life_glyphs Map.new(TokensGen.lifecycle(), fn %{state: st, glyph: g} -> {st, g} end)
+
+  # The fail-open mark for a state outside the manifest: visible, neutral, and
+  # unmistakably not one of the known states.
+  @life_neutral_glyph "\u00b7"
+
+  # The thought state whose engagement OBJECT is worth surfacing on the chip:
+  # "what is being weighed" is the whole content of `considering` (TLV D12,
+  # statement-2 visibility). `researching` carries it too once staged.
+  @engagement_states ~w(considering researching)
+
   # Count keys in board order. Any OTHER key the server later adds still renders,
   # appended in sorted order, so the chip never silently drops a lifecycle state.
   @count_order ~w(open ready in_progress blocked done closed cancelled)
@@ -537,10 +627,57 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
         if paper?(entity, suffix) do
           %{kind: :paper, label: entity_label(entity), href: paper_href(entity)}
         else
-          %{kind: :task, label: entity_label(entity), href: task_href(entity)}
+          %{
+            kind: :task,
+            label: entity_label(entity),
+            href: task_href(entity),
+            # nil when the payload carries neither — the chip then renders
+            # BYTE-IDENTICALLY to before this slice.
+            state: life_state(entity),
+            object: engagement_object(entity)
+          }
         end
     end
   end
+
+  # The entity's lifecycle state, or nil when the payload does not carry one.
+  # UNLIKE `prime_state/1` this does NOT default to "open": a prime ready-head
+  # row omits the field exactly when it IS open (a documented payload law), but
+  # an arbitrary entity payload that simply lacks the field tells us nothing, and
+  # inventing "open" would report a claimable task that may be anything at all.
+  defp life_state(entity) when is_map(entity) do
+    case entity["lifecycle_status"] do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
+  end
+
+  defp life_state(_), do: nil
+
+  # `content.engagement.object` — WHAT the task is being weighed for
+  # ("research" | "build"). The v1 BRIEF card hoists `engagement` to the top
+  # level (`put_brief_engagement/2` in tasks_controller/params.ex); a raw doc
+  # payload keeps it under `content`. Read both, top level first. Only the
+  # thought states get a marker — an object left on a card that has since moved
+  # on is stale data, and drawing it would report a deliberation that ended.
+  defp engagement_object(entity) when is_map(entity) do
+    with state when state in @engagement_states <- life_state(entity),
+         %{} = engagement <- entity["engagement"] || get_in(entity, ["content", "engagement"]),
+         object when is_binary(object) and object != "" <- engagement["object"] do
+      object
+    else
+      _ -> nil
+    end
+  end
+
+  defp engagement_object(_), do: nil
+
+  # The glyph for a lifecycle state — the manifest's own character, or the
+  # neutral dot for a state this build has never heard of. Never raises.
+  defp life_glyph(state) when is_binary(state),
+    do: Map.get(@life_glyphs, state, @life_neutral_glyph)
+
+  defp life_glyph(_), do: @life_neutral_glyph
 
   defp single_entity(%{"doc" => doc}) when is_map(doc), do: doc
   defp single_entity(%{"doc_id" => _} = payload), do: payload
@@ -592,7 +729,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   defp hit(h) when is_map(h) do
     case first_binary([h["title"], entity_id(h)]) do
       label when is_binary(label) and label != "" ->
-        %{label: label, type: h["type"], href: hit_href(h)}
+        %{label: label, type: h["type"], href: hit_href(h), state: life_state(h)}
 
       _ ->
         nil
@@ -701,7 +838,10 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
           style="list-style: none; margin: 6px 0 0; padding: 0 0 0 12px; display: flex; flex-direction: column; gap: 3px;"
         >
           <li :for={hit <- @chip.hits} style="display: flex; gap: 6px; align-items: baseline;">
-            <span style="color: var(--primary); flex: none;">·</span>
+            <span
+              data-life-state={hit[:state]}
+              style={"color: #{chip_accent(hit)}; flex: none;"}
+            ><%= (hit[:state] && life_glyph(hit[:state])) || "·" %></span>
             <a
               :if={hit.href}
               href={hit.href}
@@ -786,8 +926,20 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
       href={@chip.href}
       style="display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0 16px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface); text-decoration: none; color: inherit; font-family: var(--font-mono); font-size: 12px;"
     >
-      <span style="color: var(--primary); flex: none;"><%= chip_glyph(@chip.kind) %></span>
+      <span style={"color: #{chip_accent(@chip)}; flex: none;"}><%= chip_glyph(@chip.kind) %></span>
+      <span
+        :if={@chip[:state]}
+        data-life-state={@chip[:state]}
+        style={"color: #{life_color(@chip[:state])}; flex: none; opacity: 0.9;"}
+        title={@chip[:state]}
+      ><%= life_glyph(@chip[:state]) %></span>
       <span style="overflow-wrap: anywhere;" data-gutter-text><%= @chip.label %></span>
+      <span
+        :if={@chip[:object]}
+        class="text-dim"
+        data-engagement-object={@chip[:object]}
+        style="opacity: 0.7; flex: none;"
+      >⟡ <%= @chip[:object] %></span>
       <span class="text-dim" style="opacity: 0.6; flex: none;">
         <%= chip_kind_label(@chip.kind) %> →
       </span>
@@ -796,13 +948,34 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
       :if={is_nil(@chip.href)}
       style="display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0 16px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface); font-family: var(--font-mono); font-size: 12px;"
     >
-      <span style="color: var(--primary); flex: none;"><%= chip_glyph(@chip.kind) %></span>
+      <span style={"color: #{chip_accent(@chip)}; flex: none;"}><%= chip_glyph(@chip.kind) %></span>
+      <span
+        :if={@chip[:state]}
+        data-life-state={@chip[:state]}
+        style={"color: #{life_color(@chip[:state])}; flex: none; opacity: 0.9;"}
+        title={@chip[:state]}
+      ><%= life_glyph(@chip[:state]) %></span>
       <span style="overflow-wrap: anywhere;" data-gutter-text><%= @chip.label %></span>
+      <span
+        :if={@chip[:object]}
+        class="text-dim"
+        data-engagement-object={@chip[:object]}
+        style="opacity: 0.7; flex: none;"
+      >⟡ <%= @chip[:object] %></span>
     </div>
     """
   end
 
   def tool_chip(assigns), do: ~H""
+
+  # A chip's accent: the lifecycle hue when the payload named a state, else the
+  # generic primary the pill has always used.
+  defp chip_accent(chip) do
+    case chip[:state] do
+      state when is_binary(state) -> life_color(state)
+      _ -> "var(--primary)"
+    end
+  end
 
   # The lifecycle dot every prime row and count pill carries. The color is a
   # `var(--life-*)` token (or the neutral token for an unknown state), never a

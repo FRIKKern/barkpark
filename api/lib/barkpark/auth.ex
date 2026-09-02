@@ -217,6 +217,8 @@ defmodule Barkpark.Auth do
           }
         })
 
+        broadcast_socket_teardown(revoked)
+
         ok
 
       err ->
@@ -239,6 +241,33 @@ defmodule Barkpark.Auth do
         end
     end
   end
+
+  # Revocation has to reach ALREADY-OPEN sockets, not just the next HTTP
+  # request. `verify_token/1`'s WHERE clause is re-run per request, so the HTTP
+  # door closes on its own; `BarkparkWeb.UserSocket.connect/3` runs it EXACTLY
+  # ONCE and then never again, so a revoked credential kept answering search
+  # frames and streaming live document pushes for as long as the holder stayed
+  # connected. `UserSocket.id/1` now returns a token-derived topic — the handle
+  # Phoenix's own disconnect mechanism needs — and this is the broadcast
+  # against it, so teardown is caused by the revoke itself with no action
+  # required from the client. Both other revoke entry points
+  # (`revoke_app_tokens_for_email/2`, `revoke_app_token_by_id/2`) funnel through
+  # `revoke_token/1`, so this one hook covers every revoke in the tree.
+  #
+  # BEST-EFFORT ON PURPOSE: a pubsub or endpoint hiccup must never make a
+  # revoke fail. The DB row is the source of truth for every other consumer,
+  # and a revoke that rolled back because a socket could not be notified would
+  # be strictly worse than one whose notification was missed.
+  defp broadcast_socket_teardown(%ApiToken{id: id}) when is_binary(id) do
+    BarkparkWeb.Endpoint.broadcast(BarkparkWeb.UserSocket.disconnect_topic(id), "disconnect", %{})
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp broadcast_socket_teardown(_token), do: :ok
 
   @doc """
   Resolve a RAW bearer to its `%ApiToken{}` row regardless of revocation or

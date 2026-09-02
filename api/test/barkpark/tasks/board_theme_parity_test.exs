@@ -29,7 +29,15 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
   # The lifecycle keys BOTH surfaces speak. The board folds `cancelled` to a
   # tally (no rendered column), but the glyph is still shared truth — the glyph
   # is shared, its placement isn't (D17).
-  @shared_keys ~w(open ready in_progress blocked done cancelled)
+  @shared_keys ~w(open ready in_progress blocked done cancelled considering researching)
+
+  # The GUI's own fail-open mark (tlv-s5): `unknown` is NOT a stored lifecycle
+  # state and has no `GenLifecycle` row, so it is deliberately OUT of
+  # @shared_keys — it exists only so `Board.glyph_for/1` is total. It IS in
+  # @expected below, because that map is a full-equality witness over
+  # `Board.glyphs/0`; if a future emitter ever grows an `unknown` lifecycle,
+  # this comment is where the two lists reconcile.
+  @gui_only_keys ~w(unknown)
 
   # The §1 manifest, hard-coded as an independent third witness so a silent
   # drift on EITHER side (the Board map OR the generated Go table) trips this
@@ -40,7 +48,10 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
     "in_progress" => "⠋",
     "blocked" => "!",
     "done" => "✓",
-    "cancelled" => "✕"
+    "cancelled" => "✕",
+    "considering" => "◌",
+    "researching" => "◎",
+    "unknown" => "·"
   }
 
   # Canonical string→atom map for the lifecycle keys, folded at COMPILE time
@@ -84,6 +95,23 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
         assert Map.fetch!(tui, key) == Map.fetch!(board, atom),
                "GUI/TUI glyph drift on #{key}: TUI=#{inspect(Map.get(tui, key))} " <>
                  "GUI=#{inspect(Map.get(board, atom))}"
+      end
+    end
+
+    test "the GUI-only fail-open mark is absent from the generated TUI table" do
+      # The complement of the parity assertions above: `unknown` must NOT sneak
+      # into the shared vocabulary. If someone adds it to design/tokens.json
+      # this reds, and the fix is to decide deliberately — not to widen
+      # @shared_keys until the gate stops discriminating.
+      tui = parse_status_glyphs()
+
+      for key <- @gui_only_keys do
+        refute Map.has_key?(tui, key),
+               "#{key} is the GUI's fail-open mark, not a lifecycle state — " <>
+                 "it must not appear in the generated GenLifecycle table"
+
+        assert Map.has_key?(Board.glyphs(), @lifecycle_atom[key]),
+               "#{key} must still exist in Board.glyphs/0 — glyph_for/1 falls back to it"
       end
     end
 

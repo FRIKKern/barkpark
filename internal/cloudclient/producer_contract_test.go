@@ -62,7 +62,6 @@ import (
 //	runtime_target — same row; today it reaches the BOX payload only, never the
 //	                 deployment JSON the CLI reads
 var dormantTags = map[string]string{
-	"port":           "#3976 added the decoder; deployment_json/1 has never emitted it. Producer half tracked by task-5d3febd051e63c1d.",
 	"runtime_target": "#3976 added the decoder; it rides the box payload, not the CLI-facing deployment JSON. Same producer row.",
 }
 
@@ -265,7 +264,11 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 	//
 	// This number MOVES when the serializer legitimately gains or loses a key.
 	// That is intended: the contract changed, and someone should look.
-	const producerKeyCount = 31 // deployment_json/1's 29 + site_deployment_json/3's stages + url
+	// 31 -> 34 (#15095, task-5d3febd051e63c1d): deployment_json/1 gained `slot`, `port`
+	// and `health_exit_code` (the served-slot truth, nullable health). `port` left
+	// dormantTags in the same change — the producer now sends it, so the waiver
+	// was stale and this guard said so on main (measured 2026-09-02).
+	const producerKeyCount = 34 // deployment_json/1's 32 + site_deployment_json/3's stages + url
 	if len(producer) != producerKeyCount {
 		direction := "WIDE — it is matching identifiers that are not top-level keys, " +
 			"which can mask a dormant field"
