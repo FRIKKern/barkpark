@@ -13,11 +13,16 @@ defmodule BarkparkWeb.ChatControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Auth
+  alias Barkpark.Content
+  alias Barkpark.Content.Document
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.BlockedSweeper
   alias Barkpark.StudioChat.Message
+  alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.Webhooks
@@ -1756,6 +1761,216 @@ defmodule BarkparkWeb.ChatControllerTest do
       [message] = StudioChat.list_messages(sid)
       assert message.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+  end
+
+  # ── D49 adopted into the transport (ct-bl-plan-paper-parity) ────────────────
+  #
+  # Before this, a TUI-origin plan allow flipped the card on BOTH surfaces
+  # (`update_approval_status` is role-agnostic) but published NO Paper: the
+  # projection was a Studio-LiveView-only `defp` reading the socket's copy of the
+  # plan. A colleague watching in Studio therefore saw the SAME approved plan
+  # carry a different durable artifact depending on who clicked Allow. These
+  # tests pin the convergence at the wire and the whole "publishes nothing"
+  # contract around it.
+  describe "POST /sessions/:id/approval — plan → Paper (studio-chat D49)" do
+    @plan_md "# Ship the migration\n\nInventory, port, delete the shim."
+
+    defp pending_plan(sid, request_id, input \\ %{"plan" => @plan_md}) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: "plan",
+          source_markdown: @plan_md,
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "ExitPlanMode",
+            "input" => input,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    defp answer(raw, sid, request_id, decision) do
+      json_conn(raw)
+      |> post(
+        "/v1/chat/sessions/#{sid}/approval",
+        Jason.encode!(%{request_id: request_id, decision: decision})
+      )
+    end
+
+    defp await(fun, tries \\ 100) do
+      cond do
+        fun.() -> :ok
+        tries <= 0 -> flunk("condition never became true")
+        true -> Process.sleep(20) && await(fun, tries - 1)
+      end
+    end
+
+    defp settle, do: Process.sleep(150)
+
+    defp paper_rows(slug) do
+      Repo.all(
+        from(d in Document,
+          where: d.doc_id == ^slug and d.type == "paper" and d.dataset == ^@dataset
+        )
+      )
+    end
+
+    # EVERY plan paper in the (sandbox-isolated) dataset — a duplicate written
+    # under a DIFFERENT slug is exactly what "one Paper per approved plan"
+    # forbids, and a slug-keyed count cannot see it.
+    defp all_plan_paper_ids do
+      Repo.all(
+        from(d in Document,
+          where: like(d.doc_id, "chat-plan-%") and d.type == "paper" and d.dataset == ^@dataset,
+          select: d.doc_id,
+          order_by: d.doc_id
+        )
+      )
+    end
+
+    setup do
+      ensure_default_scope!()
+      :ok
+    end
+
+    test "a TUI-origin allow publishes the Paper and stamps paper_id/url on the shared row",
+         %{admin: a1, sid: sid} do
+      pending_plan(sid, "tui-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      assert answer(a1, sid, "tui-plan", "allow") |> response(204)
+
+      slug = PlanPapers.slug_for(sid, "tui-plan")
+      url = "/papers/#{slug}"
+
+      # a REAL published paper at the deterministic slug — the row /papers/:slug serves
+      await(fn ->
+        match?(%{status: "published", type: "paper"}, Content.get_paper(slug, @dataset))
+      end)
+
+      # the SAME {:plan_paper, request_id, %{paper_id, paper_url}} frame the Studio
+      # LiveView broadcasts, on the same session topic — a co-viewing Studio tab
+      # grows its "→ published as Paper" link off a TUI-origin allow
+      assert_receive {:plan_paper, "tui-plan", %{paper_id: ^slug, paper_url: ^url}}, 3_000
+
+      await(fn ->
+        m = StudioChat.get_needs_you_message(sid, "tui-plan")
+        {m.metadata["paper_id"], m.metadata["paper_url"]} == {slug, url}
+      end)
+
+      # …and the card is resolved on that same row (the parity that already held)
+      assert StudioChat.get_needs_you_message(sid, "tui-plan").metadata["approval_status"] ==
+               "allowed"
+    end
+
+    test "TUI-origin and Studio-origin allows converge on ONE Paper — a repeat mints no duplicate",
+         %{admin: a1, sid: sid} do
+      pending_plan(sid, "conv-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      slug = PlanPapers.slug_for(sid, "conv-plan")
+
+      # origin 1: the flat transport (TUI / bp / any HTTP client)
+      assert answer(a1, sid, "conv-plan", "allow") |> response(204)
+      await(fn -> paper_rows(slug) != [] end)
+
+      # origin 2: the Studio LiveView, which delegates to the SAME seam with the
+      # SAME two ids (`maybe_publish_plan/3` → `publish_approved_plan/3`). Its ask
+      # is already terminal here, exactly as a second answer would find it.
+      assert :ok == PlanPapers.publish_approved_plan(sid, "conv-plan", :allow)
+      settle()
+
+      # …and a third answer over the wire, for good measure
+      assert answer(a1, sid, "conv-plan", "allow") |> response(204)
+      settle()
+
+      assert all_plan_paper_ids() == [slug],
+             "three allows across both surfaces must converge on ONE Paper (under any slug)"
+
+      m = StudioChat.get_needs_you_message(sid, "conv-plan")
+      assert m.metadata["paper_id"] == slug
+      assert m.metadata["paper_url"] == "/papers/#{slug}"
+    end
+
+    test "a deny on a plan publishes nothing", %{admin: a1, sid: sid} do
+      pending_plan(sid, "deny-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert answer(a1, sid, "deny-plan", "deny") |> response(204)
+      settle()
+
+      assert Content.get_paper(PlanPapers.slug_for(sid, "deny-plan"), @dataset) == nil
+      assert StudioChat.get_needs_you_message(sid, "deny-plan").metadata["paper_id"] == nil
+    end
+
+    test "an allow on an ordinary tool approval publishes nothing", %{admin: a1, sid: sid} do
+      pending_approval(sid, "appr-nopaper")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert answer(a1, sid, "appr-nopaper", "allow") |> response(204)
+      settle()
+
+      assert Content.get_paper(PlanPapers.slug_for(sid, "appr-nopaper"), @dataset) == nil
+    end
+
+    test "a blank plan and a provider-shaped ask with no input.plan publish nothing",
+         %{admin: a1, sid: sid} do
+      pending_plan(sid, "blank-plan", %{"plan" => "   \n  "})
+      pending_plan(sid, "shaped-plan", %{"steps" => ["a", "b"]})
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      for rid <- ~w(blank-plan shaped-plan) do
+        assert answer(a1, sid, rid, "allow") |> response(204)
+      end
+
+      settle()
+
+      for rid <- ~w(blank-plan shaped-plan) do
+        assert Content.get_paper(PlanPapers.slug_for(sid, rid), @dataset) == nil,
+               "#{rid} must not produce a Paper"
+
+        # the CARD still resolves — the missing document is not a failed approval
+        assert StudioChat.get_needs_you_message(sid, rid).metadata["approval_status"] == "allowed"
+      end
+    end
+
+    test "a foreign workspace is 404'd and publishes NOTHING" do
+      # Workspace-bound CONNECTOR tokens (a :global admin keeps instance-wide
+      # reach by D21, so it is the wrong instrument for a tenancy proof).
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      raw_a = "chat-plan-conn-a-#{System.unique_integer([:positive])}"
+      raw_b = "chat-plan-conn-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_a, "plan-conn-a", @dataset, ["read", "chat"], ws_a.id)
+      {:ok, _} = Auth.create_token(raw_b, "plan-conn-b", @dataset, ["read", "chat"], ws_b.id)
+
+      # ws-A creates the session over the wire, so it is stamped owner ws-A
+      owned =
+        json_conn(raw_a) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      sid = owned["id"]
+
+      pending_plan(sid, "foreign-plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert answer(raw_b, sid, "foreign-plan", "allow") |> json_response(404)
+      settle()
+
+      assert Content.get_paper(PlanPapers.slug_for(sid, "foreign-plan"), @dataset) == nil,
+             "a tenant that cannot see the session must not be able to mint its Paper"
+
+      assert StudioChat.get_needs_you_message(sid, "foreign-plan").metadata["approval_status"] ==
+               "pending"
+
+      # the 404 is ISOLATION, not a dead seam: the OWNER's allow on the very same
+      # row DOES publish — so the assertion above cannot pass vacuously
+      assert answer(raw_a, sid, "foreign-plan", "allow") |> response(204)
+
+      await(fn ->
+        Content.get_paper(PlanPapers.slug_for(sid, "foreign-plan"), @dataset) != nil
+      end)
     end
   end
 

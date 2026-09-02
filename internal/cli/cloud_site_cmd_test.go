@@ -4553,3 +4553,110 @@ func TestRunCloudSiteWaitForLiveListRefusalExitsByStatusFamily(t *testing.T) {
 		})
 	}
 }
+
+// TestSiteStageTimestampsReachTheJSONEnvelope closes the fourth silent drop, and
+// the one that cost a live proof: `SiteStage` has carried `started_at` /
+// `finished_at` since the six-stage bar shipped, `GET /v1/sites/:id/deployments/:dep_id`
+// emits both per stage (`Sites.Deploy.stages/1` folds them off each console
+// entry's `at`), and `siteDeploymentMap` built every row as {name,status,detail}
+// and threw them away. `deploy/site-spawner-live-proof.sh`'s `stage_status_ms`
+// reads exactly those two keys off `deployment.stages[]`, so the --prebuilt
+// journey's step 6/6 compared 0ms against 0ms and red 52 PREBUILT_BUILD_NO_TIMINGS
+// on every run — not because the two builds took the same time, but because the
+// envelope it parses could not contain a duration at all.
+//
+// The input is the WIRE, decoded: a real `{"deployment":{…}}` body through
+// json.Unmarshal, so this fails if either the struct tags or the map drop them.
+//
+// MUTATION PROOF: delete either `if st.StartedAt != ""` block in siteDeploymentMap
+// and this test reds on the missing key; drop the `!= ""` guard and it reds on
+// the never-ran stage carrying a zero time.
+func TestSiteStageTimestampsReachTheJSONEnvelope(t *testing.T) {
+	// PLAN ran and finished; BUILD ran for 38.4s; STAGE is still running (started,
+	// never finished); RETIRE never ran at all and is not on the wire.
+	body := []byte(`{"deployment":{
+	  "id":"dep-ts","status":"live","stage":"SWITCH","build_id":"b-1",
+	  "stages":[
+	    {"name":"PLAN","status":"done","started_at":"2026-09-02T10:00:00Z","finished_at":"2026-09-02T10:00:01Z"},
+	    {"name":"BUILD","status":"done","started_at":"2026-09-02T10:00:01Z","finished_at":"2026-09-02T10:00:39.4Z","detail":"npm ci && npm run build"},
+	    {"name":"STAGE","status":"running","started_at":"2026-09-02T10:00:39.4Z"}
+	  ]}}`)
+	var wire struct {
+		Deployment cloudclient.SiteDeployment `json:"deployment"`
+	}
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatalf("decode the control plane's own body: %v", err)
+	}
+	if wire.Deployment.Stages[1].StartedAt == "" || wire.Deployment.Stages[1].FinishedAt == "" {
+		t.Fatalf("SiteStage must decode both timestamps off the wire: %+v", wire.Deployment.Stages[1])
+	}
+
+	m := siteDeploymentMap(wire.Deployment)
+	rows, ok := m["stages"].([]map[string]any)
+	if !ok {
+		t.Fatalf("stages must be a row list: %+v", m["stages"])
+	}
+	by := map[string]map[string]any{}
+	for _, r := range rows {
+		by[fmt.Sprint(r["name"])] = r
+	}
+
+	// The BUILD row is the oracle's own input: both keys, RFC3339, verbatim.
+	build := by["BUILD"]
+	if got := build["started_at"]; got != "2026-09-02T10:00:01Z" {
+		t.Fatalf("BUILD started_at = %v, want the control plane's own string: %+v", got, build)
+	}
+	if got := build["finished_at"]; got != "2026-09-02T10:00:39.4Z" {
+		t.Fatalf("BUILD finished_at = %v, want the control plane's own string: %+v", got, build)
+	}
+	// …and it must survive the marshal the journey actually parses.
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"finished_at":"2026-09-02T10:00:39.4Z"`) {
+		t.Fatalf("the rendered envelope must carry the BUILD finish:\n%s", b)
+	}
+
+	// THE ORACLE, computed exactly as stage_status_ms does: a real duration, not 0.
+	start, err := time.Parse(time.RFC3339, fmt.Sprint(build["started_at"]))
+	if err != nil {
+		t.Fatalf("started_at must parse as RFC3339: %v", err)
+	}
+	end, err := time.Parse(time.RFC3339, fmt.Sprint(build["finished_at"]))
+	if err != nil {
+		t.Fatalf("finished_at must parse as RFC3339: %v", err)
+	}
+	if ms := end.Sub(start).Milliseconds(); ms != 38400 {
+		t.Fatalf("the BUILD duration the journey reads = %dms, want 38400 — a 0 here IS exit 52", ms)
+	}
+
+	// A stage still RUNNING has a start and no finish. The finish key is absent,
+	// never a zero time: `stage_status_ms` treats a missing end as 0ms, which is
+	// the honest answer for a stage that has not ended, and a fabricated end
+	// would report a duration nobody measured.
+	stage := by["STAGE"]
+	if got := stage["started_at"]; got != "2026-09-02T10:00:39.4Z" {
+		t.Fatalf("a running stage keeps its start, got %v: %+v", got, stage)
+	}
+	if _, ok := stage["finished_at"]; ok {
+		t.Fatalf("a running stage must carry NO finish key: %+v", stage)
+	}
+
+	// A stage that never ran — synthesized `pending` by siteStagesInOrder off a
+	// lean payload — omits BOTH keys. A zero time here would render as
+	// "0001-01-01T00:00:00Z" and any reader differencing two of them gets a
+	// duration in millennia.
+	for _, name := range []string{"HEALTH", "SWITCH", "RETIRE"} {
+		row := by[name]
+		if row["status"] != "pending" {
+			t.Fatalf("%s should be the synthesized pending row: %+v", name, row)
+		}
+		if _, ok := row["started_at"]; ok {
+			t.Fatalf("%s never ran and must carry no started_at: %+v", name, row)
+		}
+		if _, ok := row["finished_at"]; ok {
+			t.Fatalf("%s never ran and must carry no finished_at: %+v", name, row)
+		}
+	}
+}

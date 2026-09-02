@@ -318,9 +318,10 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["numbered_list"] = orderedListRenderer{lr: lr}
 	// `ordered-list` is the same renderer under a second spelling (charter D57) —
 	// 2 live blocks. Their items are map-shaped (`{content:[…]}`), which itemNodes
-	// does NOT normalize, so the numbers land but the item text stays blank: the
-	// pre-existing defect the canonical `list` reproduces identically (charter
-	// D38, task-993d136b0fbf2fd1), not an alias defect.
+	// DOES normalize (blocks.go, the `map[string]any` arm unwraps `content`, then
+	// `text`), so both the numbers and the item text render. The blank-item defect
+	// this comment used to describe (charter D38, task-993d136b0fbf2fd1) was fixed
+	// in #8105; the canonical `list` and this alias behave identically.
 	r.blocks["ordered-list"] = orderedListRenderer{lr: lr}
 	// h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
 	// prod blocks unknown-boxed on every surface, SIX of them carrying no `level`
@@ -462,6 +463,11 @@ func DefaultRegistry(theme Theme) *Registry {
 	// nothing. Terminal twins of dataviz.ts's duel/lineage emitters.
 	r.blocks["duel"] = duelRenderer{}
 	r.blocks["lineage"] = lineageRenderer{}
+	// paper-links: a curated set of related Papers — section title + one entry
+	// per referenced paper (title link / description / reason / metadata). The
+	// terminal twin of compose.ex paper_links_html and @barkpark/react's
+	// paper-links emitter; see paperlinks.go for the resolution rules.
+	r.blocks["paper-links"] = paperLinksRenderer{ir: ir}
 	// dashboard: a tabbed CONTAINER that composes the slate leaf blocks (chart /
 	// heatmap / stat-grid / gauge-list) into a Claude-Code-/usage-style cockpit —
 	// authored tabs + a heavy ━ active rail, the active tab's children laid out as

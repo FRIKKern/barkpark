@@ -810,6 +810,11 @@ function deployment(over) {
       image_tag: null,
       build_log_url: null,
       failure_reason: null,
+      // dr-w1-s2: `deployment_json/1` carries `failure_class:
+      // DeployLedger.classify(d)` on EVERY row — null on a row that did not
+      // fail. The key is on the base shape so a fixture that forgets it is a
+      // missing key rather than a different wire.
+      failure_class: null,
       became_live_at: null,
       environment: "production",
       branch: null,
@@ -843,6 +848,10 @@ const depFailed = deployment({
   git_ref: "b23aa017c9d8e2f4a6b1305c8d9e0f1a2b3c4d5e",
   branch: "main",
   failure_reason: "npm run build exited 1",
+  // The class the LEDGER put this row in — `classify/2` reads the same reason
+  // prose and answers BUILD_FAILED. The console renders this string and never
+  // re-derives it from the sentence above.
+  failure_class: "BUILD_FAILED",
   inserted_at: tMinus(20000),
   updated_at: tMinus(19800),
   console: [
@@ -1442,6 +1451,39 @@ function me(teamName, onb, role, actorId) {
     },
   };
 }
+// dr-w1-s2 DEPLOY LEDGER CENSUS fixtures — the PAYLOAD SHAPE `DeployLedger`
+// actually emits, not a convenience shape the console would like:
+//   * every rate is a NODE — {sample, pct, numerator, min_sample, refused,
+//     reason, basis} — so the denominator can never travel apart from the
+//     percentage, and `refused: true` carries `pct: null` plus the server's own
+//     sentence ("sample 74 below min_sample 200").
+//   * each `classes[]` row carries the class NAME, its LABEL and its own share
+//     NODE. The console renders all three verbatim; nothing here is a hint the
+//     client is expected to expand.
+// @min_sample is 200 (deploy_ledger.ex), which is why n=74 refuses.
+function censusRate(numerator, sample, basis) {
+  const enough = sample >= 200;
+  return {
+    sample,
+    pct: enough ? Math.round((numerator * 10000) / sample) / 100 : null,
+    numerator,
+    min_sample: 200,
+    refused: !enough,
+    reason: enough ? null : `sample ${sample} below min_sample ${200}`,
+    basis,
+  };
+}
+const CENSUS_ATTEMPTED_BASIS =
+  "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual " +
+  "(never-attempted tombstones excluded, D19)";
+const CENSUS_FAILED_BASIS = "settled failed rows in the window — the failure numerator";
+function censusClass(name, label, count, failed) {
+  return { class: name, label, agency: "box", count, share: censusRate(count, failed, CENSUS_FAILED_BASIS) };
+}
+function censusWindow(days) {
+  return { from: tMinus(days * 86400), to: tMinus(0) };
+}
+
 // GR39: the platform-operator envelope. The flag is NESTED under `user` (the
 // same read operatorVisible/operatorRouteAllowed make) — a flat one is not the
 // contract and must never open the console.
@@ -4507,6 +4549,27 @@ export const SCENARIOS = {
       operatorWarmPool: { ready: 2 },
       // Prod truth today: zero fleet_digest rows have ever been written.
       operatorDeliveries: [],
+      // A census over a window big enough for `rate/2` to answer: 1,840
+      // attempted rows, so the percentage renders WITH its denominator and the
+      // class table carries each class's own share node.
+      operatorCensus: {
+        window: censusWindow(7),
+        volume: 1840,
+        failed: 312,
+        live: 1402,
+        in_flight: 21,
+        cancelled: 6,
+        residual: 0,
+        deferred_total: 99,
+        failure_rate: censusRate(312, 1840, CENSUS_ATTEMPTED_BASIS),
+        live_rate: censusRate(1402, 1840, CENSUS_ATTEMPTED_BASIS),
+        classes: [
+          censusClass("BUILD_FAILED", "the site build exited non-zero", 181, 312),
+          censusClass("BOX_UNREACHABLE", "the instance could not be reached at all", 74, 312),
+          censusClass("UNCLASSIFIED", "not yet named by the ledger", 57, 312),
+        ],
+        min_sample: 200,
+      },
     },
   },
   // The braked fleet: halted banner + Resume, the staging gate CLOSED, an empty
@@ -4534,6 +4597,29 @@ export const SCENARIOS = {
         { id: "dl1", status: "sent", kind: "email", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 1, inserted_at: tMinus(3600), last_error: null, http_status: null },
         { id: "dl2", status: "failed", kind: "email", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 3, inserted_at: tMinus(90000), last_error: "smtp: connection timed out", http_status: null },
       ],
+      // THE REFUSAL, and the whole reason this fixture exists: 74 attempted
+      // rows is below `DeployLedger.min_sample/0` (200), so `rate/2` answers
+      // `refused: true, pct: null` and the console must render the ledger's own
+      // "not enough data (n=74)" — never a percentage it computed itself off
+      // the counts sitting right beside it. The COUNTS stay (they are real
+      // rows); only the RATIO goes.
+      operatorCensus: {
+        window: censusWindow(1),
+        volume: 74,
+        failed: 12,
+        live: 58,
+        in_flight: 3,
+        cancelled: 1,
+        residual: 0,
+        deferred_total: 0,
+        failure_rate: censusRate(12, 74, CENSUS_ATTEMPTED_BASIS),
+        live_rate: censusRate(58, 74, CENSUS_ATTEMPTED_BASIS),
+        classes: [
+          censusClass("BUILD_FAILED", "the site build exited non-zero", 9, 12),
+          censusClass("BOX_500", "the box errored on the deploy (HTTP 500)", 3, 12),
+        ],
+        min_sample: 200,
+      },
     },
   },
   // The ZERO-STAGING console: nothing is registered on the staging channel and
@@ -4562,6 +4648,24 @@ export const SCENARIOS = {
       },
       operatorWarmPool: { ready: 0 },
       operatorDeliveries: [],
+      // THE EMPTY WINDOW. Zero attempted rows is not zero failures — it is
+      // NOTHING MEASURED, and a table of 0s beside a 0.0% rate would read as
+      // health. The card must say "no deployments in this window" and draw no
+      // table at all.
+      operatorCensus: {
+        window: censusWindow(1),
+        volume: 0,
+        failed: 0,
+        live: 0,
+        in_flight: 0,
+        cancelled: 0,
+        residual: 0,
+        deferred_total: 0,
+        failure_rate: censusRate(0, 0, CENSUS_ATTEMPTED_BASIS),
+        live_rate: censusRate(0, 0, CENSUS_ATTEMPTED_BASIS),
+        classes: [],
+        min_sample: 200,
+      },
     },
   },
   // FAIL-CLOSED (GR49): registering "operator" in VIEWS also made init()'s route
@@ -5661,6 +5765,14 @@ export function route(name, method, path, state) {
     if (p === "/v1/operator/warm-pool") return d.operatorWarmPool ? { status: 200, body: d.operatorWarmPool } : forbidden;
     if (p === "/v1/operator/deliveries") {
       return d.operatorDeliveries ? { status: 200, body: { deliveries: d.operatorDeliveries } } : forbidden;
+    }
+    // dr-w1-s2: GET /v1/operator/deploy-ledger/census?from=&to=. The console
+    // pins its own window, so the fixture is matched on the PATH alone and the
+    // query is ignored here — the window bytes the browser sends are asserted
+    // in __app.test.mjs (operatorCensusPath), where they can be pinned against
+    // an injected clock instead of a wall clock.
+    if (p === "/v1/operator/deploy-ledger/census") {
+      return d.operatorCensus ? { status: 200, body: d.operatorCensus } : forbidden;
     }
     return forbidden;
   }

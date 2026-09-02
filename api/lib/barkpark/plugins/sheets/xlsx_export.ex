@@ -30,22 +30,67 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       occupied cell extends the sheet's row extent so elixlsx still emits it
     * tab `"merges"` → `<mergeCells>`
     * tab `"color"` (`#rrggbb`) → `<sheetPr><tabColor rgb="FFRRGGBB"/>` via a
-      zip post-process (elixlsx has no tab-color knob — see `apply_tab_colors/2`)
+      zip post-process (elixlsx has no tab-color knob — see `apply_xml_patches/2`)
     * cell `"s"` → bold / italic / solid bg fill / horizontal alignment,
       composed with the tab's `"cond_formats"` (CF-D) — a conditional-format
       rule matching a cell has its computed style BAKED into the exported cell
       (CF wins `bg`/`b`/`i`, manual `al` and any keys the rule doesn't set
       survive; `CondFormat.compose/2`), on ALL rows incl. a frozen head row
       (CF-AM2 — CF follows manual styling, which xlsx already emits on every
-      row). The RULES themselves are NOT exported as `conditionalFormatting`
-      XML — v1 bakes the visual result only, so a re-import reads the baked
-      fill as a plain manual `"s"` (CF-D2; lossy on the rule, faithful on the
-      pixels). A tab with no rules exports byte-identically to before.
+      row)
+    * tab `"cond_formats"` → real `<conditionalFormatting sqref>/<cfRule>` XML
+      plus a matching `<dxf>` per distinct rule style in `xl/styles.xml`
+      (CF-X — see `cond_format_plan/1`). The baked cell styles above are KEPT
+      as well, so a viewer that ignores rules still shows the colour, and
+      `XlsxImport` reads the rules back into `"cond_formats"`: a
+      Sheets → xlsx → Sheets round trip no longer freezes live rules into
+      static fills. A tab with no exportable rule exports byte-identically to
+      before (no `conditionalFormatting`, no `dxfs`)
     * `"frozen_rows"`/`"frozen_cols"` → a frozen pane
 
   Error cells (`"t" => "e"`) export their error string as text. `"locale"`
   is not represented in the export (documented; locale is a document-level
   setting with no xlsx twin).
+
+  ## Conditional formatting: what is exported, and what stays baked-only
+
+  Every op `Barkpark.Plugins.Sheets.CondFormat` supports is exported:
+  `gt`/`lt`/`eq`/`between` as `<cfRule type="cellIs">` (operators
+  `greaterThan`/`lessThan`/`equal`/`between`) and `contains` as
+  `<cfRule type="containsText">`. The rule's `when` value(s) ride in
+  `<formula>` as TYPED xlsx literals (a number bare, a string quoted, a
+  boolean `TRUE`/`FALSE`), which is what makes the import side's decode exact
+  rather than a guess; the stored `"id"`, for which xlsx has no attribute,
+  rides in the spec's own producer-private escape hatch, `<cfRule><extLst>`.
+
+  BAKED-ONLY (the style still bakes into the cell, but no `cfRule` is written,
+  because there is nothing faithful to write):
+
+    * a rule the kernel drops outright — unknown `"op"`, an unparseable
+      `"range"`, or a `"style"` that sanitizes to empty. `CondFormat` never
+      admits it as a rule, so it never colours a cell either.
+    * a rule the STORAGE GATE
+      (`Barkpark.Plugins.Sheets.cond_format_list_errors/2`, the one shared
+      validator) would refuse. Only a hand-written document can hold one, and
+      it is dead here — a string threshold on `gt`, a numeric or empty
+      `contains` needle, a `between` with no `"value2"`, a `"style"` with no
+      `"bg"`, a missing `"id"` — but it would be LIVE in Excel, which coerces.
+      Writing it would put a rule in the file that this codebase can neither
+      evaluate nor read back into storage.
+    * a `when` whose value is neither a number, a string, nor a boolean (a
+      list, a map, `nil`) — there is no xlsx literal for it. The gate refuses
+      those too; the encoder simply never guesses.
+    * a second rule over a range an earlier rule already claimed (CF-D4 is
+      one rule per range) — the first wins, exactly as evaluation does.
+
+  Excel EVALUATES some exported rules a little differently than Barkpark does,
+  which is a fidelity note, not a drop: Excel coerces blank cells to 0 (so a
+  `lt`/`gt` rule can fire on a blank there and never here), `contains` matches
+  Barkpark's snapshot DISPLAY string but Excel's SEARCH matches the raw
+  value (a `"25.00%"` needle on a percent cell), and a type-mismatched rule
+  value (a string threshold on `gt`, a numeric `contains` needle) never
+  matches in Barkpark while Excel may coerce it. The rule round-trips through
+  Barkpark byte-identically in every one of those cases.
   """
 
   alias Barkpark.Plugins.Sheets.CondFormat
@@ -109,41 +154,51 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       end
 
     case Elixlsx.write_to_memory(%Workbook{sheets: sheets, datetime: @export_timestamp}, filename) do
-      {:ok, {_name, binary}} -> {:ok, binary |> apply_tab_colors(tabs) |> patch_zip_mtimes()}
+      {:ok, {_name, binary}} -> {:ok, binary |> apply_xml_patches(tabs) |> patch_zip_mtimes()}
       {:error, reason} -> {:error, "xlsx encode failed: #{inspect(reason)}"}
     end
   rescue
     e -> {:error, "xlsx encode failed: #{Exception.message(e)}"}
   end
 
-  # ── tab colors (QL-D7) ──────────────────────────────────────────────────────
+  # ── zip post-process: tab colors (QL-D7) + conditionalFormatting (CF-X) ─────
   #
-  # elixlsx has no tab-color knob and emits a static `<sheetPr filterMode="false">`
-  # per worksheet, so a per-tab `"color"` (lowercase `#rrggbb`) is stamped by
-  # post-processing the finished zip: for each colored tab, patch its
-  # `xl/worksheets/sheet<N>.xml` (N = 1-based tab position, elixlsx names sheets
-  # in tab order) to carry a `<tabColor rgb="FFRRGGBB"/>` as the first child of
-  # `<sheetPr>` (ARGB = `FF` + uppercase of the `#rrggbb` hex).
+  # elixlsx emits neither a tab color nor conditional-formatting XML, so both
+  # are stamped by post-processing the finished zip. One unzip/patch/rezip
+  # covers both: for each colored tab, `xl/worksheets/sheet<N>.xml` (N = 1-based
+  # tab position, elixlsx names sheets in tab order) gains a
+  # `<tabColor rgb="FFRRGGBB"/>` as the first child of `<sheetPr>`; for each tab
+  # with exportable rules the same worksheet gains its `<conditionalFormatting>`
+  # blocks, and `xl/styles.xml` gains the workbook-wide `<dxfs>` table they
+  # index into.
   #
-  # A no-color document takes the current path BYTE-IDENTICALLY — the whole
+  # A document with neither takes the current path BYTE-IDENTICALLY — the whole
   # unzip/patch/rezip is skipped, and `patch_zip_mtimes` (which runs after) sees
   # exactly the bytes it did before. The rezip is a pure function of content
   # (no wall-clock), so `patch_zip_mtimes` still normalizes the fresh DOS times
-  # and colored exports stay deterministic too. Fail-open on any structural
+  # and patched exports stay deterministic too. Fail-open on any structural
   # surprise: the unpatched binary is returned rather than break an export.
-  defp apply_tab_colors(binary, tabs) do
-    colored =
-      tabs
-      |> Enum.with_index(1)
-      |> Enum.flat_map(fn {tab, n} ->
-        case tab_color(tab) do
-          nil -> []
-          color -> [{n, to_argb(color)}]
-        end
-      end)
-      |> Map.new()
+  defp apply_xml_patches(binary, tabs) do
+    colored = tab_colors(tabs)
+    {cond_formats, dxfs} = cond_format_plan(tabs)
 
-    if colored == %{}, do: binary, else: rezip_with_colors(binary, colored)
+    if colored == %{} and cond_formats == %{} do
+      binary
+    else
+      rezip_patched(binary, colored, cond_formats, dxfs)
+    end
+  end
+
+  defp tab_colors(tabs) do
+    tabs
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {tab, n} ->
+      case tab_color(tab) do
+        nil -> []
+        color -> [{n, to_argb(color)}]
+      end
+    end)
+    |> Map.new()
   end
 
   defp tab_color(tab) when is_map(tab) do
@@ -159,18 +214,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   # tabColor wants a fully-opaque ARGB. Validated by `tab_color/1` upstream.
   defp to_argb("#" <> hex), do: "FF" <> String.upcase(hex)
 
-  defp rezip_with_colors(binary, colored) do
+  defp rezip_patched(binary, colored, cond_formats, dxfs) do
     with {:ok, entries} <- :zip.extract(binary, [:memory]) do
-      patched =
-        Enum.map(entries, fn {name, content} ->
-          case worksheet_index(name) do
-            n when is_map_key(colored, n) ->
-              {name, insert_tab_color(to_string(content), Map.fetch!(colored, n))}
-
-            _ ->
-              {name, content}
-          end
-        end)
+      patched = Enum.map(entries, &patch_member(&1, colored, cond_formats, dxfs))
 
       case :zip.create(~c"sheet.xlsx", patched, [:memory]) do
         {:ok, {_name, out}} -> out
@@ -183,6 +229,27 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     _ -> binary
   end
 
+  defp patch_member({name, content}, colored, cond_formats, dxfs) do
+    cond do
+      to_string(name) == "xl/styles.xml" and dxfs != [] ->
+        {name, content |> to_string() |> insert_dxfs(dxfs)}
+
+      worksheet_index(name) != nil ->
+        n = worksheet_index(name)
+
+        xml =
+          content
+          |> to_string()
+          |> maybe_insert_tab_color(Map.get(colored, n))
+          |> maybe_insert_cond_formats(Map.get(cond_formats, n))
+
+        {name, xml}
+
+      true ->
+        {name, content}
+    end
+  end
+
   # `xl/worksheets/sheet<N>.xml` → N (1-based); any other member → nil.
   defp worksheet_index(name) do
     case Regex.run(~r{^xl/worksheets/sheet(\d+)\.xml$}, to_string(name)) do
@@ -191,12 +258,261 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     end
   end
 
+  defp maybe_insert_tab_color(xml, nil), do: xml
+
   # Insert `<tabColor rgb="…"/>` as the FIRST child of the worksheet's existing
   # `<sheetPr …>` (schema order: tabColor precedes pageSetUpPr). elixlsx always
   # emits the open-tag form, so a self-closing `<sheetPr/>` never occurs here;
   # if the tag is somehow absent the xml is returned unchanged (fail-open).
-  defp insert_tab_color(xml, argb) do
+  defp maybe_insert_tab_color(xml, argb) do
     String.replace(xml, ~r/(<sheetPr\b[^>]*>)/, "\\1<tabColor rgb=\"#{argb}\"/>", global: false)
+  end
+
+  defp maybe_insert_cond_formats(xml, nil), do: xml
+
+  # CT_Worksheet's sequence puts `conditionalFormatting` after `mergeCells` and
+  # BEFORE `dataValidations`/`pageMargins`, so anchor on whichever of those
+  # elixlsx emitted first. Fail-open: an anchor-less worksheet keeps its XML.
+  defp maybe_insert_cond_formats(xml, cf_xml) do
+    case Enum.find(["<dataValidations", "<pageMargins"], &String.contains?(xml, &1)) do
+      nil -> xml
+      anchor -> String.replace(xml, anchor, cf_xml <> anchor, global: false)
+    end
+  end
+
+  # CT_Stylesheet's sequence is numFmts, fonts, fills, borders, cellStyleXfs,
+  # cellXfs, cellStyles, dxfs, … — elixlsx emits neither `cellStyles` nor
+  # `dxfs`, so appending just before `</styleSheet>` IS schema order.
+  defp insert_dxfs(xml, dxfs) do
+    block =
+      IO.iodata_to_binary([
+        ~s(<dxfs count="#{length(dxfs)}">),
+        Enum.map(dxfs, &dxf_xml/1),
+        "</dxfs>"
+      ])
+
+    String.replace(xml, "</styleSheet>", block <> "</styleSheet>", global: false)
+  end
+
+  # CT_Dxf's sequence is font, numFmt, fill, alignment, … and a CF style sets
+  # only bold / italic / a solid background. DIFFERENTIAL formatting carries the
+  # fill color in `bgColor` (a cell fill uses `fgColor`) — the import half
+  # accepts either, this half writes the one Excel writes.
+  defp dxf_xml(style) do
+    bold = if Map.get(style, "b") == true, do: "<b/>", else: ""
+    italic = if Map.get(style, "i") == true, do: "<i/>", else: ""
+    font = if bold == "" and italic == "", do: "", else: "<font>#{bold}#{italic}</font>"
+
+    fill =
+      case Map.get(style, "bg") do
+        "#" <> hex ->
+          ~s(<fill><patternFill><bgColor rgb="FF#{String.upcase(hex)}"/></patternFill></fill>)
+
+        _ ->
+          ""
+      end
+
+    "<dxf>#{font}#{fill}</dxf>"
+  end
+
+  # ── conditional formatting → conditionalFormatting XML (CF-X) ───────────────
+
+  # Barkpark op → the xlsx `cellIs` operator. `contains` is deliberately absent:
+  # it is a `containsText` rule, not a `cellIs` one.
+  @cf_cell_is %{
+    "gt" => "greaterThan",
+    "lt" => "lessThan",
+    "eq" => "equal",
+    "between" => "between"
+  }
+
+  # xlsx has no attribute for a rule's stored `"id"`, and `extLst` is the
+  # spec's OWN escape hatch for producer-private data (CT_CfRule's last child).
+  # Excel and LibreOffice ignore an `<ext>` whose uri they do not know;
+  # `XlsxImport` reads it back so the id round-trips byte-for-byte.
+  @cf_ext_uri "{7B1A4C2E-3D5F-4A88-9C10-2F6E8B0D4A17}"
+  @cf_ext_ns "http://barkpark.cloud/xlsx/2026/cond-format"
+
+  # `{%{sheet_index => conditionalFormatting xml}, [dxf style]}` for the whole
+  # workbook: `dxfId` indexes ONE workbook-wide `<dxfs>` table, so the styles
+  # are collected across every tab and deduped by first appearance.
+  defp cond_format_plan(tabs) do
+    tabs
+    |> Enum.with_index(1)
+    |> Enum.reduce({%{}, []}, fn {tab, n}, {acc, dxfs} ->
+      case exportable_rules(tab) do
+        [] ->
+          {acc, dxfs}
+
+        rules ->
+          {blocks, dxfs} =
+            rules
+            |> Enum.with_index(1)
+            |> Enum.map_reduce(dxfs, fn {rule, priority}, dxfs ->
+              {dxf_id, dxfs} = dxf_index(dxfs, rule.style)
+              {cf_block(rule, dxf_id, priority), dxfs}
+            end)
+
+          {Map.put(acc, n, IO.iodata_to_binary(blocks)), dxfs}
+      end
+    end)
+  end
+
+  # A tab's stored rules, in list order (which IS the CF-D4 first-match
+  # priority), filtered to the ones an xlsx cfRule can carry faithfully.
+  #
+  # TWO owners decide, neither of them re-implemented here: the kernel
+  # (`CondFormat.parse_rules/1`, run ONE rule at a time so the raw map stays
+  # alongside for the `"id"` the kernel drops) says what a rule IS, and the
+  # storage gate (`Barkpark.Plugins.Sheets.cond_format_list_errors/2`) says
+  # what a rule storage would accept. A rule the GATE refuses is dropped on
+  # purpose: it is dead here (a string threshold never matches) but LIVE in
+  # Excel (which coerces), and `XlsxImport` could not read it back without
+  # handing the save path content the same gate would then reject.
+  #
+  # Duplicate sqrefs are collapsed to the first (CF-D4's one-rule-per-range,
+  # which the gate also enforces) so the emitted package can never carry two
+  # rules over one range.
+  defp exportable_rules(tab) when is_map(tab) do
+    case Map.get(tab, "cond_formats") do
+      list when is_list(list) ->
+        for raw <- list,
+            is_map(raw),
+            Barkpark.Plugins.Sheets.cond_format_list_errors([raw], 0) == [],
+            [parsed] <- [CondFormat.parse_rules([raw])],
+            spec = rule_spec(raw, parsed),
+            spec != nil,
+            do: spec
+
+      _ ->
+        []
+    end
+    |> Enum.uniq_by(& &1.sqref)
+  end
+
+  defp exportable_rules(_tab), do: []
+
+  defp rule_spec(raw, %{range: {c1, r1, _c2, _r2} = range, condition: w, style: style}) do
+    op = Map.get(w, "op")
+
+    with true <- op == "contains" or is_map_key(@cf_cell_is, op),
+         {:ok, literals} <- cf_literals(op, w) do
+      %{
+        id: cf_id(raw),
+        sqref: format_range(range),
+        anchor: Core.format_ref({c1, r1}),
+        op: op,
+        literals: literals,
+        style: style
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp cf_id(raw) do
+    case Map.get(raw, "id") do
+      id when is_binary(id) and id != "" -> id
+      _ -> nil
+    end
+  end
+
+  defp format_range({c, r, c, r}), do: Core.format_ref({c, r})
+
+  defp format_range({c1, r1, c2, r2}),
+    do: Core.format_ref({c1, r1}) <> ":" <> Core.format_ref({c2, r2})
+
+  # The rule's `when` value(s) as xlsx formula literals, in `<formula>` order.
+  # A missing or unrepresentable value makes the rule UNEXPORTABLE (it stays
+  # baked-only, moduledoc) rather than shipping a cfRule whose threshold is a
+  # guess — an xlsx rule with the wrong threshold is worse than no rule.
+  defp cf_literals("between", w) do
+    with true <- Map.has_key?(w, "value") and Map.has_key?(w, "value2"),
+         v1 when is_binary(v1) <- cf_literal(Map.get(w, "value")),
+         v2 when is_binary(v2) <- cf_literal(Map.get(w, "value2")) do
+      {:ok, [v1, v2]}
+    else
+      _ -> :error
+    end
+  end
+
+  defp cf_literals(_op, w) do
+    with true <- Map.has_key?(w, "value"),
+         v when is_binary(v) <- cf_literal(Map.get(w, "value")) do
+      {:ok, [v]}
+    else
+      _ -> :error
+    end
+  end
+
+  # A stored `when` value as the xlsx formula literal that decodes back to the
+  # SAME Elixir term: a number bare, a boolean `TRUE`/`FALSE`, a string in
+  # double quotes with `""` escaping. Anything else has no literal → nil.
+  defp cf_literal(true), do: "TRUE"
+  defp cf_literal(false), do: "FALSE"
+  defp cf_literal(v) when is_integer(v), do: Integer.to_string(v)
+  defp cf_literal(v) when is_float(v), do: Float.to_string(v)
+  defp cf_literal(v) when is_binary(v), do: ~s(") <> String.replace(v, ~s("), ~s("")) <> ~s(")
+  defp cf_literal(_), do: nil
+
+  # Position of `style` in the workbook-wide dxf table, appending it when new.
+  defp dxf_index(dxfs, style) do
+    case Enum.find_index(dxfs, &(&1 == style)) do
+      nil -> {length(dxfs), dxfs ++ [style]}
+      index -> {index, dxfs}
+    end
+  end
+
+  # `contains` is a `containsText` rule: Excel wants BOTH the `text` attribute
+  # and the canonical `SEARCH` formula. The formula carries the needle as a
+  # TYPED literal (the `text` attribute can only ever be a string), which is
+  # what lets the import half hand back a numeric needle as a number.
+  defp cf_block(%{op: "contains", literals: [needle]} = rule, dxf_id, priority) do
+    formula = "NOT(ISERROR(SEARCH(" <> escape_xml(needle) <> "," <> rule.anchor <> ")))"
+
+    cf_wrap(rule, [
+      ~s(<cfRule type="containsText" dxfId="#{dxf_id}" priority="#{priority}") <>
+        ~s( operator="containsText" text="#{escape_attr(cf_needle_text(needle))}">),
+      "<formula>",
+      formula,
+      "</formula>",
+      cf_ext(rule.id),
+      "</cfRule>"
+    ])
+  end
+
+  defp cf_block(rule, dxf_id, priority) do
+    operator = Map.fetch!(@cf_cell_is, rule.op)
+
+    cf_wrap(rule, [
+      ~s(<cfRule type="cellIs" dxfId="#{dxf_id}" priority="#{priority}" operator="#{operator}">),
+      Enum.map(rule.literals, &["<formula>", escape_xml(&1), "</formula>"]),
+      cf_ext(rule.id),
+      "</cfRule>"
+    ])
+  end
+
+  defp cf_wrap(rule, inner) do
+    IO.iodata_to_binary([
+      ~s(<conditionalFormatting sqref="#{rule.sqref}">),
+      inner,
+      "</conditionalFormatting>"
+    ])
+  end
+
+  # The `text=` attribute is a plain string: unwrap a quoted literal, pass a
+  # bare number / TRUE / FALSE through as its own text.
+  defp cf_needle_text("\"" <> _ = literal) do
+    literal |> binary_part(1, byte_size(literal) - 2) |> String.replace(~s(""), ~s("))
+  end
+
+  defp cf_needle_text(literal), do: literal
+
+  defp cf_ext(nil), do: ""
+
+  defp cf_ext(id) do
+    ~s(<extLst><ext uri="#{@cf_ext_uri}" xmlns:bp="#{@cf_ext_ns}">) <>
+      ~s(<bp:id>#{escape_xml(id)}</bp:id></ext></extLst>)
   end
 
   # ── deterministic ZIP mod-times (QR-C) ──────────────────────────────────────
@@ -541,6 +857,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     |> String.replace("<", "&lt;")
     |> String.replace(">", "&gt;")
   end
+
+  # `escape_xml/1` plus the double quote — for a value that lands inside a
+  # double-quoted ATTRIBUTE (a `cfRule` `text=`, an `<ext>` payload).
+  defp escape_attr(s), do: s |> escape_xml() |> String.replace(~s("), "&quot;")
 
   defp parse_naive(v) do
     case NaiveDateTime.from_iso8601(v) do

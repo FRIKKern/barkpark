@@ -101,6 +101,14 @@ type Model struct {
 	// it pointing at an option that no longer exists (ct-bl-question-updatedinput).
 	optionCursor int
 
+	// foldsExpanded opens every settled turn's fold (task-8f904a88b9bc3d59).
+	// ONE bit, not a per-fold set: the terminal has no pointer to click a
+	// header with, and a per-fold cursor would need a focus concept the
+	// transcript deliberately does not have. ctrl+f flips it; the zero value is
+	// COLLAPSED, matching Studio's default — a settled turn is history, and its
+	// header already says how long it took.
+	foldsExpanded bool
+
 	// anchor is what scroll >= 0 actually MEANS (charter D80): the content the
 	// pinned top row was showing, as (block ordinal, intra-block line offset),
 	// recorded by pinScroll at the moment of the pin and relocated against the

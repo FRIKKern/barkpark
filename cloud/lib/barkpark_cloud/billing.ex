@@ -81,6 +81,14 @@ defmodule BarkparkCloud.Billing do
   # `Subscription` is checkout-eligible by default rather than silently absent.
   @never_checkout_plans ~w(free trial)
 
+  # Stripe's own documented prefix for a TEST-mode secret key. The whole
+  # `:test_mode` distinction hangs off this string, so it is named once.
+  @test_key_prefix "sk_test_"
+
+  # The sentence the server refuses with and the console prints. One string, two
+  # layers — see `test_mode_disclosure/0`.
+  @test_mode_disclosure "Checkout runs in Stripe test mode — no real card can pay."
+
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
   time) so runtime.exs's prod override is honoured — mirrors `Registry.Vault`'s
@@ -132,10 +140,20 @@ defmodule BarkparkCloud.Billing do
   called. The check sits AFTER the price resolution so an unknown/"free" plan
   keeps its existing `:plan_invalid` answer — the new refusal fires exactly in
   the hole where a price resolves but the money could never be honoured.
+
+  TEST-MODE REFUSAL (cch-w50-bl). The same shape, one state further out. With a
+  `sk_test_…` secret key everything above is satisfied — prices resolve, the
+  webhook secret verifies — and a REAL hosted Checkout Session opens that no
+  real customer's card can pay, against a plane waiting for a webhook only
+  test-mode events can produce. `checkout_capability/0` answers `:test_mode`
+  there and this function refuses with `{:error, :billing_test_mode}` before any
+  session is created, so THE SERVER is the gate and not the console's button: a
+  stale page, a `bp` client or a hand-rolled POST all get the same refusal and
+  the same sentence (`test_mode_disclosure/0`).
   """
   @spec checkout(Team.t() | binary(), Subscription.plan() | atom() | String.t()) ::
           {:ok, BarkparkCloud.Billing.Gateway.checkout_url()}
-          | {:error, :plan_invalid | :billing_not_configured | term}
+          | {:error, :plan_invalid | :billing_not_configured | :billing_test_mode | term}
   def checkout(team, plan) do
     plan = to_string(plan)
 
@@ -144,10 +162,10 @@ defmodule BarkparkCloud.Billing do
         {:error, :plan_invalid}
 
       price_id ->
-        if checkout_capability() == :available do
-          gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
-        else
-          {:error, :billing_not_configured}
+        case checkout_capability() do
+          :available -> gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
+          :test_mode -> {:error, :billing_test_mode}
+          _ -> {:error, :billing_not_configured}
         end
     end
   end
@@ -413,27 +431,66 @@ defmodule BarkparkCloud.Billing do
       `{:error, :no_secret}` forever, so the activation event can never be
       trusted and the subscription can never go active. `checkout/2` refuses
       pre-flight (see its docs) precisely so this state cannot move money.
-    * `:available` — priced and verifiable; checkout may proceed.
+    * `:test_mode` — priced, verifiable, and the secret key is a Stripe TEST key
+      (`sk_test_…`). Everything the two states above check is satisfied, so
+      until cch-w50-bl this answered `:available` and the console offered a live
+      Subscribe: a REAL hosted Checkout Session opens that NO REAL CARD CAN PAY,
+      and the plane then waits for an activation webhook only test-mode events
+      can produce. Measured on the serving control plane (2026-09-02,
+      `cloud-control_plane_green-1`): `STRIPE_SECRET_KEY` begins `sk_test_`
+      while both `STRIPE_PRICE_*` and `STRIPE_WEBHOOK_SECRET` are wired — i.e.
+      this is production's state, not a hypothetical. `checkout/2` refuses it
+      with `{:error, :billing_test_mode}`.
+    * `:available` — priced, verifiable and keyed live; checkout may proceed.
 
   For the in-memory `StubGateway` (dev/test) this is always `:available` — it
   needs no external config and moves no money.
 
   `configured?/0` is a PROJECTION of this function (`== :available`), so the
-  boolean and the enum can never drift apart.
+  boolean and the enum can never drift apart. A test-mode plane is therefore
+  NOT `configured?`, which is the honest answer: it cannot take money.
   """
-  @spec checkout_capability() :: :available | :unconfigured | :unverifiable
+  @spec checkout_capability() :: :available | :unconfigured | :unverifiable | :test_mode
   def checkout_capability do
     case gateway() do
       BarkparkCloud.Billing.StripeGateway ->
         cond do
           priced_plans() == [] -> :unconfigured
           not webhook_secret?() -> :unverifiable
+          test_mode_key?() -> :test_mode
           true -> :available
         end
 
       _ ->
         :available
     end
+  end
+
+  @doc """
+  The one sentence the plane says about a test-mode checkout, in plain words and
+  past/present tense only.
+
+  Single-sourced HERE and read by the router's refusal envelope so the reason a
+  person is given by the server is the same reason the console prints on the
+  disabled button. It promises nothing about when a live key arrives — a
+  promise no code in this repo can keep.
+  """
+  @spec test_mode_disclosure() :: String.t()
+  def test_mode_disclosure, do: @test_mode_disclosure
+
+  # Is the configured Stripe secret key a TEST key? Read from the same config
+  # `StripeGateway.secret_key/0` reads (call time, so runtime.exs's env-fed key
+  # wins) and keyed on Stripe's own documented `sk_test_` prefix. A missing key
+  # is NOT test mode — the gateway raises on the next call and the deploy has a
+  # louder problem than this enum; a live key (`sk_live_…`) is false, which is
+  # what keeps `:available` reachable at all.
+  @spec test_mode_key?() :: boolean()
+  defp test_mode_key? do
+    key =
+      Application.get_env(:barkpark_cloud, BarkparkCloud.Billing.StripeGateway, [])
+      |> Keyword.get(:secret_key)
+
+    is_binary(key) and String.starts_with?(key, @test_key_prefix)
   end
 
   # Is a non-empty webhook signing secret wired? Read at call time, same seam

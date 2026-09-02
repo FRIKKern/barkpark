@@ -413,6 +413,26 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
 
+  # A block list carrying an element that is not an object. `render_blocks/2`
+  # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
+  # (`is_map`), so `{"body":{"blocks":["notamap"]}}` used to clear the outer
+  # guard and raise FunctionClauseError inside the WRITE projection — an
+  # uncaught 500 whose body was an HTML debug page, violating §9 ("all errors
+  # are {code, message, request_id}") and leaving the caller no request_id to
+  # correlate. Refused at the writer door instead (Content.Writer
+  # `refuse_non_map_block_elements/1`), under the EXISTING `malformed` code —
+  # this is a request-body shape error, not a schema validation failure, and
+  # reusing the registered code keeps `known_codes/0` (and therefore the
+  # OpenAPI `Error.code` enum + docs/api-v1.md §9) unchanged. `details.blocks`
+  # names every offending path so a client can fix the exact element.
+  defp build({:error, {:malformed_blocks, details}}),
+    do: %{
+      code: "malformed",
+      message: "block list contains an element that is not an object",
+      status: 400,
+      details: details
+    }
+
   # A multi-op batch mutation carried an HTTP If-Match header. One ETag cannot
   # unambiguously gate N potentially-different documents, and silently dropping
   # it (the pre-fix behavior) discarded the caller's optimistic-lock intent →
@@ -567,21 +587,23 @@ defmodule Barkpark.Content.Errors do
   # told every generic client the opposite of the truth: a 4xx is the caller's
   # fault and terminal, while this is the server's and retryable.
   #
-  # WHY THE `code` STAYS "halted". A new public code must be registered in
-  # `@hints`, which puts it in `known_codes/0`, which drives BOTH the served
-  # OpenAPI `Error.code` enum (docs/openapi.json — a committed artifact behind a
-  # CI drift gate) and `docs/api-v1.md` §9 (errors_doc_coverage_test), a file
-  # sitting on ~1 byte of headroom under a CI-enforced cap. The rename is a
-  # VOCABULARY change with its own regeneration cost and stays filed on its own
-  # row; the status and the hint are the half a caller actually acts on, and
-  # they are not worth holding hostage to it. `reason` discriminates the two
-  # senses of `halted` for a client that wants the split without parsing prose
-  # — exactly as `:replay` does under "unauthorized" and `:forbidden_membership`
-  # under "forbidden" — and the arm carries its OWN `hint`, so `put_hint/1`
-  # never reaches the plugin-veto sentence for this term.
+  # WHY THE `code` IS "storage_unavailable" AND NOT "halted". One public code
+  # maps to ONE status: the CLI's exit-code table (internal/cli/errors.go) is
+  # keyed on `code`, and internal/cli/errors_api_parity_test.go refuses a code
+  # that this file emits at two statuses — `halted` at 409 (the plugin veto)
+  # AND 503 (this arm) reddened main on 2026-09-02. Minting `dedup_unavailable`
+  # as a new code is blocked too: a code must be registered in `@hints`, which
+  # puts it in `known_codes/0`, which drives the served OpenAPI `Error.code`
+  # enum (docs/openapi.json, behind a CI drift gate) and `docs/api-v1.md` §9
+  # (errors_doc_coverage_test) under a cap with 3 bytes of headroom. So the arm
+  # wears the code that already IS the transient-storage shape — public, 503,
+  # exit 8, retry-is-the-right-reflex — and `reason: "dedup_unavailable"`
+  # discriminates it from a media-volume fault, exactly as `:replay` does under
+  # "unauthorized". The arm carries its OWN `hint`, so `put_hint/1` never
+  # reaches the media-volume sentence for this term.
   defp build({:error, {:dedup_unavailable, reason}}),
     do: %{
-      code: "halted",
+      code: "storage_unavailable",
       message: halt_message(reason),
       status: 503,
       reason: "dedup_unavailable",

@@ -523,6 +523,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/release", BarkparkWeb.TasksController, :release, auth: :token_root},
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
+      {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
@@ -556,6 +557,30 @@ defmodule Barkpark.Plugins.Tasks do
       # `config :barkpark, :plugins, []` kill switch (fresh-install invariant).
     ]
   end
+
+  # The command-level `views` descriptor for the two task commands that support
+  # the brief/full projection (wave axi-brief-views): `task.ready` and
+  # `task.prime`. Emitted only under `?views=1`.
+  #
+  # DECLARED HERE, deliberately — this used to call the capabilities plugin's
+  # `agent_views_descriptor/0`, which bought a plugin→core `tasks→capabilities`
+  # architecture edge (the cqv8 boundary gate named it) for a four-key
+  # constant. The shared CALL was never the guarantee it was documented to be:
+  # a plugin can only reach a core module, so the core `search.query`
+  # descriptor could never have been pinned by it either.
+  #
+  # What actually pins `task.ready` / `task.prime` / `search.query` to the
+  # byte-identical shape is the WIRE-level contract test —
+  # test/barkpark_web/contract/capabilities_manifest_test.exs, describe
+  # "command-level `views` descriptor", `@frozen_views` — which asserts all
+  # three against a frozen literal over the real `?views=1` response. Edit this
+  # map without editing that one and the test reds, whatever module the map
+  # lives in. Keep them in step.
+  @agent_views %{
+    "supported" => ["brief", "full"],
+    "default" => "full",
+    "default_for_agents" => "brief"
+  }
 
   @doc """
   The CLI verbs Tasks contributes to the `/v1/capabilities` manifest (M3),
@@ -620,13 +645,24 @@ defmodule Barkpark.Plugins.Tasks do
         args: [],
         flags: [
           # default MUST match the server's actual page size (tasks_controller
-          # do_index: Params.parse_limit(params["limit"], 1000, 1000)). It was
+          # do_index: Params.parse_limit(params["limit"], 100, 1000)). It was
           # born as 50 — false from day one — and the CLI reads this field to
           # calibrate its "page may be truncated" warning (internal/cli/run.go
           # defaultPageLimit), so every `bp task ls` over a >=50-row corpus
           # printed a false "more may be available" even when the server had
           # returned everything.
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 1000},
+          #
+          # NOW 100, tracking the index default down from 1000
+          # (task-e2f5ecca0be9a6d1). Note that this field is NEVER SENT: run.go
+          # applyQuery adds `?limit=` only when `g.limitSet`, so a bare
+          # `bp task ls` transmits no limit and the server's own default is what
+          # bounds the page. Its ONE job is calibrating defaultPageLimit — which
+          # is why leaving it at 1000 would have been the quiet half of this
+          # defect: the server would page at 100 and the CLI, comparing 100 rows
+          # against a believed limit of 1000, would conclude the page was
+          # complete and say nothing. A wrong number here does not truncate
+          # anything; it makes a truncation UNANNOUNCED, which is worse.
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 100},
           %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
@@ -640,7 +676,24 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.ready",
         noun: "task",
         verb: "ready",
-        summary: "List executable, unblocked tasks (priority order by default).",
+        # WHAT `ready` RETURNS, said out loud (task tgw10-bl-drafts-in-ready-pool).
+        # The old summary — "List executable, unblocked tasks" — was wrong twice.
+        # (a) `blocked` IS claimable: Tasks.Validation.claimable_statuses/0 is
+        #     ~w(open blocked) by DECISION (spd-b24) — blocking is advisory
+        #     metadata; the blocks-edge and content.dependencies gates are what
+        #     actually hold work back. So a lifecycle-`blocked` row in the queue
+        #     is the design, not a leak.
+        # (b) `ready` carries NO documents.status predicate, so an UNPAIRED
+        #     `drafts.<id>` row is admitted as itself. That too is deliberate:
+        #     `bp task create` lands a draft by default, and excluding drafts
+        #     would hide every unpublished task from the queue agents claim from.
+        #     Only a draft whose published twin exists in the same scope is
+        #     collapsed away (Tasks.Queue axis 3, published-wins).
+        # The pin in cli_commands_manifest_test.exs holds this sentence.
+        summary:
+          "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), " <>
+            "dependencies and queue gate cleared, published or unpaired draft, " <>
+            "twin-collapsed to the published row — priority order by default.",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],
@@ -663,7 +716,7 @@ defmodule Barkpark.Plugins.Tasks do
         # a token-thrifty card list by default, humans the full envelope.
         # Emitted only under ?views=1 — Capabilities.maybe_gate_views strips it
         # otherwise, so the default wire shape is byte-identical to today.
-        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
+        views: @agent_views,
         scoped_prefix: nil
       },
       %{
@@ -702,7 +755,7 @@ defmodule Barkpark.Plugins.Tasks do
         # Supports the brief/full projection (wave axi-brief-views): the brief
         # prime response is the ≤5 KB resume card an agent gets by default.
         # Emitted only under ?views=1 (Capabilities.maybe_gate_views).
-        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
+        views: @agent_views,
         scoped_prefix: nil
       },
       %{
@@ -950,6 +1003,68 @@ defmodule Barkpark.Plugins.Tasks do
           }
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.landed",
+        noun: "task",
+        verb: "landed",
+        summary:
+          "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. " <>
+            "This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a " <>
+            "push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) " <>
+            "and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so " <>
+            "a second landing accumulates a second commit instead of replacing the first, and a close's own land " <>
+            "digest is never clobbered (one merge rule, shared with close). " <>
+            "--criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to " <>
+            "met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries " <>
+            "\"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. " <>
+            "Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met " <>
+            "(409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no " <>
+            "override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a " <>
+            "refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false " <>
+            "on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). " <>
+            "Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: " <>
+            "not lifecycle_status, not the claim, not a second criterion.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/landed"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id the landing is recorded on."
+          }
+        ],
+        flags: [
+          %{
+            name: "commit",
+            type: "string",
+            summary: "The commit sha that landed. Unioned into content.landed.commits."
+          },
+          %{
+            name: "pr",
+            type: "string",
+            summary: "The PR number that merged. Unioned into content.landed.prs."
+          },
+          %{
+            name: "note",
+            type: "string",
+            summary:
+              "The landing sentence. Unioned into content.landed.notes, and REQUIRED with --criterion because it is the evidence written onto that criterion."
+          },
+          %{
+            name: "criterion",
+            type: "int",
+            summary:
+              "ZERO-BASED index into acceptance_criteria — the first criterion is 0, NOT 1. Flips that ONE row to met=true with --note as evidence, and only when the row is merge-shaped and not already met; any other index is a 409 naming why. Omit it to record the landing sentence alone."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,
