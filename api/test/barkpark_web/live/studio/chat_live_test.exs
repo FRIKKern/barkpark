@@ -568,6 +568,47 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "task token has expired"
       assert has_element?(view, "form[phx-submit=send]")
     end
+
+    # task-cth-bl-token-renewal. A renewal cannot re-arm a RUNNING child (its
+    # environment was fixed at Port.open), so the card must say the one true
+    # next step rather than report a success the shell lane did not get.
+    test ":task_token_rearmed names the restart instead of claiming a live re-arm",
+         %{conn: conn} do
+      put_hands_state(fn _session -> :rearmed end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_rearmed")
+      assert html =~ "Restart this session"
+      # The chat itself keeps working — this is a bp-lane banner, not a lock.
+      assert has_element?(view, "form[phx-submit=send]")
+    end
+
+    # The renewal happens on the SESSION's clock, mid-conversation, with nobody
+    # watching. It must reach the card with no reload and no Re-check click.
+    test "a renewal that lands mid-session flips the card in place — no reload",
+         %{conn: conn} do
+      put_hands_state(fn _session -> :ok end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+      refute render(view) =~ ~s(data-readiness="task_token_rearmed")
+
+      # Exactly what the Recorder rebroadcasts when the Session renews.
+      send(view.pid, {:claude_chat_task_hands, :rearmed})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_rearmed")
+      assert html =~ "Restart this session"
+
+      # …and a later expiry the renewal could not fix arrives the same way.
+      send(view.pid, {:claude_chat_task_hands, :expired})
+      assert render(view) =~ ~s(data-readiness="task_token_expired")
+    end
   end
 
   describe "runtime auth guard (unauthed stream replay — chat-task-hands, decision 5)" do

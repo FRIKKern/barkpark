@@ -804,6 +804,17 @@ defmodule Barkpark.StudioChat.Recorder do
     {:noreply, touch(state)}
   end
 
+  # The session's task-credential verdict changed (task-cth-bl-token-renewal):
+  # a renewal landed, or the credential expired and the renewal was refused.
+  # Rebroadcast verbatim so every viewer's ChatLive flips its onboarding card
+  # in place — the whole point is that a long session never discovers its lost
+  # hands as an unexplained 401. Carries a VERDICT ATOM only; no token, no
+  # secret, nothing renderable that could leak a credential.
+  def handle_info({:claude_chat_task_hands, _verdict} = msg, state) do
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
   def handle_info({:claude_chat_exit, status, _stderr_tail} = msg, state) do
     session_exited(state.session_id)
     release_admission(state)
