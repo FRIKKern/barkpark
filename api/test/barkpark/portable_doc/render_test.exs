@@ -504,7 +504,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "content" => [%{"type" => "text", "value" => "Hello"}]
       }
 
-      assert Render.render_block(block) == "<p>Hello</p>"
+      assert Render.render_block(block) == email_p("Hello")
     end
 
     test "divider composes to an hr" do
@@ -557,7 +557,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Leading + trailing hr from the composed section sub-tree.
       assert html =~ ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
       assert html =~ ~s(<span style="font-weight:bold">Highlights</span>)
-      assert html =~ "<p>Body.</p>"
+      assert html =~ email_p("Body.")
     end
 
     test "render_blocks concatenates a list in order" do
@@ -567,7 +567,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
       ]
 
       assert Render.render_blocks(blocks) ==
-               ~s(<h2 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px">A</h2><p>B</p>)
+               ~s(<h2 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px">A</h2>) <>
+                 email_p("B")
     end
 
     # Flat-dialect ProseMirror text nodes carry a `marks` array (e.g.
@@ -582,7 +583,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<p><span style="font-weight:bold">hi</span></p>)
+               email_p(~s(<span style="font-weight:bold">hi</span>))
     end
 
     test "stacked bold + italic marks nest outer→inner in list order" do
@@ -600,7 +601,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       # First mark is the outermost wrapper.
       assert Render.render_block(block) ==
-               ~s(<p><span style="font-weight:bold"><span style="font-style:italic">x</span></span></p>)
+               email_p(
+                 ~s(<span style="font-weight:bold"><span style="font-style:italic">x</span></span>)
+               )
     end
 
     test "code mark wraps the value as PdInlineCode" do
@@ -611,7 +614,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<p><code style="background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em">a&amp;b</code></p>)
+               email_p(
+                 ~s(<code style="background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em">a&amp;b</code>)
+               )
     end
 
     test "link mark reads href from attrs and emits a PdLink" do
@@ -628,7 +633,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<p><a href="https://x.test" style="color:#1e5347;text-decoration:underline">click</a></p>)
+               email_p(
+                 ~s(<a href="https://x.test" style="color:#1e5347;text-decoration:underline">click</a>)
+               )
     end
 
     test "unknown marks pass through with no wrapper" do
@@ -638,7 +645,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "content" => [%{"type" => "text", "value" => "x", "marks" => [%{"type" => "wat"}]}]
       }
 
-      assert Render.render_block(block) == "<p>x</p>"
+      assert Render.render_block(block) == email_p("x")
     end
 
     test "empty marks list parity with no-marks (no wrapping)" do
@@ -648,7 +655,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "content" => [%{"type" => "text", "value" => "x", "marks" => []}]
       }
 
-      assert Render.render_block(block) == "<p>x</p>"
+      assert Render.render_block(block) == email_p("x")
     end
   end
 
@@ -722,7 +729,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # The asset-less image contributes nothing; the heading + paragraph render in
       # order with no empty <img> between them.
       assert Render.render_blocks(blocks) ==
-               ~s(<h2 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px">A</h2><p>B</p>)
+               ~s(<h2 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px">A</h2>) <>
+                 email_p("B")
 
       refute Render.render_blocks(blocks) =~ "<img"
     end
@@ -1663,7 +1671,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
                ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><p>The figure body.</p><figcaption class="bp-figcaption">Figure with a captioned child</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
-               ~s|<figure style="margin:16px 0"><p>The figure body.</p><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">Figure with a captioned child</div></figure>|
+               ~s|<figure style="margin:16px 0">| <>
+                 email_p("The figure body.") <>
+                 ~s|<div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">Figure with a captioned child</div></figure>|
     end
 
     test "a nonempty action is byte-identical to the pre-guard emitter" do
@@ -2181,5 +2191,18 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "<li"
       assert html =~ ~s(<span style="font-weight:bold">loud</span>)
     end
+  end
+
+  # ── the `:email` body-paragraph stamp ───────────────────────────────────────
+  #
+  # `Render.render_block/1` defaults to the `:email` style, whose `<p>` carries
+  # its type INLINE because mail clients strip stylesheets (walk.ex body_type/2).
+  # These expectations read the stamp from the PALETTE rather than re-typing the
+  # hex/font, so a theme override moves the test with the render.
+  defp email_p(inner) do
+    pal = Barkpark.PortableDoc.Render.Palettes.email_palette()
+
+    ~s(<p style="margin:0 0 16px;font-family:#{pal.font_body};font-size:17px;) <>
+      ~s(line-height:1.55;color:#{pal.text}">) <> inner <> "</p>"
   end
 end
