@@ -24,7 +24,11 @@
 //   HEIGHT    declared, derived half VACUOUSLY GREEN · app.css has ZERO
 //             height-bearing @media, so the derived refusal refuses nothing
 //             today and legA's own output says so. The declared HEIGHTS set
-//             carries a written reason per value.
+//             carries a written reason per value, and `--height a,b,c` DRIVES
+//             any of them — the loop defaults to one (RENDER_HEIGHT) for the
+//             render count stated in HEIGHT_REASONS[800], and reconciles what
+//             it asked for against the window.innerHeight it measured, so a
+//             declared-but-undriven height cannot be reported as covered.
 //   SCENARIO  116 scenarios, 26 rendered, 90 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
@@ -149,9 +153,15 @@
 //          since a UA-painted control computes an ellipsis it does not
 //          necessarily paint and that would silence correction (a).
 //          CUE_STUCK (a note, never a failure) reports the IFF half: a cue live
-//          on something that FITS. It is asked ONLY of scroll containers,
-//          because custom properties INHERIT — every descendant of a cued
-//          scroller otherwise reports a cue it does not own.
+//          on something that FITS — ON THE AXIS THE CUE PAINTS ON, read off the
+//          mask's own gradient direction (`to right` = x, `to bottom` = y). A
+//          horizontal-only fit test called the folded shell's VERTICAL
+//          `--nav-fade` stuck while the strip measured scrollHeight 503 >
+//          clientHeight 259: 78 notes on `--cell operator --widths 390,619,720`,
+//          0 after. It is asked ONLY of scroll containers (either axis), and
+//          only of the element whose OWN computed style carries the cue — both
+//          cue properties are registered `inherits: false`, so the descendant
+//          copies were `cueOf`'s ancestor walk, not CSS inheritance.
 //      SHIPPED GENERAL, WITH NO ALLOWLIST. The measured census over the
 //      data-bearing cells is one distinct selector — select#site-theme-select
 //      .rail-select, which slice S4 pays. Visually-hidden is handled by a NAMED
@@ -184,8 +194,11 @@
 //  COST, HONESTLY
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
-//  costs roughly a second per cell. The full render leg is 27 cells x 2 themes
-//  x 18 boundary widths = 972 renders: budget MINUTES. The width numeral here is
+//  costs roughly a second per cell (0.73s measured). The full render leg is
+//  27 cells x 2 themes x ONE height x 18 boundary widths = 972 renders: budget
+//  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
+//  declared HEIGHTS make it 2916 renders (35.5 min), the number that decided
+//  the default loop (HEIGHT_REASONS[800]). The width numeral here is
 //  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
 //  boundary widths"), not the 15 that this file's residue prose still repeats —
 //  that stale numeral has no arm and is owned by
@@ -210,6 +223,14 @@
 //                                     # name — it never narrows silently
 //    BREAKPOINT_SWEEP_ROOT=<dir> …    # measure an exported tree (origin/main)
 //    node …/breakpoint-sweep.mjs --render --theme dark   # one theme member
+//    node …/breakpoint-sweep.mjs --render --height 390,667,800  # the HEIGHT axis
+//                                     # DEFAULT IS ONE HEIGHT (RENDER_HEIGHT
+//                                     # 800) and HEIGHT_REASONS[800] carries
+//                                     # the render count that decided it. An
+//                                     # undeclared value EXITS 2 by name, and
+//                                     # every asked-for height is reconciled
+//                                     # against the window.innerHeight the
+//                                     # cells actually reported.
 //    BREAKPOINT_SWEEP_CSS=<file> …    # parse a DIFFERENT app.css than is served
 //    BREAKPOINT_SWEEP_HTML=<file> …   # ditto for the shell (the `light` theme
 //                                     # member is declared ONLY there, so
@@ -349,7 +370,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT. Leg B renders at 800 (RENDER_HEIGHT below) and every Q3 number this epic quotes was taken there; naming it makes the render height part of the declared axis instead of a bare module const.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 27 cells x 2 themes x 1 height x 18 widths = 972 renders (11.9 min at the measured 0.73s/cell) to 2916 (35.5 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -363,6 +384,23 @@ export const UNDRIVEN_HEIGHTS = { 900: "overflow-guard.mjs / modal-oracle drive 
 // the declared axis is what makes HEIGHTS a description of the sweep rather
 // than a wish (the unit suite pins the membership).
 export const RENDER_HEIGHT = 800;
+// The heights Leg B walks when the operator names none. ONE member, and the
+// cost that bought that decision is in HEIGHT_REASONS[800] above rather than in
+// a commit message. `--height a,b,c` selects from HEIGHTS by name and refuses
+// an unknown value the way --cell and --theme do.
+export const RENDER_HEIGHTS_DEFAULT = [RENDER_HEIGHT];
+
+// Every height Leg B was ASKED to drive, against the viewport heights it
+// actually MEASURED (window.innerHeight, read back per cell). A declared height
+// that no cell rendered at is the exact defect this function exists to make
+// impossible to ship green: the axis said three and the loop drove one.
+export function heightDriveReport({ asked, seen }) {
+  const askedSet = asked.map(Number);
+  const seenSet = new Set([...seen].map(Number));
+  const undriven = askedSet.filter((h) => !seenSet.has(h));
+  const unasked = [...seenSet].filter((h) => !askedSet.includes(h)).sort((a, b) => a - b);
+  return { asked: askedSet, driven: askedSet.filter((h) => seenSet.has(h)), undriven, unasked, ok: !undriven.length && !unasked.length };
+}
 
 // ── AXIS: SCENARIO ───────────────────────────────────────────────────────────
 // A scenario's FAMILY, derived from the artifact (charter D180): its pathname
@@ -666,6 +704,97 @@ export const HIDING_UTILITIES = ["visually-hidden", "sr-only", "screen-reader-on
 // a browser that does not enumerate them must not silently report "no cue on
 // anything" — these are checked by name as well.
 export const NAMED_CUE_PROPS = ["--set-matrix-fade", "--matrix-fade", "--scroll-fade"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CUE_STUCK ASKS THE CUE'S OWN AXIS (cch-w15-bl-cuestuck-asks-horizontal-of-a-
+//  vertical-cue)
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE DEFECT, AS MEASURED. CUE_STUCK used to ask ONE question of every cue it
+//  found — "does this element fit HORIZONTALLY?" — because the only cue this
+//  sweep was built against (`--set-matrix-fade`) is a `to right` mask on an
+//  `overflow-x: auto` scroller. The folded shell's `--nav-fade` is the other
+//  shape: a `to bottom` mask on an `overflow-y: auto` strip. Driven at 720x800
+//  on origin/main, `aside.sidebar.is-nav-clipped` measures scrollHeight 503 >
+//  clientHeight 259 — genuinely clipped, cue correctly live — and the sweep
+//  called it stuck anyway, because it fits on the axis nobody asked about. A
+//  note that is green by the WRONG AXIS is not a green.
+//
+//  AND THE INHERITANCE WAS THE INSTRUMENT'S, NOT THE CSS'S. The old arm's
+//  comment blamed custom-property inheritance for the descendant copies, and
+//  that reading is refuted by the artifact: BOTH cue properties are registered
+//  `@property … { inherits: false }` (app.css `@property --nav-fade` and
+//  `@property --set-matrix-fade`), so `svg.nav-ico` inside the strip computes
+//  `--nav-fade: 0px`. The 40px it reported came from `cueOf`'s OWN ancestor
+//  walk. So the note now reads the cue off the element's own computed style:
+//  for a REGISTERED non-inheriting cue a descendant correctly reads 0 and goes
+//  quiet, and for an unregistered `--*fade*` (which really does inherit)
+//  `getComputedStyle(child)` still returns the inherited value, so that case
+//  keeps the scroll-container guard and the axis test doing the work. `cueOf`'s
+//  walk is untouched — CLIP_NO_CUE still uses it.
+//
+//  MEASURED BOTH WAYS: `--render --cell operator --widths 390,619,720` emitted
+//  78 CUE_STUCK notes before this change (39 per theme — the filing's number
+//  predates the theme axis doubling the leg) and 0 after, while the note still
+//  fires on a cue live over something that fits on the cue's own axis.
+
+// The axis a mask actually paints on, read off the computed `mask-image`. The
+// gradient's direction IS the axis: `to right` fades a horizontal scroller,
+// `to bottom` a vertical one. Chrome drops the direction token from the
+// computed value when it is the default, and the default for `linear-gradient`
+// is `to bottom` — so "no direction token" is a vertical answer, not an unknown
+// one. Anything this cannot read (a radial mask, a corner gradient, no mask at
+// all) returns null and the caller asks BOTH axes, which can never produce a
+// note about an axis it did not measure.
+export function cueAxisOfMask(mask) {
+  if (!mask) return null;
+  var m = /linear-gradient\(([^,]*),/.exec(String(mask));
+  if (!m) return null;
+  var head = m[1].trim().toLowerCase();
+  if (head.indexOf("to ") === 0) {
+    var w = head.slice(3).trim().split(/\s+/);
+    var x = w.indexOf("left") !== -1 || w.indexOf("right") !== -1;
+    var y = w.indexOf("top") !== -1 || w.indexOf("bottom") !== -1;
+    if (x && y) return "both";
+    if (x) return "x";
+    if (y) return "y";
+    return null;
+  }
+  var deg = /^(-?[0-9]+(?:\.[0-9]+)?)deg$/.exec(head);
+  if (deg) {
+    var a = ((parseFloat(deg[1]) % 360) + 360) % 360;
+    if (a === 0 || a === 180) return "y";
+    if (a === 90 || a === 270) return "x";
+    return "both";
+  }
+  // No direction token: `linear-gradient(<color>, <color>)` is `to bottom`.
+  return "y";
+}
+
+// Is this element showing an edge cue for an overflow it does not have? The
+// question is asked ON THE CUE'S OWN AXIS. `cue` is the value read off the
+// element's OWN computed style (see the block above — an inherited-by-the-walk
+// value is not this element's cue). An axis this cannot name is asked of BOTH,
+// so an unreadable mask makes the note quieter, never louder.
+export function cueStuckVerdict(m) {
+  if (!(m.cue > 0)) return { note: false, axis: null, why: "no cue on this element's own computed style" };
+  var axis = cueAxisOfMask(m.maskImage);
+  var asked = (axis === "x" || axis === "y") ? axis : "both";
+  var fitsX = !(m.scrollW > m.clientW + 1);
+  var fitsY = !(m.scrollH > m.clientH + 1);
+  var fits = asked === "x" ? fitsX : asked === "y" ? fitsY : (fitsX && fitsY);
+  if (!fits) {
+    return {
+      note: false, axis: asked,
+      why: asked === "x"
+        ? "clipped on x (scrollWidth " + m.scrollW + " > clientWidth " + m.clientW + ") — the cue is telling the truth"
+        : "clipped on " + asked + " (scrollHeight " + m.scrollH + " > clientHeight " + m.clientH + ") — the cue is telling the truth",
+    };
+  }
+  return {
+    note: true, axis: asked,
+    why: "fits on " + asked + " (w " + m.scrollW + "/" + m.clientW + ", h " + m.scrollH + "/" + m.clientH + ")",
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  LEG A — parsing
@@ -1098,7 +1227,15 @@ const CSSOM_AXIS_JS = `(function(){
 function cellProbeJs(cell) {
   const hiding = JSON.stringify(HIDING_UTILITIES);
   const cueProps = JSON.stringify(NAMED_CUE_PROPS);
+  // THE SAME FUNCTION, NOT A COPY OF IT. cueAxisOfMask/cueStuckVerdict are
+  // injected by source, so the unit suite drives the very code the browser
+  // runs — a second implementation in the test file would be a story about
+  // the pixels (charter GR118), which is the mistake this file is built to
+  // avoid. Neither function may reference module scope or use a template
+  // literal: it lands inside this one.
   return `(function(){
+  ${cueAxisOfMask.toString()}
+  ${cueStuckVerdict.toString()}
   var HIDING=${hiding}, CUEPROPS=${cueProps};
   var FORM={SELECT:1,INPUT:1,TEXTAREA:1,BUTTON:1};
   var CLIPPY={hidden:1,clip:1,auto:1,scroll:1};
@@ -1170,13 +1307,25 @@ function cellProbeJs(cell) {
     var cut = Math.round((paintedRight - vw)*100)/100;
     if (cut > 0.5 && !contained(el)) q2.push({kind:'CUT_BY_VIEWPORT', sel:sel(el), cut:cut});
     if (!clipped) {
-      // The IFF half: a cue live on something that FITS is a lie too. Asked
-      // ONLY of scroll containers — custom properties INHERIT, so every
-      // descendant of a cued scroller reads its parent's fade and would
-      // otherwise report a cue it does not own.
-      if (!isForm && CLIPPY[cs.overflowX]) {
+      // The IFF half: a cue live on something that FITS is a lie too — ON THE
+      // AXIS THE CUE PAINTS ON. Still asked ONLY of scroll containers, now on
+      // EITHER axis (a --nav-fade strip scrolls vertically; its overflow-x
+      // computes auto only because CSS coerces visible when the other axis is
+      // not visible, which is exactly why the horizontal-only guard let 78
+      // vertical notes through). cf.own, not cf.cue: see the CUE_STUCK block
+      // above the probe.
+      if (!isForm && (CLIPPY[cs.overflowX] || CLIPPY[cs.overflowY])) {
         var cf=cueOf(el);
-        if (cf.cue>0) q2.push({kind:'CUE_STUCK', sel:sel(el), cue:cf.cue});
+        var vd=cueStuckVerdict({
+          cue: cf.own,
+          maskImage: cs.maskImage || cs.webkitMaskImage || '',
+          scrollW: el.scrollWidth, clientW: el.clientWidth,
+          scrollH: el.scrollHeight, clientH: el.clientHeight,
+        });
+        if (cf.own>0) q2.push({kind: vd.note ? 'CUE_STUCK' : 'CUE_HONEST',
+                               sel:sel(el), cue:cf.own, axis:vd.axis, why:vd.why,
+                               sw:el.scrollWidth, cw:el.clientWidth,
+                               sh:el.scrollHeight, ch:el.clientHeight});
       }
       continue;
     }
@@ -1246,23 +1395,29 @@ function cellProbeJs(cell) {
     var cs=getComputedStyle(el);
     var bl=parseFloat(cs.borderLeftWidth)||0, br=parseFloat(cs.borderRightWidth)||0;
     var track=Math.round((el.offsetWidth - el.clientWidth - bl - br)*100)/100;
-    var cue=0;
-    for (var n=el; n && n!==document.documentElement; n=n.parentElement){
+    var cue=0, own=0, depth=0;
+    for (var n=el; n && n!==document.documentElement; n=n.parentElement, depth++){
       var s=getComputedStyle(n);
+      var here=0;
       for (var i=0;i<s.length;i++){
         var p=s[i];
         if (p.slice(0,2)==='--' && /(fade|cue)/.test(p)){
           var v=parseFloat(s.getPropertyValue(p));
-          if (v>0) cue=Math.max(cue,v);
+          if (v>0) here=Math.max(here,v);
         }
       }
       for (var j=0;j<CUEPROPS.length;j++){
         var v2=parseFloat(s.getPropertyValue(CUEPROPS[j]));
-        if (v2>0) cue=Math.max(cue,v2);
+        if (v2>0) here=Math.max(here,v2);
       }
-      if (cue>0) break;
+      // own is the cue as CSS sees it on THIS element: a registered
+      // inherits:false property computes its initial 0px on a descendant, an
+      // unregistered one computes the inherited value. cue keeps the ancestor
+      // walk, which is what CLIP_NO_CUE reads.
+      if (depth===0) own=here;
+      if (here>0) { cue=Math.max(cue,here); break; }
     }
-    return {track:track, cue:cue};
+    return {track:track, cue:cue, own:own};
   }
 
   // ── Q3 below the fold ──────────────────────────────────────────────────────
@@ -1665,21 +1820,44 @@ async function legRender(rep) {
   }
   if (!themes.length) refuse(`--theme "${themeFilter}" selected no theme. Known: ${THEMES.join(", ")}`);
 
+  // The HEIGHT axis, sliceable and refusing on the SAME terms. 390 and 667 were
+  // declared with written reasons and never driven — cch-w16-bl-legb-drives-
+  // one-of-three-heights. --height is what drives them; the DEFAULT stays at
+  // RENDER_HEIGHT for the cost stated in HEIGHT_REASONS[800].
+  const heightFilter = valOf("--height");
+  if (has("--height") && (heightFilter == null || heightFilter.startsWith("--"))) {
+    refuse(`--height was given no value. Naming no height is not "all heights" — it is a run nobody described. Known: ${HEIGHTS.join(", ")}`);
+  }
+  const { selected: heightNames, unknown: unknownHeights } = selectNames(HEIGHTS.map(String), heightFilter);
+  if (unknownHeights.length) {
+    refuse(`--height named ${unknownHeights.length} height${unknownHeights.length > 1 ? "s" : ""} that ${unknownHeights.length > 1 ? "are" : "is"} not declared: ` +
+      `${unknownHeights.map((h) => `"${h}"`).join(", ")}. Refusing rather than narrowing to the ${heightNames.length} that matched — a height this sweep does not declare has no written reason, ` +
+      `and a run at an undeclared height publishes a number for a viewport nobody chose.\n   Known: ${HEIGHTS.map((h) => `${h} (${HEIGHT_REASONS[h].split(".")[0]})`).join(" · ")}`);
+  }
+  if (!heightNames.length) refuse(`--height "${heightFilter}" selected no height. Known: ${HEIGHTS.join(", ")}`);
+  const heights = heightFilter ? heightNames.map(Number) : [...RENDER_HEIGHTS_DEFAULT];
+
   return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
-    const total = cells.length * themes.length * widths.length;
-    out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
-    const dead = [], q1f = [], q2f = [], q3f = [], notes = [];
+    const total = cells.length * themes.length * heights.length * widths.length;
+    out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${heights.length} height${heights.length > 1 ? "s" : ""} [${heights.join(",")}] x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
+    if (!heightFilter) {
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 27x2x1x18 = 972 renders (11.9 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2916 (35.5 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+    }
+    const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
     const bgSeen = new Map();
     const t0 = Date.now();
     let done = 0;
 
+    const heightSeen = new Set();
+    const q3Worst = new Map();
     for (const cell of cells) {
      for (const theme of themes) {
+      for (const height of heights) {
       const row = [];
       for (const width of widths) {
         const { targetId, sessionId } = await openCell();
         try {
-          await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: RENDER_HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
+          await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
           // A FRESH `?theme=` LOAD PER CELL, NEVER A RUNTIME ATTRIBUTE FLIP.
           // A flip leaves the console lying about itself — a verifier measured
           // the body background UNCHANGED at rgb(244,245,247) after flipping
@@ -1713,6 +1891,23 @@ async function legRender(rep) {
           }
           bgSeen.set(theme, m.themeState.bg);
 
+          // ── the height axis is DRIVEN, and that is checked ───────────────
+          // The twin of the theme-drive clause above, and the exact defect
+          // cch-w16-bl-legb-drives-one-of-three-heights names: the loop can
+          // ASK for 390 and the override can silently not take, and every
+          // number below would then be a measurement of the wrong viewport
+          // published under the right label. window.innerHeight is read back
+          // per cell; a mismatch is a DEAD cell, never a warning.
+          if (m.q3.vh !== height) {
+            dead.push({
+              cell: cell.name, theme, width, present: [],
+              why: `asked for a ${height}px viewport and the document reported window.innerHeight ${m.q3.vh} — the height override did not take, so this cell measured a viewport nobody chose.`,
+            });
+            row.push(`${width}:DEAD`);
+            continue;
+          }
+          heightSeen.add(m.q3.vh);
+
           // ── clause 1+2+3, hard ────────────────────────────────────────────
           if (!m.liveness.ok) {
             const L = m.liveness;
@@ -1733,12 +1928,19 @@ async function legRender(rep) {
           if (m.q1.over) q1f.push({ cell: cell.name, theme, width, sw: m.q1.sw, cw: m.q1.cw });
           for (const f of m.q2) {
             if (f.kind === "CUE_STUCK") notes.push({ cell: cell.name, theme, width, ...f });
+            else if (f.kind === "CUE_HONEST") honest.push({ cell: cell.name, theme, width, ...f });
             else q2f.push({ cell: cell.name, theme, width, ...f });
           }
           const top = m.q3.top;
           if (top != null) {
+            // QUOTED WHETHER IT PASSES OR NOT. Q3 used to print only on
+            // failure, so the fold number at a height was invisible unless it
+            // was already over budget — and "no Q3 line" read the same as
+            // "the height was never driven".
+            const w = q3Worst.get(height);
+            if (!w || top > w.top) q3Worst.set(height, { top, budget: Math.round(FOLD_FRACTION * m.q3.vh), cell: cell.name, theme, width });
             if (top > FOLD_FRACTION * m.q3.vh) {
-              q3f.push({ cell: cell.name, theme, width, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
+              q3f.push({ cell: cell.name, theme, width, height, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
             }
           }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
@@ -1747,7 +1949,8 @@ async function legRender(rep) {
           done++;
         }
       }
-      out(`   ${`${cell.name}/${theme}`.padEnd(26)} ${row.join(" ")}\n`);
+      out(`   ${`${cell.name}/${theme}@${height}`.padEnd(30)} ${row.join(" ")}\n`);
+      }
      }
     }
 
@@ -1775,6 +1978,20 @@ async function legRender(rep) {
     // produced. Identical values across themes would mean the axis is driving
     // the same pixels twice.
     out(`   ✓ themes — ${[...bgSeen].map(([t, bg]) => `${t} loaded (body ${bg.replace(/\s+/g, "")})`).join(" · ")}\n`);
+    // THE HEIGHT AXIS, RECONCILED AGAINST WHAT THE VIEWPORT ACTUALLY WAS. Not
+    // "the loop asked for these" — window.innerHeight came back from every
+    // cell and this is that set. A height asked for and never measured is a
+    // REFUSAL (exit 2): it is the instrument lying about its own coverage,
+    // which is a claim about the instrument, not about the product.
+    const hd = heightDriveReport({ asked: heights, seen: heightSeen });
+    if (!hd.ok) {
+      shout(`\n!! BREAKPOINT SWEEP (exit 2): the height axis was ASKED for [${hd.asked.join(",")}] and MEASURED [${[...heightSeen].sort((a, b) => a - b).join(",")}].\n` +
+        (hd.undriven.length ? `   · NEVER DRIVEN: ${hd.undriven.join(", ")} — every number above was taken at a height this run claims to have covered and did not.\n` : "") +
+        (hd.unasked.length ? `   · DRIVEN BUT NOT ASKED: ${hd.unasked.join(", ")} — the viewport was not the one the loop set.\n` : ""));
+      process.exit(2);
+    }
+    out(`   ✓ heights — ${hd.driven.length}/${hd.asked.length} declared height(s) DRIVEN and read back from window.innerHeight: ${hd.driven.join(", ")}\n`);
+    out(`   ✓ Q3 fold — worst .content top per height: ${[...q3Worst].sort((a, b) => a[0] - b[0]).map(([h, w]) => `${h}px -> ${w.top} against a ${w.budget}px budget (${FOLD_FRACTION} of H) [${w.cell}/${w.theme}@${w.width}]`).join(" · ")}\n`);
 
     for (const f of q1f) out(`   ✗ Q1 SIDEWAYS  ${f.cell}/${f.theme}@${f.width}: scrollWidth ${f.sw} > viewport ${f.cw}\n`);
     for (const f of q2f) {
@@ -1788,8 +2005,24 @@ async function legRender(rep) {
       }
       else out(`   ✗ Q2 CUT_BY_VIEWPORT  ${f.cell}/${f.theme}@${f.width}: ${f.sel} extends ${f.cut}px past the viewport\n`);
     }
-    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
-    for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}/${n.theme}@${n.width}: ${n.sel} shows a ${n.cue}px edge cue while it FITS\n`);
+    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}x${f.height}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
+    // WHY THE ZERO IS NOT A BLIND SPOT. CUE_STUCK went from 78 notes to 0 on
+    // `--cell operator --widths 390,619,720`, and a note count that falls to
+    // zero is indistinguishable from a probe that stopped looking — unless it
+    // says what it DID see. Every live cue the arm measured is counted here,
+    // split into the ones telling the truth (clipped on the cue's own axis)
+    // and the ones that are not. `counting doors is not counting what a door
+    // sees`: this line is the door's own report.
+    {
+      const cueSeen = honest.length + notes.length;
+      const byKey = new Map();
+      for (const h of honest) { const k = `${h.sel}|${h.axis}`; if (!byKey.has(k)) byKey.set(k, h); }
+      out(`   ✓ cue census — ${cueSeen} live edge cue(s) measured across ${total} cells: ${honest.length} honest (clipped on the cue's own axis), ${notes.length} STUCK\n`);
+      for (const h of [...byKey.values()].slice(0, 8)) {
+        out(`        · ${h.sel} ${h.cue}px ${h.axis === "x" ? "horizontal" : h.axis === "y" ? "vertical" : h.axis} — ${h.why} [${h.cell}/${h.theme}@${h.width}]\n`);
+      }
+    }
+    for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}/${n.theme}@${n.width}: ${n.sel} shows a ${n.cue}px ${n.axis === "x" ? "horizontal" : n.axis === "y" ? "vertical" : "edge"} cue while it FITS on ${n.axis === "both" ? "BOTH axes" : `${n.axis}`} (w ${n.sw}/${n.cw}, h ${n.sh}/${n.ch})\n`);
 
     const failed = q1f.length + q2f.length + q3f.length;
     if (failed) {
