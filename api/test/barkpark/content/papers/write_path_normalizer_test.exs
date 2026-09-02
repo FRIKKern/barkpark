@@ -475,7 +475,9 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
       # is byte-identical at the reader and #14561's criterion is satisfied,
       # not traded away.
       raw_html = Render.render_blocks([@header_dialect_table])
-      normalized_html = Render.render_blocks(BlockOps.normalize_render_shapes([@header_dialect_table]))
+
+      normalized_html =
+        Render.render_blocks(BlockOps.normalize_render_shapes([@header_dialect_table]))
 
       # non-vacuity: both halves of the block actually render.
       assert raw_html =~ "Quantity"
