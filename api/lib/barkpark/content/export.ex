@@ -12,7 +12,9 @@ defmodule Barkpark.Content.Export do
   (concern K, still on the facade): resolved via the still-on-facade public
   `resolve_read_dataset_id/2`, then the NULL-tolerant legacy-string OR.
   Workspace scope rides the shared
-  `Barkpark.Content.Scope.scope_to_workspace_or_global/3`.
+  `Barkpark.Content.Scope.scope_to_workspace_or_global/3`, and GRANT row
+  narrowing rides the shared `Barkpark.Content.Scope.maybe_scope_to_grants/2`
+  (task-5fa8c834e1afa197) — see `export_stream/2`.
   """
 
   import Ecto.Query
@@ -21,7 +23,8 @@ defmodule Barkpark.Content.Export do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Envelope}
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope,
+    only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
 
   @doc """
   Stream all documents for a dataset as envelope maps. Optionally filter by type.
@@ -36,6 +39,19 @@ defmodule Barkpark.Content.Export do
   private / encrypted fields. A trusted internal full-content export must pass
   the explicit `:internal` sentinel — never nil. The schema is resolved once
   per distinct `type` and memoised across the (lazy) stream via `Stream.transform`.
+
+  GRANT ROW NARROWING (task-5fa8c834e1afa197). `maybe_scope_to_grants/2` runs
+  AFTER the workspace clause and BEFORE the stream, exactly as
+  `Content.Query.get_document/4` and the analytics aggregates do. Without it
+  this builder dropped `opts[:grant_scoped]` on the floor — and because that
+  flag DEFAULTS TO FALSE inside the gate, the absent call meant "do not narrow",
+  not "narrow to nothing": a non-member admitted by `ResolveWorkspace`'s grant
+  arm on `/w/:ws/p/:proj/v1/data/export/:dataset` streamed the WHOLE dataset as
+  full envelopes, subject only to `Envelope.render/3` field redaction, when her
+  grant covered a single type. A MEMBER never carries the flag, so the call is a
+  provable no-op for her and the NDJSON is byte-identical (grants only ADD
+  access). Pinned by
+  `test/barkpark_web/integration/export_revision_grant_narrowing_test.exs`.
   """
   def export_stream(dataset, opts \\ []) do
     type = Keyword.get(opts, :type)
@@ -46,6 +62,7 @@ defmodule Barkpark.Content.Export do
     Document
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_grants(opts)
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
     end)
