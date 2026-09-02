@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   @moduledoc """
-  The INSTANCE-OPERATOR tier: a config-backed allowlist in front of the seven
+  The INSTANCE-OPERATOR tier: a config-backed allowlist in front of the eight
   instance-global route groups that `RequireAdmin` alone cannot narrow.
 
   ## The ruling this implements (quoted verbatim)
@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   or back. This plug is the CHECK side of the fix: `admin` stays necessary,
   and on a configured instance it stops being sufficient.
 
-  ## The seven instance-global route groups this guards
+  ## The eight instance-global route groups this guards
 
     1. `POST|GET /v1/admin/self-update`, `POST /v1/admin/rollback`,
        `POST|GET /v1/admin/site-deploy` — operator primitives (RULING row 1).
@@ -45,6 +45,11 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
     6. `POST /api/playground` — the provisioning primitive (RULING row 6).
     7. `POST /api/workspaces/:workspace_slug/import` — bundle restore, whose
        target comes from the manifest (RULING row 7).
+    8. `GET /v1/instance/site-deploy`, `GET /v1/instance/metrics` — the
+       instance's deploy-door census and its Prometheus exposition; no tenant
+       selector, but other tenants' site slugs and workspace ids ride the
+       payload (RULING row 1, moved behind `require_admin` by #14793). A
+       Prometheus scraper's token id goes on `BARKPARK_OPERATOR_TOKEN_IDS`.
 
   Workspace-scoped admin routes (`DELETE /api/workspaces/:slug`,
   `GET /api/workspaces/:slug/export`, `PUT /api/workspaces/:slug/media/blob/*`,
@@ -83,7 +88,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
     * BOTH env vars unset/blank → the allowlist is EMPTY and this plug is a
       PASS-THROUGH: legacy behaviour, the `admin` bit alone still suffices.
       `warn_if_unset/0` (called once from `Barkpark.Application.start/2`) logs a
-      startup warning naming the seven groups and the two env vars, so a
+      startup warning naming the eight groups and the two env vars, so a
       multi-tenant instance cannot run in this shape unknowingly.
     * EITHER env var non-empty → the allowlist is ARMED and this plug is
       ALLOWLIST-ONLY: a bearer not on it gets `403 forbidden` with
@@ -148,7 +153,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
     if emails == [] and ids == [] do
       Logger.warning("""
       [Operator] The instance-operator allowlist is UNSET (#{@emails_env} and #{@ids_env} are
-      both empty), so the `admin` permission alone still opens these seven INSTANCE-GLOBAL
+      both empty), so the `admin` permission alone still opens these eight INSTANCE-GLOBAL
       route groups to ANY admin-permissioned token, including one whose only membership is an
       admin seat in a single workspace:
         1. POST|GET /v1/admin/self-update, POST /v1/admin/rollback, POST|GET /v1/admin/site-deploy
@@ -159,12 +164,13 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
         5. POST /v1/status/incidents, POST /v1/status/incidents/:id/resolve
         6. POST /api/playground
         7. POST /api/workspaces/:workspace_slug/import
+        8. GET /v1/instance/site-deploy, GET /v1/instance/metrics
       On a SINGLE-TENANT instance that is fine — the only admin is the operator. On a
       MULTI-TENANT one it hands your first customer-admin the instance: run-secrets in
       cleartext, the instance-wide plugin credentials record, and the release itself.
       Set #{@emails_env} (comma-separated operator emails) and/or #{@ids_env}
       (comma-separated api_token ids) to arm the allowlist; once either is non-empty the
-      seven groups are allowlist-only and fail closed.
+      eight groups are allowlist-only and fail closed.
       """)
     end
 

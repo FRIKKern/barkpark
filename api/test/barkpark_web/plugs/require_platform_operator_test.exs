@@ -172,7 +172,9 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       {"RULING row 5 (status incidents)", :post, "/v1/status/incidents",
        Jason.encode!(%{title: "probe", body: "probe"})},
       {"RULING row 6 (playground provisioning)", :post, "/api/playground", "{}"},
-      {"RULING row 7 (bundle import)", :post, "/api/workspaces/#{ctx.ws_b.slug}/import", "{}"}
+      {"RULING row 7 (bundle import)", :post, "/api/workspaces/#{ctx.ws_b.slug}/import", "{}"},
+      {"group 8 (instance reads: metrics exposition)", :get, "/v1/instance/metrics", nil},
+      {"group 8 (instance reads: deploy door)", :get, "/v1/instance/site-deploy", nil}
     ]
   end
 
@@ -235,6 +237,8 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       assert log =~ "/api/playground"
       assert log =~ "/api/workspaces/:workspace_slug/import"
       assert log =~ "GET /v1/plugins"
+      assert log =~ "/v1/instance/site-deploy"
+      assert log =~ "/v1/instance/metrics"
     end
 
     test "the allowlist reads as EMPTY, which is what makes the arm above meaningful" do

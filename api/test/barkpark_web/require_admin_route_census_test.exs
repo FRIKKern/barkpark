@@ -313,14 +313,15 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     # (task-d7ac954aa57aa522). The census merged the same hour without them,
     # so "every gated route carries a verdict" has been red on main since.
     {:get, "/v1/instance/site-deploy"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Operator: the whole instance's marketing-site deploy status; no tenant selector, " <>
-         "the twin of GET /v1/admin/site-deploy. RULING row 1."},
+         "the twin of GET /v1/admin/site-deploy. RULING row 1; operator group 8."},
     {:get, "/v1/instance/metrics"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Prometheus text exposition of this BEAM's own telemetry aggregates. workspace_id " <>
          "appears only as a series LABEL the handler stamps, never as a request selector; " <>
-         "the payload names tenants, which is why it is admin-gated at all. RULING row 1."},
+         "the payload names tenants, which is why it is admin-gated at all. RULING row 1; " <>
+         "operator group 8."},
 
     # ── /v1/shares ──
     {:get, "/v1/shares"} =>

@@ -2120,8 +2120,12 @@ defmodule BarkparkWeb.Router do
   # present: the on-box agent's health gate curls these with the instance admin
   # token (`/etc/barkpark/agent.health.token`). Neither route has a non-test
   # caller in-tree.
+  # RULING group 8 (task-c7e2b87f1bbca815): both reads below are INSTANCE-GLOBAL —
+  # no tenant selector, tenant identifiers in the payload — so they ride the
+  # operator allowlist like the seven groups above it. Prometheus scrapes this
+  # instance with a token whose id is on BARKPARK_OPERATOR_TOKEN_IDS.
   scope "/v1", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
 
     # Can this box deploy sites? Answered WITHOUT spending a deploy (dr-w15-s1).
     # {"configured": bool, "runner_alive": bool, "door": {…}, "serving": {…}}
