@@ -1818,6 +1818,25 @@ exit 0
 FAKECP
   chmod +x "$RBBIN/cp"
 
+  # An mv that REFUSES the recovery rename without touching a byte (the EPERM /
+  # cross-device shape) — the case where STAGE cannot put the interrupted swap
+  # back.  Armed only by BP_MV_ASIDE_FAIL_LOG and only for a SOURCE ending in
+  # `.aside` (the recovery direction), so the swap's own `mv <rel> <rel>.aside`
+  # and every other mv in this suite are the real one.  Same non-vacuity contract
+  # as the cp shim: the log it appends to is the sentinel — an empty mv.log means
+  # the rename the whole proof rests on never ran.
+  cat > "$RBBIN/mv" <<'FAKEMV'
+#!/usr/bin/env bash
+real=/bin/mv; [ -x "$real" ] || real=/usr/bin/mv
+if [ -n "${BP_MV_ASIDE_FAIL_LOG:-}" ]; then
+  src=""
+  for a in "$@"; do case "$a" in -*) ;; *) [ -z "$src" ] && src="$a";; esac; done
+  case "$src" in *.aside) printf '%s\n' "$src" >> "$BP_MV_ASIDE_FAIL_LOG"; exit 1;; esac
+fi
+exec "$real" "$@"
+FAKEMV
+  chmod +x "$RBBIN/mv"
+
   # The mutant: restore the pre-fix line, nothing else.  A mutation that did not
   # apply is not a catch, so the swap is asserted three ways below (exactly one
   # changed line, the pre-fix line present, the guarded line absent).
@@ -1919,6 +1938,39 @@ FAKECP
   check "FIXED: …and the recovery is on the record" grep -q 'recovered releases/rb1 from an interrupted swap' "$RBF/out.recover.log"
   check "FIXED: …and this run still failed in STAGE (the copy really ran)" \
     sh -c "[ \"$rb_recover_rc\" = 13 ] && [ -s '$RBF/cp2.log' ]"
+
+  # …and when the recovery rename ITSELF fails, STAGE must REFUSE rather than
+  # fall through to the cleanup that would delete the .aside it just failed to
+  # rescue.  Silence is the actual defect here — a run that loses the only copy
+  # of a live-or-previous release while printing nothing — so this asserts the
+  # bytes SURVIVE, that the run SAID so on both channels, and the typed 13.
+  mv "$RBF/sites/rbfix/releases/rb1" "$RBF/sites/rbfix/releases/rb1.aside"
+  : > "$RBF/mv.log"
+  rb_norecover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
+    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    BP_CP_FAIL_LOG="" BP_MV_ASIDE_FAIL_LOG="$RBF/mv.log" \
+    bash "$SELF" > "$RBF/out.norecover.log" 2>&1; echo $?)"
+  check "FIXED: the recovery rename REALLY was attempted (mv.log non-empty — not a vacuous pass)" \
+    [ -s "$RBF/mv.log" ]
+  check "FIXED: a FAILED recovery does NOT delete the .aside — the bytes SURVIVE" \
+    [ -d "$RBF/sites/rbfix/releases/rb1.aside" ]
+  check "FIXED: …with the original bytes still in it" \
+    grep -qx 'ORIGINAL-rbfix' "$RBF/sites/rbfix/releases/rb1.aside/.rb-origin"
+  check "FIXED: …and STAGE refused rather than staging over it (releases/rb1 not re-created)" \
+    [ ! -e "$RBF/sites/rbfix/releases/rb1" ]
+  check "FIXED: …and it SAID so in the log, naming the .aside as the surviving copy" \
+    grep -q 'left releases/rb1.aside UNTOUCHED' "$RBF/out.norecover.log"
+  check "FIXED: …and on the machine channel too (a silent loss is the defect)" \
+    grep -q '^BPSTAGE name=STAGE status=failed build_id=rb1' "$RBF/out.norecover.log"
+  check "FIXED: …with the typed 13 the other STAGE refusals speak" \
+    [ "$rb_norecover_rc" = 13 ]
+  # Put the fixture back the way the rest of this block expects it.
+  mv "$RBF/sites/rbfix/releases/rb1.aside" "$RBF/sites/rbfix/releases/rb1"
 
   check "FIXED: --rollback refuses on the HEALTH MARKER (the target exists)" \
     sh -c "[ \"\$(cat '$RBF/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is marked health-failed\" '$RBF/rb.log'"
@@ -2334,10 +2386,20 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # of deleting it — it can be the only copy of a live-or-previous release left
   # on the box.  Only when $RELDIR is genuinely absent; a present $RELDIR means
   # the swap landed and the .aside is the stale half.
+  # And the recovery is REFUSED-ON-FAILURE, not best-effort: the `rm -rf` three
+  # lines down would otherwise delete the very bytes a failed `mv` just left in
+  # place — the row's own defect shape, reappearing inside its own remedy and
+  # silently (no log, no emit, no non-zero exit; an operator sees a clean deploy
+  # and finds the missing rollback target only when they reach for it).  STAGE
+  # cannot honestly stage over a release it could not first put back, so read the
+  # return code and stop BEFORE the cleanup, leaving the .aside untouched.
   if [ ! -e "$RELDIR" ] && [ -d "$RELDIR.aside" ]; then
-    if mv "$RELDIR.aside" "$RELDIR" 2>/dev/null; then
-      log "STAGE: recovered releases/$BUILD_ID from an interrupted swap (.aside) before re-staging"
+    mv "$RELDIR.aside" "$RELDIR"; recover_rc=$?
+    if [ "$recover_rc" -ne 0 ]; then
+      DETAIL="could not recover releases/$BUILD_ID from an interrupted swap (mv exit $recover_rc) — releases/$BUILD_ID.aside still holds those bytes and can be the only copy of a live-or-previous release left on this box, so STAGE refused to stage over a release it could not first put back and left releases/$BUILD_ID.aside UNTOUCHED; move it back to releases/$BUILD_ID by hand (check ownership and free space on the releases mount) and redeploy"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
+    log "STAGE: recovered releases/$BUILD_ID from an interrupted swap (.aside) before re-staging"
   fi
   STAGE_ASIDE=""
   rm -rf "$RELDIR.partial" "$RELDIR.aside"
