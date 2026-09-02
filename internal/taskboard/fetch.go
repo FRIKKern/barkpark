@@ -417,7 +417,13 @@ func decodePrime(body []byte) (primeExtras, error) {
 // priority is decoded permissively because content.priority is an integer 0..4
 // on the wire while the board carries it as a display string.
 type taskWire struct {
-	DocID     string          `json:"doc_id"`
+	DocID string `json:"doc_id"`
+	// Rev is render_doc's top-level document revision — the CAS token the
+	// close-drift recovery pins as observed_rev (see Task.Rev). A plain string
+	// like DocID/Title above (NOT RawMessage): rev is server-GENERATED
+	// (Tasks.Close generate_rev), never a user-shaped content field, so it can
+	// never carry the odd shape the RawMessage fields below defend against.
+	Rev       string          `json:"rev"`
 	Title     string          `json:"title"`
 	Lifecycle string          `json:"lifecycle_status"`
 	Kind      string          `json:"kind"`
@@ -537,6 +543,7 @@ type eventWire struct {
 func (w taskWire) toTask() Task {
 	t := Task{
 		DocID:           w.DocID,
+		Rev:             w.Rev,
 		Title:           w.Title,
 		Lifecycle:       w.Lifecycle,
 		Kind:            w.Kind,
