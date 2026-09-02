@@ -158,6 +158,67 @@ set -euo pipefail
 # the same bill the `deploy/` entries above pay for the same reason. The
 # `auto_deploy_worker.ex` line is left standing: it is subsumed here, but it
 # documents its own read at the point that made it.
+#
+# THE `design/emit.mjs` ARTIFACTS ARE DECLARED HERE, BECAUSE NO SCANNER DOOR CAN
+# EVER SEE THEM (backlog cch-w30-bl-artifacts-paths-ungated). Every idiom in
+# `file_lits` extracts STRING LITERALS. `design/emit-fence.test.mjs` — declared
+# above, and SPAWNED by the seal predicate whose tests the console harness runs
+# — builds its throwaway tree with `copyFileSync(join(repoRoot, rel), dst)` over
+# a set it IMPORTS: `ARTIFACTS.map((a) => a.path)`, plus the mirror module's
+# `SURFACE_PATH` and `BUNDLE_PATH`. There is no literal at the read site, and
+# the frontier recursion in `list_escapes` is bounded at depth one BY
+# DECLARATION, so `design/emit.mjs` (two frames out) is never opened either.
+# `--list-escapes` therefore names none of these paths and never will. Same
+# blindness class as the elixir ratchet's `cloud/test/**` entry: a read that has
+# to be DECLARED because it can never be MEASURED.
+#
+# MEASURED on origin/main before these entries existed, one path standing in for
+# the family: append a comment line to `web/lib/tokens.gen.ts` and
+# `node design/emit-fence.test.mjs` goes from `# pass 9 / # fail 0` to
+# `# pass 6 / # fail 3`, while
+# `printf 'web/lib/tokens.gen.ts' | … --match console` printed `false`. The
+# Console gate SPAWNS that guard and would have SKIPPED the very PR that reds
+# it — a required context reporting green over a harness that never looked. The
+# only other catcher is `Doc budgets + anchors`, which matches the file through
+# its `**/*.ts` glob but carries an S4 exclusion row in
+# `.github/required-checks.json` and cannot block a merge. Nothing that can stop
+# a merge was watching.
+#
+# DERIVED, NOT TRANSCRIBED — the list below is the output of these two greps,
+# and the harness re-runs BOTH against the real tree:
+#
+#   awk '/^export const ARTIFACTS = \[/,/^\];/' design/emit.mjs \
+#     | grep -Eoh 'path: "[^"]*"' | sed -E 's/^path: "//; s/"$//' | sort -u
+#
+#   grep -Eoh '^export const (SURFACE_PATH|BUNDLE_PATH) = "[^"]*"' \
+#     design/paper-editor-mirror.mjs | sed -E 's/.*"([^"]*)"$/\1/'
+#
+# minus the three ARTIFACTS rows that already ride `cloud/priv/static/**`
+# (app.css, app.js, styleguide.html) and the mirror's `SURFACE_PATH`, which is
+# itself an ARTIFACTS row. `BUNDLE_PATH` is NOT an ARTIFACTS row and is declared
+# on its own measurement: emit's post-step re-derives the mirror from the
+# just-emitted surface, and a line spliced INSIDE that file's generated region
+# takes the guard to the same `# pass 6 / # fail 3`. A bare append at EOF does
+# not (`# pass 9 / # fail 0`) — the mirror attributes on the marked region, not
+# the whole file — which is why this is one exact file and not `api/assets/**`.
+#
+# The selftest asserts every derived path dispatches `true`, so an artifact
+# added to the emitter without a line here reds the harness; and it reds on a
+# derivation that resolves ZERO paths, so a regex that stops matching cannot
+# pass vacuously the way an unguarded loop over an empty list would.
+#
+# THE COST, NAMED AND ACCEPTED. These are EXACT FILES, never `api/**` or
+# `web/**`. Seven of them (the `.gen.ts`, `tokens_gen.go`, `chrome_gen.go`,
+# `tokens_gen.ex` rows) are WHOLE-FILE generated artifacts: nothing but a token
+# regeneration or the hand-edit this guard exists to refuse ever touches them,
+# so their dispatch bill is near zero. The other nine are hand-written surfaces
+# that CARRY a generated region — the Studio and /papers layouts, the two
+# controller HTML modules, the status controller, the /sheets reader, the web
+# demo's globals.css, paper-surface.css and the paper-editor bundle — and those
+# DO bill an ordinary Studio/controller/web PR for a console harness run. That
+# is the intended non-vacuity, the same bill `cloud/lib/**` and the two
+# `deploy/` entries above pay for the same reason. The alternative is a required
+# context that greens over a guard the change just broke.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
@@ -173,6 +234,22 @@ deploy/site-deploy-node.sh
 internal/builder/builder.go
 cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex
 cloud/lib/**
+api/assets/paper-surface/paper-surface.css
+api/assets/paper-editor/src/styles.css
+api/lib/barkpark_web/layouts/root.html.heex
+api/lib/barkpark_web/layouts/bulldocs.html.heex
+api/lib/barkpark_web/layouts/sheets.html.heex
+api/lib/barkpark_web/controllers/session_html.ex
+api/lib/barkpark_web/controllers/error_html.ex
+api/lib/barkpark_web/controllers/status_controller.ex
+api/lib/barkpark/portable_doc/render/tokens_gen.ex
+api/lib/barkpark_web/studio/tokens_gen.ex
+internal/taskboard/tokens_gen.go
+internal/pdrender/tokens_gen.go
+internal/semrole/tokens_gen.go
+internal/semrole/chrome_gen.go
+web/app/globals.css
+web/lib/tokens.gen.ts
 scripts/console-path-escape-check.sh
 scripts/console-path-escape-check.test.sh'
 
