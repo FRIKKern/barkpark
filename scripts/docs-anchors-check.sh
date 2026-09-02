@@ -1266,6 +1266,25 @@ else
   fi
 fi
 
+echo ""
+echo "== §10 in-place bp copy recipes =="
+# Delegated exactly as §9 above, and for the same reason: the rc is captured
+# BEFORE any formatting, because `cmd | sed` reports sed's exit code unless
+# pipefail happens to be set, and a gate whose red is laundered by its own
+# pretty-printer is worse than no gate.
+set +e
+BPCP_OUT=$("$REPO_ROOT/scripts/no-inplace-bp-copy-check.sh" 2>&1)
+BPCP_RC=$?
+set -e
+printf '%s
+' "$BPCP_OUT" | sed 's/^/      /'
+if [ "$BPCP_RC" -eq 0 ]; then
+  echo "ok:   §10 no in-place bp copy recipe on this tree"
+else
+  echo "FAIL: §10 an in-place bp copy recipe is present (rc=$BPCP_RC, see above)"
+  FAIL=1
+fi
+
 # --- summary ------------------------------------------------------------------
 echo ""
 if [ "$FAIL" -ne 0 ]; then
