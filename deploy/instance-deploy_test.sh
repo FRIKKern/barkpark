@@ -279,6 +279,10 @@ EOF
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-mcp.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"
+  # The post-deploy /mcp reachability smoke lives in the CHECKOUT (the workflow
+  # scp's only instance-deploy.sh; everything else the deploy runs it reads from
+  # $APP after the pull), so stage it exactly where the box would find it.
+  cp "$HERE/mcp-reachability-smoke.sh" "$APP/deploy/"
   CADDY="$TMP/Caddyfile"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$CADDY"
   # The fake git's HEAD/FETCH_HEAD store — per case, so cases never bleed.
@@ -374,6 +378,17 @@ check "active bridge stays enabled"       "! grep -q 'disable --now barkpark-con
 # mode, so a `stat -f ... || stat -c ...` fallback never reaches the GNU form
 # and silently compares garbage to '600'. `stat -c` fails cleanly on macOS
 # (illegal option), so probing it first is the only ordering that works on both.
+# Post-deploy /mcp reachability smoke (deploy/mcp-reachability-smoke.sh),
+# ADVISORY. The fake curl answers every URL with HEALTH_CODE=200 and writes no
+# body, so three of the four legs are legitimately RED in this run — which is
+# precisely the case worth pinning: the deploy must PRINT all four verdicts with
+# the code each leg saw and STILL exit 0. A smoke wired in fatally would turn a
+# stopped barkpark-mcp (guerrilla's state whenever that unit is down) into a
+# failed deploy of an app that is serving fine.
+check "post-deploy /mcp smoke ran"        "grep -q 'post-deploy /mcp reachability smoke' '$TMP/out.log'"
+check "smoke printed all four leg verdicts" "[ \"\$(grep -c 'mcp-smoke: LEG' '$TMP/out.log')\" = '4' ]"
+check "every verdict carries the HTTP code it saw, never a bare pass/fail" "[ \"\$(grep -c 'mcp-smoke: LEG .*-> HTTP [0-9][0-9][0-9] ' '$TMP/out.log')\" = '4' ]"
+check "red legs are ADVISORY (WARN logged, deploy still exit 0)" "grep -q 'WARN: /mcp reachability smoke has RED leg' '$TMP/out.log' && [ '$rc' = '0' ]"
 check "connectors.env is 0600 (holds real secrets)" "[ \"\$(stat -c '%a' '$TMP/connectors.env' 2>/dev/null || stat -f '%Lp' '$TMP/connectors.env')\" = '600' ]"
 check "connectors.env pins the STABLE public front" "grep -q '^BARKPARK_API_URL=https://test.example\$' '$TMP/connectors.env'"
 check "connectors.env carries the loopback listen addr" "grep -q '^CONNECTORS_HTTP_ADDR=127.0.0.1:4020\$' '$TMP/connectors.env'"
