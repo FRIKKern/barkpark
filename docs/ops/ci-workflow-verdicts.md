@@ -69,6 +69,25 @@ and is thin for anything that skips often.
 | `vendored-assets.yml` | 0 | 0 | 0.28 | DORMANT |
 | `windows-smoke.yml` | 0 | 0 | 0.33 | DORMANT |
 
+## CORRECTED 2026-09-03 — `architecture` was GREEN AND BLIND
+
+I argued that for a tripwire, never-red is the design goal, so `architecture`'s zero reds over 300 runs
+were the evidence FOR it. **That reasoning was right in general and wrong about this workflow.**
+
+`architecture` is silent because **it cannot see**: its selftest dies in 5 of 5 runs, behind
+`continue-on-error`, so the harness that proves the gate can still fail is itself failing invisibly.
+A gate that has lost the ability to red is not a quiet scream, it is a disconnected one — and from the
+outside the two look identical, which is exactly why "never-red is fine for a tripwire" must never be
+applied without checking that the tripwire still works. Filed as `task-6891e8f620c1bdea`.
+
+**The general rule survives; the instance does not.** The test that separates them is not the red rate,
+it is whether the gate's own selftest passes. Apply that to the other seven tripwires before trusting
+their silence.
+
+`reland-check` (2,188 runs) and `architecture` (1,402 runs) are both never-red in 14 days, not
+required, and carry no written rationale — they are the two strongest RETIRE-OR-MOVE candidates once
+`architecture` can see again.
+
 ## The three that need words
 
 **`required-checks-drift` — MOVE, in flight as #15663.** ~3,500 job-minutes across 1,227 PR runs for

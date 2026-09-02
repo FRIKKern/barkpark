@@ -451,6 +451,26 @@ FIX
     fail=$((fail+1)); echo "  FAIL v1b got '$va', expected '1 0' — in-place reruns are invisible, so rerun=0 will read as 'no flakes'"
   fi
 
+  # v1c — A RERUN OF A CANCELLED ATTEMPT IS NOT A FLAKE. The first attempt never
+  # produced a verdict, so there is no red to explain. Measured by the ci-team
+  # second pass: 79 of 230 required-context rerun-greens (34%) were reruns of
+  # cancelled attempts, and ALL SEVEN of cloud's were — three ids this harness
+  # first published as flakes were ONE dispatcher-cancellation event. Counting
+  # them inflates the flake rate on exactly the busy days when cancellations
+  # cluster, which is the worst possible direction for this measurement to err.
+  cat > "$tmp/cancelprior.jsonl" <<'FIX'
+{"wf":"evicted.yml","sha":"ggg111","concl":"success","created":"2026-09-01T10:00:00Z","pr":15,"id":9,"attempt":2,"prior_concl":"cancelled"}
+{"wf":"evicted.yml","sha":"hhh222","concl":"success","created":"2026-09-01T11:00:00Z","pr":15,"id":10,"attempt":2,"prior_concl":"failure"}
+FIX
+  local vc
+  vc=$(CI_MEASURE_FIXTURE="$tmp/cancelprior.jsonl" bash "$0" --value-audit --since 2026-09-01 2>&1 >/dev/null \
+        | python3 -c 'import json,sys; r=json.load(sys.stdin)["rows"][0]; print(r["rerun_green"], r["rerun_after_cancel"])' 2>/dev/null)
+  if [ "$vc" = "1 1" ]; then
+    pass=$((pass+1)); echo "  ok   v1c a rerun of a CANCELLED attempt is counted apart from a rerun of a FAILED one"
+  else
+    fail=$((fail+1)); echo "  FAIL v1c got '$vc', expected '1 1' — cancelled-prior reruns are being counted as flakes, which inflates the rate exactly when the queue is deep"
+  fi
+
   # v2 — and the discriminator works the other way: a green on a LATER sha of
   # the same PR is a catch CANDIDATE. If v1 and v2 both passed for the same
   # reason (everything classed as flake) the audit would be useless.
@@ -569,11 +589,34 @@ value_audit() {
       local page=1
       while [ "$page" -le 3 ]; do
         gh api "repos/$REPO/actions/workflows/$id/runs?event=pull_request&created=>=$SINCE&per_page=100&page=$page" \
-          --jq ".workflow_runs[] | {wf: \"$(basename "$path")\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt}" 2>/dev/null
+          --jq ".workflow_runs[] | {wf: \"$(basename "$path")\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt, prior: .previous_attempt_url}" 2>/dev/null
         page=$((page + 1))
       done
     done <<< "$wfs"
-  } | classify_runs
+  } | enrich_prior | classify_runs
+}
+
+# enrich_prior — resolve what the PRIOR attempt concluded, for reruns only.
+# One API call per rerun-green, and reruns are a small minority of runs, so this
+# is affordable where a per-run call would not be. Without it the harness cannot
+# tell a rerun of a CANCELLED attempt (no verdict, no flake) from a rerun of a
+# FAILED one (a red with no code change, a real flake) — and treating them alike
+# inflates the flake rate on exactly the busy days when cancellations cluster.
+enrich_prior() {
+  while IFS= read -r line; do
+    case "$line" in
+      *'"attempt":1'*|*'"prior":null'*) printf '%s\n' "$line"; continue ;;
+    esac
+    local url concl
+    url=$(printf '%s' "$line" | python3 -c 'import json,sys;print((json.load(sys.stdin).get("prior") or ""))' 2>/dev/null)
+    if [ -n "$url" ]; then
+      concl=$(gh api "$url" --jq '.conclusion' 2>/dev/null)
+      if [ -n "$concl" ]; then
+        printf '%s\n' "$line" | python3 -c 'import json,sys,os;o=json.load(sys.stdin);o["prior_concl"]=os.environ["C"];print(json.dumps(o))' C="$concl" 2>/dev/null && continue
+      fi
+    fi
+    printf '%s\n' "$line"
+  done
 }
 
 classify_runs() {
@@ -582,12 +625,14 @@ classify_runs() {
 import json, sys, collections
 
 runs = collections.defaultdict(list)
+prior_conclusions = {}
 for line in sys.stdin:
     line = line.strip()
     if not line: continue
     try: o = json.loads(line)
     except json.JSONDecodeError: continue
     runs[o["wf"]].append(o)
+    if o.get("prior_concl"): prior_conclusions[o.get("id")] = o["prior_concl"]
 
 rows = []
 for wf, rs in runs.items():
@@ -597,6 +642,7 @@ for wf, rs in runs.items():
     for r in rs: by_sha[r.get("sha")].append(r)
 
     rerun_green = 0
+    rerun_after_cancel = 0
     fixed_later = 0
     unresolved = 0
     evidence = collections.defaultdict(list)
@@ -607,10 +653,22 @@ for wf, rs in runs.items():
     # workflow, which is not credible and was the tell. `run_attempt > 1` with
     # a green conclusion is the same event seen correctly: it failed on an
     # earlier attempt and passed on a later one, with no code change between.
+    # SPLIT THE RERUN-GREENS BY WHAT THE PRIOR ATTEMPT CONCLUDED. A rerun of a
+    # CANCELLED attempt is not evidence of flakiness at all: the first attempt
+    # never produced a verdict, so there is no red to explain. Measured by the
+    # ci-team second pass: 79 of 230 required-context rerun-greens (34%) were
+    # reruns of cancelled attempts, and ALL SEVEN of cloud's were — three of the
+    # ids this harness first cited as flakes were one dispatcher-cancellation
+    # event. Counting those as flakes overstates every busy day's flake rate,
+    # because cancellations cluster exactly when the queue is deep.
     for r in rs:
         if (r.get("attempt") or 1) > 1 and r.get("concl") == "success":
-            rerun_green += 1
-            evidence["rerun-green"].append((r.get("id"), "attempt %s" % r.get("attempt")))
+            if prior_conclusions.get(r.get("id")) == "cancelled":
+                rerun_after_cancel += 1
+                evidence["rerun-after-cancel"].append((r.get("id"), "prior attempt cancelled"))
+            else:
+                rerun_green += 1
+                evidence["rerun-green"].append((r.get("id"), "attempt %s" % r.get("attempt")))
 
     for red in reds:
         sha = red.get("sha")
@@ -646,7 +704,8 @@ for wf, rs in runs.items():
         verdict = "RED-UNRESOLVED"
     rows.append({
         "workflow": wf, "runs": total, "reds": nred,
-        "rerun_green": rerun_green, "catch_candidate": fixed_later,
+        "rerun_green": rerun_green, "rerun_after_cancel": rerun_after_cancel,
+        "catch_candidate": fixed_later,
         "unresolved": unresolved, "verdict": verdict,
         "evidence": {k: v[:3] for k, v in evidence.items()},
     })
