@@ -1635,3 +1635,159 @@ func TestPickerWindowCountsPhysicalLines(t *testing.T) {
 		t.Fatalf("noticed picker paints %d lines past height %d:\n%s", n, m.height, out)
 	}
 }
+
+// ── charter D80: a frozen viewport is anchored to CONTENT, not to a line number
+
+// d80Model builds a scrollable transcript of one-physical-line user messages,
+// each carrying its own identifying text — so a drifted viewport shows up as
+// DIFFERENT CONTENT, never merely a different index.
+func d80Model(t *testing.T, n int) Model {
+	t.Helper()
+	msgs := make([]Message, 0, n)
+	for i := 1; i <= n; i++ {
+		msgs = append(msgs, Message{Seq: i, Role: "user", SourceMarkdown: fmt.Sprintf("msg-%02d", i)})
+	}
+	return wfTestModel(t, State{SessionID: "s1", Messages: msgs, LastSeq: n})
+}
+
+// d80BodyHeight mirrors renderChat's transcript budget exactly (frame minus
+// chrome minus the rail band), so the tests window the same rows the reader sees.
+func d80BodyHeight(m Model) int {
+	h := m.bodyHeight() - len(renderRail(m.width, m.st.Rail))
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+func equalLines(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestFrozenScrollReanchorsWhenAnEarlierBlockGrows is the D80 regression proof.
+// A reader freezes the transcript mid-history through the REAL key path, then a
+// block ABOVE the pin grows by 11 physical lines (the measured drift floor). The
+// pinned viewport must still show the EXACT lines the reader was reading.
+//
+// The test carries its own anti-vacuity arm: it computes the pre-anchor
+// behaviour in-test (window() at the same RAW index over the grown transcript)
+// and fails if that already reproduces the viewport — so the assertion can never
+// pass by accident, and the drift it documents is the growth itself.
+func TestFrozenScrollReanchorsWhenAnEarlierBlockGrows(t *testing.T) {
+	const grow = 11
+	m := d80Model(t, 40)
+	bodyH := d80BodyHeight(m)
+
+	// Freeze via the key grammar (Up), NEVER by poking m.scroll: the pin only
+	// carries a content anchor because the scroll path recorded one.
+	for i := 0; i < 20; i++ {
+		nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+		m = nm.(Model)
+	}
+	if m.scroll <= 0 {
+		t.Fatalf("setup: the reader must be frozen ABOVE the transcript top, got scroll=%d", m.scroll)
+	}
+	if !m.anchor.set {
+		t.Fatal("a pin made through the scroll path must record a content anchor")
+	}
+	before := append([]string(nil), m.transcriptViewport(bodyH)...)
+	beforeCount := len(m.transcriptLines(m.width))
+
+	// Grow a block ABOVE the pin by exactly `grow` physical lines.
+	m.st.Messages[1].SourceMarkdown = "msg-02" + strings.Repeat("\nfiller", grow)
+	afterAll := m.transcriptLines(m.width)
+	if got := len(afterAll) - beforeCount; got != grow {
+		t.Fatalf("setup: the earlier block must grow by exactly %d lines, grew %d", grow, got)
+	}
+
+	// ANTI-VACUITY: the pre-anchor behaviour must genuinely differ here.
+	if raw := window(afterAll, bodyH, m.scroll); equalLines(raw, before) {
+		t.Fatal("vacuous: the raw physical index already reproduces the viewport, so this test could not fail")
+	}
+
+	after := m.transcriptViewport(bodyH)
+	if !equalLines(after, before) {
+		t.Fatalf("a %d-line growth ABOVE the pin swapped the frozen viewport.\nwas:\n%s\n\nnow:\n%s",
+			grow, strings.Join(before, "\n"), strings.Join(after, "\n"))
+	}
+}
+
+// TestFollowModeUnchangedByEarlierBlockGrowth: follow (scroll = -1) is a pure
+// last-N slice per frame and was already immune to height change. It must stay
+// BYTE-IDENTICAL to the raw window() call — the anchor never touches it.
+func TestFollowModeUnchangedByEarlierBlockGrowth(t *testing.T) {
+	m := d80Model(t, 40)
+	bodyH := d80BodyHeight(m)
+	if m.scroll != -1 {
+		t.Fatalf("setup: the model must start in follow mode, got %d", m.scroll)
+	}
+	if got, want := m.transcriptViewport(bodyH), window(m.transcriptLines(m.width), bodyH, -1); !equalLines(got, want) {
+		t.Fatal("follow mode must be byte-identical to the raw last-N slice")
+	}
+	m.st.Messages[1].SourceMarkdown = "msg-02" + strings.Repeat("\nfiller", 11)
+	if got, want := m.transcriptViewport(bodyH), window(m.transcriptLines(m.width), bodyH, -1); !equalLines(got, want) {
+		t.Fatal("follow mode must stay byte-identical to the raw last-N slice after a height change")
+	}
+}
+
+// TestUnanchoredPinKeepsRawIndexSemantics: a pin set by poking m.scroll (no
+// anchor recorded) keeps the pre-D80 raw-index contract verbatim — the anchor
+// corrects pins it made, it does not reinterpret ones it did not.
+func TestUnanchoredPinKeepsRawIndexSemantics(t *testing.T) {
+	m := d80Model(t, 40)
+	bodyH := d80BodyHeight(m)
+	m.scroll = 7
+	if got, want := m.transcriptViewport(bodyH), window(m.transcriptLines(m.width), bodyH, 7); !equalLines(got, want) {
+		t.Fatal("an unanchored pin must slice at its raw index, exactly as before")
+	}
+}
+
+// TestScrollToBottomDropsTheAnchor: reaching the bottom re-enters follow and the
+// anchor goes with it — a stale anchor must never survive into follow mode.
+func TestScrollToBottomDropsTheAnchor(t *testing.T) {
+	m := d80Model(t, 40)
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = nm.(Model)
+	if !m.anchor.set {
+		t.Fatal("setup: the pin must carry an anchor")
+	}
+	nm, _ = m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnd})
+	m = nm.(Model)
+	if m.scroll != -1 || m.anchor.set {
+		t.Fatalf("End must re-enter follow AND drop the anchor, got scroll=%d anchor=%+v", m.scroll, m.anchor)
+	}
+}
+
+// TestAnchorAtRoundTripsThroughTheBlockIndex pins the coordinate system itself:
+// every physical top line resolves to a (block, offset) pair that maps straight
+// back to the same line in an UNCHANGED layout.
+func TestAnchorAtRoundTripsThroughTheBlockIndex(t *testing.T) {
+	m := d80Model(t, 12)
+	all, _, starts := m.transcriptAnchored(m.width, "")
+	if len(starts) != 12 {
+		t.Fatalf("12 one-line messages must be 12 blocks, got %d", len(starts))
+	}
+	for top := 0; top < len(all); top++ {
+		a := anchorAt(starts, top)
+		if !a.set {
+			t.Fatalf("top %d produced no anchor", top)
+		}
+		if got := a.resolve(starts, -1, len(all)); got != top {
+			t.Fatalf("anchor round-trip broke at top %d: got %d (block %d off %d)", top, got, a.block, a.off)
+		}
+	}
+	// An anchor whose block no longer exists degrades to the raw index rather
+	// than jumping somewhere the reader never asked for.
+	gone := scrollAnchor{set: true, block: 99, off: 0}
+	if got := gone.resolve(starts, 5, len(all)); got != 5 {
+		t.Fatalf("a vanished block must fall back to the raw pin, got %d", got)
+	}
+}

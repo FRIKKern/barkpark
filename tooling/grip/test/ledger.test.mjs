@@ -783,9 +783,14 @@ test("derived_level is RE-DERIVED in the fold too, closing tgw2-fold-reread-deri
   // on disk claims L3. The fold used to hand that L3 straight to every
   // consumer, and only leads.mjs re-derived — so the fix lived one layer above
   // the defect and every OTHER reader inherited it.
+  // `screen: null` — the EXPLICIT unscreened read (see foldLedger's ARMING
+  // header). The L1 command that makes this test meaningful is one the screen's
+  // host bound refuses, so under the default arming the row would be rejected
+  // REFUSED-COMMAND and never reach the restatement under test. Naming the
+  // opt-out keeps this test about level re-derivation.
   const folded = foldLedger([
     { file: "a.json", run_id: "a", recipes: [{ subject: "cloud/health", quantity: "q", rerun: "curl -s https://api.barkpark.cloud/api/schemas", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
-  ]);
+  ], { screen: null });
   const recipe = folded.entries[0].recipes[0];
   assert.equal(recipe.stored_level, "L3", "the stored claim is carried, so the disagreement is visible");
   assert.equal(recipe.derived_level, "L1", "…and it is NOT what the fold reports");
@@ -802,15 +807,18 @@ test("leads reads the fold's stored_level — the two halves of the drift signal
   // own fixtures. This is the seam where that would go unnoticed.
   const folded = foldLedger([
     { file: "a.json", run_id: "a", recipes: [{ subject: "cloud/health.ex", quantity: "q", rerun: "curl -s https://api.barkpark.cloud/api/schemas", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
-  ]);
+  ], { screen: null });
   assert.equal(folded.entries[0].recipes[0].stored_level, "L3");
   assert.equal(folded.entries[0].recipes[0].derived_level, "L1");
 });
 
 test("a command the mint cannot key falls back to the STORED quantity and is MARKED — a silent fallback is the silent-strip defect in a new hat", () => {
+  // `screen: null`: `&&` is not a command at all, so the default screen refuses
+  // it before the mint ever gets asked for a quantity. The opt-out is what
+  // makes this a test of the FALLBACK rather than of admission.
   const folded = foldLedger([
     { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "hand-written quantity", rerun: "&&", derived_level: "L6", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
-  ]);
+  ], { screen: null });
 
   const entry = folded.entries[0];
   assert.equal(entry.quantity, "hand-written quantity", "the stored value IS the key when nothing can be minted — the row is not dropped");
@@ -1205,23 +1213,33 @@ test("the fold REJECTS a row carrying `value` — VALUE-STORED, into unreadable[
   assert.equal(folded.unreadable[0].index, 0, "the report must name WHICH row, or it cannot be found by hand");
 });
 
-test("the fold REJECTS a screen-refused rerun — REFUSED-COMMAND, only when a screen is injected (RED before hardening)", () => {
+test("the fold REJECTS a screen-refused rerun — REFUSED-COMMAND, by DEFAULT and under an injected screen alike", () => {
   // derived_level L6 so `rm -rf` (which re-derives L6) does NOT also trip
   // LEVEL-SKIP — the ONLY reason this row can be refused is the screen.
   const row = foldRow({ rerun: "rm -rf /opt/barkpark/releases", derived_level: "L6" });
 
-  // No screen: the fold cannot know the command is unsafe — it has no screen,
-  // exactly as admitRecipe has none unless the caller injects one. Folds.
-  const unscreened = foldLedger([row]);
-  assert.equal(unscreened.unreadable.length, 0, "with no screen there is nothing to refuse it — the rejection must be the screen's doing");
-  assert.equal(unscreened.entries.length, 1);
+  // THE DEFAULT IS SCREENED. This assertion is the inversion this slice bought:
+  // it read `unreadable.length === 0` before, because a library fold was
+  // silently unscreened while the CLI's fold of the same bytes was not.
+  const byDefault = foldLedger([row]);
+  assert.equal(byDefault.entries.length, 0, "a library caller who says nothing gets the SAME screen the CLI injects");
+  assert.equal(byDefault.unreadable[0].reason, "REFUSED-COMMAND");
+  assert.equal(byDefault.arming.screen, "screen.mjs", "…and the fold SAYS which screen was in force");
 
-  // Screen injected (as the CLI injects screenCommand): refused.
+  // Screen injected explicitly (as the CLI injects screenCommand): identical.
   const folded = foldLedger([row], { screen: screenCommand });
   assert.equal(folded.entries.length, 0);
   assert.equal(folded.stats.unreadable, 1);
   assert.equal(folded.unreadable[0].reason, "REFUSED-COMMAND");
   assert.match(folded.unreadable[0].message, /rm/, "the screen's own reason must survive into the report");
+  assert.equal(folded.arming.screen, "screen.mjs", "the CLI's own screenCommand IS the default — the same module, so the same name");
+
+  // …and the ONLY way to read the unscreened population is to ASK for it, in
+  // which case the arming says so and no reader can mistake the two counts.
+  const optedOut = foldLedger([row], { screen: null });
+  assert.equal(optedOut.entries.length, 1, "the explicit opt-out still exists — it is now explicit");
+  assert.equal(optedOut.unreadable.length, 0);
+  assert.equal(optedOut.arming.screen, "none");
 });
 
 test("the fold REJECTS a future observed_at — FUTURE-OBSERVED-AT, against an injected now (RED before hardening)", () => {
@@ -1498,5 +1516,108 @@ test("CONTROL: the committed rows fold CLEAN under the hardening — unreadable 
       `${Object.values(ownedRejections).reduce((a, b) => a + b, 0)} rejection(s) across ${ownedRows.size} row(s) → ${JSON.stringify(ownedRejections)}` +
       `\n  [D89 control] level restatements: ${whole.level_restatements.down.length} DOWN (asserted 0), ${whole.level_restatements.up.length} UP → ` +
       `${JSON.stringify(whole.level_restatements.up.map((r) => `${r.file}#${r.index} ${r.subject} ${r.stored_level}→${r.derived_level}`))}\n`,
+  );
+});
+
+// ── the two reading paths, over the COMMITTED store ──────────────────────────
+//
+// MEASURED (the defect this section closes). `foldLedger()` as a library
+// returned rows 360 / subjects 307 / unreadable 433 on the committed store,
+// while `node ledger.mjs fold` returned 354 / 302 / 507 — the same bytes, the
+// same fold, five subjects apart, both exiting normally. The whole gap was the
+// SCREEN: the CLI injected `screenCommand` and the library injected nothing.
+//
+// So the counts here are UNPINNED on purpose. The store is a shared append-only
+// commons that grows every wave, and a pinned 354 would just rot into a chore.
+// What is pinned is the RELATION: the two paths agree, and any residual
+// difference is named in `arming` where the counts live.
+//
+// These tests fold the REAL committed store. They write nothing (foldLedger is
+// a pure read; the CLI is spawned with `fold`, which never writes) and the
+// DEFAULT_LEDGER_DIR growth guard above covers the whole run either way.
+
+// The CLI's answer, parsed, plus its own arming. `fold` exits 1 when the store
+// holds any unreadable row — which it does, and legitimately (four epics write
+// here by hand) — so the status is NOT asserted; the JSON on stdout is.
+function cliFold(...args) {
+  const run = spawnSync(process.execPath, [LEDGER_SRC, "fold", ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  assert.ok(run.stdout.trim().length > 0, `the fold CLI printed nothing on stdout: ${run.stderr}`);
+  return JSON.parse(run.stdout);
+}
+
+test("THE TWO READING PATHS AGREE on the committed store — same rows, same subjects, same unreadable, same arming", () => {
+  // The CLI owns the clock (D19: this module reads none), so the CLI is asked
+  // FIRST and the library is folded under the clock the CLI actually used. That
+  // makes `now` equal by construction, which is the stated precondition: the
+  // paths agree when `now` is equal, and the ONLY other bound is the screen.
+  const cli = cliFold();
+  const lib = foldLedger(DEFAULT_LEDGER_DIR, { now: cli.arming.now });
+
+  assert.equal(typeof cli.arming.now, "string", "the CLI must report the clock it read, not hide it");
+
+  // THE COUNTS FIRST, because the counts are the defect. The arming assertions
+  // below say the two paths can DESCRIBE their agreement; these say they have
+  // one.
+  for (const k of ["rows", "subjects", "unreadable", "runs", "rival_methods"]) {
+    assert.equal(
+      lib.stats[k], cli.stats[k],
+      `stats.${k} differs by reading path — library ${lib.stats[k]} vs CLI ${cli.stats[k]}. ` +
+        `A count quoted off one path would be wrong read as the other, which is the exact defect this pins.`,
+    );
+  }
+  // Not just the totals: the same KEYS, in the same order. Two folds that agree
+  // on a count while disagreeing on which subjects they hold would satisfy a
+  // stats-only assertion and still be two different answers.
+  assert.deepEqual(lib.entries.map((e) => e.key), cli.entries.map((e) => e.key));
+  assert.deepEqual(
+    lib.unreadable.map((u) => `${u.file}#${u.index}:${u.reason}`).sort(),
+    cli.unreadable.map((u) => `${u.file}#${u.index}:${u.reason}`).sort(),
+  );
+
+  assert.deepEqual(lib.arming, cli.arming, "the two paths must be able to state that they read under the SAME bounds");
+  assert.equal(lib.arming.screen, "screen.mjs", "a library caller who passes no screen gets the CLI's screen — this is the fix");
+
+  console.log(
+    `\n  [read-path control] library { screen: "${lib.arming.screen}", now: "${lib.arming.now}" } → ` +
+      `rows ${lib.stats.rows} / subjects ${lib.stats.subjects} / unreadable ${lib.stats.unreadable}` +
+      `\n  [read-path control] CLI     { screen: "${cli.arming.screen}", now: "${cli.arming.now}" } → ` +
+      `rows ${cli.stats.rows} / subjects ${cli.stats.subjects} / unreadable ${cli.stats.unreadable}\n`,
+  );
+});
+
+test("…and the ONE remaining divergence is EXPLICIT: `screen: null` differs, and the output says which arming it was", () => {
+  // The counts still differ if a caller asks for the unscreened population —
+  // that is a legitimate read, not a defect. What must be impossible is reading
+  // one and believing it is the other, so this asserts BOTH: that the two
+  // populations genuinely differ on this store, and that `arming` distinguishes
+  // them. If they ever stopped differing the assertion below would go vacuous,
+  // so the difference itself is asserted first.
+  const cli = cliFold();
+  const screened = foldLedger(DEFAULT_LEDGER_DIR, { now: cli.arming.now });
+  const optedOut = foldLedger(DEFAULT_LEDGER_DIR, { now: cli.arming.now, screen: null });
+
+  assert.equal(screened.arming.screen, "screen.mjs");
+  assert.equal(optedOut.arming.screen, "none");
+  assert.notEqual(optedOut.arming.screen, screened.arming.screen, "the two armings must be distinguishable in the output");
+
+  // NON-VACUITY: the committed store must actually contain screen-refused rows,
+  // or this test would pass over a store where the arming makes no difference
+  // and prove nothing about the naming.
+  const refused = screened.unreadable.filter((u) => u.reason === "REFUSED-COMMAND");
+  assert.ok(refused.length > 0, "the committed store must hold at least one screen-refused row, or this test is vacuous");
+  assert.ok(
+    optedOut.stats.rows > screened.stats.rows,
+    `the unscreened read must return MORE rows (got ${optedOut.stats.rows} vs ${screened.stats.rows}) — otherwise the arming distinguishes nothing`,
+  );
+  assert.equal(
+    optedOut.unreadable.filter((u) => u.reason === "REFUSED-COMMAND").length, 0,
+    "the opted-out read refuses no command — that is what it opted out of",
+  );
+
+  console.log(
+    `\n  [arming control] screen="screen.mjs" → rows ${screened.stats.rows} / subjects ${screened.stats.subjects} / unreadable ${screened.stats.unreadable}` +
+      `\n  [arming control] screen="none"       → rows ${optedOut.stats.rows} / subjects ${optedOut.stats.subjects} / unreadable ${optedOut.stats.unreadable}` +
+      `\n  [arming control] ${refused.length} REFUSED-COMMAND row(s) separate them, and `
+      + `${optedOut.stats.subjects - screened.stats.subjects} subject(s)\n`,
   );
 });

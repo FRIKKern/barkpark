@@ -10,10 +10,17 @@
 //
 // ── WHY THIS IS NOT A PATH SCREEN (charter D73) ──────────────────────────────
 //
-// 46 of the 62 stored rows (74.2%) hard-code an absolute checkout path, and the
-// obvious fix — refuse absolute paths at mint time — INVERTS its own signal.
-// Classify the same 62 rows by WHICH REF THE COMMAND ACTUALLY READS and the
-// picture is the opposite of the path-shape picture:
+// A FIXED PAST READING, NOT A LIVE COUNT. Every figure in this section was
+// measured over the store as it stood at 60ef35bd06 (2026-07-21): 62 rows. The
+// ledger is an append-only shared write target that grows without touching this
+// file, so the snapshot is named once here and every count below is read
+// against it — restating any of them with today's total would just reset the
+// same clock (charter D23/D37/D52, and D102's ruling on live denominators).
+//
+// At 60ef35bd06 (2026-07-21), 46 of those 62 stored rows (74.2%) hard-coded an
+// absolute checkout path, and the obvious fix — refuse absolute paths at mint
+// time — INVERTED its own signal. Classifying the same 62 rows by WHICH REF THE
+// COMMAND ACTUALLY READS gave the opposite of the path-shape picture:
 //
 //   `cd /Volumes/… && git show origin/main:internal/cli/tasks_next_cmd.go | wc -l`
 //        → 314 lines in the primary checkout, in a linked worktree, and in a
@@ -69,8 +76,9 @@
 //
 // ── exit_masked IS A FIRST-CLASS OUTPUT, AND D76's MECHANISM IS CORRECTED ────
 //
-// D76 rules that 49 of the 62 stored rows mask their failure, and describes them
-// as "rows ending in `| wc -l` or `| grep -c`". The COUNT reproduces exactly.
+// D76 ruled that, at 60ef35bd06 (2026-07-21), 49 of the 62 stored rows masked
+// their failure, and described them as "rows ending in `| wc -l` or `| grep
+// -c`". The COUNT reproduced exactly against that snapshot.
 // The MECHANISM does not, and the correction is the same shape as D73's own:
 //
 //   22 rows end in `| wc -l`   → git exits 128, pipeline prints "0", EXITS 0.
@@ -86,7 +94,7 @@
 // from a real negative answer at the reading end, which is what `exit_masked`
 // means here — so the boolean covers all 49 and `exit_mask_rule` carries the
 // severity D76's single bit hides. `set -o pipefail` anywhere in the command
-// clears the flag; 0 of the 62 rows carry it.
+// clears the flag; at 60ef35bd06 (2026-07-21), 0 of the 62 rows carried it.
 //
 // ── WHAT THIS MODULE DELIBERATELY IS NOT (D74) ───────────────────────────────
 //
@@ -109,10 +117,11 @@
 //     alike. Token scanning runs over a quote-masked copy, so
 //     `git show 'origin/main:x'` reads as bare-git-local and
 //     `find "/Users/pelle/Library/…"` reads as a relative find. That is the
-//     correct trade on the measured corpus, not a guess: 0 of 62 stored rows and
-//     0 of the 104 git-bearing proofs quote a ref, and 0 of 62 stored rows quote
-//     an absolute path. 14 of the 652 proofs do quote an absolute path, and in
-//     most of those it is a grep PATTERN or the body of a `python3 -c` program,
+//     correct trade on the corpus measured at 60ef35bd06 (2026-07-21), not a
+//     guess: 0 of 62 stored rows and 0 of the 104 git-bearing proofs quoted a
+//     ref, and 0 of 62 stored rows quoted an absolute path in that snapshot.
+//     14 of the 652 proofs did quote an absolute path, and in most of those it
+//     is a grep PATTERN or the body of a `python3 -c` program,
 //     where masking is the RIGHT answer — unmasked, `git worktree list | grep
 //     '/Volumes/SATECHI/github/barkpark'` would be read as a foreign-tree pin.
 //     The residual loss is the handful of genuinely quoted operands.

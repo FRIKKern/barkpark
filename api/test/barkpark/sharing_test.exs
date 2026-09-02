@@ -185,6 +185,24 @@ defmodule Barkpark.SharingTest do
   end
 
   describe "active?/0" do
+    # PRECONDITION, not assumption: `Sharing.reload/0` in other files writes
+    # `shares_env() ++ stored` into `:barkpark, :shares`, and that app env
+    # survives their sandbox rollback. "No shares configured" must be
+    # established here, then restored, or this test reds on suite order
+    # (main went red on it 2026-09-02 after a merge burst).
+    setup ctx do
+      prior = Application.get_env(:barkpark, :shares)
+      Application.delete_env(:barkpark, :shares)
+
+      ExUnit.Callbacks.on_exit(ctx, fn ->
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :shares),
+          else: Application.put_env(:barkpark, :shares, prior)
+      end)
+
+      :ok
+    end
+
     test "false with no shares configured" do
       refute Sharing.active?()
     end

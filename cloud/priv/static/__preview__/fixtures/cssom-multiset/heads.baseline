@@ -1,0 +1,7 @@
+# Baseline for BOTH fixtures in this directory — they author the same three heads on
+# purpose, so the count assertion is held CONSTANT across the pair and the only thing
+# that can differ between the green and the red run is the multiset comparison.
+#
+# It is also, deliberately, a sidecar of the honest shape: exactly one payload line,
+# and it is a bare integer (D222).
+3

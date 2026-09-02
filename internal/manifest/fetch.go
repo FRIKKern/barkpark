@@ -170,10 +170,36 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		// say *why*, not just "401".
 		msg := strings.TrimSpace(string(res.Body))
 		if msg != "" {
-			return nil, fmt.Errorf("fetch manifest: unexpected status %d — %s", res.StatusCode, clampErrBody(msg))
+			return nil, &StatusError{Status: res.StatusCode, Body: clampErrBody(msg)}
 		}
-		return nil, fmt.Errorf("fetch manifest: unexpected status %d", res.StatusCode)
+		return nil, &StatusError{Status: res.StatusCode}
 	}
+}
+
+// StatusError is the refusal Fetch returns when the server answered a status it
+// cannot ride out on the cache. It carries the STATUS as a field, not only in
+// the message, because the one caller that must tell an authentication refusal
+// (401/403) apart from every other failure — `bp whoami`, deciding whether a
+// shell env token just shadowed a working saved credential — otherwise has to
+// scrape the number back out of English. Error() is byte-identical to the two
+// fmt.Errorf strings this replaced, so every message assertion still holds.
+type StatusError struct {
+	Status int
+	Body   string // already clamped by clampErrBody; may be empty
+}
+
+func (e *StatusError) Error() string {
+	if e.Body != "" {
+		return fmt.Sprintf("fetch manifest: unexpected status %d — %s", e.Status, e.Body)
+	}
+	return fmt.Sprintf("fetch manifest: unexpected status %d", e.Status)
+}
+
+// Unauthenticated reports whether the server REFUSED the credential (401/403) —
+// as opposed to being down, overloaded, or absent. nil is false: "we never
+// asked" is not "the credential was rejected".
+func (e *StatusError) Unauthenticated() bool {
+	return e != nil && (e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden)
 }
 
 // retryAfterCap bounds the wait Fetch will sit through on a 429. Two seconds is

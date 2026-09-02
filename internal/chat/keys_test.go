@@ -2,6 +2,7 @@ package chat
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -679,4 +680,113 @@ var errArchiveTest = errors.New("boom")
 // returns directly so a call site reads mustModel(m.handleKey(...)).
 func mustModel(m tea.Model, _ tea.Cmd) Model {
 	return m.(Model)
+}
+
+// ── jumpToPendingCard (charter D80: its first DIRECT coverage) ───────────────
+
+// jumpCardModel is a transcript with one pending approval card sitting `before`
+// one-line messages down and `after` messages below it — the needs-you jump's
+// real shape (a card the reader has to be taken to).
+func jumpCardModel(t *testing.T, before, after int) Model {
+	t.Helper()
+	msgs := make([]Message, 0, before+after+1)
+	for i := 1; i <= before; i++ {
+		msgs = append(msgs, Message{Seq: i, Role: "user", SourceMarkdown: fmt.Sprintf("before-%02d", i)})
+	}
+	msgs = append(msgs, liveApprovalCard(before+1, "req-42"))
+	for i := 1; i <= after; i++ {
+		msgs = append(msgs, Message{Seq: before + 1 + i, Role: "user", SourceMarkdown: fmt.Sprintf("after-%02d", i)})
+	}
+	return wfTestModel(t, State{SessionID: "s1", Messages: msgs, LastSeq: before + after + 1})
+}
+
+// TestJumpToPendingCardLandsTheCardInView is jumpToPendingCard's first direct
+// test: at every representative geometry the jump leaves follow mode, puts the
+// card's FIRST line at the top of the viewport, and shows the card's prompt —
+// asserted against the rendered viewport, not just the numeric scroll.
+func TestJumpToPendingCardLandsTheCardInView(t *testing.T) {
+	for _, h := range []int{10, 12, 16, 24, 40} {
+		m := jumpCardModel(t, 10, 30)
+		m.height = h
+		all, start, _ := m.transcriptAnchored(m.width, "req-42")
+		if start <= 0 {
+			t.Fatalf("h=%d setup: the accumulator must locate the card block", h)
+		}
+		if start > m.maxScrollTop() {
+			t.Fatalf("h=%d setup: the card must pin ABOVE the bottom (start=%d maxTop=%d)", h, start, m.maxScrollTop())
+		}
+
+		got := m.jumpToPendingCard()
+		if got.scroll < 0 {
+			t.Fatalf("h=%d: the jump must leave follow mode", h)
+		}
+		if !got.anchor.set {
+			t.Fatalf("h=%d: the jump must pin to CONTENT (an anchor), not a bare line number", h)
+		}
+		view := got.transcriptViewport(d80BodyHeight(got))
+		if len(view) == 0 || view[0] != all[start] {
+			t.Fatalf("h=%d: the card block must sit at the top of the viewport, got %q want %q", h, view[0], all[start])
+		}
+		if !strings.Contains(strings.Join(view, "\n"), "run rm -rf?") {
+			t.Fatalf("h=%d: the jumped-to viewport must show the card's prompt:\n%s", h, strings.Join(view, "\n"))
+		}
+	}
+}
+
+// TestJumpToPendingCardClampsAndStillShowsTheCard: a card in the bottom tail
+// cannot be pinned to the top (there is not a screenful below it), so the jump
+// clamps to maxScrollTop — and the card must still be ON SCREEN, which is the
+// property that actually matters to the reader.
+func TestJumpToPendingCardClampsAndStillShowsTheCard(t *testing.T) {
+	m := jumpCardModel(t, 40, 0)
+	_, start, _ := m.transcriptAnchored(m.width, "req-42")
+	maxTop := m.maxScrollTop()
+	if start <= maxTop {
+		t.Fatalf("setup: this geometry must exercise the clamp (start=%d maxTop=%d)", start, maxTop)
+	}
+	got := m.jumpToPendingCard()
+	if got.scroll != maxTop {
+		t.Fatalf("a bottom-tail card must clamp to maxScrollTop, got %d want %d", got.scroll, maxTop)
+	}
+	view := got.transcriptViewport(d80BodyHeight(got))
+	if !strings.Contains(strings.Join(view, "\n"), "run rm -rf?") {
+		t.Fatalf("the clamped jump must still show the card:\n%s", strings.Join(view, "\n"))
+	}
+}
+
+// TestJumpToPendingCardIsContentRelative: the jump's pin is an ANCHOR, so a
+// height change ABOVE the card cannot slide the card out from under it — the
+// same D80 property the manual freeze gets, proven on the jump path.
+func TestJumpToPendingCardIsContentRelative(t *testing.T) {
+	m := jumpCardModel(t, 10, 30)
+	got := m.jumpToPendingCard()
+	bodyH := d80BodyHeight(got)
+	before := append([]string(nil), got.transcriptViewport(bodyH)...)
+
+	got.st.Messages[1].SourceMarkdown = "before-02" + strings.Repeat("\nfiller", 11)
+	afterAll := got.transcriptLines(got.width)
+	if raw := window(afterAll, bodyH, got.scroll); equalLines(raw, before) {
+		t.Fatal("vacuous: the raw index already reproduces the jumped viewport")
+	}
+	if after := got.transcriptViewport(bodyH); !equalLines(after, before) {
+		t.Fatalf("growth above the card moved the jumped viewport.\nwas:\n%s\n\nnow:\n%s",
+			strings.Join(before, "\n"), strings.Join(after, "\n"))
+	}
+}
+
+// TestJumpToPendingCardWithNoCardIsANoOp: with nothing focused the jump must
+// leave the model completely alone — scroll, anchor, focus and panel state.
+func TestJumpToPendingCardWithNoCardIsANoOp(t *testing.T) {
+	m := jumpCardModel(t, 10, 30)
+	m.st.Messages = m.st.Messages[:10] // drop the card — nothing answerable left
+	m.focus = focusWorkflow
+	m.wfExpanded = true
+	if _, ok := m.focusedCard(); ok {
+		t.Fatal("setup: no card may be focused")
+	}
+	got := m.jumpToPendingCard()
+	if got.scroll != m.scroll || got.anchor.set || got.focus != focusWorkflow || !got.wfExpanded {
+		t.Fatalf("a jump with no focused card must be a no-op, got scroll=%d anchor=%+v focus=%v expanded=%v",
+			got.scroll, got.anchor, got.focus, got.wfExpanded)
+	}
 }
