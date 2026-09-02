@@ -1060,6 +1060,30 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   hold. Surfaces that mark error cells (Studio's `sheet-err` class, the web
   grid, PortableDoc's html render) read THIS single list instead of hand-
   copying it, so a new code (e.g. `#NUM!`) lights up every surface at once.
+
+  ## Where the mirrors are — ADD A CODE HERE, THEN UPDATE ALL OF THESE
+
+  Surfaces that cannot call this function at runtime keep a local mirror. Each
+  is held EQUAL to this list by a named test, so the duplication is a CHECKED
+  invariant, never a silent fork:
+
+    * `Barkpark.PortableDoc.Render.Walk` `@error_values` (`error_vocab/0`)
+      — `api/test/barkpark/sheets_parity_test.exs`
+    * `BarkparkWeb.Studio.SheetGrid.Cells` `@error_values` (`error_vocab/0`)
+      — `api/test/barkpark/sheets_parity_test.exs`
+    * `web/__tests__/fixtures/engine-errors.json` — the generated fixture the
+      two TS surfaces read; `sheets_parity_test.exs` asserts it EQUALS this
+      list, so regenerating it is step one of any vocabulary change
+    * `web/lib/sheets.ts` `ENGINE_ERRORS` — `web/__tests__/sheets-errors.test.ts`
+      (against the fixture above)
+    * `js/packages/react/src/blocks/sheet.ts` `ERROR_VALUES` — the FIFTH mirror,
+      unguarded until #15376; now
+      `js/packages/react/tests/sheet-error-vocabulary.test.ts` (against the same
+      fixture)
+
+  NOT yet checked: `apps/mobile/src/papers/portabledoc/blocks/sheet.tsx`
+  `ERROR_VALUES` is a SIXTH copy with no drift test of its own — update it by
+  hand until it earns one.
   """
   # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,spill,sheet-err,error_values
   @spec error_values() :: [String.t()]
