@@ -624,4 +624,18 @@
 # printed "!! BASELINE MISMATCH: 1342 authored rule heads, sidecar baseline is 1340
 # (+2)" with "MISSES 0" and "flattened selectors 1288 authored / 1288 CSSOM" on the
 # same run. Both numbers are copied from that printout, never from arithmetic.
-1342
+#
+# Re-measured 2026-09-02 (cch-w53-bl-env-var-round-2-product-call, PR #15449):
+# 1340 authored heads, MISSES 0 — the -2 are `.set-row-key` and `.set-row-tags`,
+# the two rule heads that existed ONLY for the team env-var page's rows (the mono
+# key cell and its scope/secret chip strip). The feature was deleted by product
+# ruling on 2026-09-02, prod `env_vars` held zero rows ever, and the grep for both
+# class names over cloud/ now returns only prose comments — no producer in
+# index.html or app.js. The surrounding `.set-row-*` roster rules stay: Members
+# still uses them.
+# MEASURED, NOT REASONED (D158): cssom-parity.mjs was RUN against the stale 1342
+# and printed "!! BASELINE MISMATCH in app.css: 1340 authored rule heads, sidecar
+# baseline is 1342 (-2)" with "MISSES 0", "CSSOM style rules 1340" and "flattened
+# selectors 1286 authored / 1286 CSSOM" on the same run. Both numbers are copied
+# from that printout, never from arithmetic.
+1340

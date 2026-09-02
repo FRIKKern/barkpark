@@ -16,6 +16,8 @@ name: elixir
 #                         _build/prod, --warnings-as-errors enforced.
 #   4. validation-perf  — the cross-field validation perf bench. Blocking.
 #   5. path-escape      — the path ratchet + its harness. Unfiltered, blocking.
+#                         The JOB is unfiltered; the harness STEP alone is
+#                         conditioned on the diff reaching it (see there).
 #   6. elixir-gate      — the AGGREGATOR. The one name that should be REQUIRED.
 #
 # ── THE SKIP SHIM (Honest Gates wave 2, charter D18/D19/D31) ────────────────
@@ -284,8 +286,91 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # depth 2, not 0. On a pull_request the checked-out ref is the merge
+          # commit, so HEAD^1 IS the base sha and `git diff HEAD^1 HEAD` is
+          # exactly the PR's file set — one extra commit object, no extra fetch
+          # step, and no `needs: changes`. MEASURED, two alternating clones of
+          # this repo from GitHub: depth 1 = 28.4s then 25.1s, depth 2 = 29.3s
+          # then 22.9s — the second pass has depth 2 FASTER, so the added cost
+          # is inside run-to-run variance and is not resolvable at all. Both
+          # working trees are 464M; depth 2 carries one extra commit object.
+          # And the MECHANISM is measured, not assumed: `git fetch --depth 2
+          # origin refs/pull/15568/merge` into an empty repo resolves both
+          # HEAD^1 and HEAD^2, and `git diff --name-only HEAD^1 HEAD` printed
+          # the same four paths, in the same order, as `gh pr view 15568
+          # --json files`.
+          # The whole point of the step below is to buy back ~114 seconds, so a
+          # base fetch that cost real time would eat the saving; it is bought
+          # at the checkout rather than paid for again in a step of its own.
+          fetch-depth: 2
+
+      # ── the harness runs when the diff can reach it, and otherwise not ────
+      # MEASURED on four successful main runs (2026-09-01): this job averages
+      # 2m35s, of which the `--selftest` harness below is 114s and the actual
+      # ratchet 15-17s, the remaining three steps 12s. 74% of an unfiltered,
+      # every-single-PR job is the harness proving the ratchet CAN fail —
+      # ~84 job-minutes over 60 runs, nearly all of it re-proving a mutation
+      # matrix over two files the PR did not touch.
+      #
+      # SO ONLY THE HARNESS IS CONDITIONED. `Every repo-root read is dispatched
+      # on` — the ratchet itself, the thing that catches a real uncovered read —
+      # keeps running on every single PR, unfiltered, exactly as before, and the
+      # JOB keeps its no-`if:`/no-continue-on-error/no-`needs` shape (charter
+      # D26, asserted by merge-authority-claim-check.test.sh §B6 and by
+      # elixir-path-escape-check.test.sh's `escape_if`/`escape_needs` facts).
+      # Conditioning the harness narrows WHEN a proof-of-proof is re-run; it
+      # does not narrow what the gate sees.
+      #
+      # There is in-tree precedent for retiring a `--selftest` step from a
+      # workflow once something else is its home: scripts/required-checks.test.sh
+      # §9 records that `verify --selftest` is run there and that
+      # required-checks-drift.yml "no longer runs it as a step of its own".
+      # The condition below is the same trade, one notch weaker — the harness
+      # keeps this job as its home, it is simply not re-run on diffs that cannot
+      # move it.
+      #
+      # FAIL-SAFE DIRECTION, and it is the whole design: a skip happens ONLY on
+      # a positive, successful determination that none of the three paths
+      # changed. Anything else — a non-pull_request event, an unresolvable
+      # HEAD^1, a `git diff` that errors, an empty file list — falls through to
+      # `run`. The failure mode of running is 114 wasted seconds; the failure
+      # mode of skipping wrongly is a mutation matrix nobody ever watched fail,
+      # which is the exact disease (D26) this job exists to treat. So the
+      # default is `run` and only one branch can ever write `skip`, and this
+      # step is written to always exit 0 so that a broken condition cannot even
+      # red the job — an unwritten output reads as "not skip", i.e. run.
+      - name: Does this diff reach the harness?
+        id: harness-scope
+        run: |
+          decision=run
+          why="not a pull_request — the harness always runs on push to main"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            why="could not determine the diff — failing toward running"
+            if base="$(git rev-parse --verify --quiet HEAD^1)" && [ -n "$base" ]; then
+              if changed="$(git diff --name-only "$base" HEAD)" && [ -n "$changed" ]; then
+                # D37: never `printf … | grep -q`. Under pipefail a matching
+                # grep exits 0, printf dies of SIGPIPE, 141 wins, and the match
+                # reads as a miss. A here-string has no writer to kill.
+                if grep -qxF \
+                     -e scripts/elixir-path-escape-check.sh \
+                     -e scripts/elixir-path-escape-check.test.sh \
+                     -e .github/workflows/elixir.yml <<<"$changed"; then
+                  why="the diff touches the ratchet, its harness, or this workflow"
+                else
+                  decision=skip
+                  why="the diff touches none of the ratchet, its harness, or this workflow"
+                fi
+              fi
+            fi
+          fi
+          echo "harness ${decision}: ${why}"
+          echo "decision=${decision}" >> "$GITHUB_OUTPUT"
+          exit 0
 
       - name: Harness (the ratchet must be able to fail)
+        # `!= 'skip'`, never `== 'run'`: a missing or garbled output must RUN.
+        if: steps.harness-scope.outputs.decision != 'skip'
         run: bash scripts/elixir-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on

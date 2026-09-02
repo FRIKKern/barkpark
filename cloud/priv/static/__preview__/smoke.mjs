@@ -4130,7 +4130,7 @@ const EXPECTATIONS = {
       assert.ok(html.includes("token-eye"), "a show/hide toggle is offered");
     },
   },
-  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // ── G-06 Members (Settings wave, phase 4) ─────────────────────────────────
   // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
   // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
   // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — the roster at the
@@ -4330,81 +4330,6 @@ const EXPECTATIONS = {
         "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
     },
   },
-  // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
-  // secret + write-once chips, the sealed write-once note) + the add FORM.
-  "env-populated": {
-    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form — AND a real Delete click that shrinks the SERVER list 4→3",
-    async check(reg, hooks, ctx) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("set-section"), "the rows ride the .set-section anatomy");
-      assert.ok(body.includes("DATABASE_URL") && body.includes("STRIPE_SECRET_KEY") && body.includes("WORKER_TOKEN"), "every var key renders");
-      assert.ok(body.includes(">Secret<"), "a secret chip renders");
-      assert.ok(body.includes(">Write-once<"), "a write-once chip renders");
-      assert.ok(body.includes(">Team<") && body.includes(">Instance<"), "both scope chips render");
-      // The value is sealed forever — NEVER a reveal affordance anywhere.
-      assert.ok(!body.includes("Reveal") && !body.includes("Show value") && !body.includes("value=\"env"), "no reveal affordance — the value is sealed");
-      // The write-once row carries the honest sealed-and-unreplaceable note.
-      assert.ok(body.includes("Delete and recreate to change"), "the write-once row states it can't be changed in place");
-      // The admin add-var FORM section with its own save-row.
-      assert.ok(body.includes("Add a variable") && body.includes("set-save-row"), "the add-var form section renders with a save-row");
-      assert.ok(body.includes(">Delete<"), "admin rows carry Delete");
-
-      // ── cch-w10 LEG 4/5: DELETE A VARIABLE, CLICKED FOR REAL ──────────────
-      const rows = reg.get("env-body").querySelectorAll("[data-env-delete]");
-      assert.equal(rows.length, 4, "every admin row carries a wired Delete; got " + rows.length);
-      const varId = rows[0].getAttribute("data-env-delete");
-      const varKey = rows[0].getAttribute("data-key");
-      assert.equal(rows[0].click(), 1, "the row Delete dispatched no click handler — it is DEAD");
-      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 0,
-        "the row click must only open the confirm sheet — a sealed value must never go on a single click");
-      const sheet = reg.get("modal-body").innerHTML || "";
-      assert.ok(sheet.includes("Delete variable?") && sheet.includes(varKey),
-        "the sheet must name the variable; got: " + sheet.slice(0, 200));
-      assert.ok(sheet.includes("can&#39;t be recovered") || sheet.includes("can't be recovered"),
-        "the sheet must state the value is unrecoverable — the whole reason this verb needs a sheet");
-      const go = reg.get("env-delete-go");
-      assert.equal(go.click(), 1, "the sheet's Delete must be wired for \"click\"");
-      assert.equal(go.disabled, true, "the in-flight Delete must disable itself against a double-fire");
-      await ctx.settle();
-      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 1, "exactly one env-var DELETE on the wire");
-      assert.equal(ctx.state.envVars.length, 3,
-        "the server list must shrink by exactly one (4 → 3); got " + ctx.state.envVars.length);
-      assert.ok(!ctx.state.envVars.some((v) => v.id === varId), "and the deleted row is the one gone");
-      const after = reg.get("env-body").innerHTML || "";
-      // Anchored on the ROW markup, not a bare substring: the add-var form
-      // carries "DATABASE_URL" as its placeholder, so a naive includes() would
-      // have reported the deleted row as still present and sent the next reader
-      // hunting a bug that isn't there.
-      assert.ok(!after.includes('set-row-key">' + varKey + "<"),
-        "the deleted row must be gone from the repaint; got: " + after.slice(0, 300));
-      assert.equal(countMatches(after, 'class="set-row-key"'), 3, "three rows survive the refetch");
-      assert.ok(after.includes('set-row-key">STRIPE_SECRET_KEY<'), "and the survivors are still listed");
-    },
-  },
-  // The write-once 409 twin renders the same sealed note; the POST-collision copy
-  // itself is unit-pinned (envVarWriteFailureCopy) since the submit is click-driven.
-  "env-write-once-409": {
-    what: "Environment variables — the write-once row's sealed state (409 copy unit-pinned)",
-    check(reg) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("STRIPE_SECRET_KEY") && body.includes("Write-once"), "the write-once var renders");
-      assert.ok(body.includes("Delete and recreate to change"), "the sealed per-row note renders");
-    },
-  },
-  // Env-vars (member): read-only rows, NO add form, NO Delete (member-read law).
-  "env-member": {
-    what: "Environment variables (member) — read-only rows, no add form",
-    check(reg) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("DATABASE_URL"), "the rows still render for a member");
-      assert.ok(!body.includes("Add a variable") && !body.includes("set-save-row"), "a member sees no add form");
-      assert.ok(!body.includes(">Delete<"), "a member sees no Delete affordance");
-    },
-  },
-
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
   // The crown surface, states-complete: rolling / halted / bounced / unreadable.
   "operator-console": {
