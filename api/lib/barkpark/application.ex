@@ -33,6 +33,19 @@ defmodule Barkpark.Application do
     # `Barkpark.Mailer.warn_if_undeliverable/0`.
     _ = Barkpark.Mailer.warn_if_undeliverable()
 
+    # Same boot-warning mechanism, third condition (task-c7e2b87f1bbca815): the
+    # INSTANCE-OPERATOR allowlist. Unset means legacy — the `admin` permission
+    # alone still opens the seven instance-global route groups (run-secret
+    # reveal, the instance-wide plugin-settings record, self-update/rollback/
+    # site-deploy, status incidents, playground provisioning, bundle import) to
+    # any admin-permissioned token, including one seated in exactly one
+    # workspace. WARNS rather than raising for the same reason the mailer check
+    # does: a single-tenant self-hosted box is a legitimate shape (its only
+    # admin IS the operator), and refusing to boot would break every existing
+    # deployment on upgrade. See
+    # BarkparkWeb.Plugs.RequirePlatformOperator.warn_if_unset/0.
+    _ = BarkparkWeb.Plugs.RequirePlatformOperator.warn_if_unset()
+
     # The /v1/graph admission-cap slot table, created HERE and nowhere else that
     # matters. It is a CONCURRENCY BOUND, not a cache: the rows are the slots
     # currently held, so the table must outlive every request that holds one.
@@ -53,6 +66,18 @@ defmodule Barkpark.Application do
     # walk of priv/plugins). Per the locked Q1 grill decision, topology is
     # compile-time static — hot-reload is out of scope for v1.
     plugin_children = Barkpark.Plugins.Registry.collect_workers(%{phase: :boot})
+
+    # THE inverted edge-extractor seam — the one and only installer.
+    # `Barkpark.Content.Graph`'s drafts fold needs every plugin's projected
+    # edges, but `content` is a KERNEL concept and the registry is a FEATURE:
+    # the kernel importing the registry is a wrong-direction dependency the
+    # boundary gate (tooling/concept-map/boundary.mjs) reports. So the arrow is
+    # turned around HERE, at the composition root, which is allowed to know
+    # both sides. Content reads `:edge_extractor_collector`; it never names the
+    # registry. Unset → core edges only (the fresh-install invariant: a
+    # plugin-free host still walks its drafts graph, it just has no plugin
+    # edges to add).
+    install_edge_extractor_seam()
 
     # C4-1: plugins may contribute Oban Cron entries via `oban_crontab/0`.
     # Collect them here (a pure, GenServer-independent call, same as
@@ -340,6 +365,23 @@ defmodule Barkpark.Application do
       end
 
     Keyword.put(oban_config, :plugins, merged_plugins)
+  end
+
+  # Installs the plugin edge-extractor fan-out into the key
+  # `Barkpark.Content.Graph` reads. An explicit `config :barkpark,
+  # :edge_extractor_collector, …` WINS — an operator (or a test) that has
+  # already wired the seam is not overwritten at boot, which is what makes the
+  # seam substitutable rather than merely indirect.
+  defp install_edge_extractor_seam do
+    if is_nil(Application.get_env(:barkpark, :edge_extractor_collector)) do
+      Application.put_env(
+        :barkpark,
+        :edge_extractor_collector,
+        &Barkpark.Plugins.Registry.collect_edge_extractors/1
+      )
+    end
+
+    :ok
   end
 
   # P1c: one-time post-boot banner for LAN sharing. No-op (and silent) unless

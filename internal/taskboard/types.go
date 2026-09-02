@@ -81,6 +81,30 @@ type CriterionItem struct {
 	// 5 most recent. A recorded attempt on an unmet criterion is what turns its
 	// ladder rung amber — the board shows the honest miss, not just the seal.
 	Attempts []CriterionAttempt
+	// Withdrawals is the correction trail (D745): `bp task stamp --withdraw`
+	// LOWERS met to false, leaves Evidence exactly where it was, and appends
+	// {note,ts,worker,superseded_evidence} here. Unlike Attempts it is
+	// UNBOUNDED server-side, because silently dropping a correction is the
+	// defect the verb exists to end. A row carrying withdrawals is a row whose
+	// proof was refuted at least once — read it before trusting Evidence, which
+	// is deliberately the SUPERSEDED text on a withdrawn row.
+	Withdrawals []CriterionWithdrawal
+}
+
+// CriterionWithdrawal is one recorded withdrawal of a stamped proof (D745's
+// withdrawals[] entry): who withdrew it, when, why, and the evidence that
+// stamp had carried. It is the signed replacement for the prose convention it
+// supersedes — reviewers used to write "[WITHDRAWN BY WAVE REVIEW …]" into the
+// evidence itself because no verb could lower the flag, and every board went on
+// counting those criteria MET.
+type CriterionWithdrawal struct {
+	Note   string
+	At     time.Time
+	Worker string
+	// SupersededEvidence is the proof text this withdrawal retired, snapshotted
+	// when it was withdrawn — so it stays legible even if the criterion is
+	// later re-stamped over.
+	SupersededEvidence string
 }
 
 // CriterionAttempt is one recorded miss on a criterion (charter D8's

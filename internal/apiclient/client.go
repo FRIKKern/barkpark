@@ -202,7 +202,7 @@ func New(cfg Config) *Client {
 	// HTTP 500 only, error.code "internal_error" only, announced on stderr.
 	// Installed here rather than at ~20 call sites so there is ONE owner of the
 	// policy and no read path can be forgotten.
-	rt := &retryTransport{onRetry: stderrRetryNotifier}
+	rt := &retryTransport{onRetry: stderrRetryNotifier, onExhausted: stderrExhaustedNotifier}
 	return &Client{
 		baseURL:     cfg.BaseURL,
 		token:       cfg.Token,

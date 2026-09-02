@@ -10623,6 +10623,23 @@ defmodule BarkparkCloud.Web.Router do
       agent_status: bp.agent_status,
       version: bp.version,
       git_commit: bp.git_commit,
+      # dr-w22-bl SINCE WHEN this box has served that commit. The `(sha,
+      # first_seen)` history already existed — every 60 s beat lands in
+      # `agent_events` with the full report and AgentRetentionWorker keeps 14
+      # days of it (measured on prod 2026-09-01: 132,120 rows spanning
+      # 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z) — but its ONLY reader is
+      # `GET /v1/barkparks/:id/events`, which is `Auth.require_user` and pages
+      # at 200 rows: about three hours of a fourteen-day record, handed to a
+      # NARROWER caller than this route's `require_user_or_pat` + `read`. The
+      # materialised column answers the question here instead, so no page and
+      # no auth widening is needed to get it.
+      #
+      # NULL is UNMEASURED, never "now" — the same contract `commit_distance`
+      # carries below. A box that has not changed sha since the column shipped,
+      # and a box whose stored sha was empty when a sha first arrived, both read
+      # NULL because neither transition was OBSERVED. Renderers must paint it as
+      # unmetered and must not sort it as fresh.
+      git_commit_first_seen_at: bp.git_commit_first_seen_at,
       last_seen_at: bp.last_seen_at,
       # Reachability bookkeeping (health-status) — the raw counters behind the
       # health axis, so a client can state the EVIDENCE ("N consecutive missed
@@ -13024,6 +13041,34 @@ defmodule BarkparkCloud.Web.Router do
       build_id: d.build_id,
       content_rev: d.content_rev,
       stage: d.stage,
+      # site-spawner (node slot truth): WHICH SLOT IS SERVING THIS BUILD, and
+      # WHETHER ITS HEALTH GATE ACTUALLY RAN. `deploy/site-spawner-node-live-proof.sh`
+      # reads all three off `bp cloud site deploy -o json`; before these columns
+      # existed this payload carried no slot, no port and no health key of any
+      # kind, so the proof's node assertions ran against empty strings.
+      #
+      #   * `slot` / `port` — the blue/green position the BOX MEASURED Caddy to be
+      #     proxying to after SWITCH, read back out of its own Caddyfile, plus the
+      #     loopback port. NEVER the slot the control plane intended: in a
+      #     blue/green deploy the Caddy upstream port IS the slot truth, and an
+      #     intent-derived slot reports intent while looking like state. `port`
+      #     can stand while `slot` is nil (a served port matching neither of the
+      #     site's two allocated slots) — that pair is a real signal, not a bug.
+      #
+      #   * `health_exit_code` — 0 (HEALTH ran and passed), 14 (ran and failed),
+      #     `nil` (never measured). THE NIL IS NEVER COERCED TO 0, and this is the
+      #     one field on this payload where the coercion would be actively
+      #     dangerous: 0 is the SUCCESS code, so a defaulted zero would render a
+      #     build that died in BUILD as health-certified. Same rule the three
+      #     `deferral_*` keys above state, for the same reason. The Go side reads
+      #     it as `*int` and renders nil as an explicit dash.
+      #
+      # All three are nil on every static row, on every container row, and on
+      # every row written before the 20260902091000 migration — honestly unknown,
+      # never backfilled.
+      slot: d.slot,
+      port: d.port,
+      health_exit_code: d.health_exit_code,
       inserted_at: d.inserted_at,
       updated_at: d.updated_at
     }

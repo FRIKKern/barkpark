@@ -253,6 +253,17 @@ config :barkpark, :media_processing_callback_token, "dev-media-processing-callba
 # reads.
 config :barkpark, :allow_bundle_import, false
 
+# INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815). The default is EMPTY on
+# purpose: empty means UNSET, and UNSET means LEGACY — the `admin` permission
+# alone still opens the seven instance-global route groups
+# (BarkparkWeb.Plugs.RequirePlatformOperator's moduledoc enumerates them), which
+# is what every existing deployment already runs. runtime.exs overrides these
+# from BARKPARK_OPERATOR_EMAILS / BARKPARK_OPERATOR_TOKEN_IDS (comma-separated);
+# the moment EITHER list is non-empty the tier is ARMED and allowlist-only.
+# Mirrors cloud's `:platform_admin_emails` shape (cloud/config/config.exs).
+config :barkpark, :operator_emails, []
+config :barkpark, :operator_token_ids, []
+
 # Fallback CORS allowlist for API routes without a dataset path segment
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
 config :barkpark, :default_cors_origins, []

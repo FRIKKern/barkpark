@@ -131,6 +131,26 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# ── the shared check-runs reader ─────────────────────────────────────────────
+# `fetch_check_runs` below used to hand-roll the jq/awk pipeline that
+# scripts/lib/check-runs.sh owns, and required-checks-verify.sh kept a third
+# copy of the same function. One reader, one dedup, one sort. Resolution is
+# FAIL-CLOSED: no lib, no run — a private fallback copy is the defect being
+# removed here.
+#
+# BARKPARK_CHECK_RUNS_LIB exists for exactly one caller, and it is not a
+# production knob: required-checks.test.sh proves clauses by running sed-mutated
+# COPIES of this file out of a temp directory, whose $0-derived REPO_ROOT is
+# that temp directory. It is the same accommodation the mutants already make for
+# --workflows and --prose.
+CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}"
+[ -f "$CHECK_RUNS_LIB" ] || {
+  echo "FAIL: no check-runs reader at $CHECK_RUNS_LIB — refusing to run without the shared primitive" >&2
+  exit 1
+}
+# shellcheck source=scripts/lib/check-runs.sh
+. "$CHECK_RUNS_LIB"
+
 REPO="${RC_REPO:-FRIKKern/barkpark}"
 BRANCH="${RC_BRANCH:-main}"
 ACTIONS_APP_ID=15368
@@ -261,23 +281,27 @@ classify_row() {
 # ── feeds ────────────────────────────────────────────────────────────────────
 # Every fetch is fail-closed: an unreadable feed is a hard error, never an empty
 # candidate set that would generate a cheerfully empty spec.
+#
+# THE READ IS THE LIB'S; THE RULING ON EMPTINESS IS NOT, AND THAT LINE MATTERS.
+# check_runs_rows_ext returns an empty feed as ZERO ROWS AND EXIT 0 on purpose:
+# for the registration sampler a head whose feed is empty is the cadence datum,
+# so a primitive that died there could not be shared. For a GENERATOR the
+# opposite holds — a spec generated from nothing is a cheerfully empty required
+# set, i.e. a branch protected by nothing. So the refusal stays HERE, at the
+# call site, and §4 of required-checks.test.sh mutation-proves that it fires.
+# Inheriting the lib's permissiveness would turn this fail-closed guard into a
+# fail-open one.
 fetch_check_runs() {
-  local sha="$1" json
-  if [ -n "$FIXTURE_DIR" ]; then
-    [ -f "$FIXTURE_DIR/checkruns-$sha.json" ] || die "no fixture checkruns-$sha.json in $FIXTURE_DIR"
-    json="$(cat "$FIXTURE_DIR/checkruns-$sha.json")"
-  else
-    json="$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" 2>/dev/null)" \
-      || die "cannot read check-runs for $sha (unreadable feed is a failure, not an empty set)"
-  fi
-  [ "$(printf '%s' "$json" | jq -r '.check_runs | length')" -gt 0 ] \
+  local sha="$1" rows rc=0
+  rows="$(check_runs_rows_ext "$REPO" "$sha" "$FIXTURE_DIR")" || rc=$?
+  [ "$rc" -eq 0 ] \
+    || die "cannot read check-runs for $sha (unreadable feed is a failure, not an empty set)"
+  [ -n "$rows" ] \
     || die "check-runs for $sha is EMPTY — refusing to generate a spec from nothing"
-  # latest row per name wins (a re-run leaves both); sorted ascending, awk keeps last.
-  printf '%s' "$json" | jq -r '
-      .check_runs | sort_by(.started_at // "") | .[]
-      | [ .name, (.conclusion // "null"), ((.app.id // 0)|tostring) ] | @tsv' \
-    | awk -F'\t' '{ seen[$1] = $0 } END { for (n in seen) print seen[n] }' \
-    | sort
+  # The lib emits five columns; this feed's consumers read three, and
+  # fetch_status_contexts emits the same three — so project here rather than
+  # widening the reader loop, and the two feeds stay interchangeable.
+  printf '%s\n' "$rows" | cut -f1,2,5
 }
 
 fetch_status_contexts() {
