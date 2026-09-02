@@ -665,7 +665,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 7: THE ARCHIVE BUNDLE — FOREIGN RESIDUE, DONE HONESTLY ───────────
 
-  test "ROW 7 — decommission makes ZERO object-storage requests, and OUR TREE exports no verb that could delete a bundle" do
+  test "ROW 7 — decommission makes ZERO object-storage requests; the one destructive export is NOT on the teardown path" do
     {_user, team, token} = logged_in()
 
     base = Application.get_env(:barkpark_cloud, ArchiveStore, [])
@@ -720,25 +720,49 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
            "the archived bundle is no longer listable after the teardown: #{inspect(archives)}"
 
     # THE REFLECTION ARM, derived by RUNNING __info__(:functions) — never by
-    # grep. The file carries five `def` lines but exports three functions (one is
-    # a second `list_archives` clause, one lives in the nested HttpClient module),
-    # so a grep-based reading of this guard would be wrong about the population it
-    # is guarding.
+    # grep. The file carries several `def` lines but exports four functions (a
+    # second `list_archives` clause and a second `delete_bundle` clause collapse,
+    # and the transport lives in the nested HttpClient module), so a grep-based
+    # reading of this guard would be wrong about the population it is guarding.
     exports = ArchiveStore.__info__(:functions) |> Enum.sort()
 
-    assert exports == [derive_signing_key: 4, list_archives: 1, sign_v4: 1],
+    assert exports == [
+             delete_bundle: 2,
+             derive_signing_key: 4,
+             list_archives: 1,
+             sign_v4: 1
+           ],
            "BarkparkCloud.ArchiveStore's exports changed: #{inspect(exports)}. Re-derive this row " <>
              "— a new export may be a new way for our tree to reach the bundle."
 
+    # cch-w54-bl RE-DERIVED THIS ARM RATHER THAN DELETING IT. It used to read
+    # `destructive == []` — our tree had no object-storage verb that could
+    # destroy anything, so the bundle's survival needed no further explanation.
+    # It has exactly one now, `delete_bundle/2`. What ROW 7 still measures is
+    # UNCHANGED and is the whole point: the destructive verb is NOT on this
+    # path. The teardown above ran to completion with the recorder armed and
+    # dialled the store zero times, so the bundle outlives the DELETE route and
+    # is erased later, on a schedule, by a caller this test does not run.
+    # (`ArchiveRetentionWorker` is run for real — with its window and its
+    # live-team carve-out driven in both directions — in
+    # `workers/archive_retention_worker_test.exs`. That proof stays there: this
+    # file may not claim a sweep it does not execute.)
     destructive =
       Enum.filter(exports, fn {name, _arity} ->
         Atom.to_string(name) =~ ~r/delete|purge|remove/
       end)
 
-    assert destructive == [],
-           "our tree now exports an object-storage verb that could destroy a bundle: " <>
-             "#{inspect(destructive)}. ROW 7 says only that OUR TREE MAKES NO SUCH CALL; that " <>
-             "sentence stops being true here."
+    assert destructive == [delete_bundle: 2],
+           "the destructive-export population changed: #{inspect(destructive)}. Every entry here " <>
+             "is a way our tree can reach into the bundle store, and each one must be shown to be " <>
+             "off the teardown path before this row's zero-requests reading means anything."
+
+    # And the reachability claim is asserted the only way it can be: the DELETE
+    # route above made no request AT ALL, so it reached no signed verb, and the
+    # anti-vacuity arm above proves the recorder could have caught one.
+    assert Process.get(:archive_reqs) |> Enum.all?(fn r -> r.method != :delete end),
+           "the teardown issued an object-storage DELETE — the erasure moved onto the synchronous " <>
+             "path and this row's premise is gone"
   end
 
   # The injected transport, modelled on archive_store_test.exs:461-541. Public so
