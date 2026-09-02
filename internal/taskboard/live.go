@@ -57,7 +57,14 @@ type backstopMsg struct{}
 // update loop (the act verbs run off-loop so the network never blocks a
 // keystroke). handleActionResult renders res on the strip and, on success,
 // fires the reconciling refetch.
-type actionResultMsg struct{ res ActionResult }
+// docID is the row the verb ran against, carried so handleActionResult can arm
+// the observed_rev close recovery on the EXACT doc the server refused (the
+// result itself names no row, and the cursor may have moved while the request
+// was in flight).
+type actionResultMsg struct {
+	docID string
+	res   ActionResult
+}
 
 // snapshotMsg is the result of a refetch. The connection state is NOT derived
 // from what drove the fetch — applySnapshot reads the single truth of whether
