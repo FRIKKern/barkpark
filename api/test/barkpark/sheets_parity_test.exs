@@ -609,30 +609,45 @@ defmodule Barkpark.SheetsParityTest do
   # `error_values_literal!/1` REFUSES rather than returning [] when it cannot
   # find the set — an extractor that silently yields nothing would make this
   # whole lock vacuous the first time someone reformats the file.
-  @ts_error_mirrors [
-    {"js/packages/react/src/blocks/sheet.ts", "the @barkpark/react sheet emitter"},
-    {"apps/mobile/src/papers/portabledoc/blocks/sheet.tsx", "the mobile sheet block"}
-  ]
+  # The two paths are LITERAL on purpose. An earlier draft built them by
+  # concatenating a module attribute onto Path.expand/2, and
+  # scripts/elixir-path-escape-check.sh could not resolve them — it reported OK
+  # while two undeclared cross-tree reads sat in the suite. A read the ratchet
+  # cannot see is worse than one it rejects, so both are spelled out here and
+  # both are declared in ELIXIR_TEST_ONLY_PATHS. Declaring them also makes the
+  # lock bidirectional: editing either .ts file now dispatches the Elixir suite,
+  # so the mirror cannot drift from EITHER side without a required context going
+  # red. Two exact files, not globs — the whole tree would be far more CI than
+  # this buys.
+  test "the @barkpark/react ERROR_VALUES mirror equals Engine.error_values/0" do
+    codes =
+      Path.expand("../../../js/packages/react/src/blocks/sheet.ts", __DIR__)
+      |> error_values_literal!("js/packages/react/src/blocks/sheet.ts")
 
-  for {rel, what} <- @ts_error_mirrors do
-    test "#{rel} ERROR_VALUES equals Engine.error_values/0 (#{what})" do
-      rel = unquote(rel)
-      codes = error_values_literal!(rel)
+    assert_mirror_equals_engine(codes, "js/packages/react/src/blocks/sheet.ts")
+  end
 
-      assert Enum.sort(codes) == Enum.sort(Engine.error_values()),
-             "#{rel} ERROR_VALUES drifted from Engine.error_values/0.\n" <>
-               "  only in the TS mirror: #{inspect(codes -- Engine.error_values())}\n" <>
-               "  only in the engine:    #{inspect(Engine.error_values() -- codes)}\n" <>
-               "Update the mirror in the SAME PR as the engine change: a red in that " <>
-               "package's own suite cannot block a merge (see the comment above)."
-    end
+  test "the mobile sheet block's ERROR_VALUES mirror equals Engine.error_values/0" do
+    codes =
+      Path.expand("../../../apps/mobile/src/papers/portabledoc/blocks/sheet.tsx", __DIR__)
+      |> error_values_literal!("apps/mobile/src/papers/portabledoc/blocks/sheet.tsx")
+
+    assert_mirror_equals_engine(codes, "apps/mobile/src/papers/portabledoc/blocks/sheet.tsx")
+  end
+
+  defp assert_mirror_equals_engine(codes, rel) do
+    assert Enum.sort(codes) == Enum.sort(Engine.error_values()),
+           "#{rel} ERROR_VALUES drifted from Engine.error_values/0.\n" <>
+             "  only in the TS mirror: #{inspect(codes -- Engine.error_values())}\n" <>
+             "  only in the engine:    #{inspect(Engine.error_values() -- codes)}\n" <>
+             "Update the mirror in the SAME PR as the engine change."
   end
 
   # Pull the `ERROR_VALUES = new Set([...])` members out of a TS source file.
-  # Raises with the path when the shape it depends on is gone, so a refactor
-  # that moves the literal fails LOUDLY instead of quietly matching nothing.
-  defp error_values_literal!(rel) do
-    path = Path.expand("../../../" <> rel, __DIR__)
+  # REFUSES with the path when the shape it depends on is gone, so a refactor
+  # that moves the literal fails LOUDLY instead of quietly matching nothing — a
+  # silently-empty extractor is how a lock of this kind rots.
+  defp error_values_literal!(path, rel) do
     src = File.read!(path)
 
     body =
@@ -643,9 +658,9 @@ defmodule Barkpark.SheetsParityTest do
         _ ->
           flunk(
             "#{rel}: could not find an `ERROR_VALUES = new Set([...])` literal. " <>
-              "If it was renamed or restructured, update @ts_error_mirrors and this " <>
-              "extractor — do NOT delete the assertion, it is the only lock on this " <>
-              "mirror that runs in a required context."
+              "If it was renamed or restructured, update this extractor — do NOT " <>
+              "delete the assertion, it is the only lock on this mirror that runs " <>
+              "in a required context."
           )
       end
 

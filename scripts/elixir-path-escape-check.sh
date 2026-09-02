@@ -202,6 +202,7 @@ ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 api/assets/sheet-grid/**
+apps/mobile/src/papers/portabledoc/blocks/sheet.tsx
 cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
@@ -212,6 +213,7 @@ internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
 scripts/check-deployyml-filters.sh
