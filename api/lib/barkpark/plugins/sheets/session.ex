@@ -565,6 +565,20 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
         {:ok,
          schedule_idle(%{
+           # MISNAMED, deliberately left alone: this holds a PUBLISHED-ID, not
+           # a slug. `init/1` is called with the registry key's third element,
+           # which `key/3` built as `Content.published_id(slug)`, and every
+           # reader here (`load_doc/3`, the ring key, the persist's `doc_id`)
+           # wants exactly that. `published_id/1` is idempotent and the two
+           # forms coincide for a plain slug, so the tuple the moduledoc
+           # documents — `{dataset, workspace_id, published-id}` — is CORRECT
+           # and this FIELD NAME is the drift, not the doc. Reported once as a
+           # key mismatch; it is not one.
+           #
+           # Not renamed to `published_id` because `Session.Ops` reads
+           # `state.slug` too (`ops.ex` `sheet_id:` and the `topic/3` call), so
+           # the rename is a cross-module change and this task's fence is
+           # session.ex + replay_ring.ex. Rename both together or not at all.
            slug: pubid,
            dataset: dataset,
            title: doc.title,
@@ -629,6 +643,15 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
       _ ->
         {reply, state} = do_apply_ops(ops, state)
+
+        # THE ONLY WRITER of `:sheets_ops_replay`, and it must stay that way.
+        # `ReplayRing.put/3` is a lookup-then-insert on a public ETS table; it
+        # is atomic only because this call runs INSIDE this GenServer and the
+        # unique `SessionRegistry` guarantees one live process per `ring_key`.
+        # Do not move it into a Task/spawn and do not add a second writer — see
+        # the fence comment above `ReplayRing.put/3` for the measured
+        # lost-update shape, and `replay_ring_single_writer_test.exs`, which
+        # fails if this call ever executes off this pid.
         if request_id, do: ReplayRing.put(ring_key, request_id, reply)
         {:reply, {:ok, reply}, schedule_idle(state)}
     end
