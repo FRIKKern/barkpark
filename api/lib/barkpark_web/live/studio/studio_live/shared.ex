@@ -289,12 +289,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # read-only api_token or read-only member. It is silent on a principal-LESS
   # socket, because `write_capable?/2` returns TRUE there BY DESIGN (the
   # intentionally-open public-demo posture).
+  # studio-w21 (from the pds-w43 run) — THE SECOND QUESTION, ASKED HERE TOO.
+  #
+  # The gate above answers "may this PRINCIPAL write at all". It has no TARGET,
+  # and for a GRANT-graded socket the target IS the authorization: a grant
+  # naming ONE doc auto-satisfies `Access.admits_desk?/3` at desk granularity,
+  # so `Caps.write_capable?/2` — and therefore `write_denied?/1` — answers
+  # "capable" while editing a DIFFERENT doc on the same desk. `paper_pane_op/2`,
+  # `paper_ops/2` and `document_op/2` each ask the target question after the
+  # principal one; this seam did not, and it is the same hook-invisible shape
+  # (`handle_info`, which no `handle_event` hook observes).
+  #
+  # Reproduced by run before this arm: on a socket holding a project-scoped READ
+  # grant plus a doc-scoped WRITE grant, `do_autosave/2` with `editor_doc` set to
+  # the doc the write grant does NOT name returned `save_status: "Saved"` and
+  # `title == "ESCALATED-BY-AUTOSAVE"` read back from the store.
+  #
+  # ONE RULE, NOT A FORK: `Paper.grant_target_denied?/3` and
+  # `Paper.refuse_outside_grant/1` are the SAME copies the paper doors call —
+  # `Access.validate/3` on the target's real type + doc_id — so the four doors
+  # cannot drift into four answers. `editor_doc` is the doc this seam actually
+  # writes (`autosave_write/2` → `Content.upsert_draft`), so it is the doc the
+  # grant must admit; a missing/!map doc yields a nil target, which the shared
+  # predicate treats as unresolvable and refuses FOR A GRANT-GRADED SOCKET ONLY.
+  # A membership-derived socket is untouched: `grant_target_denied?/3` returns
+  # false without loading anything.
   @doc false
   def do_autosave(socket, params) do
-    if Paper.write_denied?(socket) do
-      Paper.refuse_write_denied(socket)
-    else
-      autosave_write(socket, params)
+    doc = socket.assigns[:editor_doc]
+    doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
+
+    cond do
+      Paper.write_denied?(socket) ->
+        Paper.refuse_write_denied(socket)
+
+      Paper.grant_target_denied?(socket, socket.assigns[:editor_type], doc_id) ->
+        Paper.refuse_outside_grant(socket)
+
+      true ->
+        autosave_write(socket, params)
     end
   end
 
