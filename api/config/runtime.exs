@@ -480,6 +480,31 @@ end
 # compiled default, byte-identical to before. Applies in ALL envs (personal-local
 # boots :prod), so it lives OUTSIDE the prod guard — same idiom as the media
 # webhook/CDN blocks below.
+# Indx durable state (`Barkpark.Plugins.Indx.Persistence`, the per-index
+# key_maps). The compiled default is `priv/indx_state` — under an OTP release a
+# per-version copy that a version bump abandons, under `mix phx.server` a symlink
+# into the source tree — and NOTHING set the documented `:dir` override, so prod
+# ran on the dev/test default (task-527b519e47669559). BARKPARK_INDX_STATE_DIR
+# points it OUTSIDE the build. Unset in :prod ⇒ /var/lib/barkpark/indx-state
+# WHEN that parent exists (deploy/instance-deploy.sh creates it), so a
+# personal-local :prod boot without the directory keeps the compiled default
+# instead of logging :eacces on every save. dev/test: unchanged unless set.
+# Applies in ALL envs, same idiom as BARKPARK_MEDIA_DIR below.
+indx_state_dir =
+  case System.get_env("BARKPARK_INDX_STATE_DIR") do
+    dir when is_binary(dir) and dir != "" ->
+      Path.expand(dir)
+
+    _ ->
+      if config_env() == :prod and File.dir?("/var/lib/barkpark"),
+        do: "/var/lib/barkpark/indx-state",
+        else: nil
+  end
+
+if indx_state_dir do
+  config :barkpark, Barkpark.Plugins.Indx.Persistence, dir: indx_state_dir
+end
+
 case System.get_env("BARKPARK_MEDIA_DIR") do
   dir when is_binary(dir) and dir != "" ->
     config :barkpark, :media_upload_dir, Path.expand(dir)
