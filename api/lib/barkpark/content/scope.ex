@@ -128,6 +128,37 @@ defmodule Barkpark.Content.Scope do
   # request can produce this value, which is what separates "no tenant resolved"
   # from "an internal caller wants everything" — two intents that an absent key
   # could not distinguish, with the permissive one winning for both.
+  #
+  # ── THE SIGN-FLIP: "missing sentinel" HAS NO FIXED DIRECTION ────────────────
+  #
+  # A reader who assumes "absent `:workspace_id` = wider" is backwards half the
+  # time, and so is the reader who assumes it is narrower. The direction is a
+  # property of WHICH HELPER the consumer lands in, not of the value:
+  #
+  #   scope_to_workspace_or_global(q, nil, _)          -> query UNTOUCHED
+  #                                                       = EVERY tenant  (WIDER)
+  #   scope_to_workspace_or_global(q, :shared_only, _) -> delegates below
+  #                                                       = workspace_id IS NULL
+  #                                                         (NARROWER than nil)
+  #   scope_to_workspace(q, nil, _)                    -> where(q, false)
+  #                                                       = ZERO rows   (NARROWER)
+  #   scope_to_workspace(q, :shared_only, _)           -> workspace_id IS NULL
+  #                                                       (WIDER than nil)
+  #
+  # So an absent workspace_id WIDENS through `scope_to_workspace_or_global/3` and
+  # NARROWS through `scope_to_workspace/3`, and adding the sentinel moves the two
+  # helpers in OPPOSITE directions. Trace the helper your consumer actually
+  # reaches — never assume the sign from the sentinel.
+  #
+  # This is not hypothetical. `Content.Query.base_query/4` reaches the PERMISSIVE
+  # `scope_to_workspace_or_global/3`, so `Content.list_documents` /
+  # `get_document` are on the WIDENING side; a comment in
+  # `Barkpark.Plugins.Tickets.Thread.operator_scope/1` named the fail-CLOSED
+  # `scope_to_workspace/3` for that same read and thereby inverted the sign of
+  # exactly this question (corrected in PR #14009). The transport flips it too:
+  # `BarkparkWeb.ScopeHelpers.scope_opts/1` emits `:shared_only` for a
+  # `%Plug.Conn{}` and OMITS the key for a socket, so the same read is narrow
+  # over HTTP and wide over a LiveView mount that resolved no workspace.
   def scope_to_workspace(query, :shared_only, _project_id),
     do: where(query, [x], is_nil(x.workspace_id))
 
