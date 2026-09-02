@@ -651,7 +651,14 @@ console_ere="$(set_ere console)"
 uncovered=0
 while IFS= read -r p; do
   [ -n "$p" ] || continue
-  if printf '%s\n' "$p" | grep -Eq -- "$console_ere"; then
+  # here-string, NOT `printf '%s\n' "$p" | grep -Eq` (honest-gates D37) — the
+  # same site the cloud ratchet carries. `grep -q` exits on the first match;
+  # under this script's own `set -o pipefail` the write side takes SIGPIPE, the
+  # pipeline returns 141, and the `if` falls to its FALSE branch: a COVERED
+  # repo-root read reported UNCOVERED, a BLOCKING red on the required Console
+  # gate for a reason foreign to what this ratchet measures. Only the 64 KiB
+  # pipe buffer kept it quiet — luck, not correctness.
+  if grep -Eq -- "$console_ere" <<<"$p"; then
     continue
   fi
   if is_exempt "$p"; then

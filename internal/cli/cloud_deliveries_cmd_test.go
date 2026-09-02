@@ -1018,3 +1018,90 @@ func deliveriesLineWith(t *testing.T, stdout, needle string) string {
 	t.Fatalf("no rendered line contains %q:\n%s", needle, stdout)
 	return ""
 }
+
+// ---------------------------------------------------------------------------
+// the credential (task-e2acb66e9ed0da09)
+// ---------------------------------------------------------------------------
+
+// TestCloudDeliveriesSendsTheBearerItWasGiven: `bp cloud deliveries <sha>` works
+// for the WORKER principal, and the reason it does is that the client is
+// credential-AGNOSTIC — it sends `c.Token` verbatim and makes no judgement about
+// which of the three kinds (session / PAT / worker) it holds.
+//
+// This is the CLI half of the row. The 401 that made the verb dark for every CI
+// caller was decided in the control plane's router, not here: GET /v1/deliveries
+// was gated `require_user_or_pat`, which resolves a session or a PAT and nothing
+// else, so the faceless WORKER_TOKEN that deploy.yml's crown step carries — the
+// only credential that WRITES these rows — landed on `unauthorized/1`. The route
+// now takes `require_user_or_pat_or_worker` (cloud/lib/barkpark_cloud/web/
+// auth.ex), and the whole CLI-side requirement is that nothing in this transport
+// rewrites, filters or drops the bearer on the way out.
+//
+// So the assertion is the WIRE, not a stub's opinion: a worker-shaped token
+// arrives at the route byte-for-byte, and a 200 renders the record. If anyone
+// ever teaches this client to "validate" or reshape the credential — the obvious
+// tempting shape being "reject anything that does not look like a session" — the
+// verb goes dark again for the exact principal the row exists to serve, and this
+// reds.
+func TestCloudDeliveriesSendsTheBearerItWasGiven(t *testing.T) {
+	fx := loadDeliveriesFixture(t)
+	status, body := deliveriesScenario(t, fx, "two_rows_one_sha")
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	// A worker-shaped credential, deliberately unlike the `sess-` prefix every
+	// other test in this file seeds: nothing here may key on its SHAPE.
+	const workerToken = "wrk_9f3c2b7ae15d40c8b6a1e07d3c5f8e42"
+	withTempConfigHome(t)
+	if err := SaveConfig(&Config{CloudURL: srv.URL, CloudToken: workerToken}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	stdout, stderr, code := runDeliveries(t, "table", "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c")
+	if code != exitOK {
+		t.Fatalf("`bp cloud deliveries` exit = %d, want 0 for the WORKER principal\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if gotAuth != "Bearer "+workerToken {
+		t.Fatalf("the client did not send the bearer it was given.\n got: %q\nwant: %q\nA client that reshapes the credential re-darkens `bp cloud deliveries` for the WORKER principal — the one deploy.yml carries and the only one that WRITES these rows.", gotAuth, "Bearer "+workerToken)
+	}
+	// And the read actually rendered — an admitted credential that prints nothing
+	// is not a working read path.
+	if !strings.Contains(stdout, "2 deliveries recorded") {
+		t.Fatalf("the worker-credentialed read rendered no record:\n%s", stdout)
+	}
+}
+
+// TestCloudDeliveriesRouteAcceptsTheWorkerPrincipal pins the CONTROL-PLANE half
+// from the Go side, read out of the router source, so the two languages cannot
+// drift: if the guard on GET /v1/deliveries is ever narrowed back to
+// `require_user_or_pat`, the verb above keeps passing against its own fake server
+// while the real route 401s the worker again — the exact silent regression
+// task-e2acb66e9ed0da09 closed.
+func TestCloudDeliveriesRouteAcceptsTheWorkerPrincipal(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "cloud", "lib", "barkpark_cloud", "web", "router.ex"))
+	if err != nil {
+		t.Fatalf("read router.ex: %v", err)
+	}
+	i := strings.Index(string(src), `get "/v1/deliveries" do`)
+	if i < 0 {
+		t.Fatalf(`router.ex no longer declares get "/v1/deliveries" — this pin has gone vacuous`)
+	}
+	// The guard is the first line of the block; take a short, bounded window so a
+	// later route's guard can never be borrowed.
+	window := string(src)[i:min(i+300, len(string(src)))]
+	if !strings.Contains(window, "Auth.require_user_or_pat_or_worker") {
+		t.Fatalf("GET /v1/deliveries is not gated by Auth.require_user_or_pat_or_worker, so it answers HTTP 401 to the WORKER principal and `bp cloud deliveries <sha>` is dark for every CI caller. Guard window:\n%s", window)
+	}
+	// PAT reachability (D385/D412) must be PRESERVED, not replaced: the read
+	// ability gate is what keeps a PAT in the door.
+	if !strings.Contains(window, `Auth.require_ability("read")`) {
+		t.Fatalf("GET /v1/deliveries lost its read-ability gate; D385/D412 PAT reachability is not preserved. Guard window:\n%s", window)
+	}
+}

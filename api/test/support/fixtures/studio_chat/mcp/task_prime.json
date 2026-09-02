@@ -1,0 +1,67 @@
+{
+  "ok": true,
+  "worker": "chat-w3",
+  "counts": {
+    "open": 12,
+    "in_progress": 3,
+    "blocked": 1,
+    "done": 40,
+    "cancelled": 2
+  },
+  "in_progress": [
+    {
+      "doc_id": "task-hold1",
+      "title": "Studio chat renders NO chip for task_prime results",
+      "lifecycle_status": "in_progress",
+      "priority": 3
+    }
+  ],
+  "ready": [
+    {
+      "doc_id": "task-r1",
+      "title": "Render the prime queue chip",
+      "priority": 2,
+      "updated_at": "2026-08-30T09:00:00Z"
+    },
+    {
+      "doc_id": "task-r2",
+      "title": "Fold the approval status",
+      "lifecycle_status": "ready",
+      "priority": 3
+    },
+    {
+      "doc_id": "task-r3",
+      "title": "Wire the rail rev diff",
+      "lifecycle_status": "researching",
+      "priority": 3
+    },
+    {
+      "doc_id": "task-r4",
+      "title": "Widen the coverage floor",
+      "lifecycle_status": "blocked",
+      "priority": 4
+    },
+    {
+      "doc_id": "task-r5",
+      "title": "Retire the second diff engine",
+      "lifecycle_status": "marinating",
+      "priority": 4
+    },
+    {
+      "doc_id": "task-r6",
+      "title": "Seal the wave paper",
+      "lifecycle_status": "open",
+      "priority": 5
+    },
+    {
+      "doc_id": "task-r7",
+      "title": "Prune the stale worktrees",
+      "lifecycle_status": "open",
+      "priority": 5
+    }
+  ],
+  "rails": {},
+  "recent_events": [
+    { "event": "task.claim", "doc_id": "task-hold1", "at": "2026-08-30T09:01:00Z" }
+  ]
+}

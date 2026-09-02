@@ -1,0 +1,13 @@
+/* clean.css — the NON-VACUITY CONTROL for duplicate-hidden.css.
+
+   Byte-for-byte the same shape, with the one at-rule Chrome does not support
+   (`@document`) swapped for one it does (`@media`). Same three authored heads, same
+   `.alpha` authored twice — and now both occurrences reach the CSSOM, so the deficit
+   signal must be SILENT. Without this half, a proof that the gate reds on the
+   fixture above would not distinguish "it caught the loss" from "it reds on any
+   duplicate", which is the difference between a gate and a nuisance. */
+.alpha { color: red; }
+.beta { color: green; }
+@media (min-width: 40em) {
+  .alpha { color: black; }
+}

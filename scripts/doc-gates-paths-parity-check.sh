@@ -2,7 +2,8 @@
 #
 # doc-gates-paths-parity-check.sh — .github/workflows/doc-gates.yml carries TWO
 # hand-maintained trigger lists, `push.paths` and `pull_request.paths`, of ~70
-# globs each. This guard asserts they are SET-EQUAL.
+# globs each. This guard asserts they are SET-EQUAL — and, since
+# cgsiw-parity-paths-ignore-blind-spot, that their `paths-ignore` twins are too.
 #
 # WHY THIS EXISTS (CI gate-wiring + spec-generator wave, cgsiw-s3)
 # -----------------------------------------------------------------------------
@@ -28,6 +29,45 @@
 # unnoticed: a harmless drift and a load-bearing one arrive by the identical
 # mechanism (someone edits one list and not the other) and look identical in a
 # diff. A guard is cheap and re-earns itself every run; a code review does not.
+#
+# `paths-ignore`, THE OTHER HALF OF THE FILTER (cgsiw-parity-paths-ignore-blind-spot)
+# -----------------------------------------------------------------------------
+# `paths` is not the only hand-maintained trigger list GitHub honours. A
+# `paths-ignore:` block SUBTRACTS from the trigger set, it is per-side exactly
+# like `paths` is, and it is edited by the same hand in the same file — so a
+# `paths-ignore` added to `push` and forgotten on `pull_request` reproduces both
+# silent failures above, with the polarity inverted and therefore harder to
+# read: the PR keeps running the gate green while the MERGE quietly stops
+# triggering it.
+#
+# Nothing in this repo uses `paths-ignore` today, on either side of either
+# watched file. That is exactly why the original guard shipped blind to it and
+# reported OK: it was complete for the file as it STOOD, and silent about the
+# file as it might become. This arm distinguishes THREE states, not two:
+#
+#   * absent from BOTH sides — the state today. Symmetric, so it is a GREEN,
+#     and it is now printed by name. "No drift" and "not looked at" were the
+#     same output before this change, which is the whole finding.
+#   * present on ONE side only — DRIFT (exit 1). The finding is the KEY, not a
+#     glob: there is nothing to set-compare, and the guard says so and names
+#     the side that is missing it rather than manufacturing a glob diff.
+#   * present on BOTH — the globs are set-compared exactly like `paths`, with
+#     the same one-sided reporting and the same pin machinery. A paths-ignore
+#     pin is KEY-QUALIFIED — `<side>:paths-ignore:<glob>` — so it cannot
+#     collide with a `paths` pin naming the same glob; an unqualified
+#     `<side>:<glob>` pin still means `paths`.
+#
+# A present-but-EMPTY `paths-ignore` (`[]`, or null) is HARNESS-UNAVAILABLE, not
+# an absence. `[] == []` is the same vacuous green the `paths` arm already
+# refuses, and reading a half-finished edit as "there is no paths-ignore here"
+# would hand that green straight back through the new arm.
+#
+# NOT BYTE-ANCHORED, and it inherits no anchoring. The extraction is a PyYAML
+# parse of the whole document that reads `paths-ignore` off the same `on.<side>`
+# mapping `paths` comes from, so a quoted `"pull_request":`, a flow mapping, or
+# any other legal spelling is handled by the parser rather than by a line-shape
+# assumption. There is no sed sweep in this file for the new arm to inherit one
+# from, and the arm adds none.
 #
 # THE PIN, AND WHY IT IS NOT A WAIVER
 # -----------------------------------------------------------------------------
@@ -55,24 +95,39 @@
 # never a pass. An unparseable workflow is precisely when a parity claim is
 # worth least, so it must not be able to produce one.
 #
-# MUTATION-PROVEN. The bundled `--selftest` drives THIS script over mktemp
-# fixtures in both directions (a matched pair PASSES and a one-sided pair REDS —
-# a guard that only ever reds is not a measurement either), plus the fail-closed
-# arm and the unknown-argument refusal. The set comparison itself was then
-# disarmed in a scratch copy to prove the selftest reds when the guard stops
-# guarding; that disarm run is recorded in the commit message body of the change
-# that introduced this file:
+# MUTATION-PROVEN, ARM BY ARM. The bundled `--selftest` drives THIS script over
+# mktemp fixtures in both directions for BOTH keys (a matched pair PASSES and a
+# one-sided pair REDS — a guard that only ever reds is not a measurement
+# either), plus the fail-closed arm and the unknown-argument refusal. Each
+# comparison was then disarmed in a scratch copy to prove the selftest reds when
+# that arm stops guarding. Re-run in full at cgsiw-parity-paths-ignore-blind-spot
+# (the counts below supersede the 15-case ones from #12633):
 #
-#     armed:    doc-gates-paths-parity-check --selftest: 15 passed, 0 failed, rc 0
-#     disarmed: both `comm` lines in the MUT-SETCMP block replaced by `true` in
-#               a scratch copy — 11 passed, 4 FAILED, rc 1. The four that went
-#               red are exactly the drift-detecting ones: "push-only entry reds"
-#               and "pull_request-only entry reds" both returned rc 0 with an
-#               "OK — 2 globs on push, 1 on pull_request" line (the vacuous
-#               green), and the two pin cases inverted because a guard that
-#               sees no drift necessarily reports every pin as STALE. The
-#               fail-closed and unknown-argument cases stayed green, correctly:
-#               they do not depend on the comparison.
+#     armed:    doc-gates-paths-parity-check --selftest: 22 passed, 0 failed, rc 0
+#
+#     disarm A (the `paths` set comparison): both `comm` lines in the MUT-SETCMP
+#               block replaced by `true` in a scratch copy — 18 passed, 4
+#               FAILED, rc 1. The four reds are the `paths` drift-detectors:
+#               "push-only entry reds" and "pull_request-only entry reds" both
+#               returned rc 0 with an "OK — 2 globs on push, 1 on pull_request"
+#               line (the vacuous green), and the two pin cases inverted,
+#               because a guard that sees no drift necessarily reports every pin
+#               as STALE. Every paths-ignore case stayed GREEN — the two arms
+#               are independent, and disarming one does not smear over the
+#               other.
+#
+#     disarm B (the paths-ignore arm): the three branch conditions of the
+#               MUT-IGNORE block replaced by `false` in a scratch copy, so no
+#               presence drift is ever recorded and no paths-ignore glob is ever
+#               compared — 18 passed, 4 FAILED, rc 1. The four reds are exactly
+#               the new drift-detectors: both one-sided-KEY cases returned rc 0
+#               with "OK — 2 globs on push, 2 on pull_request" (the vacuous
+#               green this slice exists to remove), the one-sided-ENTRY case
+#               returned rc 0, and the paths-ignore pin case inverted to STALE
+#               PIN for the same reason as above. The symmetric and
+#               absent-from-both cases stayed green, correctly: they are the
+#               green arm and do not depend on the comparison. Every `paths`
+#               case stayed green.
 #
 # HERMETIC: no network, no `bp`, no `gh`, writes only under mktemp. python3 +
 # PyYAML is the only dependency, and its absence is exit 2, never a skip.
@@ -82,8 +137,10 @@
 #   doc-gates-paths-parity-check.sh --selftest   # mutation-prove both directions
 #
 # EXIT CODES
-#   0  the two lists are set-equal (modulo pinned, still-current entries)
-#   1  drift: an unpinned one-sided entry, or a stale pin
+#   0  the twin lists are set-equal, `paths` AND `paths-ignore` (modulo pinned,
+#      still-current entries). paths-ignore absent from both sides is set-equal.
+#   1  drift: an unpinned one-sided entry, a one-sided `paths-ignore:` KEY, or a
+#      stale pin
 #   2  harness unavailable, or an argument this script does not understand
 
 set -euo pipefail
@@ -101,7 +158,11 @@ DEFAULT_TARGET="$REPO_ROOT/.github/workflows/doc-gates.yml"
 # verdict.
 TARGET="${DOC_GATES_PATHS_PARITY_TARGET:-$DEFAULT_TARGET}"
 
-# The pinned one-sided entries, one per line, as `<side-it-is-ON>:<glob>`.
+# The pinned one-sided entries, one per line, as `<side-it-is-ON>:<glob>` for a
+# `paths` entry, or `<side-it-is-ON>:paths-ignore:<glob>` for a paths-ignore
+# one. A one-sided paths-ignore KEY is deliberately NOT pinnable: a pin buys a
+# known glob-level asymmetry, and a whole trigger key present on one side only
+# is not a rounding error somebody should be able to park here.
 # See "THE PIN, AND WHY IT IS NOT A WAIVER" above: an entry here must STILL be
 # one-sided or the guard reds. Deleting a line is how the fix lands.
 KNOWN_ONE_SIDED='push:api/test/**/*.exs'
@@ -122,7 +183,7 @@ harness_unavailable() {
 }
 
 # ---------------------------------------------------------------------------
-# extract — the two paths blocks, as `<side><TAB><glob>` lines
+# extract — the trigger glob lists, as `<side><TAB><key><TAB><glob>` lines
 # ---------------------------------------------------------------------------
 # A REAL yaml parse, not a sed sweep: "unparseable" has to be a state this guard
 # can reach and refuse, and only a parser can report it. PyYAML resolves the
@@ -172,7 +233,30 @@ for side in ("push", "pull_request"):
         if not isinstance(g, str) or not g.strip():
             print("%s: on.%s.paths has a non-string entry" % (path, side), file=sys.stderr)
             sys.exit(3)
-        out.append("%s\t%s" % (side, g))
+        out.append("%s\tpaths\t%s" % (side, g))
+
+    # `paths-ignore` is OPTIONAL: absent from BOTH sides is the state of every
+    # workflow in this repo today and is not a finding. Present on ONE side is,
+    # and that verdict is the shell's to make — this only reports what is there.
+    # Present-but-unusable is refused right here rather than reported as an
+    # absence: a null or `[]` block is a half-finished edit, and reading it as
+    # "no paths-ignore" would turn the vacuous shape into a green.
+    if "paths-ignore" not in block:
+        continue
+    ignores = block.get("paths-ignore")
+    if not isinstance(ignores, list) or not ignores:
+        print(
+            "%s: on.%s.paths-ignore is present but not a non-empty list"
+            " — scanning zero globs is the vacuous pass this guard exists to refuse"
+            % (path, side),
+            file=sys.stderr,
+        )
+        sys.exit(3)
+    for g in ignores:
+        if not isinstance(g, str) or not g.strip():
+            print("%s: on.%s.paths-ignore has a non-string entry" % (path, side), file=sys.stderr)
+            sys.exit(3)
+        out.append("%s\tpaths-ignore\t%s" % (side, g))
 
 sys.stdout.write("\n".join(out) + ("\n" if out else ""))
 PY
@@ -198,8 +282,8 @@ check() {
   fi
 
   local push_list pr_list n_push n_pr
-  push_list="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="push"{print $2}' | sort -u)"
-  pr_list="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="pull_request"{print $2}' | sort -u)"
+  push_list="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="push" && $2=="paths"{print $3}' | sort -u)"
+  pr_list="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="pull_request" && $2=="paths"{print $3}' | sort -u)"
   n_push="$(printf '%s' "$push_list" | grep -c . || true)"
   n_pr="$(printf '%s' "$pr_list" | grep -c . || true)"
 
@@ -210,6 +294,17 @@ check() {
     || harness_unavailable "on.push.paths extracted 0 globs from $TARGET — scanning zero globs is the vacuous pass this guard exists to refuse"
   [ "$n_pr" -gt 0 ] \
     || harness_unavailable "on.pull_request.paths extracted 0 globs from $TARGET — scanning zero globs is the vacuous pass this guard exists to refuse"
+
+  # The paths-ignore twins. Absent from BOTH sides is the state of every
+  # workflow in this repo today: symmetric, therefore GREEN, and n_*_ign is 0 on
+  # both. It is NOT the fail-closed shape the two assertions above catch — there
+  # is nothing to scan, as opposed to a list that should have entries and does
+  # not. A `paths-ignore: []` never reaches here; the extractor refuses it.
+  local push_ign pr_ign n_push_ign n_pr_ign
+  push_ign="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="push" && $2=="paths-ignore"{print $3}' | sort -u)"
+  pr_ign="$(printf '%s\n' "$raw" | awk -F'\t' '$1=="pull_request" && $2=="paths-ignore"{print $3}' | sort -u)"
+  n_push_ign="$(printf '%s' "$push_ign" | grep -c . || true)"
+  n_pr_ign="$(printf '%s' "$pr_ign" | grep -c . || true)"
 
   # `push:<glob>` for every glob on push and not on pull_request, and mirrored.
   # MUT-SETCMP: the two comm(1) invocations below ARE the set comparison. The
@@ -223,6 +318,28 @@ check() {
     } | grep -Ev '^(push|pull_request):$' | sort || true
   )"
 
+  # MUT-IGNORE: the paths-ignore arm. THREE states, not two — the KEY being
+  # present on one side only is itself the finding, and it has no globs to
+  # compare, so it is carried separately rather than squeezed into the set
+  # difference. Disarming this block is what the header's second disarm proof
+  # neuters. paths-ignore one-sided entries are tagged `<side>:paths-ignore:`
+  # inside `one_sided` so they share the pin machinery without colliding with a
+  # `paths` glob of the same name.
+  local ignore_presence_drift=""
+  if [ "$n_push_ign" -gt 0 ] && [ "$n_pr_ign" -eq 0 ]; then
+    ignore_presence_drift="push"
+  elif [ "$n_pr_ign" -gt 0 ] && [ "$n_push_ign" -eq 0 ]; then
+    ignore_presence_drift="pull_request"
+  elif [ "$n_push_ign" -gt 0 ]; then
+    one_sided="$(
+      {
+        printf '%s\n' "$one_sided" | grep . || true
+        comm -23 <(printf '%s\n' "$push_ign") <(printf '%s\n' "$pr_ign") | sed 's/^/push:paths-ignore:/'
+        comm -13 <(printf '%s\n' "$push_ign") <(printf '%s\n' "$pr_ign") | sed 's/^/pull_request:paths-ignore:/'
+      } | grep -Ev '^(push|pull_request):(paths-ignore:)?$' | sort || true
+    )"
+  fi
+
   local pinned
   pinned="$(printf '%s\n' "${KNOWN_ONE_SIDED-}" | grep . | sort -u || true)"
 
@@ -232,28 +349,52 @@ check() {
   stale="$(comm -13 <(printf '%s\n' "$one_sided" | grep . || true) \
                     <(printf '%s\n' "$pinned"    | grep . || true) || true)"
 
-  local line side glob other
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    side="${line%%:*}"
-    glob="${line#*:}"
+  # A token is `<side>:<glob>` for a `paths` entry and `<side>:paths-ignore:<glob>`
+  # for a paths-ignore one; `key` is the difference and it is NOT guessed from
+  # the glob's shape.
+  local line side glob other key keylabel
+  decode_token() {
+    side="${1%%:*}"
+    glob="${1#*:}"
+    key="paths"
+    case "$glob" in
+      paths-ignore:*)
+        key="paths-ignore"
+        glob="${glob#paths-ignore:}"
+        ;;
+    esac
+    keylabel=""
+    [ "$key" = "paths-ignore" ] && keylabel=" (paths-ignore)"
     other="pull_request"
     [ "$side" = "pull_request" ] && other="push"
-    echo "::error::$SELF: DRIFT: '$glob' is on on.$side.paths but MISSING from on.$other.paths" >&2
+    return 0
+  }
+
+  if [ -n "$ignore_presence_drift" ]; then
+    other="pull_request"
+    [ "$ignore_presence_drift" = "pull_request" ] && other="push"
+    echo "::error::$SELF: DRIFT: on.$ignore_presence_drift has a \`paths-ignore:\` block but on.$other does not — a trigger KEY present on one side only is the same asymmetry, by the same hand-edit, that this guard exists to catch" >&2
+    echo "::error::$SELF: a one-sided paths-ignore SUBTRACTS from one event's trigger set and not the other's: mirror it onto on.$other, or delete it." >&2
+    problems=$((problems + 1))
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    decode_token "$line"
+    echo "::error::$SELF: DRIFT: '$glob' is on on.$side.$key but MISSING from on.$other.$key" >&2
     problems=$((problems + 1))
   done <<< "$unpinned"
 
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    side="${line%%:*}"
-    glob="${line#*:}"
-    echo "::error::$SELF: STALE PIN: '$glob' is pinned as $side-only but the two lists now agree on it — delete its line from KNOWN_ONE_SIDED in scripts/$SELF.sh" >&2
+    decode_token "$line"
+    echo "::error::$SELF: STALE PIN: '$glob' is pinned as $side-only$keylabel but the two lists now agree on it — delete its line from KNOWN_ONE_SIDED in scripts/$SELF.sh" >&2
     problems=$((problems + 1))
   done <<< "$stale"
 
   if [ "$problems" -gt 0 ]; then
-    echo "$SELF: $problems problem(s) — on.push.paths and on.pull_request.paths have drifted" >&2
-    echo "$SELF: the two trigger lists must stay set-equal; edit BOTH or neither." >&2
+    echo "$SELF: $problems problem(s) — the push and pull_request trigger lists have drifted" >&2
+    echo "$SELF: the twin lists must stay set-equal, paths AND paths-ignore; edit BOTH sides or neither." >&2
     return 1
   fi
 
@@ -262,11 +403,20 @@ check() {
   # the wrong lesson.
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    side="${line%%:*}"
-    glob="${line#*:}"
-    echo "$SELF: NOTE: '$glob' is $side-only and PINNED (known drift, owner cgsiw-s5-doc-gates-paths-gaps)"
+    decode_token "$line"
+    echo "$SELF: NOTE: '$glob' is $side-only$keylabel and PINNED (known drift, owner cgsiw-s5-doc-gates-paths-gaps)"
   done <<< "$pinned"
 
+  # The paths-ignore verdict is printed on the GREEN path too, and names which
+  # of its two greens this is. "absent from both" and "present and set-equal"
+  # are different facts, and a reader who cannot tell them apart cannot tell
+  # either from "not looked at" — which is what this run said before
+  # cgsiw-parity-paths-ignore-blind-spot.
+  if [ "$n_push_ign" -gt 0 ] || [ "$n_pr_ign" -gt 0 ]; then
+    echo "$SELF: paths-ignore: $n_push_ign on push, $n_pr_ign on pull_request, set-equal modulo the pin"
+  else
+    echo "$SELF: paths-ignore: absent from both sides (symmetric — nothing to compare)"
+  fi
   echo "$SELF: OK — $n_push globs on push, $n_pr on pull_request, set-equal modulo the pin ($TARGET)"
   return 0
 }
@@ -299,9 +449,14 @@ run_case() {
   fi
 }
 
-# write_fixture <file> <push-globs, newline-separated> <pr-globs, newline-separated>
+# write_fixture <file> <push-paths> <pr-paths> [<push-paths-ignore>] [<pr-paths-ignore>]
+# All lists are newline-separated. The two paths-ignore arguments are OPTIONAL
+# and an EMPTY one omits the `paths-ignore:` key entirely rather than writing an
+# empty block — "the key is not there" and "the key is there and empty" are
+# different states to this guard (green-if-symmetric vs HARNESS-UNAVAILABLE),
+# and a fixture writer that could not express both would leave one untested.
 write_fixture() {
-  local file="$1" push="$2" pr="$3"
+  local file="$1" push="$2" pr="$3" push_ign="${4-}" pr_ign="${5-}"
   {
     echo "name: fixture"
     echo "on:"
@@ -309,9 +464,17 @@ write_fixture() {
     echo "    branches: [main]"
     echo "    paths:"
     printf '%s\n' "$push" | grep . | sed 's/^/      - "/; s/$/"/' || true
+    if printf '%s\n' "$push_ign" | grep -q .; then
+      echo "    paths-ignore:"
+      printf '%s\n' "$push_ign" | grep . | sed 's/^/      - "/; s/$/"/' || true
+    fi
     echo "  pull_request:"
     echo "    paths:"
     printf '%s\n' "$pr" | grep . | sed 's/^/      - "/; s/$/"/' || true
+    if printf '%s\n' "$pr_ign" | grep -q .; then
+      echo "    paths-ignore:"
+      printf '%s\n' "$pr_ign" | grep . | sed 's/^/      - "/; s/$/"/' || true
+    fi
     echo "jobs:"
     echo "  noop:"
     echo "    runs-on: ubuntu-latest"
@@ -347,6 +510,65 @@ selftest() {
   write_fixture "$tmp/reordered.yml" $'b\na\nc' $'c\nb\na'
   run_case "a reordered but equal pair passes (sets, not sequences)" 0 "$tmp/reordered.yml" "" \
     "3 globs on push, 3 on pull_request"
+
+  # ── the paths-ignore arm (cgsiw-parity-paths-ignore-blind-spot). Before it,
+  # every fixture below returned "OK — N globs on push, N on pull_request": the
+  # guard read `paths` and nothing else, so a one-sided `paths-ignore:` — the
+  # identical asymmetry, produced by the identical hand-edit — was a GREEN.
+
+  # Absence from BOTH sides is the live state of every workflow in this repo and
+  # must stay a pass. It is asserted on its own line, not inferred from rc=0:
+  # "symmetric" and "never looked at" are the same exit code and the whole point
+  # of this slice is that they were the same OUTPUT too.
+  run_case "paths-ignore absent from BOTH sides is symmetric, not drift" 0 \
+    "$tmp/matched.yml" "" "paths-ignore: absent from both sides"
+
+  # DIRECTION 1: the key on push only. This is the nastier polarity — the PR
+  # keeps running the gate green while the merge quietly stops triggering it.
+  write_fixture "$tmp/ignore_push_only.yml" $'**/*.md\n**/*.ex' $'**/*.md\n**/*.ex' \
+    $'docs/**' ''
+  run_case "a paths-ignore on push only reds" 1 "$tmp/ignore_push_only.yml" "" \
+    'on.push has a `paths-ignore:` block but on.pull_request does not'
+
+  # DIRECTION 2: the key on pull_request only.
+  write_fixture "$tmp/ignore_pr_only.yml" $'**/*.md\n**/*.ex' $'**/*.md\n**/*.ex' \
+    '' $'docs/**'
+  run_case "a paths-ignore on pull_request only reds" 1 "$tmp/ignore_pr_only.yml" "" \
+    'on.pull_request has a `paths-ignore:` block but on.push does not'
+
+  # A MATCHED pair of paths-ignore blocks passes — the green arm of the new
+  # comparison. A guard that reds on every paths-ignore would be a ban on the
+  # key, not a parity check.
+  write_fixture "$tmp/ignore_symmetric.yml" $'**/*.md\n**/*.ex' $'**/*.md\n**/*.ex' \
+    $'docs/**\nREADME.md' $'README.md\ndocs/**'
+  run_case "a symmetric (and reordered) paths-ignore pair passes" 0 \
+    "$tmp/ignore_symmetric.yml" "" "paths-ignore: 2 on push, 2 on pull_request, set-equal"
+
+  # Present on BOTH sides but with a one-sided ENTRY: the key-presence check is
+  # satisfied and the glob set-difference is what has to catch this. Without a
+  # separate case, disarming the comparison while keeping the presence check
+  # would still show green here.
+  write_fixture "$tmp/ignore_glob_drift.yml" $'**/*.md' $'**/*.md' \
+    $'docs/**\nREADME.md' $'README.md'
+  run_case "a one-sided paths-ignore ENTRY reds even when both sides have the key" 1 \
+    "$tmp/ignore_glob_drift.yml" "" \
+    "'docs/**' is on on.push.paths-ignore but MISSING from on.pull_request.paths-ignore"
+
+  # The pin grammar reaches paths-ignore too, and is written with the key in it
+  # (`<side>:paths-ignore:<glob>`) so it cannot collide with a `paths` pin for a
+  # glob of the same name. An unqualified `<side>:<glob>` pin still means paths.
+  # This case exists because a documented pin format nobody exercises is a claim,
+  # not a mechanism.
+  run_case "a paths-ignore pin is key-qualified and passes with a NOTE" 0 \
+    "$tmp/ignore_glob_drift.yml" 'push:paths-ignore:docs/**' \
+    "is push-only (paths-ignore) and PINNED"
+
+  # An EMPTY paths-ignore block is not an absence. `[] == []` is the vacuous
+  # green the paths arm already refuses, and reading a half-finished edit as
+  # "no paths-ignore" would hand it back through the new arm instead.
+  printf 'name: emptyignore\non:\n  push:\n    branches: [main]\n    paths:\n      - "**/*.md"\n  pull_request:\n    paths:\n      - "**/*.md"\n    paths-ignore: []\njobs:\n  noop:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n' > "$tmp/empty_ignore.yml"
+  run_case "a zero-entry paths-ignore is HARNESS-UNAVAILABLE, not an absence" 2 \
+    "$tmp/empty_ignore.yml" "" "on.pull_request.paths-ignore is present but not a non-empty list"
 
   # ── the PIN, both ways: it buys today's known drift and nothing else, and it
   # retires itself the moment the drift it named is gone.
