@@ -92,10 +92,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # THE VETO — deterministic, 409, and it must NOT move when the outage arm
       # below does.
       {"halted", {:error, {:halted, "tenant is over quota"}}, "halted", 409, []},
-      # THE OUTAGE — transient, 503, its own retry hint, `reason` discriminating
-      # it from the veto it shares a code with.
-      {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}}, "halted",
-       503, [:reason]},
+      # THE OUTAGE — transient, 503, its own retry hint, wearing the public
+      # transient-storage code (one code = one status: `halted` stays 409),
+      # `reason` discriminating it from a media-volume fault.
+      {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}},
+       "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},
@@ -159,6 +160,10 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
     env = Errors.to_envelope({:error, {:dedup_unavailable, "backlog scan timed out"}})
 
     assert env.status == 503, "a transient dedup outage must not render as a 4xx"
+
+    assert env.code == "storage_unavailable",
+           "one code = one status: `halted` is the 409 plugin veto; the CLI exit-code parity refuses a code at two statuses"
+
     assert env.message == "backlog scan timed out"
     assert env.reason == "dedup_unavailable"
     assert env.hint =~ "Transient"
