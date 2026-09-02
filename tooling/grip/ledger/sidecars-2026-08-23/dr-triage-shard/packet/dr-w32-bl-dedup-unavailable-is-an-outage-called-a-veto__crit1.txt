@@ -1,0 +1,1 @@
+A transient dedup outage renders with a status and hint that tell a caller to RETRY, and a test pins the new shape.

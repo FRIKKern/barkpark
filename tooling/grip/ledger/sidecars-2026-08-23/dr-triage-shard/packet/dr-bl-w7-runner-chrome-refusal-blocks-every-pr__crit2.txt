@@ -1,0 +1,1 @@
+THE ANTI-VACUITY OBLIGATION: a real measured layout/parity defect STILL reds the Console gate after the change. Evidence: a deliberately broken fixture run through the changed workflow logic, exit code pasted.

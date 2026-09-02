@@ -107,6 +107,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The required-set question is about the REPO's state, not about any one PR's
+  # diff, so it wants a clock as well as a merge. Nightly catches a protection
+  # change made in the GitHub UI, which no push to this repo would ever notice.
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -119,6 +125,113 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # ── THE VENUE RULE, AND WHY IT IS A JOB-LEVEL `if:` AND NOT A PATHS FILTER ──
+  #
+  # MEASURED (20 recent pull_request runs, compute derived from job steps, not
+  # from the job's wall clock which on a saturated queue is mostly waiting):
+  #
+  #     Required-check spec gate                       4.58 min/exec
+  #     Required-check spec drift (advisory)           3.16 min/exec
+  #     Every workflow job has runs-on+steps or uses   0.17 min/exec
+  #
+  # Across 1,227 PR pushes in 2026-08-30..09-02 that is on the order of 3,500
+  # job-minutes for a question that does not change with the PR: "has the
+  # required-checks roster moved?" is about the repo's state. Asking it 1,227
+  # times a window gets the same answer 1,227 times.
+  #
+  # THE HEADER'S NO-FILTER RULE STANDS AND IS NOT BEING BROKEN. It says a
+  # workflow-level `on:.paths` key emits NO check run on a PR that misses the
+  # paths, and an absent context routes to `is expected.` forever. That is true,
+  # and it is why there is still no `on:.paths` key here. A job-level `if:` is a
+  # different mechanism: the job still RENDERS, with conclusion `skipped`, so
+  # the name never goes absent and the deadlock the header warns about cannot
+  # occur. That distinction is the whole reason this shape is legal.
+  #
+  # `workflow-job-shape` is deliberately NOT conditioned. It costs 0.17 min, it
+  # is the reason this unfiltered home exists at all, and its subject is the
+  # WHOLE workflow tree — a job poisoned by an unrelated PR is invisible to any
+  # diff-derived condition. Conditioning it on its own inputs would be a
+  # category error: its input IS every PR.
+  changes:
+    # No `if:`, no paths filter, no matrix — it runs on every event so the jobs
+    # behind it always have a defined answer. Never a silent false: on an
+    # unresolvable base it FAILS rather than dispatching false, because a
+    # dispatcher that "could not tell" and emitted false would skip the gate
+    # and publish a quiet green.
+    name: Dispatch (required-checks inputs)
+    runs-on: ubuntu-latest
+    outputs:
+      touched: ${{ steps.sets.outputs.touched }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref — the same reason elixir.yml's
+          # dispatcher documents: the merge ref already contains main's
+          # advance, so a three-dot diff against a lagging base sweeps in
+          # everything main gained and the condition never fires narrowly.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # FULL HISTORY, BLOBLESS. These two options are ORTHOGONAL and this
+          # job needs both — DEPTH and FILTER are different axes, and confusing
+          # them is exactly how this was first written and reverted (run
+          # 33691239048, three of four dispatchers red on `PR base <sha> and
+          # HEAD share NO common ancestor`).
+          #
+          # `fetch-depth: 0` — REQUIRED, do not drop it. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE; a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure rather
+          # than emit a verdict. Dropping this line does NOT leave "whatever the
+          # filter gives you": actions/checkout then applies its DEFAULT depth
+          # of 1, and a depth-1 clone — blobless or not — has no merge base.
+          # `fetch-depth: 2` does not rescue it either; that trick works on jobs
+          # sitting on `refs/pull/N/merge`, where HEAD^1 IS the base, and this
+          # job deliberately is not one of those (see the `ref:` note above).
+          #
+          # `filter: blob:none` — the actual saving, and it is NOT shallowness.
+          # A blobless partial clone fetches every commit and every tree and
+          # omits only blob CONTENTS. `git diff --name-only` reads trees, not
+          # blobs, so the commit graph, the merge base and the path set below
+          # are unchanged BY CONSTRUCTION rather than by benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways at FULL depth, compares the three-dot
+          # changed-path sets by SORTED CHECKSUM, and refuses to report a pass
+          # if a sample is empty on both sides (two empty sets match, which
+          # would be vacuous). Read 2026-09-03: full clone 138 s / .git 791 MB,
+          # blobless 34 s / .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
+          fetch-depth: 0
+          filter: blob:none
+      - id: sets
+        name: Does this PR touch what this workflow tests?
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull_request event — the gate runs unconditionally"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "base sha $base is not resolvable locally — REFUSING to guess" >&2
+            exit 1
+          fi
+          files="$(git diff --name-only "$base"...HEAD)"
+          if [ -z "$files" ]; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "empty diff — dispatching TRUE rather than skipping a gate"
+            exit 0
+          fi
+          if printf '%s\n' "$files" | grep -qE '^(\.github/required-checks\.json|scripts/required-checks[.-].*|\.github/workflows/required-checks-drift\.yml)$'; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            echo "this PR edits the required-checks spec or its scripts — running the gate"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+            echo "no required-checks input touched — the gate is skipped on this PR"
+          fi
+          printf '%s\n' "$files" | head -50
+
   # ── the hermetic half (see the header: not a required context today) ────────
   # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
   # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
@@ -126,6 +239,8 @@ jobs:
   # paths filter had. It renders on every PR, always, and its name is stable.
   spec-gate:
     name: Required-check spec gate
+    needs: changes
+    if: needs.changes.outputs.touched == 'true'
     runs-on: ubuntu-latest
     steps:
       # actions/checkout is REQUIRED, not incidental: §13's prose ratchet runs
@@ -231,6 +346,8 @@ jobs:
   # ── the advisory half ───────────────────────────────────────────────────────
   required-checks-drift:
     name: Required-check spec drift (advisory)
+    needs: changes
+    if: needs.changes.outputs.touched == 'true'
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:

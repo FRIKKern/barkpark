@@ -1,0 +1,1 @@
+MUTATION PROOF: the new guard/behaviour is shown to FAIL when the thing it protects is removed or reversed. A green that cannot go red is not evidence.

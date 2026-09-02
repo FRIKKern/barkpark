@@ -1,0 +1,1 @@
+.github/required-checks.json is byte-unchanged. Evidence: `git diff --name-only`.

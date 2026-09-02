@@ -1,0 +1,1 @@
+`PLATFORM_ADMIN_EMAILS` is set on the running control plane and `/v1/me` reports `platform_operator: true` for a named human. Evidence: the /v1/me body, and the container env grep going rc=1 -> rc=0.

@@ -1,0 +1,1 @@
+The epic's direct roster is materially below ROSTER_PAGE_LIMIT 500 and the seal predicate returns a VERDICT (not ROSTER-TRUNCATED) - paste the VERDICT-TOKEN with roster=, repo= and head=.

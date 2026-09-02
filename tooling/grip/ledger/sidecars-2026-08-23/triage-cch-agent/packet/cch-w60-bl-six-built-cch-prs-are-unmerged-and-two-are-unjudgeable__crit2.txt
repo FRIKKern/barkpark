@@ -1,0 +1,1 @@
+Each PR is either merged, or this row records per-PR why it cannot be and what would unblock it. No underlying epic row is closed on anything but a merge verified by gh compare returning ahead.

@@ -73,7 +73,7 @@ Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts
 
 ### 5c. History [token]
 
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{…content}}`; `POST revision/:dataset/:id/restore` restores as a draft.
+Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; `rev` is null on history written before it was recorded, and such rows resolve by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
@@ -100,7 +100,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries it too.
 
-Failures: §9.
+Failures: §9. `content.dedup_bypass: true` skips the duplicate scan — an owner decision, persisted on the doc.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
@@ -159,7 +159,7 @@ Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403
 
 `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `storage_unavailable` 503 (media, dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
 
-Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint`/`bpml`/`bpml_unavailable`/`bpml_unprintable`/`unknown_format`/`hollow_paper`/`structure` · sessions `missing_slug`/`invalid_kind`/`invalid_conversation`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_restarting`/`session_start_failed`/`invalid_request_id` · media `share_expired` · deploy `build_id_mismatch`/`deploy_runner_unavailable`/`invalid_deploy_mode` · grants `invalid_grant`/`unprocessable` · chat hosts `invalid_enrollment`/`invalid_state_report` · step-up `mfa_required`/`mfa_enrolment_required` · import/export `bundle_import_disabled`/`invalid_import_mode`/`workspace_slug_conflict`/`blob_path_conflict`/`import_constraint_violation`/`import_failed`/`export_transport_failed`/`export_build_failed`/`import_body_read_failed`/`import_body_too_large`/`import_spill_write_failed`/`insufficient_disk_space` · chat `runtime_capacity`/`runtime_unavailable`/`chat_unsupported`/`chat_create_failed`. Source `known_codes/0`.
+Endpoint-specific: [api/error-codes.md](api/error-codes.md). Source `Errors.known_codes/0`.
 
 ## 10. Legacy `/api/*` Routes
 

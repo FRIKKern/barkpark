@@ -1,0 +1,1 @@
+A deferred row renders a CAUSE line from the deferral columns (depth, bound, cause) rather than an empty string

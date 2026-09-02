@@ -1,0 +1,1 @@
+usage_test.exs:337-343's existing property (a DELIBERATELY unmetered meter carries no reason) still holds and is distinguished from the new typed reasons. Evidence: both tests passing.

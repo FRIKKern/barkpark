@@ -1,0 +1,1 @@
+`bp cloud deliveries` is registered as a signal in deploy_signal_audience_census_test.exs so the crown's audience is measured at all.

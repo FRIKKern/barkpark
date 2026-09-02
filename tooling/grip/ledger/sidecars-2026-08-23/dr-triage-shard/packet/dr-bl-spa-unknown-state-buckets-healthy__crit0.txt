@@ -1,0 +1,1 @@
+attentionRank returns a defined rank for an unmapped classifyBp state, and bucketOf places it in the ATTENTION bucket — matching Go's default arm rather than inverting it

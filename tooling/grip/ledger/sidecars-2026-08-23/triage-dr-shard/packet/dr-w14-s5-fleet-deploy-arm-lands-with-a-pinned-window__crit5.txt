@@ -1,0 +1,1 @@
+The ROUTER'S window choice is PINNED and TESTED: a new test in cloud/test/ reds when router.ex's -24 hour literal moves. `git grep -c deploy_rate origin/main -- cloud/test/` returns ZERO today, so this is the first guard the window has ever had; paste the mutation red proving the test can lose

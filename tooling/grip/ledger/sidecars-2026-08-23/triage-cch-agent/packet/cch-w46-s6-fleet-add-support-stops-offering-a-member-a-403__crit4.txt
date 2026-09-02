@@ -1,0 +1,1 @@
+MUTATION PROOF: reverting the authority term REDS the member absence assertion; restoring it greens it. Evidence: both `# fail` lines.

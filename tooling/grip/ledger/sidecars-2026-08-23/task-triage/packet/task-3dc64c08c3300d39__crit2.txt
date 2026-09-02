@@ -1,0 +1,1 @@
+MUTATION-PROVED: disarm the new guard and confirm the fail-first test reds again, naming the cross-tenant bytes rather than a status code.

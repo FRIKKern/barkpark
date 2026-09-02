@@ -1,0 +1,1 @@
+The sweep reads index.html statically so a control's ABSENCE is distinguishable from its presence — demonstrated by deleting a static button id and observing the sweep notice, which the auto-creating getElementById cannot.

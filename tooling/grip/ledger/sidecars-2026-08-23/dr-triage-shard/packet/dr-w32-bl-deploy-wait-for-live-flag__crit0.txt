@@ -1,0 +1,1 @@
+bp cloud site deploy --wait-for-live keeps polling past a deferral until a live deployment for the same site+environment appears, proven by a test whose fixture stream is deferred then live.

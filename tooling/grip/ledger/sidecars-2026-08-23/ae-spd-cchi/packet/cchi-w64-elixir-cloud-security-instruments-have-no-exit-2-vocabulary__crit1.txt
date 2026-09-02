@@ -1,0 +1,1 @@
+At least one real infrastructure refusal (network, service, cache) is driven end to end and reaches the check-run annotation labelled a REFUSAL, not a defect. Paste the annotation.

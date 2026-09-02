@@ -1,0 +1,1 @@
+#11174 is closed with its supersession evidence (origin/main's digest_email_test.exs is a superset). Evidence: the close event.

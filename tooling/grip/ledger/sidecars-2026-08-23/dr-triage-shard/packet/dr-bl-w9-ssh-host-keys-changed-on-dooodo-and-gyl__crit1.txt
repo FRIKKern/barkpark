@@ -1,0 +1,1 @@
+known_hosts is reconciled only AFTER that adjudication, never before — clearing a changed host key without adjudicating why is the reflex a real compromise relies on. Evidence: the order of operations recorded on this task.

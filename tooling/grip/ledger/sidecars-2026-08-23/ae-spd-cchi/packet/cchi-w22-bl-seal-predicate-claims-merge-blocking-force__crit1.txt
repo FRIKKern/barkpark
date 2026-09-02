@@ -1,0 +1,1 @@
+Leg C no longer asserts merge-blocking force it cannot observe — it either reads live protection, or states which authority it read and downgrades its sentence accordingly. Evidence: the new output line.

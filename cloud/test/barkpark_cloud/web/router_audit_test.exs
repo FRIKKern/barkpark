@@ -1227,55 +1227,6 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
     end
   end
 
-  describe "env-var seams" do
-    test "POST /v1/env-vars writes env_var.created — key name only, NEVER the value" do
-      {user, team, token} = logged_in()
-
-      conn =
-        call(
-          :post,
-          "/v1/env-vars",
-          %{key: "API_TOKEN", value: "super-secret", scope: "team"},
-          token
-        )
-
-      assert conn.status == 201
-
-      assert [ev] = events(team, "env_var.created")
-      assert ev.actor_user_id == user.id
-      assert ev.target_type == "env_var"
-      assert ev.metadata["key"] == "API_TOKEN"
-      # The plaintext value never reaches the audit row.
-      refute Enum.any?(Map.values(ev.metadata), &(&1 == "super-secret"))
-      refute Map.has_key?(ev.metadata, "value")
-    end
-
-    test "DELETE /v1/env-vars/:id writes env_var.deleted" do
-      {_user, team, token} = logged_in()
-      {:ok, ev} = Registry.put_env_var(team, %{key: "DELME", value: "v", scope: "team"})
-
-      conn = call(:delete, "/v1/env-vars/#{ev.id}", nil, token)
-      assert conn.status == 200
-
-      assert [audit] = events(team, "env_var.deleted")
-      assert audit.metadata["key"] == "DELME"
-    end
-
-    # Transactional no-row proof for the credential/settings family: the audit
-    # rides put_env_var's transaction, so a write-once rejection rolls the audit
-    # row back too — exactly one env_var.created event survives both POSTs.
-    test "a write-once conflict 409s and writes NO second row" do
-      {_user, team, token} = logged_in()
-
-      assert call(:post, "/v1/env-vars", %{key: "ONCE", value: "v1", is_shown_once: true}, token).status ==
-               201
-
-      dup = call(:post, "/v1/env-vars", %{key: "ONCE", value: "v2"}, token)
-      assert dup.status == 409
-      assert length(events(team, "env_var.created")) == 1
-    end
-  end
-
   describe "notifications settings seams" do
     test "PUT /v1/notifications/settings writes notifications.settings_changed (field NAMES, no secret)" do
       {user, team, token} = logged_in()

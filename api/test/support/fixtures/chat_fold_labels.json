@@ -20,5 +20,53 @@
     {"duration_ms": 3600000, "outcome": "settled", "label": "Worked for 1h 0m 0s"},
     {"duration_ms": 3845000, "outcome": "settled", "label": "Worked for 1h 4m 5s"},
     {"duration_ms": 3845000, "outcome": "interrupted", "label": "You stopped after 1h 4m 5s"}
+  ],
+
+  "_running_note": [
+    "SHOW-ACTIVE-ONLY, the RUNNING half (task-b66928b2958c8cfa). While a turn is",
+    "RUNNING the transcript keeps the ACTIVE tool row and folds the rows BEFORE",
+    "it behind one '+N previous' control. These cases pin BOTH the hidden-row",
+    "count N and the control's text, and BOTH suites read them:",
+    "  Elixir — ChatToolRenderer.running_hidden_count/1 + running_fold_label/1",
+    "  Go     — chat.runningHiddenCount + chat.runningFoldLabel",
+    "'row_outputs' is each row's tool_result output in transcript order; an EMPTY",
+    "string is a row whose result has not arrived — still executing. The ACTIVE",
+    "row is the FIRST row still awaiting its result, or the LAST row when every",
+    "result already landed (the model is thinking, not tooling). N is how many",
+    "rows sit BEFORE the active one, so a null 'control' means N=0: nothing is",
+    "hidden and NO control is drawn. Add a case here BEFORE changing either",
+    "surface's counter or label."
+  ],
+  "running_cases": [
+    {
+      "case": "a 1-row turn — the only row IS the active one",
+      "row_outputs": [""],
+      "hidden": 0,
+      "control": null
+    },
+    {
+      "case": "4 rows, the last still executing — three previous fold away",
+      "row_outputs": ["ok", "ok", "ok", ""],
+      "hidden": 3,
+      "control": "+3 previous"
+    },
+    {
+      "case": "parallel tool calls, none finished — the active row is the FIRST row",
+      "row_outputs": ["", "", "", ""],
+      "hidden": 0,
+      "control": null
+    },
+    {
+      "case": "every result landed but the turn still runs — the LAST row is active",
+      "row_outputs": ["ok", "ok"],
+      "hidden": 1,
+      "control": "+1 previous"
+    },
+    {
+      "case": "a long turn — the count is spelled plainly, never abbreviated",
+      "row_outputs": ["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", ""],
+      "hidden": 12,
+      "control": "+12 previous"
+    }
   ]
 }

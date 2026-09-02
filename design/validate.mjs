@@ -305,6 +305,19 @@ for (const step of ["body", "h1", "h2", "h3"]) {
   const ls = ((type.reading || {})[step] || {}).letterSpacing;
   ok(ls === undefined || typeof ls === "number", `type.reading.${step}.letterSpacing must be a number (em)`);
 }
+// A per-step weight is optional too (device 3, charter D29) — the SHARED
+// headingWeight above stays pinned at 600 and never moves; a step that wants its
+// own voice declares `weight` and the emitter hands it out as
+// --tok-reading-<step>-weight. An integer on the CSS 100–900 ladder: the
+// reading stack is static system serifs, so anything off the ladder would snap
+// to a face the author did not pick.
+for (const step of ["body", "h1", "h2", "h3"]) {
+  const w = ((type.reading || {})[step] || {}).weight;
+  ok(
+    w === undefined || (Number.isInteger(w) && w >= 100 && w <= 900),
+    `type.reading.${step}.weight must be an integer 100–900 (CSS font-weight ladder) when present`,
+  );
+}
 
 // --- scalar ladders --------------------------------------------------------
 for (const k of ["1", "2", "3", "4", "5", "6", "7", "8"]) {

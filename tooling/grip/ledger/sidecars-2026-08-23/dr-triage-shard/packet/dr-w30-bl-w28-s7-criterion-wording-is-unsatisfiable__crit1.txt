@@ -1,0 +1,1 @@
+The criterion is stamped MET with the vouched token quoted (head= and b-unavailable=) and an explicit disclosure that a full CLONE, not a worktree, produced it. Evidence: the stamp.

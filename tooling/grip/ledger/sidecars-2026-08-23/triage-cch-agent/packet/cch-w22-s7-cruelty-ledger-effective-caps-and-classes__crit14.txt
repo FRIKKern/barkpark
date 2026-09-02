@@ -1,0 +1,1 @@
+THE FULL GUARD IS GREEN ON THE WIDENED TABLE, run on a PINNED port, with its cost recorded. Evidence: the run with `rc=$?`, the cell and nav counts, and the wall time — stated as a measurement on your host, not as a claim about the CI runner.

@@ -1,0 +1,1 @@
+Every existing failure path still errors rather than falling back: no .env, no DATABASE_URL, no psql, timeout and unparseable output all keep pg_size_bytes at -1 and pg_top_relations nil — proved by the existing table tests still passing plus one new row for the env path

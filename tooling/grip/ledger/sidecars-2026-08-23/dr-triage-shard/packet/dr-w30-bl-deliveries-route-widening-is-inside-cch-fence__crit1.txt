@@ -1,0 +1,1 @@
+If the answer is 'widen', an explicit cession from cloud-console-hardening is recorded before any router.ex/auth.ex edit is scheduled. Evidence: the cession, quoted.

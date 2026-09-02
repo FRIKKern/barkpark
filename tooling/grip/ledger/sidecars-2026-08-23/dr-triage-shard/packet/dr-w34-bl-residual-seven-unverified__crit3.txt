@@ -1,0 +1,1 @@
+Residual 2 is rephrased: the exit-15 label is two-producer AMBIGUOUS, not wrong, and the four producers across two lock families are named.

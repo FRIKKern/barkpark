@@ -1,0 +1,1 @@
+Section 21 clause 2 asserts the EXACT roster row count derived from the workflow sources, not a >= floor; mutation: add or remove one roster row and the clause reds

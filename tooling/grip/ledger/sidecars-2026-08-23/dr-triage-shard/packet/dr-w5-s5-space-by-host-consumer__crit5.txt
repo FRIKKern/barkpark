@@ -1,0 +1,1 @@
+THE PR BODY CARRIES D71's SCOPE STAMP: D47's "load-bearing build caches" clause was measured on GUERRILLA's `/opt/barkpark/sites` and does NOT transfer to jarl's docker layer; and the 24 builder tarballs ARE a live cache read by `internal/runtime/runtime.go:380`, so they are a retention-policy problem and not blanket garbage. This slice deletes nothing.

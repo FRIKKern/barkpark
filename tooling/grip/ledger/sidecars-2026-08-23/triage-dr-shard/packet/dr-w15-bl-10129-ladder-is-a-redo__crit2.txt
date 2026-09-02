@@ -1,0 +1,1 @@
+The payload key-set census pin is bumped to barkpark_json arity 5 rather than any floor being lowered — paste the diff

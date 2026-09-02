@@ -1,0 +1,1 @@
+An independent reviewer has re-derived the secret-boundary judgment on the MERGED bytes and recorded the derivation under tooling/grip/ledger/ (the cch D182 shape). Closed by the lead.

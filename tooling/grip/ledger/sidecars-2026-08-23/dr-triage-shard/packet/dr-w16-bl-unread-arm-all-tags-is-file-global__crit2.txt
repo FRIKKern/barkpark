@@ -1,0 +1,1 @@
+Any pre-existing collisions the tightening surfaces are resolved as allowlist rows carrying reasons, and each is named in the PR body

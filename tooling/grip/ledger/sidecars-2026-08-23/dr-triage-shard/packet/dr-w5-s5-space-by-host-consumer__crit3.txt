@@ -1,0 +1,1 @@
+AFFORDABILITY RE-TIMED ON THE BOX, not quoted from the brief: `time nice -n 19 ionice -c3 du -hx -d1 /var/lib` on a real box, with `uptime` printed beside it, shown to be well inside `duProbeTimeout = 60s`. Evidence: the timing output and the load average it was taken at.

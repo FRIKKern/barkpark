@@ -1,0 +1,1 @@
+docs/setup/TASK-SYSTEM.md <= 16000B on main and bash scripts/check-doc-budgets.sh exits 0

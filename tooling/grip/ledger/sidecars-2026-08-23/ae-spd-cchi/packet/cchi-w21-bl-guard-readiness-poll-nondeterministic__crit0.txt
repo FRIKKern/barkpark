@@ -1,0 +1,1 @@
+THE FLAKE IS REPRODUCED UNDER LOAD, not merely quoted: the readiness failure is provoked deterministically (e.g. under a synthetic delay or a loaded host) and the run pair is pasted.

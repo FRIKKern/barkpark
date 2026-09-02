@@ -1,0 +1,1 @@
+A request-reachable (or explicitly documented as unreachable) path exists for dedup_unavailable at the ingest seam, decided in writing.

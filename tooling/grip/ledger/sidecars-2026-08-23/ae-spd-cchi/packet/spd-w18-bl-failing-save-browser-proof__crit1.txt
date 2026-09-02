@@ -1,0 +1,1 @@
+The refusal is proven server-side too (the paper is unchanged after the attempt), so the reading is of a real refusal and not a no-op.

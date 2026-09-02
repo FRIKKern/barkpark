@@ -1,0 +1,1 @@
+A payload carrying absorption but no terminal-row rate does not print the flattering 'no terminal rate' fallback sentence — proved by a fixture exercising that combination. Evidence: the test.

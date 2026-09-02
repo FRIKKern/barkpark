@@ -1,0 +1,1 @@
+bp cloud usage renders a FAILED read differently from a deliberate non-measurement — the two cells quoted side by side from real command output, not from source reading.

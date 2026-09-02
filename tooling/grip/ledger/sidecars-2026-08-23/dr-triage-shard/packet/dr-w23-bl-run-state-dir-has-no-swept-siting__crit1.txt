@@ -1,0 +1,1 @@
+The 10,000-record prune path is exercised by a test that seeds past the cap, so its first production run is not its first run -- the test output is pasted.

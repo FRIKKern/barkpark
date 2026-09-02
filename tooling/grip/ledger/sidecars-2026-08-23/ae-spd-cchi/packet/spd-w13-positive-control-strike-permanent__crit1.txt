@@ -1,0 +1,1 @@
+It injects the extracted rule against the generator-deleted fixture and asserts the false green (content flips away from none with no threshold present). Quote the assertion output.

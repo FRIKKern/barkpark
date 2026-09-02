@@ -1,0 +1,1 @@
+A committed preview fixture renders the refused update chip IN THE FLEET LIST (not the detail rail). Paste the scenario or row name and the smoke.mjs assertion that reads the fleet-list HTML for fleet-update-chip--refused.

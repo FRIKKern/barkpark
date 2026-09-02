@@ -19,7 +19,7 @@ Replaces the prior line-by-line mapping spec (removed; recover from git history)
 | XSD gate (xmllint vs vendored Issue 73 XSD) | `.Validator` | `validate_xsd/2`, `default_xsd_path/0` |
 | Status pill (5 buckets over 9 lifecycle states) | `.StatusPill` | `color_class/1`, `label/1` |
 
-Export opts: `:dataset` (default `"production"` — written into `<MessageNote>`), `:sent_at` (DateTime, default `DateTime.utc_now/0` — overridable for tests), `:dataset_host` (default `"barkpark.cloud"` — used in RecordReference). XML lib: **XmlBuilder `~> 2.2`** (already vendored; Saxy rejected — parser-first lib, streaming unneeded at 10–30 KB/message). Coverage totals at spec close: MAPPED 138 · PARTIAL 47 · UNMAPPED 9 (`bp_*` internals, doc envelope) · DEFERRED 4 (Promotion, Production, Measure, SupplyContact).
+Export opts: `:dataset` (default `"production"` — written into `<MessageNote>`), `:sent_at` (DateTime, default `DateTime.utc_now/0` — overridable for tests), `:dataset_host` (`ONIX_DATASET_HOST`, else `"barkpark.cloud"`). XML lib: **XmlBuilder `~> 2.2`** (already vendored; Saxy rejected — parser-first lib, streaming unneeded at 10–30 KB/message). Coverage totals at spec close: MAPPED 138 · PARTIAL 47 · UNMAPPED 9 (`bp_*` internals, doc envelope) · DEFERRED 4 (Promotion, Production, Measure, SupplyContact).
 
 ## Norwegian defaults — rationale
 
@@ -30,7 +30,7 @@ Export opts: `:dataset` (default `"production"` — written into `<MessageNote>`
 
 ## RecordReference — global-uniqueness rule
 
-`<RecordReference>` = `barkpark.cloud:<_publishedId>`, domain-prefixed for cross-publisher uniqueness. The `drafts.` prefix is **stripped**, so a draft and its published doc share one RecordReference (Bokbasen tracks records by it across updates).
+`<RecordReference>` = `<dataset_host>:<_publishedId>`, domain-prefixed for cross-publisher uniqueness. The `drafts.` prefix is **stripped**, so a draft and its published doc share one RecordReference (Bokbasen tracks records by it across updates).
 
 ## ERRATA (schema-annotation bugs — corrections are deliberate)
 

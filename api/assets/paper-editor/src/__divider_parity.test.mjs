@@ -11,7 +11,7 @@
 //   <div style="position:relative;text-align:center;margin:2.4rem 0;
 //               border-top:1px solid var(--paper-rule, #e6e2d8)">
 //     <span style="position:relative;top:-0.7rem;display:inline-block;
-//                  padding:0 0.8rem;background:var(--paper-bg-deep, #f5f2e9);
+//                  padding:0 0.8rem;background:var(--paper-bg, #f6faf9);
 //                  color:var(--paper-ink-soft, #6a6a6a);font-size:1.1rem">§</span>
 //   </div>
 // The edit side binds the same tokens via a class (.bp-section-divider /

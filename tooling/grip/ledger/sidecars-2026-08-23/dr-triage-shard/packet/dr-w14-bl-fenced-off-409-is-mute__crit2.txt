@@ -1,0 +1,1 @@
+GATE: the api test covering the close gates is green, output pasted

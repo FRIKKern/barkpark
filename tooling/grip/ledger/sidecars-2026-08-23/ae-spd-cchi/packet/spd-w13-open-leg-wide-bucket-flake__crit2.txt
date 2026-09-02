@@ -1,0 +1,1 @@
+Either a fix lands (the retry recognises the collapsed state and re-opens) or a bounded-retry wrapper per D138 is shipped, with the choice argued.

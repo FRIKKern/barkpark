@@ -1,0 +1,1 @@
+A nil `BARKPARK_GIT_SHA` renders an EXPLICIT unknown, not a `0` and not a fabricated instant. A test pins the null path and the PR body states that `0` would read as 'perfectly current'.

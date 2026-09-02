@@ -1,0 +1,1 @@
+A cross-surface assertion reads cloud/priv/static/__fixtures__ or attention_order.json from the JS harness, so the two predicates can no longer drift silently.

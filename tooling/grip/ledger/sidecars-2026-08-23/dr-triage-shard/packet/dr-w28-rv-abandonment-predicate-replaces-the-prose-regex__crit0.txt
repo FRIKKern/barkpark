@@ -1,0 +1,1 @@
+classify/1 reads deferral_cause when present and falls back to the @abandoned regex only for pre-s6 rows. Both paths pinned by a test, and the fallback proved reachable.

@@ -1,0 +1,1 @@
+api() distinguishes the transport failure modes it currently collapses into status 0 + network_error, or the collapse is documented as deliberate with the reason stated at the code.

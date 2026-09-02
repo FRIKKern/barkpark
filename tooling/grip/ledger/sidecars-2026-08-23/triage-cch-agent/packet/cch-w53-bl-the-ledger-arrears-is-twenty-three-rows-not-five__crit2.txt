@@ -1,0 +1,1 @@
+MERGE-GATED — the lead closes this. Either a PR is merged, or the row is closed with a written disposition explaining why no change ships.

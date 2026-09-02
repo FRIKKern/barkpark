@@ -1,0 +1,1 @@
+The generalization is tested against at least a week of Deploy (production) completions vs usage_samples gaps, and the result is quoted either way.

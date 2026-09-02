@@ -1,0 +1,1 @@
+The increment path for coalesced_attempts is traced end to end and the answer is stated: either the counter is never reached on a path that occurs (a counter bug), or the CP-side coalesce genuinely almost never happens (a coalescer fact).

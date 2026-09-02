@@ -1,0 +1,1 @@
+A NEW Go test enforces the percentile discipline and is proven able to lose by mutation (paste the RED) — today a p50 key passes the rate/percent scan untouched

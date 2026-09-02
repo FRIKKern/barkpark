@@ -1,0 +1,1 @@
+The reword lands in the SAME commit as any spec change that registers Required-check spec gate, or the flip packet is amended to order it first. Evidence: the commit or the amended packet.

@@ -1,0 +1,1 @@
+If a person-reachable write path now exists, the row is promoted to a screen slice and the wrap remedy lands on `.fleet-meta` and `.fleet-infra`. Evidence: the route, plus post-fix measurements at 320/390/430/620/900 in both themes.

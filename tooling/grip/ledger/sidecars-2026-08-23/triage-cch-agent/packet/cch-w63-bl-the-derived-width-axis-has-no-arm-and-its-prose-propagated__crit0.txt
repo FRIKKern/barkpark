@@ -1,0 +1,1 @@
+Every stale width/cell numeral in breakpoint-sweep.mjs is corrected AND an arm recounts them from the file's own bytes against the live WIDTHS/CELLS/THEMES values. Paste the arm and the corrected sites.

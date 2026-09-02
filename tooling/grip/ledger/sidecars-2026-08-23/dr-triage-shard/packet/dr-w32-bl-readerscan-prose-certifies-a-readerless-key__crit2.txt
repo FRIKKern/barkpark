@@ -1,0 +1,1 @@
+The moduledoc's safety argument is corrected to name the :has_reader over-count as its own failure mode.

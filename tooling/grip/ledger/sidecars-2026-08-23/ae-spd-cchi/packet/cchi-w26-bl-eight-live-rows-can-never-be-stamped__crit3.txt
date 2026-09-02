@@ -1,0 +1,1 @@
+A create-time criteria requirement is stated in the charter's filing law with a measurable predicate (count rows filed in the wave window carrying no acceptance_criteria key; target zero).

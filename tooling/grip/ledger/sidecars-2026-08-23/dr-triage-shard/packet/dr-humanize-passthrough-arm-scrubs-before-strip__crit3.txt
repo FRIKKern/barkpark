@@ -1,0 +1,1 @@
+Every remaining hand-composed strip_ansi/scrub pair is inventoried; either routed through a single helper or justified in the PR body.

@@ -1,0 +1,1 @@
+The one-directional filter is fixed at its REAL site: __binding_census.mjs:752 is `PIN.filter((r) => r.predicate && !declaresFn(r.predicate))`, which drops every `predicate: null` row BEFORE check (2g) runs — so a non-null pin that rots is caught and a null pin that becomes false is not. (The path 'census.mjs:751' in circulation does not exist; quote the real one.)

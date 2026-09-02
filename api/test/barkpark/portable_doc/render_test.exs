@@ -1181,15 +1181,15 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@code, %{style: :article})
 
       assert html =~ "<pre"
-      # Parchment background, terracotta left-border, horizontal scroll —
-      # now emitted through `var(--paper-*, hex)` for dark-mode theming.
+      # A --paper-bg-deep slab, horizontal scroll — emitted through
+      # `var(--paper-*, hex)` for dark-mode theming.
       assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
-      # S8 (au-eg): geometry is token-bound (--bp-codeblock-*); the code bar is a
-      # reading-character cue (TUI twin ReadingAccent), so its accent now binds the
-      # terracotta --paper-reading-accent (color.reading-accent), not the evergreen
-      # chrome --paper-accent.
-      assert html =~
-               "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925)"
+      # task-ddb1e0ab09a62466: NO left bar. The 3px terracotta reading-accent bar
+      # (S8) marked a code block while the reader body was painted --paper-bg-deep
+      # and the slab was invisible; the body now stands on --paper-bg, the slab is
+      # the mark, and the bar is gone from all three parity files.
+      refute html =~ "border-left"
+      refute html =~ "--bp-codeblock-accent-w"
 
       assert html =~ "font-size:var(--bp-codeblock-size, 0.9rem)"
       assert html =~ "overflow-x:auto"
@@ -1256,7 +1256,6 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_block(@code, %{style: :article}) ==
                ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;| <>
                  ~s|border-radius:var(--bp-codeblock-radius, 0);| <>
-                 ~s|border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);| <>
                  ~s|color:var(--paper-ink, #15211d);| <>
                  ~s|padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
                  ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);| <>

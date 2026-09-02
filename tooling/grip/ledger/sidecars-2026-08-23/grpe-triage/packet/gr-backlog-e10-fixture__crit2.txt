@@ -1,0 +1,1 @@
+E10 also walks styleguide.html and index.html inline <style> blocks, or the task records a reasoned decision not to

@@ -1,0 +1,1 @@
+A test pins that a 500 raised after a long request lands with its full duration and increments the 5xx count. Evidence: the test and its run.

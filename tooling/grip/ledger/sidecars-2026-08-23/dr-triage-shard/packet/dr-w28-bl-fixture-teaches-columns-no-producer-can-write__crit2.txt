@@ -1,0 +1,1 @@
+D430's residual law is NOT changed: pickup remains the residual and is never redefined as job.started - job.created.

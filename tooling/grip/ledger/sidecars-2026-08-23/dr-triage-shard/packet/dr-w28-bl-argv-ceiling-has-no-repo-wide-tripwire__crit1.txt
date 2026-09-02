@@ -1,0 +1,1 @@
+It is proven ABLE TO FAIL by mutation: reintroduce an argv-borne list payload in a scratch file and paste the red.

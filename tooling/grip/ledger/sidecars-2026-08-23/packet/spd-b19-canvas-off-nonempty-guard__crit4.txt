@@ -1,0 +1,1 @@
+The PR body records that the flag is unset on both live hosts (naming the three places checked on each) so a reader knows this guard protects a decision rather than fixing a live screen.

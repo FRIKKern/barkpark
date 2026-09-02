@@ -610,8 +610,10 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
 
     test "unknown function survives the save stale, keeping its cached value" do
       content = %{
+        # A name no spreadsheet has: `NPV` used to stand in here, and it stopped
+        # being "unknown" the day the engine grew the financial batch.
         "tabs" => [
-          %{"cells" => %{"A1" => %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n"}}}
+          %{"cells" => %{"A1" => %{"f" => "NOTAFUNC(0.1,5)", "v" => 42, "t" => "n"}}}
         ]
       }
 

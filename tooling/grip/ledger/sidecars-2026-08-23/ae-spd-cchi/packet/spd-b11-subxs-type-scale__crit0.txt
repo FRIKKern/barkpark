@@ -1,0 +1,1 @@
+design/tokens.json declares a sub-12px chrome rung and design/emit.mjs regenerates the GENERATED block in root.html.heex with it (node design/check.mjs green, Part A byte-compare included)

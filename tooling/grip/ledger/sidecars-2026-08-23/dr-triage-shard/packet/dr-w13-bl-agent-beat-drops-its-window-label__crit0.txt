@@ -1,0 +1,1 @@
+The beat carries window_s (or an equivalently explicit label) for each rate it reports, sourced from the upstream envelope rather than hardcoded

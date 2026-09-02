@@ -2128,16 +2128,22 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
   # ── stale semantics ─────────────────────────────────────────────────────────
 
+  # The placeholder below is deliberately a name NO spreadsheet has. These tests
+  # used to spell it `NPV(0.1,5)` — a REAL Excel function the engine had simply
+  # not implemented yet — so the day the financial batch landed, three "unknown
+  # function" tests started exercising a KNOWN one and reddened for a reason
+  # that had nothing to do with staleness. An unknown-name fixture must name
+  # something that can never become known.
   describe "stale — unknown function names" do
     test "unknown function leaves v/t untouched and sets stale" do
-      out = run(%{"A1" => %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n"}})
+      out = run(%{"A1" => %{"f" => "NOTAFUNC(0.1,5)", "v" => 42, "t" => "n"}})
 
       assert out["A1"] == %{
-               "f" => "NPV(0.1,5)",
+               "f" => "NOTAFUNC(0.1,5)",
                "v" => 42,
                "t" => "n",
                "stale" => true,
-               "stale_fn" => "NPV"
+               "stale_fn" => "NOTAFUNC"
              }
     end
 
@@ -2161,7 +2167,7 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "dependents read the stale cell's cached value" do
       out =
         run(%{
-          "A1" => %{"f" => "NPV(0.1,5)", "v" => 42},
+          "A1" => %{"f" => "NOTAFUNC(0.1,5)", "v" => 42},
           "B1" => %{"f" => "A1*2"}
         })
 
@@ -2175,7 +2181,7 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "a stale cell with no cached value is #NAME?, and dependents propagate" do
       out =
         run(%{
-          "A1" => %{"f" => "NPV(0.1,5)"},
+          "A1" => %{"f" => "NOTAFUNC(0.1,5)"},
           "B1" => %{"f" => "A1+1"}
         })
 
@@ -2273,8 +2279,11 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "a nested unknown under a known name is still named" do
-      out = run(%{"A1" => %{"f" => "SUM(NPV(0.1,5),2)", "v" => 9}})
-      assert out["A1"]["stale_fn"] == "NPV"
+      # `NOTAFUNC`, not `NPV`: this stood in for an unknown name until the
+      # financial batch made NPV a REAL function, at which point the assertion
+      # was testing nothing about staleness at all.
+      out = run(%{"A1" => %{"f" => "SUM(NOTAFUNC(0.1,5),2)", "v" => 9}})
+      assert out["A1"]["stale_fn"] == "NOTAFUNC"
     end
 
     test "dependents of a loud-stale cell still read the cached value" do
@@ -4907,10 +4916,11 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       end
 
       # 123 after batch 3 + 17 batch-4 names + RAND/RANDBETWEEN = 142, then
-      # + TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK (the everyday batch) = 147.
+      # + TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK (the everyday batch) = 147,
+      # then + PMT FV PV NPV IRR RATE NPER (the financial batch) = 154.
       # THE authoritative count.
       assert "RAND" in names and "RANDBETWEEN" in names
-      assert length(names) == 147
+      assert length(names) == 154
       assert names == Enum.sort(names)
       assert Enum.uniq(names) == names
     end
@@ -5636,6 +5646,313 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         assert args != []
         assert String.ends_with?(doc, ".")
       end
+    end
+  end
+
+  # ── financial ───────────────────────────────────────────────────────────────
+  #
+  # Every number below is a PUBLISHED Microsoft Excel documentation example —
+  # the function's own support page — cited per test by the doc's formula and
+  # the result Microsoft prints. Those pages print money to the cent, so each
+  # test pins TWO things: the doc's printed figure exactly (as an integer, via
+  # ROUND(x * 10^k, 0), so no float-equality luck is involved) and the full
+  # closed-form value at the 1e-9 RELATIVE tolerance the criterion asks for.
+  # The full-precision figures were recomputed from the closed forms outside
+  # this engine; the IRR/RATE ones were additionally cross-checked by BISECTION
+  # — a different root-finder from the engine's Newton — so a shared bug in the
+  # iteration cannot make these assertions agree with themselves.
+
+  # `expected` is the reference; the tolerance is 1e-9 of its magnitude.
+  defp assert_rel(actual, expected) do
+    assert is_number(actual), "expected a number, got #{inspect(actual)}"
+    assert_in_delta actual, expected, 1.0e-9 * abs(expected)
+  end
+
+  describe "PMT — Excel's published PMT examples" do
+    # Doc: Rate 8%, Nper 10, Pv 10000. `=PMT(A2/12, A3, A4)` -> ($1,037.03)
+    test "a 10-month 8%/yr loan of 10,000 pays out $1,037.03 a month (negative)" do
+      assert_rel(eval!("PMT(0.08/12, 10, 10000)"), -1_037.0320893591636)
+      assert eval!("ROUND(PMT(0.08/12, 10, 10000) * 100, 0)") == -103_703
+    end
+
+    # Doc: same terms, `=PMT(A2/12, A3, A4, 0, 1)` -> ($1,030.16) — payments
+    # due at the BEGINNING of the period.
+    test "type 1 (payments at the beginning) is the doc's ($1,030.16)" do
+      assert_rel(eval!("PMT(0.08/12, 10, 10000, 0, 1)"), -1_030.1643271779772)
+      assert eval!("ROUND(PMT(0.08/12, 10, 10000, 0, 1) * 100, 0)") == -103_016
+    end
+
+    # Doc: Rate 6%, 18 years of saving, 50,000 target.
+    # `=PMT(A9/12, A10*12, 0, A11)` -> ($129.08)
+    test "saving 50,000 over 18 years at 6% costs $129.08 a month" do
+      assert_rel(eval!("PMT(0.06/12, 18*12, 0, 50000)"), -129.0811608679954)
+      assert eval!("ROUND(PMT(0.06/12, 18*12, 0, 50000) * 100, 0)") == -12_908
+    end
+
+    test "a zero rate is the straight division, and a zero term is #NUM!" do
+      # No interest: 1200 repaid over 12 periods is -100 a period.
+      assert eval!("PMT(0, 12, 1200)") == -100.0
+      assert eval!("PMT(0.01, 0, 1000)") == "#NUM!"
+    end
+  end
+
+  describe "FV — Excel's published FV examples" do
+    # Doc: Rate 0.06, Nper 10, Pmt -200, Pv -500, Type 1.
+    # `=FV(A2/12, A3, A4, A5, A6)` -> $2,581.40
+    test "the five-argument example is the doc's $2,581.40" do
+      assert_rel(eval!("FV(0.06/12, 10, -200, -500, 1)"), 2_581.4033740601362)
+      assert eval!("ROUND(FV(0.06/12, 10, -200, -500, 1) * 100, 0)") == 258_140
+    end
+
+    # Doc: Rate 0.12, Nper 12, Pmt -1000. `=FV(A2/12, A3, A4)` -> $12,682.50
+    test "the three-argument example is the doc's $12,682.50" do
+      assert_rel(eval!("FV(0.12/12, 12, -1000)"), 12_682.503013196976)
+      assert eval!("ROUND(FV(0.12/12, 12, -1000) * 100, 0)") == 1_268_250
+    end
+
+    # Doc: Rate 0.11, Nper 35, Pmt -2000, Type 1 -> $82,846.25
+    test "35 beginning-of-period payments at 11%/yr is the doc's $82,846.25" do
+      assert_rel(eval!("FV(0.11/12, 35, -2000, 0, 1)"), 82_846.24637190059)
+      assert eval!("ROUND(FV(0.11/12, 35, -2000, 0, 1) * 100, 0)") == 8_284_625
+    end
+
+    test "a zero rate just accumulates the payments" do
+      assert eval!("FV(0, 10, -200, -500)") == 2500
+    end
+  end
+
+  describe "PV — Excel's published PV example" do
+    # Doc: Rate 0.08, Nper 20 (years), Pmt 500 (paid out monthly).
+    # `=PV(A2/12, A3*12, A4, , 0)` -> ($59,777.15)
+    test "a 20-year 500/month annuity at 8%/yr is worth the doc's ($59,777.15)" do
+      assert_rel(eval!("PV(0.08/12, 20*12, 500, 0, 0)"), -59_777.14585118777)
+      assert eval!("ROUND(PV(0.08/12, 20*12, 500, 0, 0) * 100, 0)") == -5_977_715
+    end
+
+    test "PV and FV are the same identity solved for different unknowns" do
+      # PV answers the present value that makes the future value zero, so
+      # feeding it straight back into FV must return zero (to float noise).
+      assert_in_delta eval!("FV(0.05, 8, -300, PV(0.05, 8, -300))"), 0.0, 1.0e-9
+    end
+
+    test "a zero rate is the undiscounted sum" do
+      assert eval!("PV(0, 10, -100, 0)") == 1000
+    end
+  end
+
+  describe "NPER — Excel's published NPER examples" do
+    # Doc: Rate 0.12, Pmt -100, Pv -1000, Fv 10000, Type 1.
+    # `=NPER(A2/12, A3, A4, A5, A6)` -> 59.6738657
+    test "the five-argument example is the doc's 59.6738657" do
+      assert_rel(eval!("NPER(0.12/12, -100, -1000, 10000, 1)"), 59.67386567429457)
+      assert eval!("ROUND(NPER(0.12/12, -100, -1000, 10000, 1) * 10000000, 0)") == 596_738_657
+    end
+
+    # Doc: `=NPER(A2/12, A3, A4, A5)` -> 60.0821229
+    test "the same terms at type 0 are the doc's 60.0821229" do
+      assert_rel(eval!("NPER(0.12/12, -100, -1000, 10000)"), 60.08212285376166)
+      assert eval!("ROUND(NPER(0.12/12, -100, -1000, 10000) * 10000000, 0)") == 600_821_229
+    end
+
+    # Doc: `=NPER(A2/12, A3, A4)` -> -9.57859404
+    test "with no future value the term is the doc's -9.57859404" do
+      assert_rel(eval!("NPER(0.12/12, -100, -1000)"), -9.578594039813161)
+      assert eval!("ROUND(NPER(0.12/12, -100, -1000) * 100000000, 0)") == -957_859_404
+    end
+
+    test "a zero rate divides straight through; a zero payment there is #NUM!" do
+      assert eval!("NPER(0, -100, 1000)") == 10.0
+      assert eval!("NPER(0, 0, 1000)") == "#NUM!"
+    end
+
+    test "cash flows that never reach fv have no real term — #NUM!" do
+      # Paying IN 100 a period against a positive pv can never reach a positive
+      # fv: the log argument goes non-positive.
+      assert eval!("NPER(0.1, 100, 1000, 5000)") == "#NUM!"
+    end
+  end
+
+  describe "NPV — Excel's published NPV examples" do
+    # Doc: Rate 10%, values -10000 (a year from today), 3000, 4200, 6800.
+    # `=NPV(A2, A3, A4, A5, A6)` -> $1,188.44
+    test "the four-flow example is the doc's $1,188.44" do
+      assert_rel(eval!("NPV(0.1, -10000, 3000, 4200, 6800)"), 1_188.4434123352216)
+      assert eval!("ROUND(NPV(0.1, -10000, 3000, 4200, 6800) * 100, 0)") == 118_844
+    end
+
+    # Doc: Rate 8%, initial cost 40,000 TODAY, then 8000 9200 10000 12000 14500.
+    # `=NPV(A2, A4:A8)+A3` -> $1,922.06
+    @npv_flows %{
+      "A1" => %{"v" => 8000},
+      "A2" => %{"v" => 9200},
+      "A3" => %{"v" => 10_000},
+      "A4" => %{"v" => 12_000},
+      "A5" => %{"v" => 14_500}
+    }
+    test "a RANGE of five flows less a time-zero outlay is the doc's $1,922.06" do
+      assert_rel(eval!("NPV(0.08, A1:A5) - 40000", @npv_flows), 1_922.061554932363)
+      assert eval!("ROUND(NPV(0.08, A1:A5) * 100, 0) - 4000000", @npv_flows) == 192_206
+    end
+
+    # Doc: `=NPV(A2, A4:A8, -9000)+A3` -> ($3,749.47)
+    test "a sixth-year loss appended after the range is the doc's ($3,749.47)" do
+      assert_rel(eval!("NPV(0.08, A1:A5, -9000) - 40000", @npv_flows), -3_749.4650870155747)
+      assert eval!("ROUND(NPV(0.08, A1:A5, -9000) * 100, 0) - 4000000", @npv_flows) == -374_947
+    end
+
+    test "the off-by-one is real: the FIRST value is discounted one period" do
+      # A single flow of 110 at 10% is worth exactly 100 — not 110.
+      assert_rel(eval!("NPV(0.1, 110)"), 100.0)
+    end
+
+    test "position is the semantics — reordering the flows changes the answer" do
+      refute eval!("NPV(0.1, 100, 200)") == eval!("NPV(0.1, 200, 100)")
+    end
+
+    test "a rate of exactly -1 is #DIV/0!" do
+      assert eval!("NPV(-1, 100, 200)") == "#DIV/0!"
+    end
+  end
+
+  describe "IRR — Excel's published IRR examples" do
+    # Doc: -70000 business cost then 12000 15000 18000 21000 26000 of income.
+    @irr_flows %{
+      "A1" => %{"v" => -70_000},
+      "A2" => %{"v" => 12_000},
+      "A3" => %{"v" => 15_000},
+      "A4" => %{"v" => 18_000},
+      "A5" => %{"v" => 21_000},
+      "A6" => %{"v" => 26_000}
+    }
+
+    # Doc: `=IRR(A2:A6)` -> -2% (four years in)
+    test "after four years the return is the doc's -2%" do
+      assert_rel(eval!("IRR(A1:A5)", @irr_flows), -0.021244848273410943)
+      assert eval!("ROUND(IRR(A1:A5) * 10000, 0)", @irr_flows) == -212
+    end
+
+    # Doc: `=IRR(A2:A7)` -> 8.66% (five years in)
+    test "after five years the return is the doc's 8.66%" do
+      assert_rel(eval!("IRR(A1:A6)", @irr_flows), 0.0866309480365316)
+      assert eval!("ROUND(IRR(A1:A6) * 10000, 0)", @irr_flows) == 866
+    end
+
+    # Doc: `=IRR(A2:A4, -10%)` -> -44.35% (two years in, with a guess)
+    test "after two years, with the doc's -10% guess, the return is -44.35%" do
+      assert_rel(eval!("IRR(A1:A3, -0.1)", @irr_flows), -0.44350694133474045)
+      assert eval!("ROUND(IRR(A1:A3, -0.1) * 10000, 0)", @irr_flows) == -4435
+    end
+
+    test "the guess matters: the same two-year flows blow the domain by default" do
+      # Without the doc's -10% guess the Newton iterate leaves 1+r > 0 — #NUM!,
+      # which is exactly why Microsoft's example passes a guess.
+      assert eval!("IRR(A1:A3)", @irr_flows) == "#NUM!"
+    end
+
+    test "flows that never change sign have no root — #NUM! before any iteration" do
+      cells = %{"A1" => %{"v" => 100}, "A2" => %{"v" => 200}, "A3" => %{"v" => 300}}
+      assert eval!("IRR(A1:A3)", cells) == "#NUM!"
+
+      neg = %{"A1" => %{"v" => -100}, "A2" => %{"v" => -200}, "A3" => %{"v" => -300}}
+      assert eval!("IRR(A1:A3)", neg) == "#NUM!"
+    end
+
+    test "a chaotic orbit exhausts the 100-step bound and answers #NUM!" do
+      # These flows DO change sign, so the cheap pre-check passes and the
+      # iteration really runs; the Newton orbit wanders without settling, so the
+      # only thing that can end it is the step bound. This is the criterion's
+      # non-convergence case — and the proof the loop is bounded at all.
+      cells = %{
+        "A1" => %{"v" => 18},
+        "A2" => %{"v" => -9},
+        "A3" => %{"v" => -12},
+        "A4" => %{"v" => 7}
+      }
+
+      assert eval!("IRR(A1:A4)", cells) == "#NUM!"
+    end
+  end
+
+  describe "RATE — Excel's published RATE example" do
+    # Doc: 4 years of the loan, -200 monthly payment, 8000 borrowed.
+    # `=RATE(A2*12, A3, A4)` -> 1% monthly; `=RATE(A2*12, A3, A4)*12` -> 9.24%
+    test "a 4-year 8,000 loan at -200/month is the doc's 9.24% a year" do
+      assert_rel(eval!("RATE(4*12, -200, 8000)"), 0.007701472488201888)
+      assert eval!("ROUND(RATE(4*12, -200, 8000) * 12 * 10000, 0)") == 924
+    end
+
+    test "RATE inverts PMT — feeding a PMT back recovers the rate it was built from" do
+      assert_rel(eval!("RATE(120, PMT(0.004, 120, 25000), 25000)"), 0.004)
+    end
+
+    test "a no-root problem is #NUM! within the bounded iteration" do
+      # Borrowing 1000 AND paying 100 a period IN: the identity has no root, so
+      # the bounded Newton must give up — #NUM!, not a spin and not a raise.
+      assert eval!("RATE(10, 100, 1000)") == "#NUM!"
+      assert eval!("RATE(0, -100, 1000)") == "#NUM!"
+    end
+  end
+
+  describe "the financial batch's shared argument rules" do
+    test "a text argument is #VALUE! in every one of the seven" do
+      assert eval!(~s|PMT("x", 10, 1000)|) == "#VALUE!"
+      assert eval!(~s|FV(0.01, "x", 100)|) == "#VALUE!"
+      assert eval!(~s|PV(0.01, 10, "x")|) == "#VALUE!"
+      assert eval!(~s|NPER(0.01, -100, "x")|) == "#VALUE!"
+      assert eval!(~s|NPV("x", 100)|) == "#VALUE!"
+      assert eval!(~s|IRR("x")|) == "#VALUE!"
+      assert eval!(~s|RATE(10, -100, "x")|) == "#VALUE!"
+    end
+
+    test "a range in a scalar slot is #VALUE!" do
+      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}
+      assert eval!("PMT(0.01, 10, A1:A2)", cells) == "#VALUE!"
+      assert eval!("RATE(10, -100, A1:A2)", cells) == "#VALUE!"
+    end
+
+    test "an error argument propagates" do
+      assert eval!("PMT(1/0, 10, 1000)") == "#DIV/0!"
+      assert eval!("NPV(0.1, SQRT(-1))") == "#NUM!"
+      assert eval!("FV(0.01, 10, NA())") == "#N/A"
+    end
+
+    test "a type that is neither 0 nor 1 is #NUM!" do
+      assert eval!("PMT(0.01, 10, 1000, 0, 2)") == "#NUM!"
+      assert eval!("FV(0.01, 10, -100, 0, 2)") == "#NUM!"
+      assert eval!("PV(0.01, 10, -100, 0, -1)") == "#NUM!"
+      assert eval!("NPER(0.01, -100, 1000, 0, 5)") == "#NUM!"
+      assert eval!("RATE(10, -100, 1000, 0, 3)") == "#NUM!"
+    end
+
+    test "the wrong arity is #VALUE!, as it is for every known function" do
+      assert eval!("PMT(0.01, 10)") == "#VALUE!"
+      assert eval!("NPV(0.1)") == "#VALUE!"
+      assert eval!("IRR()") == "#VALUE!"
+      assert eval!("RATE(10, -100, 1000, 0, 0, 0.1, 9)") == "#VALUE!"
+    end
+  end
+
+  describe "the financial batch is in function_names/0 and function_specs/0" do
+    test "all seven names carry a name, args and a doc" do
+      names = Engine.function_names()
+      specs = Map.new(Engine.function_specs(), &{&1.name, &1})
+
+      for n <- ~w(PMT FV PV NPV IRR RATE NPER) do
+        assert n in names, "#{n} missing from function_names/0"
+        assert %{args: args, doc: doc} = specs[n]
+        assert args != []
+        assert String.ends_with?(doc, ".")
+      end
+    end
+
+    test "a stale financial import flips live once the engine knows the name" do
+      # The xlsx-import path: an imported PMT cell kept its cached value and a
+      # `stale` flag while the name was unknown. Now it recomputes decisively.
+      cells =
+        run(%{"A1" => %{"f" => "PMT(0.08/12, 10, 10000)", "v" => -1037.03, "stale" => true}})
+
+      refute Map.has_key?(cells["A1"], "stale")
+      assert_rel(cells["A1"]["v"], -1_037.0320893591636)
     end
   end
 end

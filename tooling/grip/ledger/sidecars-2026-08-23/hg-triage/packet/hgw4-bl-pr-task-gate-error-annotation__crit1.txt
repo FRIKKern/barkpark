@@ -1,0 +1,1 @@
+A real failing PR's check run carries the gate's actual refusal text in annotations[], not 'Process completed with exit code 1.'. Evidence: the annotations API response.

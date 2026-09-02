@@ -25,10 +25,10 @@ so the natural repo-relative invocation
 | `render.exs` | renders a fixture through the real `PortableDoc.Render` + the real bulldocs layout |
 | `shoot.mjs` | serves the rendered page on loopback and photographs it, asserting DOM content |
 | `census.mjs` | the heavy-rule census — one measurement function, run on the artifact AND on a rendered paper |
-| `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 7); nonzero on any content failure |
+| `gate.sh` | render + shoot a committed fixture (`heggemsnes-act` by default, `--panel` for all 8); nonzero on any content failure |
 | `baseline.sh` | the same path, writing into `baselines/` so a refresh is a reviewable diff |
 | `fetch-fixtures.sh` | pulls paper blocks from Barkpark via `bp` and rewrites `fixtures/*.json`; its default slug list is every **published** fixture (`design-probe` is authored and has no live doc — `eight-minute-erasure` once drifted purely by being absent from this list) |
-| `fixtures/` | 7 papers, each stamped with the `source_rev` it was taken from (`design-probe` is authored, not published) |
+| `fixtures/` | 8 papers, each stamped with the `source_rev` it was taken from (`design-probe` and `stat-partial-row` are authored, not published) |
 | `baselines/` | the committed panel (see below) |
 
 ## How it stays hermetic
@@ -108,9 +108,10 @@ default moves, the rig reds rather than silently re-baselining every shot.
 
 ## Baselines
 
-`baselines/` holds the 7-paper panel: `design-probe`, `eight-minute-erasure`,
+`baselines/` holds the 8-paper panel: `design-probe`, `eight-minute-erasure`,
 `heggemsnes-act`, `hobby-hardening-capstone`, `mechanical-spacing-doctrine`,
-`paper-excellence-wave-2026-08-12`, `portabledoc-showcase` — **full page**,
+`paper-excellence-wave-2026-08-12`, `portabledoc-showcase`, `stat-partial-row`
+— **full page**,
 light and dark, at **1280 and 1920**, `deviceScaleFactor: 2`, JPEG q72, plus a
 `*.report.json` per paper recording column width, **evidence-band width per
 component, prose characters-per-line, document horizontal overflow, the air
@@ -128,14 +129,28 @@ and blocked-request count — and, per cell, the four **crown measurements**
   margin, resolved through the existing `--bp-tone-*` / `--st-*` tokens — the
   device already ships on those tokens, **zero new tokens**, and this key is
   where a token remap or a dead tone class becomes a text diff.
-* **`h2Px`** — the rendered font-size + weight of a prose h2 (27px/600 today;
-  the display-scale device will move it, and this key is where that move is a
-  reviewable number).
+* **`h2Px`** — the rendered font-size + weight of a prose h2 (36px/400 since the
+  display-scale device, charter D29/D36 — was 27px/600; this key is where that
+  move is a reviewable number).
 * **`statTracks`** — the resolved grid track count of every `.bp-stats` strip
   (8 at 1920, 7 at 1280, 4 at 768, 1 at 360 today): the stat-density device's
   width signal. Absent elements record null-with-reason; a strip that is
   present but yields zero tracks **fails the run** — the measurement refusing
   to go vacuous.
+* **`statRemainder`** — per `.bp-stats` strip: the resolved track count, the
+  cell count, the number of EMPTY tracks in the last row (only a strip with two
+  or more rows can have any — `auto-fit` collapses a track that is empty in
+  every row, so a lone short row stretches to full width), and — when there
+  are any — what `elementFromPoint` hits at the centre of the first empty track
+  plus that element's computed background. The partial-last-row slab
+  (task-0098ba55d2642545): the hairline grid used to be a rule-tinted container
+  ground showing through 1px gaps, which painted every empty track as a solid
+  slab. The seams are drawn per cell now and the container is transparent, so
+  the probe **asserts** the hit is the strip's own container with a
+  transparent background; a fixture that carries a partial row but yields no
+  probe fails too (anti-vacuity). `stat-partial-row` is the committed fixture
+  that has one at every panel width (11 cells — prime, so no track count
+  divides it: 8+3 @1280, 9+2 @1920).
 
 ## The ingress-ratio arm
 

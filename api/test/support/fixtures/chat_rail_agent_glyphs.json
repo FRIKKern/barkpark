@@ -1,0 +1,48 @@
+{
+  "_note": [
+    "The AGENTS-RAIL agent-glyph truth table (task-5e88e691e0d6e31d). ONE fixture,",
+    "read by BOTH surfaces' tests:",
+    "  Elixir — api/test/barkpark_web/live/studio/chat_rail_agent_glyph_test.exs",
+    "           against BarkparkWeb.Studio.ChatLive.rail_agent_glyph/1",
+    "  Go     — internal/chat/rail_glyph_lock_test.go",
+    "           against chat.workflowAgentGlyph (internal/chat/render.go)",
+    "Before this fixture the two truth tables were hand-mirrored — the Go source",
+    "comment literally said 'mirrors Studio's rail_agent_glyph' — so a glyph edit",
+    "on one surface left both suites green while the surfaces disagreed.",
+    "",
+    "'state' is the workflow_agent node's wire state (case-insensitive; an empty",
+    "string stands for an ABSENT state, which reads live). 'terminal' and",
+    "'failed' are what StudioChat.workflow_node_terminal?/1 and",
+    "workflow_node_failed?/1 (Go: workflowStateTerminal / workflowStateFailed)",
+    "must answer for it, and 'glyph' is the character the rail paints.",
+    "",
+    "PRECEDENCE IS PART OF THE CONTRACT. The failure set is a SUBSET of the",
+    "terminal set, so every 'failed' case is ALSO terminal — failed is checked",
+    "FIRST on both surfaces, which is why those rows carry the failed glyph and",
+    "not the terminal one. Swap the two arms on either surface and the glyph SET",
+    "still matches while behaviour diverges; the both_failed_and_terminal rows",
+    "below are what catches that.",
+    "",
+    "Add a case here BEFORE changing either surface's glyphs or arm order."
+  ],
+  "glyphs": {
+    "failed": "✕",
+    "terminal": "✓",
+    "live": "●"
+  },
+  "cases": [
+    {"case": "a running agent breathes", "state": "start", "terminal": false, "failed": false, "glyph": "●"},
+    {"case": "mid-flight is still live", "state": "progress", "terminal": false, "failed": false, "glyph": "●"},
+    {"case": "an ABSENT state has not settled — live", "state": "", "terminal": false, "failed": false, "glyph": "●"},
+    {"case": "an unknown state is live, never a fake terminal", "state": "queued", "terminal": false, "failed": false, "glyph": "●"},
+    {"case": "a success terminal", "state": "done", "terminal": true, "failed": false, "glyph": "✓"},
+    {"case": "the other success terminal", "state": "completed", "terminal": true, "failed": false, "glyph": "✓"},
+    {"case": "case-insensitive success terminal", "state": "Done", "terminal": true, "failed": false, "glyph": "✓"},
+    {"case": "a failure terminal", "state": "failed", "terminal": true, "failed": true, "glyph": "✕"},
+    {"case": "an error node is a FAILURE terminal, never done (charter D58)", "state": "error", "terminal": true, "failed": true, "glyph": "✕"},
+    {"case": "one-l cancel", "state": "canceled", "terminal": true, "failed": true, "glyph": "✕"},
+    {"case": "two-l cancel", "state": "cancelled", "terminal": true, "failed": true, "glyph": "✕"},
+    {"case": "aborted", "state": "aborted", "terminal": true, "failed": true, "glyph": "✕"},
+    {"case": "case-insensitive failure terminal", "state": "ERROR", "terminal": true, "failed": true, "glyph": "✕"}
+  ]
+}

@@ -1,0 +1,1 @@
+The PR body states that the SPA ladder in cloud/priv/static/app.js remains NINE rungs and that this merge WIDENS the divergence, that it is D150-fenced to CCH and deliberately untouched, and that `grep -c attention_order cloud/priv/static/__app.test.mjs` = 0 proves the fixture edit cannot red the Cloud gate

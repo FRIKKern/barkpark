@@ -1,0 +1,1 @@
+MUTATION-PROVED: with the probe forced to a bad code (and separately, the restart forced to fail), the script's behaviour changes observably — both runs pasted.

@@ -1,0 +1,1 @@
+The surface stops claiming `current` for a release that is materially behind main, or explicitly and deliberately keeps doing so with a written reason. Evidence: the rendered `bp cloud status` output and the code path.

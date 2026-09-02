@@ -1519,11 +1519,11 @@ const activeSub = {
   trial_days_remaining: null,
 };
 
-// ── G-06 members + env-vars fixtures ─────────────────────────────────────────
+// ── G-06 members fixtures ────────────────────────────────────────────────────
 // Envelope shapes are the real serializers: member_json {user_id, email, role,
-// joined_at}; invitation_json {id, email, role, expires_at, inserted_at};
-// env_var_json {id, key, scope, barkpark_id, is_secret, is_shown_once, comment,
-// inserted_at, updated_at} — the VALUE is never in the payload (sealed at rest).
+// joined_at}; invitation_json {id, email, role, expires_at, inserted_at}.
+// The env-var fixtures that lived beside these went with the team env-var
+// feature (ruled 2026-09-02, Option A — zero prod rows ever).
 // usr_ada is the me() user, so the roster tags it "(you)" and never offers a
 // self-remove. THREE roles only (owner/admin/member).
 const teamMembers = [
@@ -1554,35 +1554,6 @@ function corpusActorEmail(userId) {
 const teamInvites = [
   { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
   { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
-];
-// Both scopes + a secret + a write-once + a comment row, so one shot proves the
-// whole grammar: DATABASE_URL (team secret, commented), STRIPE_SECRET_KEY (team,
-// write-once → sealed-and-unreplaceable note), PUBLIC_SITE_URL (team, non-secret,
-// commented), WORKER_TOKEN (instance-scoped secret).
-// cch-w24-s7 — THE CRUEL ENV COMMENT, on the row that already carried one, so
-// the row census and every count assertion over these four rows is unmoved.
-// ADMISSIBILITY: `EnvVar.changeset/2` does `validate_length(:comment, max: 255)`
-// — 255 and NOT 1000, because the column is a bare `add :comment, :string`
-// (varchar(255)) that no migration ever widened. Re-derive:
-//   grep -n 'validate_length(:comment' cloud/lib/barkpark_cloud/registry/env_var.ex
-// So 255 unbroken characters is the WIDEST string the server will store here,
-// and it is server data painted verbatim into `.set-row-note` by the env row
-// builder (grep -n 'set-row-note' cloud/priv/static/app.js) — a user typed it,
-// so it wraps or it escapes. The realistic producer is a paste: an operator
-// documenting a rotation by dropping the whole reference in, spaces and all
-// eaten by the paste. Same regression-pin logic as the cruel site row: on
-// today's CSS the `.set-row-note` wrap already shipped and the yield is ZERO;
-// deleting that wrap is what this string exists to make red.
-const CRUEL_ENV_COMMENT = atLength("env comment",
-  "rotatedbyplatformautomationduringthenortherneuropeanregionalfailover" +
-  "exerciseandthenrecordedhereverbatimbecausethecommentfieldwastheonly" +
-  "placetheoperatorcouldreachwithoutanadmingrantseerunbookentrytwenty" +
-  "sixzeroeightzerotwoacmegroupholdingsinfrastructure2026", 255);
-const teamEnvVars = [
-  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: CRUEL_ENV_COMMENT, inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
-  { id: "env_stripe", key: "STRIPE_SECRET_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: true, comment: null, inserted_at: tMinus(60 * 86400), updated_at: tMinus(60 * 86400) },
-  { id: "env_url", key: "PUBLIC_SITE_URL", scope: "team", barkpark_id: null, is_secret: false, is_shown_once: false, comment: "Canonical URL used in outbound emails", inserted_at: tMinus(30 * 86400), updated_at: tMinus(30 * 86400) },
-  { id: "env_worker", key: "WORKER_TOKEN", scope: "barkpark", barkpark_id: IDS.liveInstance, is_secret: true, is_shown_once: false, comment: null, inserted_at: tMinus(5 * 86400), updated_at: tMinus(5 * 86400) },
 ];
 
 // ── usage envelope (GET /v1/barkparks/:id/usage — Usage.compose/1 shape) ──────
@@ -2987,7 +2958,7 @@ export const SCENARIOS = {
     },
   },
 
-  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // ── G-06 Members (Settings wave, phase 4) ─────────────────────────────────
   // The roster on the GR33 .set-* anatomy: mixed roles (owner "(you)" / admin /
   // member), the admin-only pending-invitations card, per-manageable-row Change
   // role + Remove (destroy-tier typed-confirm, click-driven).
@@ -3085,55 +3056,6 @@ export const SCENARIOS = {
       audit: [],
       members: teamMembersPeerOwner,
       invitations: teamInvites,
-    },
-  },
-  // Env-vars (admin): the row grammar end-to-end — team + instance scopes, a
-  // secret, a write-once (sealed, unreplaceable-in-place note), a comment, and
-  // the add-var FORM section with its .set-save-row.
-  "env-populated": {
-    label: "Environment variables (admin) — rows + add form (secret / write-once / scopes)",
-    authed: true,
-    deepLink: "#settings/env",
-    data: {
-      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
-      barkparks: [liveInstance],
-      subscription: activeSub,
-      sites: [],
-      audit: [],
-      envVars: teamEnvVars,
-    },
-  },
-  // The write-once 409: the same populated rows, but the add-form POST is pinned
-  // to the server's 409 write_once (the collision the form surfaces inline). The
-  // per-row sealed note renders regardless; the 409 copy is unit-pinned via
-  // envVarWriteFailureCopy (the submit is click-driven, inert in smoke).
-  "env-write-once-409": {
-    label: "Environment variables — write-once collision (POST → 409 write_once)",
-    authed: true,
-    deepLink: "#settings/env",
-    data: {
-      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
-      barkparks: [liveInstance],
-      subscription: activeSub,
-      sites: [],
-      audit: [],
-      envVars: teamEnvVars,
-      envPost: { status: 409, body: { error: "write_once" } },
-    },
-  },
-  // Env-vars (member): read-only rows, NO add form, NO Delete buttons (access
-  // model member-read/admin-write; E-03's any-member-write does NOT transfer).
-  "env-member": {
-    label: "Environment variables (member) — read-only rows, no add form",
-    authed: true,
-    deepLink: "#settings/env",
-    data: {
-      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
-      barkparks: [liveInstance],
-      subscription: activeSub,
-      sites: [],
-      audit: [],
-      envVars: teamEnvVars,
     },
   },
 
@@ -5071,7 +4993,7 @@ function sessionsOf(d, state) {
 }
 
 // cch-w10-destroy-shrink-oracle-merged — sessionsOf's SHAPE, generalised to the
-// other lists a destroy verb shrinks (providers, members, invitations, env-vars,
+// other lists a destroy verb shrinks (providers, members, invitations,
 // barkparks). The three properties that make a shrink OBSERVABLE, all inherited
 // verbatim from sessionsOf and all load-bearing:
 //   1. OPT-IN. No `state` → the old read-only `.slice()`, byte-for-byte. mock.js
@@ -5766,25 +5688,6 @@ export function route(name, method, path, state) {
   const inviteOne = p.match(/^\/v1\/teams\/[^/]+\/invitations\/([^/]+)$/);
   if (inviteOne && method === "DELETE") {
     return destroyFrom(listOf(d, state, "invitations"), state, (x) => x.id === inviteOne[1]);
-  }
-
-  // G-06 ENV-VARS: the ROW model (member-read / admin-write). GET is member-
-  // readable → a scenario's `envVars` fixture (absent → honest empty). POST is
-  // admin-only: `envPost` lets the env-write-once-409 scenario pin the write_once
-  // 409 the form surfaces inline; absent → a benign 201 echo. DELETE → 200.
-  if (p === "/v1/env-vars") {
-    if (method === "POST") {
-      return d.envPost || {
-        status: 201,
-        body: { env_var: { id: "env_new", key: "NEW_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: null, inserted_at: T, updated_at: T } },
-      };
-    }
-    if (d.envVarsDenied) return { status: 403, body: { error: "forbidden" } };
-    return { status: 200, body: { env_vars: listOf(d, state, "envVars") } };
-  }
-  const envOne = p.match(/^\/v1\/env-vars\/([^/]+)$/);
-  if (envOne && method === "DELETE") {
-    return destroyFrom(listOf(d, state, "envVars"), state, (x) => x.id === envOne[1]);
   }
 
   // gr-p5 OPERATOR: the session-gated /v1/operator/* seam. `operatorDenied`

@@ -1,0 +1,1 @@
+If set: paste an HTTP 200 from GET /v1/operator/deploy-ledger/census with the named account's credential

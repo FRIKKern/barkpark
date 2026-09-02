@@ -1,0 +1,1 @@
+THE COLUMN IS READ, NOT INFERRED: `cloud/priv/repo/migrations` is searched for the `error` column definition and its type/limit is quoted, settling whether the field is uncapped at the database as well as at the changeset.

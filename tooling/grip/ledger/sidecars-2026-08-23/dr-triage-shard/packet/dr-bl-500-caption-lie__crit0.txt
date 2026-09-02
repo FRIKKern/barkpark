@@ -1,0 +1,1 @@
+box_refusal/2 records the PHASE (start vs poll beat) so a start-time crash is distinguishable from a mid-build one.

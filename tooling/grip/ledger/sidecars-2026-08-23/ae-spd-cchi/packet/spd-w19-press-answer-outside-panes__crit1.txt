@@ -1,0 +1,1 @@
+Exactly ONE aria-live region exists in the served HTML after the change (grepped from the response body, not asserted).

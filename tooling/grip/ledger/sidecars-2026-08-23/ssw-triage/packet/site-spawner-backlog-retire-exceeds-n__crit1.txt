@@ -1,0 +1,1 @@
+A fail-before self-test drives at least ten deploys plus rollback/forward-rollback permutations and asserts exact retained IDs and counts after every retire, including the former seven-at-five sequence.

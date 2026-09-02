@@ -1,0 +1,1 @@
+`CC=/usr/bin/clang go build ./... && go vet ./internal/cli/... ./internal/semrole/... && go test ./internal/cli/... ./internal/semrole/...` is green AND `node --check cloud/priv/static/app.js && node --test cloud/priv/static/__app.test.mjs` is green (baseline 887/887/0) — both outputs pasted.

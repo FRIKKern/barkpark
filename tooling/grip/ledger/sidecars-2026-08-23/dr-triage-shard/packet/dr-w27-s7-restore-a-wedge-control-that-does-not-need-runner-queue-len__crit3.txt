@@ -1,0 +1,1 @@
+The UNPINNED notes left by dr-w26-s7 in router.ex, the controller moduledoc and the test moduledoc are updated to point at the restored control.

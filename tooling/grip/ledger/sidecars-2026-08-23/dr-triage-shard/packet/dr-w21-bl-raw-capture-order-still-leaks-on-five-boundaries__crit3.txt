@@ -1,0 +1,1 @@
+A boundary test covers the HTTP/API payload (a %{conn} fixture), not only the email body — main's merged suite at notifications/failure_raw_boundary_test.exs is 5 email tests and does not reach the API surface.

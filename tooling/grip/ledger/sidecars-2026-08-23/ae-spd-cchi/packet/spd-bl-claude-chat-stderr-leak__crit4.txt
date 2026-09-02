@@ -1,0 +1,1 @@
+The file is run repeatedly under deliberate CPU contention and stays green, with the run count and the load method quoted.

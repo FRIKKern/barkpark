@@ -1,0 +1,1 @@
+The stage_caption leak test still passes and still FAILS if raw/1 is reverted to a bare scrub (mutation-proved, not read).

@@ -1,0 +1,1 @@
+The auto-proof zombie registration (secret on the CP, no row on the box) is resolved so a backfill run cannot silently raise the fan-out to six.

@@ -1,0 +1,1 @@
+The handover states the corrected minimum diff (25 lines app.js + 13 harness, a real render change through statusPill at six sites) so the receiving wave does not re-derive the refuted 'five lines' grant. Evidence: the quoted row description.

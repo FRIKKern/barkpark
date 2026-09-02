@@ -1,0 +1,1 @@
+The survivor names its owning epic/fence explicitly (cloud-console-hardening holds app.js and __app.test.mjs) and cites charter D68/D150 so nobody takes the edit unilaterally.

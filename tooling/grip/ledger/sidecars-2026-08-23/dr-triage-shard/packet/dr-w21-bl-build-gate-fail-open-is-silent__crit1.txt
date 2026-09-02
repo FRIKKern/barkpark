@@ -1,0 +1,1 @@
+The incidence is RE-TAKEN before any build, over the full journal, printing matches rather than counting them (journalctl -g prints `-- No entries --` on no match, so `| wc -l` reads 1). A second measured zero is a legitimate close.

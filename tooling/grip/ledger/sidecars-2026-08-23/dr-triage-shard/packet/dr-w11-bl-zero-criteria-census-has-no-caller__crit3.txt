@@ -1,0 +1,1 @@
+The census is re-run against the deploy-reliability epic AFTER a subsequent wave has filed its own tasks, and reports 0 — the class reproduces faster than a hand count, so surviving one wave is the only proof that matters.

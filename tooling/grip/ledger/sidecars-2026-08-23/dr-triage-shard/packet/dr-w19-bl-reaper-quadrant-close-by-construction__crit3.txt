@@ -1,0 +1,1 @@
+NO guard asserting the quadrant is empty is added, and the PR body states why (n=0 measured twice; a guard over an empty set cannot lose).

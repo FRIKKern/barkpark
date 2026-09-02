@@ -1,0 +1,1 @@
+Each row reads back from the PUBLISHED ledger as lifecycle done with N/N criteria met — verified by re-reading, since a printed rev is not persistence.

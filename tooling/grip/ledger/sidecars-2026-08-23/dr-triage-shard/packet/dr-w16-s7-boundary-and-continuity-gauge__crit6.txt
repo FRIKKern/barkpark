@@ -1,0 +1,1 @@
+IT CAN LOSE: a genuine repair (a class dying with its share NOT absorbed elsewhere) prints :repaired, an unpaired arrival prints :new_cause, and a class absent from both windows is SILENT. Paste all three

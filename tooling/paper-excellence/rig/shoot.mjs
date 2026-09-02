@@ -732,6 +732,48 @@ async function main() {
             });
           }
 
+          // ── the partial last row (task-0098ba55d2642545, charter D36) ──────
+          // A strip whose cell count is not a multiple of its track count leaves
+          // EMPTY tracks in its last row, and whatever the container paints shows
+          // there. The hairline grid used to be a rule-tinted container ground
+          // seen through 1px gaps, so the remainder rendered as a solid slab — a
+          // geometry no published fixture happened to hit. Measured per strip:
+          // the empty-track count, and when there are any, what an element probe
+          // at the CENTRE of the first empty track hits and that element's
+          // background. A slab is the strip's own container hit with a tinted
+          // background; the remedy leaves it transparent. Asserted below.
+          // ONLY a strip with TWO OR MORE rows can have one: `auto-fit`
+          // collapses a track that is empty in EVERY row, so a single row of 4
+          // cells over 8 tracks stretches the 4 to full width and there is no
+          // remainder to probe (design-probe, measured 2026-09-02 — the probe
+          // point landed outside the strip). With a full row above, the empty
+          // tracks of the last row are occupied above and stay open.
+          // `elementFromPoint` needs viewport coordinates, so the strip is
+          // scrolled into view for the probe and the page is scrolled back — a
+          // full-page capture is unaffected by scroll position.
+          const statRemainder = statStrips.map((el, i) => {
+            const cells = [...el.children].filter((c) => c.classList.contains("bp-stat"));
+            const tracks = statTracks[i];
+            const remainder = tracks > 0 && cells.length > tracks ? (tracks - (cells.length % tracks)) % tracks : 0;
+            const out = { tracks, cells: cells.length, emptyTracks: remainder, probe: null };
+            if (remainder === 0) return out;
+            el.scrollIntoView({ block: "center" });
+            const last = cells[cells.length - 1].getBoundingClientRect();
+            // The gap is 1px; the first empty track starts one gap after the last cell.
+            const x = last.right + 1 + last.width / 2;
+            const y = last.top + last.height / 2;
+            const hit = document.elementFromPoint(x, y);
+            const describe = (n) =>
+              n ? n.tagName.toLowerCase() + (n.classList.length ? "." + [...n.classList].join(".") : "") : null;
+            out.probe = {
+              hit: describe(hit),
+              hitIsStrip: hit === el,
+              hitBackground: hit ? getComputedStyle(hit).backgroundColor : null,
+            };
+            window.scrollTo(0, 0);
+            return out;
+          });
+
           return {
             wrapper: true,
             classes: main.className,
@@ -758,6 +800,7 @@ async function main() {
             h2Px,
             statTracks,
             statTracksNote,
+            statRemainder,
             docOverflow: round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
             clientWidth: document.documentElement.clientWidth,
           };
@@ -961,6 +1004,37 @@ async function main() {
           );
         }
         assertions += (seen.ingressPresent ? 2 : 0) + (seen.statTracks === null ? 0 : 1);
+        // The partial last row must be page ground, not a slab. Anti-vacuity
+        // first: a strip WITH empty tracks must yield a probe — a probe that
+        // silently skipped the geometry it was built for is the vacuous green.
+        // Then the hit: the strip's own transparent container. A cell or a kilde
+        // there means the geometry was mis-measured; a tinted container is the
+        // slab (rgba(0, 0, 0, 0) is what Chromium reports for `transparent`).
+        // Red-before (2026-09-02): with `background: var(--paper-rule)` restored
+        // on `.bp-paper-surface .bp-stats`, stat-partial-row reds here —
+        // "the container's background is rgb(221, 231, 226), not transparent"
+        // (light, evergreen pin) — and goes green again once it is removed.
+        for (const s of seen.statRemainder ?? []) {
+          if (s.emptyTracks === 0) continue;
+          if (!s.probe) {
+            fail(`${cell}: a .bp-stats strip has ${s.emptyTracks} empty track(s) in its last row but the remainder probe yielded nothing — the slab arm went vacuous`);
+          }
+          if (!s.probe.hitIsStrip) {
+            fail(
+              `${cell}: the remainder probe (${s.cells} cells over ${s.tracks} tracks, ${s.emptyTracks} empty) hit ` +
+                `${s.probe.hit ?? "nothing"}, not the strip's own container — the empty-track geometry was mis-measured`,
+            );
+          }
+          if (s.probe.hitBackground !== "rgba(0, 0, 0, 0)") {
+            fail(
+              `${cell}: the partial last row of a .bp-stats strip (${s.cells} cells over ${s.tracks} tracks, ` +
+                `${s.emptyTracks} empty) paints as a slab — the container's background is ${s.probe.hitBackground}, ` +
+                `not transparent. The seams belong to the CELLS (paper-surface.css \`.bp-stats .bp-stat\`), ` +
+                `never to a container ground the empty tracks would show`,
+            );
+          }
+          assertions += 3;
+        }
 
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a

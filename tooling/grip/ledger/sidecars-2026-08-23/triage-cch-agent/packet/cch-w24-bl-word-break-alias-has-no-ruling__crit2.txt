@@ -1,0 +1,1 @@
+NOT converted mechanically: no site changes without a measurement or a written reason, because a conversion with no fixture that could make it fail is this epic's own first clause. Evidence: the diff, showing every touched site paired with its number or its sentence.

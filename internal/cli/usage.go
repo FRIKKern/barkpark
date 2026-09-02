@@ -444,6 +444,54 @@ func soleReadVerb(n *manifest.TreeNoun, typed string) (*manifest.Command, bool) 
 	return sole, true
 }
 
+// argShapedToken reports whether the token typed where a verb belongs CANNOT be
+// a verb: it contains whitespace. No manifest verb has ever carried a space, so
+// such a token is definitively an ARGUMENT the caller forgot to put a verb in
+// front of (`bp search "PDS crown proof"`). This is a structural fact about the
+// token, not a guess about intent — which is why the multi-verb suggestion below
+// is allowed to fire on it while `soleReadVerb`'s AUTO-RUN still is not.
+func argShapedToken(typed string) bool {
+	return strings.ContainsAny(typed, " \t\n")
+}
+
+// freeTextReadVerbs returns the verbs of n that could plausibly consume a
+// free-text argument, in the manifest's own declared order: NON-WRITING (a
+// destructive verb is never suggested for a fat-fingered invocation) and
+// declaring exactly ONE required string arg (so the typed phrase fills it
+// exactly). Nothing is inferred beyond the manifest's own declarations.
+//
+// WHY THIS EXISTS. `soleReadVerb` / `noVerbMsg`'s did-you-mean arm fire only
+// when a noun declares exactly ONE verb. The live server declares THIRTEEN for
+// `search`, so on a real server `bp search "<phrase>"` got a bare 13-verb list
+// and never the runnable fix — while the regression test that claimed to cover
+// it (TestExecuteRealNounFreeTextInfersSoleVerb) used a fixture whose `search`
+// noun has a single verb, so it was green and unreachable from production.
+// A lead read one such result as "nothing found", concluded a row was unfiled,
+// and a near-duplicate PR was built on a 7390-line file.
+func freeTextReadVerbs(n *manifest.TreeNoun) []*manifest.Command {
+	var out []*manifest.Command
+	for _, c := range n.Verbs {
+		if c.Writes {
+			continue
+		}
+		required := 0
+		stringy := true
+		for _, a := range c.Args {
+			if !a.Required {
+				continue
+			}
+			required++
+			if a.Type != "" && a.Type != "string" {
+				stringy = false
+			}
+		}
+		if required == 1 && stringy {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // noVerbMsg is the error line for a REAL noun followed by no valid verb. It
 // never says the noun is unknown (that was the bug), and it carries the fix in
 // the message itself — which matters because `-o json` renders only this string
@@ -469,6 +517,26 @@ func noVerbMsg(n *manifest.TreeNoun, noun, typed string) string {
 	}
 	if len(verbs) == 0 {
 		return base + "; it declares no verbs"
+	}
+	// MULTI-VERB NOUN + an ARGUMENT-SHAPED token. Nothing is auto-run here (never
+	// guess a caller into one of thirteen verbs), but the message must still hand
+	// back something RUNNABLE instead of a list to shop from. The named verb is
+	// the FIRST free-text read verb in the manifest's own declared order — the
+	// same ordering `noVerbMsg` already trusts for `n.Verbs[0]` above — and any
+	// other candidate is disclosed by name so the suggestion never pretends to be
+	// the only answer. Exit code is unchanged (exitUsage): this is copy, not a
+	// new success path.
+	if cands := freeTextReadVerbs(n); len(cands) > 0 && argShapedToken(typed) {
+		msg := fmt.Sprintf("%s, but %q contains spaces so it is an ARGUMENT, not a verb; did you mean `barkpark %s %s %q`?",
+			base, typed, noun, cands[0].Verb, typed)
+		if len(cands) > 1 {
+			others := make([]string, 0, len(cands)-1)
+			for _, c := range cands[1:] {
+				others = append(others, c.Verb)
+			}
+			msg += fmt.Sprintf(" (other verbs taking a free-text argument: %s)", strings.Join(others, ", "))
+		}
+		return msg + fmt.Sprintf(" All verbs: %s", strings.Join(verbs, ", "))
 	}
 	return fmt.Sprintf("%s with verbs: %s", base, strings.Join(verbs, ", "))
 }
@@ -500,6 +568,12 @@ func verbHint(tree *manifest.Tree, noun, typed string) string {
 	}
 	if best, ok := nearestVerb(typed, verbs); ok {
 		return "barkpark " + noun + " " + best
+	}
+	// Not a typo of any verb — but an argument-shaped token on a noun with a
+	// free-text read verb still has ONE runnable correction, and the `-o json`
+	// envelope's `hint` is the field a scripted caller actually executes.
+	if cands := freeTextReadVerbs(n); len(cands) > 0 && argShapedToken(typed) {
+		return fmt.Sprintf("barkpark %s %s %q", noun, cands[0].Verb, typed)
 	}
 	return ""
 }

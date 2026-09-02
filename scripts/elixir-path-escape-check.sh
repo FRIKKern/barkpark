@@ -96,12 +96,18 @@ set -euo pipefail
 #   the full suite it is gating. gate-announces-skips.test.sh joins them for the
 #   same reason: it is executed by elixir.yml's unfiltered `path-escape` job, so
 #   a change to it is a change to what this required context asserts.
+#   prod-build-cache-guard.sh joins them for the strongest version of that
+#   reason: mix-prod-compile EXECUTES it, and its verdict decides whether that
+#   required gate compiles against a restored dependency tree or rebuilds from
+#   scratch. A PR that edited only the guard would otherwise change what the
+#   prod-compile gate does while skipping the prod-compile gate.
 ELIXIR_COMPILE_PATHS='api/**
 design/**
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh
-scripts/gate-announces-skips.test.sh'
+scripts/gate-announces-skips.test.sh
+scripts/prod-build-cache-guard.sh'
 
 # TEST-ONLY set — fixture/mirror trees read by tests but never compiled against.
 # Each entry is a MEASURED read, not a guess; see --list-escapes for the census.
@@ -210,16 +216,19 @@ ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 api/assets/sheet-grid/**
+apps/mobile/src/papers/portabledoc/blocks/sheet.tsx
 cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh
 docs/api-v1.md
+docs/api/error-codes.md
 docs/openapi.json
 internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
 scripts/check-deployyml-filters.sh

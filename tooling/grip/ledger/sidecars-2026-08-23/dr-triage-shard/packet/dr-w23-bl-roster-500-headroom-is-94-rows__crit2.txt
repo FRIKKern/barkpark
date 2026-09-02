@@ -1,0 +1,1 @@
+The deploy-reliability roster size is re-derived and recorded on the day the fix lands, so the headroom claim is not inherited.

@@ -1,0 +1,1 @@
+NEGATIVE CLAMP: a test drives the residual negative and asserts the render prints the undefined-residual sentence, never a negative number.

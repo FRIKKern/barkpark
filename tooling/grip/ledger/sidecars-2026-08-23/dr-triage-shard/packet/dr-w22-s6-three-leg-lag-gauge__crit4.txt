@@ -1,0 +1,1 @@
+The recorder's key is `(sha, delivering_run_id, first_seen_at)`. The PR body states charter D385's number — 180 of 493 merges (36.5%) delivered by a later run, 179 runs evicted as cancelled — as the reason a sha-only key reproduces the bug.

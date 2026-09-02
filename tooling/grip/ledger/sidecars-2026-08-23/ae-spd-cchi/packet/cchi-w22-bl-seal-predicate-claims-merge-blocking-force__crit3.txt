@@ -1,0 +1,1 @@
+`.github/required-checks.json` is NOT modified by this row. Evidence: `git diff --name-only` showing it absent.

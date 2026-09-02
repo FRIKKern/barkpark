@@ -1,0 +1,1 @@
+A live query re-derives the current shape (distinct shas vs distinct build_seconds per write event) with its timestamp. Evidence: the query output.

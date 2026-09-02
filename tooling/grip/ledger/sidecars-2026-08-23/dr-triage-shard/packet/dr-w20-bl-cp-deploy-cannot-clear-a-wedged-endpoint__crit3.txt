@@ -1,0 +1,1 @@
+The docker version deploy/ expects is pinned or asserted, and deploy/instance-deploy.sh gains the same handling or the PR body states why the content box does not need it.

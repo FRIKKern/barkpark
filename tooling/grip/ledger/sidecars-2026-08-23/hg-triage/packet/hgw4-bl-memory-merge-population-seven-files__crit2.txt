@@ -1,0 +1,1 @@
+always-merge-prs.md's hard-coded TRUE-blocking-gates list is replaced by a pointer to .github/required-checks.json. Evidence: the diff.

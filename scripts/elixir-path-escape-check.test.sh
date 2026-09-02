@@ -1289,6 +1289,7 @@ check_match "internal/taskboard/components.go" compile false
 check_match "internal/chat/testdata" test true
 check_match "docs/openapi.json" test true
 check_match "docs/api-v1.md" test true
+check_match "docs/api/error-codes.md" test true
 # exact-file entries must not match by prefix
 check_match "docs/openapi.json.bak" test false
 check_match "scripts/async_env_seam_scan.exs.orig" test false

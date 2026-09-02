@@ -1,0 +1,1 @@
+The six landed wave-30 slices are closed against their PR mergeCommit oids (not branch names), and their lapsed epic-builder claims are cleared so none appears in `bp task ready`.

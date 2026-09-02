@@ -1,0 +1,1 @@
+GATE: `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go vet ./internal/cli/... && CGO_ENABLED=0 go test ./internal/cli/ -run 'Deliver'` is green; paste the full output.

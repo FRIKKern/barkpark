@@ -1,0 +1,1 @@
+The two-cause split is re-derived, not inherited: verify run against a 5-context candidate exits 1 naming BOTH the MISSING-from-live drift and the required-checks-drift.yml advisory-prose hit. Evidence: the run output with its rc read by redirect, never through a pipe.

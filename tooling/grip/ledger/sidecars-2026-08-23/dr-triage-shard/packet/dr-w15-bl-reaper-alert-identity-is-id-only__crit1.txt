@@ -1,0 +1,1 @@
+A producer-level test drives a reap and asserts the fuller identity line in the delivered email body

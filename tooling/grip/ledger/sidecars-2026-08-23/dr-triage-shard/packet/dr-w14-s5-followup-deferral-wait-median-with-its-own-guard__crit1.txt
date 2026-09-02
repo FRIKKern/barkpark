@@ -1,0 +1,1 @@
+Still-open, page-truncated and abandoned chains are REPORTED as censored lower bounds beside a page-ran-out marker, not dropped from the sample

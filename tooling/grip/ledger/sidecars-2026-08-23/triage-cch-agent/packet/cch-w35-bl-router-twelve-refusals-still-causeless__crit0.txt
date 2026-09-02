@@ -1,0 +1,1 @@
+Each of the twelve sites is triaged into tier 1/2/3 with its actual denial condition quoted from origin/main. Evidence: the table.

@@ -427,7 +427,7 @@ defmodule Barkpark.Tasks.Query do
   defp load_task_schema(query, scope, opts) do
     dataset = Keyword.get(opts, :dataset) || Map.get(filter_of(query), "dataset") || "production"
 
-    case Barkpark.Content.get_schema("task", dataset, scope) do
+    case Barkpark.Content.Schema.get_schema_for_redaction("task", dataset, scope) do
       {:ok, schema} -> schema
       _ -> nil
     end

@@ -1,0 +1,1 @@
+The probe follows or accounts for the redirect, or the unit is configured so the probed path matches what the app serves — proven by the three units reaching active state.

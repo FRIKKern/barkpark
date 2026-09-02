@@ -1,0 +1,1 @@
+If section 18's term list is widened, every newly matched instance in the tree is re-classified into the existing four-way split (live claim / dated retraction / dated record / not-a-claim) and the classification is quoted per instance — a widened regex with unclassified members is refused, because that split is what keeps the guard from redding truths.

@@ -1,0 +1,1 @@
+Each coverage cohort carries a bounded, truncation-marked list naming the sites whose rows are never covered, respecting the existing site_limit option and the truncated: pattern used by the sites node. Evidence: the emitted node pasted from a test.

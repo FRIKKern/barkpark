@@ -1,0 +1,1 @@
+The expected-file floor in the grip CI workflow (if merged by then) is bumped to match, or the bump is filed. Evidence: paste the floor value or the filed row id.

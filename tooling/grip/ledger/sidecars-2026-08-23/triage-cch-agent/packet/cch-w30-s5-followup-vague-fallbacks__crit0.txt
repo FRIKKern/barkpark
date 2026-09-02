@@ -1,0 +1,1 @@
+app.js:5678 and app.js:12530 no longer render a hardcoded connection sentence for a 5xx — each is routed through faultCopy or an equivalent status check, pinned by a node test asserting the rendered string for a 500 and for status 0.

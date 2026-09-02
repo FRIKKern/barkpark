@@ -1,0 +1,1 @@
+`vercel_deploy_url`'s key rename is recorded in the ledger entry as `from: vercel.ex:107 (serialized as deployment_url)`, so a name-keyed grep can never again declare it unrendered. Evidence: the entry.

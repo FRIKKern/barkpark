@@ -1,0 +1,1 @@
+The scope is MEASURED before anything is built: count how many open children of this epic carry a `path:NNN` anchor in their description, and how many of those anchors still land on a plausible match at HEAD. Quote both numbers — if the stale share is small the right answer may be the convention alone.

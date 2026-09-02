@@ -1,0 +1,1 @@
+`defp site_row(site_id, rows)` exists as a single-clause named producer returning the per-site map literal, and site_rows/2 calls it. Paste the diff hunk

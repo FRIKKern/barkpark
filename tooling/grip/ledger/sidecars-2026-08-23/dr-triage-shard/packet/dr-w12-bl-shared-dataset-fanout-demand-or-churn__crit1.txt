@@ -1,0 +1,1 @@
+If churn: the amplification is reduced and the attempts-per-publish ratio is re-measured before and after

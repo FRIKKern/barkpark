@@ -15,6 +15,7 @@ The OnixEdit plugin exports `book` documents as ONIX 3.0 XML and ships them to B
 Constraints:
 - **D12:** the `book` schema (v2 field types) is TUI **read-only** — JSON dump in the TUI, editing in Studio. → docs/contracts/schema-v2.md.
 - Field → submodule+function index, ERRATA (codelistId 162→86; list 93 ≠ Thema), RecordReference global-uniqueness → docs/contracts/onix-field-map.md (canonical).
+- **RecordReference host** = `ONIX_DATASET_HOST` (default `barkpark.cloud`), resolved at export time by `Export.dataset_host/0`; the per-export `:dataset_host` opt still wins, and a malformed value raises at boot. It is an identifier NAMESPACE, so a self-hoster must set it BEFORE the first submission — changing it later re-identifies every record a partner already holds.
 - Bokbasen wire contract: no-ONIXMessage-wrapper rejection, OAuth sender identity, size limits, creds setup, credential-redaction rule, known gotchas → docs/contracts/bokbasen.md (canonical).
 - Go-live checklist (Oban concurrency=4) → docs/ops/bokbasen-go-live.md.
 - EDItEUR/Thema license posture → api/priv/codelists/README.md (canonical).

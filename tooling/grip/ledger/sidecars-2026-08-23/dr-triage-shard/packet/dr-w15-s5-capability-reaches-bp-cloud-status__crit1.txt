@@ -1,0 +1,1 @@
+merge_capability/2 reads the value off the latest health beat RAW jsonb (no migration, no health_changeset cast change) and honours measured_or_nil: absent maps to nil/unmetered, never to false or 0. Paste the diff showing no migration file and no cast-list change.

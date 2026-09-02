@@ -1,0 +1,1 @@
+The survivor states the cross-surface hole plainly: no test compares ATTENTION_RANK to attention_order.json, and __app.test.mjs independently pins a nine-string closed enum.

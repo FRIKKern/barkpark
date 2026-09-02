@@ -1,0 +1,1 @@
+calc(55ch + 80px) is proven <= the 720px container gate for every measured face, OR the gate is widened/derived so the floor can never exceed the panel

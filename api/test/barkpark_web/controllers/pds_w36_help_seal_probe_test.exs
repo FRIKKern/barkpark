@@ -3,7 +3,7 @@ defmodule BarkparkWeb.PdsW36HelpSealProbeTest do
   PDS-D502 differential — the truncation-honesty `help[]` line must be computed
   from what the caller ACTUALLY RECEIVED.
 
-  Before the repair, `task_list_response/3` (tasks_controller.ex:82-85) rendered
+  Before the repair, `task_list_response/4` (tasks_controller.ex, `task_list_response`) rendered
   the SEALED docs but handed `Params.maybe_put_brief_truncation_help/3` the RAW,
   UNSEALED list, and `GET /v1/tasks/prime` had the identical shape at :180. The
   help predicate reads `content["claim"]["now"]["text"]`, which `Params.seal/3`

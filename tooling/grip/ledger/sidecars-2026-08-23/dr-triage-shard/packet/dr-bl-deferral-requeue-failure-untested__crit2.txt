@@ -1,0 +1,1 @@
+Mutation-proved: reverting either error branch to a success return reds the new tests.

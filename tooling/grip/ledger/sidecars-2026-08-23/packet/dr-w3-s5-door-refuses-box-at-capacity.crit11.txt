@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR merges to main with all four required contexts green, AFTER an independent second review of the door-vs-unit race (a manual lead step this wave arranged, not discovered).

@@ -1,0 +1,1 @@
+The stale read-only rationale comment in studio_live/components.ex is corrected, since it is false for every hand-created paper.

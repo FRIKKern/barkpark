@@ -111,7 +111,7 @@
     {
       "name": "open_fence_skeleton",
       "title": "A segment carrying an open-fence skeleton",
-      "why": "Frame 0 settles the lead paragraph while an unterminated ``` fence is still streaming past `to`. The server classifies the remainder (skeleton.kind=code) because the classifier lives in the one converter (D59); the client draws a code-shaped placeholder, never a raw half-fence. skeleton.prose is the line ABOVE the fence -- the bytes from `to` up to the fence's first line -- so that prose keeps streaming as live text while only the fence is hidden behind the placeholder (see contract.what_skeleton_prose_is). Frame 1 settles both the held-back paragraph and the closed fence, and the skeleton goes null.",
+      "why": "Frame 0 settles the lead paragraph while an unterminated ``` fence is still streaming past `to`. The server classifies the remainder (skeleton.kind=code) because the classifier lives in the one converter (D59); the client draws a code-shaped placeholder, never a raw half-fence. skeleton.prose is the line ABOVE the fence -- the bytes from `to` up to the fence's first line -- so that prose keeps streaming as live text while only the fence is hidden behind the placeholder (see contract.what_skeleton_prose_is). Frame 1 settles both the held-back paragraph and the closed fence, and the skeleton goes null. The settled code block carries `lang: \"go\"` -- the fence info string, which FromMarkdown emits as `lang` ONLY when the fence supplies one (a language-less fence keeps the two-key {type, value} map). Nothing asserts block equality against this file, so that key was HAND-added here (bl-frommarkdown-fence-language) rather than forced by a red test: this fixture is the contract, and a contract that lags the emitter is the silent drift the fixture exists to refuse.",
       "sources": {
         "1": "Here is the converter entry point:\n\nIt looks like this:\n```go\nfunc Render(doc Doc) string { return doc.Text }\n```\n\n"
       },
@@ -158,6 +158,7 @@
               },
               {
                 "type": "code",
+                "lang": "go",
                 "value": "func Render(doc Doc) string { return doc.Text }"
               }
             ],

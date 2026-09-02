@@ -1,0 +1,1 @@
+uptime is quoted BEFORE and AFTER the run and reads under ~2.0 on 10 cores throughout; if it does not, the task records the refusal instead of a number.

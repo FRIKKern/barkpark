@@ -1,0 +1,1 @@
+smoke.mjs's main() is wrapped in the breakpoint-sweep.mjs:1834 main-guard idiom and the top-level `await assertLateMeRepaintsTheRail()` has moved inside main(); `node __preview__/smoke.mjs` still exits 0 rendering all scenarios.

@@ -1,0 +1,1 @@
+The ten `app.css <bytes> B` size records in cssom-heads.baseline do NOT become E11 errors: the gate exits 0 on the widened scan set with the tight separator in force. Evidence: the rc-0 run captured to a FILE, never through a pipe.

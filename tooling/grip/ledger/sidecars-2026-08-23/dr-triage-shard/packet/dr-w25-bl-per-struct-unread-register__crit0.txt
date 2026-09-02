@@ -1,0 +1,1 @@
+A per-struct register pins which json tags belong to which Go struct, so omitting one reds even when the name exists elsewhere in the package.

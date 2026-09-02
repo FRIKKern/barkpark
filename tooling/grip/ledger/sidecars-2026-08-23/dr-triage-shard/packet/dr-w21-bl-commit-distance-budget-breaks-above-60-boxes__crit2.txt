@@ -1,0 +1,1 @@
+Live proof that control-plane egress to api.github.com works at all: one real sweep with a non-NULL four-figure distance on the stalest row, distinguishing blocked-egress from rate-limited.

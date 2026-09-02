@@ -1,0 +1,1 @@
+Revert-red: removing the phx-click wiring (or the arm) reds the new test by name.

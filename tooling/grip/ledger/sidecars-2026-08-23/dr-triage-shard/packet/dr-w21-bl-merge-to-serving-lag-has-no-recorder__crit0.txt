@@ -1,0 +1,1 @@
+A recorder persists (serving sha, first_seen_at) — the first observation of a NEW sha, NOT serving_since verbatim — so a bare container restart cannot improve the gauge. A test asserts a restart with an unchanged sha does not move first_seen_at.

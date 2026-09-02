@@ -1,0 +1,1 @@
+The gauge has THREE legs (merge -> group free -> first job -> serving), OR two legs with leg A explicitly named for OUR OWN `deploy-production` queue. The PR body quotes the occupied-vs-free split (117 @ p50 204 s vs 197 @ p50 4 s) as the reason.

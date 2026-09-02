@@ -1,0 +1,1 @@
+the session tier is DERIVED from router.ex source (every 2-arity with_team_site call site), not hand-listed

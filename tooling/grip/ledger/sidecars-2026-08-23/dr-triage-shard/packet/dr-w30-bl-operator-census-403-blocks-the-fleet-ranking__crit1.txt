@@ -1,0 +1,1 @@
+If team-scoped is canonical, every published fleet-wide number is labelled as SQL-derived and explicitly NOT an instrument reading. Evidence: the labelling convention, quoted.

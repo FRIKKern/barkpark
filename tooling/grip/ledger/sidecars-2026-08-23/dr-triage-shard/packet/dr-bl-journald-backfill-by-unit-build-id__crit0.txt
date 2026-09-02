@@ -1,0 +1,1 @@
+Deployment rows predating the per-build recorder are matched to their journal units by prefix-matching slug+build_id against the enumerated unit set, with no schema change and no unit_name column added

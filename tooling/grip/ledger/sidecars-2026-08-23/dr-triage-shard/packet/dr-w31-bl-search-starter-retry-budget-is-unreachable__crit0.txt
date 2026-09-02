@@ -1,0 +1,1 @@
+The retry budget is widened where it can actually take effect on a MANAGED build — either the template's compiled default changes, or BARKPARK_FETCH_TIMEOUT_MS/retries are added to site-deploy-node.sh's RUNTIME_ALLOW deliberately — proven by a run, not by reading the env var.

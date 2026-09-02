@@ -13,6 +13,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.{Access, Checkout, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
+  alias Barkpark.Media.WhereUsed
   alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
@@ -279,7 +280,13 @@ defmodule BarkparkWeb.V1.MediaController do
     opts =
       [
         limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
-        offset: parse_int(params["offset"], 0),
+        # SAME ceiling as `MediaSearchParams.parse/1` — this action does not go
+        # through it, and it reaches the identical paginator: `query_files/2`
+        # tail-calls `Delivery.Search.search/2`, whose `paginate_ids/2` fetches
+        # `limit + offset + 20` rows into the BEAM before dropping `offset`.
+        # Derived by grepping every `parse_int(params["offset"]` site, not from
+        # the filing's list, which named only the SearchParams door.
+        offset: MediaSearchParams.clamp_offset(parse_int(params["offset"], 0)),
         mime_type: blank_to_nil(params["type"] || params["mimeType"]),
         kind: blank_to_nil(params["kind"]),
         q: blank_to_nil(params["q"])
@@ -446,10 +453,16 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
-  def delete(conn, %{"dataset" => dataset, "id" => id}) do
+  def delete(conn, %{"dataset" => dataset, "id" => id} = params) do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
+         # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed
+         # media as RAW `/media/files/...` URL STRINGS, invisible to every
+         # reference graph (`Relations.graph/3` walks mediaAsset<->mediaAsset
+         # edges only), so this door used to answer 200 while blanking a live
+         # page. Consult usage BEFORE the irreversible delete.
+         :ok <- refuse_if_referenced(conn, file, params),
          {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
       # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
       # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
@@ -464,6 +477,29 @@ defmodule BarkparkWeb.V1.MediaController do
       })
     else
       error -> error
+    end
+  end
+
+  # `:ok` to proceed, or a HALTED conn carrying the 409 census. Returning the
+  # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
+  # envelope reuses the public `conflict` code but carries a `details` census
+  # that no shared builder would know how to assemble.
+  defp refuse_if_referenced(conn, file, params) do
+    if WhereUsed.forced?(params) do
+      :ok
+    else
+      case WhereUsed.referrers(file) do
+        %{count: 0} ->
+          :ok
+
+        census ->
+          env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{error: env})
+          |> halt()
+      end
     end
   end
 

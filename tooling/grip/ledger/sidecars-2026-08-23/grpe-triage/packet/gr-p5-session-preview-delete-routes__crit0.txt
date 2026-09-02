@@ -1,0 +1,1 @@
+scenarios.mjs matches DELETE /v1/account/sessions/:id and DELETE /v1/account/sessions, and a scenario exercises each. Evidence: the diff plus the smoke.mjs scenario count before/after.

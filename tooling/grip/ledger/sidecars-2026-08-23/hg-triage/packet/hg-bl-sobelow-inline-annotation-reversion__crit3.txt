@@ -1,0 +1,1 @@
+No finding loses coverage: the set of findings suppressed before and after is compared and any difference is enumerated and justified

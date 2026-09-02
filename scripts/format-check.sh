@@ -10,16 +10,20 @@
 #  and two of them are invisible:
 #
 #    1. FORMATTING            the thing it claims to measure.
-#    2. ELIXIR VERSION        1.18.1 and 1.19.x formatters disagree. MEASURED
-#                             2026-07-20 on this repo: under CI's 1.18.1 exactly
-#                             ONE file was unformatted; under a local 1.19.5, 97
-#                             were. The two toolchains agreed on ZERO files. The
-#                             disagreement is TOTAL, not marginal. Every "N
+#    2. ELIXIR VERSION        the 1.18.x and 1.19.x formatters disagree, and
+#                             not marginally. MEASURED 2026-07-20 on this repo:
+#                             under CI's then-1.18.1 exactly ONE file was
+#                             unformatted; under a local 1.19.5, 97 were. The
+#                             two toolchains agreed on ZERO files. Every "N
 #                             unformatted files" figure ever quoted from a local
-#                             run described a set CI never evaluates — the count
+#                             run described a set CI never evaluated — the count
 #                             was published as 1, corrected to 91, corrected to
 #                             92, and all three were answers to the wrong
-#                             question.
+#                             question. THIS CAUSE DOES NOT GO AWAY NOW THAT THE
+#                             GATE AND THE FLEET AGREE (2026-09-02: both 1.19.5)
+#                             — it goes QUIET, and a quiet cause is exactly the
+#                             one that comes back unannounced when either side
+#                             moves. The check below still runs.
 #    3. UNFETCHED DEPS        a checkout without `mix deps.get` fails with
 #                             "Unknown dependency :ecto_sql given to
 #                             :import_deps", which is INDISTINGUISHABLE from a
@@ -33,11 +37,26 @@
 #  than silently producing the wrong one.
 #
 #  THE PIN IS NOT THE ENFORCEMENT. `.tool-versions` already pinned Elixir, and
-#  it did not help: asdf is not installed on every machine, so `elixir`
-#  resolves to whatever is on PATH (measured on this box: .tool-versions says
-#  1.18.4-otp-27, PATH gives Homebrew's 1.19.5/OTP 28, CI runs 1.18.1/OTP 27 —
+#  it did not help: asdf is not installed on every machine, so `elixir` resolves
+#  to whatever is on PATH (measured 2026-07-20: .tool-versions said
+#  1.18.4-otp-27, PATH gave Homebrew's 1.19.5/OTP 28, CI ran 1.18.1/OTP 27 —
 #  THREE numbers, none of them reconciled). A declaration nothing checks is a
 #  comment. This script is the check.
+#
+#  WHICH NUMBER THE GATE SHOULD BE (orchestrator ruling 2026-09-02,
+#  task-9a08c27d897f38e6). The format gate now pins 1.19.5 — THE FORMATTER
+#  DEVELOPERS AND AGENTS ACTUALLY RUN, measured on every box — because the
+#  question this instrument answers is "is the tree formatted the way the people
+#  who format it format it?", and no other answer is stable: `.tool-versions`
+#  has asked for 1.18.4-otp-27 for months and the fleet has never once honoured
+#  it, so each local `mix format` re-reddened the gate and each gate-shaped
+#  repair was undone by the next local format. A treadmill, not a backlog.
+#  `.tool-versions` deliberately did NOT move with it: it is production's
+#  declaration (release-artifact.yml builds the prebuilt from it,
+#  deploy/azure-base-install.sh pins every box's asdf to it), and the elixir.yml
+#  mix-test / mix-prod-compile matrices are production's gates. So the PIN
+#  DISAGREES warning below is now EXPECTED, and says so — two numbers, each
+#  owned, rather than three unowned ones.
 #
 #  ONE SOURCE OF TRUTH FOR THE EXPECTED VERSION: it is READ OUT of
 #  .github/workflows/elixir.yml's format job matrix, never restated here. A
@@ -104,23 +123,27 @@ if [ "${1:-}" != "--selftest" ]; then
 
   say ">> formatter   Elixir $RUNNING  (CI's format gate pins $EXPECTED, read from ${WORKFLOW#$ROOT/})"
 
-  # THE THIRD NUMBER, surfaced rather than silently tolerated. `.tool-versions`
+  # THE OTHER NUMBER, surfaced rather than silently tolerated. `.tool-versions`
   # is what a developer running asdf/mise will actually get, and it is a
   # SEPARATE declaration from the gate's matrix — so it can disagree with the
-  # thing that will judge them, and on this repo it does (measured: pin
-  # 1.18.4-otp-27 vs gate 1.18.1). A developer who does everything right, gets
-  # onto the pin, and formats is STILL producing the wrong answer.
+  # thing that will judge them, and on this repo it does (pin 1.18.4-otp-27 vs
+  # format gate 1.19.5).
   #
-  # A WARNING, not a refusal, and deliberately: reconciling the pin changes
-  # everyone's local toolchain and is not this script's call to make. But an
-  # unreconciled pin must at least be VISIBLE, because its whole failure mode is
-  # that nobody knows there are three numbers.
+  # SINCE 2026-09-02 THAT DISAGREEMENT IS DELIBERATE, and the note says so
+  # rather than pretending it is a fresh defect: the two declarations answer
+  # different questions. `.tool-versions` is PRODUCTION's toolchain (the release
+  # artifact and every box's asdf read it, as do the mix-test / mix-prod-compile
+  # matrices at 1.18.1); this gate's matrix is THE FORMATTER, pinned to what the
+  # fleet runs so that a local `mix format` and the gate reach the same verdict.
+  # Still a WARNING and never a refusal: someone on the pin will be refused by
+  # the version check below, with reasons, and that is the honest outcome.
   if [ -f "$ROOT/.tool-versions" ]; then
     PINNED="$(sed -n 's/^elixir[[:space:]]\{1,\}\([0-9][0-9.]*\).*/\1/p' "$ROOT/.tool-versions" | head -1)"
     if [ -n "$PINNED" ] && [ "$PINNED" != "$EXPECTED" ]; then
-      say "!! PIN DISAGREES: .tool-versions says elixir $PINNED, the gate uses $EXPECTED."
-      say "   Anyone who honours the pin lands on a formatter the gate does not use. File it;"
-      say "   this script will not reconcile a repo-wide toolchain declaration on its own."
+      say "!! PIN DIFFERS (expected): .tool-versions says elixir $PINNED, the format gate uses $EXPECTED."
+      say "   Deliberate since 2026-09-02: .tool-versions is PRODUCTION's toolchain (release"
+      say "   artifact + every box's asdf + the mix-test/prod-compile matrices), while the"
+      say "   format gate pins the formatter the fleet runs. Format under $EXPECTED."
     fi
   fi
 
@@ -139,8 +162,12 @@ if [ "${1:-}" != "--selftest" ]; then
     say "   Do NOT run \`mix format\` to 'fix' this. Reformatting under $RUNNING rewrites"
     say "   files the gate considers CLEAN and will red the gate that is currently green."
     say ""
-    say "   Get onto $EXPECTED (asdf/mise honouring .tool-versions, or a container), then"
-    say "   re-run. NO CLAIM is being made about formatting."
+    say "   Get onto Elixir $EXPECTED and re-run. NOTE: since 2026-09-02 the format gate"
+    say "   pins the formatter THE FLEET RUNS, which is NOT what .tool-versions declares"
+    say "   (that one is production's, and mix-test/mix-prod-compile are its gates). So"
+    say "   asdf/mise honouring .tool-versions will NOT get you to $EXPECTED — install"
+    say "   $EXPECTED explicitly, or use whatever puts it on PATH."
+    say "   NO CLAIM is being made about formatting."
     exit 3
   fi
 

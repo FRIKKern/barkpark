@@ -1,0 +1,1 @@
+CLOUD_PATHS (or an equivalent declaration) covers every root in ReaderScan.roots/0, and the census asserts that coverage itself so the two cannot drift

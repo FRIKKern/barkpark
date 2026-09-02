@@ -1,0 +1,1 @@
+The PR body names the 2026-08-06 22:24:16Z regime boundary, states that absorption is a step function rather than a trend, and carries the counterweight that live releases per hour roughly doubled across the same boundary. Evidence: the PR body.

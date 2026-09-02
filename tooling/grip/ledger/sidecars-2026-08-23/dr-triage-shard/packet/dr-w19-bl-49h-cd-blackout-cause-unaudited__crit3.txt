@@ -1,0 +1,1 @@
+The report states the control-plane vs instance split explicitly, so no downstream document repeats 'guerrilla deploys fail silently' for a control-plane outage.

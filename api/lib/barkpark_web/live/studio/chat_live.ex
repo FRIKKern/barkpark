@@ -203,6 +203,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          show_archived: false,
          renaming_session: nil,
          open_menu_session: nil,
+         # The Cmd/Ctrl+K session palette (T3 keybindings parity). Socket-local
+         # per-tab UI state, like open_menu_session: it holds NO list of its own
+         # — the palette renders `@sessions`, the very list the sidebar shows —
+         # so it can never disagree with the sidebar or outlive a tenant clamp.
+         palette_open: false,
          # Per-tab expand state for proposed-plan cards (charter D34): the set of
          # plan message ids the viewer has expanded. Socket-local, never
          # broadcast, reset on every session load — clones the open_menu_session
@@ -220,6 +225,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # session load. A MapSet, not a map: a fold has one bit, and the absent
          # key IS the default, so no stale `false` entries accumulate.
          turn_folds_expanded: MapSet.new(),
+         # SHOW-ACTIVE-ONLY, per-tab (task-b66928b2958c8cfa): has the reader
+         # opened the RUNNING turn's "+N previous" control? One BOOLEAN, not a
+         # set — at most one turn runs at a time, so there is at most one such
+         # fold on screen and nothing to key it by. Default COLLAPSED (the whole
+         # point is that the live row stays visible), reset when a turn settles
+         # and on session load, never broadcast.
+         running_fold_expanded: false,
          # The agents rail (charter D47): the task_id-keyed mission-control
          # snapshot rendered below the composer, Claude-Code-TUI style. `rail` is
          # the live map (hydrated from `rail_snapshot` on reopen, folded by the
@@ -880,6 +892,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, turn_folds_expanded: next)}
   end
 
+  # Expand/collapse the RUNNING turn's "+N previous" control
+  # (task-b66928b2958c8cfa). Per-tab and ASSIGNS-ONLY, exactly like
+  # `toggle_turn_fold` above: what a reader chooses to look at is not a fact
+  # about the turn, so nothing is stored and nothing is broadcast. No key is
+  # carried because there is only ever one running turn to open.
+  def handle_event("toggle_running_fold", _params, socket) do
+    {:noreply, assign(socket, running_fold_expanded: !socket.assigns.running_fold_expanded)}
+  end
+
   # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
   # per-tab `rail_expanded` map is keyed by task_id; default EXPANDED (user
   # mandate 2026-07-09: "we want to be able to see what is happening in the
@@ -1067,6 +1088,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      socket |> assign(show_archived: show, open_menu_session: nil) |> refresh_sessions()}
+  end
+
+  # ── keyboard thread jump + session palette (T3 keybindings parity) ───────
+  #
+  # Three events, ONE navigation: every one of them ends at
+  # `activate_session/2`, which is the same `session_link_path/2` the sidebar
+  # <.link patch={…}> is built from. There is no second way to reach a session.
+  # The client half (bp-chat-palette.js) only classifies keys and pushes; it
+  # never touches history or location.
+
+  # Cmd/Ctrl+N → the Nth VISIBLE sidebar session. Past the end is a no-op: a
+  # number the sidebar does not show must not navigate anywhere, and must never
+  # crash the chat.
+  def handle_event("chat-jump", %{"n" => n}, socket) do
+    {:noreply, activate_nth_session(socket, n)}
+  end
+
+  def handle_event("chat-palette-open", _params, socket) do
+    {:noreply, assign(socket, palette_open: true, open_menu_session: nil)}
+  end
+
+  # Escape (claimed by the palette input, so it never reaches the global
+  # interrupt listener) and a backdrop click both land here. Closing is UI-only:
+  # it never touches the session, the runtime, or a running turn.
+  def handle_event("chat-palette-close", _params, socket) do
+    {:noreply, assign(socket, palette_open: false)}
+  end
+
+  # Enter on the highlighted palette row. The id is client-supplied, so it is
+  # matched against the VISIBLE list rather than trusted — an id that is not on
+  # screen closes the palette and navigates nowhere.
+  def handle_event("chat-palette-activate", %{"id" => id}, socket) do
+    socket = assign(socket, palette_open: false)
+
+    case Enum.find(socket.assigns.sessions, &(&1.id == id)) do
+      nil -> {:noreply, socket}
+      session -> {:noreply, activate_session(socket, session.id)}
+    end
   end
 
   # Stale/unknown client events must never crash the chat — mirror the other
@@ -2481,6 +2540,76 @@ defmodule BarkparkWeb.Studio.ChatLive do
     """
   end
 
+  # SHOW-ACTIVE-ONLY, the RUNNING turn's control (task-b66928b2958c8cfa): one
+  # "+N previous" row standing in for the tool rows that ran BEFORE the active
+  # one, so the row the reader is actually watching stays on screen no matter
+  # how long the turn gets. Clicking expands every row of the turn; clicking
+  # again re-collapses. The count and the label come from the ONE counter and
+  # the ONE formatter (`ChatToolRenderer.running_hidden_count/1` +
+  # `running_fold_label/1`), the same strings `bp chat` prints.
+  #
+  # A SETTLED turn never reaches here — `fold_running_turn/1`'s gate hands it to
+  # U1's `turn_fold` instead.
+  attr :label, :string, required: true
+  attr :hidden_rows, :list, required: true
+  attr :rows, :list, required: true
+  attr :expanded, :boolean, required: true
+  attr :plan_expanded, :any, required: true
+  attr :question_forms, :map, required: true
+
+  defp running_fold(assigns) do
+    ~H"""
+    <div data-role="running-fold" style="font-family: var(--font-mono);">
+      <button
+        type="button"
+        class="text-xs text-dim"
+        phx-click="toggle_running_fold"
+        data-running-fold-toggle
+        aria-expanded={to_string(@expanded)}
+        style="display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit;"
+      >
+        <span aria-hidden="true" style="flex: none; color: var(--life-in_progress);">
+          <%= if @expanded, do: "▾", else: "▸" %>
+        </span>
+        <span data-running-fold-label style="font-weight: 650;"><%= @label %></span>
+      </button>
+
+      <%!-- The earlier rows, shown only when the reader asks for them. They are
+            rendered by the SAME body every flat row uses — folding is a
+            wrapper, never a second rendering of a row. --%>
+      <div :if={@expanded}>
+        <div
+          :for={message <- @hidden_rows}
+          data-role={message.role}
+          data-parent={message[:parent_tool_use_id]}
+          style={message[:parent_tool_use_id] && trace_child_style()}
+        >
+          <.message_body
+            message={message}
+            plan_expanded={@plan_expanded}
+            question_forms={@question_forms}
+          />
+        </div>
+      </div>
+
+      <%!-- The ACTIVE row (and any pending siblings after it) always paints —
+            that is the whole point of the fold. --%>
+      <div
+        :for={message <- @rows}
+        data-role={message.role}
+        data-parent={message[:parent_tool_use_id]}
+        style={message[:parent_tool_use_id] && trace_child_style()}
+      >
+        <.message_body
+          message={message}
+          plan_expanded={@plan_expanded}
+          question_forms={@question_forms}
+        />
+      </div>
+    </div>
+    """
+  end
+
   # ONE settled turn, folded (task-8f904a88b9bc3d59): a single header row reading
   # "Worked for 3m 12s" — or "You stopped after 42s" when a Stop ended the turn —
   # standing in for the turn's tool rows, which expand on click. The label is
@@ -2767,7 +2896,105 @@ defmodule BarkparkWeb.Studio.ChatLive do
         }
         .bp-chat-rail-leave-start { opacity: 1; max-height: 200px; }
         .bp-chat-rail-leave-end { opacity: 0; max-height: 0; margin: 0; }
+        /* The session palette's highlighted row. The ChatPalette hook stamps
+           data-palette-active as the arrows move; the token keeps the gate
+           green (no color literal). */
+        #chat-palette-list li[data-palette-active] { background: var(--primary-soft); }
       </style>
+      <%!-- The keyboard surface (T3 keybindings parity). An empty, hidden
+            element whose only job is to host the ChatKeys hook
+            (bp-chat-palette.js): it arms ONE document-level keydown listener
+            that turns Cmd/Ctrl+1..9 into `chat-jump` and Cmd/Ctrl+K into
+            `chat-palette-open`, and ignores every key typed inside an input,
+            textarea or contenteditable so the composer, the slash combobox and
+            the inline rename field keep their own keys. Escape is untouched —
+            it still belongs to the global interrupt (charter D42). --%>
+      <div id="chat-keys" phx-hook="ChatKeys" hidden></div>
+
+      <%!-- The Cmd/Ctrl+K session palette. The LIST is server-rendered from
+            `@sessions` — the same tenant-clamped, archived-shelf-aware list the
+            sidebar shows, so the palette can never offer a session the sidebar
+            hides. The FILTERING is client-side (subsequence fuzzy over the
+            stamped titles): a palette that round-trips per keystroke is not a
+            palette, and a server-side filter would need a second copy of the
+            visible-set rule. Enter pushes `chat-palette-activate`, which lands
+            on `session_link_path/2` — the sidebar click's own path. --%>
+      <div
+        :if={@palette_open}
+        id="chat-palette"
+        phx-hook="ChatPalette"
+        data-test-id="chat-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Jump to a chat"
+        style="position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px 16px; background: rgba(0, 0, 0, 0.38);"
+      >
+        <%!-- click-away sits on the CARD, never the full-screen overlay:
+              nothing is ever outside a full-screen element, so a backdrop click
+              would never fire there. --%>
+        <div
+          id="chat-palette-card"
+          phx-click-away="chat-palette-close"
+          style="width: min(560px, 94vw); max-height: 64vh; display: flex; flex-direction: column; background: var(--bg-popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); overflow: hidden;"
+        >
+          <input
+            id="chat-palette-input"
+            type="text"
+            autocomplete="off"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="chat-palette-list"
+            aria-label="Filter chats by title"
+            placeholder="Jump to a chat…"
+            data-test-id="chat-palette-input"
+            style="flex: none; width: 100%; box-sizing: border-box; padding: 12px 14px; border: none; border-bottom: 1px solid var(--border-muted); background: transparent; color: var(--text); font-size: 14px; outline: none;"
+          />
+
+          <ul
+            id="chat-palette-list"
+            role="listbox"
+            aria-label="Chats"
+            style="flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 6px;"
+          >
+            <li
+              :for={{s, i} <- Enum.with_index(@sessions)}
+              id={"chat-palette-opt-#{i}"}
+              role="option"
+              aria-selected={to_string(i == 0)}
+              data-palette-row
+              data-palette-id={s.id}
+              data-palette-title={s.title}
+              data-test-id={"chat-palette-row-#{s.id}"}
+              style="display: flex; align-items: baseline; gap: 8px; padding: 7px 9px; border-radius: 6px;"
+            >
+              <span
+                :if={i < 9}
+                class="text-xs text-dim"
+                style="flex: none; font-family: var(--font-mono);"
+              >
+                <%= i + 1 %>
+              </span>
+              <span
+                class="text-sm"
+                style="color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;"
+              >
+                <%= s.title %>
+              </span>
+              <span class="text-xs text-dim" style="margin-left: auto; flex: none;">
+                <%= session_stamp(s) %>
+              </span>
+            </li>
+          </ul>
+
+          <div
+            class="text-xs text-dim"
+            style="flex: none; padding: 7px 12px; border-top: 1px solid var(--border-muted);"
+          >
+            ↑↓ move · Enter open · Esc close · ⌘/Ctrl+1–9 jump
+          </div>
+        </div>
+      </div>
+
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
           <span class="h3" style="display: flex; align-items: center; gap: 8px; flex: 1;">
@@ -2897,7 +3124,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   />
                 </form>
               <% else %>
-                <.link patch={ReturnTo.with_return_to("#{@chat_base_path}/#{s.id}", @return_to)} class="bp-chat-session-link">
+                <.link patch={session_link_path(assigns, s.id)} class="bp-chat-session-link">
                   <% act = @activity[s.id] %>
                   <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
@@ -3142,6 +3369,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       question_forms={@question_forms}
                     />
                   </div>
+                <% {:running_fold, _n, label, hidden_rows, rows} -> %>
+                  <.running_fold
+                    label={label}
+                    hidden_rows={hidden_rows}
+                    rows={rows}
+                    expanded={@running_fold_expanded}
+                    plan_expanded={@plan_expanded}
+                    question_forms={@question_forms}
+                  />
                 <% {:turn_fold, fold_key, label, rows} -> %>
                   <.turn_fold
                     fold_key={fold_key}
@@ -4684,7 +4920,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: messages,
       # Grouped rows memoized at load time (task-9e21c3f285b3d7d0) — the template
       # reads `@grouped_rows`, so reopen does the grouping ONCE, not per render.
-      grouped_rows: fold_settled_turns(group_agent_rows(messages)),
+      grouped_rows: grouped_rows(messages),
       # Sticky draft (charter D36c): restore the unsent words left behind when
       # this session was last switched away from (nil column → clean composer).
       # From the FULL struct — list_sessions omits `draft`.
@@ -4723,6 +4959,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Turn folds reset on reopen (task-8f904a88b9bc3d59): a replayed settled
       # turn starts collapsed under its "Worked for …" header.
       turn_folds_expanded: MapSet.new(),
+      # And a reopened transcript's running fold starts collapsed too
+      # (task-b66928b2958c8cfa) — a reopen has no running turn at all.
+      running_fold_expanded: false,
       # Rail replay parity (charter D47): hydrate the mission-control rail from
       # the stored `rail_snapshot` so a reopened session shows its last-known
       # agents. `interrupt_running_tasks/1` already flipped any dead "running"
@@ -4848,6 +5087,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       agent_expanded: %{},
       # A new chat has no settled turns yet (task-8f904a88b9bc3d59).
       turn_folds_expanded: MapSet.new(),
+      # A new chat has no running turn to fold yet (task-b66928b2958c8cfa).
+      running_fold_expanded: false,
       # A new chat has no background agents yet (charter D47).
       rail: %{},
       rail_sig: [],
@@ -5115,6 +5356,53 @@ defmodule BarkparkWeb.Studio.ChatLive do
       socket
     end
   end
+
+  # ── ONE navigation path to a session (T3 keybindings parity) ─────────────
+  #
+  # The sidebar <.link patch={…}>, the palette's Enter, and Cmd/Ctrl+1..9 ALL
+  # build their destination here. A second copy of this URL shape is how the
+  # keyboard and the mouse drift apart (one keeps `return_to`, the other drops
+  # it); the test suite asserts the sidebar link's href and the keyboard patch
+  # are byte-identical for the same session.
+  #
+  # Takes `assigns` (not a socket) so the HEEx template and the event handlers
+  # call the SAME function.
+  defp session_link_path(assigns, session_id) do
+    ReturnTo.with_return_to("#{assigns.chat_base_path}/#{session_id}", assigns[:return_to])
+  end
+
+  defp activate_session(socket, session_id) do
+    push_patch(socket, to: session_link_path(socket.assigns, session_id))
+  end
+
+  # The Nth VISIBLE sidebar row, 1-indexed. `@sessions` IS the visible list
+  # (refresh_sessions/1 already applied the archived shelf and the tenant
+  # clamp), so "visible" needs no second definition here.
+  defp activate_nth_session(socket, n) do
+    case nth_index(n) do
+      nil ->
+        socket
+
+      i ->
+        case Enum.at(socket.assigns.sessions, i) do
+          nil -> socket
+          session -> activate_session(socket, session.id)
+        end
+    end
+  end
+
+  # 1..9 only, from either a JSON number or a string — anything else is not a
+  # jump. Returns the 0-based index.
+  defp nth_index(n) when is_integer(n) and n >= 1 and n <= 9, do: n - 1
+
+  defp nth_index(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} -> nth_index(i)
+      _ -> nil
+    end
+  end
+
+  defp nth_index(_), do: nil
 
   # Carry the validated `return_to` across a self-`push_patch` (charter D5), so
   # the flat chat surface never loses the scope it should return to as the user
@@ -6383,6 +6671,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp settle_tool_rows(socket, stamp) do
     messages = socket.assigns.messages
 
+    # The turn is over, so its "+N previous" control is over with it
+    # (task-b66928b2958c8cfa): the NEXT running turn starts collapsed no matter
+    # what the reader opened during this one.
+    socket = assign(socket, running_fold_expanded: false)
+
     if Enum.any?(messages, &(&1.role == :tool and Map.get(&1, :turn_settled) != true)) do
       row_stamp = %{
         turn_settled: true,
@@ -6480,7 +6773,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # over the full transcript.
   defp assign_messages(socket, messages) do
     trimmed = trim_transcript(messages)
-    assign(socket, messages: trimmed, grouped_rows: fold_settled_turns(group_agent_rows(trimmed)))
+    assign(socket, messages: trimmed, grouped_rows: grouped_rows(trimmed))
   end
 
   # Keep only the last `@transcript_window` rows. The drop count is floored at 0
@@ -6567,6 +6860,63 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # never fold, and a row from a server too old to stamp it degrades to the flat
   # transcript it has always been. Linear, called ONCE per write over the bounded
   # window — the same budget `group_agent_rows/1` is held to.
+  # The transcript's ONE grouping pipeline: D46 agent blocks, then the RUNNING
+  # turn's show-active-only fold (task-b66928b2958c8cfa), then U1's settled
+  # folds (task-8f904a88b9bc3d59). The running pass runs FIRST and on
+  # `{:row, _}` items, so its gate — "this row's turn has not settled" — is the
+  # only thing standing between a SETTLED turn and the active-only collapse.
+  defp grouped_rows(messages) do
+    messages
+    |> group_agent_rows()
+    |> fold_running_turn()
+    |> fold_settled_turns()
+  end
+
+  # SHOW-ACTIVE-ONLY (task-b66928b2958c8cfa). While a turn RUNS, its consecutive
+  # tool rows collapse to the ACTIVE row plus one "+N previous" control, so a
+  # long turn can no longer push the live row off the screen. A SETTLED turn is
+  # NOT ours — it belongs to U1's fold-on-settle — and the gate that says so is
+  # `turn_fold_key/1`: a settled row HAS a key and is chunked away from the
+  # running run, a live row has none.
+  #
+  # Emits `{:running_fold, n, label, hidden_rows, visible_rows}` and only when
+  # `n > 0`: a turn whose active row is its first row hides nothing, so it keeps
+  # the flat rows it always had and no control is drawn.
+  @doc false
+  def fold_running_turn(items) do
+    items
+    |> Enum.chunk_by(&running_run_key/1)
+    |> Enum.flat_map(fn chunk ->
+      if running_run_key(hd(chunk)) == :running, do: collapse_running_run(chunk), else: chunk
+    end)
+  end
+
+  # THE RUNNING GATE. `:running` only for a tool row whose turn has NOT settled.
+  # A settled row chunks under its fold key instead — including the key-less
+  # "server too old to stamp the fold facts" row, which U1 deliberately leaves
+  # FLAT: `turn_settled` is the gate, never the fold key, so a row that cannot
+  # fold does not fall through to the running collapse either.
+  defp running_run_key({:row, %{role: :tool} = message}) do
+    if Map.get(message, :turn_settled) == true,
+      do: {:settled, ChatToolRenderer.turn_fold_key(message)},
+      else: :running
+  end
+
+  defp running_run_key(_item), do: nil
+
+  defp collapse_running_run(chunk) do
+    rows = Enum.map(chunk, fn {:row, message} -> message end)
+
+    case ChatToolRenderer.running_hidden_count(rows) do
+      0 ->
+        chunk
+
+      n ->
+        {hidden, visible} = Enum.split(rows, n)
+        [{:running_fold, n, ChatToolRenderer.running_fold_label(n), hidden, visible}]
+    end
+  end
+
   @doc false
   def fold_settled_turns(items) do
     items
@@ -6831,7 +7181,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Agent-row glyph + color: a failed agent is ✕ in --danger (its error string in
   # the title=), a settled one ✓, a live one ●. A non-terminal agent on a DEAD
   # (interrupted) entry reads --life-open (stalled) and never breathes.
-  defp rail_agent_glyph(node) do
+  # PUBLIC (and only) so the cross-surface glyph lock can call it directly:
+  # api/test/support/fixtures/chat_rail_agent_glyphs.json pins this truth table
+  # and is read by BOTH chat_rail_agent_glyph_test.exs and the TUI's
+  # internal/chat/rail_glyph_lock_test.go, so a glyph — or an ARM ORDER — edit
+  # on either surface reds the other surface's test.
+  @doc false
+  def rail_agent_glyph(node) do
     cond do
       StudioChat.workflow_node_failed?(node) -> "✕"
       StudioChat.workflow_node_terminal?(node) -> "✓"

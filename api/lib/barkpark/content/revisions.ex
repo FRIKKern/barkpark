@@ -111,6 +111,52 @@ defmodule Barkpark.Content.Revisions do
   end
 
   @doc """
+  Resolve a document `_rev` HASH to the revision that captured it.
+
+  [rev-hash-has-no-read] The envelope publishes `"_rev" => doc.rev` on every
+  document read, and acceptance criteria cite that hash to name the exact
+  revision they sealed. Until `revisions.rev` existed there was no path —
+  surfaced or un-surfaced — from the hash to the content it names: this table is
+  keyed by its own UUID and `get_revision/3` rejects a non-UUID outright. A
+  revision a seal cited was therefore neither live nor retrievable.
+
+  Scoping is IDENTICAL to `get_revision/3` — the same dataset clause, the same
+  workspace/project clause, the same grant narrowing — so this is a new KEY on
+  the existing read, never a wider one. A `_rev` a caller may not read by UUID
+  stays unreadable by hash.
+
+  Takes the NEWEST match: `revisions.rev` is not unique (the same document rev
+  can be snapshotted by more than one action, e.g. a provenance tap alongside
+  the write), and the newest row is the one that describes the settled state.
+
+  LIMIT: history written before the `rev` column existed carries a NULL `rev`
+  and cannot be resolved this way — the hash was never recorded, so it cannot be
+  recovered. Those rows stay readable by UUID exactly as before.
+  """
+  def get_revision_by_rev(rev, dataset, opts \\ [])
+
+  def get_revision_by_rev(rev, _dataset, _opts) when not is_binary(rev) or rev == "",
+    do: {:error, :not_found}
+
+  def get_revision_by_rev(rev, dataset, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Revision
+    |> where([r], r.rev == ^rev)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_grants(opts)
+    |> order_by([r], desc: r.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      rev -> {:ok, rev}
+    end
+  end
+
+  @doc """
   Restore a document to a specific revision.
 
   Always produces a DRAFT regardless of the revision's captured status. The

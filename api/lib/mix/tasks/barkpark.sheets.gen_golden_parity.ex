@@ -74,11 +74,18 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   #       import that KEEPS its cached value — is B6, already here.) ADDITIVE
   #       only: columns A..E, no existing case touched, outside every
   #       cond_format range. Row 19 and not 13: rows 13-15 are the
-  #       everyday-function batch (#15338) and rows 16-18 are reserved by the
-  #       open financial-functions PR (#15413).
+  #       everyday-function batch (#15338) and rows 16-18 are the financial
+  #       batch (#15413).
   #
   # DO NOT add a hyperlink cell here — #882 owns the hyperlink parity lock and
   # will extend this generator itself.
+  #
+  # Financial batch (rows 16-18 — PMT/FV/PV/NPER/NPV/IRR/RATE): every result is
+  # scaled and ROUNDed to 0 places so the stored `v` is an INTEGER. That is
+  # deliberate, not cosmetic: the web and Go legs compare RENDERED strings, and
+  # an irrational annuity result could print differently in Elixir, JS and Go.
+  # Each integer is the figure Microsoft's own documentation prints for the
+  # example the formula reproduces (see the per-cell citations).
   #
   # Conditional-formatting coverage (CF-E, arc 2 — pins the CF snapshot weave in
   # the committed fixture itself, so every mirror carries composed CF styles):
@@ -222,6 +229,62 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           },
           "A15" => %{"v" => 3, "t" => "n"},
           "B15" => %{"v" => 4, "t" => "n"},
+          # Rows 16-18 — the FINANCIAL batch (PMT / FV / PV / NPER / NPV / IRR /
+          # RATE). Same additive constraints as rows 13-15 (columns A..E only, no
+          # "e" cell, clear of every cond_format range), plus one more that is
+          # specific to this batch:
+          #
+          #   the web and Go legs compare RENDERED strings, so a float that
+          #   prints differently in Elixir / JS / Go would red the mirrors for a
+          #   reason that has nothing to do with the engine. Every financial
+          #   result is irrational-ish to the last bit, so each formula is scaled
+          #   and ROUNDed to 0 places — `ROUND(x, 0)` returns an INTEGER, and an
+          #   integer renders identically on all three surfaces. The scale is
+          #   chosen so the integer IS the figure Microsoft's own documentation
+          #   prints for that example (cents, or basis-point tenths).
+          #
+          # A16 =PMT(8%/12, 10, 10000) -> ($1,037.03)   [MS PMT example 1]
+          "A16" => %{
+            "f" => "=ROUND(PMT(0.08/12, 10, 10000) * 100, 0)",
+            "v" => -103_703,
+            "t" => "n"
+          },
+          # B16 =FV(6%/12, 10, -200, -500, 1) -> $2,581.40   [MS FV example 1]
+          "B16" => %{
+            "f" => "=ROUND(FV(0.06/12, 10, -200, -500, 1) * 100, 0)",
+            "v" => 258_140,
+            "t" => "n"
+          },
+          # C16 =PV(8%/12, 20*12, 500, 0, 0) -> ($59,777.15)   [MS PV example]
+          "C16" => %{
+            "f" => "=ROUND(PV(0.08/12, 20*12, 500, 0, 0) * 100, 0)",
+            "v" => -5_977_715,
+            "t" => "n"
+          },
+          # D16 =NPER(12%/12, -100, -1000, 10000, 1) -> 59.6738657  [MS NPER ex 1]
+          "D16" => %{
+            "f" => "=ROUND(NPER(0.12/12, -100, -1000, 10000, 1) * 10000, 0)",
+            "v" => 596_739,
+            "t" => "n"
+          },
+          # E16 =NPV(10%, -10000, 3000, 4200, 6800) -> $1,188.44  [MS NPV ex 1]
+          "E16" => %{
+            "f" => "=ROUND(NPV(0.1, -10000, 3000, 4200, 6800) * 100, 0)",
+            "v" => 118_844,
+            "t" => "n"
+          },
+          # Row 17 is IRR's cash-flow series — Microsoft's own IRR example data
+          # (a 70,000 business cost then four years of income). A18 reads it as a
+          # RANGE, which is the shape IRR takes in a real sheet.
+          "A17" => %{"v" => -70_000, "t" => "n"},
+          "B17" => %{"v" => 12_000, "t" => "n"},
+          "C17" => %{"v" => 15_000, "t" => "n"},
+          "D17" => %{"v" => 18_000, "t" => "n"},
+          "E17" => %{"v" => 21_000, "t" => "n"},
+          # A18 =IRR(A17:E17) -> -2.12%  [MS IRR example, four years in]
+          "A18" => %{"f" => "=ROUND(IRR(A17:E17) * 1000000, 0)", "v" => -21_245, "t" => "n"},
+          # B18 =RATE(4*12, -200, 8000) -> 0.77% a month (9.24%/yr)  [MS RATE ex]
+          "B18" => %{"f" => "=ROUND(RATE(48, -200, 8000) * 1000000, 0)", "v" => 7_701, "t" => "n"},
           # Row 19 — the #NAME? lock (the unsupported-function ruling). A TYPED
           # unknown function with NOTHING cached has nothing honest to show, so
           # it IS an error cell, not a blank behind a quiet stale dot. Same
@@ -230,7 +293,7 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           # `t: "e"` cell, and it bumps the exactly-asserted `error_refs` lock in
           # golden_parity_fixture_test.exs from six entries to seven. Row 19
           # because rows 13-15 are the everyday-function batch and rows 16-18 are
-          # reserved by the open financial-functions PR (#15413).
+          # the financial batch (#15413).
           # (The OTHER arm of the ruling — an import that KEEPS its cached value
           # — is B6, already here.)
           "A19" => %{"v" => "Unsupported"},

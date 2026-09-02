@@ -1,0 +1,1 @@
+If enabled: a demonstration that auto-merge still respects the required set under enforce_admins:true (it must NOT bypass protection)

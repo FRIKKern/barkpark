@@ -1,0 +1,1 @@
+Every CONFLICTING open PR named by scripts/stale-verdict-watch.sh is dispositioned: rebased+pushed (which re-dispatches its checks) or closed. Paste the before and after verdicts.

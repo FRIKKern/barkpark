@@ -1,0 +1,1 @@
+If it is pure residue, that fact is recorded so no future replay fixture is drawn from those rows expecting a cause
