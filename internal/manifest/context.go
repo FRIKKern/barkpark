@@ -110,6 +110,37 @@ const (
 // pass a Defaults built from DefaultDefaults and rely on flags/active-context to
 // override; the env fallbacks are the documented v1 floor.
 func Resolve(flags map[string]string, env apiclient.Config, active ActiveContext, defaults Defaults) Context {
+	ctx, _ := ResolveWithSources(flags, env, active, defaults)
+	return ctx
+}
+
+// Layer names the precedence layer ResolveWithSources took a field's value from.
+// These are the ONLY four layers Resolve folds, in order.
+const (
+	LayerFlag    = "flag"
+	LayerEnv     = "env"
+	LayerActive  = "active"
+	LayerDefault = "default"
+)
+
+// Sources reports, per field, WHICH layer supplied the value Resolve returned.
+// It exists so a caller that must EXPLAIN a resolved value ("which credential
+// did bp just use?") reads the answer out of the same pick that chose it,
+// instead of re-deriving the precedence next to it and drifting. Every field
+// carries one of the Layer* constants.
+type Sources struct {
+	Server    string
+	Token     string
+	Workspace string
+	Project   string
+	Dataset   string
+	Output    string
+}
+
+// ResolveWithSources is Resolve plus the provenance of every field it picked.
+// Resolve delegates to it, so there is exactly ONE implementation of the
+// precedence and the label can never disagree with the value it describes.
+func ResolveWithSources(flags map[string]string, env apiclient.Config, active ActiveContext, defaults Defaults) (Context, Sources) {
 	// stated reports whether a layer ABOVE Defaults supplied the value — the only
 	// form of "the operator said so" that survives into the Context. It mirrors
 	// pick's precedence deliberately and sits directly above it: a provenance flag
@@ -120,29 +151,48 @@ func Resolve(flags map[string]string, env apiclient.Config, active ActiveContext
 		}
 		return envVal != "" || activeVal != ""
 	}
-	pick := func(flagKey, envVal, activeVal, defVal string) string {
+	// pick returns the winning value AND the layer it came from — one traversal,
+	// so the label is a by-product of the choice rather than a second opinion
+	// about it.
+	pick := func(flagKey, envVal, activeVal, defVal string) (string, string) {
 		if v, ok := flags[flagKey]; ok && v != "" {
-			return v
+			return v, LayerFlag
 		}
 		if envVal != "" {
-			return envVal
+			return envVal, LayerEnv
 		}
 		if activeVal != "" {
-			return activeVal
+			return activeVal, LayerActive
 		}
-		return defVal
+		return defVal, LayerDefault
+	}
+
+	var src Sources
+	server, srcServer := pick(FlagServer, env.BaseURL, active.Server, defaults.Server)
+	token, srcToken := pick(FlagToken, env.Token, active.Token, defaults.Token)
+	workspace, srcWorkspace := pick(FlagWorkspace, env.Workspace, active.Workspace, defaults.Workspace)
+	project, srcProject := pick(FlagProject, env.Project, active.Project, defaults.Project)
+	dataset, srcDataset := pick(FlagDataset, env.Dataset, active.Dataset, defaults.Dataset)
+	// Output has no env field on apiclient.Config; flags > active > default.
+	output, srcOutput := pick(FlagOutput, "", active.Output, defaults.Output)
+	src = Sources{
+		Server:    srcServer,
+		Token:     srcToken,
+		Workspace: srcWorkspace,
+		Project:   srcProject,
+		Dataset:   srcDataset,
+		Output:    srcOutput,
 	}
 
 	return Context{
-		Server:    pick(FlagServer, env.BaseURL, active.Server, defaults.Server),
-		Token:     pick(FlagToken, env.Token, active.Token, defaults.Token),
-		Workspace: pick(FlagWorkspace, env.Workspace, active.Workspace, defaults.Workspace),
-		Project:   pick(FlagProject, env.Project, active.Project, defaults.Project),
-		Dataset:   pick(FlagDataset, env.Dataset, active.Dataset, defaults.Dataset),
-		// Output has no env field on apiclient.Config; flags > active > default.
-		Output: pick(FlagOutput, "", active.Output, defaults.Output),
+		Server:    server,
+		Token:     token,
+		Workspace: workspace,
+		Project:   project,
+		Dataset:   dataset,
+		Output:    output,
 
 		WorkspaceExplicit: stated(FlagWorkspace, env.Workspace, active.Workspace),
 		ProjectExplicit:   stated(FlagProject, env.Project, active.Project),
-	}
+	}, src
 }

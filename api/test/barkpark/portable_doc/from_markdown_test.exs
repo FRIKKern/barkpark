@@ -51,6 +51,59 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
                FromMarkdown.blocks("```elixir\nIO.puts(:hi)\n```")
     end
 
+    # bl-frommarkdown-fence-language. The info string is the ONLY place a
+    # markdown author can say what language a fence is, and the converter used
+    # to read it (to dispatch mermaid/portabledoc) and then throw it away — so
+    # ```python arrived at every surface indistinguishable from ```.
+    test "the fence info string is carried onto the code block as `lang`" do
+      assert [%{"type" => "code", "value" => "print(1)", "lang" => "python"}] =
+               FromMarkdown.blocks("```python\nprint(1)\n```")
+
+      # `lang`, not `language`: that is the field `Blocks.default_block/1`
+      # writes, `build_block_patch/2` patches and the Studio code editor reads.
+      # A `language` key would be a decoy nothing consumes.
+      [block] = FromMarkdown.blocks("```elixir\nIO.puts(:hi)\n```")
+      assert block["lang"] == "elixir"
+      refute Map.has_key?(block, "language")
+
+      # the tilde fence spells its info string the same way
+      assert [%{"lang" => "js"}] = FromMarkdown.blocks("~~~js\nlet a = 1\n~~~")
+    end
+
+    # THE BYTE-COMPAT HALF (criterion 0). A language-less fence must emit the
+    # map it has always emitted — EXACTLY two keys, no `"lang" => ""` — because
+    # `put_if_present/3` drops a blank lang on the write path, the pd-parity
+    # golden `code.golden.json` freezes this input, and the JS emitter mirrors
+    # it byte-for-byte. Asserting the KEY SET is what makes this non-vacuous: a
+    # pattern match would pass with an extra key present.
+    test "a language-less fence emits the IDENTICAL shape it does today" do
+      for markdown <- [
+            "```\nplain\n```",
+            "~~~\nplain\n~~~",
+            "    plain\n"
+          ] do
+        assert [block] = FromMarkdown.blocks(markdown)
+
+        assert Map.keys(block) |> Enum.sort() == ["type", "value"],
+               "a fence with no info string must keep the two-key shape, got #{inspect(block)}"
+
+        assert block["type"] == "code"
+      end
+    end
+
+    # The two reserved info strings still DISPATCH rather than becoming a lang.
+    test "mermaid and portabledoc fences are unaffected by the lang carry" do
+      assert [%{"type" => "diagram"}] = FromMarkdown.blocks("```mermaid\ngraph TD\n  A-->B\n```")
+
+      fence = ~s([{"type":"callout","tone":"info","content":[]}])
+      assert [%{"type" => "callout"}] = FromMarkdown.blocks("```portabledoc\n#{fence}\n```")
+
+      # …and the degrade path stays a bare code block, with no `lang` invented
+      # out of the reserved word.
+      assert [degraded] = FromMarkdown.blocks("```portabledoc\n[{oops\n```")
+      assert Map.keys(degraded) |> Enum.sort() == ["type", "value"]
+    end
+
     test "mermaid fence becomes a diagram block" do
       assert [%{"type" => "diagram", "source" => "graph TD\n  A-->B"}] =
                FromMarkdown.blocks("```mermaid\ngraph TD\n  A-->B\n```")
@@ -147,6 +200,55 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
       assert html =~ "mermaid"
       assert html =~ "bp-stat"
       assert html =~ "example.com"
+    end
+  end
+
+  # bl-frommarkdown-fence-language, criterion 1. Carrying the field is only
+  # half a fix — the row's complaint is that "a code fence gets its chrome and
+  # language label" is unreachable on EVERY surface. This is the end-to-end
+  # proof on a server-rendered one: markdown in, the language visible in the
+  # DOM, no stub in between.
+  describe "the fence language reaches a render surface" do
+    import Phoenix.LiveViewTest
+
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    test "the Studio code-block editor shows the imported fence's language" do
+      [block] = FromMarkdown.blocks("```python\nprint(1)\n```")
+      block = Map.put(block, "id", "b1")
+
+      html = render_component(&PaperEditor.paper_block_fields/1, %{block: block})
+
+      assert html =~ ~s(name="lang")
+
+      assert html =~ ~s(value="python"),
+             "the lang control must carry the imported fence's language, got: #{html}"
+    end
+
+    test "a language-less fence leaves that control empty, exactly as before" do
+      [block] = FromMarkdown.blocks("```\nprint(1)\n```")
+      block = Map.put(block, "id", "b1")
+
+      html = render_component(&PaperEditor.paper_block_fields/1, %{block: block})
+
+      assert html =~ ~s(name="lang")
+      assert html =~ ~s(value="")
+      refute html =~ ~s(value="python")
+    end
+
+    # THE GOLDENS DO NOT MOVE, and this is the assertion that says so at the
+    # emitter rather than by trusting the fixture list. `Figures.code_block_html/1`
+    # is mirrored byte-for-byte by `codeBlockHtml` in
+    # js/packages/react/src/blocks/core.ts and frozen in
+    # test/support/fixtures/pd-parity/code.golden.json, so the article reader's
+    # `<pre>` must be identical with and without a lang — adding a label there
+    # would be a cross-surface divergence, not a fix.
+    test "the article reader's <pre> is byte-identical with and without a lang" do
+      with_lang = FromMarkdown.blocks("```python\nprint(1)\n```")
+      without = FromMarkdown.blocks("```\nprint(1)\n```")
+
+      assert Render.render_blocks(with_lang, %{style: :article}) ==
+               Render.render_blocks(without, %{style: :article})
     end
   end
 end
