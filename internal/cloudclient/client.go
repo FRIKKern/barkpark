@@ -1132,7 +1132,67 @@ type MetricsSpace struct {
 	DBSize       *float64          `json:"db_size"`
 	TopRelations []RelationSize    `json:"top_relations"`
 	Sites        MetricsSpaceSites `json:"sites"`
-	ReportedAt   *string           `json:"reported_at"`
+
+	// ConsumerRoots is the BUILD PLANE's disk and every other tree the sites
+	// axis structurally cannot see. Until it was decoded here, `bp` had NO
+	// reader for it at all: the agent has posted these rows since #13000 and
+	// the only surface that rendered them was the browser console, so "what is
+	// eating the disk on that box" was still an ssh question with the answer
+	// already in the database. That is the same failure the space payload was
+	// built to end, one layer up.
+	//
+	// nil is "this agent measured no roots"; an empty slice is "it was
+	// configured to look nowhere". Different facts, kept different.
+	ConsumerRoots []MetricsSpaceConsumerRoot `json:"consumer_roots"`
+
+	// Residual is what the reading did NOT measure — or a stated refusal.
+	// nil is an agent that predates the field, which a view must word
+	// differently from a refusal.
+	Residual *MetricsSpaceResidual `json:"residual"`
+
+	ReportedAt *string `json:"reported_at"`
+}
+
+// MetricsSpaceConsumerRoot is one named disk-consumer root on THIS box.
+//
+// Status carries four states and a reader must branch on it, never on
+// Bytes >= 0: "read", "degraded" (the total is a FLOOR — du finished but could
+// not descend everywhere), "absent" (not on this box, which must never render
+// as 0 bytes) and "unmeasured".
+//
+// ExcludedReason is INDEPENDENT of Status: a root can be perfectly well read
+// and still not be subtractable from the residual — an overlay mount is a
+// complete, correct reading of a tree that is not on the root filesystem.
+type MetricsSpaceConsumerRoot struct {
+	Path           string         `json:"path"`
+	Status         *string        `json:"status"`
+	Bytes          *float64       `json:"bytes"`
+	Count          *float64       `json:"count"`
+	Top            []RelationSize `json:"top"`
+	Degraded       []string       `json:"degraded"`
+	DegradedCount  *float64       `json:"degraded_count"`
+	ExcludedReason *string        `json:"excluded_reason"`
+}
+
+// MetricsSpaceResidual is the answer to the question every part-of-a-whole
+// reading begs and almost none of them state: what about the rest?
+//
+// OfBytes is the denominator — the root filesystem's USED total — and it
+// travels with the value so no view can render a share without the volume that
+// produced it. It is never df's capacity percent: that is ceil(used/(used+avail))
+// with root-reserved blocks excluded, a share of a DIFFERENT whole.
+//
+// Status "undefined" is the refusal a negative result becomes, and Bytes keeps
+// the -1 sentinel there. A view must word it, never print it.
+type MetricsSpaceResidual struct {
+	Status        *string  `json:"status"`
+	Bytes         *float64 `json:"bytes"`
+	OfBytes       *float64 `json:"of_bytes"`
+	MeasuredBytes *float64 `json:"measured_bytes"`
+	CountedRoots  *float64 `json:"counted_roots"`
+	ExcludedRoots *float64 `json:"excluded_roots"`
+	PGSource      *string  `json:"pg_source"`
+	Reason        *string  `json:"reason"`
 }
 
 // MetricsSpaceRoot is the root filesystem's used/total pair. Both nil is "we
@@ -3582,8 +3642,8 @@ func (c *Client) SetAutoupdate(ctx context.Context, id string, patch map[string]
 	return env.Autoupdate, nil
 }
 
-// RolloutState is the FLEET-WIDE autoupdate rollout the admin route governs
-// (GET/POST /v1/admin/autoupdate*, isu-w5). `Halted` is the one lever
+// RolloutState is the FLEET-WIDE autoupdate rollout the operator route governs
+// (GET/POST /v1/operator/autoupdate*, isu-w5). `Halted` is the one lever
 // halt/resume toggle — the global stop that pauses the AutoupdateRolloutWorker
 // from advancing ANY instance (the emergency brake when a blessed release turns
 // out bad). The counters are POINTERS so the CLI renders only what the control
@@ -3600,11 +3660,15 @@ type RolloutState struct {
 	Eligible *int   `json:"eligible"`
 }
 
-// rolloutRequest issues one admin-autoupdate call (the shared GET status / POST
-// halt / POST resume core) and decodes the RolloutState, keeping the raw bytes.
-// A non-2xx surfaces through routeError so a 404 (an older control plane without
-// the rollout route) is a *CloudRouteError the CLI can degrade honestly and a
-// 401 keeps its "unauthorized:" prefix.
+// rolloutRequest issues one operator-autoupdate call (the shared GET status /
+// POST halt / POST resume core) and decodes the RolloutState, keeping the raw
+// bytes. `auth: true`, so every one of the three carries the caller's bp-login
+// SESSION as `Authorization: Bearer <session>` — the credential
+// `Auth.require_platform_operator/2` actually resolves. A non-2xx surfaces
+// through routeError so a 404 (an older control plane that never grew the
+// /v1/operator seam) and a 403 (signed in, not on the allowlist) are both
+// *CloudRouteError the CLI can degrade honestly, and a 401 keeps its
+// "unauthorized:" prefix.
 func (c *Client) rolloutRequest(ctx context.Context, method, path string) (RolloutState, error) {
 	status, body, err := c.do(ctx, method, path, true, nil)
 	if err != nil {
@@ -3620,33 +3684,43 @@ func (c *Client) rolloutRequest(ctx context.Context, method, path string) (Rollo
 	return res, nil
 }
 
-// RolloutStatus reads the fleet rollout state via GET /v1/admin/autoupdate.
+// RolloutStatus reads the fleet rollout state via GET /v1/operator/autoupdate.
 // Read-only — it never advances or halts anything.
 //
-// THE CREDENTIAL IS THE WORKER TOKEN, NOT AN ADMIN SESSION. This comment used to
-// say "(Bearer, admin)", which is wrong in the way this epic exists to delete:
-// the route calls `Auth.require_worker/2` (router.ex, `GET /v1/admin/autoupdate`),
-// so the only credential that opens it is the shared `WORKER_TOKEN` machine
-// secret. A human's `bp login` token is refused no matter what role they hold on
-// any team, and the "admin" in the old sentence sent a reader looking for a team
-// grant that has no bearing on the answer. dr-w18-s4's audience census derives
-// this independently from source and prints the tier as `worker`. Whether any
-// human-facing verb SHOULD read the brake's position through a machine-only door
-// is dr-w19-rollout-brake-is-machine-only, filed, not answered here.
+// THE CREDENTIAL IS THE CALLER'S bp-login SESSION, AND THE PRINCIPAL IS THE
+// PLATFORM OPERATOR (isu-backlog-operator-principal, the ruling this comment now
+// records). These three methods used to call `/v1/admin/autoupdate*`, which is
+// gated by `Auth.require_worker/2` — a constant-time compare against the shared
+// `WORKER_TOKEN` machine secret. A `bp login` token can never equal that secret,
+// so `bp cloud rollout` was structurally unable to succeed for a human no matter
+// what role they held on any team: the verb shipped, and the door it knocked on
+// had no handle. (An even older revision of this comment said "(Bearer, admin)",
+// which sent a reader hunting for a team grant that has no bearing on it.)
+//
+// The rollout verbs now call the `/v1/operator/autoupdate*` trio, gated by
+// `Auth.require_platform_operator/2` (router.ex): a valid session whose email is
+// on `Notifications.platform_admin_emails/0` — the `PLATFORM_ADMIN_EMAILS`
+// allowlist, the SAME one behind `/v1/me`'s `platform_operator` boolean and the
+// console's Operator surface. One principal, both surfaces. The `/v1/admin/*`
+// routes are untouched and stay the WORKER's (the off-box provisioner), so this
+// is a reachability fix, not a widening: neither door accepts the other's
+// credential, and router_operator_test.exs asserts that in both directions.
 func (c *Client) RolloutStatus(ctx context.Context) (RolloutState, error) {
-	return c.rolloutRequest(ctx, "GET", "/v1/admin/autoupdate")
+	return c.rolloutRequest(ctx, "GET", "/v1/operator/autoupdate")
 }
 
-// RolloutHalt stops the fleet rollout via POST /v1/admin/autoupdate/halt
-// (Bearer, admin) — the global brake. Returns the resulting (halted) state.
+// RolloutHalt stops the fleet rollout via POST /v1/operator/autoupdate/halt
+// (Bearer, the caller's session; platform-operator gated — see RolloutStatus) —
+// the global brake. Returns the resulting (halted) state.
 func (c *Client) RolloutHalt(ctx context.Context) (RolloutState, error) {
-	return c.rolloutRequest(ctx, "POST", "/v1/admin/autoupdate/halt")
+	return c.rolloutRequest(ctx, "POST", "/v1/operator/autoupdate/halt")
 }
 
 // RolloutResume restarts a halted fleet rollout via
-// POST /v1/admin/autoupdate/resume (Bearer, admin). Returns the resulting state.
+// POST /v1/operator/autoupdate/resume (Bearer, the caller's session;
+// platform-operator gated — see RolloutStatus). Returns the resulting state.
 func (c *Client) RolloutResume(ctx context.Context) (RolloutState, error) {
-	return c.rolloutRequest(ctx, "POST", "/v1/admin/autoupdate/resume")
+	return c.rolloutRequest(ctx, "POST", "/v1/operator/autoupdate/resume")
 }
 
 // RollbackResult is a STARTED instance rollback (isu-w6, charter W6 D15/D16): the

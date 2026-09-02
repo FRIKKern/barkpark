@@ -1,10 +1,11 @@
-# required-checks-drift — the required-check toolchain's own gate, in two halves.
+# required-checks-drift — the required-check toolchain's own gate, plus the one
+# workflow-shape ratchet that has to live somewhere path-unfiltered.
 #
 # Live protection, the committed .github/required-checks.json, and the check-run
 # names a real PR head actually renders must agree. This workflow fails when they
 # do not, and — the part that matters — it fails when it cannot SEE one of them.
 #
-# TWO JOBS, SPLIT ON WHETHER THEY NEED A CREDENTIAL (wave 10)
+# THE TOOLCHAIN'S TWO JOBS, SPLIT ON WHETHER THEY NEED A CREDENTIAL (wave 10)
 #
 #   `Required-check spec gate`          Hermetic: no network, no token, no
 #                                       writes. Runs the mutation suite with
@@ -15,6 +16,24 @@
 #                                       line, the tally line is authoritative.
 #   `Required-check spec drift (advisory)`  ADVISORY. Everything that reads the
 #                                       GitHub API on a BREAKGLASS credential.
+#
+# A THIRD JOB THAT IS NOT ABOUT THE REQUIRED SET AT ALL, AND WHY IT IS HERE
+#
+#   `Every workflow job has runs-on+steps or uses`   Hermetic. The subject is
+#                                       the whole .github/workflows tree, not
+#                                       this workflow. It is here for ONE
+#                                       property this file has and the repo's
+#                                       other workflow-linting homes do not:
+#                                       no `on:.paths` filter, so it renders on
+#                                       every pull request. The defect it exists
+#                                       to catch (a job left with only a `name:`
+#                                       key, which makes GitHub refuse the WHOLE
+#                                       file at parse time and render zero jobs)
+#                                       arrived inside shell-harnesses.yml —
+#                                       where every other workflow harness in
+#                                       this repo is wired — and a broken file
+#                                       cannot lint itself. It shares nothing
+#                                       with the two jobs above but this home.
 #
 # WHAT THE SPEC GATE'S RED ACTUALLY DOES — AND THE HEADER USED TO OVERSTATE IT
 #
@@ -124,6 +143,47 @@ jobs:
       # verify's own 16 mutation clauses via §9. No network, no token.
       - name: Prove the toolchain by mutation (hermetic)
         run: bash scripts/required-checks.test.sh --hermetic
+
+  # ── the workflow-file shape ratchet ─────────────────────────────────────────
+  # WHY IT LIVES HERE AND NOT IN shell-harnesses.yml, where every other
+  # workflow-linting harness in this repo is wired. A PR spliced a job block
+  # between compose-smoke-dispatcher's `name:` line and its `runs-on:`/`steps:`,
+  # leaving that job with nothing but a name. The file stayed valid YAML, so no
+  # parser in the repo objected; GitHub refused the whole file at parse time
+  # ("This run likely failed because of a workflow file issue", zero jobs, 0s)
+  # on every push to main for nine hours, and all 25 shell harnesses went
+  # silently unexecuted. A checker wired only inside shell-harnesses.yml would
+  # have been dead alongside its subject — a broken file cannot lint itself.
+  #
+  # This workflow is the home because it is deliberately path-unfiltered (see
+  # the header: adding an `on:.paths` key back would undo that) and so it
+  # renders on EVERY pull request. A paths-filtered home would skip exactly the
+  # PR that does not look like it touches CI.
+  #
+  # It is its own job on purpose: not a step appended to spec-gate (whose red
+  # would then be ambiguous between two unrelated subjects) and not in any
+  # required aggregator's `needs:`. It publishes a new, unregistered check-run
+  # name; registering it is a branch-protection change and a lead call.
+  workflow-job-shape:
+    name: Every workflow job has runs-on+steps or uses
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # The harness proves itself before it judges the tree: it plants a
+      # name-only job, a runs-on-without-steps job, an unparseable file and a
+      # legal `uses:` job in mktemp fixtures and asserts red/red/red/green, plus
+      # the coverage floor (an empty scan exits 2, never a vacuous green) and an
+      # unknown flag exiting 2 rather than 0.
+      - name: Prove the shape checker on planted fixtures (--selftest)
+        run: bash scripts/workflow-job-shape-check.sh --selftest
+
+      # PyYAML ships on ubuntu-latest; no install step, no network.
+      - name: Every job in .github/workflows has a legal shape
+        run: bash scripts/workflow-job-shape-check.sh --dir .github/workflows
 
   # ── the advisory half ───────────────────────────────────────────────────────
   required-checks-drift:

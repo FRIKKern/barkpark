@@ -1,0 +1,83 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w11-s1-flip-behind-a-generator-that-cannot-lose",
+    "kind": "task",
+    "type": "task",
+    "title": "flip behind a generator that cannot lose",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "built and proven, part 1.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 2.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 3.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 4.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 5.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 6.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 7.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 8.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 9.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "THE PUT, in one sitting with the merge.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Criterion 10 was amended by the lead; the original subject PR was closed 37 minutes before the flip, so the natural experiment can never be run.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "THE GATE IS MUTATION-PROVEN ABLE TO BOTH STOP AND NOT-STOP A MERGE.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "PR merged to main (LEAD closes this criterion, pasting the merge SHA).",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "number": 13001,
+    "title": "fix: two trailers",
+    "body": "Body.\n\nTask: cch-w42-bl-ambiguously-named\nTask: some-other-row\n",
+    "mergedAt": "2026-08-22T00:00:00Z",
+    "mergeCommit": {
+      "oid": "eeee4444"
+    }
+  }
+]

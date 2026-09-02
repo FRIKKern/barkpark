@@ -270,4 +270,111 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
       assert {:error, _} = Auth.verify_token(minted["token"])
     end
   end
+
+  # ── The NULL-column arms of the SAME two checks (arpss) ──────────────────
+  #
+  # The confinement block above proves FAMILY and OBJECT AUTHZ against rows that
+  # carry both columns. Neither check's fail-closed CATCH-ALL had a test, and
+  # both catch-alls guard a shape that really exists in `api_tokens`:
+  #
+  #   * `workspace_id` is nullable and `Auth.create_token/4` predates workspace
+  #     binding, so legacy support rows carry NULL. `workspace_admin?/2` denies
+  #     them only because `Repo.uuid_or_nil(nil)` returns nil and the
+  #     `is_binary(ws_id)` clause then misses — a fallback that reads as an
+  #     accident and would be silently deleted by anyone "simplifying" the
+  #     helper. If nil ever passed, EVERY unbound support row on the instance
+  #     becomes revocable by ANY admin: the exact global kill switch #12700
+  #     closed, reopened through the column nobody looks at.
+  #   * `label` is nullable too (only `token_hash` is `validate_required`), so
+  #     `support_family?/1`'s catch-all is the only thing standing between an
+  #     unlabelled row and the family gate.
+  #
+  # Both assert STATE (the credential is still alive), not just the status code.
+
+  # A live, IN-FAMILY support token with NO workspace binding — the legacy shape.
+  # FAMILY passes on purpose, so only the object-authz nil arm can deny.
+  defp null_workspace_support_token do
+    raw = "barkpark-test-victim-nullws-#{System.unique_integer([:positive])}"
+
+    {:ok, token} =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        token_hash: ApiToken.hash_token(raw),
+        label: "fleet-support-legacy-unbound",
+        dataset: "test",
+        permissions: ["read", "write"],
+        workspace_id: nil
+      })
+      |> Repo.insert()
+
+    {raw, token}
+  end
+
+  # A live row with NO label, bound to the workspace the admin actor DOES
+  # administer — so object authz passes and only the family catch-all can deny.
+  defp null_label_token do
+    raw = "barkpark-test-victim-nulllabel-#{System.unique_integer([:positive])}"
+
+    {:ok, token} =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        token_hash: ApiToken.hash_token(raw),
+        label: nil,
+        dataset: "test",
+        permissions: ["read", "write"],
+        workspace_id: Barkpark.Tenancy.get_default_workspace().id
+      })
+      |> Repo.insert()
+
+    {raw, token}
+  end
+
+  describe "revoke confinement: the NULL-column arms" do
+    test "a support-family token with a NULL workspace_id is NOT revocable", %{conn: conn} do
+      {raw, victim} = null_workspace_support_token()
+
+      # Premise: FAMILY is satisfied, so the family check cannot be what denies
+      # — and the row genuinely carries no workspace, which is the whole point.
+      assert String.starts_with?(victim.label, "fleet-support-")
+      assert is_nil(victim.workspace_id)
+
+      resp = conn |> admin_conn() |> delete("/v1/fleet/support-tokens/#{victim.id}")
+      assert resp.status == 404
+
+      # STATE: the credential is still ALIVE.
+      assert {:ok, _} = Auth.verify_token(raw)
+      assert is_nil(Repo.get!(ApiToken, victim.id).revoked_at)
+    end
+
+    test "a NULL label is not in the family, even in a workspace the actor admins",
+         %{conn: conn} do
+      {raw, victim} = null_label_token()
+
+      # Premise: OBJECT AUTHZ is satisfied — the actor really does admin this
+      # row's workspace — so only the family catch-all can produce the denial.
+      actor = actor_row(@admin_token)
+      assert is_nil(victim.label)
+      assert Barkpark.Tenancy.Auth.workspace_admin?(actor, victim.workspace_id)
+
+      resp = conn |> admin_conn() |> delete("/v1/fleet/support-tokens/#{victim.id}")
+      assert resp.status == 404
+
+      assert {:ok, _} = Auth.verify_token(raw)
+      assert is_nil(Repo.get!(ApiToken, victim.id).revoked_at)
+    end
+
+    test "both NULL denials are BYTE-IDENTICAL to a missing row", %{conn: conn} do
+      {_raw, null_ws} = null_workspace_support_token()
+      {_raw2, null_label} = null_label_token()
+
+      missing = conn |> admin_conn() |> delete("/v1/fleet/support-tokens/#{Ecto.UUID.generate()}")
+      unbound = conn |> admin_conn() |> delete("/v1/fleet/support-tokens/#{null_ws.id}")
+      unlabelled = conn |> admin_conn() |> delete("/v1/fleet/support-tokens/#{null_label.id}")
+
+      for resp <- [missing, unbound, unlabelled] do
+        assert resp.status == 404
+        assert resp.resp_body == missing.resp_body
+      end
+    end
+  end
 end

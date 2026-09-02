@@ -14,6 +14,13 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { mintAll, mintRecipe, pathToken, quantityPhrase } from "../mint.mjs";
+// NAMESPACE-IMPORTED ON PURPOSE, and not to be tidied into the named import
+// above. A named import of a symbol the PREVIOUS mint.mjs does not export is a
+// LINK error: swap the module back and the whole file reds with a SyntaxError
+// before a single assertion runs, which proves nothing about the mint. Reached
+// through the namespace, the fail-before tests red on what the mint DOES.
+import * as mint from "../mint.mjs";
+const cdRootOffset = (rerun) => mint.cdRootOffset(rerun);
 import { admitRecipe, foldLedger, inScope, mintRunId, readLedgerRuns, writeLedgerRun } from "../ledger.mjs";
 import { screenCommand } from "../screen.mjs";
 
@@ -537,11 +544,98 @@ test("tgw6 — subject and deps are minted from the ORIGINAL command, so a strip
   strictEqual(withCd.recipe.rerun, stripped.recipe.rerun);
 });
 
+// ── tgw11 defect 9: the `cd` that MOVED THE ROOT ─────────────────────────────
+//
+// Measured on the committed store, not invented. `grip-20260721T150000Z-v2-
+// tickets-idor-fixshape.json` carries
+//
+//   rerun    cd <checkout>/api && CC=/usr/bin/clang mix test test/barkpark/plugins/tickets/keys_test.exs 2>&1 | tail -3
+//   subject  api/test/barkpark/plugins/tickets/keys_test.exs      ← the human, repo-rooted
+//   minted   test/barkpark/plugins/tickets/keys_test.exs          ← the mint, resolving to NOTHING
+//
+// The human is right: the store is repo-rooted, and `test/barkpark/plugins/…`
+// does not exist at the repo root. Defect 1 taught the mint to strip a checkout
+// ROOT; it never taught it that a `cd` into a SUBDIRECTORY moves the root the
+// other way and the subject has to move with it.
+
+test("tgw11 — `cd <checkout>/<subdir> &&` carries the subdir onto the subject AND the path-shaped deps", () => {
+  const m = mintRecipe(
+    { rerun: `cd ${REPO}/api && CC=/usr/bin/clang mix test test/barkpark/plugins/tickets/keys_test.exs 2>&1 | tail -3` },
+    { observed_at: NOW },
+  );
+  ok(m.ok);
+  strictEqual(m.recipe.subject, "api/test/barkpark/plugins/tickets/keys_test.exs");
+  deepStrictEqual(m.recipe.deps, ["api/test/barkpark/plugins/tickets/keys_test.exs"]);
+  // a worktree checkout is the same root, and the offset is read past it
+  const w = mintRecipe({ rerun: `cd ${WORKTREE}/api && mix test test/support/data_case.ex` }, { observed_at: NOW });
+  ok(w.ok);
+  strictEqual(w.recipe.subject, "api/test/support/data_case.ex");
+  // a multi-segment offset carries whole. The SUBJECT here is the cd target
+  // itself — a multi-segment target survives stripRoots and is already the
+  // first path token, which is behaviour this slice does not touch — but the
+  // dep it moved into is now repo-rooted instead of naming a bare `src/`.
+  const j = mintRecipe({ rerun: `cd ${REPO}/js/packages/react && wc -l src/index.ts` }, { observed_at: NOW });
+  ok(j.ok);
+  strictEqual(j.recipe.subject, "js/packages/react");
+  deepStrictEqual(j.recipe.deps, ["js/packages/react", "js/packages/react/src/index.ts"]);
+});
+
+test("tgw11 — the offset is read ONLY off an absolute target that strips to a non-empty remainder", () => {
+  // the target IS the checkout root: nothing moved, and defect 1 already handles it
+  strictEqual(cdRootOffset(`cd ${REPO} && wc -l tooling/grip/mint.mjs`), null);
+  strictEqual(cdRootOffset(`cd ${WORKTREE} && wc -l tooling/grip/mint.mjs`), null);
+  // a BARE RELATIVE target: the cwd it was typed in is not recorded anywhere.
+  // The live store's `cd barkpark && git grep … -- api/lib` is the counter-
+  // example — the target is the REPO reached from its parent, and carrying it
+  // would mint `barkpark/api/lib`, a directory that has never existed.
+  strictEqual(cdRootOffset("cd api && grep -rn receive_timeout lib/"), null);
+  strictEqual(subjectOf("cd barkpark && git grep -c DedupWall origin/main -- api/lib"), "api/lib");
+  // a FOREIGN absolute target: the offset is unknowable, behaviour UNCHANGED —
+  // the target mints nothing (PATH_SHAPED refuses an absolute) and every other
+  // token mints bare, exactly as before this change.
+  strictEqual(cdRootOffset("cd /Users/f/Documents/GitHub/barkpark/api && mix test test/y_test.exs"), null);
+  strictEqual(subjectOf("cd /Users/f/Documents/GitHub/barkpark/api && mix test test/y_test.exs"), "test/y_test.exs");
+  strictEqual(cdRootOffset("cd /tmp && wc -l probe.txt"), null);
+  // no leading cd at all
+  strictEqual(cdRootOffset("mix test test/y_test.exs"), null);
+});
+
+test("tgw11 — a token the `cd` cannot reach is NOT carried: absolute, and ref-qualified", () => {
+  // ABSOLUTE — resolved by the filesystem; stripRoots already root-anchored it,
+  // so a carry would double the prefix into `api/api/lib/z.ex`.
+  strictEqual(subjectOf(`cd ${REPO}/api && wc -l ${REPO}/api/lib/z.ex`), "api/lib/z.ex");
+  // REF-QUALIFIED — in `git show <rev>:<path>` a path not beginning `./` is
+  // relative to the REPO ROOT, so git already answers root-relative.
+  strictEqual(subjectOf(`cd ${REPO}/api && git show origin/main:api/lib/x.ex | wc -l`), "api/lib/x.ex");
+  const mixed = mintRecipe(
+    { rerun: `cd ${REPO}/api && diff <(git show origin/main:api/lib/x.ex) lib/x.ex` },
+    { observed_at: NOW },
+  );
+  ok(mixed.ok);
+  // one root-relative token from the ref, one cwd-relative token carried — both
+  // land on the SAME repo-rooted key, which is the whole point of the carry
+  deepStrictEqual(mixed.recipe.deps, ["api/lib/x.ex"]);
+});
+
+test("tgw11 — the carry does not touch quantity, binding, or a rerun with no leading cd", () => {
+  const rerun = `cd ${REPO}/api && grep -c 'isolation' lib/barkpark/plugins/capabilities.ex`;
+  const m = mintRecipe({ rerun }, { observed_at: NOW });
+  ok(m.ok);
+  strictEqual(m.recipe.subject, "api/lib/barkpark/plugins/capabilities.ex");
+  strictEqual(m.recipe.quantity, "grep:-c:isolation");
+  // cwd-bound remainder ⇒ classifyBinding keeps the cd, untouched by defect 9
+  strictEqual(m.binding.rebound, false);
+  strictEqual(m.recipe.rerun, rerun);
+  // and the no-cd control still mints bare
+  strictEqual(subjectOf("mix test test/barkpark/plugins/tickets/keys_test.exs"), "test/barkpark/plugins/tickets/keys_test.exs");
+});
+
 // ── REGRESSION FLOOR: the provable NO-OP over the committed corpus ────────────
 //
 // Re-minting every row THE WRITE PATH PRODUCED must leave its subject and deps
-// unchanged (expected 0 moved). This is what makes S1's data merge-order-
-// independent of this slice: the transform only rewrites the stored rerun,
+// unchanged (expected 0 moved) — apart from ONE named, shape-checked, frozen
+// class, `LEGACY_CARRY_CEILING` below. This is what makes S1's data merge-order-
+// independent of the tgw6 slice: THAT transform only rewrites the stored rerun,
 // never the indexing keys.
 //
 // THE SCOPE IS A SHAPE, AND IT IS PRINTED ON PASS. `tooling/grip/ledger/` is a
@@ -572,29 +666,72 @@ const LEDGER_DIR = fileURLToPath(new URL("../ledger", import.meta.url));
 const ATTESTED_RUNS_FLOOR = 22;
 const ATTESTED_ROWS_FLOOR = 319;
 
+// THE ONE DELIBERATE MOVE (tgw11, defect 9). The store is append-only, so the
+// rows minted BEFORE the `cd`-root carry keep the subdirectory-relative keys
+// the old mint derived. Re-minting them now restores the repo-rooted form, and
+// that is the fix landing, not a regression — but it is not waved through
+// either. Two things bound it, and neither is a filename:
+//
+//   1. A SHAPE, not an allowlist. `carriedOnly` demands that EVERY key in the
+//      row either is unchanged or gains exactly the one `<offset>/` prefix that
+//      `cdRootOffset` reads off that row's own rerun. A move of any other shape
+//      — a different subject, a dropped dep, a reordering — still fails.
+//   2. A CEILING THAT CANNOT GROW. Every row written from here on is minted by
+//      the carrying code, so its stored subject already carries the offset and
+//      re-minting it is a no-op: no NEW attested row can ever enter this class.
+//      The set is frozen legacy, so `<=` is the honest direction. Re-derived
+//      2026-09-02 at 5 rows over 342 (two run files, both `cd <checkout>/api`).
+const LEGACY_CARRY_CEILING = 5;
+
+// Every key either unchanged or exactly `<offset>/<key>`, with at least one
+// actually carried. Anything else is a real regression and must still red.
+function carriedOnly(row, minted) {
+  const offset = cdRootOffset(row.rerun);
+  if (offset === null) return false;
+  const storedDeps = row.deps ?? [];
+  if (minted.deps.length !== storedDeps.length) return false;
+  let carried = 0;
+  const keyOk = (from, to) => {
+    if (to === from) return true;
+    if (to === `${offset}/${from}`) { carried += 1; return true; }
+    return false;
+  };
+  if (!keyOk(row.subject, minted.subject)) return false;
+  for (let i = 0; i < storedDeps.length; i += 1) if (!keyOk(storedDeps[i], minted.deps[i])) return false;
+  return carried > 0;
+}
+
 test("REGRESSION FLOOR — re-minting every committed ledger row leaves subject and deps unchanged", () => {
   const { runs, shape } = readLedgerRuns(LEDGER_DIR);
   const attested = runs.filter((run) => inScope(run, "attested"));
   ok(attested.length >= ATTESTED_RUNS_FLOOR, `the write-path-attested scope must not SHRINK: ${attested.length} run(s) < floor ${ATTESTED_RUNS_FLOOR}`);
   let rows = 0;
   const moved = [];
+  const carried = [];
   const remint = (row) => {
     const re = mintRecipe({ rerun: row.rerun }, { observed_at: row.observed_at });
     if (!re.ok) return { rerun: row.rerun, reason: re.reason };
     const subjMoved = re.recipe.subject !== row.subject;
     const depsMoved = JSON.stringify(re.recipe.deps) !== JSON.stringify(row.deps ?? []);
     if (!subjMoved && !depsMoved) return null;
-    return { rerun: row.rerun, from: [row.subject, row.deps], to: [re.recipe.subject, re.recipe.deps] };
+    return { rerun: row.rerun, from: [row.subject, row.deps], to: [re.recipe.subject, re.recipe.deps], carry: carriedOnly(row, re.recipe) };
   };
   for (const run of attested) {
     for (const row of run.recipes) {
       rows += 1;
       const drift = remint(row);
-      if (drift) moved.push({ file: run.file, ...drift });
+      if (!drift) continue;
+      if (drift.carry) carried.push({ file: run.file, ...drift });
+      else moved.push({ file: run.file, ...drift });
     }
   }
   ok(rows >= ATTESTED_ROWS_FLOOR, `the walked corpus must not SHRINK: ${rows} row(s) < floor ${ATTESTED_ROWS_FLOOR}`);
-  strictEqual(moved.length, 0, `${moved.length} of ${rows} attested rows moved subject/deps: ${JSON.stringify(moved)}`);
+  strictEqual(moved.length, 0, `${moved.length} of ${rows} attested rows moved subject/deps OUTSIDE the tgw11 carry class: ${JSON.stringify(moved)}`);
+  ok(
+    carried.length <= LEGACY_CARRY_CEILING,
+    `the frozen legacy tgw11 carry class must not GROW: ${carried.length} row(s) > ceiling ${LEGACY_CARRY_CEILING}. ` +
+      `A new attested row here means the write path minted a subdir-relative subject again: ${JSON.stringify(carried)}`,
+  );
 
   // The rows OUTSIDE the scope are counted and printed, never hidden. They are
   // the hand-authored runs, and their drift is a real, ruled-on number (99 rows
@@ -611,7 +748,8 @@ test("REGRESSION FLOOR — re-minting every committed ledger row leaves subject 
     }
   }
   console.log(
-    `\n  [floor] scope=attested — ${rows} row(s) over ${attested.length} run file(s), 0 moved` +
+    `\n  [floor] scope=attested — ${rows} row(s) over ${attested.length} run file(s), 0 moved outside the carry class` +
+      `\n  [floor] tgw11 legacy cd-root carry: ${carried.length} row(s) over ${new Set(carried.map((c) => c.file)).size} file(s) (ceiling ${LEGACY_CARRY_CEILING}, frozen)` +
       `\n  [floor] declined: ${handAuthored.length} hand-authored grip run file(s) (${handRows} rows, ${handMoved.length} drifting over ${new Set(handMoved).size} files), ` +
       `${shape.foreign} foreign run file(s), ${shape.not_a_run} NOT-A-RUN document(s)\n`,
   );

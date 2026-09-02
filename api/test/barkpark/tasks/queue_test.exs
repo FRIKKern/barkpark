@@ -641,7 +641,25 @@ defmodule Barkpark.Tasks.QueueTest do
              )
     end
 
-    test "dependency plan hashes a one-time done-task scan", %{scope: scope} do
+    # THE PLAN PIN, RE-AIMED (task-9a2e75098a62cf45). This test used to assert
+    # that the dependency gate rode a `MATERIALIZED` CTE computed exactly once.
+    # That CTE was the DEFECT: `MATERIALIZED` is a planner fence, so the whole
+    # workspace's done set and unsatisfied set were built in full before the
+    # outer LIMIT could discard anything, and the outer anti-join against them
+    # degenerated into a nested loop (1,320,188 rows removed by the join filter
+    # on a 12k-task corpus). "Computed once" was true and beside the point.
+    #
+    # The gate is now a correlated probe, so the property worth pinning is the
+    # one whose loss is catastrophic rather than merely slow. Both regressions
+    # measured while building the replacement present as the SAME plan node — a
+    # `Materialize` holding a `documents` scan that the probe then rescans:
+    # 13.7 s at 12k tasks and 250 s at 49k, against 24 ms for the shipped shape.
+    # Writing the gate as `NOT EXISTS` instead of a scalar `count(*) = 0`
+    # re-introduces exactly that node, because `NOT EXISTS` is flattenable into
+    # an anti-join and a scalar aggregate subquery is not. So: no CTE fence, and
+    # no materialized `documents` under the probe.
+    test "the dependency gate probes, and does not materialize the corpus",
+         %{scope: scope} do
       dataset = "queue-plan-#{System.unique_integer([:positive])}"
       now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
@@ -699,40 +717,30 @@ defmodule Barkpark.Tasks.QueueTest do
       document = explain.rows |> hd() |> hd() |> hd()
       nodes = plan_nodes(document)
 
-      done_cte = Enum.find(nodes, &(&1["Subplan Name"] == "CTE ready_done_tasks"))
-      unsatisfied_cte = Enum.find(nodes, &(&1["Subplan Name"] == "CTE ready_unsatisfied_tasks"))
+      # Instrument self-test: the fixture really did reach `documents` through
+      # this query, so an empty node list cannot masquerade as a pass.
+      assert Enum.any?(nodes, &(&1["Relation Name"] == "documents")),
+             "the plan never touched `documents` — the fixture, not the gate, is broken"
 
-      assert done_cte
-      assert unsatisfied_cte
+      # (a) the whole-corpus fence is gone.
+      for cte <- ["CTE ready_done_tasks", "CTE ready_unsatisfied_tasks"] do
+        refute Enum.any?(nodes, &(&1["Subplan Name"] == cte)),
+               "#{cte} is back — the dependency gate is materializing the corpus again"
+      end
 
-      # The done-task CTE reads `documents` — assert it does so at most once (not
-      # per-row), same plan-agnostic bound as the CTE-scan check below rather
-      # than pinning `== 1` (a pruned/materialized plan reports 0 and flaked).
-      done_doc_scans =
-        Enum.filter(plan_nodes(done_cte), &(&1["Relation Name"] == "documents"))
+      # (b) no `documents` scan sits under a `Materialize`. That node IS the
+      # regression: the probe stops being an index lookup and becomes a rescan
+      # of a buffered relation, once per candidate row.
+      materialized_doc_scans =
+        nodes
+        |> Enum.filter(&(&1["Node Type"] == "Materialize"))
+        |> Enum.flat_map(&plan_nodes/1)
+        |> Enum.filter(&(&1["Relation Name"] == "documents"))
 
-      assert done_doc_scans != []
-
-      assert Enum.all?(done_doc_scans, &(&1["Actual Loops"] <= 1)),
-             "done-task documents scan looped per row (loops: #{inspect(Enum.map(done_doc_scans, & &1["Actual Loops"]))})"
-
-      # The property under test is ONE-TIME COMPUTATION of the done-task set —
-      # the subquery runs once, not once per candidate row. That is guaranteed
-      # STRUCTURALLY by `with_cte(..., materialized: true)` (queue.ex) and shown
-      # in the plan by the CTE subplan node itself running exactly once
-      # (`done_cte`'s own Actual Loops == 1). Its underlying `documents` scan
-      # running at most once (asserted above) is the same guarantee from the
-      # inside.
-      #
-      # NOTE (the earlier flake's real cause): a `CTE Scan` node in the
-      # consuming query is NOT the computation — it is a cheap READ of the
-      # already-materialized buffer. A nested-loop join legitimately re-reads it
-      # once per outer row (loops == row_count), which is correct and fast; a
-      # prior assertion pinned that read count and failed on plan variance while
-      # proving nothing (materialization already guarantees single computation).
-      # So we assert the COMPUTATION-once property, not the join's read count.
-      assert done_cte["Actual Loops"] == 1,
-             "done-task CTE was not computed once (materialized) — Actual Loops: #{inspect(done_cte["Actual Loops"])}"
+      assert materialized_doc_scans == [],
+             "a `documents` scan is buffered under Materialize and rescanned per row — " <>
+               "the dependency gate was flattened into an anti-join " <>
+               "(node types: #{inspect(Enum.map(materialized_doc_scans, & &1["Node Type"]))})"
     end
   end
 

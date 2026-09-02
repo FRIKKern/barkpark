@@ -23,7 +23,7 @@ import {
   adjudicate, adjudicateAll, detectConflicts, conflictKey, renderLabel, stands, VERDICTS,
   screenedRerun,
 } from "../adjudicate.mjs";
-import { VERDICT, classifySafety } from "../rerun.mjs";
+import { VERDICT, classifySafety, classifySilence } from "../rerun.mjs";
 import { screenCommand, DANGER_SET } from "../screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -217,6 +217,96 @@ test("a non-string verdict is UNAVAILABLE, and never leaves the ten names", () =
   // and a runner that returns nothing at all
   assert.equal(adjudicate(CLEAN, { run: () => undefined }).verdict, VERDICTS.UNAVAILABLE);
   assert.equal(adjudicate(CLEAN, { run: () => null }).verdict, VERDICTS.UNAVAILABLE);
+});
+
+// ── the ABSENCE VETO, promoted onto the ruling (D50) ─────────────────────────
+//
+// The trap this section exists for: FAILED is TWO answers wearing one name. A
+// matcher that ran and matched nothing is a genuine "X is not there"; a DIFFER
+// that exited 1 found differences, WITH content, and citing it as an absence
+// inverts the polarity. rerun.mjs separates them on `absenceEligible`, and the
+// engine promotes the answer as `ruling.admits_absence` so a consumer never has
+// to reach into the nested raw result to find the veto.
+//
+// Both fixtures below come from classifySilence itself rather than from a
+// hand-typed shape, so a fixture cannot drift away from the table it stands
+// for — and each asserts its own `absenceEligible` first, which is the
+// non-vacuity check: a pair that silently stopped being the veto cell and the
+// eligible cell would still agree with a broken promotion.
+
+/** A stub runner returning a REAL classifySilence result for (command, run). */
+function silenceStub(command, run) {
+  const s = classifySilence(command, run);
+  return () => ({
+    command,
+    verdict: s.verdict,
+    family: s.family,
+    absenceEligible: s.absenceEligible,
+    exit: run.exit,
+    ran: true,
+    ms: 3,
+    reason: s.reason,
+  });
+}
+
+test("a DIFFER rc1 ruling does NOT admit an absence claim — the veto is on the ruling", () => {
+  const cmd = "diff -u a.txt b.txt";
+  const raw = classifySilence(cmd, { exit: 1, stdout: "- old line\n+ new line\n" });
+  assert.equal(raw.verdict, VERDICT.FAILED, "fixture must be the FAILED cell, or this proves nothing");
+  assert.equal(raw.absenceEligible, false, "fixture must be the VETOED cell, or this proves nothing");
+
+  const ruling = adjudicate(withField({ rerun: cmd }), {
+    run: silenceStub(cmd, { exit: 1, stdout: "- old line\n+ new line\n" }),
+  });
+  assert.equal(ruling.verdict, VERDICTS.FAILED, "the verdict is unchanged — no eleventh name was minted");
+  assert.equal(ruling.admits_absence, false, "differences found may never be cited as an absence");
+});
+
+test("a matcher rc1 ruling DOES admit an absence claim — same verdict, opposite veto", () => {
+  const cmd = "grep -rn 'no-such-symbol' tooling/grip";
+  const raw = classifySilence(cmd, { exit: 1, stdout: "" });
+  assert.equal(raw.verdict, VERDICT.FAILED, "the positive control must share the DIFFER cell's verdict");
+  assert.equal(raw.absenceEligible, true, "a genuine no-match is not vetoed");
+
+  const ruling = adjudicate(withField({ rerun: cmd }), { run: silenceStub(cmd, { exit: 1, stdout: "" }) });
+  assert.equal(ruling.verdict, VERDICTS.FAILED, "the discriminator is NOT the verdict — both cells are FAILED");
+  assert.equal(ruling.admits_absence, true, "a matcher that ran and matched nothing IS an absence");
+});
+
+test("a tool error carries the veto too — an errored matcher is not an absence", () => {
+  const cmd = "grep -rn 'x' tooling/grip";
+  const ruling = adjudicate(withField({ rerun: cmd }), { run: silenceStub(cmd, { exit: 2, stderr: "no such file" }) });
+  assert.equal(ruling.admits_absence, false, "a tool error may never support a negative claim");
+});
+
+test("a pass does not admit an absence claim — reproducing is not evidence of missing", () => {
+  const ruling = adjudicate(CLEAN, { run: stub(VERDICT.OK) });
+  assert.equal(ruling.verdict, VERDICTS.ADMITTED);
+  assert.equal(ruling.admits_absence, false);
+});
+
+test("every branch that never executed carries admits_absence false", () => {
+  // admission-only, empty rerun, unsafe rerun, unknown verdict, and a fact
+  // rejected before it was ever a fact. Nothing ran in any of them, so none of
+  // them may support "X is not there".
+  const branches = {
+    "admission only": adjudicate(CLEAN, { execute: false }),
+    "no rerun command": adjudicate({ subject: "a thing", claim: "a discrete claim about 3 rows", rerun: "" }),
+    "rejected on admission": adjudicate(withField({ claim: "" })),
+    "unsafe rerun": adjudicate(withField({ rerun: "bp doc publish task x --yes" })),
+    "unknown verdict": adjudicate(CLEAN, { run: () => ({ verdict: "SOMETHING-NEW", reason: "" }) }),
+  };
+  for (const [name, ruling] of Object.entries(branches)) {
+    assert.equal(ruling.admits_absence, false, `${name} must not admit an absence claim`);
+  }
+});
+
+test("the veto is DELEGATED to rerun.mjs, not re-implemented in adjudicate.mjs", () => {
+  const src = readFileSync(join(GRIP, "adjudicate.mjs"), "utf8");
+  assert.match(src, /import \{[^}]*admitsAbsenceClaim[^}]*\} from "\.\/rerun\.mjs"/);
+  const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.equal(code.includes("absenceEligible"), false,
+    "a second copy of the veto predicate here is the hand-copied-authority defect this epic exists to stop");
 });
 
 // ── CONFLICT — unit-tested, NOT wired into any live flow (D25) ────────────────

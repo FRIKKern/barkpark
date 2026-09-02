@@ -172,3 +172,41 @@ one. A record whose `event: open` has no matching `- closes:` line is an OPEN
 glass, and the watch reds until it does.
 
 <!-- BEGIN RECORDS -->
+
+### BG-20260731-RETRO
+- event: open
+- utc: 2026-07-31 (exact instant UNRECORDED — see provenance)
+- actor: UNRECORDED — the pre-b4ba2bdb1a `--disable` printed the login to the operator's own terminal and wrote nothing to disk
+- task: cch-w11-bl-breakglass-blind-to-stale-checkout
+- repo: FRIKKern/barkpark
+- branch: main
+- scope: total
+- command: scripts/required-checks-apply.sh --disable --confirm
+- pre-state: UNRECORDED (the pre-b4ba2bdb1a --disable read no pre-state)
+- provenance: RETROSPECTIVE, hand-written on 2026-09-01, NOT written by scripts/breakglass.sh. The tree it was run from was 131 commits behind origin/main and predates both breakglass.sh (557b5af40a, #6686) and the record-first delegation (b4ba2bdb1a, #6928), so no script in that checkout could have written this block at the time.
+- reason: a wave-11 verifier ran this runbook's own documented rollback string from the PRIMARY checkout to clear a blocked merge; that copy's whole --disable block was one --confirm check, an echo and a bare `gh api -X DELETE`, with no --reason/--task refusal and no record write
+
+### BG-20260731-RETRO-close
+- event: close
+- closes: BG-20260731-RETRO
+- utc: 2026-07-31 (~74 seconds after the open)
+- actor: UNRECORDED — same tree, same reason
+- task: cch-w11-bl-breakglass-blind-to-stale-checkout
+- repo: FRIKKern/barkpark
+- branch: main
+- scope: total
+- command: (repaired by hand, then independently re-verified field-for-field)
+- post-state: protection restored and verified field-for-field; `scripts/required-checks-verify.sh` agreed
+- provenance: RETROSPECTIVE, hand-written on 2026-09-01. Recorded as CLOSED because it is: protection is up and was independently re-verified. Writing the open row without this one would leave the committed-log authority reading a standing OPEN glass and reding main every 30 minutes for an outage that ended in 2026-07-31.
+- reason: the merge landed; protection was put back and re-verified. Nothing landed while the glass was down — proved non-vacuously, the since/until commit query returns ZERO rows on main for the window while a deliberately widened control over the surrounding period returns 13.
+
+<!-- The blocks above are the ONLY hand-written records in this file, and they
+     exist because the failure they describe is precisely a tree too old to run
+     the recorder. `scripts/breakglass.sh` now refuses --open and --close from
+     any checkout that does not carry b4ba2bdb1a's record-first apply.sh, naming
+     the commit and the remedy (cut a worktree from origin/main). That guard is
+     bounded and the bound is this incident: a checkout old enough to lack
+     breakglass.sh itself still reaches the API with nothing repo-side to stop
+     it, which is why this row had to be written by hand rather than replayed.
+     scripts/breakglass.test.sh §11 pins the guard, both legs, in both
+     directions. -->
