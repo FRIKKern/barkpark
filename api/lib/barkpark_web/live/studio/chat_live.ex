@@ -38,9 +38,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Attachments
+  alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.Tasks
+  alias Barkpark.Tenancy
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
@@ -163,6 +165,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
          page_title: "chat",
          nav_section: :chat,
          dataset: default_dataset(),
+         # The dataset the URL SCOPE names, as distinct from the one above.
+         # No chat route carries a `:dataset` segment today, so this is nil and
+         # `dataset:` is a substitution nobody chose — the context band reports
+         # exactly that difference rather than printing the substitution as if
+         # it were a choice. Read from params (not hardcoded nil) so a future
+         # dataset-scoped chat route tells the truth without touching the band.
+         scope_dataset: params["dataset"],
+         # The transcript header's context identity (chat-local-cloud-context-w3).
+         # Rebuilt on session load, on the new-chat reset, and on a host report —
+         # never per render.
+         context_identity: nil,
          # current_path is owned by StudioChrome's :handle_params hook, which
          # also keeps it fresh across the /studio/chat/:session_id patches
          # (this static string used to freeze the active tab on reopen).
@@ -330,6 +343,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
        |> refresh_sessions()
        |> subscribe_activity()
        |> subscribe_hand_tasks()
+       |> assign_context_identity()
        |> allow_upload(:attachments,
          # Charter D25: paste/drop images ride the SAME user turn as base64
          # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
@@ -2054,6 +2068,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, readiness: readiness_for_hands(verdict))}
   end
 
+  # A registered host's authoritative state report (herd-s6) rides the activity
+  # topic this LiveView already joined, and it is also the only moment the
+  # server learns execution MOVED: a lease transfer becomes visible when the new
+  # host first speaks under its own fence. Rebuild the context band for the OPEN
+  # session so the header names who is running it now — in place, no reconnect,
+  # no browser reload. Reads only: the report's own write already happened
+  # server-side (ChatHosts.report_state/4), and this head touches no store.
+  def handle_info({:chat_reported_state, sid, _frame}, socket) do
+    if socket.assigns[:store_session_id] == sid do
+      {:noreply, assign_context_identity(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   # The async readiness probe landed (chat-task-hands, charter decision 4).
@@ -2940,6 +2969,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
       >
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
+        </span>
+      </div>
+
+      <%!-- The context identity band (chat-local-cloud-context-w3, criterion 2;
+            the CLI half is internal/chat/context.go). WHICH execution host runs
+            this session, on WHICH Barkpark server, in WHICH workspace / project
+            / dataset, out of WHICH repository root. Every segment is a
+            PROJECTION of server truth — the session row, its live execution
+            lease and the host that last reported on it — never a config string.
+            A field whose two truths disagree leads with ⚠ and carries both
+            values; absence is typed ((not set) / (unknown) / (not a git repo) /
+            (server-local)) and never renders blank or as a plausible default. --%>
+      <div
+        :if={@context_identity}
+        data-test-id="chat-context-band"
+        class="text-xs text-dim"
+        style="display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 5px 16px; border-bottom: 1px solid var(--border-muted); flex: none;"
+      >
+        <span
+          :for={f <- @context_identity.fields}
+          data-test-id={"chat-context-#{f.name}"}
+          data-mismatch={to_string(f.mismatch?)}
+          style={f.mismatch? && "color: var(--warn);"}
+        >
+          <%= if f.mismatch?, do: "⚠ " %><%= f.name %> <%= ContextIdentity.Field.display(f) %>
         </span>
       </div>
 
@@ -4579,6 +4633,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # off the ledger so a reopen shows in-flight task work immediately.
     |> assign(task_picker: nil)
     |> hydrate_hand_tasks()
+    |> assign_context_identity()
   end
 
   # A reopened session whose persisted mode is bypassPermissions (charter D55).
@@ -4677,6 +4732,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       pending_echo_id: nil,
       question_forms: %{}
     )
+    |> assign_context_identity()
   end
 
   # Is `title` for `session_id` ALREADY what the sidebar shows? The duplicate-
@@ -7101,6 +7157,98 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp send_error_text(_reason),
     do:
       "That message didn't reach Claude — the session dropped. Your words were kept; send again."
+
+  # ── the transcript header's context identity (chat-local-cloud-context-w3) ──
+  #
+  # The GATHERING half only: which host runs this session, on which server, in
+  # which workspace / project / dataset, out of which repository root.
+  # `Barkpark.StudioChat.ContextIdentity` owns the two laws (a displayed value
+  # comes from the actual binding; absence is visible and typed) and every
+  # rendering decision — this reads the facts and hands them over.
+  #
+  # Called on mount, on session load, on the new-chat reset and on a host state
+  # report. NEVER per render: the band lives in an assign precisely so a
+  # streaming turn does not re-query the lease table sixty times a second.
+  defp assign_context_identity(socket) do
+    assign(socket, context_identity: build_context_identity(socket))
+  end
+
+  defp build_context_identity(socket) do
+    session = stored_session(socket)
+
+    hosts =
+      case session do
+        %{id: id} -> ChatHosts.session_execution_identity(id)
+        _ -> %{lease_host: nil, reporting_host: nil}
+      end
+
+    ContextIdentity.resolve(%{
+      lease_host: hosts.lease_host,
+      reporting_host: hosts.reporting_host,
+      endpoint: server_endpoint(),
+      viewer_workspace: viewer_workspace_slug(socket),
+      session_workspace: session_workspace_slug(session),
+      project: project_slug(socket),
+      scope_dataset: socket.assigns[:scope_dataset],
+      mount_dataset: socket.assigns[:dataset],
+      execution_target: session && session.execution_target,
+      cwd: session && session.cwd,
+      repo_probe: ContextIdentity.repo_probe()
+    })
+  end
+
+  # The STORED row (not the `@session` runtime pid): the band needs
+  # `owner_workspace_id`, `execution_target` and `cwd`, none of which live in
+  # assigns. `:global` because the tenancy clamp already ran at load time —
+  # `store_session_id` is only ever set by `load_stored_session/2`, which is
+  # reached through `get_session_in_tenancy/2`.
+  defp stored_session(socket) do
+    case socket.assigns[:store_session_id] do
+      id when is_binary(id) -> StudioChat.get_session(id, :global)
+      _ -> nil
+    end
+  end
+
+  # The server the browser is actually talking to, read at RUNTIME off the
+  # endpoint config. Never a compile-time literal — a baked-in URL that silently
+  # disagrees with the running endpoint is exactly the class of string this band
+  # exists to stop trusting.
+  defp server_endpoint do
+    BarkparkWeb.Endpoint.url()
+  rescue
+    _ -> nil
+  end
+
+  # The workspace the VIEWER is acting in: the URL scope on the scoped mount,
+  # the acting token's own workspace on the flat one (which carries no
+  # `current_workspace` — its live_session has no LiveScope hook). This is the
+  # CLAIM half of the workspace comparison; the session's own owner is the other.
+  defp viewer_workspace_slug(socket) do
+    case socket.assigns[:current_workspace] do
+      %{slug: slug} when is_binary(slug) ->
+        slug
+
+      _ ->
+        workspace_slug(principal_workspace_id(socket))
+    end
+  end
+
+  defp session_workspace_slug(%{owner_workspace_id: ws_id}), do: workspace_slug(ws_id)
+  defp session_workspace_slug(_), do: nil
+
+  defp workspace_slug(ws_id) do
+    case Tenancy.get_workspace_by_id(ws_id) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
+
+  defp project_slug(socket) do
+    case socket.assigns[:current_project] do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
 
   defp default_dataset do
     case Barkpark.Content.list_datasets() do

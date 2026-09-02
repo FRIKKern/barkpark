@@ -455,6 +455,61 @@ defmodule Barkpark.ChatHosts do
     |> Repo.one()
   end
 
+  @doc """
+  WHO IS EXECUTING THIS SESSION, as two independently-measured names — the read
+  behind the Studio chat context band (`Barkpark.StudioChat.ContextIdentity`).
+
+  A projection, not a decision: it reports both truths and judges neither.
+
+    * `:lease_host` — the host holding the session's LIVE execution lease, via
+      the ONE canonical fence selector (`live_report_fence/2`), so "who runs
+      this session" can never mean something different here than it means to
+      the report gate. `nil` when no host does — the server itself runs it.
+    * `:reporting_host` — the host that sent the session's most recent
+      execution event, across ALL of its leases. Normally the same host; when
+      it is not, a lease TRANSFERRED and the band says so.
+
+  Both are host NAMES (never ids, never credentials): the band is chrome, and
+  a name is the only part of a registered host that is safe to paint.
+  """
+  def session_execution_identity(session_id) when is_binary(session_id) do
+    %{
+      lease_host: host_name(lease_host_id(session_id)),
+      reporting_host: host_name(latest_reporting_host_id(session_id))
+    }
+  end
+
+  defp lease_host_id(session_id) do
+    case live_report_fence(session_id) do
+      %ExecutionLease{host_id: host_id} -> host_id
+      _ -> nil
+    end
+  end
+
+  # Ordered by `inserted_at` and NOT by `cursor`: cursor is per-LEASE, so a
+  # cross-lease `order_by: cursor` would rank a transferred host's first event
+  # (cursor 1) behind the old host's tenth and report the transfer backwards.
+  defp latest_reporting_host_id(session_id) do
+    from(e in ExecutionEvent,
+      join: l in ExecutionLease,
+      on: l.id == e.lease_id,
+      where: l.session_id == ^session_id,
+      order_by: [desc: e.inserted_at, desc: e.cursor],
+      limit: 1,
+      select: e.host_id
+    )
+    |> Repo.one()
+  end
+
+  defp host_name(nil), do: nil
+
+  defp host_name(host_id) do
+    case Repo.get(RegisteredHost, host_id) do
+      %RegisteredHost{name: name} -> name
+      _ -> nil
+    end
+  end
+
   # D79h selection rule, plus honest deny grammar: prefer the LATEST live lease
   # (non-revoked, unexpired, leased/running); when none exists, fall back to the
   # latest leased/running row regardless of expiry/revocation so
