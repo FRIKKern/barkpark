@@ -28,9 +28,16 @@ const F = sandbox.window.BarkparkSheetFormula;
 assert.ok(F, "BarkparkSheetFormula must be assigned on window");
 
 let failures = 0;
+// `passed` exists so the verdict line can carry a COUNT. Without one, a harness
+// that silently ran zero checks prints the same triumphant sentence as a harness
+// that ran all of them — and the ExUnit gate that shells this file
+// (api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs) could not
+// tell the two apart. It counts checks that COMPLETED, not checks that exist.
+let passed = 0;
 function check(name, fn) {
   try {
     fn();
+    passed++;
     console.log(`PASS  ${name}`);
   } catch (e) {
     failures++;
@@ -516,4 +523,4 @@ if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
 }
-console.log("\nall bp-sheet-formula kernel checks PASS");
+console.log(`\nall bp-sheet-formula kernel checks PASS \u2014 ${passed} checks`);
