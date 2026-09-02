@@ -2,6 +2,8 @@
 
 # WBQS 44-done census: task_id -> PR# -> SHA -> ancestor re-derivation (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Epic: `wild-bulk-quality-sweep-2026-07-16-epic`. Verifier assignment [census-reproof].
 Anchor: origin/main = `710c38f06a7e21441f3993ef3ebff01c1317a8ae`.
 

@@ -248,6 +248,69 @@ if [ "$MODE" = selftest ]; then
     printf -- "fixture-async\tfixtureAsyncFn\n" > "$FIX/pin"
     export CANON_PIN="$FIX/pin"'
 
+  # §12 COLD-DOC BANNER. Two RED arms — one per fence shape — because keying only
+  # on a bash-tagged fence would have covered 16 of 47 real cases (see §12's own
+  # comment). Fixtures are built with QUOTED heredocs, never printf: a fence is
+  # three backticks, and in the double-quoted printf these arms first used, bash
+  # read them as command substitution. The files came out empty of fences, §12
+  # scanned 0, and the two SILENT arms below passed on mangled input — a vacuous
+  # green that a heredoc makes structurally impossible.
+  st_case "cold doc with a bash-tagged fence and no banner REDS, naming the file" 1 "docs/cold-a.md is doc-tier: cold and carries runnable commands" '
+    cat > "$FIX/docs/cold-a.md" <<"CASEA"
+<!-- doc-tier: cold | canonical-for: fixture-cold-a | budget: 100tok -->
+# Cold A
+
+```bash
+git status
+```
+CASEA'
+
+  st_case "cold doc with an UNTAGGED fence of commands and no banner REDS" 1 "docs/cold-b.md is doc-tier: cold and carries runnable commands" '
+    cat > "$FIX/docs/cold-b.md" <<"CASEB"
+<!-- doc-tier: cold | canonical-for: fixture-cold-b | budget: 100tok -->
+# Cold B
+
+```
+bp task close x w 1 done "s"
+```
+CASEB'
+
+  # SILENT ARMS — §12 must bite ONLY where it should, or the banner becomes noise
+  # that gets waived. Each of these three is a GREEN the gate has to earn, and
+  # each asserts the COUNT, so a detector that has gone blind cannot pass them.
+  st_case "the banner satisfies §12, and the doc is COUNTED" 0 "§12 scanned 1 cold doc(s) carrying runnable commands; 0 missing" '
+    cat > "$FIX/docs/cold-c.md" <<"CASEC"
+<!-- doc-tier: cold | canonical-for: fixture-cold-c | budget: 100tok -->
+# Cold C
+
+> HISTORICAL RECORD (2026-01-02) — the commands below were run on that date.
+
+```bash
+git status
+```
+CASEC'
+
+  st_case "an untagged fence of OUTPUT is not a command block" 0 "§12 scanned 0 cold doc(s)" '
+    cat > "$FIX/docs/cold-d.md" <<"CASED"
+<!-- doc-tier: cold | canonical-for: fixture-cold-d | budget: 100tok -->
+# Cold D
+
+```
+cond_b=OK ok=1
+total 42
+```
+CASED'
+
+  st_case "an agent-tier doc with commands is out of scope for 12" 0 "§12 scanned 0 cold doc(s)" '
+    cat > "$FIX/docs/warm-e.md" <<"CASEE"
+<!-- doc-tier: agent | canonical-for: fixture-warm-e | budget: 100tok -->
+# Warm E
+
+```bash
+git status
+```
+CASEE'
+
   echo ""
   if [ "$ST_FAIL" -ne 0 ]; then
     echo "docs-anchors-check --selftest: FAILED"
@@ -917,6 +980,78 @@ else
   fi
   rm -f "$MG_OUT"
 fi
+
+# --- 12. a `cold` doc that still carries RUNNABLE COMMANDS must say so --------
+# (task-fed001f6174e5c4c)
+#
+# CLAUDE.md tiers `cold` as finished work an agent must not LOAD to learn how the
+# repo works. It never meant "unreachable": `git grep` does not read tier headers,
+# and a recipe is found by grepping for the command in it. So the one thing a
+# cold doc must not be is a page of copyable commands with nothing on it saying
+# when they ran. tooling/grip/ledger/pds-w27-bare30-content-recheck-2026-07-31
+# was exactly that — a census recipe whose `cd /tmp` was still being copied
+# months after the tier said nobody reads the file (defused in #13772).
+#
+# THE RULE, and why it is a banner rather than a deletion. §7 above already
+# records the answer for the biggest cohort: tooling/grip/ledger/ is a
+# "shared append-only commons … of dated, immutable evidence rows", and "a record
+# must quote what it observed". Those records are CONSULTED — that is their whole
+# job — so `cold` is right about "do not load this to learn the system" and wrong
+# about "nobody reads it". The banner reconciles the two: the doc stays, the
+# commands stay re-runnable (grip's ledger is an index of HOW TO VERIFY), and the
+# reader is told the OUTPUT is pinned to a date and is not current.
+#
+# WHY BARE FENCES COUNT. Keying only on ```bash would have covered 16 of the 47
+# command-carrying cold docs in this repo at the time of writing; the other 31
+# hold their commands in an untagged ``` fence — including
+# `bp task close <id> <worker> <epoch>`, a PROD WRITE. A tripwire that sees a
+# third of its class is not a tripwire, so an untagged fence whose body opens a
+# line with an executing verb counts too. The verb list is deliberately narrow:
+# a false positive costs one banner line, a false negative is the defect above.
+CMD_VERBS='git|gh|bp|curl|mix|cd|ssh|make|npm|npx|node|python3?|psql|bash|sh|jq|for|while|grep|awk|sed|find|rm|mkdir|export|sudo|systemctl|docker|go|cargo|pnpm|yarn'
+COLD_N=0
+COLD_BAD=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  # Tier lives on line 1 by contract ("First line of every active doc").
+  head -1 "$f" 2>/dev/null | grep -q 'doc-tier: *cold' || continue
+  awk -v verbs="$CMD_VERBS" '
+    BEGIN { inf = 0; runnable = 0 }
+    /^[[:space:]]*```/ {
+      if (inf == 0) {
+        lang = $0; sub(/^[[:space:]]*```/, "", lang); gsub(/[[:space:]]/, "", lang)
+        inf = 1; cur = lang; body = ""
+      } else {
+        inf = 0
+        if (cur ~ /^(bash|sh|shell|zsh|console)$/) runnable = 1
+        else if (cur == "" && body ~ ("(^|\n)[ \t]*(" verbs ")[ \t]")) runnable = 1
+      }
+      next
+    }
+    { if (inf == 1) body = body "\n" $0 }
+    END { exit (runnable ? 0 : 1) }
+  ' "$f" || continue
+  COLD_N=$((COLD_N + 1))
+  # The banner must be near the top — a reader who opens the file sees it before
+  # the first fence. Ten lines covers "marker, blank, H1, blank, banner" with room.
+  if ! head -10 "$f" | grep -q '^> HISTORICAL RECORD ('; then
+    COLD_BAD="$COLD_BAD $f"
+  fi
+done <<COLDEOF
+$(prune_find -name '*.md' -type f -print | sed 's|^\./||' | grep -v '^_attic/' | LC_ALL=C sort)
+COLDEOF
+
+for f in $COLD_BAD; do
+  echo "FAIL: $f is doc-tier: cold and carries runnable commands, but has no '> HISTORICAL RECORD (<date>)' banner in its first 10 lines."
+  echo "      A cold doc is not unreachable — git grep finds recipes by their commands, not by their tier."
+  echo "      Add, directly under the title: > HISTORICAL RECORD (YYYY-MM-DD) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current."
+  FAIL=1
+done
+# Stated out loud every run, like §8: this section is otherwise an absence proof,
+# and a detector that has gone blind prints the same nothing as a clean tree. The
+# count is the non-vacuity signal — if it collapses toward zero while the ledger
+# keeps growing, the fence walker broke, not the corpus.
+echo "ok:   §12 scanned $COLD_N cold doc(s) carrying runnable commands; $(printf '%s' "$COLD_BAD" | wc -w | tr -d ' ') missing the HISTORICAL RECORD banner"
 
 # --- summary ------------------------------------------------------------------
 echo ""

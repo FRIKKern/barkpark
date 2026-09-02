@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: w33-count-and-landed-truth | budget: 5000tok -->
 # w33 — the epic's count, re-derived lease-independently, and the landed set re-verified
 
+> HISTORICAL RECORD (2026-08-09) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 `task-fb4fb869490b4213` · origin/main `4ca033f502f4` · 2026-08-09T20:20–20:25Z
 
 ## 1. The count, four reads, timestamped

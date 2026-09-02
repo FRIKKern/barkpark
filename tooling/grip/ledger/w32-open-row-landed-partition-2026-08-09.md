@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: w32-open-row-landed-partition | budget: 9000tok -->
 # w32 — the deploy-reliability GOAL's open rows are 38% already shipped
 
+> HISTORICAL RECORD (2026-08-09) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 `task-fb4fb869490b4213` · origin/main `e913de82c881` · 2026-08-09T18:20:13Z
 
 **child_count 280 · open 199 · done 73 · cancelled 8.** The wind-down cannot cite

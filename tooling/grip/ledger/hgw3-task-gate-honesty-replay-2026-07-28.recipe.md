@@ -2,6 +2,8 @@
 
 # Re-derivation recipe — "N of the last M pr-task-gate reds were lapsed claims"
 
+> HISTORICAL RECORD (2026-07-28) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 The claim appears verbatim in THREE places on origin/main as "11 of the gate's last 15 reds":
 `scripts/pr-task-gate.sh:297`, `scripts/pr-task-gate.test.sh:80`, `docs/ops/merge-gates.md:60`.
 It is **not** re-derivable from GitHub log text (the log only carries the pre-#6413 message

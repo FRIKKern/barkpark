@@ -2,6 +2,8 @@
 
 # PE W5 — variant=framed live round-trip re-derivation recipe
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verifier assignment `variant-live-roundtrip`. Proves the bp/API write path
 preserves `variant="framed"` verbatim AND pins the exact condition under which
 the served `/papers/` HTML carries `class="bp-section--framed"`.

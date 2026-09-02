@@ -2,6 +2,8 @@
 
 # anchors-fix-blast — re-derivation recipes (origin/main 541195b5d1)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Every recipe runs against a throwaway `git archive` extract. Nothing touches the shared checkout.
 
 ## 0. Build the pristine tree

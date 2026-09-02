@@ -2,6 +2,8 @@
 
 # Re-derivation recipe — CCH wave 17, `v1-topbar-zero-sum`
 
+> HISTORICAL RECORD (2026-08-01) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Every number in the verifier's report is reproduced by these commands. Nothing below reads a
 committed instrument's green as evidence: the topbar band (320–430) is BELOW `breakpoint-sweep.mjs`'s
 Leg-B floor of 619, so every cell here is hand-driven and labelled as such.

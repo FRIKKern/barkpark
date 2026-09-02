@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: felix-w25-roster-collision-sweep-recipe | budget: 1200tok -->
 # Felix W25 — roster-collision-sweep re-derivation recipe (2026-08-17)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 VERDICT: fence CLEAN, dup CLEAN, on_mount(:admin) FAIL-CLOSED. Verifier lane [roster-collision-sweep].
 
 ## (a) Per-file open-PR fence — zero collisions
