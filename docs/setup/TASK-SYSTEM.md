@@ -36,7 +36,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 
 **Register the movement.** Every unit of work — build, research, plan, audit, spike — runs under a claimed task: if no row names it, create one and claim it FIRST, then work. Unregistered work is unrecoverable — a crashed session is rebuilt only from the ledger, and "what has been going on lately" is answerable only from task events. [AGENT-ONRAMPS](AGENT-ONRAMPS.md) carries the portable form every agent surface renders, and the three ways registration silently does not happen; in this repo it also gates merge ([merge-gates](../ops/merge-gates.md)).
 
-**1. Token.** Any bearer token works for the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`.
+**1. Token.** Any bearer token works for the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`. A stale `BARKPARK_TOKEN` in the environment SHADOWS `~/.config/barkpark/config.json`: `bp whoami` then reads `auth_tier: none` and every `bp task` verb says *hidden at your tier* — `unset BARKPARK_TOKEN` (or run `env -u BARKPARK_TOKEN bp …`) before blaming the server.
 
 **2. Discover.** One call teaches the whole surface:
 
@@ -44,7 +44,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 bp capabilities -o json          # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
 ```
 
-**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …); the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback. Author briefs as blocks, not a text wall.
+**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …); the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback. Author briefs as blocks, not a text wall. From the CLI, `bp task create "<title>" --yes` files a draft; `--publish` additionally needs `--description` (20+ chars) and 1–12 tags that are ALREADY registered `type:tag` docs (`bp doc ls tag --all`) — an invented tag is refused before anything is created.
 
 ```bash
 curl -X POST $API/v1/data/mutate/production \
@@ -53,9 +53,9 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing* — listing is NOT published-only: an unpaired `drafts.<id>` task IS listed as itself, and only a draft that has a published twin is collapsed in favour of that twin. Lifecycle is independent of draft/publish.
+> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing* — listing is NOT published-only: an unpaired `drafts.<id>` task IS listed as itself, and only a draft that has a published twin is collapsed in favour of that twin. Lifecycle is independent of draft/publish. `bp doc patch` (like `create --set`) writes the DRAFT: the published row — the one boards and `bp task get` read — does not change until `bp doc publish task <id> --yes`.
 
-**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write needs `--yes` — without it `bp` aborts with `prod write not confirmed` and sends nothing, so a batch script missing it no-ops every write.
+**4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write — `create`, `claim`, `pulse`, `stamp`, `release`, `close`, `doc patch`/`publish` — needs `--yes`; without it `bp` aborts with `prod write not confirmed` and sends nothing, so a batch script missing it no-ops every write. Reading a row back: in `bp task get <id> -o json` the criteria sit under `doc.content.acceptance_criteria` and the lease under `doc.claim` — a reader walking the top level sees an empty row.
 
 ```bash
 # Queue claim: take the NEXT ready task (priority order)
@@ -67,7 +67,7 @@ bp task claim t1 agent-1            # <doc_id> <worker_id>
 # Voluntary walk-away (fenced)
 bp task release t1 agent-1 1        # <doc_id> <worker> <epoch>
 
-# Mid-claim: stamp a criterion — met or honestly missed
+# Mid-claim: stamp a criterion — met or honestly missed (--criterion N is ZERO-based: 0 = the first)
 bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --met --evidence "gate green"
 bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
 

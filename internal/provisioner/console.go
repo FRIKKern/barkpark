@@ -8,9 +8,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/secretscrub"
 )
 
 // consolePathFmt is the internal endpoint the worker POSTs each console
@@ -94,38 +95,30 @@ func (r *HTTPConsoleReporter) Report(ctx context.Context, jobID, line string) er
 	return nil
 }
 
-// adminTokenRe matches a minted per-instance admin bearer (bp_admin_…). It is
-// the PATTERN half of the console redaction — belt-and-suspenders on top of the
-// literal admin-token scrub the emitter registers once the chain surfaces the
-// real value, so a console line can never carry one even if a narration string
-// ever formats it.
-var adminTokenRe = regexp.MustCompile(`bp_admin_[A-Za-z0-9_-]+`)
-
-// envSecretConsoleRe redacts secret-SHAPED env assignments the SAME way the SSH
-// runner's scrubEnvSecrets does — a defense-in-depth pass so a stray narration
-// line that echoes a /opt/barkpark/.env value never lands in the persisted /
-// streamed console. It MUST stay in lockstep with cloud.envSecretAssignRe (the
-// two log paths share the same key set): BARKPARK_KEK_PREVIOUS precedes
-// BARKPARK_KEK so the longer key wins the alternation.
-var envSecretConsoleRe = regexp.MustCompile(`(SECRET_KEY_BASE|BARKPARK_KEK_PREVIOUS|BARKPARK_KEK|BARKPARK_CLOAK_KEY|PREVIEW_JWT_SECRET|DATABASE_URL)=\S+`)
-
 // redactConsoleLine scrubs a console line before it leaves the worker: the
 // literal secrets the caller registered (the KNOWN minted admin token — the same
-// literal-substring redaction the cloud runner applies) PLUS the admin-token +
-// env-secret PATTERNS. Console narration REUSES the redaction posture and never
-// bypasses it.
+// literal-substring redaction the cloud runner applies) PLUS the Barkpark-token,
+// Bearer, ecto-userinfo and secret-shaped-assignment PATTERNS. Console narration
+// REUSES the redaction posture and never bypasses it.
+//
+// The patterns live in internal/secretscrub, the one owner. This file used to
+// carry its own copy, whose doc comment promised it "MUST stay in lockstep with
+// cloud.envSecretAssignRe" — a promise a hand-maintained copy cannot keep, and
+// it had already fallen behind on THREE axes:
+//
+//   - envSecretConsoleRe was still the original SIX-NAME allowlist
+//     (SECRET_KEY_BASE|BARKPARK_KEK_PREVIOUS|BARKPARK_KEK|BARKPARK_CLOAK_KEY|
+//     PREVIEW_JWT_SECRET|DATABASE_URL) after the cloud runner moved to a shape
+//     match, so ANTHROPIC_API_KEY=…, *_TOKEN=…, *_PASSWORD=… and every other
+//     secret-shaped assignment a bootstrap step echoed passed through into the
+//     persisted provision_jobs.console.
+//   - adminTokenRe matched bp_admin_ ONLY, so a control-plane bp_read_ /
+//     bp_write_ token in a narration line was not redacted.
+//   - there was no Bearer clause and no ecto/postgres userinfo clause at all.
+//
+// Delegating closes all three at once and removes the lockstep hazard.
 func redactConsoleLine(line string, secrets []string) string {
-	for _, s := range secrets {
-		if s != "" {
-			line = strings.ReplaceAll(line, s, "[REDACTED]")
-		}
-	}
-	line = adminTokenRe.ReplaceAllString(line, "[REDACTED]")
-	line = envSecretConsoleRe.ReplaceAllStringFunc(line, func(m string) string {
-		key := m[:strings.IndexByte(m, '=')]
-		return key + "=[REDACTED]"
-	})
-	return line
+	return secretscrub.Line(line, secrets)
 }
 
 // consoleEmitter tees the create→live + bootstrap narration to the control plane

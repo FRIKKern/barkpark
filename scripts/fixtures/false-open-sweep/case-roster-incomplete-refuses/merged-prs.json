@@ -1,0 +1,11 @@
+[
+  {
+    "number": 1,
+    "title": "x",
+    "body": "Task: y\n",
+    "mergedAt": "2026-08-01T00:00:00Z",
+    "mergeCommit": {
+      "oid": "d1"
+    }
+  }
+]

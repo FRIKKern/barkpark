@@ -1,0 +1,346 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/FRIKKern/barkpark/internal/manifest"
+)
+
+// THE SEARCHABLE LEDGER (cchi-bl-task-get-not-found-hint-is-unsearchable).
+//
+// `bp task get <truncated-id>` answers not_found and — until this file — the
+// remedy it named was `bp task ls`, a verb whose ONLY flags are limit/offset.
+// So "run the list and look" meant dumping the whole ledger (8,120 rows,
+// ~2.9 MB of JSON at the time of filing) and grepping it locally, on every
+// truncated id an agent meets. And the epic's own rows produce truncated ids
+// routinely: one P0 row named six of them in a single sentence.
+//
+// The server cannot help. GET /v1/tasks accepts filter[kind|label|
+// lifecycle_status|parent|parent_id|phase_id|type] and nothing else — no `q`,
+// no title/id substring — and its filter container is fail-CLOSED, so an
+// invented `filter[q]` 400s rather than silently returning the unfiltered
+// page. (Checked against the live manifest and
+// tasks_controller/params.ex @index_filter_keys.) That leaves the client, and
+// the client already owns a hardened offset walk, so this is a filter hook on
+// that walk plus a hint that names it — not a new route.
+//
+// Two surfaces, one vocabulary:
+//
+//   - `bp task ls --match <substring>` walks every page and prints only rows
+//     whose doc_id OR title contains the substring, case-insensitively.
+//   - `bp task get <missing-id>` names that exact command with the id the
+//     caller typed, and — when exactly ONE published doc_id has the typed id as
+//     a strict prefix — names that id as a suggestion. A suggestion, never a
+//     redirect: the CLI does not silently fetch a document the caller did not
+//     ask for.
+//
+const taskMatchFlag = "--match"
+
+// taskLsCommandID and taskGetCommandID are the manifest ids this file keys on.
+// Keyed on the ID, never on the noun alone: `--match` must not be silently
+// accepted by any other task verb, and the not_found enrichment must not fire
+// on a refusal from a verb whose id was not a task doc_id.
+const (
+	taskLsCommandID  = "task.ls"
+	taskGetCommandID = "task.get"
+)
+
+// extractTaskMatchFlag removes `--match <value>` / `--match=<value>` from tail
+// and returns the LAST value given, tail without it, and a usage error when the
+// flag was given without a value.
+//
+// It runs before splitArgs, which would otherwise refuse `--match` as an
+// unknown command-local flag — the same seam
+// `--fail-on-failed-delivery` (webhook.test-send) and `--delete-unpublished`
+// (doc discard-draft) use, and for the same reason: the manifest cannot declare
+// a flag the server knows nothing about.
+//
+// An empty value is a usage error, not a match-everything: `--match ""` that
+// silently listed all 8,120 rows would be the exact dump this flag exists to
+// avoid, wearing the costume of a filtered read.
+func extractTaskMatchFlag(tail []string) (string, []string, error) {
+	match := ""
+	given := false
+	kept := make([]string, 0, len(tail))
+	for i := 0; i < len(tail); i++ {
+		a := tail[i]
+		switch {
+		case a == taskMatchFlag:
+			if i+1 >= len(tail) {
+				return "", nil, fmt.Errorf("%s needs a value: %s <substring>", taskMatchFlag, taskMatchFlag)
+			}
+			match = tail[i+1]
+			given = true
+			i++
+		case strings.HasPrefix(a, taskMatchFlag+"="):
+			match = strings.TrimPrefix(a, taskMatchFlag+"=")
+			given = true
+		default:
+			kept = append(kept, a)
+		}
+	}
+	if given && strings.TrimSpace(match) == "" {
+		return "", nil, fmt.Errorf("%s needs a non-empty substring — an empty --match would print the whole ledger, which is what --match exists to avoid", taskMatchFlag)
+	}
+	return match, kept, nil
+}
+
+// taskRowMatcher builds the row predicate for `--match`: case-insensitive
+// containment over doc_id AND title.
+//
+// Both fields, because the two ways an id reaches an agent fail differently. A
+// truncated doc_id (`cch-w57-s5`) is a prefix of the real id, so doc_id
+// matching finds it; a row remembered by what it SAID ("the dns sweep") has no
+// id at all, so title matching finds that. A row missing either field simply
+// does not match on it — never a panic, never a wildcard.
+func taskRowMatcher(needle string) func(json.RawMessage) bool {
+	lowered := strings.ToLower(needle)
+	return func(row json.RawMessage) bool {
+		var obj struct {
+			DocID string `json:"doc_id"`
+			Title string `json:"title"`
+		}
+		if json.Unmarshal(row, &obj) != nil {
+			return false
+		}
+		return strings.Contains(strings.ToLower(obj.DocID), lowered) ||
+			strings.Contains(strings.ToLower(obj.Title), lowered)
+	}
+}
+
+// Bounds on the prefix-suggestion walk. The suggestion rides the not_found
+// path, so it must NEVER turn a fast 404 into a hang: a caller who typed a
+// genuinely bogus id is entitled to their refusal now, not after a full ledger
+// crawl.
+//
+// The page size is 1000 because that is the server's own clamp
+// (Params.parse_limit(params["limit"], 1000, 1000)) — asking for more returns
+// 1000 anyway, so 1000 is the fewest round-trips the route can be walked in
+// (~9 for the 8,120-row ledger, versus ~82 at the --all walk's page size of
+// 100). The ceiling and the deadline are BOTH hard: whichever trips first
+// abandons the suggestion. Abandoning is safe in exactly one direction —
+// "exactly one candidate" is an ABSENCE claim about every row not read, so a
+// truncated walk cannot make it. It falls back to the plain hint, which still
+// names `--match` and is still one command from the answer.
+const (
+	// taskRouteMaxLimit is the server's own clamp on GET /v1/tasks
+	// (Params.parse_limit(params["limit"], 1000, 1000)). Asking for more
+	// returns 1000 anyway — and, worse, returns it SILENTLY.
+	taskRouteMaxLimit = 1000
+
+	// taskWalkPageSize is the window `bp task ls --match` walks in. It is the
+	// clamp MINUS ONE, and the minus one is load-bearing.
+	//
+	// paginatedAllWalk requests pageSize+1 and keeps the extra row as the
+	// lookahead anchor that proves the next page opens where this one left off.
+	// A pageSize of 1000 asks for 1001, the server clamps it to 1000, and the
+	// walk gets no anchor row — so EVERY boundary goes unverified and says so,
+	// eight times, on stderr. Measured live: the run printed
+	// "pagination boundary at offset N is unverified" for all eight boundaries.
+	// That trades away the exact shift-detection the walk exists for. 999 asks
+	// for 1000, lands ON the clamp, and keeps every boundary anchored — at the
+	// same nine round-trips.
+	taskWalkPageSize = taskRouteMaxLimit - 1
+
+	// The suggestion walk asks for the clamp exactly: it keeps no lookahead row
+	// (a best-effort suggestion needs no shift proof — it abandons instead), so
+	// it has no +1 to leave room for.
+	taskSuggestPageSize = taskRouteMaxLimit
+	taskSuggestMaxPages = 25
+
+	// THE DEADLINE, CHOSEN AGAINST MEASURED PAGES, NOT TASTE — and it is the
+	// reason this suggestion is deliberately allowed to give up.
+	//
+	// Measured against the live ledger (8,120 tasks, 9 pages), three runs over
+	// ONE keep-alive connection: 30.1s, 27.4s, 40.6s for 2.91 MB. The bytes are
+	// not the cost — `view=brief` already cut a page from 10.2 MB to ~340 KB and
+	// the walk still takes ~3-5s PER PAGE, because the time is server-side per
+	// request. So a COMPLETE scan of a ledger this size cannot be bought at any
+	// latency a refusal may honestly charge, no matter how the client asks.
+	//
+	// That is a fact about the route, not a tuning failure, and the honest
+	// response is to bound the spend and SAY when the bound was hit rather than
+	// to raise it until a 404 takes half a minute. 6s buys a small ledger's
+	// whole scan (a fresh instance, a local dev server, any corpus of a page or
+	// two — where the suggestion fires exactly as specified) and about two pages
+	// of a large one, after which the walk stops and the hint reports that it
+	// stopped. The real fix is server-side (a prefix lookup, or an id-only
+	// projection on /v1/tasks) and is out of this change's fence.
+)
+
+// taskSuggestDeadline is a var, not a const, for ONE reason: the arm that
+// enforces it is a distinct exit from the page ceiling, and a test that cannot
+// reach it cannot prove it reports an ABANDONED scan rather than a completed
+// one. Shrinking it is the only way to exercise that arm without spending six
+// real seconds per run. Never reassigned outside tests.
+var taskSuggestDeadline = 6 * time.Second
+
+// taskSuggestView is the projection the suggestion walk asks for. It reads
+// nothing but doc_id, and the brief view carries doc_id and title while
+// dropping the brief/description/criteria bulk that makes a full task row fat:
+// measured against the live route, 337 KB per 1000-row page instead of
+// 10.2 MB, and ~1.2s instead of ~4s. Nothing is rendered from these rows, so
+// the narrower projection has no effect a caller can observe — only a 30x
+// cheaper one they do not wait for.
+//
+// It is sent as a raw query param rather than through resolveView because
+// task.ls declares no `views` contract in the manifest, so the CLI's own view
+// resolution would send nothing. Asking for a view a route does not implement
+// is harmless — an unknown param is ignored and the walk reads full rows, just
+// more slowly.
+const taskSuggestView = "brief"
+
+// taskPrefixSuggestion returns the ONE published task doc_id that has typed as
+// a strict prefix, or "" when there is no such id, more than one, or the walk
+// could not finish inside its bounds.
+//
+// "Exactly one" is the whole contract. Two candidates mean the CLI does not
+// know which one the caller meant, and naming either would be a guess dressed
+// as an answer — so two candidates say nothing, exactly as zero do.
+//
+// Candidates are deduplicated by doc_id: a page that repeats a row (a
+// collection shifting mid-walk, the same hazard paginatedAllWalk refuses over)
+// would otherwise turn one real candidate into a phantom pair and suppress a
+// correct suggestion.
+// It returns (suggestion, complete). complete is false when the walk gave up —
+// on a bound, an error, or an unreadable page — and the caller must then say
+// that no scan was made rather than implying no candidate exists. "" with
+// complete=true is a real absence claim; "" with complete=false is silence.
+func taskPrefixSuggestion(out *writer, m *manifest.Manifest, ctx manifest.Context, typed string) (string, bool) {
+	if m == nil || typed == "" {
+		return "", false
+	}
+	var lsCmd manifest.Command
+	found := false
+	for _, c := range m.Commands {
+		if c.ID == taskLsCommandID {
+			lsCmd, found = c, true
+			break
+		}
+	}
+	if !found {
+		return "", false
+	}
+	baseURL, err := m.BuildURL(lsCmd, ctx, map[string]string{})
+	if err != nil {
+		return "", false
+	}
+	headers := authHeaders(lsCmd, ctx)
+
+	// ANNOUNCE THE WAIT. This walk can take seconds, and it hangs off a
+	// refusal — the one place a caller expects an instant answer. A silent
+	// multi-second pause on a 404 reads as a hung CLI, which is worse than no
+	// suggestion at all; one line naming what is happening and what it is
+	// bounded by turns it into a wait the reader can sit through or Ctrl-C.
+	if out != nil {
+		out.userErr("no such task id — scanning the ledger for a close match (up to %s)…", taskSuggestDeadline)
+	}
+
+	seen := map[string]bool{}
+	deadline := time.Now().Add(taskSuggestDeadline)
+	for page := 0; page < taskSuggestMaxPages; page++ {
+		if time.Now().After(deadline) {
+			return "", false
+		}
+		pageURL := withOffsetLimit(baseURL, page*taskSuggestPageSize, taskSuggestPageSize) + "&view=" + taskSuggestView
+		status, body, err := doRequest(lsCmd.HTTP.Method, pageURL, headers, nil)
+		if err != nil || status < 200 || status >= 300 {
+			return "", false
+		}
+		rows, key := extractListRows(unwrapResult(body))
+		if key == "" {
+			// Same law the --all walk applies: an HTTP 200 is no proof the body
+			// came from Barkpark. An unreadable page cannot support an
+			// "exactly one" claim, so the suggestion is abandoned rather than
+			// computed over a partial read.
+			return "", false
+		}
+		for _, row := range rows {
+			var obj struct {
+				DocID string `json:"doc_id"`
+			}
+			if json.Unmarshal(row, &obj) != nil {
+				continue
+			}
+			if len(obj.DocID) > len(typed) && strings.HasPrefix(obj.DocID, typed) {
+				seen[obj.DocID] = true
+				if len(seen) > 1 {
+					// Two candidates already: no further page can restore
+					// uniqueness, so stop paying for round-trips. This IS a
+					// complete answer: "not exactly one" is settled.
+					return "", true
+				}
+			}
+		}
+		if len(rows) < taskSuggestPageSize {
+			// Short page: the walk reached the end of the collection, so the
+			// count below is over EVERY row, which is what "exactly one" needs.
+			if len(seen) == 1 {
+				for id := range seen {
+					return id, true
+				}
+			}
+			return "", true
+		}
+	}
+	// Page ceiling reached without a short page — the walk never saw the end of
+	// the ledger, so it cannot claim uniqueness.
+	return "", false
+}
+
+// taskGetNotFoundHint is the remedy for a `bp task get <id>` not_found: it
+// names `bp task ls --match <the id the caller typed>` and, when exactly one
+// published doc_id extends that id, names it.
+//
+// It replaces the generic notFoundHint for this one command because that hint
+// named `bp task ls` with no flag — a remedy whose cost is the whole ledger.
+// The dataset clause is carried over verbatim: /v1/tasks has no :dataset
+// placeholder, and a reader who reaches for --dataset next has been sent down a
+// second dead end.
+//
+// TWO NEIGHBOURS IT IS NOT, because both answer a grep a reader would type
+// here: errors.go's notFoundHint is the manifest-derived hint for EVERY noun
+// (the one this overrides), and usage.go's usageSuggestNouns is a different
+// "did you mean" entirely — it suggests NOUNS on a usage error, never a
+// document id.
+func taskGetNotFoundHint(out *writer, m *manifest.Manifest, ctx manifest.Context, typed string) string {
+	if typed == "" {
+		return ""
+	}
+	search := fmt.Sprintf("run `bp task ls --match %s` — a case-insensitive substring of doc_id or title, matched over every page", typed)
+	scope := "(this route is not dataset-scoped, so --dataset cannot affect it)"
+
+	suggestion, complete := taskPrefixSuggestion(out, m, ctx, typed)
+	switch {
+	case suggestion != "":
+		return fmt.Sprintf("did you mean `%s`? it is the only published task id starting with `%s`. %s %s", suggestion, typed, search, scope)
+	case !complete:
+		// SILENCE IS NOT ABSENCE. The scan gave up, so "no close id" was never
+		// established — and a hint that quietly omitted the suggestion here
+		// would let the reader infer an absence the CLI never checked.
+		return fmt.Sprintf("no close-id scan was made (this ledger is larger than a %s scan can read); %s %s", taskSuggestDeadline, search, scope)
+	}
+	return search + " " + scope
+}
+
+// taskGetTypedID recovers the doc_id positional the caller typed, or "" when
+// the command is not `task get` or bound no id. It reads the ALREADY-BOUND arg
+// map shape via bindArgs rather than re-scanning tail, so a flag value can
+// never be mistaken for the id.
+func taskGetTypedID(cmd manifest.Command, tail []string) string {
+	if cmd.ID != taskGetCommandID {
+		return ""
+	}
+	pos, _, err := splitArgs(cmd, tail)
+	if err != nil {
+		return ""
+	}
+	args, err := bindArgs(cmd, pos)
+	if err != nil {
+		return ""
+	}
+	return args["doc_id"]
+}

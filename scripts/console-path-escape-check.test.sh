@@ -313,7 +313,7 @@ else
   no "did not resolve the template-literal read: $out"
 fi
 # The real read this idiom exists for is DECLARED, so the real tree stays green.
-if printf '%s\n' "$("$SCRIPT" --print-set console)" | grep -qx '.github/required-checks.json'; then
+if has_line "$("$SCRIPT" --print-set console)" '.github/required-checks.json'; then
   ok ".github/required-checks.json is in the declared set (the sibling slice's leg-A read)"
 else
   no ".github/required-checks.json is not declared — the merged pair would red on main"

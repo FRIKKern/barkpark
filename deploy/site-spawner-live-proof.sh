@@ -53,6 +53,7 @@
 #   49 PREBUILT_BASE_BROKEN         — served bp-site-base != /sites/<slug>/ (every asset href is dead; HEALTH cannot see it)
 #   50 DEPLOY_FAILED                — the deployment never reached live
 #   51 DEPLOY_STAGES_INCOMPLETE     — the six stages did not all land, in order
+#   52 PREBUILT_BUILD_NO_TIMINGS    — the payload carried NO per-stage durations to compare
 #   60 LIVE_NOT_200                 — the live URL does not serve
 #   61 LIVE_BUILD_ID_MISMATCH       — served bp-build-id != the deployment's build_id
 #   62 LIVE_CONTENT_EMPTY           — bp-content-rev or bp-doc-id empty (a vacuous green page)
@@ -119,6 +120,7 @@ E_PB_BYTES_NOT_LIVE=48
 E_PB_BASE_BROKEN=49
 E_DEPLOY_FAILED=50
 E_DEPLOY_STAGES=51
+E_PB_BUILD_NO_TIMINGS=52
 E_LIVE_NOT_200=60
 E_LIVE_BUILD_MISMATCH=61
 E_LIVE_CONTENT_EMPTY=62
@@ -150,6 +152,7 @@ codename() {
     "$E_PB_BASE_BROKEN") echo "PREBUILT_BASE_BROKEN" ;;
     "$E_DEPLOY_FAILED") echo "DEPLOY_FAILED" ;;
     "$E_DEPLOY_STAGES") echo "DEPLOY_STAGES_INCOMPLETE" ;;
+    "$E_PB_BUILD_NO_TIMINGS") echo "PREBUILT_BUILD_NO_TIMINGS" ;;
     "$E_LIVE_NOT_200") echo "LIVE_NOT_200" ;;
     "$E_LIVE_BUILD_MISMATCH") echo "LIVE_BUILD_ID_MISMATCH" ;;
     "$E_LIVE_CONTENT_EMPTY") echo "LIVE_CONTENT_EMPTY" ;;
@@ -290,7 +293,18 @@ CREATED_BROKEN=""
 # A failed delete is REPORTED, never swallowed: the operator gets the manual
 # steps. Cleanup never changes the run's verdict — it runs from the EXIT trap,
 # so `exit "$code"` in fail() has already fixed the exit status.
+# CLEANUP RUNS AT MOST ONCE. `fail()` calls cleanup and then exits, which fires
+# the EXIT trap and would call it a SECOND time — and now that cleanup performs a
+# real DELETE rather than printing a note, the second pass is not harmless: the
+# first pass already removed $TMP, so the delete cannot even write its receipt,
+# and the run ends by telling the operator "DELETE FAILED … The site's read token
+# is STILL LIVE" about a site it had just successfully deleted. A measured run
+# printed exactly that. Deleting each slug is also latched, so a re-entry can
+# never re-delete a name another run may since have taken.
+CLEANED=0
 cleanup() {
+  [ "$CLEANED" -eq 0 ] || return 0
+  CLEANED=1
   if [ "$KEEP" -eq 0 ]; then
     local s dx
     for s in "$CREATED_SITE" "$CREATED_BROKEN"; do
@@ -300,6 +314,10 @@ cleanup() {
       dx=0
       "$BP" cloud site delete "$s" --yes >"${TMP:-/tmp}/del-$s.json" 2>"${TMP:-/tmp}/del-$s.err" || dx=$?
       if [ "$dx" -eq 0 ]; then
+        case "$s" in
+          "$CREATED_SITE") CREATED_SITE="" ;;
+          "$CREATED_BROKEN") CREATED_BROKEN="" ;;
+        esac
         ok "cleanup: '$s' deleted from the control plane"
       else
         note "cleanup: DELETE FAILED for '$s' (exit $dx): $(cli_err "${TMP:-/tmp}/del-$s.json" "${TMP:-/tmp}/del-$s.err")"
@@ -471,9 +489,21 @@ judge_build_disagree() {
 # took 40ms did not run npm either, so the ratio would be a comparison between two
 # no-ops. A real Astro build on this fleet is tens of seconds; 1000ms is the
 # generous line under which we refuse to call it a build at all.
+# ABSENT TIMINGS ARE THEIR OWN RED, AND THAT DISTINCTION IS THE POINT.
+# A live run measured BUILD at 0ms on BOTH paths — while the source run had
+# visibly just done `npm ci && npm run build`. The durations were not equal, they
+# were MISSING: `siteDeploymentMap` (internal/cli/cloud_site_cmd.go) emits each
+# stage as {name, status, detail} only, dropping the `started_at`/`finished_at`
+# that `SiteStage` carries, so the `-o json` envelope this journey reads can
+# never contain a duration at all. Folding that into NOT_FASTER made the script
+# say "if these are close, the box is doing the same work on both paths" — an
+# accusation against the ENGINE for what is a payload gap. A source BUILD of 0ms
+# is not a fast build, it is no measurement; it gets its own name so nobody
+# optimises a box that was never the problem.
 judge_build_orders() {
   local pb="$1" src="$2" factor="${3:-10}"
-  [ "$pb" -ge 0 ] 2>/dev/null || return "$E_PB_BUILD_NOT_FASTER"
+  [ "$pb" -ge 0 ] 2>/dev/null || return "$E_PB_BUILD_NO_TIMINGS"
+  [ "$src" -gt 0 ] 2>/dev/null || return "$E_PB_BUILD_NO_TIMINGS"
   [ "$src" -ge 1000 ] 2>/dev/null || return "$E_PB_BUILD_NOT_FASTER"
   [ "$src" -ge $(( (pb + 1) * factor )) ] || return "$E_PB_BUILD_NOT_FASTER"
   return 0
@@ -602,6 +632,10 @@ self_check() {
   expect_code "$E_PB_BUILD_NOT_FASTER" "42000ms vs 47000ms — the same build twice" judge_build_orders 42000 47000
   expect_code "$E_PB_BUILD_NOT_FASTER" "the 'source' BUILD took 40ms — that is not a build either" \
     judge_build_orders 0 40
+  expect_code "$E_PB_BUILD_NO_TIMINGS" "0 vs 0 — the payload carried no durations at all" \
+    judge_build_orders 0 0
+  expect_code "$E_PB_BUILD_NO_TIMINGS" "a prebuilt duration but no source one" \
+    judge_build_orders 120 0
   expect_pass      "the served page carries the minted build id"     judge_prebuilt_live 200 b-mint b-mint
   expect_code "$E_PB_BYTES_NOT_LIVE" "the site 404s after the upload"        judge_prebuilt_live 404 b-mint b-mint
   expect_code "$E_PB_BYTES_NOT_LIVE" "200, but an OLDER build is still live" judge_prebuilt_live 200 b-old b-mint
@@ -949,34 +983,76 @@ PY
   ok "live bp-build-id flipped $before → $after"
 
   # ---- 5. A BROKEN BUILD NEVER REACHES A VISITOR ---------------------------
-  step "5/5 BROKEN BUILD — dies at its named stage, visitors never see it"
-
   local live_before; live_before="$after"
 
-  # doc_type is bound at CREATE (D35), so the poison is a SEPARATE site bound to a
-  # type that does not exist — NOT a deploy-time env override (which is inert now
-  # the CLI drops it). This is the REAL failure mode this fleet has: an undefined
-  # type answers 200 with count:0 (it does NOT 404), so the build "succeeds" and
-  # emits a page with an EMPTY bp-doc-id. That is precisely what HEALTH's marker
-  # assertion exists to catch, and precisely what a reachability-only gate would
-  # wave through. If HEALTH is real, the poison dies there and never gets a
-  # `current` symlink; if HEALTH is theatre, it reaches visitors and we say so.
-  local broken_slug="${SLUG}-broken"
-  note "creating a poison site '$broken_slug' bound to a doc type that does not exist…"
-  local pcx=0
-  "$BP" cloud site create --name "$broken_slug" --dataset "$DATASET" \
-    --framework astro --kind static --instance "$INSTANCE" \
-    --doc-type "__no_such_type__" \
-    -o json >"$TMP/broken-create.json" 2>"$TMP/broken-create.err" || pcx=$?
-  [ "$pcx" -eq 0 ] ||
-    fail "$E_CREATE_FAILED" "could not create the poison site to prove HEALTH containment: $(cli_err "$TMP/broken-create.json" "$TMP/broken-create.err")"
-  CREATED_BROKEN="$broken_slug"
+  # WHY THE POISON IS A PREBUILT UPLOAD AND NO LONGER A SECOND SITE.
+  #
+  # This arm used to create a SEPARATE site bound to a doc type that does not
+  # exist, on the reasoning that an undefined type answers 200 with count:0 and
+  # so builds a silently EMPTY page. That poison is now UNBUILDABLE, and by a
+  # deliberate product change: the control plane's binding guard (W8/D73) reads
+  # the binding at CREATE and refuses a site that would build from nothing —
+  # measured live, `--doc-type __no_such_type__` now answers 422 with "this site
+  # would build from nothing … It can read: task (7749), paper (1050), … No site
+  # was created." The old arm therefore died at CREATE_FAILED without ever
+  # reaching the gate it exists to test, and a proof that cannot construct its
+  # own negative case is not proving containment.
+  #
+  # So the poison is now made the way a real broken build actually reaches a box:
+  # bytes that pass every CLIENT-side check and fail the BOX's HEALTH gate. We
+  # take the page that is ALREADY LIVE (a genuine build output — no npm needed
+  # here, which keeps this arm's dependencies exactly `bp` and `curl`), stamp it
+  # with the build id the mint hands out so the CLI will upload it, and BLANK its
+  # bp-doc-id. `deploy/site-deploy.sh` HEALTH asserts that marker non-empty
+  # ("bp-doc-id marker is empty — the build rendered no content document"), so
+  # the deploy must die at HEALTH, must never SWITCH, and the live URL must still
+  # serve the PREVIOUS build. It also keeps the whole arm on ONE site: no second
+  # row to create, and none to leak.
+  step "5/5 BROKEN BUILD — dies at its named stage, visitors never see it"
 
-  # A non-zero deploy exit here is the CORRECT outcome, so it is not an error —
-  # the judgement is on the deployment's own status/stage/reason, on whether the
-  # poison ever served, and above all on whether the GOOD site's page moved.
-  note "deploying the poison site — it must die at HEALTH and never serve…"
-  "$BP" cloud site deploy "$broken_slug" -o json >"$TMP/broken.json" 2>"$TMP/broken.stream" || true
+  local sx5=0
+  "$BP" cloud site settings "$SLUG" --prebuilt-enabled true -o json \
+    >"$TMP/p5-settings.json" 2>"$TMP/p5-settings.err" || sx5=$?
+  [ "$sx5" -eq 0 ] ||
+    fail "$E_BROKEN_NOT_NAMED" "could not opt '$SLUG' into prebuilt uploads, so the poison cannot be shipped: $(cli_err "$TMP/p5-settings.json" "$TMP/p5-settings.err")" \
+      "prebuilt uploads are per-site and OFF by default; this arm needs them to ship bytes the box did not build"
+
+  # The bytes: the page that is live right now, which is a real build output.
+  local pdist="$TMP/poison"
+  mkdir -p "$pdist"
+  curl -sS -m 30 -o "$pdist/index.html" "https://$LIVE_HOST/sites/$SLUG/" 2>/dev/null || true
+  [ -s "$pdist/index.html" ] ||
+    fail "$E_BROKEN_NOT_NAMED" "could not fetch the live page to build a poison from." \
+      "the live URL served nothing, so there is no real build output to corrupt"
+
+  # Mint: the refusal names the deployment to resume and the build id the bytes
+  # must carry (the mint is nonced, so this cannot be known in advance).
+  "$BP" cloud site deploy "$SLUG" --prebuilt "$pdist" >"$TMP/p5-mint.out" 2>"$TMP/p5-mint.err" || true
+  local p5all p5dep p5bid p5crev
+  p5all="$(cat "$TMP/p5-mint.out" "$TMP/p5-mint.err" 2>/dev/null)"
+  p5dep="$(printf '%s\n' "$p5all" | sed -n 's/.*--deployment \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p' | tail -n 1)"
+  p5bid="$(printf '%s\n' "$p5all" | sed -n 's/.*BARKPARK_BUILD_ID=\([^ ]*\).*/\1/p' | tail -n 1)"
+  p5crev="$(printf '%s\n' "$p5all" | sed -n 's/.*BARKPARK_CONTENT_REV=\([^ ]*\).*/\1/p' | tail -n 1)"
+  [ -n "$p5dep" ] && [ -n "$p5bid" ] ||
+    fail "$E_BROKEN_NOT_NAMED" "the poison mint named deployment='${p5dep:-none}' build_id='${p5bid:-none}' — nothing to ship the corrupt bytes to. Output: $(printf '%s' "$p5all" | head -c 300)"
+
+  # Stamp the id the box expects (so the CLIENT lets it through), then blank the
+  # one marker HEALTH refuses to accept empty. This is the whole poison.
+  restamp_markers "$pdist" "$p5bid" "$p5crev" >/dev/null
+  python3 - "$pdist/index.html" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8", errors="replace").read()
+s = re.sub(r'(<meta[^>]*name="bp-doc-id"[^>]*content=")[^"]*(")', r'\1\2', s)
+open(p, "w", encoding="utf-8").write(s)
+PY
+  [ -z "$(meta_content "$pdist/index.html" bp-doc-id)" ] ||
+    fail "$E_BROKEN_NOT_NAMED" "could not blank bp-doc-id in the poison bytes — the negative case was never constructed, so this arm would prove nothing."
+  note "poison built: build id $p5bid, bp-doc-id BLANKED (HEALTH must refuse it)"
+
+  note "shipping the poison — it must die at HEALTH and never switch…"
+  "$BP" cloud site deploy "$SLUG" --prebuilt "$pdist" --deployment "$p5dep" -o json \
+    >"$TMP/broken.json" 2>"$TMP/broken.stream" || true
   say ""
   sed 's/^/    │ /' "$TMP/broken.stream" >&2 || true
   say ""
@@ -986,32 +1062,22 @@ PY
   bstage="$(jget "$TMP/broken.json" deployment.stage)"
   breason="$(jget "$TMP/broken.json" deployment.failure_reason)"
 
-  # Containment, part 1: the GOOD proof site is UNCHANGED — a broken deploy of any
-  # site must never disturb a live one.
+  # Containment: the live page is UNCHANGED — a failed deploy never reaches a visitor.
   curl -sS -m 30 -o "$TMP/live4.html" "https://$LIVE_HOST/sites/$SLUG/" >/dev/null 2>&1 || true
   local live_after; live_after="$(meta_content "$TMP/live4.html" bp-build-id)"
 
   judge_broken "$bstatus" "$(printf '%s' "${bstage:-}" | tr '[:lower:]' '[:upper:]')" "$breason" "$live_before" "$live_after" ||
-    fail $? "the broken build: status=$bstatus stage=${bstage:-none} reason='${breason:-none}'; the GOOD site's live bp-build-id went '$live_before' → '$live_after'. A broken build must fail at a NAMED stage with a REAL reason, and it must NEVER change what a visitor sees." \
-      "HEALTH asserts the baked bp-doc-id/bp-content-rev markers before SWITCH — a build that fetched no content must die there"
+    fail $? "the broken build: status=$bstatus stage=${bstage:-none} reason='${breason:-none}'; the live bp-build-id went '$live_before' → '$live_after'. A broken build must fail at a NAMED stage with a REAL reason, and it must NEVER change what a visitor sees." \
+      "HEALTH asserts the baked bp-doc-id/bp-content-rev markers before SWITCH — bytes that carry an empty bp-doc-id must die there"
   ok "failed at $(printf '%s' "$bstage" | tr '[:lower:]' '[:upper:]') — $breason"
-  ok "the GOOD site's live bp-build-id UNCHANGED at $live_after"
+  ok "the live bp-build-id UNCHANGED at $live_after (the poison never reached a visitor)"
 
-  # Containment, part 2: the poison site NEVER SWITCHED — dying at HEALTH means it
-  # never got a `current` symlink, so its own URL must not serve the broken build.
-  # A poison page that fetched no content would carry an EMPTY bp-doc-id; a real
-  # 404 (no current) is the cleaner outcome. Either way, a served build with a
-  # non-empty bp-doc-id at this URL would mean the broken build reached visitors.
-  local burl="https://$LIVE_HOST/sites/$broken_slug/"
-  curl -sS -m 30 -o "$TMP/broken-live.html" -w '%{http_code}' "$burl" >"$TMP/broken-live.code" 2>/dev/null || true
-  local bhc bdoc
-  bhc="$(cat "$TMP/broken-live.code" 2>/dev/null || echo 000)"
-  bdoc="$(meta_content "$TMP/broken-live.html" bp-doc-id)"
-  if [ "$bhc" = "200" ] && [ -n "$bdoc" ]; then
-    fail "$E_BROKEN_REACHED_VISITORS" "the poison site's own URL ($burl) served HTTP 200 with bp-doc-id='$bdoc' — the broken build REACHED VISITORS. HEALTH did not gate the switch." \
-      "a build that fails HEALTH must never SWITCH — the poison site must have no \`current\` symlink and its URL must 404 (or serve nothing)"
-  fi
-  ok "poison URL never served the broken build (HTTP $bhc, bp-doc-id='${bdoc:-<none>}')"
+  # And the served page still carries a REAL doc id — not the blank we shipped.
+  local sdoc; sdoc="$(meta_content "$TMP/live4.html" bp-doc-id)"
+  [ -n "$sdoc" ] ||
+    fail "$E_BROKEN_REACHED_VISITORS" "the live page's bp-doc-id is EMPTY — the poisoned bytes ARE what visitors are being served. HEALTH did not gate the switch." \
+      "a build that fails HEALTH must never get the \`current\` symlink"
+  ok "the live page still serves real content (bp-doc-id=$sdoc)"
 
   # ---- verdict --------------------------------------------------------------
   say ""
@@ -1301,7 +1367,7 @@ prebuilt_journey() {
   ok "the runs DISAGREE about BUILD: prebuilt='$pb_build' vs source='$src_build'"
   judge_build_orders "$pb_ms" "$src_ms" "$JOURNEY_FACTOR" ||
     fail $? "BUILD took ${pb_ms}ms prebuilt and ${src_ms}ms from source — not the ${JOURNEY_FACTOR}x apart a skipped build must be (and a 'source' build under 1000ms is not a build either)." \
-      "if these are close, the box is doing the same work on both paths"
+      "a source BUILD of 0ms is NOT a fast build, it is NO measurement: the CLI's \`-o json\` deployment envelope emits each stage as {name, status, detail} and drops the started_at/finished_at that SiteStage carries, so no duration can be read from it. Fix the payload before reading anything into these numbers — the box is not implicated by a missing field."
   ok "BUILD ${pb_ms}ms vs ${src_ms}ms — orders apart, without a shell on the box"
 
   say ""

@@ -1,0 +1,16 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [
+    {
+      "row": "cch-w40-bl-still-open-row",
+      "arm": "A",
+      "pr": 12345,
+      "class": "FULL"
+    }
+  ],
+  "must_contain": [
+    "RESULT: 1 of 2 open rows carry a merge receipt",
+    "receipt: arm A · PR #12345"
+  ]
+}

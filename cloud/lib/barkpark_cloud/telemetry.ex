@@ -200,6 +200,33 @@ defmodule BarkparkCloud.Telemetry do
             count: number | nil
           }
         ] | nil,
+        # What the reading did NOT measure, or a stated refusal. `bytes` is
+        # RootUsedBytes minus the measured roots and `of_bytes` is that
+        # denominator, carried together so no surface can render a share
+        # without the volume behind it. `status` is a closed set:
+        #
+        #   "computed"   — the subtraction happened; bytes is real
+        #   "undefined"  — the measured roots summed to MORE than the disk's
+        #                  used total, which is arithmetically impossible for
+        #                  disjoint trees on one device. bytes stays -1: a
+        #                  negative gigabyte is a new dishonest number inside
+        #                  the fix for dishonest numbers, and a clamp to 0
+        #                  would render the least-measured box as the best.
+        #   "unmeasured" — not attempted (no denominator, or the roots' device
+        #                  could not be verified). `reason` says which.
+        #
+        # nil is an agent that computes no residual at all — a different fact
+        # from an agent that tried and refused.
+        residual: %{
+          status: String.t(),
+          bytes: number | nil,
+          of_bytes: number | nil,
+          measured_bytes: number | nil,
+          counted_roots: number | nil,
+          excluded_roots: number | nil,
+          pg_source: String.t(),
+          reason: String.t() | nil
+        } | nil,
         reported_at: String.t() | nil   # the event's inserted_at, RFC3339
       }
 
@@ -235,6 +262,7 @@ defmodule BarkparkCloud.Telemetry do
         count: num_or_nil(Map.get(payload, "sites_count"))
       },
       consumer_roots: consumer_roots(Map.get(payload, "consumer_roots")),
+      residual: residual(Map.get(payload, "residual")),
       reported_at: nil
     }
   end
@@ -283,7 +311,14 @@ defmodule BarkparkCloud.Telemetry do
             # which is the exact information loss the fourth status word exists
             # to end.
             degraded: path_list(Map.get(row, "degraded")),
-            degraded_count: num_or_nil(Map.get(row, "degraded_count"))
+            degraded_count: num_or_nil(Map.get(row, "degraded_count")),
+            # WHY this root's bytes were not subtracted from the residual, and
+            # nil exactly when they were. It is independent of `status`: a root
+            # can be perfectly well READ and still be unsubtractable — the
+            # overlay case is a complete, correct 1.44 GiB reading of a tree
+            # that is not on the root filesystem at all. Dropping it would
+            # leave the residual a number with a silent asterisk.
+            excluded_reason: str_or_nil(Map.get(row, "excluded_reason"))
           }
         ]
     end
@@ -304,6 +339,38 @@ defmodule BarkparkCloud.Telemetry do
     do: status
 
   defp consumer_root_status(_), do: "unmeasured"
+
+  # The residual. A non-map (an agent predating the field, a null) is nil — NOT
+  # MEASURED — which a surface words differently from a refusal.
+  #
+  # Every number rides verbatim, -1 sentinel included, exactly like the roots
+  # above: the normalizer never zeroes what it did not measure, and "0 B
+  # unaccounted" is the strongest claim this axis can make.
+  defp residual(row) when is_map(row) do
+    %{
+      status: residual_status(str_or_nil(Map.get(row, "status"))),
+      bytes: num_or_nil(Map.get(row, "bytes")),
+      of_bytes: num_or_nil(Map.get(row, "of_bytes")),
+      measured_bytes: num_or_nil(Map.get(row, "measured_bytes")),
+      counted_roots: num_or_nil(Map.get(row, "counted_roots")),
+      excluded_roots: num_or_nil(Map.get(row, "excluded_roots")),
+      pg_source: residual_pg_source(str_or_nil(Map.get(row, "pg_source"))),
+      reason: str_or_nil(Map.get(row, "reason"))
+    }
+  end
+
+  defp residual(_), do: nil
+
+  # Closed sets, normalized the same direction as consumer_root_status/1: an
+  # unrecognised word becomes the state that CLAIMS THE LEAST. For a status
+  # that is "unmeasured"; for the pg source it is "none". Passing an unknown
+  # word through would let a future agent invent a state every surface renders
+  # by falling off the end of its branch table.
+  defp residual_status(status) when status in ["computed", "undefined", "unmeasured"], do: status
+  defp residual_status(_), do: "unmeasured"
+
+  defp residual_pg_source(source) when source in ["du-root", "pg-size-bytes", "none"], do: source
+  defp residual_pg_source(_), do: "none"
 
   # A list of PATHS — the degraded subtree names. Only binary members survive
   # (a corrupt row cannot name a place); a non-list is nil, the same

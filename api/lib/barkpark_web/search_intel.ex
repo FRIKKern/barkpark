@@ -3,30 +3,77 @@ defmodule BarkparkWeb.SearchIntel do
   Shared request metadata for search intelligence across API surfaces.
   """
 
-  @doc false
+  @doc """
+  The identity a search event is filed under, and the key its owner's `recent`
+  suggestions are read back by.
+
+  THE ORDERING IS THE SECURITY PROPERTY. `x-bp-search-client` used to be
+  consulted FIRST, so the actor was attacker-CHOSEN: any caller — authenticated
+  or not — who knew another browser's id could send it as that header and read
+  that browser's `recent` bucket verbatim (queries, filters, result counts,
+  timestamps). Worse, the header OUTRANKED the token, so a token holder's own
+  recents lived in a `client:<id>` bucket that a TOKENLESS caller could enter
+  with one header. The header can no longer SELECT an actor; it only
+  SUBDIVIDES the one the request already proved:
+
+    * api_token present -> `token:<id>`, and the header is namespaced UNDER it
+      (`token:<id>:<client>`) so a browser still gets its own recents without
+      ever leaving its token's namespace. No header can reach into a token
+      namespace, and no header can leave one.
+    * no token, header present -> `client:<workspace>:<client>`, namespaced by
+      the workspace the SERVER resolved from the route/token
+      (`:current_workspace`, which the caller cannot pick), so one id under two
+      tenants is two buckets.
+    * neither -> `"anon"`, the shared bucket that
+      `Barkpark.Search.Intelligence.recent_queries/6` deliberately answers with
+      `[]`.
+
+  What the header IS: a per-browser BEARER id — `crypto.randomUUID()` persisted
+  in `localStorage["bp-search-client"]` (`templates/search-starter/lib/search-session.ts`,
+  mirrored by the JS SDK's `sessionKey` option in `js/packages/core/src/search.ts`).
+  Token-first ordering closes the impersonation half outright. The anonymous
+  half is then bounded by that id's entropy: a random v4 UUID is not guessable,
+  so an anonymous bucket is reachable only by a caller who was GIVEN the id.
+  That is a bearer credential, not an authorization check — never put anything
+  behind it that a leaked id must not reach.
+  """
   def actor_key(conn) do
-    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
-      [client | _] when is_binary(client) and client != "" ->
-        "client:" <> String.slice(client, 0, 64)
-
-      _ ->
-        case conn.assigns[:api_token] do
-          %{id: id} -> "token:" <> id
-          _ -> "anon"
-        end
+    case {conn.assigns[:api_token], client_id(conn)} do
+      {%{id: id}, nil} -> "token:" <> id
+      {%{id: id}, client} -> "token:" <> id <> ":" <> client
+      {_, nil} -> "anon"
+      {_, client} -> "client:" <> workspace_segment(conn) <> ":" <> client
     end
   end
 
-  @doc false
-  def session_key(conn) do
+  # The raw per-browser bearer id, capped. `nil` when absent or empty.
+  defp client_id(conn) do
     case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
-      [client | _] when is_binary(client) and client != "" ->
-        String.slice(client, 0, 64)
-
-      _ ->
-        nil
+      [client | _] when is_binary(client) and client != "" -> String.slice(client, 0, 64)
+      _ -> nil
     end
   end
+
+  # The server-resolved tenant, same source as the controllers' `workspace_id/1`
+  # (`:current_workspace`, assigned by the pipeline — never a request param), so
+  # the record path and the suggestions read path derive the SAME segment.
+  # `"global"` is the pre-tenancy/no-workspace bucket.
+  defp workspace_segment(conn) do
+    case conn.assigns[:current_workspace] do
+      %{id: id} when is_binary(id) -> id
+      _ -> "global"
+    end
+  end
+
+  @doc """
+  The raw per-browser id, unchanged.
+
+  Semantics deliberately UNTOUCHED by the actor_key hardening: `session_key` is
+  a COUNTING key (distinct sessions accepting a correction — the anti-gaming
+  gate on synonym auto-promotion), never a read selector, so it cannot be used
+  to select another actor's data and does not share `actor_key/1`'s flaw.
+  """
+  def session_key(conn), do: client_id(conn)
 
   @doc false
   def parent_event_id(conn) do
@@ -105,12 +152,7 @@ defmodule BarkparkWeb.SearchIntel do
     |> Enum.take(8)
   end
 
-  defp client_tracked?(conn) do
-    case Plug.Conn.get_req_header(conn, "x-bp-search-client") do
-      [client | _] when is_binary(client) and client != "" -> true
-      _ -> false
-    end
-  end
+  defp client_tracked?(conn), do: client_id(conn) != nil
 
   defp record_committed?(conn) do
     case Plug.Conn.get_req_header(conn, "x-bp-search-record") do

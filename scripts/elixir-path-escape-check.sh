@@ -645,7 +645,12 @@ EOF
         aname="${ap%%	*}"
         aadir="${ap#*	}"
         [ -n "$aname" ] || continue
-        mjoins="$(printf '%s\n' "$win" | grep -Eoh '@?'"$aname"'[[:space:]]*,[[:space:]]*"[^"]*"' || true)"
+        # here-string, not `printf | grep` (charter D37): under `set -o
+        # pipefail` a grep that stops reading before printf finishes writing
+        # takes SIGPIPE and the pipeline returns 141. `grep -Eoh` reads to EOF
+        # so this site cannot fire today, but the idiom is the one the harness
+        # purged and a later `-q`/`-m1` would arm it silently.
+        mjoins="$(grep -Eoh '@?'"$aname"'[[:space:]]*,[[:space:]]*"[^"]*"' <<<"$win" || true)"
         while IFS= read -r j; do
           [ -n "$j" ] || continue
           jlit="${j#*\"}"
@@ -833,7 +838,15 @@ test_ere="$(set_ere test)"
 uncovered=0
 while IFS= read -r p; do
   [ -n "$p" ] || continue
-  if printf '%s\n' "$p" | grep -Eq -- "$test_ere"; then
+  # here-string, NOT `printf '%s\n' "$p" | grep -Eq` (charter D37). `grep -q`
+  # exits on the first match; under this script's `set -o pipefail` the write
+  # side then takes SIGPIPE and the pipeline returns 141, so the `if` takes the
+  # FALSE branch and a COVERED path is reported UNCOVERED — a BLOCKING red for
+  # a reason foreign to what this ratchet measures. Only the 64KiB pipe buffer
+  # kept it quiet: a payload that fits is written before grep can exit. That is
+  # luck, not correctness, and the mutation proof in the PR shows the old form
+  # at 200/200 false UNCOVERED verdicts once the payload exceeds the buffer.
+  if grep -Eq -- "$test_ere" <<<"$p"; then
     continue
   fi
   if is_exempt "$p"; then
