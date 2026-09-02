@@ -73,7 +73,7 @@ Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts
 
 ### 5c. History [token]
 
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{…content}}`; `POST revision/:dataset/:id/restore` restores as a draft.
+Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; `rev` is null on history written before it was recorded, and such rows resolve by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 

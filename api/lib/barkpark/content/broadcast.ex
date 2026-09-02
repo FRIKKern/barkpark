@@ -371,6 +371,11 @@ defmodule Barkpark.Content.Broadcast do
       status: doc.status,
       content: doc.content,
       action: action,
+      # [rev-hash-has-no-read] Stamp the source document's opaque rev — the same
+      # string the envelope publishes as `"_rev"`. This is what makes a `_rev`
+      # cited by an acceptance criterion resolvable to the content it names
+      # (`Revisions.get_revision_by_rev/3`); without it the hash pointed nowhere.
+      rev: doc.rev,
       # WHO produced this revision — threaded from the mutation's user_id
       # (nil for system / unattributed writes). Atomic-with-mutation: this
       # insert already runs inside apply_mutations' Repo.transaction.

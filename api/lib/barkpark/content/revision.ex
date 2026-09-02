@@ -14,6 +14,15 @@ defmodule Barkpark.Content.Revision do
     field :content, :map
     field :action, :string
 
+    # [rev-hash-has-no-read] The source document's OPAQUE rev at snapshot time —
+    # the same string the envelope publishes as `"_rev"`. Without it a `_rev`
+    # cited by an acceptance criterion resolved to nothing: this table is keyed
+    # by its own UUID, so there was no path from the hash to the content it
+    # names. NULLABLE — history written before the column existed never recorded
+    # the hash and cannot be backfilled. Read via
+    # `Content.Revisions.get_revision_by_rev/3`.
+    field :rev, :string
+
     # WHO produced this revision — the actor threaded from the mutation's
     # `opts[:user_id]` (`ctx.user_id`). A plain string (an api-token / user id),
     # NULLABLE: system writes and pre-trail history have no actor. Turns version
@@ -43,6 +52,7 @@ defmodule Barkpark.Content.Revision do
       :status,
       :content,
       :action,
+      :rev,
       :actor_user_id,
       :document_id,
       :workspace_id,
