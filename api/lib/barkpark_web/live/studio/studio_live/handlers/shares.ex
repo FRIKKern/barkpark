@@ -41,12 +41,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # clause an account admin of workspace A could declare a public read share
   # over workspace B.
   #
-  # The token arm needs no clamp and MUST NOT get one: `Caps.admin?/1`'s token
-  # arm already requires `token_admin?/1` — the same `admin` permission that
-  # `/v1/shares`'s `:require_admin` pipeline requires — so a token principal
-  # holds instance-wide declare authority by design there, and clamping here
-  # would make the LiveView panel refuse what its own HTTP twin performs. The
-  # hole is the ACCOUNT arm, which `/v1/shares` refuses outright.
+  # RETRACTED — DO NOT ACT ON THE NEXT PARAGRAPH. It is quoted, not asserted;
+  # it was already false the day it was written and it kept the token arm open
+  # for three more days. The retraction and its receipts are the block below
+  # `declarable_scope?/2`; read that before touching either write half.
+  #
+  #   > The token arm needs no clamp and MUST NOT get one: `Caps.admin?/1`'s
+  #   > token arm already requires `token_admin?/1` — the same `admin`
+  #   > permission that `/v1/shares`'s `:require_admin` pipeline requires — so
+  #   > a token principal holds instance-wide declare authority by design
+  #   > there, and clamping here would make the LiveView panel refuse what its
+  #   > own HTTP twin performs. The hole is the ACCOUNT arm, which
+  #   > `/v1/shares` refuses outright.
+  #
+  # The account arm WAS a hole. It was not the only one.
   #
   # Injection is NOT the mechanism and needs no guard: a `:` in the scope makes
   # `parse_entry/1` see 4+ segments and fall to its catch-all, and a `;` makes
@@ -62,12 +70,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
 
   # ── HTTP-EDGE PARITY on the FOREIGN arm (task-14dce90fc23a4fdc) ───────────
   #
-  # THE COMMENT ABOVE IS NOW HALF-STALE AND IS KEPT AS THE RECORD OF WHY.
+  # THE COMMENT ABOVE IS RETRACTED AND IS KEPT ONLY AS THE RECORD OF WHY.
+  #
+  # THE DATES ARE THE WHOLE ARGUMENT. It never described a world that then
+  # changed; the world had ALREADY changed when it was written:
+  #
+  #   2026-08-19  cef6ee8465  #12701  POST/DELETE /v1/shares confined to
+  #                                   workspace_admin? of the SCOPE's workspace
+  #   2026-08-19  2f2f7dffcb  #12695  caps.ex, verbatim: "arpss-w10 / D22
+  #                                   OVERTURNS the former 'the token arm is
+  #                                   deliberately membership-FREE'"
+  #   2026-08-21  bb3b203f58  #12929  this clamp landed WITH the exemption —
+  #                                   TWO DAYS AFTER both commits above
+  #
+  # So both halves of the retracted claim were false on arrival:
+  #
+  #   * "holds instance-wide declare authority by design there" — cef6ee8465
+  #     had already taken that authority away at the HTTP edge. A global-`admin`
+  #     token with a plain `member` row in workspace B gets 403 from
+  #     `create/2`/`delete/2`.
+  #   * "clamping here would make the LiveView panel refuse what its own HTTP
+  #     twin performs" — the inequality ran the OTHER way. The panel PERFORMED
+  #     what the twin REFUSES, and 2f2f7dffcb had already overturned the
+  #     membership-free reading of the token arm that the sentence leaned on.
+  #     (2f2f7dffcb's seat is read on the MOUNTED workspace, never on the
+  #     SUBMITTED scope's — which is the gap, not its closure.)
+  #
   # "a token principal holds instance-wide declare authority by design there,
   # and clamping here would make the LiveView panel refuse what its own HTTP
-  # twin performs" was TRUE when `/v1/shares` was gated by `:require_admin`
-  # alone. arpss-w8 slice 2 (PR #12701) moved the HTTP edge underneath it:
-  # `ShareController.create/2` and `delete/2` now run
+  # twin performs" was TRUE only while `/v1/shares` was gated by
+  # `:require_admin` alone. cef6ee8465 (arpss-w8 slice 2, PR #12701) moved the
+  # HTTP edge underneath it: `ShareController.create/2` and `delete/2` now run
   # `Tenancy.Auth.workspace_admin?/2` against the workspace the SCOPE NAMES,
   # in the order grammar -> resolve -> AUTHORIZE -> write, BEFORE
   # `Sharing.add_share/1` / `remove_share/3` touch the store. A token holding
