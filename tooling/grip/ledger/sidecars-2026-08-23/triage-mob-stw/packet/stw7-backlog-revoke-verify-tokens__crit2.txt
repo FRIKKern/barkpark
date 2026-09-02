@@ -1,0 +1,1 @@
+Both HTTP and WebSocket verification paths reject the revoked credentials so cached or alternate-channel authority cannot survive.

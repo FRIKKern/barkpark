@@ -1,0 +1,1 @@
+A census over FUTURE published rows exists and refuses when a newly published open task lands with criteria_progress.total == 0. It is a census, NOT a repair to the backlog-filing step — that step is currently behaving (ZERO criteria-less rows dated 2026-08-09), so a repair could not be proven to lose.

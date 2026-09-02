@@ -1,0 +1,1 @@
+GATE: `node --check scripts/studio-desk-measure.mjs` plus the pasted run-outcome table; any code change ships with the red-test that would catch its re-break

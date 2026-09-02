@@ -1,0 +1,1 @@
+A test reds BEFORE the fix on that shape and greens after — pasted output for both halves, runtime named.

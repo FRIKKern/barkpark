@@ -1,0 +1,1 @@
+A symbol-first authoring convention is written into the task-authoring rubric: cite the SYMBOL, and treat a line number as an optional hint that carries the sha it was taken at. A number with no sha is not falsifiable.

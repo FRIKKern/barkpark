@@ -1,0 +1,1 @@
+The payload lets a reader bound the staleness without knowing a module attribute — either the tick interval or an explicit staleness figure is rendered beside measured_at

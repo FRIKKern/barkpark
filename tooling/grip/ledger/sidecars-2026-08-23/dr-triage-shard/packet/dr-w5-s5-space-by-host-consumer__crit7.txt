@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR merges to main with all four required contexts green, AFTER `dr-w5-s2` and `dr-w5-s3` are already on main (verify with `git merge-base --is-ancestor` exiting 0 for both).

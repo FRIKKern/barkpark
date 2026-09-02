@@ -1,0 +1,1 @@
+The deferred-only unique-publish count is re-derived over a SETTLED window (last row older than 30 minutes) and reported as an absolute with its window named, never as a rate

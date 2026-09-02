@@ -1,0 +1,1 @@
+The seed dispatch uses a sentinel that can never equal tailGen (a named constant, matching keys.go:412's -1 reasoning) with the rationale in a comment at the site.

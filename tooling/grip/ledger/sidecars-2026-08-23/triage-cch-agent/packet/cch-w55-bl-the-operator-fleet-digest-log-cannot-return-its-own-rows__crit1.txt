@@ -1,0 +1,1 @@
+The guard reds when the two scopes are made to disagree again (mutate one side, watch it fail by name). Evidence: the mutation output and the revert.

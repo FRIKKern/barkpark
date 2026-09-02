@@ -1,0 +1,1 @@
+The 94 sub-12px desk-chrome font-size sites consume the new token; the ~11 decorative/display sizes are explicitly left hardcoded with a one-line comment saying why

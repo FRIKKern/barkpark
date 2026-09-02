@@ -1,0 +1,1 @@
+Either way, `pinned_release`'s admissible free-text path into the same host is checked, since it is the likelier promoter. Evidence: the `#pin-input` and `autoupdate_changeset` citations plus a measurement if it renders long.

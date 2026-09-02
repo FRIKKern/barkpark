@@ -1,0 +1,1 @@
+bash scripts/pr-task-gate.test.sh stays green. Evidence: the tally.

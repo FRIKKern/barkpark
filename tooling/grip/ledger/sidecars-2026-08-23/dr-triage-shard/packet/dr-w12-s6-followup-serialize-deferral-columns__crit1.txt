@@ -1,0 +1,1 @@
+internal/cli/cloud_site_cmd.go PREFERS the structured fields and falls back to siteDeferralChainRe only when they are null; a test drives both a structured row and a pre-W12 null row and asserts the same rendered chain. Evidence: the two test names and the run.

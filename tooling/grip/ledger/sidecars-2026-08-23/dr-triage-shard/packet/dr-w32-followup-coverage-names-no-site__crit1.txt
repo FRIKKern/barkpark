@@ -1,0 +1,1 @@
+site_id survives the observations fold: deploy_ledger.ex:1523-1528's Map.merge carries site_id, correcting this task's own original false premise. Evidence: the diff hunk.

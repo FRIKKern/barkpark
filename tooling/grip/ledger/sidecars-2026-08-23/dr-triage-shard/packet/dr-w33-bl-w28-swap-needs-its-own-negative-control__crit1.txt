@@ -1,0 +1,1 @@
+The reader swap lands with its OWN negative control: a mutation to the new predicate reds a test, proving the reader can lose independently of the writer's tripwire. Evidence: the failing and passing runs.

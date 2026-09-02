@@ -1,0 +1,1 @@
+GATE (Elixir): cd cloud && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_cloud/deploy_ledger_test.exs is green, output pasted — this is the gate the rebase verifier could NOT run and it is where the @agency defect surfaces

@@ -1,0 +1,1 @@
+dr-bl-w5-500-carries-its-own-name gains a criterion requiring the transient allowlist to be widened in the SAME PR, citing the 3-of-61 mutation. Evidence: the task read back.

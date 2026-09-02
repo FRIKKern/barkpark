@@ -1,0 +1,1 @@
+A committed script creates the `hotfix!` label, and `gh label list` shows it exists. Evidence: the script plus the label listing.

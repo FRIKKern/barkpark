@@ -1,0 +1,1 @@
+notification_deliveries carries something that distinguishes ACCEPTED from DELIVERED, or the field's meaning is documented at every reader.

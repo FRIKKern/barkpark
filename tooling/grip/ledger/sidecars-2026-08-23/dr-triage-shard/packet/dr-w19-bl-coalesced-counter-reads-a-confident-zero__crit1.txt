@@ -1,0 +1,1 @@
+The answer is proved by a test or a live probe that can distinguish the two — not by reading the code alone.

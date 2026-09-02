@@ -1,0 +1,1 @@
+MERGE-GATED (lead closes): the PR is merged to main with all four required contexts green, and the PR body states the day-one fleet reading (6 ok+marker, jarl unmetered, guerrilla deploys_failing) so the non-standard rows are not read as a broken fold

@@ -1,0 +1,1 @@
+Full local gate green from a worktree at the merge base, each rc read by redirect never through a pipe: node __me_census.mjs; node --test __app.test.mjs; node __unknown_census.mjs; node __css_check.mjs; node smoke.mjs. app.js is untouched by this slice.

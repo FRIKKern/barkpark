@@ -1,0 +1,1 @@
+GATE GREEN: the cloud deploy_ledger and payload census tests plus `go build/vet/test ./internal/...` all pass. Evidence: pasted tail output.

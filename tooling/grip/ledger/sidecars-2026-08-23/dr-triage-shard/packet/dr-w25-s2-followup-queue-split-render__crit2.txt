@@ -1,0 +1,1 @@
+platform_deliveries.json live_key_set moves to the 13-key shape and the delta test still reds on any other change

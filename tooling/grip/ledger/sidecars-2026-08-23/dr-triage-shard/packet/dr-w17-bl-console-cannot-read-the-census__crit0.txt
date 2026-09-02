@@ -1,0 +1,1 @@
+The fetch inventory above is attached to task-54326937e919e2cf so the next CCH wave can pick it up with the read-set pre-derived

@@ -1,0 +1,1 @@
+The 500-wall interaction is coordinated with cch-w51-bl-seal-predicate-roster-read-is-truncated-at-500 rather than duplicated - name the PR or task that owns it.

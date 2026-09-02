@@ -1,0 +1,1 @@
+Retiring a slug leaves a resolvable tombstone or the successor is discoverable from the old id, so references in merged PR bodies do not silently 404

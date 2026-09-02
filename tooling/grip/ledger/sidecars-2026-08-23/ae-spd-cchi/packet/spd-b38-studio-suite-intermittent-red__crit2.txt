@@ -1,0 +1,1 @@
+If it is a real race, the same loop runs 20 consecutive times green after the fix; if it is contention, the finding is written where a reviewer will meet it rather than left in a task nobody opens.

@@ -1,0 +1,1 @@
+Nothing keyed off the neutral default for this token before the change: semrole is a SHARED vocabulary pinned by the decision-32 attention fixture — re-run that fixture and quote its output before and after, so a tone change in one surface is not a silent regression in another.

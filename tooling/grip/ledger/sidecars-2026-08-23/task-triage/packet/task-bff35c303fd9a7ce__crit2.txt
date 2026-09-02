@@ -1,0 +1,1 @@
+go-tests is green on 10 consecutive main runs after the fix, with the run ids listed. A test that flakes at 50% is a signal nobody reads, so the acceptance is the RATE, not one green run.

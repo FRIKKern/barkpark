@@ -1,0 +1,1 @@
+Gate green: cd tooling/grip && node --test test/*.test.mjs

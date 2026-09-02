@@ -1,0 +1,1 @@
+Both ratchets pin post_verdict_jobs to exactly report-main-failure with no empty alternative, and both pass on a main that contains the reporter.

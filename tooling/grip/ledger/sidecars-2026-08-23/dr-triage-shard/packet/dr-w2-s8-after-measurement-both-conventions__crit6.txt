@@ -1,0 +1,1 @@
+The measurement's SOURCE is stated honestly - psql against the control-plane database, because the shipped census route is 403-dark in production (charter D30) - so nobody reads it as the product surface reporting on itself.

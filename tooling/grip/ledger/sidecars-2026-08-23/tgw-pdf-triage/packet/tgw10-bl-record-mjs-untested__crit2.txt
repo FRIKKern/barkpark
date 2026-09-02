@@ -1,0 +1,1 @@
+Every new control is proven ABLE TO FAIL by mutation in a scratch copy, not merely by passing. Evidence: paste one `not ok` per class.

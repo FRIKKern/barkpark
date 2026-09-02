@@ -1,0 +1,1 @@
+Text fidelity is asserted beyond whitespace-normalised equality for at least the marks the corpus uses (bold, links, table shape), OR the PR body states explicitly that fidelity is text-only and names what that cannot catch. Evidence: the assertion or the statement.

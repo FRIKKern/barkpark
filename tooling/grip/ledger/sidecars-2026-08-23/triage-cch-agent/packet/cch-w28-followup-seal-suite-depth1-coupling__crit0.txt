@@ -1,0 +1,1 @@
+A depth-1 clone of this repo runs seal-predicate.test.mjs and the result (pass or the exact failing test names) is quoted with the command.

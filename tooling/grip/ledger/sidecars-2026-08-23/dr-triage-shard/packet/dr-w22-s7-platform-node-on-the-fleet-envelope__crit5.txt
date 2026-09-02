@@ -1,0 +1,1 @@
+REACHABILITY PROVED BY RUN, not by reading: the PR body pastes a live `GET /v1/barkparks` with a real non-operator PAT returning 200 and carrying the `platform` node, alongside the operator sibling returning 403 to the SAME token (charter D395's proof shape), both with as-of instants.

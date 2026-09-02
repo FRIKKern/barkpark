@@ -1,0 +1,1 @@
+The 2026-08-08 alert batch's delivery is either confirmed from an independent source or recorded as unrecoverable.

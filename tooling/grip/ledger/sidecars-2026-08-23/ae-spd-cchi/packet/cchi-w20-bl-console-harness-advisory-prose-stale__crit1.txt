@@ -1,0 +1,1 @@
+The claim is derived from the live protection API at edit time and quoted, not from .github/required-checks.json and not from memory.

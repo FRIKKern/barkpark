@@ -1,0 +1,1 @@
+All three hand-rolled boundaries call FailureCopy.raw/1, and event_email.ex:280's strip_ansi binding is retained with a comment explaining why it is load-bearing.

@@ -1,0 +1,1 @@
+The sidebar contains an input whose value round-trips to content[description] - asserted by writing a value and reading the stored document back.

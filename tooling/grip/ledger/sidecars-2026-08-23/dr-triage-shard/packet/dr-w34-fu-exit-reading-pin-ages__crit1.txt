@@ -1,0 +1,1 @@
+--from/--to are shape-checked in the runner so a malformed instant refuses 7 with its own sentence instead of reaching the route and returning 422 as exit 2; a harness case covers it.

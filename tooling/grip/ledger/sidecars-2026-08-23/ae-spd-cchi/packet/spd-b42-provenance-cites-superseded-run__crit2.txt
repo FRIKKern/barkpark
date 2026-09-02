@@ -1,0 +1,1 @@
+spd-b42 states the drift check in words — that the earlier run was re-run at 65541e2d4/blue, compared for Studio CSS drift, found none, and is superseded-but-not-repudiated

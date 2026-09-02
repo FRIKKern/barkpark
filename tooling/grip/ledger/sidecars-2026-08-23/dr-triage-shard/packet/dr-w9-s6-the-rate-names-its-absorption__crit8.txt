@@ -1,0 +1,1 @@
+cd cloud && MIX_TEST_PARTITION=_w9s6 CC=clang mix test test/barkpark_cloud/deploy_ledger_test.exs test/barkpark_cloud/web/router_head_fence_census_test.exs is green, and CC=clang go build ./... && CC=clang go test ./internal/cli/... is green. Evidence: both run outputs.

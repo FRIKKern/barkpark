@@ -1,0 +1,1 @@
+The plugin_link anchors are classified separately as browser navigations rather than counted as unhandled, and the three id-less .pane-add-btn controls are inventoried with the reason they were not pressed.

@@ -1,0 +1,1 @@
+#10129 is CLOSED, executing charter D242's standing ruling, and the surviving value (box_rates/3) is filed as its own fresh row with sizing.

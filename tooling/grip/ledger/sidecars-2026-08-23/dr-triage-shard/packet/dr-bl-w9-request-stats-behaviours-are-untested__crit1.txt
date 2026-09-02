@@ -1,0 +1,1 @@
+A test pins that a chunked response is sampled at stream open, not at close. Evidence: the test and its run.

@@ -1,0 +1,1 @@
+A first-appearance value is reachable on a PAT-reachable surface, not only on the require_user events route

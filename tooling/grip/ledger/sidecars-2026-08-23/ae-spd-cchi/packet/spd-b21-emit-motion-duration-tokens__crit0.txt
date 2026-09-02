@@ -1,0 +1,1 @@
+design/emit.mjs emits the motion.dur-* family as --dur-* custom properties into the GENERATED tokens block of every surface that consumes durations, and the emitted values match tokens.json byte-for-byte

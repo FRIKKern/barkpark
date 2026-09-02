@@ -1,0 +1,1 @@
+The guard can LOSE: a Go test in internal/cli/cloud_usage_test.go reds when the discrimination is collapsed back to the single unmetered branch. Evidence: baseline, mutated run, restored run.

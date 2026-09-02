@@ -1,0 +1,1 @@
+The refusal is an ENVIRONMENT refusal (exit 2), never a screen defect (exit 1). Evidence: the exit code and the refusal text.

@@ -1,0 +1,1 @@
+#10947 is closed with a reason naming its zero-byte diff.

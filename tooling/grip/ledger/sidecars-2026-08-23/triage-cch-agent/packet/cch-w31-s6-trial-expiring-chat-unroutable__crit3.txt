@@ -1,0 +1,1 @@
+`notifications/render.ex` gains a trial_expiring arm carrying the actual consequence (the instance is torn down at trial end), not the generic fallback, and render_test.exs pins the rendered string. Evidence: the test source and its passing output.

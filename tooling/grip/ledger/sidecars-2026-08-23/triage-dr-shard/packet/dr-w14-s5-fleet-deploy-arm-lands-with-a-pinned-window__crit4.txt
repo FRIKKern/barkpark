@@ -1,0 +1,1 @@
+@agency gains BOTH BOX_DEPLOY_DISABLED_503 and BOX_RUNNER_UNAVAILABLE_503 as :box; the PR body records that the Elixir file auto-merged CLEAN and was semantically broken by it (19 classes vs 17 agency keys), and that without deploy_ledger_test.exs:1881 both would have fallen to :ambiguous, shrinking the box-caused numerator in D148's forbidden direction

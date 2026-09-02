@@ -1,0 +1,1 @@
+A LOOSE-vs-STRICT count assertion reds on the first one-liner route spelling (`post "/x", do: ...`); zero exist today. Paste the assertion and the measured count.

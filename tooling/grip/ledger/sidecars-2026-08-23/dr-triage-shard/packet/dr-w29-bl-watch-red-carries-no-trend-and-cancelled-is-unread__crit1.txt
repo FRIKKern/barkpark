@@ -1,0 +1,1 @@
+A run that concluded `cancelled` - or that exited 5 (BLIND) - is counted as UNREAD, never as unchanged. Evidence: a fixture for each and the rendered trend line.

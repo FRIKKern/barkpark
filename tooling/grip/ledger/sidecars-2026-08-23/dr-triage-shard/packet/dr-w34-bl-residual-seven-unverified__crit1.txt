@@ -1,0 +1,1 @@
+Items 1, 2, 4 and 5 are re-derived against the live control plane on a host with disk, and the output is pasted - or they remain explicitly marked UNVERIFIED in the artefact.

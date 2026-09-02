@@ -1,0 +1,1 @@
+census/3 emits `coalesced_attempts` as a window SUM BESIDE `volume`, never folded into it. Paste the diff and state in one line why merging them would silently redefine every rate this epic has published

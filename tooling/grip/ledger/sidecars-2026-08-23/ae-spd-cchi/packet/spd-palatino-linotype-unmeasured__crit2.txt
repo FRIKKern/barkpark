@@ -1,0 +1,1 @@
+Either the face is added to the instrument's forced-face list and a run is pasted, or the reason it cannot be is recorded with the arithmetic finding standing in its place

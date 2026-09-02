@@ -1,0 +1,1 @@
+Either notification_deliveries gains a nullable deployment reference alongside the retention and index work already filed under cch-w34, or a comment on the schema records that per-row attribution is deliberately out of scope and why

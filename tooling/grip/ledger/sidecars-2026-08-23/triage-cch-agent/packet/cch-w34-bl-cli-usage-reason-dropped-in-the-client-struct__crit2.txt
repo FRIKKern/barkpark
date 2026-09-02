@@ -1,0 +1,1 @@
+bp cloud usage renders a crashed read distinctly from a deliberately unmetered one, in BOTH the value cell and the state token — mirroring app.js's usageUnavailableText mapping. Evidence: the rendered output for both cases.

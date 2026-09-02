@@ -1,0 +1,1 @@
+MUST RUN and stay green: the notifications suite and the console harness. Evidence: the tails of `mix test test/barkpark_cloud/notifications/` and `node --test cloud/priv/static/__app.test.mjs`.

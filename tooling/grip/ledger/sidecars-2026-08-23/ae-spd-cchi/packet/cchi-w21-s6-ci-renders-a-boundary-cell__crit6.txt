@@ -1,0 +1,1 @@
+`.github/required-checks.json` IS UNTOUCHED: `gh pr diff <n> --name-only` is pasted and does not contain it.

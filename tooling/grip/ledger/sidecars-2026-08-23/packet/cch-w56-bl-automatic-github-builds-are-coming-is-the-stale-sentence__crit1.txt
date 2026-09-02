@@ -1,0 +1,1 @@
+app.js:13163 is UNTOUCHED and the PR body states why: github_build_available?/1 is repo-present since #8400 (404e3a6ba), so that sentence is true. Evidence: the predicate quoted from origin/main plus `git diff` showing no edit at that line.

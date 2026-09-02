@@ -1,0 +1,1 @@
+bp cloud deployments prints the fleet rate WITH its volume beside it, the class histogram and the worst offenders, and REFUSES to print a rate below roughly n=200 — the refusal proven by a test.

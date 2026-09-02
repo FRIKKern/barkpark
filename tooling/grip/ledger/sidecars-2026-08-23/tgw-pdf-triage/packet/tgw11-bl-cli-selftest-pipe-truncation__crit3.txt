@@ -1,0 +1,1 @@
+Every other grip entrypoint that writes a verdict and exits is checked for the same shape, and the ones that are clean are named. Evidence: paste the per-entrypoint file-vs-pipe comparison.

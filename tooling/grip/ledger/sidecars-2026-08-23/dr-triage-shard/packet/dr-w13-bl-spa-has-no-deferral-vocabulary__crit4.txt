@@ -1,0 +1,1 @@
+GATE: node --check cloud/priv/static/app.js && node cloud/priv/static/__app.test.mjs is green with the harness extended for the new helpers

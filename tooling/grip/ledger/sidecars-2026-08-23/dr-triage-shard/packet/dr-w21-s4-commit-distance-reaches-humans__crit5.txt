@@ -1,0 +1,1 @@
+The PR body pastes a live `bp cloud status -o table` and `-o json` against the control plane AFTER dr-w21-s2's first hourly sweep, showing a four-figure distance on the stalest box and UNMETERED on the agent-offline one — the verdict proven BY RUN, not by fixture.

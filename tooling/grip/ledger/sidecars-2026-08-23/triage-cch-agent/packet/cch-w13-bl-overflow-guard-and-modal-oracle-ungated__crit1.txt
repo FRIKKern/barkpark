@@ -1,0 +1,1 @@
+overflow-guard.mjs runs in console-harness.yml inside an existing job, with its exit vocabulary preserved by the wrapper, and a deliberately reverted CSS fix reds the job.

@@ -1,0 +1,1 @@
+Settled by measurement: the NULL deferral_cause rows are dated relative to the deferral_* migration, proving whether they are pre-migration residue or rows a live writer is failing to classify. Paste the query and its output.

@@ -1,0 +1,1 @@
+The design question is decided IN WRITING before the code: two five-valued bands over one envelope, versus ONE band returning the role with two boolean readers. Whichever wins, D439 holds. Evidence: the decision recorded in the charter or PR body.

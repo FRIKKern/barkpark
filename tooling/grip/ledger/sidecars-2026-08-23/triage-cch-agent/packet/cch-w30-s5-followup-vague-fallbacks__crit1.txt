@@ -1,0 +1,1 @@
+The 29 vague friendly() sites are triaged in writing: each either gets copy naming the real failure or is recorded as intentionally generic. Evidence: the list with a verdict per line.

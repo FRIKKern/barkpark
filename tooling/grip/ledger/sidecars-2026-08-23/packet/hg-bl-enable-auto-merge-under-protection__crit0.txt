@@ -1,0 +1,1 @@
+A stated decision on allow_auto_merge with its reason, recorded in docs/ops/merge-gates.md rather than only in a PR body

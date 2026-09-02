@@ -1,0 +1,1 @@
+A 2-series chart renders both series in legible data colours (neither series painted as muted apparatus), or the grey is explicitly ratified with a reason

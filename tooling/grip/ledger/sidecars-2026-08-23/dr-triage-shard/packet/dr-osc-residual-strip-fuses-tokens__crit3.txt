@@ -1,0 +1,1 @@
+cd cloud && CC=clang MIX_ENV=test mix test is green and mix format --check-formatted rc=0, with the real exit code read.

@@ -1,0 +1,1 @@
+Each slot proposed for retirement is confirmed to be the standby half of its pair, with the check shown, so no live cutover target is stopped

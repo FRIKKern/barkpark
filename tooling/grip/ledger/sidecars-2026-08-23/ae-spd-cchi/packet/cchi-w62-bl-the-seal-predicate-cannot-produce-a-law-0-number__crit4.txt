@@ -1,0 +1,1 @@
+The instrument reports the same numbers as the independent published query at limit=1000 for at least two different epics — quote both routes for both epics. A single-epic agreement is not a cross-check.

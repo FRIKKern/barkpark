@@ -1,0 +1,1 @@
+The reading renders as a SECOND census block with its own clock named, never a rebadge of the existing content-delivery block (@delivery_clock, deploy_ledger.ex:1179), and it refuses with population/window/as-of rather than printing a bare number.

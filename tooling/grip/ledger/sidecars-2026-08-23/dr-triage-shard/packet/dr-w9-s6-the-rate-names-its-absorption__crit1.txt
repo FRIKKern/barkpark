@@ -1,0 +1,1 @@
+absorption reuses the module's existing rate constructor, so a sub-min_sample window returns refused: true with pct nil and a reason naming the sample — proved by a test asserting `refute pct == 0.0`. Evidence: the test and its run output.

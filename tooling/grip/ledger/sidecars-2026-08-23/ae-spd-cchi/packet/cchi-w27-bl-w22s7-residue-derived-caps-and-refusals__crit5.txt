@@ -1,0 +1,1 @@
+The CRUEL leg imports SCENARIOS and refuses BY NAME at exit 2 when a route.scens entry names a scenario that no longer exists. Today overflow-guard.mjs imports SCENARIOS in three legs (:1418, :4457, :4774) and die()s on a lost fixture, but the cruel leg does not import it at all, so it fails at RUNTIME instead of refusing by name.

@@ -1,0 +1,1 @@
+MUTATION 0->1->0 AGAINST THE REAL .github/workflows/deploy.yml, not a fixture: remove the platform-deliveries allowlist row and paste the RED naming the route; append a recorder job with a LITERAL route path and paste the GREEN; remove it and paste the RED again.

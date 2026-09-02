@@ -1,0 +1,1 @@
+Proven by running the harness with no gh token available and showing it neither false-reds nor vacuously passes

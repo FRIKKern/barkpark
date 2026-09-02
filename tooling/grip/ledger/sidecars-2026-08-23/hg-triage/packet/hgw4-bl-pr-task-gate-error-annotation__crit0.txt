@@ -1,0 +1,1 @@
+scripts/pr-task-gate.sh's common fail() emits an ::error title=...:: workflow command alongside its stderr line. Evidence: the diff.

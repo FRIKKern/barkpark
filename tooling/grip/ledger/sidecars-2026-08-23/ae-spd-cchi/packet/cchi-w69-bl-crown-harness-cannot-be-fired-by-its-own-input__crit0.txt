@@ -1,0 +1,1 @@
+crown-reconcile.yml's pull_request paths include .github/workflows/shell-harnesses.yml, and the mutation proof (literal re-planted -> crown-reconcile.test.sh fails 228/1; removed -> 229/0) is recorded in a durable venue the merge carries (evidence names which).

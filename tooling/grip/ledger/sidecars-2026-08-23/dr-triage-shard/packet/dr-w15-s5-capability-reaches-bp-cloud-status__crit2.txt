@@ -1,0 +1,1 @@
+attentionStatus gains a capability rung placed in BOTH the evaluation switch and attentionRankOrder, and BOTH fixtures (internal/cli/testdata/attention_order_cases.json and cloud/priv/static/__fixtures__/attention_order.json) carry it with rank, bucket AND a non-empty tone; the ladder-count test and the tone-hole guard at cloud_status_cmd_test.go:404 both pass

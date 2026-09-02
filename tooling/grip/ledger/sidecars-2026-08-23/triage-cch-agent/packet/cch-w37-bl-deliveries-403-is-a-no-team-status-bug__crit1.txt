@@ -1,0 +1,1 @@
+loadNotifDeliveries' first-page error path stops printing a transient sentence for a permanent refusal, proven by a test driving the teamless case.

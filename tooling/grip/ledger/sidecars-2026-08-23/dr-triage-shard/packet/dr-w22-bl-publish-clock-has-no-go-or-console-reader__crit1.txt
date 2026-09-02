@@ -1,0 +1,1 @@
+The rendered copy says 'did not enqueue a build of its own', never 'coalesced', unless the column is split at the stamp site first

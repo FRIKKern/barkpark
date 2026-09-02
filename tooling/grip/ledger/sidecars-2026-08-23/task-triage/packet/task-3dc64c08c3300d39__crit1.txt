@@ -1,0 +1,1 @@
+The read fails CLOSED when no tenant resolves: either AssignDefaultScope halts / marks the conn, or the media read moves to Content.Scope.scope_to_workspace/3. The choice is recorded with its back-compat reasoning for genuinely untenanted single-tenant installs.

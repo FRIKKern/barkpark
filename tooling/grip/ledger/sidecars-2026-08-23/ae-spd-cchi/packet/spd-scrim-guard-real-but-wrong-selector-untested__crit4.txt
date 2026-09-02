@@ -1,0 +1,1 @@
+GATE: `node --check scripts/studio-desk-measure.mjs` and the sabotage/revert pair both pasted, with the revert proven by an empty `git diff`

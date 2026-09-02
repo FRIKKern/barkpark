@@ -1,0 +1,1 @@
+cloud/priv/static/__app.test.mjs READS attention_order.json and asserts the SPA vocabulary against it, including the bucket strings — replacing the inline hardcoded ladder literals

@@ -1,0 +1,1 @@
+Per-assertion scoring: the .instances-grid card-half reds INDEPENDENTLY of its siblings, proven by breaking exactly that half and showing the others stay green.

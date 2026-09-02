@@ -1,0 +1,1 @@
+No code is touched by this row — it is roster and charter hygiene only. Evidence: the diff's file list.

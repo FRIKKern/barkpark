@@ -1,0 +1,1 @@
+The fleet deploy arm prints its AMPLIFICATION caveat beside the attempt rate — distinct content revisions, auto-publishing site count, attempts-per-revision with the fan-out and retry factors, and the per-revision figure explicitly REFUSED as a rate because it is below the 200-sample floor. NO tenancy word (customer/platform/demo) appears anywhere in the caveat

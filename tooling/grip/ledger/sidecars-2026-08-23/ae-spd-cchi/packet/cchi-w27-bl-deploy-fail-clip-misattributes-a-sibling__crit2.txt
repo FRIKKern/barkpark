@@ -1,0 +1,1 @@
+The fix does not weaken the leg: W26-deploy-fail-clip still reds on the original wave-26 defect (revert app.css:1865 overflow-wrap on .deploy-fail and confirm).

@@ -1,0 +1,1 @@
+button[phx-click=airdrop-open] and button[phx-click=access-open] each compute a non-empty accessible name from aria-label (title does not count).

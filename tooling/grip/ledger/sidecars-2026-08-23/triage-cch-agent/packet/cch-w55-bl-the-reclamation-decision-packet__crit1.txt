@@ -1,0 +1,1 @@
+If any mechanism is chosen, the row that builds it names the archive job kind as its predecessor, or states in writing why irreversible deletion without a resurrection point is acceptable for the chosen trigger. Evidence: the successor row's id and its first criterion.

@@ -1,0 +1,1 @@
+bp cloud site status performs a SECOND read of the newest deployment and states the truth when the current build is stale — e.g. live, serving a build from N days ago, M deploys failed since — in BOTH the table and the -o json arm.

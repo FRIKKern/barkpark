@@ -1,0 +1,1 @@
+The guard can lose: a fixture carrying an unavailable_reason must render the crashed cell, and removing the field must red the assertion. Evidence: both runs.

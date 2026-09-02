@@ -1,0 +1,1 @@
+A refused absorption renders its refusal reason in the human output, never 0%. Evidence: a golden-output test over a small-sample fixture.

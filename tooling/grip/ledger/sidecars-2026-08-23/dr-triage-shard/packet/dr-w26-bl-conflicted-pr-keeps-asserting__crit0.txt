@@ -1,0 +1,1 @@
+A reporter enumerates open PRs that went DIRTY after a merge to main and names the merged PR that did it, derived from `git log -1 -- <conflicting file>`.

@@ -1,0 +1,1 @@
+The three json tags are declared on the Barkpark struct itself, pinned by a D260-style per-struct assertion

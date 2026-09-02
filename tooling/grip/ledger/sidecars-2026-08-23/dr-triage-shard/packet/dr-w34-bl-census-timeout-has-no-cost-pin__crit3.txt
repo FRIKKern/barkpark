@@ -1,0 +1,1 @@
+The no-retry, no-server-budget shape is documented beside the constant so the next reader does not assume a server budget exists.

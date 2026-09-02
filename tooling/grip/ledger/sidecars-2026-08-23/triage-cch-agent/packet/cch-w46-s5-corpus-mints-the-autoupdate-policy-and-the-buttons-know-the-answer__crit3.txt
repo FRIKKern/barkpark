@@ -1,0 +1,1 @@
+NO NEW COPY (D428): the refusal sentence is friendly()'s output on the real 403 body, byte-identical to the rail's inst-life-reason. Evidence: both strings, printed and compared.

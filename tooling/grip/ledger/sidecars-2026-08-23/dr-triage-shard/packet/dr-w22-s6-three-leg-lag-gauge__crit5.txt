@@ -1,0 +1,1 @@
+ZERO anonymous api.github.com calls are added: the computation runs in the runner on the `github.token` bucket. The PR body names the bucket and states that a control-plane-sited compare would have landed on the 60/h anonymous limit the fleet's own sweeps use.

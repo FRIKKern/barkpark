@@ -1,0 +1,1 @@
+The digest's accounting line survives a blue/green recreation, or the record it writes is durable (a row, not a log line) - proved by recreating the container and re-reading.

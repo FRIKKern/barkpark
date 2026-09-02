@@ -1,0 +1,1 @@
+supportRowHtml, offloadWatchPanelHtml and newRenderFailed each gain at least one assertion over their rendered pace copy, proven able to fail by mutation.

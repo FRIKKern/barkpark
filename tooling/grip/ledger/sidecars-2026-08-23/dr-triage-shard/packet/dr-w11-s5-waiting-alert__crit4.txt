@@ -1,0 +1,1 @@
+VOLUME IS PROJECTED AND STATED: the PR body quotes the projected alerts/day for this event against the measured 870/day of deployment_failed, and names whether default-ON is defensible at that volume

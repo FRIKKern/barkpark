@@ -1,0 +1,1 @@
+A consumer can distinguish an empty post-flip window from a genuinely quiet minute, and a test pins that distinction

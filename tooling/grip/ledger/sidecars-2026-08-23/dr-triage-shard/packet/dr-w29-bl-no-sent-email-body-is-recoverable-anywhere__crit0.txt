@@ -1,0 +1,1 @@
+A delivery row carries enough to prove what was sent - at minimum the subject plus a body hash and the numeric block - and a live send is read back through it. Evidence: the row and the render it matches.

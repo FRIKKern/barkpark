@@ -1,0 +1,1 @@
+The two-factor phase has an explicit unknown arm and never renders a determinate on/off state before the read resolves. Evidence: the assertion and its output for the unread state.

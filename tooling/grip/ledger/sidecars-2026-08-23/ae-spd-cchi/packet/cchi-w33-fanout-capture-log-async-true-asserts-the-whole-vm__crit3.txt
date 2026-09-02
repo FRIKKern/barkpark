@@ -1,0 +1,1 @@
+MUST RUN, one path per invocation (D371), MIX_ENV=test on the ecto tasks (D380): `CC=clang MIX_TEST_PARTITION=w33flake mix test test/barkpark_cloud/push/fanout_result_test.exs` (baseline 4 tests, 0 failures) and `CC=clang MIX_TEST_PARTITION=w33flake mix test test/barkpark_cloud/push`. Evidence: both counts.

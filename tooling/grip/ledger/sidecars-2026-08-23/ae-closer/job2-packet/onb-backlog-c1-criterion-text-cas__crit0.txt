@@ -1,0 +1,1 @@
+onboarding-composition-epic acceptance_criteria[0].criterion is re-worded to D23s honest phrasing (journey mechanics proven live end-to-end against a local control plane via the shipped CLI primitives; installer + Windows + paid-instance legs plan-proven with named ABORT conditions), keeping met:true and the existing evidence unchanged; verified by server read-back.

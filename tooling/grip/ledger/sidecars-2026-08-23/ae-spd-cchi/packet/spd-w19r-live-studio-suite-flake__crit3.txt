@@ -1,0 +1,1 @@
+The clean-main full-suite baseline is restated: the wave-19 brief said 13015 tests 2 failures and a review run measured 13026 tests 0 failures, so whichever is current is quoted with its date and host.

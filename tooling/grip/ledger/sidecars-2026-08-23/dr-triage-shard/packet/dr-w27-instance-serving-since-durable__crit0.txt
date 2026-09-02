@@ -1,0 +1,1 @@
+instance-deploy.sh writes a durable first-observed-serving record at the moment it flips the slot, and a re-run that deploys nothing does NOT move it forward. Prove the second half by running the deploy twice and quoting both file contents.

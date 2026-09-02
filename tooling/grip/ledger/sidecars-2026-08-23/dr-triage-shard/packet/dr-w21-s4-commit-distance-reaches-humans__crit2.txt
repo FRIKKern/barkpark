@@ -1,0 +1,1 @@
+`bp cloud status` renders the verdict: a number of commits behind for `ahead`, `current` for `identical`, UNMETERED for `unknown`, and a distinct loud row for `behind`/`diverged` (a box serving code that is not on main). A test pins all four renderings.

@@ -1,0 +1,1 @@
+bp task ready --all no longer lists akbr-feedback-2026-08-epic twice (unique == count), and node tooling/grip/seal.mjs stops exiting 2 INFRA-FAULT on the pool-integrity gate for this cause. Evidence: the dedup verified by a ready-pool count and a seal run, quoted in the fixing change.

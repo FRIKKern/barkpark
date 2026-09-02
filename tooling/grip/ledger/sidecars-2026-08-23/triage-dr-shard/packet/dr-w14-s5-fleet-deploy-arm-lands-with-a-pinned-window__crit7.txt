@@ -1,0 +1,1 @@
+MUTATION on the ladder: swapping two adjacent rungs REDS both the length/order assertion AND the fixture pin AND TestRankBarkparksFixture; paste all three reds. The PR body records that a name-filtered `go test -run 'Attention'` reports GREEN against a corrupted expected_order and is therefore FORBIDDEN as proof

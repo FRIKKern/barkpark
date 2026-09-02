@@ -1,0 +1,1 @@
+label_spine names the FIELD and the RULE that actually failed — main_tag absent, and top-tag strength below the wall threshold are each reported by name and by their measured value. Driven both ways: a document failing only main_tag says so, and a document failing only strength says so. Evidence: both refusals quoted.

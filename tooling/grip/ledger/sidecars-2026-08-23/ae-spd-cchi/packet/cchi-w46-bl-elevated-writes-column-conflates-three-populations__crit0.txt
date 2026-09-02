@@ -1,0 +1,1 @@
+The census stops reporting one number over three populations: proven-reachable, proven-omitted and unobservable are counted SEPARATELY in the output, and a run is quoted showing the three counts. That is the real work; fixing the false rows is the bookkeeping half.

@@ -1,0 +1,1 @@
+The rule is written into the charter as a decision: what a cancelled row means for time-to-web, at the census level and at the alert level separately

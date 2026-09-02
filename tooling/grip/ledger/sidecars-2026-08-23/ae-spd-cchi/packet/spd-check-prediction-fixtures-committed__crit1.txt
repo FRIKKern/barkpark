@@ -1,0 +1,1 @@
+A single committed command runs all seven and asserts exit codes 0,1,1,2,2,3,3. Quote its output.

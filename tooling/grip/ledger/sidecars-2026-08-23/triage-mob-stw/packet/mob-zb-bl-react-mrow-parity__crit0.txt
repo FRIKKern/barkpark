@@ -1,0 +1,1 @@
+parseGroup emits a single mrow per braced group; JS output for \frac{a+b}{c} byte-equals Elixir's tex_to_mathml_row

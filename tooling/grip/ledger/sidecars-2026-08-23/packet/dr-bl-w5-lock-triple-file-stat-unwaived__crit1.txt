@@ -1,0 +1,1 @@
+The anchor-token tripwire is checked after any Sobelow version bump, and the PR body notes that it is advisory-inside-advisory so its warning arrives as a green board.

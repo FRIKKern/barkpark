@@ -1,0 +1,1 @@
+GATE: CC=/usr/bin/clang go build ./... && CC=/usr/bin/clang go vet ./internal/cli/... && CC=/usr/bin/clang go test ./internal/cli/... passes, AND cd cloud && CC=/usr/bin/clang mix test test/barkpark_cloud/payload_key_set_census_test.exs passes. Paste both.

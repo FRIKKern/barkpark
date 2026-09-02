@@ -1,0 +1,1 @@
+NO PUBLISH IS ATTEMPTED AND NO CLAIM IS MADE ABOUT ONE. The PR body states in writing that release.yml is workflow_dispatch-only with dry_run defaulting to true, that the token's validity is UNPROVEN (108 days old, granular, last proven write 100 days ago), and that cutting preview.2 is jdf-bl-publish-react-preview2's row in another epic.

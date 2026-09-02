@@ -1,0 +1,1 @@
+The PR body states charter D404 plainly — #10605 already shipped `git_sha` on `/health`, so this slice is about 'since when', not 'what commit' — and does NOT repeat the retired claim that the platform cannot state its commit.

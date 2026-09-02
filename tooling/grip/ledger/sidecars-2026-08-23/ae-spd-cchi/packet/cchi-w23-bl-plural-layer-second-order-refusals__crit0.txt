@@ -1,0 +1,1 @@
+EACH OF THE THREE VACUITIES IS REPRODUCED BEFORE IT IS FIXED: the element-rename mutation is run for .inst-tabs, for .fleet-url/.fleet-meta and for status-pill-label, and each is shown to leave its leg at rc=0 with byte-identical output. Quote the three mutations and the three unchanged ok-lines, and confirm each revert.

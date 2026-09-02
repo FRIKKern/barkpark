@@ -1,0 +1,1 @@
+A test pins the chosen behaviour so a future caller cannot silently regain the silent-ignore.

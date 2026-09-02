@@ -1,0 +1,1 @@
+The unused `GUERRILLA_HOST` env on the smoke step is either wired to the URL or removed, so a secret pointing elsewhere cannot move one box and certify another.

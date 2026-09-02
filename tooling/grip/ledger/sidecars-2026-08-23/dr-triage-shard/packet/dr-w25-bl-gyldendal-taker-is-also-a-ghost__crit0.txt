@@ -1,0 +1,1 @@
+It is established what is actually serving https://gyldendal.barkpark.cloud at 116.203.98.0 given that f5e1392e has never phoned home.

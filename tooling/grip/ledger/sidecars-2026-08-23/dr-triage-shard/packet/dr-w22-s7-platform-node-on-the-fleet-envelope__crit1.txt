@@ -1,0 +1,1 @@
+A top-level `platform:` node rides the `GET /v1/barkparks` envelope beside `step_estimates`, carrying `serving_sha`, `serving_since` and `first_seen_at` and NOTHING team- or site-shaped. The PR body pastes the rendered envelope and the key list, proving no `team_id` and no `id`.

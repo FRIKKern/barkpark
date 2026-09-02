@@ -1,0 +1,1 @@
+The console copy matches the server's actual gating, proved by driving the switch off and asserting what a chat channel receives. Evidence: the test showing zero chat jobs plus the copy that discloses it.

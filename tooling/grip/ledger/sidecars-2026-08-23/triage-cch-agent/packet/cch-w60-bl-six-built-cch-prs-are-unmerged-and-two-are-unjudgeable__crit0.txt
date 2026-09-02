@@ -1,0 +1,1 @@
+For each of #10154 #10155 #10006 #9956 #10085 #10086, the blocking cause is named from the live API (which required context, which state) rather than inferred — paste the per-PR check-run query output.

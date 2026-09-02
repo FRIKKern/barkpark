@@ -1,0 +1,1 @@
+The guard can LOSE: removing it lets a criteria-less row through and reds a test. Evidence: the failing run with the guard removed and the passing run with it restored.

@@ -1,0 +1,1 @@
+The fixture FAILS when the ceiling is removed — proven by mutation against the real module, not asserted

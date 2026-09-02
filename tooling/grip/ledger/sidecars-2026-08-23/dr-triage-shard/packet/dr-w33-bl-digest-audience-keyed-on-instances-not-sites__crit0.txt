@@ -1,0 +1,1 @@
+The digest audience includes every team that owns SITES, not only teams that own instances. Evidence: the diff hunk at notifications.ex:445 and its new derivation.

@@ -1,0 +1,1 @@
+The intermittent 500 on `bp task ls --all` is either reproduced and filed separately with its request_id, or shown not to reproduce across 20 consecutive calls. Evidence: paste the loop output.

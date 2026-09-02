@@ -1,0 +1,1 @@
+PAGINATION IS PROVEN, not merely decodable: a Go caller walks past the 100-row cap using next_cursor and the test asserts it reaches row 101+. A decoded-but-unused cursor is the same silence this row was filed for.

@@ -1,0 +1,1 @@
+cch-w53-s4 and cch-w53-s6 are either closed WITH the independent-review question answered (say who reviewed, or say the review was skipped and that the row is being closed anyway), or left open with that reason recorded on the row. Evidence: the close evidence text or the recorded note.

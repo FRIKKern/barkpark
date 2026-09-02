@@ -1,0 +1,1 @@
+The mechanism is named in the diff: how Scope.select learns the patch destination failed, given push_patch is fire-and-forget today.

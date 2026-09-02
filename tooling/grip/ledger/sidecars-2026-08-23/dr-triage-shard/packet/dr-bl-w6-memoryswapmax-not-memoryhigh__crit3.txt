@@ -1,0 +1,1 @@
+The charter's stale figures are corrected in place: PSI memory-full avg10 is 0.60 not 4.46, the OOM census is 32-of-33 not 32-of-32, and MemoryHigh's prerequisite was never the beam-PID pin. Evidence: the charter diff.

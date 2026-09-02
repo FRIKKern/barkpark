@@ -1,0 +1,1 @@
+`scan` no longer claims to be read-only while writing, or no longer writes - evidence: paste the corrected line and a run showing no unexpected write

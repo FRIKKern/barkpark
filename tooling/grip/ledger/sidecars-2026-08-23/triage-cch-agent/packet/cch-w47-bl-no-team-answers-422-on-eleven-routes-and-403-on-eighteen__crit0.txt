@@ -1,0 +1,1 @@
+All three gate paths answer a teamless authed caller with ONE status and one wire shape — asserted by a test that drives all three and compares, which did not exist before.

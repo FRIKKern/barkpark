@@ -1,0 +1,1 @@
+The wide-geometry lock is updated as a deliberate widening with a stated reason, and api/test/barkpark_web/studio/wide_geometry_lock_test.exs plus the Studio suite pass.

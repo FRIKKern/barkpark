@@ -1,0 +1,1 @@
+The refusal CAN LOSE: a mutation proof shows a create with `parent_id: cloud-console-hardening-epic` and an absent-or-instrument `surface` is REFUSED, and a create with a console `surface` PASSES. Note seal-predicate.test.mjs:229-238 is prior evidence this epic's test files sometimes PIN a defect — check the mutations tests for the same hazard before trusting them.

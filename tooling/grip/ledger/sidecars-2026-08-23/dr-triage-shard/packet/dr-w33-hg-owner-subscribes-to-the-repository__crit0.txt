@@ -1,0 +1,1 @@
+The owner's subscription to FRIKKern/barkpark is enabled. Evidence: `gh repo view FRIKKern/barkpark --json viewerSubscription` returning SUBSCRIBED (not UNSUBSCRIBED, not null).

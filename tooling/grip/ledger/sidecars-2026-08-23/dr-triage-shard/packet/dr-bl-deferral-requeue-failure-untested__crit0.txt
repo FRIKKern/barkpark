@@ -1,0 +1,1 @@
+A test makes AutoDeployWorker.enqueue/1 fail deterministically and asserts Sites.Deploy.defer/3 returns an error tuple AND the row carries the could-NOT-be-re-queued text.

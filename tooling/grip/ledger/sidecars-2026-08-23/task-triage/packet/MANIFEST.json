@@ -1,0 +1,552 @@
+[
+ {
+  "id": "task-31a773375d22f39e",
+  "verdict": "ALREADY-DONE",
+  "group": "group:6dff811575-pays-four",
+  "title": "statCard drops the progress bar for value:\"0\" and renders negative width for negative values (pre-existing, found in the s5 review)",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-31a773375d22f39e__crit0.txt",
+    "bytes": 91,
+    "sha256": "3bf9fb539e385f1818a82dba1264e14b7158106a0fc0c7c34fa7c0e77567195b"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-31a773375d22f39e__crit1.txt",
+    "bytes": 71,
+    "sha256": "efbcf85900608f817a14a2abb9d6c184b8e5bf34407acb8d2d75b035acddb5c8"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-31a773375d22f39e__crit2.txt",
+    "bytes": 69,
+    "sha256": "e4c0c13d16ee3c7654681b9bddd2041aa43299a8bb5ef5ab83e0fe7e29dde1f6"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-31a773375d22f39e__crit3.txt",
+    "bytes": 17,
+    "sha256": "f6a5f866d840dfcdfb982b39a4a445e503886306f6edbbb853e1bf6cbeb41f60"
+   }
+  ],
+  "proof": "commit 6dff811575c7e9c3e9f393b9afceac3c235e95e8 (#6949, trailer mob-lm-s4-dataviz-invariants). apps/mobile/src/papers/portabledoc/blocks/dataviz.tsx statCard :382-412: track exists whenever max>0 regardless of value; fill = strict numeric parse clamped 0..1 (clamp at :83). git log -S names 6dff811575 as sole landing."
+ },
+ {
+  "id": "task-579c54dbd1df1dbd",
+  "verdict": "ALREADY-DONE",
+  "group": "group:6dff811575-pays-four",
+  "title": "LEGEND_ROLES uses a blocklist where react uses a manifest allowlist \u2014 a future non-manifest role would silently become a legend row on mobile",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-579c54dbd1df1dbd__crit0.txt",
+    "bytes": 96,
+    "sha256": "2386e50b544519467b5673d142f8f26be340a9f9f4f1740dc27e925a5d118d7e"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-579c54dbd1df1dbd__crit1.txt",
+    "bytes": 139,
+    "sha256": "de021a41b9a93f364211ebb73caa03b9159095bb9ce519232f0e535c0cdd5c80"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-579c54dbd1df1dbd__crit2.txt",
+    "bytes": 17,
+    "sha256": "f6a5f866d840dfcdfb982b39a4a445e503886306f6edbbb853e1bf6cbeb41f60"
+   }
+  ],
+  "proof": "commit 6dff811575c7. apps/mobile/src/papers/portabledoc/blocks/core-doc.tsx:99 `LEGEND_ROLES = STATUS_ROLES.filter((r) => MANIFEST_LADDER.has(r.role))` \u2014 allowlist, not blocklist; PR body records the status-manifest drift-gate test + hand-added-tenth-role mutant."
+ },
+ {
+  "id": "task-79551ef7cdadfa21",
+  "verdict": "ALREADY-DONE",
+  "group": "group:6dff811575-pays-four",
+  "title": "DEGRADE_ONLY is hand-maintained: a future third degrade card silently loses chat information \u2014 needs a mechanical tripwire",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-79551ef7cdadfa21__crit0.txt",
+    "bytes": 75,
+    "sha256": "a952c154f0079e10f9fb2c55311efa2e3c32eccfa82ef40c8739bc0790b0f41c"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-79551ef7cdadfa21__crit1.txt",
+    "bytes": 123,
+    "sha256": "e13fef9514539b00b0ef6224a1d9b45c2cbf937356e01c513d390ec6aa27c16e"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-79551ef7cdadfa21__crit2.txt",
+    "bytes": 91,
+    "sha256": "39a83098b70ff09990f17f3a5b14d3d823ea96224ab4928375b7c4817776a0f8"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-79551ef7cdadfa21__crit3.txt",
+    "bytes": 17,
+    "sha256": "f6a5f866d840dfcdfb982b39a4a445e503886306f6edbbb853e1bf6cbeb41f60"
+   }
+  ],
+  "proof": "commit 6dff811575c7 (+ follow-up refactor in same PR moving marker to register.ts). registry.tsx:122 DEGRADE_ONLY derived from degradeCard marker (register.ts:63); PR body records set-equal-both-directions test + mark/unmark mutants."
+ },
+ {
+  "id": "task-63a68469fac91624",
+  "verdict": "ALREADY-DONE",
+  "group": "group:6dff811575-pays-four",
+  "title": "Chart series palette spends series 2 on grey \u2014 theme.success === theme.accent makes the D56 four-colour ladder collapse to three",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-63a68469fac91624__crit0.txt",
+    "bytes": 134,
+    "sha256": "2cd019538610b164200ac5250f1e4c5c9498e8ec647a80c3293c7b5b8d2ef741"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-63a68469fac91624__crit1.txt",
+    "bytes": 154,
+    "sha256": "8d0226dc1de33002bc2f649e000c8374771d35a47b8125b2e7977f2dc79cbb6b"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-63a68469fac91624__crit2.txt",
+    "bytes": 87,
+    "sha256": "daa93f0fe80be28533f0497c51363d45cafb19d93a8ada2a59c72a5ffb5688e1"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-63a68469fac91624__crit3.txt",
+    "bytes": 17,
+    "sha256": "f6a5f866d840dfcdfb982b39a4a445e503886306f6edbbb853e1bf6cbeb41f60"
+   }
+  ],
+  "proof": "LEAD-JUDGMENT: commit 6dff811575c7 satisfies c1's 'or the grey is explicitly ratified with a reason' arm \u2014 PR body: series-2-wears-axis-colour 'PINNED AS TODAY'S BEHAVIOUR with D74 cited' + pairwise-distinctness/stable-prefix pin test (c2). seriesColors at dataviz.tsx:1076. c0's charter ruling = D74 (cut the fifth token)."
+ },
+ {
+  "id": "task-35e4fa473743f866",
+  "verdict": "ALREADY-DONE",
+  "group": "group:seal-predicate-roster",
+  "title": "The seal predicate cannot page its own roster: 530 children against a 500-row limit, and a stale copy prints a confident wrong 218",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-35e4fa473743f866__crit0.txt",
+    "bytes": 215,
+    "sha256": "a5ca583c18dcfbb68600bfa9e5f00664c2a55a3331ea5e3559d128c68293ddd8"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-35e4fa473743f866__crit1.txt",
+    "bytes": 300,
+    "sha256": "fa9cf095d39438fd79069e57f306f97811c2a6dffa1bcea633f39b7901e7e2fb"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-35e4fa473743f866__crit2.txt",
+    "bytes": 181,
+    "sha256": "eaaa15d7ba80488bb171863326a5ae4ce2aaa7fa489b3c38d2eeef1864886843"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-35e4fa473743f866__crit3.txt",
+    "bytes": 342,
+    "sha256": "6169405c7bd9c2f60150792e3d64434573b90966be6492b3cfcf7fa2f1a301db"
+   },
+   {
+    "index": 4,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-35e4fa473743f866__crit4.txt",
+    "bytes": 101,
+    "sha256": "a82ca8bd06cf192e9454c97337e129b1abf8077005f6f5c4b4186137b2f6add4"
+   }
+  ],
+  "proof": "commit a1d27149e755 (#11438, trailer cch-w64-s4-the-seal-predicate-can-read-its-own-roster, done 8/8). cloud/priv/static/__preview__/seal-predicate.mjs offset paging loop at :468; ROSTER-TRUNCATED refusal kept and re-aimed at :451-454. DUPLICATE-FLAG (never cancel): cch-w51-bl-seal-predicate-roster-read-is-truncated-at-500 (open 4/4, PR #13011 merged carrying its trailer) covers the same defect family."
+ },
+ {
+  "id": "task-8196ff3223895405",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "check-doc-budgets.sh has an 11-arm selftest that CI never calls, and it does not cover the fixed-caps loop",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-8196ff3223895405__crit0.txt",
+    "bytes": 41,
+    "sha256": "2aecda4a3fe7a2745b7d654c8fb3c8e907111a8b9d9845132d602f29c1f30b7c"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-8196ff3223895405__crit1.txt",
+    "bytes": 96,
+    "sha256": "603625d55b96dac5f9516779cc7d0d8df55d3c0c0af872985511bac268ea493b"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-8196ff3223895405__crit2.txt",
+    "bytes": 96,
+    "sha256": "5f8fca299de693a6ae393b72fd96fbcc9360c1053d2cf32d4c110972433eb21a"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-8196ff3223895405__crit3.txt",
+    "bytes": 68,
+    "sha256": "076ad1879ad13d45f2feba0e1be36405fedbe415c875b4827b82aacc4859aafa"
+   }
+  ],
+  "proof": "merge 348c9f59880b (#12774) carries THIS row's trailer. .github/workflows/doc-gates.yml:358 runs `bash scripts/check-doc-budgets.sh --selftest` (comment at :342 names the planted-violation harness + fixed-caps row-count pin). Evidence never stamped after merge."
+ },
+ {
+  "id": "task-336d22b7722ea71e",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "The public /finder LiveView leaks private document types and titles to anonymous visitors",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-336d22b7722ea71e__crit0.txt",
+    "bytes": 159,
+    "sha256": "4f493e31a62c323bf8099fb6b5e8da9a8a5b3b668653b9585ddb5d7506c762b1"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-336d22b7722ea71e__crit1.txt",
+    "bytes": 133,
+    "sha256": "7addcdbe26c1c679c211823256e657d22600cf717956d0838e8b7205fd7a276b"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-336d22b7722ea71e__crit2.txt",
+    "bytes": 203,
+    "sha256": "0e646b6c379c266a286fe57b4d326992f7eb9e7af8c76a9c8ced9f26fa0e91db"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-336d22b7722ea71e__crit3.txt",
+    "bytes": 201,
+    "sha256": "5cbc5adea87a809a11d00b6caf21e5f6c9597bdb62a77dacfd07cbf219918afb"
+   }
+  ],
+  "proof": "merge 882fb4b55240 (#13021) carries THIS row's trailer: 'clamp the public /finder graph payload to public-visibility'. api/lib/barkpark_web/live/finder_live.ex:116-120 (principal-keyed schema-visibility gate, narrowed to PUBLIC-visibility types), :247."
+ },
+ {
+  "id": "task-683b16a400f56ed3",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "A failed build's cause reaches only the box: the durable log holds all 29 errors and no surface exposes it, so diagnosis still costs an SSH session",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-683b16a400f56ed3__crit0.txt",
+    "bytes": 295,
+    "sha256": "e04575f0c1a120a9b3e3398f1c98fefdff749c01d93c052535672454b28cba6e"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-683b16a400f56ed3__crit1.txt",
+    "bytes": 228,
+    "sha256": "bd4c2c1845b4d68b7e4256e34fc2b9e0e983b2e5ebb922357e60052fa473fc52"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-683b16a400f56ed3__crit2.txt",
+    "bytes": 291,
+    "sha256": "9e7a10340f1cbec3a89edb0b1d91e8be9de050375142217fa6133304d01533ad"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-683b16a400f56ed3__crit3.txt",
+    "bytes": 226,
+    "sha256": "771d4f12c02065a25c824f5c3de56e5f107b158cbc89d1cfbe0c11ca9f0f8a23"
+   },
+   {
+    "index": 4,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-683b16a400f56ed3__crit4.txt",
+    "bytes": 284,
+    "sha256": "1906943f3197f0fafce02cce03841e45e7256cbb8a187c2b46916d2aaf567565"
+   },
+   {
+    "index": 5,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-683b16a400f56ed3__crit5.txt",
+    "bytes": 90,
+    "sha256": "8def73a7a87c6b1572076f1fca3e1796dc0af6dcf7b44254f19af710f0f4cf1d"
+   }
+  ],
+  "proof": "merge b4f31465ab3d (#12993) carries THIS row's trailer: 'a failed build's cause reaches an operator without an SSH session'. Title is the row's own c0."
+ },
+ {
+  "id": "task-3dc64c08c3300d39",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "AssignDefaultScope fails OPEN: an unseeded Default workspace makes public GET /media/files/*path an unscoped all-tenant read",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-3dc64c08c3300d39__crit0.txt",
+    "bytes": 234,
+    "sha256": "fab9747cc27d644e2b6a10c9fc2afa270e7af9b5019fb4e21e61803d12404de1"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-3dc64c08c3300d39__crit1.txt",
+    "bytes": 262,
+    "sha256": "5e1a90e9422222cc29f0d9060b9b5547bfaabb90b2f773ae8fc6d96180ba21bf"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-3dc64c08c3300d39__crit2.txt",
+    "bytes": 138,
+    "sha256": "ffcd5e9c7a27bb82425ea792597f4fb755552173541fe910f7825418def125cf"
+   },
+   {
+    "index": 3,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-3dc64c08c3300d39__crit3.txt",
+    "bytes": 166,
+    "sha256": "481b0bb9215f75e1528f7c83d5aaf7cf460a5bf7fc57ccc484c34d01fce61b5e"
+   },
+   {
+    "index": 4,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-3dc64c08c3300d39__crit4.txt",
+    "bytes": 317,
+    "sha256": "d9772bd313d9b34e5a1c61a9b36e15a03eb42d161c210136f9e9375051e5a3ff"
+   }
+  ],
+  "proof": "merge 6ac8124d33f4 (#12870, trailer task-2e4a3692adf5c565 \u2014 done 7/7). media_controller.ex:15-58: unscoped-read confinement (confine_one/confine_many, per-row shared-layer rule), header comment cites task-2e4a3692adf5c565. c4 sibling sweep recorded as 'filed separately' in the same comment. DUPLICATE-FLAG (never cancel): pair with task-2e4a3692adf5c565."
+ },
+ {
+  "id": "task-e5ea320d544e444f",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "router.ex still says the site-delete refusal 'has no console surface at all yet' \u2014 the reader now exists",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-e5ea320d544e444f__crit0.txt",
+    "bytes": 185,
+    "sha256": "518862c7758eb468b363017a2758f438e1b5c6a978bba8941b3fd91efb4f23a2"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-e5ea320d544e444f__crit1.txt",
+    "bytes": 84,
+    "sha256": "129dcdb275591fa9b2e848413345a873ec6d15aa45abf96fb1768eced6176fa0"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-e5ea320d544e444f__crit2.txt",
+    "bytes": 71,
+    "sha256": "e6b907aaa92df396446ced74b7bb4469c6ea29758373914cc7089fa613a16523"
+   }
+  ],
+  "proof": "commit 4b5d802a1d5a (#11553, trailer cch-w66-bl-site-delete-cascades\u2026, done 9/9). `grep -n 'no console surface' cloud/lib/barkpark_cloud/web/router.ex` returns nothing (row's own c1, self-tested against a hit elsewhere + impossible-string control)."
+ },
+ {
+  "id": "task-d3248adeebec65a0",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "Docs: TASK-SYSTEM.md over byte budget (16455B > 16000B) \u2014 doc-gates red on every PR",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-d3248adeebec65a0__crit0.txt",
+    "bytes": 89,
+    "sha256": "2afdf0f5498abb4126cd856adf8cb48eccb3bb8e2c0562541a30dd18e2c6ea17"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-d3248adeebec65a0__crit1.txt",
+    "bytes": 79,
+    "sha256": "7a30ed9a3bcf52e85574c39e522bf4e81f4ccc20db46dc26908b472871e95795"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-d3248adeebec65a0__crit2.txt",
+    "bytes": 191,
+    "sha256": "0f62c09a55733c2578176361d4bc0bf09bfc884f3ae359d164f77e2da34cd061"
+   }
+  ],
+  "proof": "MEASURED on origin/main today: docs/setup/TASK-SYSTEM.md = 15998 bytes vs cap 16000 (scripts/check-doc-budgets.sh:451). The row's defect state (16455B>16000B, doc-gates red on every PR) is gone; doc-gates has been green on main."
+ },
+ {
+  "id": "task-bff35c303fd9a7ce",
+  "verdict": "ALREADY-DONE",
+  "group": "single",
+  "title": "TestRemoveFullCycleByteClean flakes on .git/objects/maintenance.lock \u2014 go-tests is red on ~half of main's runs",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-bff35c303fd9a7ce__crit0.txt",
+    "bytes": 162,
+    "sha256": "12bef5675a84d085a79b968895bb463e51c372ebc9d328c5dc6a1e3ab91d3b31"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-bff35c303fd9a7ce__crit1.txt",
+    "bytes": 194,
+    "sha256": "b861f24d852200f6cb4a3ea78d62aef38067693c6838e4936c26d2117134c359"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-bff35c303fd9a7ce__crit2.txt",
+    "bytes": 187,
+    "sha256": "69927f7087d8731a7682a44232468eec367fc16e2ad48bc75a1c814942a2d2d3"
+   }
+  ],
+  "proof": "commit 8e04e40d1080 (#12853, trailer task-b4d2d520bf621af9 \u2014 open 5/6): 'stop the byte-clean snapshot walking .git/'. remove_test.go:121-139 'skips the git store alone' incl. .git-not-the-store lookalike control. c2 (10 consecutive green main runs listed) is a lead read, not a build. DUPLICATE-FLAG (never cancel): pair with task-b4d2d520bf621af9."
+ },
+ {
+  "id": "task-d06d12de3fc0768b",
+  "verdict": "REFUTED",
+  "group": "single",
+  "title": "Mechanical spacing doctrine \u2014 bring every Paper renderer to margin-zero",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-d06d12de3fc0768b__crit0.txt",
+    "bytes": 203,
+    "sha256": "1a1e382f73367ac02a33c506f0099e806f03f570d47bd9c8999903223dd83fb2"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-d06d12de3fc0768b__crit1.txt",
+    "bytes": 128,
+    "sha256": "cdd9630dcb3654281c98839946ac96e22ce7208ad464a0325640e14d86158176"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-d06d12de3fc0768b__crit2.txt",
+    "bytes": 173,
+    "sha256": "5a5fd00d43e19b51759a260ba5c225f7baef415e6796e50231068dcc907d7257"
+   }
+  ],
+  "proof": "POSITIVE CONTRADICTION: the mechanical-spacing doctrine FLIPPED. api/lib/barkpark/content/authoring_wall.ex:325-341 counts spacer paragraphs as a DEFECT ('persisting spacer content creates empty HTML, terminal rows, accessibility\u2026'; article papers with spacer_count>0 are flagged). The row orders renderers to margin-zero so authored blank paragraphs are the rhythm \u2014 the codebase now enforces the opposite law."
+ },
+ {
+  "id": "task-4a74a4b6039c5a88",
+  "verdict": "REFUTED",
+  "group": "single",
+  "title": "check.mjs Parts D-J share a sticky failed boolean \u2014 a part prints its green line beside its own reds",
+  "unmet_criteria_zero_based": [
+   0
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-4a74a4b6039c5a88__crit0.txt",
+    "bytes": 111,
+    "sha256": "de3fd4fba9dc0e0e6d87dbecd7a9eec2d75948868d8a5f28332f37ea34e92a1c"
+   }
+  ],
+  "proof": "POSITIVE CONTRADICTION: design/check.mjs already reports per-part \u2014 failedBeforeD :266, E :366, F :478, G :709, H :786 gate each part's ok print (landed 83d154a2ad, 2026-07-09, BEFORE this row was filed from #11634). A part that fails cannot print its ok summary. Lead: confirm parts I/J have no ok-print to guard."
+ },
+ {
+  "id": "task-0098ba55d2642545",
+  "verdict": "SUPERSEDED",
+  "group": "single",
+  "title": "Partial last row of the hairline stat grid exposes the rule ground as a tinted slab",
+  "unmet_criteria_zero_based": [
+   0,
+   1,
+   2
+  ],
+  "criteria_files": [
+   {
+    "index": 0,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-0098ba55d2642545__crit0.txt",
+    "bytes": 211,
+    "sha256": "a13db1702c8eff8d2f13332d631eb4c89774ee3f7103989799bf904149e9cf02"
+   },
+   {
+    "index": 1,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-0098ba55d2642545__crit1.txt",
+    "bytes": 164,
+    "sha256": "132ec476c1ea65bd651e89081d476fb451590abc5555d8da6c9053664f0164d0"
+   },
+   {
+    "index": 2,
+    "file": "/Volumes/SATECHI/dev-caches/tmp/claude-code/claude-501/-Volumes-SATECHI-github-barkpark/ba5f66f9-9370-4639-ae79-5f38bb0e7fe1/scratchpad/task-triage/packet/task-0098ba55d2642545__crit2.txt",
+    "bytes": 175,
+    "sha256": "b8c76bddbf5488e58d91e4ba35fed79827791411b03c0eff192ac8c109967df1"
+   }
+  ],
+  "proof": "Successor NAMED: pe-w2-bl-device3-display-scale (open 0/6 on the board). Row's own description: 'FOLDED INTO pe-w2-bl-device3-display-scale at wave 5 (charter D36) \u2014 the remedy is built inside that slice\u2026 The lead stamps these criteria [there].' Cited #11854's trailer names pe-w3-hairline-grid-ground, not this row \u2014 exemplar, not implementer."
+ }
+]
