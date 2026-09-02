@@ -33,6 +33,19 @@ defmodule Barkpark.Application do
     # `Barkpark.Mailer.warn_if_undeliverable/0`.
     _ = Barkpark.Mailer.warn_if_undeliverable()
 
+    # Same boot-warning mechanism, third condition (task-c7e2b87f1bbca815): the
+    # INSTANCE-OPERATOR allowlist. Unset means legacy — the `admin` permission
+    # alone still opens the seven instance-global route groups (run-secret
+    # reveal, the instance-wide plugin-settings record, self-update/rollback/
+    # site-deploy, status incidents, playground provisioning, bundle import) to
+    # any admin-permissioned token, including one seated in exactly one
+    # workspace. WARNS rather than raising for the same reason the mailer check
+    # does: a single-tenant self-hosted box is a legitimate shape (its only
+    # admin IS the operator), and refusing to boot would break every existing
+    # deployment on upgrade. See
+    # BarkparkWeb.Plugs.RequirePlatformOperator.warn_if_unset/0.
+    _ = BarkparkWeb.Plugs.RequirePlatformOperator.warn_if_unset()
+
     # The /v1/graph admission-cap slot table, created HERE and nowhere else that
     # matters. It is a CONCURRENCY BOUND, not a cache: the rows are the slots
     # currently held, so the table must outlive every request that holds one.

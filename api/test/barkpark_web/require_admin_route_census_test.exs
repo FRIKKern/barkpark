@@ -79,14 +79,17 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
        instance runs on. There is no tenant target to bind them to; a
        per-workspace variant is not a narrower version of this capability,
        it is a different (nonexistent) capability. These are the canonical
-       "do not confine" rows the program was told to name.
+       "do not confine" rows the program was told to name. Gated by
+       `BarkparkWeb.Plugs.RequirePlatformOperator` since task-c7e2b87f1bbca815.
     2. `GET /v1/plugins` — the installed-plugin ROSTER. Instance-level
-       inventory; no workspace param, no tenant rows.
+       inventory; no workspace param, no tenant rows. Gated by
+       `BarkparkWeb.Plugs.RequirePlatformOperator` since task-c7e2b87f1bbca815.
     3. `GET|PUT|DELETE /v1/plugins/settings/:plugin_name` — instance-level
        plugin config. `Barkpark.Plugins.SettingsRecord` is
        `@primary_key {:plugin_name, :string, ...}` with NO `workspace_id`
        column at all, so there is no per-tenant row to confine to. `show`
-       masks; `update` writes the one instance-wide record.
+       masks; `update` writes the one instance-wide record. Gated by
+       `BarkparkWeb.Plugs.RequirePlatformOperator` since task-c7e2b87f1bbca815.
     4. `GET /v1/secrets`, `GET /v1/secrets/:name`, `GET /v1/secrets/:name/audit`,
        `PUT /v1/secrets/:name`, `DELETE /v1/secrets/:name` — the GLOBAL tier
        of a deliberately two-tier store. `SecretController.resolve_scope/1`
@@ -94,31 +97,62 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
        the assigns, and pins the flat route to `:global`
        (`workspace_id IS NULL`). The PER-WORKSPACE twin already exists on
        `:scoped_admin` at `/w/:ws/p/:proj/v1/secrets`. Confining the flat
-       route would not add a boundary; it would delete the global tier.
+       route would not add a boundary; it would delete the global tier. Gated
+       by `BarkparkWeb.Plugs.RequirePlatformOperator` since
+       task-c7e2b87f1bbca815 — the fence goes in FRONT of the tier, not into
+       `resolve_scope/1`.
     5. `POST /v1/status/incidents`, `POST /v1/status/incidents/:id/resolve` —
        the instance STATUS PAGE. `Barkpark.Status.create_incident/1` takes no
-       workspace and `Status.Incident` carries no `workspace_id`.
+       workspace and `Status.Incident` carries no `workspace_id`. Gated by
+       `BarkparkWeb.Plugs.RequirePlatformOperator` since task-c7e2b87f1bbca815.
     6. `POST /api/playground` — a CREATION primitive. It mints a brand-new
        workspace, owner and quota; the admin gate answers "who may
-       provision", and there is no pre-existing tenant it can reach.
+       provision", and there is no pre-existing tenant it can reach. Gated by
+       `BarkparkWeb.Plugs.RequirePlatformOperator` since task-c7e2b87f1bbca815.
     7. `POST /api/workspaces/:workspace_slug/import` — a RESTORE whose target
        comes from the BUNDLE MANIFEST, not from the URL (the `:workspace_slug`
        segment is read and ignored). `clean` mode fails closed on a
        slug/PK collision with a live workspace; `merge` mode (the only arm
        that can write into an existing workspace) is refused unless the
        server operator sets `:allow_bundle_import`. There is no
-       victim-selecting parameter to bind.
+       victim-selecting parameter to bind. Gated by
+       `BarkparkWeb.Plugs.RequirePlatformOperator` since task-c7e2b87f1bbca815
+       — split out of the shared export/import scope, since `export/2` is a
+       TENANT-admin verb and stays on `:require_admin`.
 
-  THE STANDING COST OF THIS RULING, stated so nobody reads it as an all-clear:
-  rows 3, 4 and 1 mean a token that is an admin of ONE workspace and a
-  stranger everywhere else can still read instance secrets in cleartext
-  (`SecretController.show/2` reveals, by design), rewrite instance plugin
-  config, and roll the whole instance forward or back. That is not a
-  cross-TENANT hole — no tenant rows are reachable — but it is the reason the
-  `admin` permission must stay an OPERATOR-minted bit. The correct follow-on
-  is a separate operator/instance-admin tier, not a workspace filter on these
-  seven surfaces. Filed as `task-c7e2b87f1bbca815` (p0), whose two probes below
-  (RULING rows 3 and 4) are the evidence it quotes.
+  THE STANDING COST OF THIS RULING IS NOW CONDITIONAL, and the condition is
+  named: it is paid only while the instance-operator allowlist is UNSET.
+
+  The follow-on the paragraph above called for has SHIPPED
+  (`task-c7e2b87f1bbca815`): `BarkparkWeb.Plugs.RequirePlatformOperator`, one
+  config-backed allowlist read at runtime from `BARKPARK_OPERATOR_EMAILS`
+  (comma-separated; matched against the bearer's OWNER email — a PAT's
+  `owner_user_id` → `Accounts` email, or an app token's `"app:<email>"` label)
+  and `BARKPARK_OPERATOR_TOKEN_IDS` (comma-separated `api_tokens.id` values),
+  mounted on all seven groups above through
+  `pipe_through([:api, :require_admin, :require_platform_operator])`.
+
+    * BOTH env vars unset/blank → the tier is UNSET and the plug is a
+      PASS-THROUGH: `admin` alone still opens all seven, exactly as before, and
+      `Barkpark.Application.start/2` logs a boot warning naming the seven
+      groups and both env vars. On a SINGLE-TENANT instance this is the correct
+      shape — the only admin IS the operator — and it is why the tier ships
+      opt-in rather than breaking every existing deployment on upgrade.
+    * EITHER env var non-empty → the tier is ARMED and the seven groups are
+      ALLOWLIST-ONLY, fail closed. A token that is an admin of ONE workspace
+      and a stranger everywhere else gets `403 forbidden` with
+      `required: "platform_operator"` on every one of them, whatever its
+      `admin` bit says.
+
+  So the residual risk is no longer "accepted because there is nothing to check
+  against" — it is a DEPLOYMENT CHOICE with a named remedy: a multi-tenant
+  instance sets the two env vars. `RequireAdmin` itself is untouched (it still
+  answers "is this bearer an admin SOMEWHERE"), and every workspace-scoped
+  admin route is untouched too — those re-bind through
+  `Tenancy.Auth.workspace_admin?/2`, and an instance allowlist in front of them
+  would lock tenant admins out of their own workspaces. The four RULING probes
+  below assert BOTH arms: UNSET is still 200 (rows 3 and 4, legacy), ARMED is
+  403 (rows 3 and 4, fenced).
 
   ## FOLLOW-ON SLICES FILED (criterion 3)
 
@@ -166,7 +200,19 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
   # Both mount `BarkparkWeb.Plugs.RequireAdmin`. Adding a third pipeline that
   # mounts it without adding it here would silently shrink this census, so
   # `the plug is mounted by exactly these pipelines` asserts the set.
-  @gated_pipelines ["pipe_through([:api, :require_admin])", "pipe_through(:flat_admin_api)"]
+  @gated_pipelines [
+    "pipe_through([:api, :require_admin])",
+    "pipe_through(:flat_admin_api)",
+    "pipe_through([:api, :require_admin, :require_platform_operator])"
+  ]
+
+  # The THIRD pipeline (task-c7e2b87f1bbca815): `:require_admin` + the
+  # instance-operator allowlist plug, layered ON TOP so the `admin` bit stays
+  # necessary. Every route it gates is still gated by `RequireAdmin`, so it
+  # belongs in this census; what changed is that on a CONFIGURED instance the
+  # admin bit is no longer SUFFICIENT there.
+  @operator_pipeline "pipe_through([:api, :require_admin, :require_platform_operator])"
+  @operator_guard "BarkparkWeb.Plugs.RequirePlatformOperator"
 
   # Where plugin-contributed `auth: :api` routes are mounted (router.ex,
   # `scope "/v1/plugins" do  pipe_through([:api, :require_admin])`).
@@ -210,65 +256,72 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
 
     # ── /v1/status ──
     {:post, "/v1/status/incidents"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Instance status page. Status.create_incident/1 takes no workspace and Status.Incident " <>
          "has no workspace_id column. RULING row 5."},
     {:post, "/v1/status/incidents/:id/resolve"} =>
-      {:instance_global, nil, "Same instance status page incident. RULING row 5."},
+      {:instance_global, @operator_guard, "Same instance status page incident. RULING row 5."},
 
     # ── /v1/plugins roster + settings ──
     {:get, "/v1/plugins"} =>
-      {:instance_global, nil, "Installed-plugin roster; no workspace param. RULING row 2."},
+      {:instance_global, @operator_guard,
+       "Installed-plugin roster; no workspace param. RULING row 2."},
     {:get, "/v1/plugins/settings/:plugin_name"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Plugins.SettingsRecord is @primary_key {:plugin_name, :string} with NO workspace_id " <>
          "column, so there is no per-tenant row. RULING row 3."},
     {:put, "/v1/plugins/settings/:plugin_name"} =>
-      {:instance_global, nil, "Writes the one instance-wide settings record. RULING row 3."},
+      {:instance_global, @operator_guard,
+       "Writes the one instance-wide settings record. RULING row 3."},
     {:delete, "/v1/plugins/settings/:plugin_name"} =>
-      {:instance_global, nil, "Deletes the one instance-wide settings record. RULING row 3."},
+      {:instance_global, @operator_guard,
+       "Deletes the one instance-wide settings record. RULING row 3."},
 
     # ── /v1/secrets (GLOBAL tier of a two-tier store) ──
     {:get, "/v1/secrets"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "SecretController.resolve_scope/1 keys off the ROUTE (no :workspace_slug path param) " <>
          "and pins the flat surface to :global (workspace_id IS NULL), NEVER the " <>
          ":current_workspace assign. RULING row 4."},
     {:get, "/v1/secrets/:name/audit"} =>
-      {:instance_global, nil, "scope_audit/2 :global arm is an explicit IS NULL. RULING row 4."},
+      {:instance_global, @operator_guard,
+       "scope_audit/2 :global arm is an explicit IS NULL. RULING row 4."},
     {:get, "/v1/secrets/:name"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Reveals the global-tier value by design (the scoped twin serves per-workspace " <>
          "secrets). RULING row 4."},
     {:put, "/v1/secrets/:name"} =>
-      {:instance_global, nil, "Writes the global tier. RULING row 4."},
+      {:instance_global, @operator_guard, "Writes the global tier. RULING row 4."},
     {:delete, "/v1/secrets/:name"} =>
-      {:instance_global, nil, "Deletes from the global tier. RULING row 4."},
+      {:instance_global, @operator_guard, "Deletes from the global tier. RULING row 4."},
 
     # ── /v1/admin — operator primitives ──
     {:post, "/v1/admin/self-update"} =>
-      {:instance_global, nil, "Operator: applies a release to the whole instance. RULING row 1."},
+      {:instance_global, @operator_guard,
+       "Operator: applies a release to the whole instance. RULING row 1."},
     {:get, "/v1/admin/self-update"} =>
-      {:instance_global, nil, "Operator: instance self-update status. RULING row 1."},
+      {:instance_global, @operator_guard, "Operator: instance self-update status. RULING row 1."},
     {:post, "/v1/admin/rollback"} =>
-      {:instance_global, nil, "Operator: rolls the whole instance back. RULING row 1."},
+      {:instance_global, @operator_guard,
+       "Operator: rolls the whole instance back. RULING row 1."},
     {:post, "/v1/admin/site-deploy"} =>
-      {:instance_global, nil, "Operator: deploys the marketing site. RULING row 1."},
+      {:instance_global, @operator_guard, "Operator: deploys the marketing site. RULING row 1."},
     {:get, "/v1/admin/site-deploy"} =>
-      {:instance_global, nil, "Operator: site-deploy status. RULING row 1."},
+      {:instance_global, @operator_guard, "Operator: site-deploy status. RULING row 1."},
 
     # ── /v1/instance — operator reads moved onto :require_admin by #14793 ──
     # (task-d7ac954aa57aa522). The census merged the same hour without them,
     # so "every gated route carries a verdict" has been red on main since.
     {:get, "/v1/instance/site-deploy"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Operator: the whole instance's marketing-site deploy status; no tenant selector, " <>
-         "the twin of GET /v1/admin/site-deploy. RULING row 1."},
+         "the twin of GET /v1/admin/site-deploy. RULING row 1; operator group 8."},
     {:get, "/v1/instance/metrics"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Prometheus text exposition of this BEAM's own telemetry aggregates. workspace_id " <>
          "appears only as a series LABEL the handler stamps, never as a request selector; " <>
-         "the payload names tenants, which is why it is admin-gated at all. RULING row 1."},
+         "the payload names tenants, which is why it is admin-gated at all. RULING row 1; " <>
+         "operator group 8."},
 
     # ── /v1/shares ──
     {:get, "/v1/shares"} =>
@@ -330,14 +383,14 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
        "WorkspaceController.delete/2 resolves the slug THEN Tenancy.Auth.workspace_admin?/2 " <>
          "against the RESOLVED target before the cascade teardown."},
     {:post, "/api/playground"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "Provisioning primitive: mints a NEW workspace + owner + quota. RULING row 6."},
     {:get, "/api/workspaces/:workspace_slug/export"} =>
       {:tenant_bound, "TenancyAuth.workspace_admin?",
        "WorkspaceController.export/2 resolves the slug THEN Tenancy.Auth.workspace_admin?/2 " <>
          "before any byte of the bundle is streamed."},
     {:post, "/api/workspaces/:workspace_slug/import"} =>
-      {:instance_global, nil,
+      {:instance_global, @operator_guard,
        "The :workspace_slug segment is read and IGNORED; the restore target comes from the " <>
          "bundle manifest. clean mode fails closed on a slug/PK collision, merge mode is " <>
          "refused unless the operator sets :allow_bundle_import. RULING row 7."},
@@ -460,7 +513,7 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
   # "applies to routes declared after it in the same scope" rule) is a census
   # row. `plugin_routes(scope: :api)` expands through the SAME registry call
   # the macro makes at compile time.
-  def enumerate_gated_routes do
+  def enumerate_gated_routes(pipelines \\ @gated_pipelines) do
     router_source_path()
     |> File.read!()
     |> String.split("\n")
@@ -475,7 +528,7 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
         indent == 2 and trimmed != "" ->
           {nil, false, acc}
 
-        indent == 4 and trimmed in @gated_pipelines ->
+        indent == 4 and trimmed in pipelines ->
           {prefix, true, acc}
 
         gated? and indent == 4 and trimmed == "plugin_routes(scope: :api)" ->
@@ -562,9 +615,21 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
 
       assert length(mounts) == 2,
              "BarkparkWeb.Plugs.RequireAdmin is mounted #{length(mounts)} times in router.ex, " <>
-               "but this census walks #{length(@gated_pipelines)} pipelines " <>
-               "(#{inspect(@gated_pipelines)}). A new mount means a new set of routes gated " <>
-               "by a global role bit — classify them here."
+               "but this census walks it through #{length(@gated_pipelines)} pipe_through " <>
+               "shapes (#{inspect(@gated_pipelines)}). A new mount means a new set of routes " <>
+               "gated by a global role bit — classify them here."
+
+      operator_mounts =
+        source
+        |> String.split("\n")
+        |> Enum.filter(&(String.trim(&1) == "plug(#{@operator_guard})"))
+
+      assert length(operator_mounts) == 1,
+             "#{@operator_guard} is mounted #{length(operator_mounts)} times in router.ex. " <>
+               "The instance-operator tier (task-c7e2b87f1bbca815) is ONE pipeline layered on " <>
+               "top of :require_admin; a second mount means a second, unaudited operator " <>
+               "surface, and ZERO means the tier is gone and every :instance_global row below " <>
+               "is back to bare `admin`."
     end
 
     test "the parse is not vacuous and is faithful to the compiled router" do
@@ -624,6 +689,17 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
             assert is_binary(guard),
                    "#{inspect(route)} is :tenant_bound but names no guard symbol"
 
+          # Since task-c7e2b87f1bbca815 an :instance_global row is NOT ungated:
+          # it names the instance-operator plug, and the tripwire below asserts
+          # that plug is really in front of it. A nil here would silently
+          # restore the pre-ruling state (bare `admin` on an instance-wide
+          # surface) with no test noticing.
+          :instance_global ->
+            assert guard == @operator_guard,
+                   "#{inspect(route)} is :instance_global but names #{inspect(guard)} instead " <>
+                     "of #{@operator_guard} — every instance-global row is gated by the " <>
+                     "operator allowlist (THE RULING, task-c7e2b87f1bbca815)"
+
           _ ->
             assert is_nil(guard),
                    "#{inspect(route)} is #{inspect(verdict)} but names a guard symbol"
@@ -641,6 +717,45 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       assert exploitable == Enum.sort(@expected_exploitable),
              "the workspace-blind set changed. Every :exploitable row needs a run-proved " <>
                "cross-tenant probe below and a filed fix slice."
+    end
+
+    test "TRIPWIRE: every :instance_global route really sits behind the operator plug" do
+      operator_gated = MapSet.new(enumerate_gated_routes([@operator_pipeline]))
+
+      # NON-VACUITY: an empty parse would make the membership check below
+      # trivially true for an empty census — and the census is not empty.
+      assert MapSet.size(operator_gated) >= 15,
+             "the operator-pipeline parse found only #{MapSet.size(operator_gated)} routes; " <>
+               "either the pipe_through shape changed (re-point @operator_pipeline) or the " <>
+               "tier was unmounted."
+
+      instance_global =
+        @census
+        |> Enum.filter(fn {_r, {v, _g, _reason}} -> v == :instance_global end)
+        |> Enum.map(&elem(&1, 0))
+
+      unguarded =
+        instance_global |> Enum.reject(&MapSet.member?(operator_gated, &1)) |> Enum.sort()
+
+      assert unguarded == [],
+             "THE RULING BROKE: these :instance_global routes are no longer mounted on " <>
+               "#{@operator_pipeline}, so a token that administers ONE workspace reaches an " <>
+               "instance-wide surface again:\n" <> Enum.map_join(unguarded, "\n", &inspect/1)
+
+      # A scope can sit on the operator pipeline while the PIPELINE BODY has
+      # been emptied — which would pass the membership check above and gate
+      # nothing. Read the body and assert the plug is still in it.
+      source = File.read!(router_source_path())
+
+      body =
+        case Regex.run(~r/\n  pipeline :require_platform_operator do\n(.*?)\n  end\n/s, source) do
+          [_, body] -> body
+          _ -> ""
+        end
+
+      assert body =~ "plug(#{@operator_guard})",
+             "pipeline :require_platform_operator no longer mounts #{@operator_guard}; the " <>
+               "seven instance-global groups are pipe_through-ing an EMPTY pipeline."
     end
 
     test "TRIPWIRE: every named guard symbol is still present in that route's controller" do
@@ -708,6 +823,26 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     build_conn()
     |> put_req_header("authorization", "Bearer #{bearer}")
     |> put_req_header("content-type", "application/json")
+  end
+
+  # Arm/disarm the instance-operator allowlist (task-c7e2b87f1bbca815) for one
+  # test, restoring whatever the node booted with. The RULING probes below run
+  # BOTH arms, so neither can pass by accident: a UNSET-only suite could not
+  # tell "the tier is mounted" from "the tier is absent", and an ARMED-only one
+  # could not tell "fenced" from "the route is broken".
+  defp put_operator_allowlist(emails, ids) do
+    prev_emails = Application.get_env(:barkpark, :operator_emails, [])
+    prev_ids = Application.get_env(:barkpark, :operator_token_ids, [])
+
+    Application.put_env(:barkpark, :operator_emails, emails)
+    Application.put_env(:barkpark, :operator_token_ids, ids)
+
+    on_exit(fn ->
+      Application.put_env(:barkpark, :operator_emails, prev_emails)
+      Application.put_env(:barkpark, :operator_token_ids, prev_ids)
+    end)
+
+    :ok
   end
 
   # Criterion 1 wants the row's evidence to quote an ACTUAL status and body,
@@ -947,7 +1082,13 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     end
   end
 
-  describe "PROBE: the RULING — the instance-global routes really are instance-global" do
+  describe "PROBE: the RULING, allowlist UNSET — the instance-global routes are global" do
+    # Pinned, not inherited: the node's env may already carry an operator
+    # allowlist, and these two probes are the LEGACY arm by definition.
+    setup do
+      put_operator_allowlist([], [])
+    end
+
     test "/v1/secrets is ONE global tier both admins share (RULING row 4)",
          %{admin_a: admin_a, admin_b: admin_b} do
       name = uniq("probe_secret")
@@ -1001,6 +1142,112 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
 
       assert read.status == 200, "B's admin could not read A's write: #{read.resp_body}"
       assert read.resp_body =~ "census_probe_flag"
+
+      delete(as(admin_b), "/v1/plugins/settings/#{plugin}")
+    end
+  end
+
+  describe "PROBE: the RULING, allowlist ARMED — the same two rows are fenced" do
+    # The INVERSION of the two probes above (task-c7e2b87f1bbca815). Same
+    # fixture, same routes, one difference: BARKPARK_OPERATOR_TOKEN_IDS names a
+    # token, so `admin` stops being sufficient on the seven instance-global
+    # groups. `tok_b` is the listed operator; `admin_a` (an admin of exactly one
+    # workspace) is not.
+    # Each test writes its row through the LEGACY door FIRST and arms the
+    # allowlist only afterwards: a 403 on a row that never existed would prove
+    # nothing about the gate.
+    setup do
+      put_operator_allowlist([], [])
+    end
+
+    test "RULING row 4: an admin of ONE workspace is 403 on the global secret, the listed " <>
+           "operator is 200",
+         %{admin_a: admin_a, admin_b: admin_b, tok_b: tok_b} do
+      name = uniq("probe_secret_armed")
+      value = uniq("v")
+
+      # Written through the LEGACY door (allowlist still unset in this setup).
+      wrote = put(as(admin_b), "/v1/secrets/#{name}", Jason.encode!(%{value: value}))
+      assert wrote.status == 200, "setup secret write failed: #{wrote.resp_body}"
+
+      put_operator_allowlist([], [tok_b.id])
+
+      refused =
+        evidence(
+          "RULING row 4 ARMED: GET /v1/secrets/:name as admin-of-A (not on the allowlist)",
+          get(as(admin_a), "/v1/secrets/#{name}")
+        )
+
+      assert refused.status == 403,
+             "the operator gate did not close on RULING row 4: #{refused.status} " <>
+               refused.resp_body
+
+      assert refused.resp_body =~ "platform_operator"
+      refute refused.resp_body =~ value, "the refusal leaked the value it refused"
+
+      # NON-VACUITY CONTROL: the listed operator still reads it, so the 403
+      # above is the ALLOWLIST talking, not a broken route.
+      served =
+        evidence(
+          "RULING row 4 ARMED: GET /v1/secrets/:name as the ID-LISTED operator",
+          get(as(admin_b), "/v1/secrets/#{name}")
+        )
+        |> json_response(200)
+
+      assert served["value"] == value
+
+      delete(as(admin_b), "/v1/secrets/#{name}")
+    end
+
+    test "RULING row 3: an admin of ONE workspace is 403 on the instance plugin settings " <>
+           "record, the listed operator is 200",
+         %{admin_a: admin_a, admin_b: admin_b, tok_b: tok_b} do
+      plugin = uniq("census-probe-armed")
+
+      wrote =
+        put(
+          as(admin_b),
+          "/v1/plugins/settings/#{plugin}",
+          Jason.encode!(%{settings: %{"census_probe_flag" => true}})
+        )
+
+      assert wrote.status == 200, "setup settings write failed: #{wrote.resp_body}"
+
+      put_operator_allowlist([], [tok_b.id])
+
+      refused =
+        evidence(
+          "RULING row 3 ARMED: GET /v1/plugins/settings/:plugin_name as admin-of-A",
+          get(as(admin_a), "/v1/plugins/settings/#{plugin}")
+        )
+
+      assert refused.status == 403,
+             "the operator gate did not close on RULING row 3: #{refused.status} " <>
+               refused.resp_body
+
+      assert refused.resp_body =~ "platform_operator"
+
+      # And the WRITE half is refused before it writes.
+      blocked =
+        put(
+          as(admin_a),
+          "/v1/plugins/settings/#{plugin}",
+          Jason.encode!(%{settings: %{"census_probe_overwrite" => true}})
+        )
+
+      assert blocked.status == 403
+
+      served =
+        evidence(
+          "RULING row 3 ARMED: GET /v1/plugins/settings/:plugin_name as the ID-LISTED operator",
+          get(as(admin_b), "/v1/plugins/settings/#{plugin}")
+        )
+
+      assert served.status == 200
+      assert served.resp_body =~ "census_probe_flag"
+
+      refute served.resp_body =~ "census_probe_overwrite",
+             "the 403 on the write was cosmetic — the record was rewritten anyway"
 
       delete(as(admin_b), "/v1/plugins/settings/#{plugin}")
     end
