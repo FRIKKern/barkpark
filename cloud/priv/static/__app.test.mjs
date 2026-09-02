@@ -2390,6 +2390,129 @@ test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all five copies there"
   }
 });
 
+// ── cch-w19-bl-e14-shorthand-blind · E14 and the SHORTHAND it could not see ──
+// THE GAP, MEASURED BEFORE IT WAS FIXED. `padding` is not one of E14's five
+// pinned core NAMES, so a wrapper-scoped `.status-pill` rule written
+// `{ padding: 2px 11px }` neither TRIGGERED the check nor SATISFIED
+// `padding-top`/`padding-bottom`. Run against the pre-fix check, the exact
+// stylesheet the first leg below builds printed `4 wrapper-scoped wrap copy(ies)
+// … 0 E14 error(s)` and exited 0 — the fifth copy was INVISIBLE, not red. That
+// is the asymmetry that matters: a drifting fourth copy went unseen.
+//
+// THE REMEDY IS TRIGGER-ON-SHORTHAND, NOT EXPAND-SHORTHAND, and the argument is
+// in the E14 header entry of __css_check.mjs (the losing option is named there
+// with the reason it lost). These three legs drive what that choice BUYS, and
+// the third is the one a naive implementation fails.
+test("cch-w19-bl-e14: a shorthand-only fourth copy is COUNTED and REDS", () => {
+  const f = wrapTmp("shorthand.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { padding: 2px 11px; }\n");
+  const r = runCssCheck("--wrap-parity-check", f);
+  assert.equal(r.status, 1, "a shorthand fourth copy must RED, not vanish:\n" + r.out);
+  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED — invisibility was the defect:\n" + r.out);
+  assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the four survivors stay ok:\n" + r.out);
+  assert.match(r.out, /\.op-gate \.status-pill declares padding —/, "the error must name the host AND the shorthand:\n" + r.out);
+  assert.match(r.out, /set through the shorthand `padding: 2px 11px`/, "and say WHY, not just 'not declared':\n" + r.out);
+});
+
+test("cch-w19-bl-e14: shorthand plus the core RESTATED in longhand after it greens", () => {
+  // The legitimate way to give the pill horizontal padding. Remedy (b) must not
+  // outlaw it, or the check gets turned off within a wave — the same reason
+  // design choice 1 refuses to trigger on the selector.
+  const f = wrapTmp("legal.css", WRAP_SURVIVORS +
+    "\n.op-gate .status-pill { white-space: normal; height: auto; min-height: 24px; padding: 2px 11px; padding-top: 2px; padding-bottom: 2px; }\n");
+  const r = runCssCheck("--wrap-parity-check", f);
+  assert.equal(r.status, 0, "shorthand + longhand restatement is a legal fifth copy:\n" + r.out);
+  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it is still COUNTED:\n" + r.out);
+  assert.match(r.out, /0 E14 error\(s\)/, r.out);
+});
+
+test("cch-w19-bl-e14: the shorthand AFTER the longhands reds — the cascade-order trap", () => {
+  // A second false green on the pre-fix check, and the one a
+  // "just require the longhand to be present" implementation still ships: all
+  // five longhands are here at canonical values, and a `padding: 3px 11px`
+  // AFTER them wins the cascade and makes the chip 3px, not 2px. Driven
+  // against the pre-fix check this stylesheet printed 0 E14 error(s) too.
+  const f = wrapTmp("order.css", WRAP_SURVIVORS +
+    "\n.op-gate .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; padding: 3px 11px; }\n");
+  const r = runCssCheck("--wrap-parity-check", f);
+  assert.equal(r.status, 1, "a shorthand that OVERRIDES the restated longhands must red:\n" + r.out);
+  assert.match(r.out, /1 E14 error\(s\)/, r.out);
+  assert.match(r.out, /set through the shorthand `padding: 3px 11px`/, "and name the shorthand that won:\n" + r.out);
+  assert.match(r.out, /restate `padding-top: 2px` in longhand AFTER that shorthand/, "and say how to fix it:\n" + r.out);
+});
+
+// ── cch-w12-bl-e12-blind-to-border-width · E12's escape must be able to PAINT ─
+// E12 lets a focus rule with a translucent band off when it ALSO carries an
+// opaque `border-color` — "the border is the real indicator". Until this row
+// that escape read the COLOUR out of the focus rule's own block and nothing
+// else, so a `border-color` on an edge of zero width or `style: none` painted
+// nothing and the guard certified it. Both legs below are the mutation proof:
+// each edits app.css in a MIRROR of the static tree (the check reads its inputs
+// from its own directory, so the tree is copied rather than the file passed),
+// asserts the mutation applied EXACTLY once, and runs the full gate.
+const STATIC_DIR = fileURLToPath(new URL("./", import.meta.url));
+const runGateOnMirror = (mutate) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-e12-"));
+  try {
+    fs.cpSync(STATIC_DIR, d, { recursive: true });
+    const cssPath = path.join(d, "app.css");
+    if (mutate) {
+      const before = fs.readFileSync(cssPath, "utf8");
+      const after = mutate(before);
+      assert.notEqual(after, before, "the mutation did not APPLY — an unapplied mutation is a vacuous proof");
+      fs.writeFileSync(cssPath, after, "utf8");
+    }
+    const r = spawnSync(process.execPath, [path.join(d, "__css_check.mjs")], { encoding: "utf8" });
+    return { status: r.status, out: (r.stdout || "") + (r.stderr || "") };
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+};
+
+test("cch-w12-bl-e12: the mirror harness itself greens on the UNMUTATED tree", () => {
+  // Without this leg the two reds below prove only that the harness can fail,
+  // never that the tree is clean — and a guard that reds on everything is worth
+  // as little as one that reds on nothing.
+  const r = runGateOnMirror(null);
+  assert.equal(r.status, 0, "app.css must be green under the tightened E12:\n" + r.out);
+  assert.match(r.out, /0 error\(s\)/, r.out);
+  assert.match(r.out, /E12 focus rules scanned: app\.css 16/, "and the scan must not have gone empty:\n" + r.out);
+});
+
+test("cch-w12-bl-e12: zeroing .fleet-row's border reds the escape that used to certify it", () => {
+  const r = runGateOnMirror((css) => {
+    const blocks = [...css.matchAll(/\.fleet-row \{[^{}]*\}/g)].filter((b) => /border: 1px solid var\(--border\);/.test(b[0]));
+    assert.equal(blocks.length, 1, "expected exactly one .fleet-row block declaring the 1px border — re-derive by grep");
+    return css.replace(blocks[0][0], blocks[0][0].replace("border: 1px solid var(--border);", "border: 0;"));
+  });
+  assert.equal(r.status, 1, "a focus rule whose escape border has zero width must RED:\n" + r.out);
+  assert.match(r.out, /1 error\(s\)/, "and exactly one — nothing else may move:\n" + r.out);
+  assert.match(r.out, /focus rule "\.fleet-row\[data-id\]:focus-visible"/, "naming the rule that took the escape:\n" + r.out);
+  assert.match(r.out, /CANNOT PAINT/, r.out);
+  assert.match(r.out, /top 0\/none, right 0\/none, bottom 0\/none, left 0\/none/, "with the resolved edges, not just a verdict:\n" + r.out);
+  assert.match(r.out, /set by `\.fleet-row`/, "and the rule that killed it:\n" + r.out);
+});
+
+test("cch-w12-bl-e12: the shipped .inst-sites-card case reds once its focus fix is removed", () => {
+  // The context that actually exploited this. `.inst-sites-card .site-row`
+  // zeroes the border the shared `.site-row[data-id]:focus-visible` only ever
+  // RE-COLOURS, leaving right/bottom/left with nothing to paint; the rendered
+  // driving of cch-w12-s3 found it, and no static gate could. Deleting that
+  // slice's inset-outline fix restores the pre-fix tree and the guard must red
+  // on it — three sides is not a perimeter, which is why the predicate is
+  // `every side`, not `any side`.
+  const r = runGateOnMirror((css) => {
+    const hits = [...css.matchAll(/\.inst-sites-card \.site-row\[data-id\]:focus-visible \{[^{}]*\}\n/g)];
+    assert.equal(hits.length, 1, "expected exactly one .inst-sites-card focus rule — re-derive by grep");
+    return css.replace(hits[0][0], "");
+  });
+  assert.equal(r.status, 1, "the pre-fix .inst-sites-card tree must RED:\n" + r.out);
+  assert.match(r.out, /1 error\(s\)/, r.out);
+  assert.match(r.out, /focus rule "\.site-row\[data-id\]:focus-visible"/, "and blame the SHARED rule that took the escape:\n" + r.out);
+  assert.match(r.out, /right medium\/none, bottom medium\/none, left medium\/none/, "with the three dead sides:\n" + r.out);
+  assert.match(r.out, /set by `\.inst-sites-card \.site-row`/, "and the context rule that killed them:\n" + r.out);
+  assert.ok(!/top medium\/none/.test(r.out), "the top hairline DOES paint and must not be blamed:\n" + r.out);
+});
+
 // ── cchi-w20: --citation-inventory, and E17's collapsed-scan-set refusals ───
 //
 // E11's census is only as honest as the file list it iterates, and until this
