@@ -24,6 +24,24 @@ import { renderBlockNative } from '../registry'
 // a quiet code REGION, so the chat register uses the codeBg/codeFg role pair
 // and drops the rule. The chrome is register-scoped — charter D22's no-chrome
 // law is TURN-level, so a code block still gets to look like a code block.
+//
+// THE LANGUAGE HEADER (bl-frommarkdown-fence-language). The block's language
+// field is `lang` — the same key `Blocks.default_block("code")` writes, the
+// Studio's code editor reads and `FromMarkdown` now carries off a ```python
+// fence. It is OPTIONAL and absent far more often than present, so the header
+// is strictly additive:
+//
+//   * NO lang  → the element returned is the one this renderer has always
+//     returned: the frame-styled ScrollView as the ROOT, byte-identical.
+//     `rootStyle()` in chatBlocks.test.tsx reads that root's style, and the
+//     register-default suite JSON-compares whole trees, so anything that
+//     wrapped the no-lang case in a View would be a silent regression on both.
+//   * WITH lang → the frame moves out to a wrapping View so the label can sit
+//     ABOVE the scroller. It must not sit inside a horizontal ScrollView: a
+//     label that scrolls away with the code is not a label, and it would also
+//     ride the scroller's content width.
+//
+// Still ONE horizontal scroller (charter D50) — the wrapper is a plain View.
 const code: Render = (b, ctx, key) => {
   const chat = (ctx.register ?? 'paper') === 'chat'
   const frame = chat
@@ -34,18 +52,52 @@ const code: Render = (b, ctx, key) => {
         borderLeftColor: ctx.theme.accent,
         marginVertical: 10,
       }
+  const body = (
+    <Text
+      style={{
+        ...roles.codeBlock,
+        fontFamily: MONO,
+        color: chat ? ctx.theme.codeFg : ctx.theme.text,
+      }}
+    >
+      {str(b.value)}
+    </Text>
+  )
+  // STRICT on purpose, where the rest of this module uses `str()`. `str()`
+  // coerces a number, so a junk `lang: 42` would paint "42" as a language
+  // label — chrome that lies. A language identifier is a string or it is
+  // nothing, and anything else falls back to the untouched no-lang tree.
+  const lang = typeof b.lang === 'string' ? b.lang.trim() : ''
+
+  if (lang === '') {
+    return (
+      <ScrollView key={key} horizontal style={frame} contentContainerStyle={{ padding: 12 }}>
+        {body}
+      </ScrollView>
+    )
+  }
+
   return (
-    <ScrollView key={key} horizontal style={frame} contentContainerStyle={{ padding: 12 }}>
+    <View key={key} style={frame}>
       <Text
         style={{
-          ...roles.codeBlock,
+          // `scale.micro` (11/15) is the chrome ladder's smallest rung — the
+          // same step the tab-bar badge uses. Hand-typing the pair here is an
+          // eslint error by design (no-restricted-syntax, the S8 token guard).
+          ...scale.micro,
           fontFamily: MONO,
-          color: chat ? ctx.theme.codeFg : ctx.theme.text,
+          letterSpacing: 0.4,
+          color: ctx.theme.textMuted,
+          paddingHorizontal: 12,
+          paddingTop: 10,
         }}
       >
-        {str(b.value)}
+        {lang}
       </Text>
-    </ScrollView>
+      <ScrollView horizontal contentContainerStyle={{ padding: 12, paddingTop: 4 }}>
+        {body}
+      </ScrollView>
+    </View>
   )
 }
 

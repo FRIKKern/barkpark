@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "child_count": 1,
+  "children": [
+    {
+      "doc_id": "cch-w42-bl-ambiguously-named",
+      "title": "ambiguously named",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 1,
+        "total": 2
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "doc": {
+    "doc_id": "fixture-epic",
+    "kind": "task",
+    "type": "task",
+    "title": "fixture epic",
+    "lifecycle_status": "in_progress",
+    "content": {
+      "kind": "task"
+    }
+  }
+}

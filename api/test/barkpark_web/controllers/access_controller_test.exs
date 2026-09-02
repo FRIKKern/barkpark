@@ -4,7 +4,8 @@ defmodule BarkparkWeb.AccessControllerTest do
 
     * `POST /v1/access` mints (grantor), returns the raw token ONCE, and NEVER
       leaks `link_token_hash`; the no-escalation gate still 403s a token that
-      lacks the conferred capability.
+      lacks the conferred capability, and the RULING that a grant confers READ
+      or WRITE only is enforced at the edge (`["admin"]` → 422, and no row).
     * `GET /v1/access` is grantor/workspace-scoped — one workspace's grants
       never bleed into another's; no `link_token_hash` in output.
     * `GET /v1/access/:id` is grantor-or-admin; a stranger — who can see no
@@ -116,14 +117,16 @@ defmodule BarkparkWeb.AccessControllerTest do
     end
 
     # The no-escalation gate lives INSIDE `Access.mint/2` and must keep speaking
-    # over HTTP. It is deliberately probed with a WRITE-capable grantor asking
-    # for `admin` (task-a85afbbc0c4b1be3): a read-only grantor is now refused
-    # upstream by `Plugs.RequireWriteForMutation`, so the old `["read"]` →
-    # `["write"]` shape would answer 403 without `Access.mint/2` ever running —
-    # a green that no longer proves the thing it names.
-    test "no-escalation: a write token cannot mint an admin grant → 403", %{conn: conn} do
+    # over HTTP. It USED to be probed with a write-capable grantor asking for
+    # `admin` (task-a85afbbc0c4b1be3) — that shape now answers 422 at the edge
+    # (see the admin tests below), so it can no longer reach the gate. The probe
+    # moved INSIDE the narrowed vocabulary: a WRITE-only token clears
+    # `Plugs.RequireWriteForMutation` (so `Access.mint/2` really runs) and is
+    # then refused for conferring `read`, which `@read_perms ~w(read admin
+    # public-read)` does not give it.
+    test "no-escalation: a write-only token cannot mint a read grant → 403", %{conn: conn} do
       ws = create_workspace!()
-      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+      {grantor_raw, _} = token_principal(ws, ["write"])
 
       conn =
         conn
@@ -131,11 +134,98 @@ defmodule BarkparkWeb.AccessControllerTest do
         |> post("/v1/access", %{
           "grantee_email" => "grantee@example.com",
           "workspace_id" => ws.id,
-          "capabilities" => ["admin"]
+          "capabilities" => ["read"]
         })
 
       assert json_response(conn, 403)["error"]["message"] =~
                "capabilities you do not hold"
+    end
+
+    # ── the RULING: grants confer read/write only ────────────────────────────
+    #
+    # `admin` is a third spelling of tenant-control authority beside the
+    # membership role and the token permission bit. The Studio picker only ever
+    # surfaced read/write (`@surfaced_caps`); the server now matches it, at the
+    # edge, BEFORE `Access.mint/2`. The grantor below holds `admin` and would
+    # have sailed through the no-escalation gate — this is a REFUSAL OF THE
+    # VOCABULARY, not of the grantor, which is why the negative store readback
+    # matters.
+    test "capabilities [\"admin\"] → 422 and NO grant row is written", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write", "admin"])
+      email = "admin-cap-#{Ecto.UUID.generate()}@example.com"
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => email,
+          "workspace_id" => ws.id,
+          "capabilities" => ["admin"]
+        })
+
+      body = json_response(conn, 422)
+      assert body["error"]["code"] == "unprocessable"
+      assert body["error"]["message"] =~ "read or write"
+
+      # Read the STORE back: the refusal happened before `Access.mint/2`, so
+      # this workspace (fresh, so no whole-table count) holds nothing.
+      assert Access.list_grants_for_workspace(ws.id) == []
+    end
+
+    test "a mixed [\"read\", \"admin\"] mint is refused whole → 422, no row", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write", "admin"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "mixed-#{Ecto.UUID.generate()}@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["read", "admin"]
+        })
+
+      assert json_response(conn, 422)["error"]["code"] == "unprocessable"
+      assert Access.list_grants_for_workspace(ws.id) == []
+    end
+
+    # POSITIVE CONTROLS — the refusal is narrow. Without these the 422 above
+    # would be green even if the endpoint refused everything.
+    test "positive control: [\"read\"] still mints → 201", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "read-#{Ecto.UUID.generate()}@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["read"]
+        })
+
+      assert %{"grant" => grant} = json_response(conn, 201)
+      assert grant["capabilities"] == ["read"]
+      assert [%Access.Grant{}] = Access.list_grants_for_workspace(ws.id)
+    end
+
+    test "positive control: [\"read\", \"write\"] still mints → 201", %{conn: conn} do
+      ws = create_workspace!()
+      {grantor_raw, _} = token_principal(ws, ["read", "write"])
+
+      conn =
+        conn
+        |> bearer(grantor_raw)
+        |> post("/v1/access", %{
+          "grantee_email" => "rw-#{Ecto.UUID.generate()}@example.com",
+          "workspace_id" => ws.id,
+          "capabilities" => ["read", "write"]
+        })
+
+      assert %{"grant" => grant} = json_response(conn, 201)
+      assert grant["capabilities"] == ["read", "write"]
+      assert [%Access.Grant{}] = Access.list_grants_for_workspace(ws.id)
     end
 
     # The upstream half of the same refusal, kept separate so the two reasons

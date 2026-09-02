@@ -309,6 +309,19 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     {:get, "/v1/admin/site-deploy"} =>
       {:instance_global, @operator_guard, "Operator: site-deploy status. RULING row 1."},
 
+    # ── /v1/instance — operator reads moved onto :require_admin by #14793 ──
+    # (task-d7ac954aa57aa522). The census merged the same hour without them,
+    # so "every gated route carries a verdict" has been red on main since.
+    {:get, "/v1/instance/site-deploy"} =>
+      {:instance_global, nil,
+       "Operator: the whole instance's marketing-site deploy status; no tenant selector, " <>
+         "the twin of GET /v1/admin/site-deploy. RULING row 1."},
+    {:get, "/v1/instance/metrics"} =>
+      {:instance_global, nil,
+       "Prometheus text exposition of this BEAM's own telemetry aggregates. workspace_id " <>
+         "appears only as a series LABEL the handler stamps, never as a request selector; " <>
+         "the payload names tenants, which is why it is admin-gated at all. RULING row 1."},
+
     # ── /v1/shares ──
     {:get, "/v1/shares"} =>
       {:tenant_bound, "visible_stored_shares",
