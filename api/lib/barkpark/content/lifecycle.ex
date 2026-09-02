@@ -47,6 +47,7 @@ defmodule Barkpark.Content.Lifecycle do
   }
 
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.PortableDoc.Projection
   alias Barkpark.Tasks.Transitions
 
   # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
@@ -100,24 +101,76 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
-  defp prepare_paper_render_shapes(
-         %Document{content: %{"blocks" => blocks} = content} = draft,
-         "paper"
-       )
-       when is_list(blocks) do
-    normalized = BlockOps.normalize_render_shapes(blocks)
+  # THE GATE'S SCOPE DESCENDS FROM THE READER, NOT FROM THE WRITER'S KEY.
+  #
+  # This used to pattern-match ONLY `%Document{content: %{"blocks" => blocks}}`,
+  # so a Paper whose block list lived under `content["body"]["blocks"]` or
+  # `content["body"]` — the shape `Projection.project/3` writes and the shape a
+  # `bp doc patch --set body:=` author produces — fell to the catch-all and
+  # published UNGATED. Same server, same bytes, opposite verdict, decided by
+  # which key the writer used. The readers do not care which key it is:
+  # `Barkpark.PortableDoc.Projection.read_blocks/1` is the ONE locator the
+  # Studio paper reader, the share-link renderer, the content envelope and the
+  # body_html rehydrator all go through, and it accepts three STORED locations
+  # in this precedence — top-level `"blocks"`, `"body"."blocks"`, `"body"`.
+  # The gate now reads through that same locator and normalises back into the
+  # location it read from, so the verdict is a property of the CONTENT.
+  #
+  # The fourth `read_blocks/1` clause — a markdown STRING body — is deliberately
+  # out of scope: its block list is synthesised at read time by `FromMarkdown`
+  # and never stored, so there is nothing to normalise back into `content` and
+  # no authored shape to refuse.
+  defp prepare_paper_render_shapes(%Document{content: content} = draft, "paper")
+       when is_map(content) do
+    cond do
+      # A DECLARED but malformed top-level `"blocks"` keeps its pre-existing
+      # refusal even when a readable body list sits beside it: the key is a
+      # claim about the document, and this arm is strictly a superset of the
+      # refusals the key-matched gate already issued. Written as an explicit
+      # case because the old arm returned `validate_render_shapes/1`'s BARE
+      # `:ok` straight into a `with` that binds `{:ok, draft}` — unreachable
+      # today only because that function's catch-all always errors on a
+      # non-list, and one edit away from silently returning `:ok` from
+      # `publish_document/4` in place of the published document.
+      is_map_key(content, "blocks") and not is_list(content["blocks"]) ->
+        case BlockOps.validate_render_shapes(content["blocks"]) do
+          :ok -> {:ok, draft}
+          {:error, _reason} = error -> error
+        end
 
-    case BlockOps.validate_render_shapes(normalized) do
-      :ok -> {:ok, %{draft | content: Map.put(content, "blocks", normalized)}}
-      {:error, _reason} = error -> error
+      true ->
+        case {Projection.read_blocks(content), paper_block_path(content)} do
+          {blocks, path} when is_list(blocks) and is_list(path) ->
+            normalized = BlockOps.normalize_render_shapes(blocks)
+
+            case BlockOps.validate_render_shapes(normalized) do
+              :ok -> {:ok, %{draft | content: put_in(content, path, normalized)}}
+              {:error, _reason} = error -> error
+            end
+
+          _ ->
+            {:ok, draft}
+        end
     end
   end
 
-  defp prepare_paper_render_shapes(%Document{content: content}, "paper")
-       when is_map(content) and is_map_key(content, "blocks"),
-       do: BlockOps.validate_render_shapes(content["blocks"])
-
   defp prepare_paper_render_shapes(draft, _type), do: {:ok, draft}
+
+  # The STORED location `Projection.read_blocks/1` would read this content's
+  # block list from, in that function's own clause order, or nil when the list
+  # is synthesised (markdown body) or absent. Kept adjacent to the gate so the
+  # normalised list is written back exactly where the readers look for it —
+  # never promoted to a top-level `"blocks"` key the document did not have.
+  defp paper_block_path(content) do
+    body = Map.get(content, "body")
+
+    cond do
+      is_list(Map.get(content, "blocks")) -> ["blocks"]
+      is_map(body) and is_list(Map.get(body, "blocks")) -> ["body", "blocks"]
+      is_list(body) -> ["body"]
+      true -> nil
+    end
+  end
 
   defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts) do
     ctx = WriteScope.build_ctx(opts)

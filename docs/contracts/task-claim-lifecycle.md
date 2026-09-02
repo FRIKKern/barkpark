@@ -4,8 +4,7 @@
 
 Split out of [TASK-SYSTEM.md](../setup/TASK-SYSTEM.md), which remains the human
 guide (setup, Studio, organising work). **This file owns the machine-facing half:
-what each verb does, what it fences on, and every refusal it can emit.** The
-sentences below were moved verbatim, not rewritten.
+what each verb does, what it fences on, and every refusal it can emit.**
 
 Lifecycle: `open · in_progress · blocked · done · cancelled`.
 
@@ -16,6 +15,7 @@ The contract, precisely:
 - **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, and bumps the epoch.
 - **Release** — `POST /v1/tasks/:id/release`, holder `worker_id` + `observed_epoch`: `in_progress`→`open`, clears `claim.worker`+`assignee`, bumps the epoch, stamps `released_by`/`released_at`, emits `task.released`.
 - **Stamp** — holder + epoch fenced. `--met` needs evidence **and** `--criterion-text` (exact row wording; index-only met-flip → 409 `criterion_text_required`). `--miss` needs neither — records one of the last 5 attempts, no `met` flip. Emits `task.criterion`; never trips the work-digest fence. **Real only once the PUBLISHED row holds it:** refusals are loud (exit 6 + remedy), but a draft-only row's stamp lands where no board reads it, and a `bp` predating #13410 prints a green for it. `make cli-build`; trust the read-back, not the exit code. **`in_progress` only** — a closed row refuses `not_in_progress:done`; no per-criterion evidence after close.
+- **Withdraw** — `--withdraw --note "<why>"` (with `--criterion-text`) is the only verb that LOWERS a met flag: review refutes a proof *after* the close. Sets `met: false` so `criteria_progress` drops, **leaves the original evidence exactly where it was** (append-only is kept by adding, never by clearing), and appends a signed `{note, ts, worker, superseded_evidence}` record to the criterion's `withdrawals` list. Refuses an already-unmet criterion (`409 criterion_not_met`); needs no `--merge-gated` on a merge gate (lowering a lock cannot fabricate a done). The ONE stamp outcome allowed on a **sealed** row: `in_progress` = holder-only + epoch-fenced like any stamp; done/cancelled/open takes `--observed-rev <the rev you read>` instead (`409 observed_rev_required`). `python3 scripts/withdrawn_but_met.py --live` finds criteria still flagged met whose evidence retracts itself in prose (the pre-verb convention).
 - **Merge gates are the lead's**; PR-body proof dies at merge — close over, never flip ([ADR 0005](../decisions/0005-pr-body-criteria.md)).
 - **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat: renews the lease, emits `task.pulse`. Takes no epoch arg but **bumps the epoch** (measured 1→2→3→4), so the claim's epoch is stale after your first pulse — re-read `claim.epoch` before stamping or closing. `now` caps at **500 bytes** (501 → `now must be at most 500 bytes`).
 - **Close** needs holder + epoch. Status defaults `done`; reason + criterion updates (`met:true` needs its `criterion` text) commit in the same rev-CAS. Brief drift → `doc_changed_since_claim`; pass `observed_rev` for strict full-rev CAS.

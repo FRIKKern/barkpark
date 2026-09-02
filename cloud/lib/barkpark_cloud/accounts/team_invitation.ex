@@ -31,7 +31,15 @@ defmodule BarkparkCloud.Accounts.TeamInvitation do
 
   @roles TeamMembership.roles()
   # Loose-but-real email shape — exactly one "@", no spaces. Mirrors User.@email_format.
-  @email_format ~r/^[^\s@]+@[^\s@]+$/
+  # cch-email-format-missing-u-modifier — the `u` modifier is DELIBERATE. Without
+  # it PCRE's \s is ASCII-only, so U+00A0 (NBSP) and every other Unicode space
+  # passed as "not whitespace" and an address could carry apparent word breaks
+  # (measured: `Regex.match?(~r/\s/, "\u00A0")` is false, `~r/\s/u` is true).
+  # Tightened 2026-09-02 after checking the live control plane for rows that would
+  # newly fail: users.email 0 of 27, users.pending_email 0 of 0,
+  # team_invitations.email 0 of 1 (and 0 rows with ANY non-ASCII byte) — nothing
+  # is locked out by this change.
+  @email_format ~r/^[^\s@]+@[^\s@]+$/u
 
   schema "team_invitations" do
     field :email, :string

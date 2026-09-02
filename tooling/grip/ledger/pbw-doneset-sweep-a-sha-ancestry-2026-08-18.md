@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: pbw-doneset-sweep-a-ancestry-rederive | budget: 600tok -->
 # PD Block-Wishlist done-set audit — Sweep A (SHA-ancestry) re-derivation
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Wave: pd-block-wishlist-doneset-audit-2026-08-18. Assignment [sha-ancestry-100].
 Origin/main head at run: `f8d63a9805279f16f1f22e83071c5b1337195ea8` (2026-08-18 10:36 +0200).
 

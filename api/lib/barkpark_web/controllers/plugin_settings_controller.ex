@@ -49,9 +49,27 @@ defmodule BarkparkWeb.PluginSettingsController do
     # Settings.put/3 only errors with an Ecto changeset (its txn rolls back with
     # one); to_envelope renders that as validation_failed + details. The former
     # `{:error, reason} -> inspect(reason)` branch was dead code.
+    # RECEIPT LAW (pds wave 39 residue): the emitted value DESCENDS FROM THE
+    # WRITE RETURN. `Settings.put/3` already hands back the persisted
+    # `SettingsRecord` and this discarded it for a bare literal that stayed
+    # `true` even if the row never landed. `ok` now derives from the row's own
+    # `updated_at` stamp, and `updated_at`/`updated_by` are store values the
+    # request cannot produce — revert to the bare success map and those keys are
+    # simply absent, so the differential reds. The settings MAP is never echoed:
+    # this
+    # controller's read side masks every string leaf, so the receipt names the
+    # row it wrote, never its contents.
     case Settings.put(name, settings_map, user_id: user_id) do
-      {:ok, _rec} -> json(conn, %{ok: true})
-      {:error, _} = err -> err
+      {:ok, rec} ->
+        json(conn, %{
+          ok: not is_nil(rec.updated_at),
+          plugin_name: rec.plugin_name,
+          updated_at: rec.updated_at,
+          updated_by: rec.updated_by
+        })
+
+      {:error, _} = err ->
+        err
     end
   end
 

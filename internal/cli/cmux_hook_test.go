@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,12 +18,39 @@ import (
 
 // hookRec records what a hook fired at the fake server.
 type hookRec struct {
-	claims  int
-	closes  int
-	gets    int
-	lastWkr string // worker_id on the last claim/close body
-	lastEp  int    // observed_epoch on the last close body
-	lastRev string // observed_rev on the last close body (digest-fence bypass, D82)
+	mu       sync.Mutex
+	claims   int
+	closes   int
+	gets     int
+	pulses   int
+	lastWkr  string   // worker_id on the last claim/close/pulse body
+	lastEp   int      // observed_epoch on the last close body
+	lastRev  string   // observed_rev on the last close body (digest-fence bypass, D82)
+	lastNow  string   // now on the last pulse body
+	pulseRaw []string // every pulse body VERBATIM, so a leak test can grep the wire
+	closeEps []int    // observed_epoch of every close, in order
+}
+
+// hookSnap is a lock-free copy of hookRec's counters — a plain struct so it can
+// be returned by value (hookRec itself carries the mutex and never is).
+type hookSnap struct {
+	claims, closes, gets, pulses int
+	lastWkr, lastNow             string
+	pulseRaw                     []string
+	closeEps                     []int
+}
+
+// snapshot copies the counters under the lock so a concurrent-hook test can
+// assert on them without racing the handler goroutines.
+func (r *hookRec) snapshot() hookSnap {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return hookSnap{
+		claims: r.claims, closes: r.closes, gets: r.gets, pulses: r.pulses,
+		lastWkr: r.lastWkr, lastNow: r.lastNow,
+		pulseRaw: append([]string(nil), r.pulseRaw...),
+		closeEps: append([]int(nil), r.closeEps...),
+	}
 }
 
 // newHookServer serves the three endpoints the hook touches: the drafts task
@@ -37,6 +65,8 @@ func newHookServer(t *testing.T, met []bool, claimEpoch int) (*httptest.Server, 
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
 		switch {
 		case strings.HasSuffix(p, "/claim"):
 			rec.claims++
@@ -47,6 +77,22 @@ func newHookServer(t *testing.T, met []bool, claimEpoch int) (*httptest.Server, 
 			_ = json.Unmarshal(raw, &body)
 			rec.lastWkr = body.Worker
 			_, _ = w.Write([]byte(`{"ok":true,"doc":{"claim":{"epoch":` + itoaT(claimEpoch) + `}}}`))
+		case strings.HasSuffix(p, "/pulse"):
+			// The pulse endpoint the PreToolUse heartbeat now uses. It answers
+			// like the live server: ok + the doc carrying the BUMPED claim epoch
+			// (Tasks.Pulse.apply_pulse = current_epoch + 1), which is what the
+			// hook stamps for the close that runs in a later process.
+			rec.pulses++
+			var body struct {
+				Worker string `json:"worker_id"`
+				Now    string `json:"now"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			rec.pulseRaw = append(rec.pulseRaw, string(raw))
+			_ = json.Unmarshal(raw, &body)
+			rec.lastWkr = body.Worker
+			rec.lastNow = body.Now
+			_, _ = w.Write([]byte(`{"ok":true,"doc":{"claim":{"epoch":` + itoaT(claimEpoch+rec.pulses) + `}}}`))
 		case strings.HasSuffix(p, "/close"):
 			rec.closes++
 			var body struct {
@@ -59,6 +105,7 @@ func newHookServer(t *testing.T, met []bool, claimEpoch int) (*httptest.Server, 
 			rec.lastWkr = body.Worker
 			rec.lastEp = body.Epoch
 			rec.lastRev = body.Rev
+			rec.closeEps = append(rec.closeEps, body.Epoch)
 			_, _ = w.Write([]byte(`{"ok":true,"doc":{}}`))
 		case strings.Contains(p, "/v1/data/doc/") && strings.Contains(p, "/task/"):
 			rec.gets++
@@ -196,46 +243,13 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 	})
 }
 
-// PreToolUse renew is throttled: a second fire inside the window makes no
-// request; the first (no stamp yet) renews (design §2c).
-func TestHookPreToolUseThrottle(t *testing.T) {
-	srv, rec := newHookServer(t, []bool{false}, 2)
-	// Shared temp dir across BOTH fires so the stamp written by the first is seen
-	// by the second (hookHarness would hand a fresh TempDir each call).
-	dir := t.TempDir()
-	t.Setenv("BARKPARK_TASK", "task-p")
-	t.Setenv("BARKPARK_WORKER_ID", "")
-	t.Setenv("CMUX_SURFACE_ID", "S")
-	t.Setenv("CMUX_WORKSPACE_ID", "")
-	t.Setenv("BP_CMUX_DEBUG", "")
-	hookStdin = strings.NewReader(`{}`)
-	userConfigDir = func() (string, error) { return dir, nil }
-	ctx := manifest.Context{Server: srv.URL, Token: "t", Workspace: "default", Project: "default", Dataset: "production"}
-
-	// First fire: no stamp → renews. Real buffers (not io.Discard) so the
-	// fail-safe "empty stdout" invariant is actually asserted on the renew path.
-	var so1, se1 bytes.Buffer
-	if code := runCmuxHook(&writer{stdout: &so1, stderr: &se1, output: "table"}, globals{}, ctx, []string{"PreToolUse"}); code != exitOK {
-		t.Fatalf("first PreToolUse exit = %d", code)
-	}
-	if so1.Len() != 0 {
-		t.Errorf("first PreToolUse wrote to stdout: %q (must be empty)", so1.String())
-	}
-	if rec.claims != 1 {
-		t.Fatalf("first PreToolUse claims = %d, want 1 (renew)", rec.claims)
-	}
-	// Second fire immediately: within the throttle window → no request.
-	var so2, se2 bytes.Buffer
-	if code := runCmuxHook(&writer{stdout: &so2, stderr: &se2, output: "table"}, globals{}, ctx, []string{"PreToolUse"}); code != exitOK {
-		t.Fatalf("second PreToolUse exit = %d", code)
-	}
-	if so2.Len() != 0 {
-		t.Errorf("second PreToolUse wrote to stdout: %q (must be empty)", so2.String())
-	}
-	if rec.claims != 1 {
-		t.Errorf("second PreToolUse claims = %d, want still 1 (throttled)", rec.claims)
-	}
-}
+// The PreToolUse throttle, the pulse payload, the stamped epoch, the malformed
+// context and the concurrent-hook storm all live in cmux_hook_pulse_test.go —
+// this file's claim-count assertions for PreToolUse were RETIRED when the
+// heartbeat stopped being a re-claim. A claim-count assertion cannot tell a
+// pulse from a re-claim (both renew, both bump the epoch); the pulse tests
+// assert the VERB, the now-line on the wire, the returned epoch, and the
+// throttle instead.
 
 // The dry-run flag mutates nothing but still reads to decide (design §7 rule 5).
 func TestHookDryRunNoMutation(t *testing.T) {
@@ -251,9 +265,32 @@ func TestHookDryRunNoMutation(t *testing.T) {
 	if rec.claims != 0 || rec.closes != 0 {
 		t.Errorf("dry-run mutated: claims=%d closes=%d, want 0/0", rec.claims, rec.closes)
 	}
-	if !strings.Contains(se, "would re-claim") {
-		t.Errorf("dry-run stderr = %q, want a 'would re-claim' plan line", se)
+	if !strings.Contains(se, "would close") {
+		t.Errorf("dry-run stderr = %q, want a 'would close' plan line", se)
 	}
+
+	// The PreToolUse heartbeat's dry run must plan a PULSE, not a re-claim, and
+	// must still touch nothing on the wire.
+	t.Run("PreToolUse plans a pulse", func(t *testing.T) {
+		srv, rec := newHookServer(t, []bool{false}, 5)
+		ctx := hookHarness(t, srv.URL, "task-dry", "S", `{"tool_name":"Bash","cwd":"/x/barkpark"}`)
+		so, se, code := runHook(t, ctx, globals{dryRun: true}, "PreToolUse")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+		if so != "" {
+			t.Errorf("dry-run wrote to stdout: %q (must be empty)", so)
+		}
+		if rec.pulses != 0 || rec.claims != 0 {
+			t.Errorf("dry-run mutated: pulses=%d claims=%d, want 0/0", rec.pulses, rec.claims)
+		}
+		if !strings.Contains(se, "would pulse") {
+			t.Errorf("dry-run stderr = %q, want a 'would pulse' plan line", se)
+		}
+		if strings.Contains(se, "re-claim") {
+			t.Errorf("dry-run stderr = %q still plans a re-claim — PreToolUse is the pulse path now", se)
+		}
+	})
 }
 
 // The fail-safe exit-0 matrix: every abnormal input exits 0 with empty stdout.
@@ -276,7 +313,7 @@ func TestHookFailSafeExitZero(t *testing.T) {
 		{"unreachable server", "task-x", "SessionStart", "http://127.0.0.1:1", `{}`},
 		{"malformed stdin", "task-x", "SessionStart", "http://127.0.0.1:1", `{not json at all`},
 		{"hung server within timeout", "task-x", "SessionStart", hang.URL, `{}`},
-		// PreToolUse is the renew path (re-claim, throttled). Its failure surface
+		// PreToolUse is the renew path (pulse, throttled). Its failure surface
 		// must be just as inert as SessionStart's.
 		{"PreToolUse unreachable server", "task-x", "PreToolUse", "http://127.0.0.1:1", `{}`},
 		{"PreToolUse hung server", "task-x", "PreToolUse", hang.URL, `{}`},

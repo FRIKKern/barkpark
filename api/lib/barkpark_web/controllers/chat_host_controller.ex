@@ -11,7 +11,15 @@ defmodule BarkparkWeb.ChatHostController do
   def create_enrollment(conn, params) do
     workspace_id = conn.assigns.current_workspace.id
 
-    if TenancyAuth.membership_role(conn.assigns.api_token, workspace_id) == "owner" do
+    # The OWNER-ONLY SEAT, asked at the chokepoint. The route's
+    # :require_chat_host_admin pipeline has already established owner-OR-admin
+    # (RequireWorkspaceRole); enrollment narrows that to owner alone, and the
+    # narrowing is `Tenancy.Auth.workspace_owner?/2` — the SAME predicate the
+    # Studio `ChatHostsLive` :enroll arm calls. It used to be a literal
+    # `membership_role(...) == "owner"` here AND there, one rule in two
+    # spellings; a loosening applied to one and not the other diverged
+    # silently (`arpss-w10-bl-chat-hosts-owner-literal-seat-fork`).
+    if TenancyAuth.workspace_owner?(conn.assigns.api_token, workspace_id) do
       case ChatHosts.issue_enrollment(workspace_id, params) do
         {:ok, result} -> conn |> put_status(:created) |> json(result)
         {:error, changeset} -> unprocessable(conn, changeset)

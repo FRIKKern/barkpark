@@ -18,14 +18,27 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
 
   # ─── Shared env-restore setup ───────────────────────────────────────────
 
+  # The two ctx-capturing fake plugins at the bottom of this file record the ctx
+  # they received in a `:persistent_term`. That store is global AND UNOWNED —
+  # nothing tears it down between modules — and each test `erase`s its key
+  # BEFORE reading it, which protects that test and protects nobody else.
+  @capture_keys [{__MODULE__, :collected_ctx}, {__MODULE__, :route_ctx}]
+
   setup do
     prev = Application.get_env(:barkpark, :plugins, :unset)
+    prior_terms = Enum.map(@capture_keys, &{&1, :persistent_term.get(&1, :__absent__)})
 
     on_exit(fn ->
       case prev do
         :unset -> Application.delete_env(:barkpark, :plugins)
         v -> Application.put_env(:barkpark, :plugins, v)
       end
+
+      # Erase when there was no prior term, so an absent key stays absent.
+      Enum.each(prior_terms, fn
+        {key, :__absent__} -> :persistent_term.erase(key)
+        {key, value} -> :persistent_term.put(key, value)
+      end)
     end)
 
     :ok

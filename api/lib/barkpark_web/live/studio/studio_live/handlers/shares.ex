@@ -204,6 +204,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
     end
   end
 
+  # The cascade clause both info receipts carry. `remove_share/3` revokes every
+  # live item link under the scope on EVERY call, so this is a statement of what
+  # just happened, not a hedge.
+  @item_links_revoked "Every item /s/ link under it was revoked too."
+
   @doc """
   Stop sharing a scope — and report what the STORE now says, not what the
   request asked for.
@@ -220,6 +225,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   whether the scope is shared; the delete count only decides whether anything
   was actually removed. Surfacing the count ALONE would not have been enough —
   even at `count == 1` an env-baseline share can survive the delete.
+
+  BOTH INFO BRANCHES ALSO NAME THE ITEM-LINK CASCADE (arpss-w8, RULED CASCADE).
+  `remove_share/3` revokes every live `/s/<token>` item link under the scope
+  UNCONDITIONALLY — including on the `count == 0` branch, which is exactly the
+  path that reads like a no-op. Saying it in the receipt is the whole point: the
+  operator could not otherwise tell whether the links they had handed out are
+  dead, and before the cascade landed they were not.
   """
   def shares_remove(%{"scope" => scope}, socket) do
     if Caps.admin?(socket) do
@@ -283,10 +295,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
         )
 
       count == 0 ->
-        put_flash(socket, :info, "#{scope} was not shared — nothing to remove.")
+        put_flash(
+          socket,
+          :info,
+          "#{scope} was not shared — nothing to remove. " <> @item_links_revoked
+        )
 
       true ->
-        put_flash(socket, :info, "Stopped sharing #{scope} — it is no longer shared.")
+        put_flash(
+          socket,
+          :info,
+          "Stopped sharing #{scope} — it is no longer shared. " <> @item_links_revoked
+        )
     end
   end
 

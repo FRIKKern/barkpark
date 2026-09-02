@@ -2,6 +2,8 @@
 
 # cch w28 — can task DESCRIPTIONS produce a `surface` value where every structured field failed?
 
+> HISTORICAL RECORD (2026-08-03) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Re-derivation recipe + executable backfill list. Verifier artifact, wave 28, assignment `v7-backfill-from-descriptions`.
 Stamp 2026-08-03. Ledger read live from `guerrilla.barkpark.cloud`, both epics, `limit=500`, FULL documents (no `--fields` projection).
 

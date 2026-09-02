@@ -192,7 +192,9 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
 
     test "SABOTAGE CONTROL: the bare-token check says NO to a fallback hex" do
       bare = ".btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }"
-      fallback = ".btn:focus-visible { outline: 2px solid var(--ring, #2c6d5a); outline-offset: -2px; }"
+
+      fallback =
+        ".btn:focus-visible { outline: 2px solid var(--ring, #2c6d5a); outline-offset: -2px; }"
 
       # positive arm — the real idiom passes every predicate…
       assert rule_body(bare, ".btn:focus-visible") =~ "var(--ring)"

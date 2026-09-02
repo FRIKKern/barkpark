@@ -224,6 +224,37 @@ bolted on afterward, which is worth nothing.
   builder-authored simulation, never in the loop. "The throw is the only enforcement that genuinely
   fires" is an intent, not an observation, until a wave observes one.*
 
+  **AMENDED 2026-09-02 — the ruling above is SUPERSEDED: both floors have fired.** *Re-derived on
+  this date. The VERIFY floor has fired in **13** distinct real `bp-epic-cycle` runs, each one
+  `"status": "failed"` with the fully-RENDERED throw — a digit where the source carries an
+  interpolation — in the run record's own top-level `error`. The first is `wf_5fb8ba2e-ab7.json`,
+  2026-07-21, after 14/14 surveyors reported: the digest returned 1 assignment against a floor of 3.
+  Twelve more fired on 2026-08-18, two of them on THIS epic's own waves — `wf_27e7dcd5-7a5.json`
+  (0 assignments) and `wf_f5b9da24-ba7.json` (1). The SURVEY floor has ALSO fired: 5 distinct runs
+  on 2026-07-22 (workflow task-ids `wlcsw6x2d`, `w1smo8lzj`, `w2p2ldakl`, `wkimfhhf3`, `wy6ts9gf1`),
+  each a failed-workflow notification reading "the strategist returned 1 survey assignment(s), below
+  the floor of 5". Those five left NO `wf_*.json` behind — a run that dies at the Survey floor never
+  persists a run record — so the original sweep, which read run records, was structurally blind to
+  precisely the floor it then declared unfired. That is worth more than the correction: absence from
+  the run-record corpus is not absence of the firing, and a sweep must be shown able to FIND the
+  thing before its silence counts as evidence. The record also did not decay — it lives under
+  `~/.claude/projects/<project-slug>/<session-id>/workflows/`, which outlives the repo worktree a run
+  was launched from, so a check that looked only inside the worktree read the wrong shelf.*
+
+  *Re-derive it, do not trust it — read-only, from any checkout:*
+  `grep -rlE 'Verify fan-out floor: the digest returned [0-9]+ verify assignment' ~/.claude/projects --include='wf_*.json'`
+  *and* `grep -rlE 'Survey fan-out floor: the strategist returned [0-9]+ survey' ~/.claude/projects`.
+  *Expected shape: the first prints one file path per firing and nothing else — 13 paths on
+  2026-09-02, one under an `e2-review-w17` session and twelve under a `fix-stamp-miss-doc` session;
+  fewer means records were pruned, more means the floor fired again. The second prints session
+  `.jsonl` transcripts and never a `wf_*.json`, and one of them is the builder-authored simulation
+  (it prints its own `n=0: THREW ->` roll-call), not a wave. The DIGIT is the discriminator — a hit
+  reading `returned ${` is a snapshot of the throw's source, not an execution of it. Confirm each
+  VERIFY hit in its record's top-level `error` beside `"status": "failed"`, each SURVEY hit inside a
+  `<task-notification>` block whose status is failed, and de-duplicate by `runId` and `<task-id>`:
+  a transcript reports one firing twice, once queued and once delivered. Permission warnings on
+  unrelated project directories are stderr noise, not misses.*
+
 - **D29 — The census may NEVER gate on `classifySafety`. It gets its own fail-closed screen, and
   the screen is an ALLOWLIST first.** Three layers, in order: (a) a HOST BOUND refusing any command
   naming `ssh`/`scp`/`rsync`, `157.180.90.121`, `178.105.92.191`, `guerrilla`, `barkpark.cloud` or

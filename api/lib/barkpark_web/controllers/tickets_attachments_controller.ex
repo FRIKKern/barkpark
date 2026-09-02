@@ -19,6 +19,36 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   `:create` is submitter-only in v1 (the outsider files; the operator answers in
   text). Both read paths stream the raw bytes back to an authorized caller only.
 
+  ## Which document id these routes resolve (task-0d7d25398ee8dfde)
+
+  A ticket is a DRAFT row. `Thread.create/2` writes through
+  `Content.create_document/4` — "new docs are always created as drafts" — so the
+  stored `doc_id` is `drafts.ticket-…`, while the id the submitter is handed
+  (`Thread.to_map/1` → `Content.published_id/1`) is the bare `ticket-…`. These
+  routes used to resolve that bare id straight through `Content.get_document/4`,
+  which matches the `doc_id` column EXACTLY: a ticket filed at
+  `POST /v1/tickets` was **404 not_found** on its own attachment routes the
+  moment its submitter tried to use them.
+
+  The choice is DRAFT-FIRST RESOLUTION, not a publish-on-create, and the reason
+  is the plugin's own lifecycle: the tickets plugin never publishes. Every write
+  path (`Thread.append/4`, `close/1`, `stamp_seen/1`) re-persists with
+  `status: fresh.status || "draft"`, `Thread.find/3` already resolves
+  draft-then-published, and `Thread.to_map/1` renders the published spelling to
+  clients. Publishing on create would make tickets the one plugin whose rows sit
+  in a lifecycle state nothing else here maintains, and would leave every ticket
+  already in the field unreachable. So resolution is delegated to the
+  sibling-owned `Thread` — `get_for_key/2` (which also OWNS the `content.key_id`
+  ownership predicate) and `get_for_operator/3` — rather than re-derived here:
+  one owner for "which row is this ticket id", so a future change to the storage
+  spelling cannot leave the attachment routes behind again.
+
+  Downstream of that lookup, the ticket id used to STAMP, COUNT and RETRIEVE an
+  attachment is normalized to the resolved document's published id
+  (`attachment_ticket_id/1`). Both spellings of a ticket id now resolve, so
+  without normalization a caller who attached at `drafts.ticket-x` and read at
+  `ticket-x` would stamp one key and query another.
+
   ## What "an authorized caller" means on `:show_operator`
 
   The operator read rides `:session_token_root` (charter Decision 12), a
@@ -44,26 +74,26 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   alias Barkpark.Content
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Tickets.Attachments
+  alias Barkpark.Plugins.Tickets.Thread
   alias BarkparkWeb.Plugs.RequireToken
 
   action_fallback BarkparkWeb.FallbackController
-
-  @ticket_type "ticket"
 
   # ───────────────────────────────── create ─────────────────────────────────
 
   @doc "Upload one attachment to a ticket the presenting key owns (multipart)."
   def create(conn, %{"id" => id, "file" => %Plug.Upload{} = upload}) do
     with {:ok, key} <- require_ticket_key(conn),
-         {:ok, _ticket} <- owned_ticket(id, key),
-         :ok <- check_count(id, key),
+         {:ok, ticket} <- owned_ticket(id, key),
+         ticket_id = attachment_ticket_id(ticket),
+         :ok <- check_count(ticket_id, key),
          {:ok, binary} <- read_upload(upload),
          {:ok, mime} <-
            Attachments.validate(binary,
              filename: upload.filename,
              content_type: upload.content_type
            ),
-         {:ok, ref} <- store_attachment(binary, id, key, mime, upload.filename) do
+         {:ok, ref} <- store_attachment(binary, ticket_id, key, mime, upload.filename) do
       conn
       |> put_status(:created)
       |> json(%{attachment: ref})
@@ -91,9 +121,14 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   @doc "Stream an attachment back to the owning key."
   def show(conn, %{"id" => id, "asset_id" => asset_id}) do
     with {:ok, key} <- require_ticket_key(conn),
-         {:ok, _ticket} <- owned_ticket(id, key),
+         {:ok, ticket} <- owned_ticket(id, key),
          {:ok, file} <-
-           Attachments.linked_asset(asset_id, id, key_dataset(key), key_scope(key)) do
+           Attachments.linked_asset(
+             asset_id,
+             attachment_ticket_id(ticket),
+             key_dataset(key),
+             key_scope(key)
+           ) do
       stream_file(conn, file)
     else
       {:error, :unauthorized} -> respond_error(conn, :unauthorized)
@@ -108,8 +143,9 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
     with {:ok, _tok} <- require_operator(conn),
          {:ok, dataset} <- operator_dataset(conn),
          scope = operator_scope(conn),
-         {:ok, _ticket} <- operator_ticket(id, dataset, scope),
-         {:ok, file} <- Attachments.linked_asset(asset_id, id, dataset, scope) do
+         {:ok, ticket} <- operator_ticket(id, dataset, scope),
+         {:ok, file} <-
+           Attachments.linked_asset(asset_id, attachment_ticket_id(ticket), dataset, scope) do
       stream_file(conn, file)
     else
       {:error, :unauthorized} -> respond_error(conn, :unauthorized)
@@ -171,27 +207,26 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   # A ticket is OWNED when its embedded `key_id` matches the presenting key.
   # Missing ticket OR foreign owner → not_found (never leak existence / 403).
-  defp owned_ticket(id, key) do
-    case Content.get_document(id, @ticket_type, key_dataset(key), key_scope(key)) do
-      {:ok, %{content: content} = ticket} when is_map(content) ->
-        if to_string(Map.get(content, "key_id")) == to_string(key_id(key)) do
-          {:ok, ticket}
-        else
-          {:error, :not_found}
-        end
+  #
+  # `Thread.get_for_key/2` IS that rule plus the draft-first resolution the
+  # storage spelling requires (see the moduledoc): it derives dataset + scope
+  # from the same key fields this controller does, tries `drafts.<id>` / the id
+  # as given / the published id, and answers `{:error, :not_found}` for both a
+  # missing ticket and a foreign one. Calling it — instead of re-deriving the
+  # lookup on `Content.get_document/4` — is what keeps this surface from drifting
+  # away from the create path a second time.
+  defp owned_ticket(id, key), do: Thread.get_for_key(key, id)
 
-      _ ->
-        {:error, :not_found}
-    end
-  end
+  # An operator may read any ticket that exists in their scope. Same delegation,
+  # same reason: `Thread.get_for_operator/3` is the resolver the sibling operator
+  # read (`GET /v1/tickets/inbox/:id`) already goes through, so the attachment
+  # route and the ticket route now answer "does this ticket exist for me?"
+  # identically.
+  defp operator_ticket(id, dataset, scope), do: Thread.get_for_operator(id, dataset, scope)
 
-  # An operator may read any ticket that exists in their scope.
-  defp operator_ticket(id, dataset, scope) do
-    case Content.get_document(id, @ticket_type, dataset, scope) do
-      {:ok, ticket} -> {:ok, ticket}
-      _ -> {:error, :not_found}
-    end
-  end
+  # The id an attachment is STAMPED/COUNTED/QUERIED under: always the resolved
+  # document's PUBLISHED spelling, whichever spelling the caller used in the URL.
+  defp attachment_ticket_id(%{doc_id: doc_id}), do: Content.published_id(doc_id)
 
   defp check_count(id, key) do
     Attachments.validate_count(Attachments.count_for_ticket(id, key_dataset(key), key_scope(key)))
@@ -251,10 +286,23 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
     end
   end
 
+  # WORKSPACE, never project — the same tenancy boundary
+  # `Thread.operator_scope/1` states for every operator ticket read, applied here
+  # to the ASSET lookup as well (task-0d7d25398ee8dfde).
+  #
+  # `Keys.mint/1` binds a ticket key to a workspace and NEVER to a project, so a
+  # ticket and its attachment blob are both written with `project_id` nil. This
+  # scope, built from `AssignDefaultScope`'s `:current_project`, carried a
+  # project id into `Media.get_file/2` → `scope_to_workspace_or_global/3`, whose
+  # binary-project arm filters `project_id == ^project_id` with NO null fallback:
+  # the operator inbox read matched zero rows for every attachment a real key had
+  # ever uploaded. Narrowing to the workspace is not a widening of the tenancy
+  # boundary — it is the boundary the ticket lookup on the very next line already
+  # uses; keeping the project filter here only desynchronized the two halves of
+  # one request.
   defp operator_scope(conn) do
     []
     |> put_scope_assign(:workspace_id, conn.assigns[:current_workspace])
-    |> put_scope_assign(:project_id, conn.assigns[:current_project])
   end
 
   defp put_scope_assign(opts, _k, nil), do: opts

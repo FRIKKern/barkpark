@@ -56,18 +56,19 @@ defmodule Barkpark.Tasks.QueueGate do
   @doc """
   Derive the current execution class from Task content and a prospective worker.
 
-  A non-empty live claim owned by a different worker always wins as
-  `foreign_claimed`. The current holder sees the persisted class. Missing gates
-  and legacy content default to `executable`.
+  A LIVE claim owned by a different worker always wins as `foreign_claimed`.
+  The current holder sees the persisted class. Missing gates and legacy content
+  default to `executable`.
+
+  "Live" is `live_claim_worker/1` below: a worker name AND no close stamp.
   """
   @spec execution_class(map() | nil, String.t() | nil) :: String.t()
   def execution_class(content, worker_id \\ nil)
 
   def execution_class(content, worker_id) when is_map(content) do
-    claim = fetch(content, "claim")
-    claim_worker = if is_map(claim), do: fetch(claim, "worker"), else: nil
+    claim_worker = content |> fetch("claim") |> live_claim_worker()
 
-    if non_blank?(claim_worker) and claim_worker != worker_id do
+    if not is_nil(claim_worker) and claim_worker != worker_id do
       "foreign_claimed"
     else
       case fetch(content, "queue_gate") do
@@ -98,7 +99,15 @@ defmodule Barkpark.Tasks.QueueGate do
   def executable_query do
     dynamic(
       [doc: d],
-      fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) and
+      # SQL TWIN of `live_claim_worker/1`. The two predicates answer the same
+      # question on the same JSON and MUST move together: the Elixir arm gates
+      # the targeted claim (`Claim.check_executable_for_targeted_claim/2`), this
+      # one gates the ready queue that `bp task ready` / `bp task next` read.
+      # Fixing only one leaves a reopened row claimable-by-name but invisible
+      # on the board — the SAME bug wearing the other half of its face.
+      (fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) or
+         fragment("COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''", d.content) or
+         fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content)) and
         (not fragment("jsonb_exists(?, 'queue_gate')", d.content) or
            fragment("?->'queue_gate'", d.content) == fragment("'null'::jsonb") or
            fragment("?->'queue_gate'", d.content) ==
@@ -253,6 +262,38 @@ defmodule Barkpark.Tasks.QueueGate do
       true -> :absent
     end
   end
+
+  # A claim is LIVE only while it names a worker AND carries no close stamp.
+  #
+  # `close` DELIBERATELY keeps `claim.worker` and adds `closed_by` + `closed_at`
+  # (close.ex, "Stamp close metadata into the claim lease") so the ledger
+  # remembers who finished the work. `Stage` — the only door to the `done → open`
+  # reopen (Transitions D7) — "never reads or writes `content.claim`". So a
+  # REOPENED task still wears its dead holder's name, and deriving
+  # `foreign_claimed` from that name made every reopened row PERMANENTLY
+  # unclaimable by a new worker (hit live on stw7-backlog-drafts-clamp-gap).
+  #
+  # Why the close stamp and not `lifecycle_status`: the two OTHER ways a lease
+  # ends already blank the worker — `Release` sets `claim.worker` nil, and
+  # `TtlSweeper.apply_reap/1` does the same while KEEPING "closed_by/closed_at
+  # history if it was set". Close is the one exit that leaves a name behind, so
+  # the close stamp is exactly the missing bit, and reading it keeps this
+  # predicate claim-local (the same map `executable_query/0` can see in SQL).
+  #
+  # Agrees with `Claim.renewal?/2` by construction: renewal requires
+  # `lifecycle_status == "in_progress"`, which a closed-then-reopened row is
+  # not — so neither predicate calls a closed claim live, and the holder cannot
+  # renew a lease a contender may now take.
+  defp live_claim_worker(claim) when is_map(claim) do
+    worker = fetch(claim, "worker")
+
+    if non_blank?(worker) and not closed_claim?(claim), do: worker, else: nil
+  end
+
+  defp live_claim_worker(_claim), do: nil
+
+  defp closed_claim?(claim),
+    do: non_blank?(fetch(claim, "closed_at")) or non_blank?(fetch(claim, "closed_by"))
 
   defp non_blank?(value), do: is_binary(value) and String.trim(value) != ""
 end
