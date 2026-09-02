@@ -40,6 +40,7 @@ import {
   censusOne, censusRun, summarise, renderHuman, toJson, isNullDistribution,
   isTestRunner, loadCorpusCommands, CORPUS_NAME,
   pipelineSegments, networkTool, networkReach, validateArgv,
+  probeToolAvailability, resolveTool, toolHeads,
   loadLedgerRecipes, renderLedgerPreamble, LEDGER_CORPUS_NAME,
 } from "../census.mjs";
 import { screenCommand, DANGER_SET } from "../screen.mjs";
@@ -311,8 +312,27 @@ test("an rc128 stderr nobody recognises is NOT CLASSIFIED rather than guessed", 
   assert.equal(v.admissible, false);
 });
 
-test("exit 127 (command not found) is decay; a warning on stderr beside rc0 is not a fault", () => {
-  assert.equal(classifyOutcome("bp task ls", run(127, "", "sh: bp: not found")).outcome, OUTCOME.PATH_GONE);
+test("exit 127 (command not found) is TOOL-ABSENT and in NEITHER rate; a warning beside rc0 is not a fault", () => {
+  // THE DEFECT THIS REPLACES. rc 127 used to land in PATH-GONE, which is in the
+  // DECAYED set — so a host without `bp`, `gh` or `go` published a decay wave
+  // about the LEDGER. Measured on the frozen corpus over one unchanged tree:
+  // full PATH 39 of 193 decisive rows decayed (20.2%, verdict CONSISTENT);
+  // PATH stripped of those three 61 of 197 (31.0%, verdict CONTRARY), 37 of the
+  // 61 pure rc-127. The recipes did not move; the PATH did.
+  const v = classifyOutcome("bp task ls", run(127, "", "sh: bp: not found"));
+  assert.equal(v.outcome, OUTCOME.TOOL_ABSENT);
+  assert.equal(v.decayed, false, "a missing binary measures this host, not the ledger");
+  assert.equal(v.answering, false, "nothing was measured, so it is not an answer either");
+  assert.equal(v.admissible, false, "it must be in NEITHER rate");
+  assert.equal(isDecayed(OUTCOME.TOOL_ABSENT), false, "TOOL-ABSENT must stay outside the DECAYED set");
+  assert.match(v.why, /bp/, "the why names the head that was missing, not just 'a command'");
+
+  // THE CONTROL. A path that is genuinely gone is still real decay — the fix
+  // must not have laundered PATH-GONE away along with the missing binaries.
+  const gone = classifyOutcome("git show origin/main:gone.mjs", run(128, "", "fatal: path 'gone.mjs' does not exist in 'origin/main'"));
+  assert.equal(gone.outcome, OUTCOME.PATH_GONE);
+  assert.equal(gone.decayed, true, "a gone path is decay and must stay decay");
+
   const warned = classifyOutcome("git ls-files tooling/", run(0, "a\nb\n", "warning: not a git repository hint"));
   assert.equal(warned.outcome, OUTCOME.ANSWERED, "a clean run must not be reclassified by stderr chatter");
 });
@@ -725,14 +745,31 @@ test("--ledger folds the real store, dedupes to one recipe per key, and SURFACES
   assert.equal(source.commands.length, source.stats.subjects,
     "deduped: exactly one recipe per (subject, quantity) key");
   assert.ok(source.commands.every((c) => typeof c === "string" && c.trim()));
-  // The rivals are SKIPPED, never dropped in silence — summarise()'s report has
-  // no field for them, so flattening to a bare string[] would lose them.
-  assert.equal(source.skippedRivals, source.stats.rows - source.stats.subjects);
-  assert.equal(source.rivalMethods.length, source.stats.rival_methods);
 
   const all = loadLedgerRecipes(LEDGER_DIR, { allRivals: true });
   assert.ok(all.commands.length >= source.commands.length);
   assert.equal(all.skippedRivals, 0);
+
+  // The rivals are SKIPPED, never dropped in silence — summarise()'s report has
+  // no field for them, so flattening to a bare string[] would lose them.
+  //
+  // THE WITNESS IS THE allRivals LOAD, NOT `rows - subjects`. loadLedgerRecipes
+  // counts DISTINCT rerun STRINGS per key, so what it skips is exactly what the
+  // allRivals load keeps and this one drops. This used to be asserted as
+  // `rows - subjects`, which is the same number ONLY while no two ROWS under one
+  // key carry byte-identical commands — an accident of the store, never a
+  // property of the reader. Re-recording an existing recipe through the write
+  // path (D118's append-only repair: the original row is never edited, a new
+  // attested run supersedes it) writes precisely that duplicate, with a fresher
+  // observed_at and nothing else changed, and the old identity went red on a
+  // store that was behaving correctly.
+  assert.equal(source.skippedRivals, all.commands.length - source.commands.length,
+    "skipped = every distinct command past the first, per key");
+  // The looser relation still holds and names the gap: a key holding two rows
+  // with the SAME command contributes to rows-subjects and not to skippedRivals.
+  assert.ok(source.skippedRivals <= source.stats.rows - source.stats.subjects,
+    "a repeated command is a re-run of one recipe, not a second way in");
+  assert.equal(source.rivalMethods.length, source.stats.rival_methods);
 });
 
 test("the pre-census block prints the fold facts summarise() has NO FIELD FOR", () => {
@@ -1051,4 +1088,188 @@ test("CONTROL: `--ledger` stdout carries the provenance tree line and the bindin
   assert.match(r.stdout, /\[grip-provenance\]/, "the render must state which tree it ran in");
   assert.match(r.stdout, /BINDING CLASS/, "the render must report the binding-class distribution");
   assert.match(r.stdout, /WRONG-CWD does NOT cover this class/, "the WRONG-CWD non-coverage note must ship in the render");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. TOOL AVAILABILITY — A MISSING BINARY IS NOT A ROTTED RECIPE
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE DEFECT. rc 127 was mapped to PATH-GONE, and PATH-GONE is in the DECAYED
+// set, so a host with a lean PATH published its own missing binaries as decay
+// IN THE LEDGER. Re-derived over one unchanged tree and one unchanged corpus,
+// only the PATH differing:
+//
+//   full PATH                     39 of 193 decisive decayed  20.2%  CONSISTENT
+//   PATH without bp, gh, go, mix  61 of 197 decisive decayed  31.0%  CONTRARY
+//
+// 37 of that second 61 are pure rc-127. The verdict FLIPPED on which tools the
+// operator happened to have installed — the census's own disease (a number
+// computed at one authority level, published at a higher one) inside the
+// census's own instrument.
+//
+// THE FIX IS TWO-PART AND BOTH PARTS ARE TESTED HERE. (1) TOOL-ABSENT sits
+// outside DECAYED, so the rows leave both rates. (2) A tool-availability header
+// is PROBED (a PATH walk, not an assumption) and printed on EVERY run, and no
+// rate is printed without it — because a reader cannot otherwise tell a rate
+// conditional on a lean PATH from one that is not.
+//
+// EVERY PROBE TEST INJECTS ITS OWN PATH AND ITS OWN EXECUTABLE PREDICATE. A test
+// that asked the real host whether `bp` exists would pass or fail on what the
+// machine happens to have installed, which is the exact conditionality being
+// fixed.
+
+/** A fake host: only the named absolute paths are executable. */
+const fakeHost = (executables) => (p) => executables.includes(p);
+const FAKE_PATH = "/opt/fake/bin:/usr/bin";
+const HAS_GREP_ONLY = fakeHost(["/usr/bin/grep", "/usr/bin/git"]);
+
+const executedRow = (command) => ({ command, screened: true, executed: true, level: "L3" });
+
+test("the probe RESOLVES a head against a real PATH walk and reports absence as absence", () => {
+  const opts = { pathEnv: FAKE_PATH, isExecutable: HAS_GREP_ONLY };
+
+  const found = resolveTool("grep", opts);
+  assert.equal(found.present, true);
+  assert.equal(found.at, "/usr/bin/grep", "the probe names WHERE it resolved, so the claim is checkable");
+  assert.equal(found.kind, "on-path");
+
+  const missing = resolveTool("bp", opts);
+  assert.equal(missing.present, false);
+  assert.equal(missing.at, null);
+
+  // NOT VACUOUS IN THE OTHER DIRECTION: give the same head a PATH that has it
+  // and the same call flips. Without this half the test would pass against a
+  // probe that returned `false` for everything.
+  assert.equal(resolveTool("bp", { pathEnv: "/opt/fake/bin", isExecutable: fakeHost(["/opt/fake/bin/bp"]) }).present, true);
+});
+
+test("the probe knows a shell builtin needs no binary, and resolves a ./path literal against the tree", () => {
+  // `/bin/sh -c 'cd x && …'` needs nothing on PATH. Reporting `cd` ABSENT would
+  // make the header cry wolf on every run, and a header that cries wolf is one
+  // an operator learns to skip.
+  const builtin = resolveTool("cd", { pathEnv: "", isExecutable: () => false });
+  assert.equal(builtin.present, true);
+  assert.equal(builtin.kind, "shell-builtin");
+
+  // A head with a slash is NOT a PATH lookup: `./scripts/x.sh` is resolved
+  // against the tree. Path-stripping it to `x.sh` and searching PATH would
+  // report every repo script in the corpus as a missing tool.
+  const script = resolveTool("./scripts/x.sh", { cwd: "/repo", pathEnv: FAKE_PATH, isExecutable: fakeHost(["/repo/scripts/x.sh"]) });
+  assert.equal(script.present, true);
+  assert.equal(script.kind, "path-literal");
+  assert.equal(script.at, "/repo/scripts/x.sh");
+  assert.equal(resolveTool("./scripts/gone.sh", { cwd: "/repo", pathEnv: FAKE_PATH, isExecutable: fakeHost([]) }).present, false);
+});
+
+test("heads are counted over EVERY pipeline segment, and only over rows that actually executed", () => {
+  const heads = toolHeads([
+    executedRow("bp task ls | grep foo"),
+    executedRow("grep -rn x tooling"),
+    { command: "sudo rm -rf /", screened: false, executed: false, level: "L3" },
+  ]);
+  // `bp task ls | grep foo` exits with GREP's status, so a tail-only read would
+  // report this run as fully tooled while its head was missing.
+  assert.equal(heads.get("bp"), 1, "the pipeline HEAD must be probed even though the tail set the exit code");
+  assert.equal(heads.get("grep"), 2);
+  assert.equal(heads.has("sudo"), false, "a refused row reached no shell, so its head says nothing about the rates");
+});
+
+test("the render prints a tool-availability header naming which heads were PRESENT and which ABSENT", () => {
+  const rows = [
+    { ...executedRow("grep -rn x tooling"), ...classifyOutcome("grep -rn x tooling", run(1, "", "")) },
+    { ...executedRow("bp task ls"), ...classifyOutcome("bp task ls", run(127, "", "sh: bp: not found")) },
+    { ...executedRow("go vet ./..."), ...classifyOutcome("go vet ./...", run(127, "", "sh: go: not found")) },
+  ];
+  const report = summarise(rows, { corpusName: "tool-availability-demo", pathEnv: FAKE_PATH, isExecutable: HAS_GREP_ONLY });
+  const text = renderHuman(report);
+
+  assert.match(text, /TOOL AVAILABILITY ON THIS HOST/);
+  // The header must NAME the heads, not just count them — a bare "2 absent" is
+  // a number the reader cannot act on or check.
+  const headerLines = text.split("\n").filter((l) => /^\s+(present|ABSENT)\s/.test(l));
+  assert.equal(headerLines.length, 2);
+  assert.match(headerLines[0], /\bgrep\b/, "the present line must name grep");
+  assert.match(headerLines[1], /\bbp\b/, "the ABSENT line must name bp");
+  assert.match(headerLines[1], /\bgo\b/, "the ABSENT line must name go");
+  assert.doesNotMatch(headerLines[0], /\bbp\b/, "bp is absent on this fake host and must not be listed present");
+
+  assert.deepEqual(report.tools.absentHeads.sort(), ["bp", "go"]);
+  assert.deepEqual(report.tools.presentHeads, ["grep"]);
+  assert.equal(report.reach.toolAbsent, 2);
+
+  // AND THE RATE IT QUALIFIES EXCLUDES THEM. Both rc-127 rows are inadmissible,
+  // so the one remaining decisive row carries the whole rate.
+  assert.equal(report.decisive.admissible, 1);
+  assert.equal(report.decisive.decayed, 0, "two missing binaries must not appear as two decayed recipes");
+});
+
+test("the header is printed even when NOTHING is missing — 'everything was installed' is the fact a rate rests on", () => {
+  const rows = [{ ...executedRow("grep -rn x tooling"), ...classifyOutcome("grep -rn x tooling", run(1, "", "")) }];
+  const text = renderHuman(summarise(rows, { corpusName: "fully-tooled", pathEnv: FAKE_PATH, isExecutable: HAS_GREP_ONLY }));
+  assert.match(text, /TOOL AVAILABILITY ON THIS HOST/);
+  assert.match(text, /every head this run executed resolves here/);
+  assert.match(text, /STILL ANSWERING vs DECAYED/, "a fully-tooled run still prints its rates");
+});
+
+test("NO RATE WITHOUT THE HEADER: with no probe, both renders WITHHOLD the decay figure", () => {
+  const rows = [
+    { ...executedRow("grep -rn x tooling"), ...classifyOutcome("grep -rn x tooling", run(1, "", "")) },
+    { ...executedRow("cat gone"), ...classifyOutcome("cat gone", run(1, "", "cat: gone: No such file or directory")) },
+  ];
+  const withProbe = summarise(rows, { corpusName: "gated", pathEnv: FAKE_PATH, isExecutable: HAS_GREP_ONLY });
+  const noProbe = summarise(rows, { corpusName: "gated", tools: null });
+
+  // The CONTROL half: with the header, the rate is printed as normal. Without
+  // it, the same rows produce no rate anywhere in the render.
+  const okText = renderHuman(withProbe);
+  assert.match(okText, /STILL ANSWERING vs DECAYED/);
+  assert.match(okText.split("\n")[0], /decayed\./);
+
+  const text = renderHuman(noProbe);
+  assert.match(text, /NO RATE — THE TOOL-AVAILABILITY PROBE DID NOT RUN/);
+  assert.doesNotMatch(text, /STILL ANSWERING vs DECAYED/, "the rate block must not be reachable without the header");
+  assert.doesNotMatch(text.split("\n")[0], /% of .* STILL ANSWER/, "the banner is the first place a number could escape");
+
+  // AND THE MACHINE RENDER MAKES THE SAME REFUSAL. A JSON escape hatch around a
+  // human-render guard is the guard not existing.
+  const j = toJson(noProbe);
+  assert.equal(j.decisive.decayPct, null);
+  assert.equal(j.decisive.answeringPct, null);
+  assert.match(j.decisive.rate_withheld, /tool-availability/i);
+  assert.equal(j.tool_availability, null);
+  // The control, again: the probed report DOES carry its numbers.
+  assert.equal(typeof toJson(withProbe).decisive.decayPct, "number");
+});
+
+test("--json carries the tool-availability header and a caveat that names it", () => {
+  const rows = [
+    { ...executedRow("grep -rn x tooling"), ...classifyOutcome("grep -rn x tooling", run(1, "", "")) },
+    { ...executedRow("bp task ls"), ...classifyOutcome("bp task ls", run(127, "", "sh: bp: not found")) },
+  ];
+  const j = toJson(summarise(rows, { corpusName: "json-tools", pathEnv: FAKE_PATH, isExecutable: HAS_GREP_ONLY }));
+  assert.deepEqual(j.tool_availability.absent.map((e) => e.head), ["bp"]);
+  assert.deepEqual(j.tool_availability.present.map((e) => e.head), ["grep"]);
+  assert.equal(j.tool_availability.rows_scored_tool_absent, 1);
+  assert.ok(j.caveats.some((c) => /TOOL-ABSENT/.test(c) && /NEITHER rate/.test(c)));
+});
+
+test("the probe SPAWNS NOTHING — the census's execution set stays exactly what screenCommand admitted", () => {
+  // The whole safety argument of this module (D47) is that screenCommand is the
+  // only gate and nothing else reaches a shell. A probe implemented as
+  // `sh -c 'command -v bp'` would have quietly widened that set. This asserts
+  // the implementation reads the filesystem instead.
+  let spawned = 0;
+  const rows = [executedRow("bp task ls | grep foo"), executedRow("go vet ./...")];
+  const probe = probeToolAvailability(rows, {
+    pathEnv: FAKE_PATH,
+    isExecutable: (p) => { spawned += 0; return HAS_GREP_ONLY(p); },
+  });
+  assert.equal(spawned, 0);
+  assert.equal(probe.probed, 3, "bp, grep and go");
+  assert.equal(probe.rowsDependingOnAbsent, 2);
+
+  // And the SOURCE never composes a shell probe: no `command -v`, no `which`,
+  // no `type -p` reaching the executor.
+  assert.ok(!/command\s+-v/.test(CODE), "the probe must not shell out to `command -v`");
+  assert.ok(!/\bwhich\s+\$\{/.test(CODE), "the probe must not shell out to `which`");
 });

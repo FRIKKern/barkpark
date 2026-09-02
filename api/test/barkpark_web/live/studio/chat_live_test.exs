@@ -4017,6 +4017,91 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert length(chip.hits) == 8
       assert chip.overflow == 692
     end
+
+    test "a task_prime payload classifies to a PRIME chip — counts plus a colored ready head" do
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_prime", mcp_fixture("task_prime.json"))
+
+      assert %{kind: :prime, ready_total: 7, overflow: 2} = chip
+
+      # counts render in board order, each carrying its lifecycle token
+      assert Enum.map(chip.counts, & &1.state) ==
+               ~w(open in_progress blocked done cancelled)
+
+      assert Enum.map(chip.counts, & &1.count) == [12, 3, 1, 40, 2]
+
+      assert Enum.find(chip.counts, &(&1.state == "in_progress")).color ==
+               "var(--life-in_progress)"
+
+      # the ready head is capped at 5, deep-linked, and lifecycle-colored
+      assert length(chip.ready) == 5
+      first = hd(chip.ready)
+      assert first.label == "Render the prime queue chip"
+      assert first.href == "/admin/projects?task=task-r1"
+      # a BRIEF card omits lifecycle_status exactly when it is "open"
+      assert first.state == "open"
+      assert first.color == "var(--life-open)"
+
+      ready_row = Enum.find(chip.ready, &(&1.label == "Fold the approval status"))
+      assert ready_row.color == "var(--life-ready)"
+    end
+
+    test "an UNKNOWN lifecycle state reads dim-neutral — it never borrows a known color" do
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_prime", mcp_fixture("task_prime.json"))
+
+      row = Enum.find(chip.ready, &(&1.label == "Retire the second diff engine"))
+      assert row.state == "marinating"
+      assert row.color == "var(--fg-dim)"
+
+      # and the negative control: a state IN the vocabulary is NOT neutralized
+      known = Enum.find(chip.ready, &(&1.label == "Wire the rail rev diff"))
+      assert known.color == "var(--life-researching)"
+    end
+
+    test "a MALFORMED prime payload degrades to a neutral chip — never a crash, never invented state" do
+      malformed =
+        Jason.encode!(%{
+          "ok" => true,
+          "counts" => "not a map",
+          "ready" => "not a list",
+          "worker" => 7
+        })
+
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_prime", malformed)
+
+      assert %{kind: :prime, counts: [], ready: [], ready_total: 0, overflow: 0} = chip
+    end
+
+    test "a PARTIAL prime payload keeps every row it can read and drops only the unreadable ones" do
+      partial =
+        Jason.encode!(%{
+          "ok" => true,
+          "counts" => %{"open" => 2, "in_progress" => nil, "sludge" => "many"},
+          "ready" => ["a bare string", %{"doc_id" => "task-x", "title" => "Readable"}, 42]
+        })
+
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_prime", partial)
+
+      # non-integer counts are dropped rather than rendered as garbage
+      assert Enum.map(chip.counts, & &1.state) == ["open"]
+      # only the map row with a label survives; the total stays HONEST
+      assert Enum.map(chip.ready, & &1.label) == ["Readable"]
+      assert chip.ready_total == 3
+      assert chip.overflow == 2
+    end
+
+    test "the prime branch never steals a search payload — `counts` alone is not prime" do
+      # a result LIST carrying a counts map (no `ready`) is still a search chip:
+      # prime requires BOTH keys, so the existing branches are untouched.
+      payload =
+        Jason.encode!(%{
+          "ok" => true,
+          "counts" => %{"open" => 3},
+          "docs" => [%{"doc_id" => "task-aaa", "title" => "Still a search", "type" => "task"}]
+        })
+
+      assert %{kind: :search, total: 1} =
+               ChatToolRenderer.chip("mcp__barkpark__task_ready", payload)
+    end
   end
 
   describe "MCP result chip render (charter D64)" do
@@ -4076,6 +4161,57 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "no id"
       refute html =~ "href="
     end
+
+    test "a prime chip renders the counts and a lifecycle-colored ready head, tokens only" do
+      html =
+        render_component(&ChatToolRenderer.tool_chip/1,
+          chip: %{
+            kind: :prime,
+            ready_total: 7,
+            overflow: 2,
+            counts: [
+              %{state: "open", count: 12, color: "var(--life-open)"},
+              %{state: "in_progress", count: 3, color: "var(--life-in_progress)"}
+            ],
+            ready: [
+              %{
+                label: "Render the prime queue chip",
+                state: "open",
+                color: "var(--life-open)",
+                href: "/admin/projects?task=task-r1"
+              },
+              %{
+                label: "Unknown state row",
+                state: "marinating",
+                color: "var(--fg-dim)",
+                href: nil
+              }
+            ]
+          }
+        )
+
+      assert html =~ "7 ready"
+      assert html =~ "open 12"
+      assert html =~ "in_progress 3"
+      assert html =~ "var(--life-in_progress)"
+      assert html =~ ~s(href="/admin/projects?task=task-r1")
+      # the unknown state draws the NEUTRAL token and no dead link
+      assert html =~ "var(--fg-dim)"
+      assert html =~ "Unknown state row"
+      assert html =~ "+2 more"
+      # tokens only — no copied hex/hsl color literal
+      refute html =~ ~r/#[0-9a-fA-F]{3,6}\b/
+    end
+
+    test "an EMPTY prime chip still renders honestly — 0 ready, no rows, no overflow line" do
+      html =
+        render_component(&ChatToolRenderer.tool_chip/1,
+          chip: %{kind: :prime, ready_total: 0, overflow: 0, counts: [], ready: []}
+        )
+
+      assert html =~ "0 ready"
+      refute html =~ "more"
+    end
   end
 
   describe "MCP chips in the live transcript (charter D64)" do
@@ -4108,6 +4244,18 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "3 results"
       assert html =~ "/admin/projects?task=task-aaa"
       assert html =~ "Ship native chips"
+    end
+
+    test "a task_prime result renders the queue chip in the live transcript",
+         %{view: view, sid: sid} do
+      send_tool_use(sid, "mcp__barkpark__task_prime", %{"worker" => "chat-w3"})
+      send_frame(sid, tool_result_frame("toolu_x", mcp_fixture("task_prime.json")))
+
+      html = render(view)
+      assert html =~ "7 ready"
+      assert html =~ "/admin/projects?task=task-r1"
+      assert html =~ "Render the prime queue chip"
+      assert html =~ "var(--life-in_progress)"
     end
 
     test "an is_error string keeps the generic ⎿ row, no chip", %{view: view, sid: sid} do

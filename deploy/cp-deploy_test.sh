@@ -172,6 +172,34 @@ slot_port() { case "$1" in
 esac; }
 case "${1:-}" in
   tag) exit 0 ;;
+  # `docker version --format '{{.Server.Version}}'` — the fake ignores the
+  # template and answers the value the script parses out of it.
+  version) printf '%s\n' "${FAKE_DOCKER_VERSION:-29.6.1}"; exit 0 ;;
+  # `docker inspect --type container <id>`: the clearer's staleness probe. Any
+  # id spelled *GONE is a container the daemon no longer has.
+  inspect)
+    for a in "$@"; do case "$a" in *GONE) exit 1 ;; esac; done
+    exit 0 ;;
+  network)
+    case "${2:-}" in
+      inspect)
+        # The clearer passes a Go template; like the `ps` fake above, this
+        # answers the RESOLVED output (one "<container id> <name>" per endpoint).
+        # Emitted only in a wedged scenario — otherwise there is nothing to list.
+        [ -n "${WEDGE:-}" ] || exit 0
+        # The serving slot (blue) is spelled GONE on purpose: it LOOKS stale, so
+        # only the by-name serving-slot guard can save it. If that guard is ever
+        # dropped, this endpoint gets unplugged and the case reds.
+        [ "${WEDGE_UNCLEARABLE:-0}" = 1 ] || printf '%s\n' "9a7aab2dba5bGONE cloud-control_plane_green-1"
+        printf '%s\n' "f0638a499a14LIVE cloud-db-1"
+        printf '%s\n' "b1000000blueGONE cloud-control_plane_blue-1"
+        exit 0 ;;
+      disconnect)
+        # Clearing the endpoint is what unblocks the next `compose up`.
+        touch "$DSTATE/endpoint_cleared"
+        exit 0 ;;
+    esac
+    exit 0 ;;
   ps)
     p=""
     for a in "$@"; do case "$a" in publish=*) p="${a#publish=}" ;; esac; done
@@ -193,8 +221,19 @@ case "${1:-}" in
     set -- $args
     sub="${1:-}"
     case "$sub" in
+      version) printf '%s\n' "${FAKE_COMPOSE_VERSION:-5.2.0}"; exit 0 ;;
       build) [ "${COMPOSE_BUILD_FAIL:-0}" = 1 ] && exit 1; exit 0 ;;
       up)
+        # WEDGED: the daemon refuses every recreate until the stale endpoint is
+        # actually disconnected. Sleeping does NOT clear it — which is exactly
+        # why the old sleep-and-retry measured 0-for-65 over 27 hours.
+        if [ -n "${WEDGE:-}" ] && [ ! -f "$DSTATE/endpoint_cleared" ]; then
+          case "$WEDGE" in
+            2) echo "Error response from daemon: container 9a7aab2dba5b is not connected to the network cloud_default" >&2 ;;
+            *) echo "Error response from daemon: network cloud_default has active endpoints (name:\"cloud-control_plane_green-1\" id:\"9a7aab2dba5b\")" >&2 ;;
+          esac
+          exit 1
+        fi
         for a in "$@"; do
           pp="$(slot_port "$a")"; [ -n "$pp" ] && touch "$DSTATE/running.$pp"
         done
@@ -519,6 +558,106 @@ rc="$(run_flip BUILDER_KEEP_FLAG_FAIL=1)"
 check "keep-storage refused: deploy still exit 0" "[ '$rc' = '0' ]"
 check "keep-storage refused: fallback named in the log" "grep -q 'pruned ALL build cache' '$FTMP/out.log'"
 check "keep-storage refused: a flagless builder prune ran" "grep -q '^docker builder prune -af\$' '$DOCKERLOG'"
+# ===========================================================================
+# THE WEDGED ENDPOINT (dr-w20-bl-cp-deploy-cannot-clear-a-wedged-endpoint)
+#
+# ROOT CAUSE these guard: 2026-07-21T07:59:48Z..07-23T08:46:54Z, 48h47m, 121
+# deploy.yml runs, 84 failures, ZERO successes — ONE stale docker network
+# endpoint (id 9a7aab2dba5b, byte-identical across 27 hours) that the daemon
+# named in every refusal, in two phrasings. The only in-tree mitigation was a
+# sleep-3-and-retry-once, measured 0-FOR-65: a stale endpoint is DAEMON STATE
+# and sleeping does not remove daemon state, so the retry met the same refusal.
+# The blackout ended by hand — cloud_default was destroyed and recreated at
+# 2026-07-23T09:48:58Z (read off barkpark-cp; the network's own Created stamp) —
+# with no commit anywhere in the tree.
+#
+# The fakes drive the real script: `compose up` refuses with the daemon's exact
+# wording until `docker network disconnect` has actually been called, so nothing
+# here can pass by retrying. Endpoint liveness is a real probe (`docker inspect`
+# fails for any id spelled *GONE), and the SERVING slot's endpoint is spelled
+# GONE too — so only the by-name guard keeps it plugged in.
+# ===========================================================================
+echo
+echo "cp-deploy wedged endpoint (dr-w20-bl-cp-deploy-cannot-clear-a-wedged-endpoint)"
+
+n_disconnect() { grep -c "^docker network disconnect" "$DOCKERLOG"; }
+
+# ---- Case 15: the blackout's own message -> the endpoint is CLEARED and the
+# deploy completes. FAIL-BEFORE: the old script sleeps 3s, retries, meets the
+# identical refusal, logs "db/postfix up FAILED twice" and exits 13.
+setup_flip localhost:4100
+rc="$(run_flip WEDGE=1)"
+check "wedge: exit 0 — the deploy COMPLETES (old script: exit 13)" "[ '$rc' = '0' ]"
+check "wedge: the daemon's refusal is recognised as the wedge, not a generic race" \
+  "grep -q 'refused on a WEDGED ENDPOINT' '$FTMP/out.log'"
+check "wedge: the stale endpoint is named with its container" \
+  "grep -q \"STALE ENDPOINT on cloud_default: 'cloud-control_plane_green-1'\" '$FTMP/out.log'"
+check "wedge: docker network disconnect -f ran on cloud_default with the right name" \
+  "grep -q '^docker network disconnect -f cloud_default cloud-control_plane_green-1\$' '$DOCKERLOG'"
+check "wedge: EXACTLY one endpoint was disconnected" "[ \"\$(n_disconnect)\" = '1' ]"
+# THE GUARD. cloud-control_plane_blue-1 is the slot Caddy is serving and its id
+# is spelled GONE, so the staleness probe alone would unplug it — taking the
+# live control plane off the network mid-deploy. Only the by-name serving-slot
+# check stops that.
+check "wedge: the SERVING slot's endpoint was NEVER disconnected (the guard)" \
+  "! grep -q 'disconnect .*cloud-control_plane_blue-1' '$DOCKERLOG'"
+check "wedge: the guard says so out loud" \
+  "grep -q \"endpoint 'cloud-control_plane_blue-1' is the SERVING slot on :4100\" '$FTMP/out.log'"
+check "wedge: a LIVE container's endpoint was left alone" \
+  "! grep -q 'disconnect .*cloud-db-1' '$DOCKERLOG'"
+check "wedge: the flip still landed on :4101" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "wedge: green slot booted" "[ -f '$DSTATE/running.4101' ]"
+check "wedge: old blue slot retired after the flip" "[ ! -f '$DSTATE/running.4100' ]"
+
+# ---- Case 16: the SIBLING phrasing (15 of the 84 runs) reaches the clearer
+# too. It arrived on the SLOT BOOT path, not db/postfix, and ended in "SLOT BOOT
+# FAILED" — a detector that matched only the first phrasing would miss a fifth
+# of the outage.
+setup_flip localhost:4100
+rc="$(run_flip WEDGE=2)"
+check "sibling phrasing: exit 0" "[ '$rc' = '0' ]"
+check "sibling phrasing: 'is not connected to the network' also detected as the wedge" \
+  "grep -q 'refused on a WEDGED ENDPOINT' '$FTMP/out.log'"
+check "sibling phrasing: the endpoint was disconnected" \
+  "grep -q '^docker network disconnect -f cloud_default cloud-control_plane_green-1\$' '$DOCKERLOG'"
+check "sibling phrasing: the flip landed" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+
+# ---- Case 17: the daemon names a wedge but NOTHING is stale -> the clearer
+# must not invent work, must not loop, and must not mask the failure. Exactly
+# one retry, an honest exit 13, and the live slot untouched.
+setup_flip localhost:4100
+rc="$(run_flip WEDGE=1 WEDGE_UNCLEARABLE=1)"
+check "unclearable wedge: exit 13 (fails honestly, does not mask)" "[ '$rc' = '13' ]"
+check "unclearable wedge: says nothing was stale" \
+  "grep -q 'none of cloud_default.*endpoints is stale' '$FTMP/out.log'"
+check "unclearable wedge: NOTHING was disconnected" "[ \"\$(n_disconnect)\" = '0' ]"
+check "unclearable wedge: the LIVE blue slot was never stopped" "[ -f '$DSTATE/running.4100' ]"
+check "unclearable wedge: Caddy never moved" "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "unclearable wedge: nothing was pruned" "! grep -q 'image prune' '$DOCKERLOG'"
+
+# ---- Case 18: the docker version is ASSERTED and LOGGED. The blackout was a
+# daemon-behaviour bug and the box's docker is mutable state no commit records,
+# so a version change must at least be dateable from the deploy log. A mismatch
+# WARNS and never refuses — a stale pin that blocks every deploy is worse than
+# drift you can read.
+setup_flip localhost:4100
+rc="$(run_flip)"
+check "docker version: logged on every deploy" \
+  "grep -q 'docker server 29.6.1 / compose 5.2.0' '$FTMP/out.log'"
+check "docker version: the expected major raises no warning" \
+  "! grep -q 'is not the expected' '$FTMP/out.log'"
+
+setup_flip localhost:4100
+rc="$(run_flip FAKE_DOCKER_VERSION=31.0.2)"
+check "docker version drift: WARNS, naming both versions" \
+  "grep -q 'docker server 31.0.2 is not the expected 29.x' '$FTMP/out.log'"
+check "docker version drift: never refuses the deploy (exit 0)" "[ '$rc' = '0' ]"
+check "docker version drift: the flip still landed" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+
+setup_flip localhost:4100
+rc="$(run_flip BARKPARK_EXPECT_DOCKER_MAJOR=29)"
+check "docker version: the expectation is overridable" "[ '$rc' = '0' ]"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"

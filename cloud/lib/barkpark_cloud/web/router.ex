@@ -106,7 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
-      GET     /v1/deliveries       user(s)   the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
+      GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
       PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
@@ -197,7 +197,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
       DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
-      POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret (manual)
+      POST    /v1/sites/:id/github  admin    link a GitHub repo + branch + webhook secret (manual)
       POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
@@ -4451,14 +4451,37 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/deliveries[?sha=<sha>][&limit=n] → 200 {deliveries, count, …} — THE
   # PLATFORM'S OWN PAST, readable by a human (dr-w23-s2, charter D385).
   #
-  # THE CREDENTIAL IS `require_user_or_pat` + `require_ability("read")`, and that
-  # is the load-bearing half of this slice. The writer above is worker-token
-  # (machine-only by construction: the whole `/v1/internal/*` family is), and
+  # THE CREDENTIAL IS `require_user_or_pat_or_worker` + `require_ability("read")`,
+  # and that is the load-bearing half of this slice.
+  #
+  # AN OPERATOR GATE WOULD BE WRONG HERE, and that ruling is unchanged:
   # `require_platform_operator` delegates to `require_user`, which authenticates
   # SESSION tokens ONLY — so an operator gate would answer a PAT **401, never
   # 403** (D412, measured live). A record that only a browser session can read is
   # a record no script, no CI job and no `bp` invocation can ever check, which is
   # the same unreadable-by-construction defect the operator census demonstrates.
+  # PAT reachability (D385/D412) is PRESERVED here, not replaced.
+  #
+  # AND THE WRITER CAN READ ITS OWN RECORD (task-e2acb66e9ed0da09). The write
+  # half is `POST /v1/internal/platform-deliveries` under `require_worker` —
+  # deploy.yml's crown step carries `WORKER_TOKEN` and no other credential. Under
+  # `require_user_or_pat` alone this route answered that same principal 401, so
+  # the record had no working API read path for the principal that WRITES it:
+  # crown-reconcile run 31311887504 printed the downgrade 22 times, once per sha,
+  # and survived only by SSH-ing in and reading `platform_deliveries` out of the
+  # control plane's own postgres container. A fallback that always fires is a
+  # broken door with a working window.
+  #
+  # THIS WIDENS NOTHING A WORKER DID NOT ALREADY HOLD. `WORKER_TOKEN` is a
+  # faceless off-box shared secret that already reaches the cross-team
+  # `GET /v1/internal/barkparks`, every team's provision-job queue, and the
+  # writer of these very rows. It is admitted here FACELESSLY (no current_user,
+  # no current_team) and clamped to `["read"]`, so `require_ability` 403s it on
+  # write/deploy/root. It gains no reach into the TENANT delivery logs — GET
+  # /v1/notifications/deliveries (`require_user` + team scoping) and GET
+  # /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries (`proxy_instance_webhook`
+  # → `require_user`) are untouched and still 401 a worker. Both arms are pinned
+  # in `test/barkpark_cloud/platform_delivery_test.exs` §4.
   #
   # NOT a node on GET /v1/sites/:id/deployments: that route is session-only and
   # 401s a read PAT today, and re-tiering it is D219's cross-epic ruling — filed,
@@ -4475,7 +4498,7 @@ defmodule BarkparkCloud.Web.Router do
   # for this sha" is the single most useful thing this table can say about a
   # deploy that went silent, and a 404 would render it as "no such route".
   get "/v1/deliveries" do
-    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
+    conn = conn |> Auth.require_user_or_pat_or_worker([]) |> Auth.require_ability("read")
 
     if conn.halted do
       conn
@@ -8556,8 +8579,17 @@ defmodule BarkparkCloud.Web.Router do
   # key is a durable deploy trigger that is not team-scoped, not session-tied,
   # not revoked when the actor loses access, and not visible in the audit log.
   # This matches /github/connect, which has always minted unconditionally.
+  #
+  # RBAC: binding a repo is a capability action -> TEAM ADMIN only, the same tier
+  # /github/connect and DELETE /v1/sites/:id/github already enforce. The three
+  # doors reach one outcome — the team's production site builds and serves code
+  # the caller chose — so a member-open create against an admin-only delete let
+  # the weaker principal mint state only the stronger one could clear (and
+  # OVERWRITE an admin-established link, rotating its secret, in the same call).
+  # That connect spends the team's GitHub App credential and this route does not
+  # bounds what CONNECT may do; it never bounded what the member may achieve.
   post "/v1/sites/:id/github" do
-    with_team_site(conn, fn conn, site ->
+    with_team_site(conn, :team_admin, fn conn, site ->
       repo = conn.body_params["repo"]
       branch = conn.body_params["branch"]
 
@@ -13115,6 +13147,10 @@ defmodule BarkparkCloud.Web.Router do
   # `auth` selects the credential mode:
   #   * `:session` (the default) — session-token ONLY (the dashboard / browser
   #     management routes). A PAT cannot reach these.
+  #   * `:team_admin` — session-token AND the team-admin role. Same credential
+  #     kind as `:session`, one tier up: for the site-management verbs whose
+  #     outcome a plain member must not be able to reach (linking a GitHub repo,
+  #     which mints a deploy trigger only an admin can clear).
   #   * `{:ability, ab}` — accept a session OR a PAT, then gate on ability `ab`
   #     (a session implies `root`, so the browser always passes). Used by the
   #     programmatic routes external integrations call (e.g. deploy → "write").
@@ -13124,6 +13160,7 @@ defmodule BarkparkCloud.Web.Router do
     conn =
       case auth do
         :session -> Auth.require_user(conn, [])
+        :team_admin -> Auth.require_team_admin(conn, [])
         {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
       end
 

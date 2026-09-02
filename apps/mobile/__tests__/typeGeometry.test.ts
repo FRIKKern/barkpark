@@ -425,6 +425,12 @@ const CENSUS: Record<string, Record<string, number>> = {
   },
   'papers/portabledoc/blocks/core-media.tsx': {
     'roles.codeBlock': 1,
+    // micro ×1 = the code block's OPTIONAL language header
+    // (bl-frommarkdown-fence-language). The smallest rung on the ladder,
+    // deliberately: the label is apparatus ABOUT the fence, quieter even than a
+    // caption, and it must never read as a line of the code it sits above. Same
+    // step the TabBar badge and core-code's diff apparatus speak at.
+    'scale.micro': 1,
     // sm ×3 = the figure/video/asciicast caption rung: the two degrade cards
     // (mob-zb-s7, D46d) label themselves at the same step a figcaption speaks at,
     // one rung under body, because a card is apparatus about the content.
