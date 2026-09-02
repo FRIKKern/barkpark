@@ -289,12 +289,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # read-only api_token or read-only member. It is silent on a principal-LESS
   # socket, because `write_capable?/2` returns TRUE there BY DESIGN (the
   # intentionally-open public-demo posture).
+  # studio-w21 (from the pds-w43 run) — THE SECOND QUESTION, ASKED HERE TOO.
+  #
+  # The gate above answers "may this PRINCIPAL write at all". It has no TARGET,
+  # and for a GRANT-graded socket the target IS the authorization: a grant
+  # naming ONE doc auto-satisfies `Access.admits_desk?/3` at desk granularity,
+  # so `Caps.write_capable?/2` — and therefore `write_denied?/1` — answers
+  # "capable" while editing a DIFFERENT doc on the same desk. `paper_pane_op/2`,
+  # `paper_ops/2` and `document_op/2` each ask the target question after the
+  # principal one; this seam did not, and it is the same hook-invisible shape
+  # (`handle_info`, which no `handle_event` hook observes).
+  #
+  # Reproduced by run before this arm: on a socket holding a project-scoped READ
+  # grant plus a doc-scoped WRITE grant, `do_autosave/2` with `editor_doc` set to
+  # the doc the write grant does NOT name returned `save_status: "Saved"` and
+  # `title == "ESCALATED-BY-AUTOSAVE"` read back from the store.
+  #
+  # ONE RULE, NOT A FORK: `Paper.grant_target_denied?/3` and
+  # `Paper.refuse_outside_grant/1` are the SAME copies the paper doors call —
+  # `Access.validate/3` on the target's real type + doc_id — so the four doors
+  # cannot drift into four answers. `editor_doc` is the doc this seam actually
+  # writes (`autosave_write/2` → `Content.upsert_draft`), so it is the doc the
+  # grant must admit; a missing/!map doc yields a nil target, which the shared
+  # predicate treats as unresolvable and refuses FOR A GRANT-GRADED SOCKET ONLY.
+  # A membership-derived socket is untouched: `grant_target_denied?/3` returns
+  # false without loading anything.
   @doc false
   def do_autosave(socket, params) do
-    if Paper.write_denied?(socket) do
-      Paper.refuse_write_denied(socket)
-    else
-      autosave_write(socket, params)
+    doc = socket.assigns[:editor_doc]
+    doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
+
+    cond do
+      Paper.write_denied?(socket) ->
+        Paper.refuse_write_denied(socket)
+
+      Paper.grant_target_denied?(socket, socket.assigns[:editor_type], doc_id) ->
+        Paper.refuse_outside_grant(socket)
+
+      true ->
+        autosave_write(socket, params)
     end
   end
 
@@ -1084,6 +1117,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
                             non-drillable `:document` node because it has no
                             installed schema.
 
+  Deliberately SUPPRESSED, not named: a walk that stopped on a `:plugin_link`
+  child. The node is a terminal outbound link, so no document was ever named
+  and none is missing — it takes the calm `:nothing_selected` state rather
+  than one of the four reasons above (task-554a33ca42c0c45a; the shape and
+  both lies it used to produce are pinned in
+  `studio_plugin_link_empty_state_test.exs`).
+
   Deliberately NOT a reason: `unrenderable_content`. A document that RESOLVES
   and cannot render is the OTHER arm, owned by
   `StudioLive.Components.unrenderable_document_notice/1` (#7897). Also deliberately absent:
@@ -1101,6 +1141,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     cond do
       nav_path == [] ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+
+      # The walk terminated on a `:plugin_link` CHILD of the last pane —
+      # PaneBuilder's `%{type: :plugin_link}` branch returns `{panes, nil}`
+      # because the node is a terminal outbound link, not a document that
+      # failed to resolve. Nothing is missing, so nothing may shout: without
+      # this arm the very next clause names a reason for a document that was
+      # never named. Two lies, both observed and pinned in
+      # `studio_plugin_link_empty_state_test.exs`:
+      #
+      #   * link nested in a group (`/studio/media-desk/media-library`) → the
+      #     last pane is `role: :list` with no `type_name`, so `:no_schema`
+      #     fires: "No schema for media-library is installed in this dataset."
+      #   * link sitting at the desk root → the last pane is `role: :nav` with
+      #     a selection, so `:unknown_node` fires: "This desk has no section
+      #     named …" — about the section the human just clicked.
+      #
+      # It is NOT a one-frame flash. The desk LiveView issues no
+      # `push_navigate` for a `:plugin_link` nav_path (the anchors navigate by
+      # plain href), so the frame is the DEAD render AND every connected
+      # render, and `assert_redirect` on that mount times out. The shape is
+      # distinguishable from `(panes, nav_path)` alone: the terminal pane's
+      # own `items` carry `%{type: :plugin_link, id: …}` (PaneBuilder
+      # `list_items/2`) and one of them is what `:selected` names.
+      terminated_on_plugin_link?(last) ->
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
 
       match?(%{role: :nav}, last) and Map.get(last, :selected) != nil ->
@@ -1135,6 +1200,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
     end
   end
+
+  # Did the desk walk stop on an outbound `:plugin_link` row? Keyed on the
+  # terminal pane's OWN items rather than on the node type (the node is gone
+  # by the time the panes reach here), which is why this works for both the
+  # root `:nav` pane and any nested `:list` pane — both build their items with
+  # `PaneBuilder.list_items/2`, and only that function emits `type:
+  # :plugin_link`.
+  defp terminated_on_plugin_link?(%{} = pane) do
+    case Map.get(pane, :selected) do
+      nil ->
+        false
+
+      selected ->
+        pane
+        |> Map.get(:items)
+        |> List.wrap()
+        |> Enum.any?(fn item ->
+          is_map(item) and Map.get(item, :type) == :plugin_link and
+            Map.get(item, :id) == selected
+        end)
+    end
+  end
+
+  defp terminated_on_plugin_link?(_), do: false
 
   # The secondary (split-view) pane belongs to the PRIMARY document it was
   # opened beside, so it clears on an ACTUAL primary-document identity change

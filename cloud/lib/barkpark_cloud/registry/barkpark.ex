@@ -173,6 +173,34 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :health_status, :string, default: "unknown"
     field :version, :string
     field :git_commit, :string
+
+    # dr-w22-bl WHEN the box started serving `git_commit` — the materialised
+    # first appearance of the sha the row currently carries, stamped by
+    # `Registry.record_agent_report/2` the first time a beat reports a sha
+    # DIFFERENT from the one already stored.
+    #
+    # The fact was already on disk and unreachable. Every 60 s beat lands in
+    # `agent_events` with the full report (`git_commit` included) and
+    # `AgentRetentionWorker` keeps 14 days (MEASURED on prod 2026-09-01:
+    # 132,120 rows spanning 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z). But
+    # the ONLY reader of that history is `GET /v1/barkparks/:id/events`, which
+    # is `Auth.require_user` and caps a page at 200 rows — about three hours of
+    # a fourteen-day record, on a NARROWER surface than the fleet list every
+    # PAT holder already reads. This column puts the answer on the row.
+    #
+    # NULL IS UNMEASURED, NEVER "NOW" — the same contract `commit_distance`
+    # below carries, and the reason this column is not backfilled. Two distinct
+    # populations read NULL and both are honest:
+    #
+    #   * a box that has not changed sha since this column shipped — we never
+    #     OBSERVED the transition, and stamping the deploy instant would report
+    #     a box as freshly-changed when it has served the same commit for weeks;
+    #   * a box whose stored sha was empty (agent offline / pre-`git_commit`
+    #     agent) when a sha first arrived — that sha may have been running long
+    #     before we could see it, so the transition is not dated either.
+    #
+    # Renderers must show NULL as unmetered and must NOT sort it as fresh.
+    field :git_commit_first_seen_at, :utc_datetime_usec
     field :agent_status, :string, default: "offline"
     field :last_seen_at, :utc_datetime_usec
 
@@ -659,6 +687,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
   `provision_support` job (`Registry.succeed_job/3` guards it to
   `fleet_role: "support"` rows), the agent report path never builds it, and it
   is an OPAQUE revocation handle — never the token value itself.
+
+  `git_commit_first_seen_at` (dr-w22-bl) is castable here and is the one field
+  in this set an agent MUST NOT be able to choose. It is SERVER-COMPUTED:
+  `Registry.record_agent_report/2` DROPS any incoming value (atom and string
+  key both) and re-derives it from the sha already on the row versus the sha in
+  this beat. It is castable rather than written through its own changeset so
+  the stamp lands in the SAME update as the `git_commit` it dates — a second
+  `Repo.update` could interleave with a concurrent beat and date the wrong sha.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
@@ -667,6 +703,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :health_status,
       :version,
       :git_commit,
+      :git_commit_first_seen_at,
       :agent_status,
       :last_seen_at,
       :admin_token_encrypted,

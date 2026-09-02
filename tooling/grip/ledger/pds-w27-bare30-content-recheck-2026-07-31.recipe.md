@@ -2,6 +2,8 @@
 
 # PDS wave 27 — re-derivation recipe: the 30 bare live rows, re-checked BY CONTENT against origin/main
 
+> HISTORICAL RECORD (2026-07-31) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Every command below is literal and re-runnable from a clean shell. The primary
 checkout may sit on a foreign commit and may not carry
 `scripts/pds-ledger-census.sh` at all — every read is `git show origin/main:` or

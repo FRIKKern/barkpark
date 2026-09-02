@@ -91,13 +91,18 @@
 #      BY IMAGE TAG (never by name: blue/green renames it), read the token out of
 #      the running container, issue the read from the box.
 #
-#      The route's reader tier is `require_user_or_pat` + `require_ability("read")`
-#      while WORKER_TOKEN is the WORKER principal, so that GET can answer 401/403.
-#      When it does, this falls back to reading `platform_deliveries` directly out
-#      of the control plane's own postgres container — the same crown, the same
-#      box, the same SSH, no new secret and no route change — and says out loud
-#      which reader produced the answer. A read that cannot happen is rc 2, never
-#      a green.
+#      The route's reader tier is `require_user_or_pat_or_worker` +
+#      `require_ability("read")` since PR #14979, and WORKER_TOKEN is exactly the
+#      WORKER principal that tier admits — so a 401/403 to that bearer is a
+#      REGRESSION of that fix, not a tier mismatch. THERE IS ONE READER PER
+#      TRANSPORT AND NO SUBSTITUTE. This used to fall back to reading
+#      `platform_deliveries` straight out of the control plane's postgres
+#      container, and because that detour ALWAYS fired it rendered a dead route
+#      as a `note:` and never once as a verdict (run 31311887504: 22 downgrades,
+#      one per sha, all green). The detour is DELETED. A 401/403 now prints
+#      CR_ERROR=http_<code>_worker_principal, names the route, the principal and
+#      #14979, counts as a read that did not happen, and the run exits 2 saying
+#      so. A read that cannot happen is rc 2, never a green.
 #
 # AN EXPLICITLY-EMPTY PAT IS A CONFIGURATION FAULT, A MISSING ONE IS NOT
 # (charter D530).
@@ -112,12 +117,14 @@
 #
 # WHICH READER ANSWERED IS A VERDICT FIELD, NOT A `note:` (charter D531).
 #
-# `reader=ssh` names the TRANSPORT. It does NOT say whether the rows came from
-# `/v1/deliveries` or from the control plane's postgres container after a 401 to
-# the WORKER principal — and a live run printed that downgrade TEN times, as a
-# `note:` on stderr, behind a header that said only `reader=ssh`. The reader that
-# ANSWERED is now counted per read and printed as its own line beside the
-# verdict, and it rides the VERDICT sentence itself.
+# `reader=ssh` names the TRANSPORT, and the transport is not the reader: a live
+# run printed the 401 downgrade TEN times as a `note:` on stderr, behind a header
+# that said only `reader=ssh`. The reader that ANSWERED is counted per read and
+# printed as its own line beside the verdict, and it rides the VERDICT sentence
+# itself. Since the postgres detour was deleted (#14979) the only reader an SSH
+# transport can name is `route` — so the field's other job is to print the
+# REFUSALS: a 401/403 to the WORKER principal is counted, named, and cannot be
+# answered by a substitute.
 #
 # A GRACE IS A DEFERRAL, SO IT MUST LEAVE A DEBT BEHIND (charter D511).
 #
@@ -726,13 +733,14 @@ state_save() { # <file of "sha epoch" lines to keep>
 READER=""
 SSH=""
 # WHICH reader actually produced rows, counted per read. The transport is known
-# before the first read; the reader is not, because the SSH transport carries
-# two of them and only a 401 to the WORKER principal decides which one answers.
+# before the first read; the reader is not — but since #14979 there is exactly
+# ONE reader behind each transport, so a read that the route refuses has no
+# substitute and is counted as a REFUSAL, never as a different reader.
 READS_ROUTE=0
-READS_SQL=0
 READS_FIXTURE=0
 READS_FAILED=0
-SQL_DOWNGRADE_HTTP=""
+READS_REFUSED=0
+REFUSED_HTTP=""
 select_reader() {
   if [ "$FIXTURE_MODE" = "1" ]; then
     READER="fixture"
@@ -780,41 +788,28 @@ if [ "$CODE" = "200" ]; then
   rm -f /tmp/cr-body.json
   exit 0
 fi
-# The reader route is user-or-PAT; WORKER_TOKEN is the worker principal, so a
-# 401/403 here is a TIER MISMATCH, not a broken box. Read the same rows straight
-# out of the control plane's own postgres container instead — same crown, same
-# SSH, no new credential.
-if [ "$CODE" != "401" ] && [ "$CODE" != "403" ]; then
-  echo "CR_ERROR=http_$CODE"
-  rm -f /tmp/cr-body.json
+rm -f /tmp/cr-body.json
+# A 401/403 HERE IS THE VERDICT, NOT A DETOUR. GET /v1/deliveries takes
+# `require_user_or_pat_or_worker` + `require_ability("read")` since PR #14979,
+# and WORKER_TOKEN — the only credential deploy.yml's crown step carries, and the
+# principal that WRITES these rows — is exactly what that tier admits. So a
+# refusal is a REGRESSION of #14979. This used to answer it by reading
+# `platform_deliveries` out of the control plane's postgres container, which
+# always worked, always fired, and therefore turned a dead route into a `note:`
+# behind a green. That branch is DELETED: the refusal is named and the read
+# fails, so the next occurrence is a verdict.
+if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
+  echo "CR_ERROR=http_${CODE}_worker_principal"
+  echo "CR_DETAIL=GET /v1/deliveries answered HTTP $CODE to the WORKER principal (WORKER_TOKEN) — the credential deploy.yml's crown step carries and the one that WRITES these rows. PR #14979 admitted that principal to this route, so this is a REGRESSION of that fix, not a tier mismatch, and there is no postgres detour left to hide it."
   exit 0
 fi
-DBID="$(docker ps -q --filter ancestor=postgres:15-alpine | head -1)"
-if [ -z "$DBID" ]; then echo "CR_ERROR=no_db_container"; exit 0; fi
-PU="$(docker exec "$DBID" printenv POSTGRES_USER)"
-PD="$(docker exec "$DBID" printenv POSTGRES_DB)"
-if [ -z "$PU" ] || [ -z "$PD" ]; then echo "CR_ERROR=no_db_env"; exit 0; fi
-SHA=""
-LIM="100"
-for kv in $(echo "$QS" | tr '&' ' '); do
-  case "$kv" in
-    sha=*) SHA="${kv#sha=}" ;;
-    limit=*) LIM="${kv#limit=}" ;;
-  esac
-done
-case "$LIM" in ''|*[!0-9]*) LIM=100 ;; esac
-case "$SHA" in ''|*[!0-9a-f]*) WHERE="" ;; *) WHERE="WHERE sha = '$SHA'" ;; esac
-SQL="SELECT coalesce(json_agg(row_to_json(t)), '[]'::json) FROM (SELECT sha, target, carried, delivering_run_id, to_char(first_seen_at, 'YYYY-MM-DD\"T\"HH24:MI:SSZ') AS first_seen_at FROM platform_deliveries $WHERE ORDER BY first_seen_at DESC LIMIT $LIM) t"
-ROWS="$(docker exec "$DBID" psql -U "$PU" -d "$PD" -tAc "$SQL" 2>/dev/null)"
-if [ -z "$ROWS" ]; then echo "CR_ERROR=sql_read_failed"; exit 0; fi
-echo "CR_VIA=sql"
-echo "CR_BODY={\"deliveries\":$ROWS}"
+echo "CR_ERROR=http_$CODE"
 REMOTE
 }
 
 # crown_read <query-string> <out-file> -> 0 read / 2 could not read
 crown_read() {
-  local qs="$1" out="$2" body http via
+  local qs="$1" out="$2" body http via err det
   case "$READER" in
     fixture)
       [ -f "$CROWN_FIXTURE" ] || { READS_FAILED=$((READS_FAILED + 1)); warn "  crown fixture is unreadable: ${CROWN_FIXTURE:-<none>}"; return 2; }
@@ -847,15 +842,33 @@ crown_read() {
       printf '%s\n' "$body" | sed -n 's/^CR_BODY=//p' > "$out"
       if [ ! -s "$out" ]; then
         READS_FAILED=$((READS_FAILED + 1))
-        warn "  the crown could not be read on the box for ?$qs: $(printf '%s\n' "$body" | sed -n 's/^CR_ERROR=//p')"
+        err="$(printf '%s\n' "$body" | sed -n 's/^CR_ERROR=//p')"
+        det="$(printf '%s\n' "$body" | sed -n 's/^CR_DETAIL=//p')"
+        # A REFUSAL IS ITS OWN NAMED CONDITION, not a generic unreadable. It goes
+        # through reason() from HERE rather than from a call site, because two of
+        # the four call sites do not name one, and a 401 that reaches the verdict
+        # as an unnamed silence is the shape #14979 was filed against.
+        case "${http:-}" in
+          401|403)
+            READS_REFUSED=$((READS_REFUSED + 1))
+            REFUSED_HTTP="$http"
+            reason "${det:-GET /v1/deliveries answered HTTP $http to the WORKER principal (WORKER_TOKEN) — PR #14979 admitted that principal to this route, so this is a REGRESSION of that fix, not a tier mismatch} [${err:-http_$http}, ?$qs]"
+            ;;
+          *)
+            warn "  the crown could not be read on the box for ?$qs: ${err:-<none>}"
+            ;;
+        esac
         return 2
       fi
-      if [ "$via" = "sql" ]; then
-        READS_SQL=$((READS_SQL + 1))
-        SQL_DOWNGRADE_HTTP="$http"
-      else
-        READS_ROUTE=$((READS_ROUTE + 1))
+      # THE ONLY READER BEHIND THIS TRANSPORT IS THE ROUTE. The postgres-container
+      # detour is deleted, so a body that claims any other reader is a substitute
+      # this script never asked for — refused, not counted as a read.
+      if [ "$via" != "route" ]; then
+        READS_FAILED=$((READS_FAILED + 1))
+        reason "the crown read for ?$qs came back claiming reader '${via:-<none>}' (HTTP ${http:-<none>}) — since PR #14979 the WORKER principal reads GET /v1/deliveries directly and this script has NO substitute reader; a body from anything else is refused, not counted clean"
+        return 2
       fi
+      READS_ROUTE=$((READS_ROUTE + 1))
       return 0
       ;;
   esac
@@ -869,16 +882,15 @@ reader_answered() {
   local names=""
   [ "$READS_FIXTURE" -gt 0 ] && names="fixture"
   [ "$READS_ROUTE" -gt 0 ] && names="${names:+$names+}route"
-  [ "$READS_SQL" -gt 0 ] && names="${names:+$names+}postgres-container"
   printf '%s' "${names:-none}"
 }
 
 say_reader() {
   local detail=""
-  if [ "$READS_SQL" -gt 0 ]; then
-    detail=" — the /v1/deliveries route answered HTTP ${SQL_DOWNGRADE_HTTP:-<none>} to the WORKER principal, so those rows came from the control plane's own postgres container, NOT from the route"
+  if [ "$READS_REFUSED" -gt 0 ]; then
+    detail=" — the /v1/deliveries route answered HTTP ${REFUSED_HTTP:-<none>} to the WORKER principal (WORKER_TOKEN) on ${READS_REFUSED} read(s); PR #14979 admitted that principal, so this is a REGRESSION of that fix and NOTHING read those rows in its place"
   fi
-  say "READER: transport=${READER:-<none>}, answered by $(reader_answered) (route=${READS_ROUTE}, postgres-container=${READS_SQL}, fixture=${READS_FIXTURE}, unreadable=${READS_FAILED})${detail}"
+  say "READER: transport=${READER:-<none>}, answered by $(reader_answered) (route=${READS_ROUTE}, fixture=${READS_FIXTURE}, unreadable=${READS_FAILED}, refused-401/403=${READS_REFUSED})${detail}"
 }
 
 # ── the runs ─────────────────────────────────────────────────────────────────

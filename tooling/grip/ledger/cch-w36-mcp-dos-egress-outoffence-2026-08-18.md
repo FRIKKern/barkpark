@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: cch-w36-mcp-dos-egress-recipe | budget: 800tok -->
 # W36 — mcp-session-egress DoS finding: CONFIRMED on origin/main, OUT OF FENCE
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verifier [dos-surface-confirm], wave 36. Re-derivation recipe for the one genuinely
 new security finding. This is a task to FILE (published child hardening task), NOT a
 slice to build — both offending files are outside the cloud/+connectors/+scripts/connectors fence.

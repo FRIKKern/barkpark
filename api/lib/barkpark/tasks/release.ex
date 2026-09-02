@@ -124,6 +124,17 @@ defmodule Barkpark.Tasks.Release do
       |> Map.put("epoch", (Map.get(claim, "epoch") || 0) + 1)
       |> Map.put("released_by", worker_id)
       |> Map.put("released_at", ts_iso)
+      # SAME ruling the TTL reap already applies (`TtlSweeper.apply_reap/1`):
+      # the walked-away worker's resource fences die with the lease. The
+      # overlap scan in `Tasks.Claim.check_resources_free/4` was never fooled
+      # — it filters `lifecycle_status = 'in_progress'`, and this row is now
+      # "open" — but LEAVING the key painted a stale "holds lib/x.ex" on an
+      # OPEN, unowned task in every reader that renders the claim map (Studio's
+      # claim panel, the TUI claim JSON, `bp task get -o json`). Release is the
+      # on-demand twin of the reap; the twins must represent a dead fence the
+      # same way, or `bp task get` disagrees with itself depending on WHICH
+      # verb freed the lease.
+      |> Map.delete("resources")
 
     # RULING (task-lifecycle-visibility wave, 2026-07-21): release ALWAYS
     # lands "open" — deliberately NOT a restore of the pre-claim status.

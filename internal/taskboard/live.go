@@ -82,14 +82,14 @@ type snapshotMsg struct {
 // scheduleDebounce arms a one-shot timer tagged with the current generation.
 func (m Model) scheduleDebounce(gen int) tea.Cmd {
 	d := m.debounceDelay
-	return tea.Tick(d, func(time.Time) tea.Msg { return debounceMsg{gen: gen} })
+	return m.tick(d, func(time.Time) tea.Msg { return debounceMsg{gen: gen} })
 }
 
 // scheduleBackstop arms the next periodic backstop tick. It reschedules itself
 // from the backstopMsg handler, so the ticker runs for the life of the program.
 func (m Model) scheduleBackstop() tea.Cmd {
 	d := m.backstopEvery
-	return tea.Tick(d, func(time.Time) tea.Msg { return backstopMsg{} })
+	return m.tick(d, func(time.Time) tea.Msg { return backstopMsg{} })
 }
 
 // refetchCmd runs the (injectable) snapshot fetch off the update loop and
@@ -144,19 +144,47 @@ func (m Model) handlePulse() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleDebounce fires the coalesced refetch — but only for the newest
-// generation and only if something is actually dirty.
+// handleDebounce fires the coalesced reaction to an SSE burst — but only for the
+// newest generation and only if something is actually dirty.
+//
+// WHAT IT COALESCES INTO CHANGED (task-e2f5ecca0be9a6d1). It used to be the full
+// snapshot refetch: three heavy requests, on every burst, forever. But an SSE
+// frame is a DATASET-wide signal — it fires for papers, chat, sessions, every
+// document type — so on a busy dataset it was refetching the task corpus for
+// writes that touched no task at all. It now nudges the keyset poll instead: the
+// cheap PK-indexed feed answers "did any TASK move?" and only a yes runs the
+// pair. The debounce is kept exactly as it was, because coalescing a burst of
+// frames into one question is still the right shape — only the question got
+// cheap. With the feed unavailable (eventsOff) this falls back to the old
+// refetch, so an older server behaves as before.
 func (m Model) handleDebounce(msg debounceMsg) (Model, tea.Cmd) {
 	if msg.gen != m.debounceGen || !m.dirty {
 		return m, nil
 	}
 	m.dirty = false
-	return m, m.refetchCmd(false)
+	if m.eventsOff {
+		return m, m.refetchCmd(false)
+	}
+	return m, (&m).nudgePoll()
 }
 
-// handleBackstop refetches unconditionally and re-arms the ticker.
+// handleBackstop refetches unconditionally and re-arms the ticker. It is the
+// SAFETY NET now, not the refresh path (defaultBackstopEvery moved 30s → 5m):
+// the keyset poll drives refreshes, and this covers the cursor catch-up window
+// and a feed that is not there at all. The re-list rides the same no-overlap
+// guard the poll's does — a backstop that fires while a slow snapshot fetch is
+// still out re-arms the ticker and drops the duplicate read rather than
+// stacking a second 9 MB list on the server it is waiting for.
 func (m Model) handleBackstop() (Model, tea.Cmd) {
-	return m, tea.Batch(m.refetchCmd(false), m.scheduleBackstop())
+	next := m.scheduleBackstop()
+	relist := m.tickRefetchCmd()
+	if relist == nil {
+		return m, next
+	}
+	m.fetchInFlight = true
+	m.lastRelistAt = m.now()
+	m.relistOwed = false
+	return m, tea.Batch(relist, next)
 }
 
 // applySnapshot swaps in a freshly-rebuilt board and updates the connection
@@ -184,6 +212,11 @@ func (m Model) handleBackstop() (Model, tea.Cmd) {
 // every refresh, and the highlight silently hopping to a different task on
 // each SSE frame would make the pane unusable while it breathes.
 func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
+	// Release the tick-driven re-list gate FIRST, on every arm including the
+	// error and out-of-order returns below: a fetch that failed is a fetch that
+	// is no longer in flight, and leaving the bit set would wedge the board on
+	// the backstop forever after one bad read.
+	m.fetchInFlight = false
 	if msg.err != nil {
 		// Surface WHY — getJSON builds its errors precisely so the status chrome
 		// can name the failure truthfully (snapshotErrorLabel maps it to a short
@@ -291,6 +324,15 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	// board is cached: the err path and the out-of-order-drop guard above both
 	// return before here, so a stale or failed fetch never overwrites a good
 	// cache. cacheDir=="" (no resolvable config dir) makes this a silent no-op.
+	//
+	// The keyset cursor rides along (Snapshot.EventCursor). It is not board data
+	// — it is the resume point for the cheap poll — but this is the one file the
+	// board already writes per scope, and persisting it is what makes the SECOND
+	// launch skip the catch-up walk: a cold cursor is 0, which means the whole
+	// task-event backlog sits between the board and now. An absent or stale value
+	// costs one walk, never a wrong board, because the cursor never carries truth
+	// (decision #4) — it only decides WHEN the snapshot fetch runs.
+	mergedSnap.EventCursor = m.eventCursor
 	SaveCachedSnapshot(m.cacheDir, m.cacheKey, mergedSnap)
 	// ────────────────────────────────────────────────────────────────────────
 	if !msg.keepStrip {

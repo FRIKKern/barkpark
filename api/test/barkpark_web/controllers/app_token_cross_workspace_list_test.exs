@@ -34,16 +34,23 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
   controller, `index/2` granted it. A refusal a neighbour grants is not a
   refusal.
 
-  ## SCOPE: the `?email=` arm ONLY, and the last describe block pins that
+  ## SCOPE: BOTH ARMS NOW — the tripwire fired and was answered
 
-  The unfiltered sweep is deliberately NOT scoped by this change, and there is
-  a test asserting it still returns another workspace's rows. That is not an
-  oversight being documented — it is the boundary being held. The chartered
-  defect is that a caller can name a SPECIFIC address and be told yes or no;
-  an unfiltered sweep cannot probe an address (labels are withheld), so it
-  discloses an inventory rather than answering a question about a person.
-  Whether an admin should see that inventory is a real policy question, it is
-  open as `task-aa07355fa8a53355`, and this change does not settle it.
+  `task-71787769f1d03e51` scoped the `?email=` arm ONLY, and left a test here
+  asserting that the unfiltered sweep still returned another workspace's rows —
+  a deliberate tripwire, so that scoping the sweep would have to red a test and
+  be decided rather than drift in. `task-aa07355fa8a53355` is that decision:
+
+      orchestrator, delegated; owner informed 2026-09-01 — RULED option 1: GET
+      /v1/auth/app-tokens is scoped to the bearer's ADMIN workspaces
+      (Tenancy.Auth.workspace_admin?/2, the same predicate both revoke arms
+      use) with labels UN-REDACTED there; an instance-wide view belongs to the
+      operator tier only, not to any `admin` permission bit.
+
+  So the last describe block is inverted rather than deleted, and the label
+  assertions with it: the redaction's only stated justification was that "the
+  admin gate here is permission-only", which stopped being true the moment the
+  rows became membership-scoped.
 
   ## Why the fixture stands up TWO workspaces
 
@@ -207,22 +214,25 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
     end
   end
 
-  describe "the UNFILTERED sweep is DELIBERATELY left alone" do
-    test "an admin of A still sees B's rows unfiltered — task-aa07355fa8a53355 is NOT closed here",
+  describe "the UNFILTERED sweep is scoped too (task-aa07355fa8a53355, RULED option 1)" do
+    # This describe block used to be headed "the UNFILTERED sweep is
+    # DELIBERATELY left alone" and asserted the OPPOSITE of everything below:
+    # that an admin of A still saw B's rows, with `label_redacted == true`. It
+    # pinned the boundary of `task-71787769f1d03e51` on purpose, so that
+    # scoping the sweep would have to red a test and be decided deliberately.
+    # It was decided:
+    #
+    #   "orchestrator, delegated; owner informed 2026-09-01 — RULED option 1:
+    #   GET /v1/auth/app-tokens is scoped to the bearer's ADMIN workspaces
+    #   (Tenancy.Auth.workspace_admin?/2, the same predicate both revoke arms
+    #   use) with labels UN-REDACTED there; an instance-wide view belongs to
+    #   the operator tier only, not to any `admin` permission bit."
+    #
+    # The tripwire fired and this is the deliberate answer, so the assertions
+    # are inverted rather than deleted.
+
+    test "an admin of A does NOT see B's rows in an unfiltered list",
          %{ws_a: ws_a, ws_b: ws_b, admin_a: admin_a} do
-      # THE SCOPE BOUNDARY OF THIS CHANGE, asserted rather than described, so
-      # nobody has to read a PR body to know what was and was not decided.
-      #
-      # The chartered defect is the `?email=` arm: it lets a caller name a
-      # SPECIFIC address and be told yes or no. The unfiltered sweep cannot
-      # probe an address — labels are withheld — so it discloses an inventory
-      # rather than answering a question about a person. Whether an admin
-      # should see that inventory is a genuine policy question with an argument
-      # on each side, it is open as `task-aa07355fa8a53355`, and settling it as
-      # a side effect of a security fix nobody reviewed as a policy decision is
-      # how these come back. So this test PINS the current behaviour: if a
-      # later change scopes the sweep, this test reds and forces that decision
-      # to be made deliberately, by aa073's owner.
       {_mine, mine_row} = app_token_in!(ws_a, email())
       {_theirs, theirs_row} = app_token_in!(ws_b, email())
 
@@ -231,17 +241,112 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
       body = json_response(conn, 200)
 
       ids = Enum.map(body["tokens"], & &1["id"])
-      assert mine_row.id in ids
 
-      assert theirs_row.id in ids,
-             "the unfiltered sweep was scoped too — that decides task-aa07355fa8a53355 " <>
-               "as a side effect, which this change deliberately does not do"
+      # POSITIVE CONTROL in the SAME call as the refute, so an empty list (a
+      # broken query rather than a working predicate) reds instead of passing.
+      assert mine_row.id in ids, "the caller lost its OWN workspace's rows"
 
-      # The redaction is what keeps the sweep from being a user directory, and
-      # it is untouched. It is a SECOND, independent guard — it hides addresses
-      # and says nothing about ids, workspace ids or permission sets.
-      assert body["label_redacted"] == true
-      assert Enum.all?(body["tokens"], &is_nil(&1["label"]))
+      refute theirs_row.id in ids,
+             "the unfiltered sweep still reaches another workspace's credentials"
+
+      # Every field the foreign row would have leaked, named individually: an
+      # id refute alone would pass on a response that dropped the id but kept
+      # the workspace_id and permission set.
+      serialized = Jason.encode!(body)
+      refute String.contains?(serialized, theirs_row.id)
+
+      refute String.contains?(serialized, ws_b.id),
+             "a foreign workspace_id leaked from the sweep — tenant discovery"
+    end
+
+    test "labels come back UN-REDACTED on the sweep — the row's own workspace is the caller's",
+         %{ws_a: ws_a, admin_a: admin_a} do
+      mail = email()
+      {_mine, mine_row} = app_token_in!(ws_a, mail)
+
+      body = json_conn(admin_a) |> get("/v1/auth/app-tokens") |> json_response(200)
+
+      # The envelope key is KEPT and always false — not dropped — so a client
+      # keying on it keeps parsing and reads "nothing withheld" rather than
+      # "unknown".
+      assert body["label_redacted"] == false
+
+      # Asserted on THIS row by id, never with `Enum.all?` over the whole
+      # response: the test database is shared, and a whole-list assertion would
+      # be answering for another agent's rows.
+      listed = Enum.find(body["tokens"], &(&1["id"] == mine_row.id))
+      assert listed, "the caller's own row is missing from the sweep"
+
+      assert listed["label"] == "app:" <> mail,
+             "the label is still withheld from the sweep — the redaction was not lifted"
+    end
+
+    test "an admin-permissioned token with NO membership anywhere sweeps up ZERO rows",
+         %{ws_a: ws_a, ws_b: ws_b} do
+      # The gate and the predicate are different tests, and this is the gap
+      # between them. `Auth.has_permission?/2` — the route's gate, the same one
+      # `Plugs.RequireAdmin` applies — is a flat read of the token's global
+      # `permissions[]` with NO membership requirement, so this bearer REACHES
+      # the route. `workspace_admin?/2` grants ROWS, and it holds none.
+      #
+      # Under the old posture this caller enumerated the entire instance. Under
+      # the ruling it is administrator of nothing and sees nothing — the same
+      # answer the write twin already gives it (`revoked_count: 0`).
+      {_a, a_row} = app_token_in!(ws_a, email())
+      {_b, b_row} = app_token_in!(ws_b, email())
+
+      stranger = raw("stranger")
+
+      # No workspace argument: `create_token/4` binds no membership in ws_a or
+      # ws_b, which are the only workspaces holding the rows above.
+      {:ok, _} = Auth.create_token(stranger, "stranger", @dataset, ["admin"])
+
+      conn = json_conn(stranger) |> get("/v1/auth/app-tokens")
+
+      # 200, not 401/403: the bearer legitimately passes the route's gate. The
+      # refusal is an absence of rows, never a status that would confirm the
+      # rows exist.
+      assert conn.status == 200
+      body = json_response(conn, 200)
+
+      ids = Enum.map(body["tokens"], & &1["id"])
+
+      refute a_row.id in ids,
+             "a membership-less admin token enumerated workspace A's credentials"
+
+      refute b_row.id in ids,
+             "a membership-less admin token enumerated workspace B's credentials"
+    end
+
+    test "the sweep and ?email= agree: same confinement, different selection",
+         %{ws_a: ws_a, ws_b: ws_b, admin_a: admin_a} do
+      # The defect the ruling closed was that `:email` doubled as the SCOPE
+      # trigger, so the two arms disagreed about who may see what. This pins
+      # that they no longer can: the id set the sweep returns for A's rows is
+      # the id set `?email=` returns for the same address, and B's copy is
+      # absent from both.
+      mail = email()
+      {_mine, mine_row} = app_token_in!(ws_a, mail)
+      {_theirs, theirs_row} = app_token_in!(ws_b, mail)
+
+      swept =
+        json_conn(admin_a)
+        |> get("/v1/auth/app-tokens")
+        |> json_response(200)
+        |> Map.fetch!("tokens")
+        |> Enum.map(& &1["id"])
+
+      filtered =
+        json_conn(admin_a)
+        |> get("/v1/auth/app-tokens?email=#{mail}")
+        |> json_response(200)
+        |> Map.fetch!("tokens")
+        |> Enum.map(& &1["id"])
+
+      assert filtered == [mine_row.id]
+      assert mine_row.id in swept
+      refute theirs_row.id in swept
+      refute theirs_row.id in filtered
     end
   end
 
@@ -260,10 +365,10 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
       # `permissions[]` with NO membership requirement, and it grants reach to
       # the ROUTE. `workspace_admin?/2` is `membership_role/2 in ~w(owner
       # admin)` and grants ROWS. So an `admin`-permissioned token holding zero
-      # memberships passes the gate and administers nothing: on `?email=` that
-      # is the ratified posture of the write twin, which hands such a caller
-      # `revoked_count: 0`. On the unfiltered sweep it would empty that
-      # operator's inventory, which is why the sweep is left alone.
+      # memberships passes the gate and administers nothing — on BOTH arms
+      # since `task-aa07355fa8a53355`, matching the write twin, which hands
+      # such a caller `revoked_count: 0`. The sweep describe block above drives
+      # exactly that caller.
       mail = email()
       {_a_secret, a_row} = app_token_in!(ws_a, mail)
       {_b_secret, b_row} = app_token_in!(ws_b, mail)
@@ -285,7 +390,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
       assert b_row.id in ids, "an admin member of BOTH workspaces lost one workspace's rows"
     end
 
-    test "a row with a NULL workspace_id is administrable by NOBODY and is absent from ?email=",
+    test "a row with a NULL workspace_id is administrable by NOBODY and is absent from BOTH arms",
          %{admin_a: admin_a, admin_b: admin_b} do
       # `create_token/5` falls back to the default workspace, so an unbound row
       # has to be written directly — which is exactly why fail-closed matters:
@@ -311,6 +416,16 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
 
         assert json_response(conn, 200)["tokens"] == [],
                "an unbound app token was listed — the predicate is not fail-closed"
+
+        # The SWEEP now runs the same predicate, so the fail-closed stance has
+        # to hold on both arms or the orphan is reachable by dropping a query
+        # parameter. Asserted by id rather than on an empty list: the shared
+        # test database means the sweep legitimately carries other rows.
+        swept = json_conn(bearer) |> get("/v1/auth/app-tokens")
+        assert swept.status == 200
+
+        refute orphan.id in (swept |> json_response(200) |> Map.fetch!("tokens") |> Enum.map(& &1["id"])),
+               "an unbound app token was swept up — the predicate is not fail-closed on the sweep"
       end
     end
   end

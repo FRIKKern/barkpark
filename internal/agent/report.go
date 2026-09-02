@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -312,6 +313,25 @@ type Report struct {
 	// re-enact the incident: "we did not look" rendered as "nothing to see" is
 	// precisely the silence of 2026-08-06.
 	Runaways []RunawayProc `json:"runaway_procs"`
+
+	// SlotUnits is the state of the box's blue/green SYSTEMD UNITS (and the
+	// spawned-site units systemd currently calls failed) — the fact that a
+	// `barkpark-slot@blue` sitting in `failed` was known ONLY to ssh, while every
+	// operator surface read `ok`. See the SlotUnit block below for the full case
+	// and for why Result and ExecMainStatus must travel together.
+	//
+	// Same nil-vs-empty law as Runaways, and here it matters more, not less: nil
+	// (a JSON null) is UNMEASURED — no systemd, no dbus, a timed-out probe — and
+	// a NON-NIL EMPTY list is MEASURED and nothing to report. A consumer that
+	// rendered "no failed units" off an unwired probe would re-create the exact
+	// silence this field exists to break.
+	SlotUnits []SlotUnit `json:"slot_units"`
+	// SlotUnitsTruncated is how many FAILED SITE units slotUnitsLimit hid, so the
+	// short list says it is short (the rule SitesCount already keeps for the
+	// per-slug cap). 0 = the list is complete; -1 = the probe never ran, matching
+	// the -1 sentinel every unmeasured number on this beat uses. The blue/green
+	// pair is never truncated, so this can never hide a slot unit.
+	SlotUnitsTruncated int `json:"slot_units_truncated"`
 
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
 	// recent backup present and scheduled?
@@ -731,7 +751,7 @@ var execRunnerTimeout = 5 * time.Minute
 // gitProbe.git above) are untouched, so a hung approved command surfaces as an
 // honest "timed out after ..." error instead of wedging the agent.
 func (ExecRunner) Run(name string, args ...string) (string, error) {
-	return runBounded(execRunnerTimeout, name, args...)
+	return runBounded(execRunnerTimeout, nil, name, args...)
 }
 
 // runBounded is the one place a shell-out gets its lifetime. EVERY caller picks
@@ -747,10 +767,18 @@ func (ExecRunner) Run(name string, args ...string) (string, error) {
 // from the output shape alone is how a timeout gets partially landed.
 var errProbeTimedOut = errors.New("timed out")
 
-func runBounded(timeout time.Duration, name string, args ...string) (string, error) {
+// env is the SECOND thing a shell-out needs from this one place, and it exists
+// for exactly one reason: a secret handed to a child in argv is world-readable
+// for the child's whole lifetime (/proc/<pid>/cmdline, a plain `ps`), while the
+// same secret handed to it in the environment is readable only by the process
+// owner. nil means "inherit the agent's own environment" — every probe but the
+// Postgres pair passes nil, because they carry no credential at all.
+func runBounded(timeout time.Duration, env []string, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = env // nil = inherit, which is exec's own default
+	out, err := cmd.CombinedOutput()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return string(out), fmt.Errorf("%w after %s: %s %s", errProbeTimedOut, timeout, name, strings.Join(args, " "))
 	}
@@ -832,6 +860,12 @@ type ReportConfig struct {
 	// error to one, so "measured and quiet" can never arrive as "we did not look".
 	// Wire the production implementation with NewRunawayProbe().
 	RunawayProbe func() ([]RunawayProc, error)
+	// SlotUnitsProbe returns the blue/green (and failed site) unit states plus
+	// how many the cap hid. nil → SlotUnits stays nil (UNMEASURED) and
+	// SlotUnitsTruncated stays -1; the two land as ONE unit like SwapProbe's
+	// pair, because a truncation count without its list says nothing. Wire the
+	// production implementation with NewSlotUnitsProbe().
+	SlotUnitsProbe func() ([]SlotUnit, int, error)
 	// SwapProbe returns (used percent 0..100, total swap bytes). nil → BOTH swap
 	// fields keep the -1 sentinel. Gathered fail-soft as ONE unit like
 	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
@@ -892,6 +926,9 @@ func gatherReport(cfg ReportConfig) Report {
 		SwapTotalBytes:  -1,
 		BeamPSSBytes:    -1,
 		BeamSwapBytes:   -1,
+		// -1, not 0: 0 means "the cap hid nothing", which is a MEASUREMENT and
+		// would be a lie on a box whose unit probe never ran.
+		SlotUnitsTruncated: -1,
 		// Always measured, never probed: the fence's denominator (D52).
 		CPUCores: runtime.NumCPU(),
 	}
@@ -953,6 +990,20 @@ func gatherReport(cfg ReportConfig) Report {
 				procs = []RunawayProc{}
 			}
 			r.Runaways = procs
+		}
+	}
+
+	// Blue/green UNIT STATE — the half of "is this box healthy" that no vital can
+	// answer. Same nil-vs-empty normalization as Runaways above, and the pair
+	// lands together: an error leaves SlotUnits nil AND SlotUnitsTruncated -1,
+	// because a truncation count beside no list is a number about nothing.
+	if cfg.SlotUnitsProbe != nil {
+		if units, truncated, err := cfg.SlotUnitsProbe(); err == nil {
+			if units == nil {
+				units = []SlotUnit{}
+			}
+			r.SlotUnits = units
+			r.SlotUnitsTruncated = truncated
 		}
 	}
 
@@ -1148,14 +1199,19 @@ const pgTopRelationsSQL = "SET statement_timeout = '" + pgStatementTimeout + "';
 // is ever edited without the parser being told.
 const pgTopRelationsLimit = 10
 
-// probeRunner is the shell-out seam the Postgres probes use. Production passes
-// a runBounded closure carrying pgProbeTimeout; tests pass a fake so the psql
-// contract (argv, parsing, failure paths) is provable without a live database.
-type probeRunner func(name string, args ...string) (string, error)
+// probeRunner is the shell-out seam every on-box probe uses. Production passes
+// a runBounded closure carrying that probe's timeout; tests pass a fake so the
+// contract (env, argv, parsing, failure paths) is provable without a live box.
+//
+// env is the first parameter and not an option BECAUSE it is the credential
+// channel: making every call site spell out `nil` is what makes the two that
+// pass a real environment (the Postgres pair) visible at a glance, and it is
+// why there is ONE runner rather than a second credential-carrying fork.
+type probeRunner func(env []string, name string, args ...string) (string, error)
 
 // boundedPGRunner is the production probeRunner: psql under pgProbeTimeout.
-func boundedPGRunner(name string, args ...string) (string, error) {
-	return runBounded(pgProbeTimeout, name, args...)
+func boundedPGRunner(env []string, name string, args ...string) (string, error) {
+	return runBounded(pgProbeTimeout, env, name, args...)
 }
 
 // pgDatabaseURL reads DATABASE_URL out of <checkout>/.env and returns it in a
@@ -1202,8 +1258,115 @@ func pgDatabaseURL(checkout string) (string, error) {
 // psqlArgs builds the argv for a single-shot, machine-readable psql query:
 // -A unaligned, -t tuples only, -q quiet, -F| explicit field separator, and
 // ON_ERROR_STOP so a failed SET does not silently yield a partial answer.
-func psqlArgs(url, sql string) []string {
-	return []string{url, "-v", "ON_ERROR_STOP=1", "-A", "-t", "-q", "-F", "|", "-c", sql}
+//
+// It carries NO connection string. argv is world-readable — every local process
+// can read /proc/<pid>/cmdline or run a plain `ps` — so a DATABASE_URL placed
+// here publishes the database password to every user on the box for the whole
+// lifetime of the child, twice per beat. The connection travels in the child's
+// ENVIRONMENT instead (pgConnEnv), which only the process owner can read.
+func psqlArgs(sql string) []string {
+	return []string{"-v", "ON_ERROR_STOP=1", "-A", "-t", "-q", "-F", "|", "-c", sql}
+}
+
+// psqlEnvKey maps a libpq URI query parameter to the environment variable libpq
+// reads for the same connection keyword. The whitelist is closed on purpose: an
+// unrecognised parameter is an ERROR, exactly as it is for libpq itself
+// ("invalid URI query parameter"), because the alternative is silently DROPPING
+// it — and a dropped `sslmode=require` is a plaintext connection nobody asked
+// for. Failing keeps the field at its -1 sentinel, which is the honest answer.
+var psqlEnvKey = map[string]string{
+	"host":                 "PGHOST",
+	"port":                 "PGPORT",
+	"dbname":               "PGDATABASE",
+	"user":                 "PGUSER",
+	"password":             "PGPASSWORD",
+	"sslmode":              "PGSSLMODE",
+	"sslrootcert":          "PGSSLROOTCERT",
+	"sslcert":              "PGSSLCERT",
+	"sslkey":               "PGSSLKEY",
+	"connect_timeout":      "PGCONNECT_TIMEOUT",
+	"application_name":     "PGAPPNAME",
+	"options":              "PGOPTIONS",
+	"target_session_attrs": "PGTARGETSESSIONATTRS",
+}
+
+// pgConnEnv turns the checkout's DATABASE_URL into the ENVIRONMENT the psql
+// child connects with, so the password never appears in argv.
+//
+// Two properties are load-bearing:
+//
+//   - It is COMPLETE or it is an error. Host, user and database must all be
+//     present; a URL missing any of them would leave libpq to fall back on its
+//     own defaults (the OS user, a unix socket, a database named after the
+//     user) and the probe would then report a real, plausible number measured
+//     against the WRONG database. That is worse than -1, so it returns an error
+//     and the field keeps its sentinel — the same contract pgDatabaseURL holds.
+//   - It is EXCLUSIVE. Every inherited PG* variable is dropped from the child's
+//     environment first, so an ambient PGHOST/PGDATABASE in the agent's own
+//     environment cannot redirect the probe at another server. PG* is entirely
+//     libpq's connection namespace; psql needs nothing else out of it.
+func pgConnEnv(rawURL string) ([]string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// The error is NOT wrapped: url.Error prints the url it failed on, and
+		// that url is the credential this whole function exists to contain.
+		return nil, errors.New("pg: unparseable DATABASE_URL")
+	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return nil, fmt.Errorf("pg: DATABASE_URL scheme %q is not postgres://", u.Scheme)
+	}
+	conn := map[string]string{}
+	if h := u.Hostname(); h != "" {
+		conn["PGHOST"] = h
+	}
+	if port := u.Port(); port != "" {
+		conn["PGPORT"] = port
+	}
+	if db := strings.TrimPrefix(u.Path, "/"); db != "" {
+		conn["PGDATABASE"] = db
+	}
+	if u.User != nil {
+		if name := u.User.Username(); name != "" {
+			conn["PGUSER"] = name
+		}
+		if pw, ok := u.User.Password(); ok {
+			conn["PGPASSWORD"] = pw
+		}
+	}
+	params, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		// Unwrapped for the same reason: the parse error quotes the input.
+		return nil, errors.New("pg: unparseable DATABASE_URL parameters")
+	}
+	for name, vals := range params {
+		key, ok := psqlEnvKey[name]
+		if !ok {
+			return nil, fmt.Errorf("pg: DATABASE_URL carries unsupported parameter %q", name)
+		}
+		conn[key] = vals[len(vals)-1]
+	}
+	for _, required := range []string{"PGHOST", "PGUSER", "PGDATABASE"} {
+		if conn[required] == "" {
+			return nil, fmt.Errorf("pg: DATABASE_URL has no %s — a default connection would measure the WRONG database", required)
+		}
+	}
+
+	env := make([]string, 0, len(conn)+16)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "PG") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	keys := make([]string, 0, len(conn))
+	for k := range conn {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		env = append(env, k+"="+conn[k])
+	}
+	return env, nil
 }
 
 // NewPGSizeProbe builds the production PGSizeProbe: psql against the checkout's
@@ -1221,11 +1384,15 @@ func newPGSizeProbeWith(run probeRunner, checkout string) func() (int64, error) 
 		return nil
 	}
 	return func() (int64, error) {
-		url, err := pgDatabaseURL(checkout)
+		dbURL, err := pgDatabaseURL(checkout)
 		if err != nil {
 			return -1, err
 		}
-		out, err := run("psql", psqlArgs(url, pgSizeSQL)...)
+		env, err := pgConnEnv(dbURL)
+		if err != nil {
+			return -1, err
+		}
+		out, err := run(env, "psql", psqlArgs(pgSizeSQL)...)
 		if err != nil {
 			return -1, fmt.Errorf("pg size: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1262,11 +1429,15 @@ func newPGTopRelationsProbeWith(run probeRunner, checkout string) func() ([]Rela
 		return nil
 	}
 	return func() ([]RelationSize, error) {
-		url, err := pgDatabaseURL(checkout)
+		dbURL, err := pgDatabaseURL(checkout)
 		if err != nil {
 			return nil, err
 		}
-		out, err := run("psql", psqlArgs(url, pgTopRelationsSQL)...)
+		env, err := pgConnEnv(dbURL)
+		if err != nil {
+			return nil, err
+		}
+		out, err := run(env, "psql", psqlArgs(pgTopRelationsSQL)...)
 		if err != nil {
 			return nil, fmt.Errorf("pg top relations: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1788,8 +1959,8 @@ var DefaultConsumerRoots = []string{
 // goes through one — a probe that can run forever is the runaway-diagnostic
 // incident again, one layer down.
 func boundedSpaceRunner(timeout time.Duration) probeRunner {
-	return func(name string, args ...string) (string, error) {
-		return runBounded(timeout, name, args...)
+	return func(env []string, name string, args ...string) (string, error) {
+		return runBounded(timeout, env, name, args...)
 	}
 }
 
@@ -1807,7 +1978,7 @@ func NewRootSpaceProbe() func() (int64, int64, error) {
 
 func newRootSpaceProbeWith(run probeRunner) func() (int64, int64, error) {
 	return func() (int64, int64, error) {
-		out, err := run("df", dfRootArgs()...)
+		out, err := run(nil, "df", dfRootArgs()...)
 		if err != nil {
 			return -1, -1, fmt.Errorf("df: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1851,7 +2022,7 @@ func NewJournalSpaceProbe() func() (int64, error) {
 
 func newJournalSpaceProbeWith(run probeRunner) func() (int64, error) {
 	return func() (int64, error) {
-		out, err := run("journalctl", journalArgs()...)
+		out, err := run(nil, "journalctl", journalArgs()...)
 		if err != nil {
 			return -1, fmt.Errorf("journalctl: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1960,7 +2131,7 @@ func newSitesSpaceProbeWith(run probeRunner, dir string) func() (int64, []SiteSi
 	}
 	return func() (int64, []SiteSize, error) {
 		args, unit := duTreeArgs(dir)
-		out, err := run("nice", args...)
+		out, err := run(nil, "nice", args...)
 		if err != nil {
 			// DISCARD, never partially land. A du killed at its deadline prints
 			// the rows it had already finished — 5 site rows, then rc=137 — and
@@ -2023,7 +2194,7 @@ func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, [
 			return -1, nil, nil, errors.New("du: empty root")
 		}
 		args, unit := duTreeArgs(dir)
-		out, runErr := run("nice", args...)
+		out, runErr := run(nil, "nice", args...)
 		total, rows, degraded, parseErr := parseDuTree(out, dir, unit)
 
 		if runErr != nil {
@@ -2313,7 +2484,7 @@ func NewRunawayProbe() func() ([]RunawayProc, error) {
 
 func newRunawayProbeWith(run probeRunner) func() ([]RunawayProc, error) {
 	return func() ([]RunawayProc, error) {
-		out, err := run("ps", psRunawayArgs()...)
+		out, err := run(nil, "ps", psRunawayArgs()...)
 		if err != nil {
 			return nil, fmt.Errorf("ps: %w: %s", err, truncate(strings.TrimSpace(out), 120))
 		}
@@ -2410,4 +2581,253 @@ func restAfterFields(line string, n int) string {
 		rest = rest[j:]
 	}
 	return strings.TrimLeft(rest, " \t")
+}
+
+// --- slot / site UNIT STATE (dr-bl-w5-failed-slot-unit-is-invisible) ---------
+//
+// WHAT WAS MISSING, measured on guerrilla 2026-08-06 and again 2026-09-01: the
+// box runs blue/green as two systemd template units and the beat carried NOT ONE
+// BIT of their state. `systemctl is-active barkpark-slot@blue barkpark-slot@green`
+// read `failed / active` — blue had died on an 8m30s stop-sigterm timeout and
+// been SIGKILLed — and every operator surface said `ok`, because the verdict was
+// computed from vitals alone and had no unit-state input at all. It was ACCIDENTALLY
+// right (green was serving, so the box genuinely was serving) and would have said
+// exactly the same thing with BOTH halves dead: a light that cannot go out.
+//
+// The beat now carries the unit facts themselves — never a verdict. Whether a
+// failed half matters is the consumer's call, and it CANNOT be made from
+// ActiveState alone:
+//
+//   - Result= separates a crash from a deliberate stop that systemd mislabels.
+//     Measured 2026-09-01: barkpark-site@search__b is `failed` with
+//     Result=exit-code, ExecMainStatus=143 — 128+15, i.e. Next.js exiting on the
+//     SIGTERM of its own retire. PR #14863 adds SuccessExitStatus=143 to the unit
+//     file for exactly this. Until it lands, a reader that treats `failed` as a
+//     crash is reading a clean shutdown as an outage, so the exit status rides
+//     WITH the result and neither is dropped.
+//   - MainPID separates "the unit says active" from "a process is actually
+//     there". An `active`/`exited` oneshot has MainPID 0.
+//   - StateSince is systemd's own timestamp string, carried VERBATIM. An
+//     operator's next question after "blue is failed" is "since when", and a
+//     re-formatted timestamp is a second source of truth for a fact systemd
+//     already states.
+//
+// A verdict built on this can finally distinguish the two cases the row names:
+// half the pair failed while the OTHER half serves (still ok, say so in the
+// detail), versus NEITHER half active while health claims up (a real
+// contradiction, and previously unsayable).
+
+// SlotUnit is ONE systemd unit's state as `systemctl show` reports it — the raw
+// properties, never a derived verdict.
+//
+// Every string is systemd's own vocabulary verbatim (ActiveState
+// active|inactive|failed|activating|deactivating; SubState running|dead|failed|…;
+// Result success|exit-code|signal|timeout|oom-kill|…). Reproducing that
+// vocabulary here as an enum would be a second, drifting copy of a contract the
+// kernel of this design does not own.
+type SlotUnit struct {
+	// Unit is systemd's `Id=` — the full unit name including `.service`. It is
+	// read back from the property block rather than echoed from the argv, so a
+	// block that came back for a different unit than we asked about cannot be
+	// mislabelled.
+	Unit string `json:"unit"`
+	// ActiveState / SubState / Result are systemd's three state axes. Result is
+	// the one that separates a crash from a signal from a timeout, and it is
+	// meaningless without ExecMainStatus (see the 143 case above).
+	ActiveState string `json:"active_state"`
+	SubState    string `json:"sub_state"`
+	Result      string `json:"result"`
+	// MainPID is systemd's `MainPID=`: 0 when no main process is running. It is
+	// the difference between a unit that CLAIMS active and one that has a
+	// process. -1 when the property was absent or unparseable — an unread pid is
+	// not pid 0, which is a real, different fact.
+	MainPID int64 `json:"main_pid"`
+	// ExecMainStatus is the main process's last exit status (or signal number).
+	// -1 when absent/unparseable, for the same reason MainPID is: a status we
+	// could not read must never render as a clean 0.
+	ExecMainStatus int `json:"exec_main_status"`
+	// StateSince is systemd's own timestamp for the unit's last state change,
+	// VERBATIM (e.g. "Tue 2026-09-01 11:07:52 UTC"). Empty when systemd has none
+	// — a never-started unit reports empty timestamps, and an invented one would
+	// be the fabrication the whole beat's honesty law forbids.
+	StateSince string `json:"state_since"`
+}
+
+// slotUnitNames is the blue/green pair, asked for BY NAME on every beat. They
+// are named rather than discovered so the pair is reported even when a half is
+// `inactive`/`dead` — a discovery listing that only returns loaded-and-running
+// units would report the healthy half and silently omit the dead one, which is
+// the precise blindness this field exists to end.
+var slotUnitNames = []string{"barkpark-slot@blue.service", "barkpark-slot@green.service"}
+
+// slotUnitProps is the `systemctl show -p` property list. Id FIRST because it is
+// what labels the block; the timestamps are three because systemd populates a
+// different one depending on how the unit came to rest (see stateSince below).
+const slotUnitProps = "Id,ActiveState,SubState,Result,MainPID,ExecMainStatus," +
+	"StateChangeTimestamp,InactiveEnterTimestamp,ActiveEnterTimestamp"
+
+// slotUnitsLimit caps the whole list. The blue/green pair is 2 of it and is
+// NEVER dropped; the remainder is the failed `barkpark-site@*` units, and
+// SlotUnitsTruncated reports how many the cap hid, so the short list says it is
+// short (the same rule sitesTopLimit/SitesCount keep above). Six failed sites is
+// already a story; the seventh does not change the operator's next action.
+const slotUnitsLimit = 8
+
+// siteUnitPattern is the spawned-site template. `--state=failed` does the
+// filtering server-side, so a box with fifty healthy sites costs one line of
+// output, not fifty.
+const siteUnitPattern = "barkpark-site@*"
+
+// slotUnitsProbeTimeout bounds each systemctl shell-out. Two short `systemctl`
+// calls on a local dbus are milliseconds; a hung dbus must degrade to the
+// unmeasured nil, never stall the beat behind it.
+var slotUnitsProbeTimeout = 5 * time.Second
+
+// NewSlotUnitsProbe builds the production probe: two bounded, DIRECT-argv
+// `systemctl` calls per beat (no shell, no pipe — see psRunawayArgs for why
+// that is a contract and not a taste).
+//
+// The FIRST call is the blue/green pair and its failure is the probe's failure:
+// SlotUnits stays nil (UNMEASURED) rather than landing an empty list that would
+// read "we looked at the pair and there is nothing to say". The SECOND call is
+// the failed site units and it degrades independently — a `systemctl list-units`
+// that errors costs the site rows, never the pair.
+func NewSlotUnitsProbe() func() ([]SlotUnit, int, error) {
+	return newSlotUnitsProbeWith(boundedSpaceRunner(slotUnitsProbeTimeout))
+}
+
+func newSlotUnitsProbeWith(run probeRunner) func() ([]SlotUnit, int, error) {
+	return func() ([]SlotUnit, int, error) {
+		args := append([]string{"show", "-p", slotUnitProps}, slotUnitNames...)
+		out, err := run(nil, "systemctl", args...)
+		if err != nil {
+			return nil, -1, fmt.Errorf("systemctl show: %w: %s", err, truncate(strings.TrimSpace(out), 120))
+		}
+		units := parseSystemctlShow(out)
+		if len(units) == 0 {
+			// `systemctl show` prints a block even for a unit that does not
+			// exist, so NOTHING parseable means the command did not really run
+			// (no systemd, no dbus, a busybox `systemctl`). That is unmeasured.
+			return nil, -1, fmt.Errorf("systemctl show: no unit block in %q", truncate(strings.TrimSpace(out), 120))
+		}
+
+		truncated := 0
+		names, lerr := failedSiteUnitNames(run)
+		if lerr == nil && len(names) > 0 {
+			room := slotUnitsLimit - len(units)
+			if room < 0 {
+				room = 0
+			}
+			if len(names) > room {
+				truncated = len(names) - room
+				names = names[:room]
+			}
+			if len(names) > 0 {
+				sargs := append([]string{"show", "-p", slotUnitProps}, names...)
+				if sout, serr := run(nil, "systemctl", sargs...); serr == nil {
+					units = append(units, parseSystemctlShow(sout)...)
+				}
+			}
+		}
+		return units, truncated, nil
+	}
+}
+
+// failedSiteUnitNames lists the spawned-site units systemd currently calls
+// FAILED, in systemd's own order. `--plain --no-legend --no-pager` strips the
+// decorations so the first field of every line is a unit name and nothing else.
+func failedSiteUnitNames(run probeRunner) ([]string, error) {
+	out, err := run(nil, "systemctl", "list-units", siteUnitPattern,
+		"--all", "--state=failed", "--plain", "--no-legend", "--no-pager")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.HasSuffix(fields[0], ".service") {
+			names = append(names, fields[0])
+		}
+	}
+	return names, nil
+}
+
+// parseSystemctlShow turns `systemctl show -p A,B,C unit…` output into one
+// SlotUnit per property BLOCK. Blocks are blank-line separated and properties
+// arrive as `Key=Value` in an order systemd does not promise, so every block is
+// read into a map and looked up by name — never by position.
+//
+// A block with no `Id=` is DROPPED: an unlabelled block cannot be attributed to
+// a unit, and attributing it to the argv position would be a guess in exactly
+// the place beam_slot already taught this tree not to guess.
+func parseSystemctlShow(out string) []SlotUnit {
+	var units []SlotUnit
+	block := map[string]string{}
+	flush := func() {
+		if len(block) == 0 {
+			return
+		}
+		if u, ok := slotUnitFrom(block); ok {
+			units = append(units, u)
+		}
+		block = map[string]string{}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		block[strings.TrimSpace(k)] = v
+	}
+	flush()
+	return units
+}
+
+func slotUnitFrom(block map[string]string) (SlotUnit, bool) {
+	id := strings.TrimSpace(block["Id"])
+	if id == "" {
+		return SlotUnit{}, false
+	}
+	return SlotUnit{
+		Unit:           id,
+		ActiveState:    strings.TrimSpace(block["ActiveState"]),
+		SubState:       strings.TrimSpace(block["SubState"]),
+		Result:         strings.TrimSpace(block["Result"]),
+		MainPID:        parseUnitInt64(block["MainPID"]),
+		ExecMainStatus: int(parseUnitInt64(block["ExecMainStatus"])),
+		StateSince:     stateSince(block),
+	}, true
+}
+
+// parseUnitInt64 reads a systemd numeric property, returning -1 for absent or
+// unparseable. Never 0: an unread pid and pid 0 are different facts.
+func parseUnitInt64(s string) int64 {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// stateSince picks the timestamp that describes how the unit came to rest, in
+// the order systemd actually populates them: StateChangeTimestamp is set for a
+// unit that has changed state at all; a unit that fell out of active carries
+// InactiveEnterTimestamp; a running one carries ActiveEnterTimestamp. All three
+// are EMPTY on a unit that has never run since boot — measured on guerrilla for
+// barkpark-slot@blue — and empty is carried through as empty.
+func stateSince(block map[string]string) string {
+	for _, k := range []string{"StateChangeTimestamp", "InactiveEnterTimestamp", "ActiveEnterTimestamp"} {
+		if v := strings.TrimSpace(block[k]); v != "" {
+			return v
+		}
+	}
+	return ""
 }

@@ -383,13 +383,33 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
+  # CONTENTLESS ACTION (the empty-chrome invariant — see `blank_field?/2`): an
+  # action with NEITHER a label NOR a destination composed to
+  # `<a href="#" class="bp-button"></a>` — a zero-width CLICKABLE control on the
+  # public reader that goes nowhere and says nothing (`safe_url("")` is `"#"`, so
+  # it is a live anchor, not inert markup). It is exactly what the Studio canvas
+  # seeds: `Blocks.default_block("action", id)` is `%{"href" => "", "label" => ""}`,
+  # the same "freshly-inserted scaffolding" case the asset-less `image` clause
+  # already answers. Blank now composes to the empty `_raw` node in BOTH arms —
+  # this ONE clause is style-invariant, so the article `.bp-button` markup and the
+  # inline-styled email button are covered by the same guard and cannot disagree.
+  # `priority` is CHROME (which button skin), never content: a priority-only block
+  # is still blank. An action with a label OR an href is byte-UNCHANGED.
+  #
+  # This clause is also the `action` CHILD path for `card` / `terminal` / `columns`
+  # (`render_children/2` → `render_blocks/2` → `compose_block/2`), so an empty
+  # action nested in a card is answered here too, with no per-container copy.
   def compose_block(%{"type" => "action"} = b, _style) do
-    %{
-      "kind" => "PdButton",
-      "href" => Map.get(b, "href", ""),
-      "label" => Map.get(b, "label", ""),
-      "priority" => Map.get(b, "priority")
-    }
+    if blank_action?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      %{
+        "kind" => "PdButton",
+        "href" => Map.get(b, "href", ""),
+        "label" => Map.get(b, "label", ""),
+        "priority" => Map.get(b, "priority")
+      }
+    end
   end
 
   # STEP-2 LAYOUT ENGINE: a `section` MAY carry an optional `layout` object
@@ -455,10 +475,23 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # `figure`); the figcaption is muted/italic with a bold "Figure N." run-in.
   # In email/default mode: degrade gracefully — Mermaid never runs in email, so
   # we render the caption then the source as a plain code block.
+  # CONTENTLESS DIAGRAM (the empty-chrome invariant — see `blank_field?/2`): a
+  # diagram whose Mermaid source AND caption both normalize to nothing painted,
+  # in :article, a 328-byte bordered parchment card around an empty
+  # `<pre class="mermaid">` — a silent box a reader mistakes for a broken figure,
+  # and one Mermaid then fails to parse at runtime — and, in email/default, a
+  # `<figure>` around an empty grey `<pre>`. Blank now composes to the empty
+  # `_raw` node in BOTH arms (this ONE clause style-branches inside
+  # `Figures.diagram_html/3`, so the two surfaces cannot disagree about blank).
+  # A diagram carrying EITHER a source or a caption is byte-UNCHANGED.
   def compose_block(%{"type" => "diagram"} = b, style) do
-    source = stringish(Map.get(b, "source", ""))
-    caption = stringish(Map.get(b, "caption", ""))
-    %{"kind" => "_raw", "html" => Figures.diagram_html(source, caption, style)}
+    if blank_diagram?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      source = stringish(Map.get(b, "source", ""))
+      caption = stringish(Map.get(b, "caption", ""))
+      %{"kind" => "_raw", "html" => Figures.diagram_html(source, caption, style)}
+    end
   end
 
   # ── asciicast / terminal-recording blocks ──────────────────────────────────
@@ -475,26 +508,44 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # `poster` (optional) names the resting frame the player shows before play —
   # an npt timestamp (`"npt:1:23"`) or `"end"`. Unset → the client twins keep
   # their `npt:0:1` default and the emitted mount stays byte-identical.
+  # CONTENTLESS ASCIICAST (the empty-chrome invariant — see `blank_field?/2`): a
+  # recording with NEITHER a cast URL NOR a caption painted, in :article, a
+  # 303-byte bordered player mount carrying `data-cast-src="#"` (`safe_url("")`
+  # degrades to `"#"`), which the PaperMermaid hook then tries to FETCH AND PLAY —
+  # a bordered box that sits empty or errors; email/default painted a dead
+  # `<a href="#">Terminal recording</a>`, a link whose text the reader never wrote.
+  # Blank now composes to the empty `_raw` node in BOTH arms. `poster` and `rows`
+  # are PLAYER OPTIONS, not content — a poster names a frame of a recording that
+  # is not there, so a poster/rows-only block is still blank. A recording carrying
+  # EITHER a src or a caption is byte-UNCHANGED.
   def compose_block(%{"type" => "asciicast"} = b, :article) do
-    src = stringish(Map.get(b, "src", ""))
-    caption = stringish(Map.get(b, "caption", ""))
-    poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
+    if blank_asciicast?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      src = stringish(Map.get(b, "src", ""))
+      caption = stringish(Map.get(b, "caption", ""))
+      poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
 
-    %{
-      "kind" => "_raw",
-      "html" => Figures.asciicast_html(src, caption, poster, asciicast_rows(b), :article)
-    }
+      %{
+        "kind" => "_raw",
+        "html" => Figures.asciicast_html(src, caption, poster, asciicast_rows(b), :article)
+      }
+    end
   end
 
   def compose_block(%{"type" => "asciicast"} = b, style) do
-    src = stringish(Map.get(b, "src", ""))
-    caption = stringish(Map.get(b, "caption", ""))
-    poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
+    if blank_asciicast?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      src = stringish(Map.get(b, "src", ""))
+      caption = stringish(Map.get(b, "caption", ""))
+      poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
 
-    %{
-      "kind" => "_raw",
-      "html" => Figures.asciicast_html(src, caption, poster, asciicast_rows(b), style)
-    }
+      %{
+        "kind" => "_raw",
+        "html" => Figures.asciicast_html(src, caption, poster, asciicast_rows(b), style)
+      }
+    end
   end
 
   # A curated set of related Papers. Authored refs remain useful in pure/email
@@ -1720,8 +1771,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # spans + the optional legend row — Components.filetree_html/1 through the
   # `_raw` pre-rendered-HTML hatch. Style-invariant single clause like
   # chat-tool-diff (inline-token mono rendering reads identically in email).
+  #
+  # CONTENTLESS FILETREE (the empty-chrome invariant — see `blank_field?/2`): of
+  # the framed arms surveyed alongside the four media blocks, this is the one that
+  # is a genuine SILENT BOX. A filetree with no `text` and no `legend` emitted 291
+  # bytes of bordered mono card containing LITERALLY NOTHING
+  # (`…line-height: 1.5;"></div>`) — no label, no glyph, no count — on both
+  # surfaces, since this clause is style-invariant. Its neighbours self-describe
+  # and are deliberately LEFT: `diff` prints its own `+0 −0` counts row, and every
+  # `chat-*` card prints its literal title ("Update todos ⎿ no items", "✻ thought",
+  # "Allow tool? pending", …), so an empty one still SAYS something. Blank now
+  # composes to the empty `_raw` node; a tree with EITHER lines or a legend is
+  # byte-UNCHANGED.
   def compose_block(%{"type" => "filetree"} = b, _style) do
-    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b)}
+    if blank_filetree?(b) do
+      %{"kind" => "_raw", "html" => ""}
+    else
+      %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b)}
+    end
   end
 
   # scaffy:add-block-type Diff MARK:ex-compose-diff
@@ -1908,8 +1975,35 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # SCOPE: source-field ALIASES (`code` / `content` / `text`) are a separate
   # contract owned elsewhere; when they normalize into `value` upstream this
   # check sees them for free, with no second definition of "blank".
-  defp blank_code_source?(b),
-    do: b |> Map.get("value", "") |> stringish() |> String.trim() == ""
+  defp blank_code_source?(b), do: blank_field?(b, "value")
+
+  # THE ONE blank-field reader every empty-chrome guard in this module shares, so
+  # no two block types (and no two style arms of one type) can ever disagree about
+  # what "blank" means. Extracted from `blank_code_source?/1` above VERBATIM —
+  # missing key, explicit nil and non-stringish values normalize through
+  # `stringish/1`, then `String.trim/1` strips the whole Unicode White_Space set
+  # (NBSP U+00A0, the U+2000-200A quads, IDEOGRAPHIC SPACE U+3000, LINE/PARAGRAPH
+  # SEPARATOR U+2028/9), not just ASCII. Zero-width characters (U+200B, U+FEFF)
+  # are NOT White_Space and stay CONTENT — the guard must not over-reach.
+  defp blank_field?(b, key),
+    do: b |> Map.get(key, "") |> stringish() |> String.trim() == ""
+
+  # The empty-chrome predicates for the framed media blocks. Each is an AND over
+  # every field a READER could see, never an OR: the guard may only remove a
+  # block from which nothing authored survives. Dropping a caption because its
+  # media is missing would DELETE prose — the exact silent-content-loss shape
+  # `Slots.lossy_shape?/1` exists to catch (that predicate answers only
+  # note/card/callout/pipeline, so it neither covers nor double-answers these).
+  # Chrome-only keys are excluded by construction: `priority` on an action is a
+  # button skin, `poster`/`rows` on an asciicast are player options for a
+  # recording that is not there.
+  defp blank_diagram?(b), do: blank_field?(b, "source") and blank_field?(b, "caption")
+
+  defp blank_asciicast?(b), do: blank_field?(b, "src") and blank_field?(b, "caption")
+
+  defp blank_action?(b), do: blank_field?(b, "label") and blank_field?(b, "href")
+
+  defp blank_filetree?(b), do: blank_field?(b, "text") and blank_field?(b, "legend")
 
   defp stringish(v) when is_binary(v), do: v
   defp stringish(nil), do: ""
@@ -2810,6 +2904,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Children of a container block: `children` (preferred) or `blocks`.
   defp container_children(b), do: Map.get(b, "children") || Map.get(b, "blocks") || []
 
+  # CONTENTLESS FIGURE (the empty-chrome invariant — see `blank_field?/2`), and
+  # the ONE place both figure style arms decide it, because this bridge is where
+  # the child's bytes actually exist.
+  #
+  # THE RULE, written down: a figure is blank when NOTHING it would paint
+  # survives — its child contributes no bytes AND its caption is blank. "No
+  # bytes" is asked of the COMPOSED child, not of the key: a missing / nil /
+  # non-map `child` composes to "" (the `_ -> ""` branch below), and so does a
+  # child that is itself scaffolding — an asset-less `image`, or (since #14806) a
+  # sourceless `code` block. That is deliberately STRONGER than a key check: the
+  # 183-byte empty bordered `<figure>` the survey measured is exactly the shape a
+  # figure wrapping a nothing-child produces, and a key check would miss it.
+  # EITHER half alone keeps the frame: a caption with no child still renders (an
+  # author's prose is never deleted to tidy a border), and a real child with no
+  # caption is byte-UNCHANGED — the pre-existing `cap == ""` branches already
+  # handle a caption-less figure and are untouched.
   defp figure_html(child, caption, style) do
     child_html =
       case child do
@@ -2823,6 +2933,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           ""
       end
 
+    if String.trim(stringish(child_html)) == "" and String.trim(caption) == "" do
+      ""
+    else
+      figure_frame_html(child_html, caption, style)
+    end
+  end
+
+  defp figure_frame_html(child_html, caption, style) do
     {open, cap} =
       case style do
         :article ->

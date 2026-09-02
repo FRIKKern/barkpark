@@ -145,9 +145,60 @@ scripts/gate-announces-skips.test.sh'
 # in the repo's life), so the full-suite cost is rare and bounded.
 #   web/public/bp-paper-editor.bundle.js, web/public/assets/bp-paper-editor.css
 #       <- api/test/barkpark/paper_editor_vendor_drift_test.exs
+#
+# THE `cloud/test/**` ENTRY IS THE ONLY DECLARED READ THIS SCRIPT'S OWN CENSUS
+# CANNOT SEE, which is why it needs a paragraph here instead of a row in
+# --list-escapes. DERIVED FROM WHAT THE SCANNER READS, not from a hunch:
+#   scripts/async_env_seam_scan.exs:63-65
+#     def default_roots do
+#       [Path.join(repo_root(), "cloud/test"), Path.join(repo_root(), "api/test")]
+#     end
+#   ...and :77  `files = Path.wildcard(Path.join(root, "**/*_test.exs"))`.
+#   Called with those defaults by api/test/barkpark/async_global_seam_guard_test.exs,
+#   which asserts `count > 0` for BOTH roots and `offenders == []`. So a
+#   cloud/test file that gains `async: true` + `Application.put_env` REDS the
+#   api suite — a suite a cloud/test-only PR was skipping.
+#
+# WHY THE CENSUS MISSES IT — the blindness class, recorded so the next reader
+# does not go hunting for a scanner bug. Every door in list_escapes resolves
+# `"../…"` literals found IN api/lib + api/test. The path here is a runtime
+# `Path.join(repo_root(), "cloud/test")` inside a THIRD file that the api test
+# merely `Code.require_file`s; the only literal at the api-test site is
+# `"../../../scripts/async_env_seam_scan.exs"`, which the census DOES resolve
+# and which is declared below — the transitive read one hop further is
+# invisible. MEASURED on a clean tree before this entry existed:
+# `--list-escapes | cut -f1 | sort -u` printed 38 paths and `grep -c cloud/`
+# over them printed 0, while
+# `printf 'cloud/test/barkpark_cloud/accounts_test.exs' | … --match test`
+# printed `false` (and `--match compile` `false`). A gate that can RED on a
+# path it does not DISPATCH on, certified green by its own ratchet, is the
+# exact hole this file exists to catch — pointed at itself.
+#
+# THE CHOICE IS REAL AND IT IS MADE HERE, with its cost. The other direction
+# is to make the seam scanner scan only its OWN tree from each side, which
+# REMOVES the coupling instead of declaring it. Rejected: the api-side guard's
+# own moduledoc states why it covers both roots — "either tree's suite can be
+# run alone in CI, and a ratchet that only fires when somebody happens to run
+# the OTHER project is not a ratchet" — so narrowing it deletes live coverage
+# to buy CI minutes, and would need its own mutation proof on a
+# required-adjacent guard. Declaring pays the minutes instead, MEASURED rather
+# than waved at: 443 of this repo's 6937 commits touch cloud/test without
+# touching any other declared Elixir path, so ~6.4% of commits now
+# additionally run the full api suite, which this workflow prices at
+# 9m31s-16m29s. That is the most expensive entry in this list by frequency,
+# and it is the honest one.
+#
+# THE GLOB IS `cloud/test/**`, NOT the scanner's `cloud/test/**/*_test.exs`:
+# this file's grammar (`dir/**` or an exact path, nothing else) has no such
+# form, and the declared set must be a SUPERSET — over-triggering on
+# cloud/test/support/** is the correct direction to err, and narrowing it by
+# listing individual files would rot on the next cloud test added.
+#   cloud/test/**  <- scripts/async_env_seam_scan.exs default_roots/0
+#                     <- api/test/barkpark/async_global_seam_guard_test.exs
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
+cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh
@@ -204,10 +255,17 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 #     bases documented under HOW AN ESCAPE IS RESOLVED above. Tagged `-dir`
 #     (the `Path.expand("../x", __DIR__)` idiom) / `-cwd` (the `mix test` cwd
 #     idiom, `File.read!("../x")`). Dropping either base blinds that half.
+#     The SIGIL spelling of the same two bases — `~s(../x)`, `~S{…}`,
+#     `~c[…]`, `~C<…>` — rides the same loop under `-sigildir` /
+#     `-sigilcwd`: same bases, a different lexer, so a regex that stops
+#     tolerating sigils reds on its own rows instead of disappearing into
+#     `-dir`'s population.
 #   * the ROOT ANCHOR — the anchor+`Path.join` scan in list_escapes, in THREE
 #     join forms, tagged separately: `-root` (`Path.join(a, "lit")`),
 #     `-rootpipe` (`a |> Path.join("lit")`) and `-rootlist`
-#     (`Path.join([a, "lit"])`). THIS COMMENT SAID "THE FOUR DOORS" AND WAS
+#     (`Path.join([a, "lit"])`); plus `-rootinterp`, `-rootbase`,
+#     `-rootmulti`, `-rootconcat`, `-rootchain` and `-rootexec`, one tag per
+#     closed shape (see RESIDUE). THIS COMMENT SAID "THE FOUR DOORS" AND WAS
 #     WRONG: for weeks the root-anchor idiom was a FIFTH door nobody counted,
 #     and it hid four live undeclared reads while `--check` exited 0. It was
 #     then WRONG A SECOND TIME in a subtler way — the door was added with only
@@ -242,8 +300,8 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # case (3c). Closing them surfaced NO new undeclared read on a clean tree:
 # measured, the census stayed at 36 and the OK line stayed true.
 #
-# THREE MORE are now closed, kept under their original probe numbers (1/4/6)
-# for continuity with shapes 2, 3, 5, 7 still open underneath:
+# THREE MORE were then closed, kept under their original probe numbers (1/4/6)
+# for continuity with the shapes still open underneath at the time:
 #   1. INTERPOLATED anchor `Path.expand("../#{x}", __DIR__)` — tagged
 #      `-rootinterp`. The anchor's literal is no longer required to be pure
 #      dots-and-slashes; an interpolated tail is dropped the same way the
@@ -266,26 +324,74 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 #      script actually tracks can surface one.
 # All three surfaced NO new undeclared read on a clean tree, the same as the
 # pipe/list forms before them — the value is prospective: the next
-# `deploy/**` read written in any of these six closed shapes is now caught
-# the day it lands instead of after it has hidden a skipped suite for weeks.
+# `deploy/**` read written in any of these closed shapes is caught the day it
+# lands instead of after it has hidden a skipped suite for weeks.
 #
-# STILL BLIND, four shapes, each of which may hide an undeclared read today:
-#   2. EXECUTION CWD            `System.cmd(…, cd: root)` — a separate class;
-#                               api/test/barkpark/pds_door_census_test.exs and
-#                               pds_elixir_census_test.exs both use it
-#   3. CONCATENATED literal     `Path.join(@root, "CLAUDE" <> ".md")`
-#   5. SIGIL literal            `~s(../../../x)`, `~S`, charlists — every grep
-#                               here requires a double quote
-#   7. CHAINED anchor           `@sub Path.join(@root, "docs")` then
-#                               `Path.join(@sub, "lit")` — this one is a
-#                               PRECISION fault, not a blindness: the scanner
-#                               resolves the intermediate `docs` and never the
-#                               file, which can red on a declared read
+# THE LAST FOUR are now closed too, under the same probe numbers (2/3/5/7):
+#   2. EXECUTION CWD           `System.cmd(bin, [args], cd: @root)` — tagged
+#      `-rootexec`. A SEPARATE CLASS: the read never forms a path literal
+#      that anything resolves; the child process resolves its own arguments
+#      against the cwd it was handed. Inside a window from the call opener,
+#      if `cd:` names an anchor this script tracks, every double-quoted
+#      literal in that window is resolved against the anchor's directory and
+#      filtered by existence — which is what keeps `"--check"` and `"-lc"`
+#      out. LIVE today in api/test/barkpark/pds_door_census_test.exs and
+#      pds_elixir_census_test.exs; both pass their command
+#      and its arguments as VARIABLES, not literals, so the door correctly
+#      resolves neither site to a new read. Seen, not flagged.
+#   3. CONCATENATED literal    `Path.join(@root, "CLAUDE" <> ".md")` — tagged
+#      `-rootconcat`. The `-root` grep stops at the first closing quote, so
+#      it saw `CLAUDE` and the existence filter then dropped it silently.
+#      This door concatenates every quoted piece of the `<>` chain, and the
+#      chain's truncated prefix is suppressed on `-root` so the two doors
+#      cannot both report the same site (once correctly, once as a false red).
+#   5. SIGIL literal           `~s(../x)`, `~S{…}`, `~c[…]`, `~C<…>` — tagged
+#      `-sigildir` / `-sigilcwd`. Every literal grep here required a DOUBLE
+#      QUOTE, so `~s"…"` was the only sigil form ever seen; the six
+#      non-quote delimiters are what this adds, on both resolution bases.
+#   7. CHAINED anchor          `@sub Path.join(@root, "docs")` then
+#      `Path.join(@sub, "lit")` — tagged `-rootchain`. A PRECISION fault
+#      rather than a blindness, and the one shape here that could red the
+#      REQUIRED gate for the wrong reason: the scanner resolved the
+#      intermediate `docs` and never `docs/api-v1.md`, which IS declared, so
+#      a chained read landing on a DECLARED file emitted `::error:: UNCOVERED
+#      repo-root read: docs`. The door resolves the chain to the real file
+#      AND drops the intermediate row — but ONLY when the same file actually
+#      joins off that binding. `@dir Path.join(@root, "internal/chat/
+#      testdata")` with nothing chained off it keeps the row it has today:
+#      that is a real directory read, and dropping it would trade a false red
+#      for a false OK.
+# Measured on a clean tree: the census stayed at 38 distinct reads and the OK
+# line stayed true — the same "no new undeclared read" result every earlier
+# shape gave. The value is prospective, not retroactive.
 #
-# Shapes 2, 3, 5, 7 remain FILED, not fixed — do not read this list as a to-do
-# that someone is on; read it as the honest boundary of what the OK line above
-# means. The OK line asserts that every read THIS SCANNER CAN SEE is dispatched
-# on. It does not assert that every read exists in the census.
+# STILL BLIND — the honest boundary, and it is NOT "none". The 14-shape probe
+# matrix this note is derived from enumerates the idioms someone thought to
+# write down; it is not a proof of completeness, and three separate waves have
+# now discovered that its own count of its blindness was too low. Everything
+# below is a KNOWN limit of the shapes above, each one measured, not guessed:
+#   * a RUNTIME-COMPUTED literal — `Path.join(@root, System.get_env("X"))`,
+#     `Enum.join([…])`, a literal built by a function — resolves to nothing
+#     static and no grep-based scanner can see it. This is the class boundary
+#     of the whole approach, not a gap in one door.
+#   * a splice that is not a SUFFIX — the anchor and literal doors drop
+#     `#{…}` and keep the static PREFIX, so `Path.expand("../#{x}/../..",
+#     __DIR__)` resolves the anchor to `api/test` rather than the repo root
+#     and everything joined off it is missed. Deliberate and conservative:
+#     the alternative resolves a path the code never reads.
+#   * an anchor bound anywhere but `Path.expand(<dots>, __DIR__)` —
+#     `System.tmp_dir!()`, `File.cwd!()`, `Application.app_dir/1`, an anchor
+#     passed in as a function argument. Widening the anchor regex to any
+#     literal was MEASURED at 96 anchors instead of 7 on this tree and does
+#     not finish inside a CI timeout; see the note on that regex below.
+#   * WINDOW DEPTH — shapes 6 and 2 read 5 and 6 lines after their opener. A
+#     `Path.join(` or a `cd:` further down than that is missed.
+#   * `-sigil*` covers six delimiters; `~s|…|` inside another `|` context and
+#     the heredoc sigils are not lexed.
+#
+# Read this list as the honest boundary of what the OK line above means. The
+# OK line asserts that every read THIS SCANNER CAN SEE is dispatched on. It
+# does not assert that every read exists in the census.
 #
 # Bounds are LOWER BOUNDS, never equalities. An exact pin taxes every slice that
 # ADDS a read (the lesson filed as `pds-bl-census-exact-pins-tax-growth`, and
@@ -314,27 +420,28 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # bypass of the only check that can tell "clean" from "blind", and the harness
 # asserts that setting ELIXIR_ESCAPE_IDIOM_MIN changes nothing.
 #
-# THE FIVE FLOOR-0 ROWS ARE NOT DEAD WEIGHT, and they are not a laundered
+# THE TEN FLOOR-0 ROWS ARE NOT DEAD WEIGHT, and they are not a laundered
 # baseline. `test-rootpipe` and `test-rootlist` are the two join forms added
-# alongside `test-root`; `test-rootinterp`, `test-rootbase` and `test-rootmulti`
-# are the three shapes closed after them (the script's own STILL-BLIND comment
-# above numbers them 1, 4 and 6). All five are LIVE IDIOMS in api/lib +
+# alongside `test-root`; `test-rootinterp`, `test-rootbase`, `test-rootmulti`,
+# `test-rootconcat`, `test-rootchain`, `test-rootexec`, `test-sigildir` and
+# `test-sigilcwd` are the shapes closed after them (the RESIDUE note above
+# numbers them 1, 4, 6, 3, 7, 2 and 5). All ten are LIVE IDIOMS in api/lib +
 # api/test — the script's grammar genuinely supports them — but no current
-# call site resolves OUTSIDE api/ through any of the five, so their measured
+# call site resolves OUTSIDE api/ through any of the ten, so their measured
 # population on a clean tree is 0. A floor of 0 is the only honest number: a
 # positive floor would red every clean checkout (the `lib-root` reasoning
 # above), while OMITTING the rows makes the inventory check fire "idiom has no
-# floor" the moment any of the five first matches — which reds for the
+# floor" the moment any of the ten first matches — which reds for the
 # SCANNER instead of naming the escape, masking the very finding the door
 # exists to report. Measured: with the `test-rootpipe` row absent, a planted
 # pipe-form escape produced `::error:: idiom 'test-rootpipe' has no entry` and
 # never printed the UNCOVERED line at all.
 #
 # What a floor of 0 does NOT buy is blindness detection: with population 0
-# there is nothing to shrink from, so deleting any of the five grep doors would
+# there is nothing to shrink from, so deleting any of the ten grep doors would
 # not red this table. That protection lives in the HARNESS instead — a
 # fixture per shape in scripts/elixir-path-escape-check.test.sh, where
-# disarming a shape's grep reds the matching case. When any of the five's live
+# disarming a shape's grep reds the matching case. When any of the ten's live
 # population rises above 0, raise its floor to ~50% of the measured population
 # and say so here.
 ELIXIR_ESCAPE_IDIOM_MIN='test-cwd	8
@@ -346,7 +453,12 @@ test-rootpipe	0
 test-rootlist	0
 test-rootinterp	0
 test-rootbase	0
-test-rootmulti	0'
+test-rootmulti	0
+test-rootconcat	0
+test-rootchain	0
+test-rootexec	0
+test-sigildir	0
+test-sigilcwd	0'
 
 # ELIXIR_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -448,6 +560,9 @@ list_escapes() {
   local anchors a name alit adir joins j jlit
   local anchor_interp idiom_tag based b blit openers ol win mjoins
   local anchor_pairs ap aname aadir
+  local concats cj clit crest suppress sup skip
+  local chains ch subname sublit subdir cjoins
+  local sigil orow omatch el xlits xl
   # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
   # .exs on disk is code the suite will run, so it is code this ratchet must see.
   sources="$(cd -- "$REPO_ROOT" && find api/lib api/test -type f \( -name '*.ex' -o -name '*.exs' \) 2>/dev/null | LC_ALL=C sort)"
@@ -530,6 +645,98 @@ list_escapes() {
       # any — matched it here, so collect them as they're computed.
       anchor_pairs="$anchor_pairs$name	$adir
 "
+      # ---- SHAPE 3: CONCATENATED LITERAL (tagged `-rootconcat`) -----------
+      # `Path.join(@root, "CLAUDE" <> ".md")`. The `-root` grep below stops at
+      # the FIRST closing quote, so it sees `CLAUDE` and never `CLAUDE.md` —
+      # which the existence filter then drops, silently. Concatenate every
+      # double-quoted piece of the `<>` chain instead.
+      #
+      # The chain's first piece is added to `suppress` so the `-root` door does
+      # NOT also emit its truncated prefix: `Path.join(@root, "docs" <> "/x")`
+      # would otherwise report a repo-root read of `docs` — the SAME precision
+      # fault shape 7 names below, arriving through a different door. One
+      # suppress list serves both.
+      #
+      # Tagged separately from `-root` for the reason the whole table exists: a
+      # regex that stops tolerating `<>` must red on its own floor, not hide
+      # behind `-root`'s population.
+      concats="$(grep -Eoh 'Path\.join\(@?'"$name"',[[:space:]]*"[^"]*"([[:space:]]*<>[[:space:]]*"[^"]*")+' "$REPO_ROOT/$f" || true)"
+      suppress=""
+      while IFS= read -r cj; do
+        [ -n "$cj" ] || continue
+        crest="${cj#*,}"
+        crest="${crest#*\"}"
+        suppress="$suppress${crest%%\"*}
+"
+      done <<EOF
+$concats
+EOF
+
+      # ---- SHAPE 7: CHAINED ANCHOR (tagged `-rootchain`) ------------------
+      # `@sub Path.join(@root, "docs")` bound once, then `Path.join(@sub,
+      # "api-v1.md")` at the read site. This is a PRECISION fault, not a
+      # blindness: the `-root` door resolves the INTERMEDIATE directory and
+      # emits `::error:: UNCOVERED repo-root read: docs` while the real target
+      # `docs/api-v1.md` IS declared in ELIXIR_TEST_ONLY_PATHS. A false RED in
+      # a required gate costs more operator trust than a false OK costs
+      # coverage, so this door does BOTH halves: it resolves the chain to the
+      # real file, and it suppresses the intermediate row.
+      #
+      # The suppression is NARROW on purpose. A binding is only treated as a
+      # navigation anchor — and its own row dropped — when the SAME FILE
+      # actually joins off it. `@dir Path.join(@root, "internal/chat/testdata")`
+      # with nothing chained off it stays exactly the row it is today: that is
+      # a real directory read, and dropping it would trade a false red for a
+      # false OK.
+      chains="$(grep -Eoh '(@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+|[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*)Path\.join\(@?'"$name"',[[:space:]]*"[^"]*"\)' "$REPO_ROOT/$f" || true)"
+      while IFS= read -r ch; do
+        [ -n "$ch" ] || continue
+        subname="${ch%%Path.join*}"
+        subname="${subname%%=*}"
+        subname="${subname//[[:space:]]/}"
+        subname="${subname#@}"
+        [ -n "$subname" ] || continue
+        [ "$subname" != "$name" ] || continue
+        sublit="${ch#*\"}"
+        sublit="${sublit%%\"*}"
+        [ -n "$sublit" ] || continue
+        # only a binding something is actually JOINED OFF is an anchor
+        grep -Eq '(Path\.join\(\[?[[:space:]]*@?'"$subname"',)|(@?'"$subname"'[[:space:]]*\|>[[:space:]]*Path\.join\()' "$REPO_ROOT/$f" || continue
+        subdir="$(norm_path "$adir/$sublit")"
+        [ -n "$subdir" ] || continue
+        suppress="$suppress$sublit
+"
+        # the chained anchor joins EXACTLY like a plain one; shape 6's
+        # window scan gets it too, via anchor_pairs.
+        anchor_pairs="$anchor_pairs$subname	$subdir
+"
+        cjoins="$(grep -Eoh 'Path\.join\(@?'"$subname"',[[:space:]]*"[^"]*"' "$REPO_ROOT/$f" || true)
+$(grep -Eoh '@?'"$subname"'[[:space:]]*\|>[[:space:]]*Path\.join\("[^"]*"' "$REPO_ROOT/$f" || true)
+$(grep -Eoh 'Path\.join\(\[[[:space:]]*@?'"$subname"',[[:space:]]*"[^"]*"' "$REPO_ROOT/$f" || true)"
+        while IFS= read -r j; do
+          [ -n "$j" ] || continue
+          jlit="${j#*\"}"
+          jlit="${jlit%%\"*}"
+          jlit="${jlit%%\#\{*}"
+          case "$jlit" in
+            *'*'*)
+              jlit="${jlit%%\**}"
+              jlit="${jlit%/}"
+              ;;
+          esac
+          [ -n "$jlit" ] || continue
+          resolved="$(norm_path "$subdir/$jlit")"
+          [ -n "$resolved" ] || continue
+          case "$resolved" in api | api/*) continue ;; esac
+          [ -e "$REPO_ROOT/$resolved" ] || continue
+          printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-rootchain"
+        done <<EOF
+$cjoins
+EOF
+      done <<EOF
+$chains
+EOF
+
       # THREE JOIN FORMS, each grepped and TAGGED SEPARATELY:
       #   `-root`     `Path.join(<anchor>, "lit")`
       #   `-rootpipe` `<anchor> |> Path.join("lit")`
@@ -576,6 +783,21 @@ list_escapes() {
               ;;
           esac
           [ -n "$jlit" ] || continue
+          # A literal a MORE PRECISE door already resolved through (shape 3's
+          # `<>` chain, shape 7's chained anchor) must not ALSO be reported
+          # here as its own truncated read — that is the false RED both of
+          # those shapes exist to remove. Only the plain `-root` form can be
+          # truncated this way; the pipe and list forms never bind an anchor.
+          if [ "$form" = "root" ] && [ -n "$suppress" ]; then
+            skip=0
+            while IFS= read -r sup; do
+              [ -n "$sup" ] || continue
+              [ "$sup" = "$jlit" ] && skip=1
+            done <<EOF
+$suppress
+EOF
+            [ "$skip" -eq 0 ] || continue
+          fi
           resolved="$(norm_path "$adir/$jlit")"
           [ -n "$resolved" ] || continue
           # inside api/ is not an escape
@@ -587,6 +809,36 @@ list_escapes() {
 $joins
 EOF
       done
+
+      # SHAPE 3's rows, emitted after the join forms so `suppress` (built
+      # above, consumed above) and this loop cannot disagree about order.
+      while IFS= read -r cj; do
+        [ -n "$cj" ] || continue
+        # Concatenate every double-quoted piece of the `<>` chain, in order.
+        clit=""
+        crest="${cj#*,}"
+        while :; do
+          case "$crest" in *'"'*) ;; *) break ;; esac
+          crest="${crest#*\"}"
+          clit="$clit${crest%%\"*}"
+          crest="${crest#*\"}"
+        done
+        clit="${clit%%\#\{*}"
+        case "$clit" in
+          *'*'*)
+            clit="${clit%%\**}"
+            clit="${clit%/}"
+            ;;
+        esac
+        [ -n "$clit" ] || continue
+        resolved="$(norm_path "$adir/$clit")"
+        [ -n "$resolved" ] || continue
+        case "$resolved" in api | api/*) continue ;; esac
+        [ -e "$REPO_ROOT/$resolved" ] || continue
+        printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-rootconcat"
+      done <<EOF
+$concats
+EOF
 
       # ---- SHAPE 4: NON-__DIR__ BASE (tagged `-rootbase`) -------------------
       # `Path.expand("lit", @root)` / `Path.absname("lit", @root)` — the
@@ -636,9 +888,21 @@ EOF
     # `Path.expand(…, __DIR__)`, so the window-match against `anchor_pairs`
     # below correctly finds nothing for either site — seen, not flagged,
     # exactly as the task requires.
-    openers="$(grep -noE '^[[:space:]]*Path\.join\([[:space:]]*$' "$REPO_ROOT/$f" | cut -d: -f1 || true)"
-    while IFS= read -r ol; do
-      [ -n "$ol" ] || continue
+    #
+    # ONE grep serves shapes 6 AND 2 (`System.cmd(…, cd: <anchor>)`, below):
+    # both are window scans anchored on an opener line, and this script pays
+    # its whole runtime in per-file grep processes — the header's own note
+    # prices a widened anchor regex as "the difference between this check
+    # finishing in ~1 minute and not finishing inside a CI timeout". Measured:
+    # a separate grep per shape took the real-tree run 73s -> 117s; folded
+    # into this alternation it is back at ~76s. `-no` keeps `LINE:MATCH`, and
+    # the match text is what routes each hit to its own door.
+    openers="$(grep -noE '^[[:space:]]*Path\.join\([[:space:]]*$|System\.(cmd|shell)\(' "$REPO_ROOT/$f" || true)"
+    while IFS= read -r orow; do
+      [ -n "$orow" ] || continue
+      ol="${orow%%:*}"
+      omatch="${orow#*:}"
+      case "$omatch" in System.*) continue ;; esac
       win="$(sed -n "$((ol + 1)),$((ol + 5))p" "$REPO_ROOT/$f" | tr '\n' ' ')"
       while IFS= read -r ap; do
         [ -n "$ap" ] || continue
@@ -678,10 +942,104 @@ EOF
 $openers
 EOF
 
-    # ---- THE LITERAL DOORS (`-dir` / `-cwd`) ------------------------------
-    lits="$(grep -Eoh '"\.\./[^"]*"' "$REPO_ROOT/$f" || true)"
+    # ---- SHAPE 2: EXECUTION CWD (tagged `-rootexec`) ----------------------
+    # `System.cmd(bin, [args], cd: @root)` / `System.shell(cmd, cd: @root)`.
+    # A SEPARATE CLASS from every door above: the read never forms a path
+    # literal that resolves against anything — the child process resolves its
+    # own arguments against the cwd the parent handed it. No `"../…"` appears,
+    # no `Path.join` appears, so nothing above can see it AT ALL.
+    #
+    # Resolution: inside a window starting at the call opener, if `cd:` names
+    # an anchor this script tracks, every double-quoted literal in that window
+    # is a candidate cwd-relative path and is resolved against the anchor's
+    # directory. The existence filter is what makes that safe — `"--check"`,
+    # `"-lc"`, `"bash"` resolve to nothing on disk and are dropped exactly the
+    # way the traversal-attack fixtures are.
+    #
+    # Runs per FILE and reads a WINDOW, like shape 6: the `cd:` option is
+    # routinely on a line of its own several lines below the opener (measured
+    # live in api/test/barkpark/pds_elixir_census_test.exs).
+    #
+    # The `case "$win" in *'cd:'*` pre-filter is not decoration: without it
+    # this door pays an anchor-loop and a grep for every `System.cmd(` in the
+    # tree, and this script already has to finish inside a CI timeout.
+    while IFS= read -r orow; do
+      [ -n "$orow" ] || continue
+      el="${orow%%:*}"
+      omatch="${orow#*:}"
+      case "$omatch" in System.*) ;; *) continue ;; esac
+      win="$(sed -n "$el,$((el + 6))p" "$REPO_ROOT/$f" | tr '\n' ' ')"
+      case "$win" in *'cd:'*) ;; *) continue ;; esac
+      while IFS= read -r ap; do
+        [ -n "$ap" ] || continue
+        aname="${ap%%	*}"
+        aadir="${ap#*	}"
+        [ -n "$aname" ] || continue
+        # `[^a-zA-Z0-9_]|$` and not `\b`: BSD grep (macOS, which is what the
+        # local gate runs) does not honour GNU's `\b`, and a word boundary that
+        # silently never matches would make this door report zero forever.
+        grep -Eq 'cd:[[:space:]]*@?'"$aname"'([^a-zA-Z0-9_]|$)' <<<"$win" || continue
+        xlits="$(grep -Eoh '"[^"]*"' <<<"$win" || true)"
+        while IFS= read -r xl; do
+          [ -n "$xl" ] || continue
+          xl="${xl#\"}"
+          xl="${xl%\"}"
+          xl="${xl%%\#\{*}"
+          case "$xl" in
+            *'*'*)
+              xl="${xl%%\**}"
+              xl="${xl%/}"
+              ;;
+          esac
+          [ -n "$xl" ] || continue
+          # an absolute argument is not resolved against the cwd at all
+          case "$xl" in /*) continue ;; esac
+          resolved="$(norm_path "$aadir/$xl")"
+          [ -n "$resolved" ] || continue
+          case "$resolved" in api | api/*) continue ;; esac
+          [ -e "$REPO_ROOT/$resolved" ] || continue
+          printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-rootexec"
+        done <<EOF
+$xlits
+EOF
+      done <<EOF
+$anchor_pairs
+EOF
+    done <<EOF
+$openers
+EOF
+
+    # ---- SHAPE 5: SIGIL LITERALS (tagged `-sigildir` / `-sigilcwd`) --------
+    # `~s(../../../x)`, `~S{…}`, `~c[…]`, `~C<…>`. The literal doors below grep
+    # `"\.\./…"` — every one of them REQUIRES a double quote — so a sigil form
+    # of the exact same read is invisible to them. `~s"…"` and `~S"…"` are the
+    # one sigil form they already catch, because the delimiter IS a double
+    # quote; the six non-quote delimiters below are the gap.
+    #
+    # Resolved against BOTH bases, same as the literal doors, and tagged along
+    # the same axis (`-sigildir` / `-sigilcwd`) rather than fused into one
+    # `-sigil`: the base axis is a door that can go blind on its own, and the
+    # whole floor table exists because a fused count cannot see that happen.
+    # SHAPE 5's six delimiters ride the literal doors' OWN grep, for the
+    # per-file process cost the note on the opener scan above prices. A hit
+    # starting with `~` is a sigil, everything else is a double-quoted
+    # literal; the `case` below is what routes it.
+    lits="$(grep -Eoh '"\.\./[^"]*"|~[sScC]\(\.\./[^)]*\)|~[sScC]\{\.\./[^}]*\}|~[sScC]\[\.\./[^]]*\]|~[sScC]<\.\./[^>]*>|~[sScC]/\.\./[^/]*/|~[sScC]\|\.\./[^|]*\|' "$REPO_ROOT/$f" || true)"
     [ -n "$lits" ] || continue
     while IFS= read -r lit; do
+      # `~s(../x)` / `~S{…}` / `~c[…]` / `~C<…>` — SHAPE 5. Every supported
+      # delimiter is ONE character, so the literal is the match minus
+      # `~X<open>` and minus the closing delimiter. Tagged on the same
+      # base axis as the quoted form (`-sigildir` / `-sigilcwd`) and never
+      # fused into one `-sigil`: a base going blind must red on its own row.
+      sigil=0
+      case "$lit" in
+        '~'*)
+          sigil=1
+          lit="${lit:3}"
+          lit="${lit%?}"
+          ;;
+      esac
       lit="${lit%\"}"
       lit="${lit#\"}"
       # `"../#{Path.basename(x)}"` — keep the static prefix, drop the splice.
@@ -697,7 +1055,11 @@ EOF
       # THE RESOLUTION-BASE half. Both bases are real idioms in this codebase
       # (see HOW AN ESCAPE IS RESOLVED above), so both are separately floored.
       for base in "$d" "api"; do
-        if [ "$base" = "api" ]; then idiom="$tree-cwd"; else idiom="$tree-dir"; fi
+        if [ "$base" = "api" ]; then
+          if [ "$sigil" -eq 1 ]; then idiom="$tree-sigilcwd"; else idiom="$tree-cwd"; fi
+        else
+          if [ "$sigil" -eq 1 ]; then idiom="$tree-sigildir"; else idiom="$tree-dir"; fi
+        fi
         resolved="$(norm_path "$base/$lit")"
         [ -n "$resolved" ] || continue
         # inside api/ is not an escape

@@ -7,14 +7,19 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   nothing more. This is a TILE, not the full Fleet Card — it observes, it never
   provisions or mutates.
 
-  ## The read (PDF-D19 — the flat-endpoint law)
+  ## The read (the ONE explicit global opt-in)
 
-  The roster is read through `Barkpark.Tasks.Fleet.roster/1` with the dataset
-  passed EXPLICITLY (`@dataset "production"`) — the same global-per-dataset,
-  NO-workspace-clause read the flat `GET /v1/fleet/roster` endpoint serves and
-  the same shape `Barkpark.Tasks.Board.snapshot/1` uses. A socket-scoped read
-  (`LiveScope` / `scope_opts(socket)`) is FORBIDDEN here: it resolves a
-  different workspace source than the writer and fail-closes to an EMPTY roster
+  The roster is read through `Barkpark.Tasks.Fleet.roster/2` with the dataset
+  passed EXPLICITLY (`@dataset "production"`) and `global: true` — the named,
+  greppable cross-tenant opt-in, and this tile is its ONLY caller. The flat
+  `GET /v1/fleet/roster` endpoint no longer shares that shape: the 2026-09-01
+  ruling on task-4e2986e8609670d7 scoped the HTTP read to `scope_opts(conn)`,
+  leaving this opt-in as the one surface that still sees every workspace. It is
+  `:ops`-gated (admin) today and is exactly what an OPERATOR tier should absorb
+  when task-c7e2b87f1bbca815 lands — the ruling reserves the global view for
+  that tier, not for an `admin` bit. A socket-scoped read (`LiveScope` /
+  `scope_opts(socket)`) is still FORBIDDEN here: it resolves a different
+  workspace source than the writer and fail-closes to an EMPTY roster
   INVISIBLY (PDF-D19). Server-side staleness is already baked into each row's
   `status` (`Fleet.roster` derives `offline` at read time), so this LiveView
   renders the server's verdict and never re-computes "is this stale" — the one
@@ -77,7 +82,7 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
     # the instant the socket connects and mount re-runs, so reading the roster
     # there is pure waste (2× per open). Paint an empty skeleton on the dead
     # render; load the real roster ONCE, on connect (board_live/ops_live idiom).
-    roster = if connected, do: Fleet.roster(@dataset), else: []
+    roster = if connected, do: Fleet.roster(@dataset, global: true), else: []
 
     {:ok,
      socket
@@ -90,7 +95,7 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
-    {:noreply, assign(socket, :roster, Fleet.roster(@dataset))}
+    {:noreply, assign(socket, :roster, Fleet.roster(@dataset, global: true))}
   end
 
   # A stray message (there is no subscription, but be defensive) never crashes

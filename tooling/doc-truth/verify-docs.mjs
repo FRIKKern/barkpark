@@ -528,6 +528,19 @@ function claimsFromSpan(doc, span) {
   return out;
 }
 
+// Is the number ending at `idx` glued to a WORD rather than standing alone? A
+// line number is followed by whitespace or punctuation; a measurement carries a
+// unit or a noun — `~23-tool`, `12px`, `~180-400s`. The optional `-NNN` step
+// looks PAST a range's second endpoint, because that is where the unit sits.
+//   "-tool"  -> reject   "-400s" -> reject   "s before" -> reject   "/page" -> reject
+//   "-724,"  -> keep     "\u2013509" -> keep    ")."       -> keep     "/:2172" -> keep
+// The slash arm is what separates a RATE from a multi-line citation: `1000/page`
+// is a clamp, while `content.ex ~:2153/:2172` puts a `:` or a digit after the
+// slash, never a letter.
+function unitSuffixed(scan, idx) {
+  return /^(?:\s*[-\u2013]\s*\d{1,5})?(?:-|\/)?[A-Za-z]/.test(scan.slice(idx));
+}
+
 function matchLineref(raw) {
   // basename.ext with an explicit line number nearby. Tolerate ~ and ranges.
   // Examples: mix.exs:55 · content.ex ~:2153/:2172 · router.ex line ~672 ·
@@ -537,11 +550,47 @@ function matchLineref(raw) {
   const fileTok = fileM[1];
   const base = basename(fileTok);
   if (!/\.[A-Za-z0-9]+$/.test(base)) return null;
+
+  // PROSE IS NOT A CITATION, and the grammar below used to accept it. Two
+  // measured instances, both of which reached a verdict about a file nobody
+  // cited:
+  //
+  //   "the ONE canonical consumer AGENTS.md teach block (the ~23-tool
+  //    convergence standard)"        → read as AGENTS.md, line 23
+  //   "`…-guerrilla-live-writes-2026-08-17.md`): 119"
+  //                                  → read as lines 2026, 8, 17 and 119
+  //
+  // Nothing about either sentence is a lineref. The first glues a number to a
+  // WORD; the second harvests the DATE out of the target's own filename. Both
+  // are silent today only because an empty anchor set exits `unverifiable`
+  // before anything compares the number to the file — so the moment the range
+  // check is hoisted (as it is, below) they become loud false reds. Closing the
+  // grammar first is what keeps the hoist honest; hoisting first is how a
+  // never-worse baseline gets switched off.
+  //
+  // (1) THE DIGITS INSIDE A FILENAME ARE NOT LINE NUMBERS. Blank the file token
+  //     out before harvesting — length-preserving, so a real citation's own
+  //     `:<N>` cue is still sitting at exactly the offset it was written at.
+  const tokStart = fileM.index;
+  const tokEnd = tokStart + fileTok.length;
+  const scan = raw.slice(0, tokStart) + " ".repeat(fileTok.length) + raw.slice(tokEnd);
+
   // collect line numbers expressed as :N, ~:N, "line N", "line ~N", –N ranges
   const nums = [];
   const numRe = /(?:[:~]\s*|line\s*~?\s*|[–-])(\d{2,5})/g;
   let nm;
-  while ((nm = numRe.exec(raw))) nums.push(parseInt(nm[1], 10));
+  while ((nm = numRe.exec(scan))) {
+    // (2) A NUMBER GLUED TO A WORD IS A MEASUREMENT, NOT A LINE. `~23-tool`,
+    //     `12px`, `~5-minute` — a real line number is followed by whitespace or
+    //     punctuation, never by letters. The optional `-NNN` step ahead is what
+    //     catches a UNIT hanging off the far end of a RANGE: in `~180-400s
+    //     before exit`, the `s` that makes it seconds sits past the second
+    //     number, so reading only the character after `180` sees a digit and
+    //     lets a duration through as a pair of line numbers. Measured: that is
+    //     how `cp-deploy.sh` was reported as citing lines 180 and 400.
+    if (unitSuffixed(scan, numRe.lastIndex)) continue;
+    nums.push(parseInt(nm[1], 10));
+  }
   // BARE-RANGE cue (code-comment prose): a `NNN-NNN` line span written WITHOUT a
   // `:` or backtick — the flagship code-comment defect is
   //   `# Paths mirror router.ex /v1/auth/* (public 716-724, gated 727-734).`
@@ -549,19 +598,37 @@ function matchLineref(raw) {
   // but only when the cited basename actually resolves to a real file (so random
   // prose like `foo.bar 12-34` never classifies) and the token pair is not a
   // date (`2026-06-21`), which would otherwise read as lines 2026/06.
-  const isDate = /\b\d{4}-\d{2}-\d{2}\b/.test(raw);
+  const isDate = /\b\d{4}-\d{2}-\d{2}\b/.test(scan);
   let rangeCue = false;
   if (!isDate) {
     const rangeRe = /(\d{2,5})\s*[-–]\s*(\d{2,5})/g;
     let rm;
-    while ((rm = rangeRe.exec(raw))) {
+    while ((rm = rangeRe.exec(scan))) {
+      // A unit hanging off the range — `~180-400s`, `50-100ms` — makes it a
+      // duration or a size, never a pair of line numbers.
+      if (unitSuffixed(scan, rangeRe.lastIndex)) continue;
       nums.push(parseInt(rm[1], 10), parseInt(rm[2], 10));
       rangeCue = true;
     }
   }
-  // require an explicit ":" / "line" cue so plain `foo.ex` isn't a lineref;
-  // a bare range counts as a cue ONLY for a resolvable basename.
-  const explicitCue = /[:~]\s*\d|line\s*~?\s*\d/.test(raw);
+  // (3) THE CUE MUST TOUCH THE FILE TOKEN. Every real citation shape — a bare
+  //     colon-and-number, a backticked name followed by `line ~N`, a slash-joined
+  //     pair of `:N` cues — puts the cue immediately after the
+  //     name, separated by nothing but whitespace, backticks or an opening
+  //     bracket. A number that turns up LATER in the sentence, past a closing
+  //     paren or a run of words, belongs to the prose — that is exactly how
+  //     "AGENTS.md teach block (the ~23-tool …)" and "`….md`): 119" were read as
+  //     citations. Once adjacency establishes the citation, every number in the
+  //     phrase is still harvested, so `content.ex ~:2153/:2172` keeps both.
+  //
+  //     THE BARE-RANGE CUE IS DELIBERATELY EXEMPT. Its flagship case —
+  //     `router.ex /v1/auth/* (public 716-724, gated 727-734)` — puts the range
+  //     a whole route away from the name, so requiring adjacency there would
+  //     re-open the over-ACCEPT hole that cue was added to close. It carries its
+  //     own guard instead: a real range AND a basename that resolves.
+  const after = raw.slice(tokEnd);
+  const adjacentCue = /^[\s`([]*(?::\s*~?\s*\d|~\s*:?\s*\d|line\s*~?\s*\d)/.test(after);
+  const explicitCue = adjacentCue && /[:~]\s*\d|line\s*~?\s*\d/.test(scan);
   const bareCue = rangeCue && resolveBasename(base) !== null;
   if ((!explicitCue && !bareCue) || nums.length === 0) return null;
   return { file: fileTok, base, lines: [...new Set(nums)] };
@@ -855,6 +922,41 @@ function candidateSummary(cands) {
 // both hold. This implements the half that removes false verdicts without
 // manufacturing new ones, and reports ambiguity in the evidence of the verdicts
 // that DO fire.
+//
+// ── THE RULING ON BASENAME AMBIGUITY: **KEEP**, decided in PR #13988 ──────────
+// The question put was whether basename-only resolution should REFUSE when the
+// stem names more than one tracked file, rather than silently taking the first.
+// The ruling is KEEP — verify against EVERY candidate and red only when the
+// citation is stale in ALL of them — and it lives here, in the code it governs,
+// because a ruling recorded only in a task row is a ruling the next reader of
+// this function will never see.
+//
+// THE REASON. Refusing is not a neutral "be stricter" knob: it converts a
+// citation that is CORRECT about one of its candidates into a finding, which is
+// the over-REJECT failure this checker has now been fixed for three separate
+// times (a file required to name itself, directory segments demanded as
+// anchors, a definition's name demanded inside its own body). Ambiguity is a
+// property of the REPO's naming, not evidence that a comment drifted, and a
+// gate that reds on correct citations is the fastest way to get the whole
+// never-worse baseline switched off. What refusal would buy — catching a
+// citation that is stale about the file it MEANT while passing against a
+// namesake — is bought instead by the candidate walk below, which only accepts a
+// non-stale answer and reports the whole candidate set when every one is stale.
+//
+// THE COUNT, re-measured on this tree rather than inherited: 173 of 581
+// bare-stem lineref citations in the code corpus resolve to more than one
+// tracked file, and a further 36 resolve to none. The most-forked stems people
+// actually cite are auth.ex (6 tracked files), lifecycle.ex (5), client.go (5)
+// and errors.ex (4). Refusing on ambiguity would therefore red 173 citations,
+// against a 385-entry baseline, and essentially none of them for having drifted.
+//
+// WHERE THE RULING IS NOT YET HONOURED, and it is a live defect rather than a
+// deviation: `reverify` re-resolves through `resolveBasenameNear(t.base, …)`,
+// reading t.BASE and discarding an explicit path the citation supplied. So a
+// stale verdict about a path-qualified citation can be suppressed by a namesake
+// the citation never named — the same first-match hazard `linerefCandidates`
+// was written to remove from the first pass. Measured while building the
+// enclosing-definition selftest arm, which passed vacuously because of it.
 function verifyLineref(claim) {
   const t = claim.target;
   const { candidates, explicit } = linerefCandidates(t, claim.doc);
@@ -917,6 +1019,29 @@ function verifyLinerefAgainst(claim, rel) {
   const clipped = clippedEnumeration(claim, lines, rel);
   if (clipped) return tag(claim, "stale", "high", clipped);
 
+  // A CITATION PAST THE END OF THE FILE IS STALE ON ITS OWN EVIDENCE, and needs
+  // no anchor to say so. This check used to sit at the BOTTOM, behind the needle
+  // requirement — so a citation whose anchor set came back empty exited
+  // `unverifiable` ("no checkable anchor") before anyone compared the number
+  // against the file. The most mechanically checkable property a lineref has —
+  // is the line even IN the file — was the one property the guard skipped, and
+  // an empty anchor set is the COMMON case for a bare `dir/file.ex:N` citation
+  // now that path segments no longer count as anchors.
+  //
+  // HOISTED SECOND, NOT FIRST. Ordering against `clippedEnumeration` is
+  // deliberate: a clipped enumeration cites lines that are all IN range, so it
+  // can never be reached by this check, and leaving it above keeps its sharper
+  // verdict. Ordering against the GRAMMAR is the load-bearing part, and it is a
+  // different file's worth of work: hoisted while `matchLineref` still read
+  // "~23-tool" and a date in a filename as line numbers, this check turns every
+  // one of those into a loud false red, which is how a never-worse baseline gets
+  // switched off. The grammar was closed first, in this same change.
+  const beyondCited = t.lines.filter((n) => n > lines.length);
+  if (beyondCited.length) {
+    return tag(claim, "stale", "high",
+      `cited line(s) ${t.lines.join("/")} exceed file length (${lines.length}) in ${rel}`);
+  }
+
   // Extract salient tokens from the claim's surrounding markdown line that
   // should sit near the referenced code line: quoted strings, dotted symbols,
   // snake_case idents, env-var names. Use the full source line so anchors in a
@@ -930,8 +1055,14 @@ function verifyLinerefAgainst(claim, rel) {
   // check", never "stale". Deliberately scoped to the SOLE-needle case: where a
   // real anchor exists too, the stem rides along exactly as before, which is
   // what keeps this from re-scoring 14 confirmed citations into novel findings.
+  // SCOPED TO THE SOLE-BASIS CASE, exactly as the stem rule is: where a real
+  // anchor exists alongside them these tokens ride along unchanged, so this
+  // cannot re-score a citation that had genuine evidence. It can only move a
+  // verdict from `stale` to `unverifiable` — never to `confirmed`, since
+  // `anchors` is read by nothing but the emptiness guard below.
   const stem = basenameStem(t);
-  const anchors = needles.filter((n) => n !== stem);
+  const frags = pathFragments(t);
+  const anchors = needles.filter((n) => n !== stem && !frags.has(n));
   if (needles.length === 0 || anchors.length === 0) {
     // nothing concrete to check against — leave as low-conf unverifiable
     return tag(claim, "unverifiable", "low", `lineref has no checkable anchor near :${t.lines.join("/")}`);
@@ -951,7 +1082,7 @@ function verifyLinerefAgainst(claim, rel) {
       if (!hit && needles.some((nd) => text.includes(nd))) hit = true;
       if (independent.some((nd) => text.includes(nd))) { indHit = true; break; }
     }
-    checked.push({ n, hit, beyond: n > lines.length });
+    checked.push({ n, hit });
     if (hit) anyHit = true;
   }
   if (indHit) {
@@ -999,11 +1130,10 @@ function verifyLinerefAgainst(claim, rel) {
       ` confirms nothing about the claim`);
   }
   // No needle near any cited line ⇒ the line number drifted. Dominant stale.
-  const beyond = checked.some((c) => c.beyond);
-  const ev = beyond
-    ? `cited line(s) ${t.lines.join("/")} exceed file length (${lines.length}) in ${rel}`
-    : `none of the referenced anchors [${needles.slice(0, 3).join(", ")}] sit within ±${WINDOW} of cited line(s) ${t.lines.join("/")} in ${rel}`;
-  return tag(claim, "stale", "high", ev);
+  // Every cited line is IN RANGE here: the beyond-EOF case returned above, which
+  // is why this arm no longer branches on it.
+  return tag(claim, "stale", "high",
+    `none of the referenced anchors [${needles.slice(0, 3).join(", ")}] sit within ±${WINDOW} of cited line(s) ${t.lines.join("/")} in ${rel}`);
 }
 
 // ── the ENCLOSING DEFINITION ─────────────────────────────────────────────────
@@ -1223,6 +1353,36 @@ function basenameStem(t) {
   return String(t.base || "").replace(/\.[A-Za-z0-9]+$/, "");
 }
 
+// EVERY SEPARATOR-DELIMITED FRAGMENT OF THE CITED PATH. `deploy/site-deploy-node.sh`
+// yields {deploy, site, node, sh} — each of them a word the citation itself
+// supplied, and none of them a word the cited FILE is obliged to contain.
+//
+// THIS IS THE SAME CLASS `basenameStem` AND THE PATH-SEGMENT FILTER ALREADY
+// CLOSED, reached by a third route: the HYPHEN. The needle harvester's
+// route-segment rule reads a leading `/site` out of `deploy/site-deploy-node.sh`
+// and yields `site`, while the post-harvest filter only knows the whole
+// segment `site-deploy-node` — so the fragment walks straight between them.
+// Slash-separated segments are covered (selftest arm j), the bare stem is
+// covered (arm g), and a hyphenated fragment of either was not.
+//
+// MEASURED on main at 861e211c43: three NOVEL findings whose entire anchor set
+// was the word `site`, against a 2243-line target where the cited line is
+// perfectly in range. The gate reddened on a word that names nothing, and the
+// remedy it printed — re-point to a symbol — was right for the wrong reason.
+//
+// THE TELL THAT THIS IS THE GUARD'S OWN BUG, not a judgement call: `selfDerived`
+// ALREADY rejects `site`, because the token is a substring of the cited path. So
+// the confirm side of this function knows the anchor is worthless while the
+// stale side spends it as evidence. A token that cannot ever confirm a citation
+// must not be allowed to condemn one.
+function pathFragments(t) {
+  const out = new Set();
+  for (const tok of [t.file, t.base]) {
+    for (const part of String(tok || "").split(/[/\\.\-_]+/)) if (part) out.add(part);
+  }
+  return out;
+}
+
 // Pull checkable anchors out of a lineref claim's raw text.
 function linerefNeedles(raw, t) {
   const needles = new Set();
@@ -1422,7 +1582,17 @@ function reverify(claim) {
     // Re-resolve the file and re-scan a slightly wider window. If the anchor
     // now lands, the first pass was a near-miss — suppress.
     const t = claim.target;
-    const rel = resolveBasenameNear(t.base, claim.doc);
+    // RE-RESOLVE THE WAY THE FIRST PASS DID. This used to call
+    // `resolveBasenameNear(t.base, …)` — t.BASE, so a citation that supplied an
+    // explicit path had it thrown away at the door and was re-checked against
+    // whatever file happened to share the basename. That is the exact defect
+    // `linerefCandidates` was written to remove from the first pass, still live
+    // in the gate that overrules it: a stale verdict about a path-qualified
+    // citation could be suppressed by a namesake the citation never named.
+    // Measured while building the enclosing-definition and filename-date
+    // selftest arms — both passed VACUOUSLY because the gate scored a twin.
+    const { candidates } = linerefCandidates(t, claim.doc);
+    const rel = candidates[0] || resolveBasenameNear(t.base, claim.doc);
     if (rel) {
       const lines = fileLines(linerefTargetPath(rel));
       if (lines) {
@@ -1437,6 +1607,25 @@ function reverify(claim) {
         if (/EXHAUSTIVE claim over a CLIPPED run/.test(claim.evidence || "")) {
           return tag(claim, "confirmed", "high",
             `RE-VERIFY GATE: the clipped sibling is no longer adjacent on re-check — finding suppressed`);
+        }
+        // AN OUT-OF-RANGE VERDICT IS NOT AN OFF-BY-A-FEW, and the needle scan
+        // below must not be given the chance to forgive one. That scan exists to
+        // rescue a citation that missed by a line or two — but no width of
+        // window makes a line the file does not have exist, and a citation
+        // carrying SEVERAL numbers lands a needle on whichever one IS in range,
+        // taking the out-of-range verdict down with it. Measured: a citation
+        // naming a year past the end of a 132-line file was suppressed because
+        // the same comment also named a line near real content.
+        //
+        // Re-derived INDEPENDENTLY against the file this pass resolved, exactly
+        // as the clipped check above is: if the line is still out of range the
+        // finding stands; if the file grew underneath it, the finding goes.
+        if (/exceed file length/.test(claim.evidence || "")) {
+          if (t.lines.some((n) => n > lines.length)) {
+            return { ...claim, reverified: true };
+          }
+          return tag(claim, "confirmed", "high",
+            `RE-VERIFY GATE: every cited line is inside ${rel} (${lines.length} lines) on re-check — finding suppressed`);
         }
         const needles = linerefNeedles(claim.srcLine || claim.raw, t);
         const WINDOW = 5; // wider on re-check to avoid off-by-a-few false stale

@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: tlv-donefalse-audit-ancestry-recheck-recipe | budget: 900tok -->
 # TLV done-false audit — v-ancestry-recheck re-derivation recipe (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Snapshot pin: origin/main == e21bf409893d9de66542a31b06716e3c33d8f102 (verified: e21bf IS ancestor of origin/main; they are identical HEAD at audit time).
 
 ## SWEEP A independent re-run — highest-vacuity cohort (tlv-s1..s4 + 2 foreign-generic)

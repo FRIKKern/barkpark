@@ -182,6 +182,109 @@ fi
 # string: whether a merge landed is a question for the API, not for a grep.
 check "28 gh's local post-merge failure is UNRECOGNISED, not a silent green" UNRECOGNISED \
   "failed to run git: fatal: 'main' is already checked out at '/Volumes/SATECHI/github/barkpark'"
+# 34-39. THE SECOND POST-MERGE LOCAL SHAPE, measured twice on this fleet on
+# 2026-09-02. gh runs its branch-delete AFTER the merge call returned, so this
+# string can only ever be emitted about a merge that already went to the server.
+# It is git refusing to delete a branch some OTHER worktree has checked out —
+# the normal resting state of a fleet where every agent works in its own
+# worktree. Row 28's sibling arrives when the CHECKOUT step fails; this one
+# arrives when the checkout is not needed and the DELETE is the failing step.
+#
+# Row 28 keeps UNRECOGNISED deliberately and stays exactly as it is. What earns
+# this shape a token is the ADVICE: UNRECOGNISED tells the reader to run
+# `gh pr merge --squash --delete-branch` by hand, and on this shape that is an
+# instruction to re-merge a PR that is already merged.
+#
+# Captured by the reporting lead; the path is elided exactly as they quoted it.
+check "34 gh's local BRANCH-DELETE failure is a POST-MERGE shape, not an unknown refusal" LOCAL_POST_MERGE \
+  "failed to delete local branch gates/reland-extractor: failed to run git: error: Cannot delete branch 'gates/reland-extractor' checked out at '/…/orchestrate/wt/gates-reland-extractor'"
+# The same shape with a full path: git's half reproduced verbatim in a worktree
+# of this repo, wrapped in gh's own `failed to delete local branch %s: %w`
+# format — read out of the gh 2.87.2 binary, so the wrapper text is not a guess.
+check "35 …and with a full worktree path" LOCAL_POST_MERGE \
+  "failed to delete local branch gates/bp-merge-shape: failed to run git: error: Cannot delete branch 'gates/bp-merge-shape' checked out at '/Volumes/SATECHI/dev-caches/tmp/scratchpad/orchestrate/wt/gates-bp-merge-shape'"
+# THE MATCH IS NARROW ON PURPOSE: it needs BOTH needles. A branch-delete that
+# failed for any other reason is not a worktree collision and must keep
+# refusing. Widening this to every `failed to run git` would make the arm the
+# message-shaped guess about whether a merge landed that this script refuses.
+check "36 a branch-delete failure that is NOT a worktree collision still REFUSES" UNRECOGNISED \
+  "failed to delete local branch gates/gone: failed to run git: error: branch 'gates/gone' not found."
+check "37 …and a bare git failure still REFUSES" UNRECOGNISED \
+  'failed to run git: exit status 129'
+# Captured verbatim from two runs on 2026-09-02 (PRs #14899 and #14892). A REAL
+# refusal — the merge did NOT land, main moved under the head — pinned here so
+# the shape is on the record and any future arm for it is a deliberate edit
+# rather than a silent reclassification.
+check "38 'Base branch was modified' is a REAL refusal and stays UNRECOGNISED" UNRECOGNISED \
+  'GraphQL: Base branch was modified. Review and try the merge again. (mergePullRequest)'
+advice_contains "39 LOCAL_POST_MERGE advice names the CONFIRM command, never a re-merge" \
+                LOCAL_POST_MERGE 'gh pr view 123 --json state,mergedAt'
+advice_contains "39b …and says the local step ran after the merge call" \
+                LOCAL_POST_MERGE 'AFTER the merge call returned'
+advice_contains "39c …and says NOT to re-merge on this message alone" \
+                LOCAL_POST_MERGE 'do NOT re-merge'
+
+# 40-42. THE LANDED-CHECK CAN GO BLIND, and a blind read must not read as "not
+# merged". `gh pr view --json state` fails outright under a rate limit —
+# measured on this fleet on 2026-09-02, "API rate limit already exceeded for
+# user ID …" — and pr_state() then answers UNKNOWN, which merged_despite_error
+# treats exactly like OPEN. That is the false stall returning through the
+# instrument rather than through the table, so the refusal must SAY the read
+# failed instead of sounding as confident as a read one.
+# DRIVEN, not grepped: gh is STUBBED here, so the reader runs for real without a
+# network. A failing read must answer UNKNOWN and KEEP what the API said.
+gh() { echo "GraphQL: API rate limit already exceeded for user ID 32601161." >&2; return 1; }
+# shellcheck disable=SC2034  # read by pr_state(), which is sourced from bp-merge.sh
+PR_NUMBER=123
+PR_STATE_READ=""; PR_STATE_ERROR=""
+pr_state
+blind_ok=0
+case "$PR_STATE_ERROR" in *"rate limit already exceeded"*) blind_ok=1 ;; esac
+if [ "$PR_STATE_READ" = "UNKNOWN" ] && [ "$blind_ok" -eq 1 ]; then
+  pass=$((pass + 1)); echo "  ok   40 a FAILED state read answers UNKNOWN and keeps what the API said"
+else
+  fail=$((fail + 1))
+  echo "  FAIL a failed state read lost the error (state='$PR_STATE_READ' err='$PR_STATE_ERROR')" >&2
+fi
+# And a read that WORKS must answer the state and clear any stale error.
+gh() { printf 'MERGED\n'; }
+pr_state
+if [ "$PR_STATE_READ" = "MERGED" ] && [ -z "$PR_STATE_ERROR" ]; then
+  pass=$((pass + 1)); echo "  ok   40a …and a successful read answers the state and clears the error"
+else
+  fail=$((fail + 1))
+  echo "  FAIL a successful state read is wrong (state='$PR_STATE_READ' err='$PR_STATE_ERROR')" >&2
+fi
+unset -f gh
+unset PR_NUMBER
+# THE SUBSHELL TRAP, asserted structurally because it cannot be observed from
+# outside: `X="$(pr_state)"` runs the reader in a SUBSHELL, so PR_STATE_ERROR
+# would be assigned and then thrown away — the refusal would silently go back to
+# sounding as confident as a read one, with every row above still green.
+# Read over EXECUTABLE lines only, and matched with `case` rather than a pipe
+# into `grep -q`: the comment right above the call site names the very form it
+# forbids, and a gate that reds on its own explanation teaches people to delete
+# the explanation.
+bpm_code="$(grep -vE '^[[:space:]]*#' "$ROOT/scripts/bp-merge.sh")"
+case "$bpm_code" in
+  *'$(pr_state)'*)
+    fail=$((fail + 1))
+    echo "  FAIL pr_state is called in a command substitution — PR_STATE_ERROR dies in the subshell" >&2 ;;
+  *)
+    pass=$((pass + 1))
+    echo "  ok   40b the reader is never called in a command substitution, which would discard its globals" ;;
+esac
+if grep -q 'PR_STATE_READ" = "UNKNOWN"' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   41 refuse() checks whether the landed-check could read the state at all"
+else
+  fail=$((fail + 1)); echo "  FAIL refuse() cannot tell a CONFIRMED-open PR from an unreadable one" >&2
+fi
+if grep -q 'the landed-check could NOT read the PR state' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   42 …and says so, quoting what the API answered instead"
+else
+  fail=$((fail + 1)); echo "  FAIL a blind landed-check is silent — the refusal looks as confident as a read one" >&2
+fi
+
 if grep -q 'merged_despite_error "\$out"' "$ROOT/scripts/bp-merge.sh"; then
   pass=$((pass + 1)); echo "  ok   29 merge_loop asks the API whether the PR MERGED before classifying any string"
 else
@@ -195,8 +298,13 @@ if awk '/merged_despite_error "\$out"/ {seen=1} /state="\$\(classify_refusal/ {p
 else
   fail=$((fail + 1)); echo "  FAIL the state read happens after classification — the false stall survives" >&2
 fi
+# The comparison moved from an inlined `$(pr_state)` to the RECORDED read (rows
+# 40-42: a read that failed must be distinguishable from a PR the API said is
+# OPEN), so all three halves are asserted — the reader exists, it asks the API
+# for `state`, and the landed-decision is made against what it answered.
 if grep -q 'pr_state() {' "$ROOT/scripts/bp-merge.sh" \
-   && grep -q "\[ \"\$(pr_state)\" = \"MERGED\" \]" "$ROOT/scripts/bp-merge.sh"; then
+   && grep -qF -- 'gh pr view "$PR_NUMBER" --json state' "$ROOT/scripts/bp-merge.sh" \
+   && grep -q '\[ "\$PR_STATE_READ" = "MERGED" \]' "$ROOT/scripts/bp-merge.sh"; then
   pass=$((pass + 1)); echo "  ok   31 the landed-check reads STATE from the API, never a message shape"
 else
   fail=$((fail + 1)); echo "  FAIL the landed-check is not a state read" >&2

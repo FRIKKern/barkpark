@@ -9,8 +9,9 @@ defmodule BarkparkWeb.WorkspaceImportOperatorGrantTest do
   here. Nothing on the import path wrote a membership for a target-side token
   (`Auth.insert_token_with_membership/3` is the token-MINT seam and mints a new
   token; import never called it). So the operator who had just landed the
-  workspace could not push its blobs (`TenancyAuth.member?/2` → 404), could not
-  re-export it and could not delete it (`TenancyAuth.workspace_admin?/2` → 403).
+  workspace could not push its blobs, could not re-export it and could not
+  delete it — all three now on `TenancyAuth.workspace_admin?/2`, the blob route
+  since task-62d9364937b538e5 ruled CONFINE.
 
   THE TWO DENIAL SHAPES ARE DIFFERENT AND BOTH ARE DELIBERATE, so a test that
   expects one law on the other route reds for the wrong reason. The blob route
@@ -23,11 +24,13 @@ defmodule BarkparkWeb.WorkspaceImportOperatorGrantTest do
   workspace-blind `require_admin` was papering over it. Closing the hole made
   the missing grant visible; these tests pin the completed flow.
 
-  ROLE LEVEL IS LOAD-BEARING. The blob route binds on `member?/2`, but the
-  export and delete siblings bind on `workspace_admin?/2` (`owner`/`admin`
-  only). A plain `member` grant would fix the blob arm and leave the imported
-  workspace with no administrator — the same hole, one route narrower. The
-  export arm below is what pins `admin`; the blob arm alone cannot.
+  ROLE LEVEL IS LOAD-BEARING, and MORE so since task-62d9364937b538e5. All
+  three routes now bind on `workspace_admin?/2` (`owner`/`admin` only) — the
+  blob route used to bind on the floorless `member?/2`, so a plain `member`
+  grant would once have fixed the blob arm while leaving the imported workspace
+  with no administrator (the same hole, one route narrower). Under the
+  harmonised floor a `member` grant reds ALL THREE arms, which only widens what
+  a downgrade mutation cannot slip past.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -154,12 +157,13 @@ defmodule BarkparkWeb.WorkspaceImportOperatorGrantTest do
 
       # THE ROUTES FIRST, THE LABEL LAST — and the order is the proof, not
       # style. `export/2` and `delete/2` bind on `workspace_admin?/2`
-      # (owner|admin), so a `member`-role grant answers 403 on both while
-      # still passing the blob route above. Asserting `membership_role ==
-      # "admin"` ahead of these would short-circuit a downgrade mutation on
-      # the LABEL and never exercise the routes — pinning the string rather
-      # than the reach it buys. Under a member-grant mutation the first red
-      # here is a real 403 off a real request.
+      # (owner|admin), so a `member`-role grant answers 403 on both. Asserting
+      # `membership_role == "admin"` ahead of these would short-circuit a
+      # downgrade mutation on the LABEL and never exercise the routes —
+      # pinning the string rather than the reach it buys. Under a member-grant
+      # mutation the first red here is a real 403 off a real request. Since
+      # task-62d9364937b538e5 the blob push above sits on the same predicate,
+      # so such a mutation now reds there too rather than sliding past it.
       export = conn |> authed(raw_op) |> get("/api/workspaces/#{slug}/export")
 
       assert export.status == 200,

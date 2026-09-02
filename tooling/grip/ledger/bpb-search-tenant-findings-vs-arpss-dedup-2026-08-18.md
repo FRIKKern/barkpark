@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: none | budget: 900tok -->
 # Re-derivation: are the 2 bpb search-tenant findings owned by an OPEN api-read-path-security-sweep child? — 2026-08-18
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Verdict: NO. Both are genuinely-unclaimed cloud-build residue (parent_id=bp-cloud-build-epic, both open), offline-buildable, security-adjacent → spin to a fresh follow-up build wave. NOT-SEAL stands.
 
 ## The two findings (parent=bp-cloud-build-epic, both open, 0/3 criteria met)

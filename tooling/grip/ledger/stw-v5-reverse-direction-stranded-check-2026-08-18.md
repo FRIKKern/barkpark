@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: none | budget: 2000tok -->
 # V5 reverse-direction stranded-DONE re-derivation recipes (search-template audit, 2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Read-only audit note. Re-derive every claim from origin/main (186 commits ahead of local a6535504) + live bp.
 
 ## Denominator + near-complete set

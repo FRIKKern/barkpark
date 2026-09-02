@@ -7,7 +7,12 @@ package cli
 // pane-stable worker):
 //
 //	SessionStart  → claim  (renewal-safe: re-claim under the same worker renews)
-//	PreToolUse    → renew  (re-claim), throttled ≤1/renewEvery via an on-disk stamp
+//	PreToolUse    → pulse  (renew + now-line), throttled ≤1/renewEvery via an
+//	                on-disk stamp. NOT a re-claim: a claim renews SILENTLY and
+//	                would take the row back if the lease had lapsed, while a
+//	                pulse is holder-only, emits task.pulse, and carries a
+//	                bounded now-line so an active pane is VISIBLE on the board
+//	                instead of merely un-expired.
 //	Stop/SessionEnd → close IFF every acceptance criterion is met, else LEAVE it
 //	                  claimed so the server lease TTL expires → task.lease_expired
 //	                  → a `↩ resume` in the NEXT strip (already built). That TTL is
@@ -54,10 +59,26 @@ var (
 	hookTimeout   time.Duration          = 4 * time.Second
 )
 
-// renewEvery is the PreToolUse renew throttle: at most one re-claim per window,
-// well inside the server lease TTL (BARKPARK_TASK_LEASE_TTL_SECONDS, default
-// 2700s), so a busy agent renews cheaply but not on every tool call.
+// renewEvery is the PreToolUse renew throttle: at most one pulse per window,
+// well inside the server lease TTL (leaseTTLFloor), so a busy agent renews
+// cheaply but not on every tool call.
 const renewEvery = 60 * time.Second
+
+// leaseTTLFloor is the server lease TTL the hook assumes when deciding whether
+// a stamped epoch can still be live: BARKPARK_TASK_LEASE_TTL_SECONDS's default,
+// 2700s. It is a FLOOR, not a mirror — the hook never reads the server's
+// setting, so it must assume the SHORTEST lease it could be running against. An
+// operator who raised the TTL only makes this conservative: the hook re-claims
+// for a fresh epoch slightly earlier than it had to. An operator who LOWERED it
+// costs one fenced close that falls back to the re-claim (hookStopClose), never
+// a wrong close.
+const leaseTTLFloor = 2700 * time.Second
+
+// nowLineMax bounds the pulse now-line the hook composes. The server caps `now`
+// at 500 bytes and answers a longer one with a 400, not a truncation — so the
+// bound lives HERE, well under that, and the composed line is built from a
+// closed vocabulary (see hookNowLine) rather than trimmed after the fact.
+const nowLineMax = 160
 
 // newHookClient builds the bounded, drafts-reading apiclient the hook acts
 // through. The short Timeout (hookTimeout) is the fail-safe backstop: a hung
@@ -118,8 +139,11 @@ func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (c
 	}
 
 	// Drain stdin best-effort (Claude writes the hook JSON there). We key on env,
-	// not stdin, so a malformed/empty body is harmless — decode and move on.
-	_ = drainHookStdin()
+	// not stdin, so a malformed/empty body is harmless — it decodes to the zero
+	// value and hookNowLine degrades to a generic line. The ONLY thing read out
+	// of it is the pulse's now-line vocabulary (tool_name + the cwd basename);
+	// session_id and transcript_path are never sent anywhere.
+	hookIn := drainHookStdin()
 
 	if task == "" {
 		dbg("no BARKPARK_TASK — this pane owns no task; no-op")
@@ -130,7 +154,7 @@ func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (c
 	case "SessionStart":
 		hookSessionStart(newHookClient(ctx), task, worker, dryRun, dbg, fail)
 	case "PreToolUse":
-		hookPreToolUse(newHookClient(ctx), task, worker, dryRun, dbg, fail)
+		hookPreToolUse(newHookClient(ctx), task, worker, hookNowLine(hookIn), dryRun, dbg, fail)
 	case "Stop", "SessionEnd":
 		hookStopClose(newHookClient(ctx), task, worker, dryRun, dbg, fail)
 	default:
@@ -153,44 +177,146 @@ func hookSessionStart(c *apiclient.Client, task, worker string, dryRun bool, dbg
 		return
 	}
 	dbg("%s", res.Message)
-	// Seed the throttle so the first tool call doesn't immediately re-claim.
-	writeRenewStamp(worker, task)
+	// Seed the throttle so the first tool call doesn't immediately pulse, and
+	// record the epoch this claim wrote (see renewStamp.LastEpoch).
+	writeRenewStamp(worker, task, res.Epoch)
 	// A healthy claim clears any stale breadcrumb: the last-error is present iff
 	// the MOST RECENT hook action failed, so a recovered bridge reads clean.
 	clearHookBreadcrumb(worker)
 }
 
-// hookPreToolUse renews the lease (re-claim), throttled to ≤1/renewEvery via an
-// on-disk stamp. A missing/corrupt stamp fails OPEN (renew now) — renewing more
-// often than needed is always safe; the only cost of a missed renew is an
+// hookPreToolUse renews the lease with a PULSE, throttled to ≤1/renewEvery via
+// an on-disk stamp. A missing/corrupt stamp fails OPEN (pulse now) — renewing
+// more often than needed is always safe; the only cost of a missed renew is an
 // honest resume, never a hang.
-func hookPreToolUse(c *apiclient.Client, task, worker string, dryRun bool, dbg, fail func(string, ...any)) {
+//
+// WHY A PULSE AND NOT A RE-CLAIM. Both renew the lease and both bump the epoch,
+// so the lifetime arithmetic is unchanged. What changes is what the renewal
+// MEANS on the other end:
+//
+//   - A pulse is visible. It writes content.claim.now (this pane's bounded
+//     now-line) and emits a task.pulse mutation_event, so a board can say what
+//     an active pane is doing. A bare re-claim renews in total silence — the
+//     row looks identical before and after, which is exactly the "in_progress
+//     means held, not observed" gap this closes.
+//   - A pulse is holder-only. Tasks.Pulse refuses a lost lease with
+//     :not_holder; Claim's fall-through would silently RE-CLAIM a reaped row
+//     with a fresh work_digest, taking it back from whoever the sweeper freed
+//     it for and swallowing any brief edit made in between.
+//
+// nowLine is already sanitized and bounded by hookNowLine; this function never
+// composes one from raw hook input.
+func hookPreToolUse(c *apiclient.Client, task, worker, nowLine string, dryRun bool, dbg, fail func(string, ...any)) {
 	if !renewDue(worker, task) {
-		dbg("within throttle window — skip renew")
+		dbg("within throttle window — skip pulse")
 		return
 	}
 	if dryRun {
-		dbg("would renew (re-claim) %s as %s", task, worker)
+		dbg("would pulse %s as %s with now-line %q", task, worker, nowLine)
 		return
 	}
-	res := taskboard.DoClaim(c, task, worker)
-	if !res.OK {
-		fail("PreToolUse renew failed: %s", res.Message)
+	epoch, help, err := c.TaskPulse(task, worker, nowLine)
+	if err != nil {
+		// not_holder is the honest shape of "this pane no longer owns the row"
+		// (reaped / released / closed / stolen). It is a breadcrumb, NOT an
+		// escalation to a re-claim: taking the row back is precisely the theft
+		// the pulse verb exists to refuse.
+		fail("PreToolUse pulse failed: %s", err.Error())
 		return
 	}
-	dbg("renew: %s", res.Message)
-	writeRenewStamp(worker, task)
+	for _, h := range help {
+		if h != "" {
+			dbg("help: %s", h)
+		}
+	}
+	dbg("pulse: now-line %q · epoch %d", nowLine, epoch)
+	writeRenewStamp(worker, task, epoch)
 	clearHookBreadcrumb(worker)
+}
+
+// hookNowLine composes the pulse's now-line from the Claude hook context, under
+// a closed vocabulary: the tool about to run and the basename of the working
+// directory, each sanitized to [A-Za-z0-9._-] and length-capped, assembled into
+// a fixed sentence. Anything that does not survive the filter is DROPPED, not
+// escaped — the line degrades to a shorter true sentence rather than carrying
+// unknown bytes to the server.
+//
+// What is deliberately NOT in it: session_id, transcript_path (or any transcript
+// content), tool arguments, environment, and file contents. The now-line lands
+// in content.claim.now, which every board reader can see; a heartbeat is not a
+// channel for anything the pane happens to be holding. The cwd is reduced to its
+// BASENAME for the same reason — "barkpark" is the useful half of an absolute
+// path, and the rest is the operator's directory layout.
+func hookNowLine(in hookInput) string {
+	tool := sanitizeHookToken(in.ToolName)
+	dir := ""
+	if in.CWD != "" {
+		if base := filepath.Base(in.CWD); base != "." && base != string(filepath.Separator) {
+			dir = sanitizeHookToken(base)
+		}
+	}
+	var line string
+	switch {
+	case tool != "" && dir != "":
+		line = "cmux pane: running " + tool + " in " + dir
+	case tool != "":
+		line = "cmux pane: running " + tool
+	case dir != "":
+		line = "cmux pane: working in " + dir
+	default:
+		// Malformed, empty, or field-less hook context. The pulse still has to
+		// carry SOMETHING (the server requires a non-empty now), and "active" is
+		// the most it can honestly claim.
+		line = "cmux pane: active"
+	}
+	if len(line) > nowLineMax {
+		line = line[:nowLineMax]
+	}
+	return line
+}
+
+// sanitizeHookToken reduces one hook-context token to a safe, bounded fragment:
+// ASCII letters, digits, '.', '_' and '-' survive; everything else (spaces,
+// quotes, control bytes, path separators, any non-ASCII) is dropped. The cap is
+// per-token so no single field can dominate the composed line.
+func sanitizeHookToken(s string) string {
+	const maxToken = 48
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			r == '.' || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+		if b.Len() >= maxToken {
+			break
+		}
+	}
+	return b.String()
 }
 
 // hookStopClose is the acceptance-gated close (design §2a). Stop fires at the end
 // of EVERY turn, not "the task is done", so we close ONLY on proven acceptance:
 // the task carries ≥1 acceptance criterion and every one is met. Anything else
 // (unmet, no criteria at all, or unreadable) leaves the claim to lease-expire
-// into a resume. To close, re-claim first to observe the LIVE epoch (design §2b:
-// no persisted epoch across the separate SessionStart/Stop processes) — a
-// re-claim that 409s means someone else holds the lease, so we don't close (no
-// theft).
+// into a resume.
+//
+// WHERE THE CLOSE'S EPOCH COMES FROM. Design §2b said there is no persisted
+// epoch across the separate SessionStart/Stop processes, so the close re-claimed
+// to observe a live one. There IS one now: every renewal stamps the epoch it
+// wrote (renewStamp.LastEpoch), and PreToolUse renews by PULSE, which returns
+// the fresh epoch on the same round trip it was already making. So:
+//
+//	stamp vouches  → close on the stamped epoch. No re-claim, and therefore no
+//	                 epoch bump spent purely to learn a number this pane was
+//	                 already told.
+//	stamp silent   → re-claim for the live epoch, exactly as before (no stamp,
+//	                 a stale one, a foreign one, or an unwritable state dir).
+//	stamp WRONG    → the server says fenced_off; re-claim for the live epoch and
+//	                 close again. The cache costs one refused round trip in that
+//	                 case and never a wrong close.
+//
+// The re-claim keeps its second job in both fallbacks: a 409 there means someone
+// else holds the lease, so we do not close (no theft).
 func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, fail func(string, ...any)) {
 	doc, ok := c.GetPerspective("task", task, "drafts")
 	if !ok {
@@ -209,19 +335,48 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 		return
 	}
 	if dryRun {
-		dbg("would re-claim %s for the live epoch, then close as %s", task, worker)
+		dbg("would close %s as %s on the epoch the last renewal stamped, re-claiming for a live one only if that stamp cannot vouch", task, worker)
 		return
 	}
+	epoch, cached := stampedEpoch(worker, task)
+	if cached {
+		dbg("close: closing on the epoch the last renewal stamped (%d) — no re-claim, so no epoch bump is spent to learn it", epoch)
+	} else {
+		var err error
+		if epoch, err = hookReclaimEpoch(c, task, worker, dbg); err != nil {
+			fail("Stop: re-claim for epoch failed (%v) — not closing (no theft)", err)
+			return
+		}
+	}
+	if ok, fenced := hookCloseAtEpoch(c, task, worker, epoch, dbg, fail); ok || !fenced || !cached {
+		// Landed, or refused for a reason a fresh epoch cannot fix, or refused on
+		// an epoch that was already the live one. hookCloseAtEpoch has already
+		// reported every failure it saw; there is nothing left to try.
+		return
+	}
+	// The stamped epoch was stale after all: something else renewed this claim
+	// inside the lease window. That is exactly the case the cache is allowed to
+	// lose — pay the re-claim now and close on the live epoch.
+	dbg("close: the stamped epoch %d is no longer live (the server fenced the close) — re-claiming for the live epoch and closing again", epoch)
+	live, err := hookReclaimEpoch(c, task, worker, dbg)
+	if err != nil {
+		fail("Stop: re-claim after a fenced close failed (%v) — not closing (no theft)", err)
+		return
+	}
+	_, _ = hookCloseAtEpoch(c, task, worker, live, dbg, fail)
+}
+
+// hookReclaimEpoch re-claims to observe the LIVE fencing epoch, surfacing the
+// envelope's advisory rail-awareness notices + help[] every other claim surface
+// renders (charter D18) on the diagnostic channel. The hook's CARDINAL contract
+// forbids stdout and gates diagnostics behind debug, so they go through dbg — a
+// blocker that landed on this task (or the next-step templates) is a breadcrumb
+// for `BP_CMUX_DEBUG`, never a line on the agent's turn.
+func hookReclaimEpoch(c *apiclient.Client, task, worker string, dbg func(string, ...any)) (int, error) {
 	epoch, notices, help, err := c.TaskClaimN(task, worker)
 	if err != nil {
-		fail("Stop: re-claim for epoch failed (%v) — not closing (no theft)", err)
-		return
+		return 0, err
 	}
-	// The re-claim carries the same advisory rail-awareness notices + help[] every
-	// other claim surface now renders (charter D18). The hook's CARDINAL contract
-	// forbids stdout and gates diagnostics behind debug, so surface them through
-	// dbg — a blocker that landed on this task (or the next-step templates) is a
-	// breadcrumb for `BP_CMUX_DEBUG`, never a line on the agent's turn.
 	for _, n := range notices {
 		if n.Type != "" {
 			dbg("notice: %s", n.Type)
@@ -232,6 +387,17 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 			dbg("help: %s", h)
 		}
 	}
+	return epoch, nil
+}
+
+// hookCloseAtEpoch is the close itself, at one given epoch. ok reports whether
+// the close landed; fenced reports whether the refusal was the server's epoch
+// fence (fenced_off / stale_claim), which is the ONE refusal a fresh epoch can
+// fix — the caller retries on a re-claimed epoch when the one it used came from
+// the stamp cache. Every failure is reported here (fail → breadcrumb), including
+// the fenced one, so a retry that lands clears the breadcrumb and a retry that
+// is not attempted still leaves a trace.
+func hookCloseAtEpoch(c *apiclient.Client, task, worker string, epoch int, dbg, fail func(string, ...any)) (ok, fenced bool) {
 	// THE FENCE IS ARMED FIRST, AND THE BYPASS IS NEVER SILENT.
 	//
 	// The agent marking its own acceptance criteria met is a LEGITIMATE
@@ -270,17 +436,21 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 		}
 		dbg("close: closed · epoch %d (work-digest fence held — no observed_rev bypass needed)", epoch)
 		clearHookBreadcrumb(worker)
-		return
+		return true, false
 	}
 	if !isDocChangedSinceClaim(cerr) {
+		// Reported here either way. When it was the EPOCH fence the caller may
+		// still retry on a re-claimed epoch — a breadcrumb that a landing retry
+		// then clears is the right trade against a fenced close leaving no trace
+		// at all when no retry is available.
 		fail("Stop: close failed: %s", cerr.Error())
-		return
+		return false, isFencedOff(cerr)
 	}
 	// The brief CHANGED under this claim. Say so — naming the server's own
 	// reason, whose suffix carries the changed field — then take D82's bypass.
 	dbg("close: the brief changed under this claim (server refused with %s) — the work-digest fence blocked the close; re-closing through the observed_rev CAS (D82), which SKIPS that fence", cerr.Error())
 	rev := ""
-	if fresh, ok := c.GetPerspective("task", task, "drafts"); ok {
+	if fresh, gotFresh := c.GetPerspective("task", task, "drafts"); gotFresh {
 		rev = docRev(fresh)
 	}
 	if rev == "" {
@@ -288,15 +458,40 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 		// retry would only repeat the 409. Leave it claimed → resume, which is
 		// the honest direction, and breadcrumb WHY.
 		fail("Stop: the brief changed under this claim and the current rev is unreadable — not closing; re-read the task and close with observed_rev")
-		return
+		return false, false
 	}
 	res := taskboard.DoCloseRev(c, task, worker, epoch, rev)
 	if !res.OK {
+		// No fenced retry off this arm: DoCloseRev hands back a humanised
+		// sentence, not the server's reason code, so "the epoch was stale" is
+		// not distinguishable here from "the rev was". Guessing would risk a
+		// second write on a refusal a fresh epoch cannot fix.
 		fail("Stop: close failed after the brief changed under the claim: %s", res.Message)
-		return
+		return false, false
 	}
 	dbg("close (through the observed_rev bypass): %s", res.Message)
 	clearHookBreadcrumb(worker)
+	return true, false
+}
+
+// isFencedOff reports whether a close refusal is the server's EPOCH fence —
+// the one refusal a freshly re-claimed epoch can fix. Both codes the server
+// uses for it count: fenced_off (the observed_epoch is not the current one) and
+// stale_claim (the row moved under the claim). It matches the code with the
+// same colon-suffix tolerance as isDocChangedSinceClaim, and ONLY those codes,
+// so no other refusal — not_holder, a transport failure, the work-digest fence
+// — can ever be answered by re-claiming and closing again.
+func isFencedOff(err error) bool {
+	if err == nil {
+		return false
+	}
+	reason := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, code := range []string{"fenced_off", "stale_claim"} {
+		if reason == code || strings.HasPrefix(reason, code+":") {
+			return true
+		}
+	}
+	return false
 }
 
 // isDocChangedSinceClaim reports whether a close refusal is the server's
@@ -379,11 +574,22 @@ func drainHookStdin() hookInput {
 	return in
 }
 
-// renewStamp is the on-disk PreToolUse throttle record (design §2c).
+// renewStamp is the on-disk PreToolUse throttle record (design §2c) AND the
+// hook's only memory across its separate one-shot processes.
+//
+// LastEpoch is the fencing epoch the LAST renewal wrote — the claim's on
+// SessionStart, the pulse's on PreToolUse. It exists because a pulse BUMPS the
+// epoch (Tasks.Pulse.apply_pulse, exactly like Claim.do_renew), so by the time
+// Stop runs, the epoch SessionStart saw is stale by however many pulses the
+// turn made. Without this field the close has no epoch at all and must re-claim
+// to learn one; with it, the close spends no write to find out what the last
+// write already told this pane. It is a CACHE, not an authority — hookStopClose
+// still falls back to the re-claim whenever the stamp cannot vouch for it.
 type renewStamp struct {
 	Worker        string `json:"worker"`
 	Task          string `json:"task"`
 	LastRenewUnix int64  `json:"last_renew_unix"`
+	LastEpoch     int    `json:"last_epoch"`
 }
 
 // cmuxStampPath is {UserConfigDir}/barkpark/cmux/<sha1(worker\x00task)>.json —
@@ -397,29 +603,76 @@ func cmuxStampPath(worker, task string) (string, error) {
 	return filepath.Join(base, "barkpark", "cmux", hex.EncodeToString(sum[:])+".json"), nil
 }
 
-// renewDue reports whether a PreToolUse renew is warranted. It fails OPEN
-// (renew now) on any read/parse trouble — a missing stamp (first tool call after
-// a claim seeds it), a corrupt stamp, or an unreadable config dir all return
-// true, because over-renewing is safe and under-renewing only risks a resume.
-func renewDue(worker, task string) bool {
+// readRenewStamp loads the (worker,task) stamp. ok=false when it is absent,
+// unreadable, malformed, or written for a DIFFERENT pane/task — the path is
+// hashed from (worker,task), but a hash collision or a hand-edited file must not
+// be allowed to hand one pane another pane's epoch, so the identity is
+// re-checked against the file's own contents. Panic-guarded like every other
+// state read on the hook path.
+func readRenewStamp(worker, task string) (renewStamp, bool) {
+	defer func() { _ = recover() }()
+	var s renewStamp
 	p, err := cmuxStampPath(worker, task)
 	if err != nil {
-		return true
+		return s, false
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return true
+		return s, false
 	}
-	var s renewStamp
 	if json.Unmarshal(data, &s) != nil {
+		return renewStamp{}, false
+	}
+	if s.Worker != worker || s.Task != task {
+		return renewStamp{}, false
+	}
+	return s, true
+}
+
+// renewDue reports whether a PreToolUse pulse is warranted. It fails OPEN
+// (pulse now) on any read/parse trouble — a missing stamp (first tool call after
+// a claim seeds it), a corrupt stamp, or an unreadable config dir all return
+// true, because over-renewing is safe and under-renewing only risks a resume.
+func renewDue(worker, task string) bool {
+	s, ok := readRenewStamp(worker, task)
+	if !ok {
 		return true
 	}
 	return time.Since(time.Unix(s.LastRenewUnix, 0)) >= renewEvery
 }
 
-// writeRenewStamp records now() as the last renew for (worker,task). Best-effort:
-// a write failure just means the next PreToolUse renews again (safe).
-func writeRenewStamp(worker, task string) {
+// stampedEpoch returns the epoch the last renewal wrote for this (worker,task),
+// and whether it can still be trusted as the LIVE one.
+//
+// The freshness bound is leaseTTLFloor, not renewEvery: a stamp inside the
+// shortest lease the hook could be running against still describes a lease that
+// cannot have been reaped, so the epoch it names is the one no other renewal has
+// had cause to bump. Past that floor the lease may have expired and been
+// re-claimed by someone else, and a stale epoch would close on a lease this pane
+// no longer holds — so the stamp stops vouching and the close re-claims instead.
+//
+// It is never AUTHORITATIVE: a concurrent pulse or claim from elsewhere can bump
+// the epoch inside the window without touching this file. That case lands as a
+// fenced_off close, which hookStopClose answers by re-claiming for the live
+// epoch and closing again. The cache buys the common path a write; it never buys
+// a wrong close.
+func stampedEpoch(worker, task string) (int, bool) {
+	s, ok := readRenewStamp(worker, task)
+	if !ok || s.LastEpoch <= 0 {
+		return 0, false
+	}
+	if time.Since(time.Unix(s.LastRenewUnix, 0)) >= leaseTTLFloor {
+		return 0, false
+	}
+	return s.LastEpoch, true
+}
+
+// writeRenewStamp records now() as the last renew for (worker,task), together
+// with the fencing epoch that renewal wrote. Best-effort: a write failure just
+// means the next PreToolUse renews again and the close re-claims for its epoch
+// (both safe). A non-positive epoch is stored as-is and stampedEpoch declines
+// it — an unknown epoch must read as "no cached epoch", never as epoch 0.
+func writeRenewStamp(worker, task string, epoch int) {
 	p, err := cmuxStampPath(worker, task)
 	if err != nil {
 		return
@@ -427,7 +680,12 @@ func writeRenewStamp(worker, task string) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return
 	}
-	data, err := json.Marshal(renewStamp{Worker: worker, Task: task, LastRenewUnix: time.Now().Unix()})
+	data, err := json.Marshal(renewStamp{
+		Worker:        worker,
+		Task:          task,
+		LastRenewUnix: time.Now().Unix(),
+		LastEpoch:     epoch,
+	})
 	if err != nil {
 		return
 	}

@@ -8,7 +8,8 @@ ExecStart=/usr/local/bin/barkpark-runtime \
   --token-file /etc/barkpark/agent.token \
   --cache-dir /var/lib/barkpark-builder/images \
   --caddyfile /etc/caddy/Caddyfile \
-  --studio localhost:4000
+  --studio localhost:4000 \
+  --retain-images 3
 Restart=always
 RestartSec=5
 

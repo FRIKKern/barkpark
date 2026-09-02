@@ -29,6 +29,14 @@ func TestDebounceCoalescesBurstToOneRefetch(t2 *testing.T) {
 	clk := &fakeClock{t: time.Unix(1000, 0)}
 	m := newModel(nil, "", Config{})
 	m.now = clk.now
+	m.eventsOff = true
+	// LEGACY ARM. The debounce no longer coalesces into a REFETCH — it coalesces
+	// into one cheap keyset poll, which then decides whether the heavy pair runs
+	// (task-e2f5ecca0be9a6d1, events.go). eventsOff selects the preserved
+	// fallback loop this test was written against, so what it guards — the
+	// generation-tag coalescing itself — is still pinned; the new path's
+	// coalescing is pinned by TestDebounceNudgesThePollNotTheHeavyPair and the
+	// request-count tests in events_test.go.
 
 	// Three change events arrive in a burst. Each re-arms the debounce (gen 1→3);
 	// none of them refetches yet (they only schedule the debounce timer).
@@ -360,6 +368,14 @@ func TestSSEEventDrivesRefetchAndSwap(t2 *testing.T) {
 	fetchedAt := time.Unix(2000, 0)
 	m := newModel(c, "", Config{})
 	m.now = func() time.Time { return fetchedAt }
+	m.eventsOff = true
+	// LEGACY ARM. The debounce no longer coalesces into a REFETCH — it coalesces
+	// into one cheap keyset poll, which then decides whether the heavy pair runs
+	// (task-e2f5ecca0be9a6d1, events.go). eventsOff selects the preserved
+	// fallback loop this test was written against, so what it guards — the
+	// generation-tag coalescing itself — is still pinned; the new path's
+	// coalescing is pinned by TestDebounceNudgesThePollNotTheHeavyPair and the
+	// request-count tests in events_test.go.
 	// Inject build so the assertion does not depend on the wiring stub's policy
 	// (which the lead deletes at merge); this test owns its own tiny board rule.
 	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
@@ -460,8 +476,16 @@ func TestConnStateFollowsChangeSourceNotRefetch(t2 *testing.T) {
 	m := newModel(nil, "", Config{})
 	m.now = clk.now
 	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
+	// LEGACY ARM. The debounce no longer coalesces into a REFETCH — it coalesces
+	// into one cheap keyset poll, which then decides whether the heavy pair runs
+	// (task-e2f5ecca0be9a6d1, events.go). eventsOff selects the preserved
+	// fallback loop this test was written against, so what it guards — the
+	// generation-tag coalescing itself — is still pinned; the new path's
+	// coalescing is pinned by TestDebounceNudgesThePollNotTheHeavyPair and the
+	// request-count tests in events_test.go.
 
 	drive := func(m Model, live bool) Model {
+		m.eventsOff = true
 		m, _ = m.handleChange(changeMsg{live: live})
 		_, cmd := m.handleDebounce(debounceMsg{gen: m.debounceGen})
 		if cmd == nil {

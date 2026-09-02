@@ -70,11 +70,30 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
              }
     end
 
-    test "action missing keys defaults to empty strings" do
+    # SUPERSEDED BY THE EMPTY-CHROME INVARIANT, not deleted. This test pinned the
+    # DEFECT: an action with neither key composed to a PdButton whose href and
+    # label were both "", which the walker painted as
+    # `<a href="#" class="bp-button"></a>` — a zero-width CLICKABLE control that
+    # goes nowhere and says nothing. Its real content (don't crash on missing
+    # keys; `priority` stays absent) is kept below, re-aimed at the new answer:
+    # blank composes to the empty `_raw` node in every style arm.
+    test "action missing keys composes to the empty raw node, not an empty button" do
       b = %{"type" => "action"}
-      result = Compose.compose_block(b)
+
+      assert Compose.compose_block(b) == %{"kind" => "_raw", "html" => ""}
+      assert Compose.compose_block(b, :article) == %{"kind" => "_raw", "html" => ""}
+      assert Render.render_block(b, %{style: :article}) == ""
+      assert Render.render_block(b, %{style: :email}) == ""
+    end
+
+    # The half of the old pin that still describes live behaviour: `priority` is
+    # CHROME, so it neither survives into a blank block nor rescues it.
+    test "an action with a label keeps defaulting the absent href and priority" do
+      result = Compose.compose_block(%{"type" => "action", "label" => "Go"})
+
+      assert result["kind"] == "PdButton"
       assert result["href"] == ""
-      assert result["label"] == ""
+      assert result["label"] == "Go"
       assert result["priority"] == nil
     end
 

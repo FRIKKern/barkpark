@@ -417,6 +417,87 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     assert unmeasured["commit_distance_checked_at"] == "2026-08-08T12:17:08.000000Z"
   end
 
+  # dr-w22-bl — SINCE WHEN the box has served the sha it serves now, ON THE
+  # PAT-REACHABLE SURFACE.
+  #
+  # THE HOLE. The `(sha, first_seen)` history existed all along: every 60 s beat
+  # lands in `agent_events` with the full report and AgentRetentionWorker keeps
+  # 14 days (MEASURED on prod 2026-09-01 — 132,120 rows spanning
+  # 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z, and 7 completed retention
+  # jobs, latest 2026-09-01T03:30:00Z). Its ONLY reader is
+  # `GET /v1/barkparks/:id/events` (router.ex `Auth.require_user`), which caps a
+  # page at `parse_limit(…, 50, 200)` — a live `limit=5000` returned exactly 200
+  # rows spanning 3 h 06 m of a 14-day record. Paging that route would hand the
+  # answer to a NARROWER caller than the fleet list every PAT holder already
+  # reads, so the value is materialised onto the row instead.
+  #
+  # THE PAT ARM IS THE POINT, and it is asserted with a REAL `read`-ability PAT
+  # rather than by reading the pipeline off the router: a session-token-only
+  # assertion would stay green through exactly the regression this row is about
+  # (an answer that exists only behind require_user).
+  test "GET /v1/barkparks emits git_commit_first_seen_at, and a read PAT can reach it" do
+    {user, team} = user_with_team()
+    sha = String.duplicate("a", 40)
+
+    _measured =
+      barkpark_fixture(team)
+      |> Ecto.Changeset.change(
+        name: "changed",
+        git_commit: sha,
+        git_commit_first_seen_at: ~U[2026-08-31 10:21:20.746433Z]
+      )
+      |> Repo.update!()
+
+    # A box that has NOT been seen changing sha. NULL is UNMEASURED, never a
+    # fabricated instant, and the key must still be PRESENT so a consumer can
+    # tell "the plane has no first-appearance" from "this route never emitted
+    # one" — the same rung `commit_distance` above stands on.
+    _never_changed =
+      barkpark_fixture(team)
+      |> Ecto.Changeset.change(
+        name: "unchanged",
+        git_commit: sha,
+        git_commit_first_seen_at: nil
+      )
+      |> Repo.update!()
+
+    {:ok, token} = Accounts.create_user_session_token(user)
+    conn = call(:get, "/v1/barkparks", nil, token)
+    assert conn.status == 200
+
+    rows = json_body(conn)["barkparks"]
+    changed = Enum.find(rows, &(&1["name"] == "changed"))
+    unchanged = Enum.find(rows, &(&1["name"] == "unchanged"))
+
+    assert changed["git_commit"] == sha
+    assert changed["git_commit_first_seen_at"] == "2026-08-31T10:21:20.746433Z"
+
+    assert Map.has_key?(unchanged, "git_commit_first_seen_at")
+    assert unchanged["git_commit_first_seen_at"] == nil
+
+    # THE AUTH HALF. `GET /v1/barkparks` is require_user_or_pat + require_ability
+    # ("read"); `GET /v1/barkparks/:id/events` is require_user ONLY. A read PAT
+    # therefore gets the first-appearance here and gets 401 on the history it
+    # was derived from — which is the whole reason the value was materialised
+    # rather than the events route paged.
+    {:ok, plaintext, _stored} =
+      Accounts.create_personal_access_token(user, team, %{
+        name: "first-seen-read-#{System.unique_integer([:positive])}",
+        abilities: ["read"]
+      })
+
+    pat_conn = call(:get, "/v1/barkparks", nil, plaintext)
+    assert pat_conn.status == 200
+
+    pat_changed =
+      json_body(pat_conn)["barkparks"] |> Enum.find(&(&1["name"] == "changed"))
+
+    assert pat_changed["git_commit_first_seen_at"] == "2026-08-31T10:21:20.746433Z"
+
+    events_conn = call(:get, "/v1/barkparks/#{pat_changed["id"]}/events", nil, plaintext)
+    assert events_conn.status == 401
+  end
+
   # ── task-0dd7578bc3d2bcbd: arm BEFORE resume, enforced ─────────────────────
   #
   # `autoupdate_paused` has no automatic clear — its only `false` writer is this

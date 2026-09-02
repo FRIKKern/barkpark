@@ -2,6 +2,8 @@
 
 # muscle-1 public content + exposure — re-derivation recipes (2026-07-28)
 
+> HISTORICAL RECORD (2026-07-28) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Written by verifier `v-muscle1-public-content`. Live-network recipes, so they
 cannot go through `node tooling/grip/ledger.mjs write` — the injected safety
 screen refuses every one of them (`host bound: names barkpark.cloud`, and

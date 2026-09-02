@@ -430,5 +430,49 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
       assert Repo.get(WebauthnCredential, cred_id) == nil
     end
+
+    # RECEIPT LAW (pds wave 39 residue). The test above pins the ABSENCE the
+    # verb causes; this one pins that the printed sentence DESCENDS FROM THE
+    # WRITE RETURN. `Webauthn.delete_credential/2` was widened from a bare `:ok`
+    # to `{:ok, row}` so the controller has a row to render at all.
+    test "delete (200 receipt) renders the ROW Repo.delete removed — nickname and " <>
+           "created_at are store fields the request never carried",
+         %{token: token} do
+      register!(token)
+
+      [%{"id" => cred_id}] =
+        authed(token)
+        |> get("/v1/auth/webauthn/credentials")
+        |> json_response(200)
+        |> Map.fetch!("credentials")
+
+      # Read the row that is ABOUT to be deleted, directly — these are the bytes
+      # the receipt has to reproduce, and none of them ride the DELETE request,
+      # which carries the id and nothing else.
+      before = Repo.get(WebauthnCredential, cred_id)
+      assert %WebauthnCredential{} = before
+
+      body =
+        authed(token)
+        |> delete("/v1/auth/webauthn/credentials/#{cred_id}")
+        |> json_response(200)
+
+      # The proof fields. Revert the receipt to `%{ok: true}` and both are nil.
+      assert body["created_at"] != nil,
+             "receipt carried no created_at — it did not descend from the write return"
+
+      assert {:ok, emitted, _} = DateTime.from_iso8601(body["created_at"])
+      assert DateTime.compare(emitted, before.inserted_at) == :eq
+      assert body["nickname"] == before.nickname
+      assert body["deleted"] == before.id
+      assert body["ok"] == true
+
+      # No credential material rides the receipt.
+      refute Map.has_key?(body, "cose_key")
+      refute Map.has_key?(body, "credential_id")
+
+      # …and the claim the receipt makes is true: the row is gone.
+      assert Repo.get(WebauthnCredential, cred_id) == nil
+    end
   end
 end
