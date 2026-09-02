@@ -55,6 +55,8 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.QueueGate
+  alias Barkpark.Tasks.Validation
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.TasksController.Params
 
@@ -562,11 +564,13 @@ defmodule BarkparkWeb.TasksController do
         # Snapshot the rail BEFORE the claim so rail_changed compares
         # observed_rail_rev against the rail the worker actually saw (not the
         # rev its own claim produces). nil when the row is absent/parentless.
-        baseline_rev =
+        pre_task =
           case find_task_by_doc_id(doc_id, conn) do
-            {:ok, %Document{} = pre} -> pre_write_rail_rev(pre, conn)
+            {:ok, %Document{} = pre} -> pre
             _ -> nil
           end
+
+        baseline_rev = if pre_task, do: pre_write_rail_rev(pre_task, conn), else: nil
 
         case Tasks.claim_by_id(doc_id, worker_id, opts) do
           {:ok, %Document{} = doc} ->
@@ -600,6 +604,24 @@ defmodule BarkparkWeb.TasksController do
           {:error, {:invalid_execution_policy, errors}} ->
             bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
 
+          # THE THREE-ARM SPLIT (task-eb2b6170e19f1611). `Tasks.claim_by_id/3`
+          # collapses three different refusals into one `:not_ready` atom, and
+          # the CLI turns that into one sentence covering all three: "someone
+          # else holds it or it isn't ready". Three different remedies, one
+          # word — the caller cannot tell which applies, and the filing that
+          # produced this fix spent hours chasing a phantom readiness bug on a
+          # row that was simply `human_gated` by its own author.
+          #
+          # The refusal atom is UNCHANGED (so is the wire `reason` token, which
+          # internal/cli/errors.go and pr-task-gate.sh both string-match) — the
+          # arm is DERIVED here from the pre-claim snapshot the rail baseline
+          # already fetched, and rides as additive fields + a `message` the bp
+          # CLI prints in place of the bare token.
+          {:error, :not_ready} ->
+            conn
+            |> put_status(:conflict)
+            |> json(not_ready_arm(pre_task, worker_id))
+
           {:error, reason} ->
             conn
             |> put_status(:conflict)
@@ -608,6 +630,74 @@ defmodule BarkparkWeb.TasksController do
 
       _ ->
         bad_request(conn, "worker_id is required")
+    end
+  end
+
+  # Name WHICH arm of `claim_by_id`'s readiness gate refused, in the same order
+  # `Barkpark.Tasks.Claim` evaluates them: executable-gate first
+  # (`check_executable_for_targeted_claim` → QueueGate), lifecycle second
+  # (`check_ready_for_targeted_claim` → Validation.claimable_statuses/0).
+  #
+  # Every arm keeps `reason: "not_ready"`. `arm` is the machine-readable
+  # discriminator; `message` is the sentence a human acts on.
+  @doc false
+  def not_ready_arm(nil, _worker_id),
+    do: %{ok: false, reason: "not_ready", arm: "unknown"}
+
+  def not_ready_arm(%Document{content: content}, worker_id) do
+    c = content || %{}
+    holder = claim_holder(c)
+    gate = Map.get(c, "queue_gate")
+    status = Map.get(c, "lifecycle_status")
+
+    cond do
+      not is_nil(holder) and holder != worker_id ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "held_by_other",
+          held_by: holder,
+          message:
+            "held by #{holder} — nobody else can claim it. If that worker id is YOURS, " <>
+              "re-claim with it VERBATIM to renew the lease. If the row also reads " <>
+              "lifecycle open, the holder is stranded: free it with " <>
+              "`bp task release <id> <your-worker-id> <claim.epoch> --yes`."
+        }
+
+      not QueueGate.executable?(c, worker_id) ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "queue_gated",
+          execution_class: QueueGate.execution_class(c, worker_id),
+          gate_reason: if(is_map(gate), do: Map.get(gate, "reason")),
+          message:
+            "queue_gate state is #{inspect(QueueGate.execution_class(c, worker_id))} — this row " <>
+              "is gated by its AUTHOR, not by readiness, and no retry will change that. " <>
+              "Read content.queue_gate.reason for what it is waiting on."
+        }
+
+      status not in Validation.claimable_statuses() ->
+        %{
+          ok: false,
+          reason: "not_ready",
+          arm: "not_claimable_status",
+          lifecycle_status: status,
+          message:
+            "lifecycle_status is #{inspect(status)}; only " <>
+              "#{inspect(Validation.claimable_statuses())} is claimable. " <>
+              "Reopen it with `bp task stage <id> open` first."
+        }
+
+      true ->
+        %{ok: false, reason: "not_ready", arm: "unknown"}
+    end
+  end
+
+  defp claim_holder(content) do
+    case get_in(content, ["claim", "worker"]) do
+      worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
+      _ -> nil
     end
   end
 
