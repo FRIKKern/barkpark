@@ -557,6 +557,30 @@ defmodule Barkpark.Plugins.Tasks do
     ]
   end
 
+  # The command-level `views` descriptor for the two task commands that support
+  # the brief/full projection (wave axi-brief-views): `task.ready` and
+  # `task.prime`. Emitted only under `?views=1`.
+  #
+  # DECLARED HERE, deliberately — this used to call the capabilities plugin's
+  # `agent_views_descriptor/0`, which bought a plugin→core `tasks→capabilities`
+  # architecture edge (the cqv8 boundary gate named it) for a four-key
+  # constant. The shared CALL was never the guarantee it was documented to be:
+  # a plugin can only reach a core module, so the core `search.query`
+  # descriptor could never have been pinned by it either.
+  #
+  # What actually pins `task.ready` / `task.prime` / `search.query` to the
+  # byte-identical shape is the WIRE-level contract test —
+  # test/barkpark_web/contract/capabilities_manifest_test.exs, describe
+  # "command-level `views` descriptor", `@frozen_views` — which asserts all
+  # three against a frozen literal over the real `?views=1` response. Edit this
+  # map without editing that one and the test reds, whatever module the map
+  # lives in. Keep them in step.
+  @agent_views %{
+    "supported" => ["brief", "full"],
+    "default" => "full",
+    "default_for_agents" => "brief"
+  }
+
   @doc """
   The CLI verbs Tasks contributes to the `/v1/capabilities` manifest (M3),
   moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry (the
@@ -663,7 +687,7 @@ defmodule Barkpark.Plugins.Tasks do
         # a token-thrifty card list by default, humans the full envelope.
         # Emitted only under ?views=1 — Capabilities.maybe_gate_views strips it
         # otherwise, so the default wire shape is byte-identical to today.
-        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
+        views: @agent_views,
         scoped_prefix: nil
       },
       %{
@@ -702,7 +726,7 @@ defmodule Barkpark.Plugins.Tasks do
         # Supports the brief/full projection (wave axi-brief-views): the brief
         # prime response is the ≤5 KB resume card an agent gets by default.
         # Emitted only under ?views=1 (Capabilities.maybe_gate_views).
-        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
+        views: @agent_views,
         scoped_prefix: nil
       },
       %{
