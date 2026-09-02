@@ -4497,6 +4497,105 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "0 ready"
       refute html =~ "more"
     end
+
+    # ── tlv-s5: chips speak the lifecycle (TLV charter D12/D14) ───────────────
+
+    test "a task chip carries the lifecycle glyph + hue from the payload's lifecycle_status" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-c1","title":"Weighing the rewrite",) <>
+            ~s("type":"task","lifecycle_status":"considering",) <>
+            ~s("engagement":{"object":"research","holder":"cycle-42"}}})
+        )
+
+      assert chip.state == "considering"
+      assert chip.object == "research"
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      # ◌ is the GENERATED manifest's considering glyph — the identical character
+      # the board and the Go TUI paint (the chip folds TokensGen.lifecycle/0).
+      assert html =~ ~s(data-life-state="considering")
+      assert html =~ "◌"
+      assert html =~ "var(--life-considering)"
+      # the CONSIDERING object marker: what the task is being weighed FOR (D12)
+      assert html =~ ~s(data-engagement-object="research")
+      assert html =~ "research"
+      # tokens only — no copied hex/hsl literal (studio-literal-check doctrine)
+      refute html =~ ~r/#[0-9a-fA-F]{3,6}\b/
+    end
+
+    test "an UNKNOWN chip state draws the NEUTRAL token, never a known state's hue" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-x","title":"From a newer server",) <>
+            ~s("type":"task","lifecycle_status":"marinating"}})
+        )
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      assert html =~ ~s(data-life-state="marinating")
+      assert html =~ "var(--fg-dim)"
+      # borrowing ANY --life-* hue would report a queue state that does not exist
+      refute html =~ "var(--life-"
+    end
+
+    test "a payload with NO lifecycle_status draws no state mark at all" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_create",
+          ~s({"ok":true,"id":"task-n","title":"No state here"})
+        )
+
+      # NOT defaulted to "open": an entity payload that simply omits the field
+      # tells us nothing, and inventing "open" would report claimable work.
+      assert chip.state == nil
+      assert chip.object == nil
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      refute html =~ "data-life-state"
+      refute html =~ "data-engagement-object"
+      assert html =~ "var(--primary)"
+    end
+
+    test "the engagement object marker is drawn ONLY for the thought states" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_get",
+          ~s({"ok":true,"doc":{"doc_id":"task-w","title":"Already building",) <>
+            ~s("type":"task","lifecycle_status":"in_progress","engagement":{"object":"build"}}})
+        )
+
+      # a stale engagement left on a card that has MOVED ON is not a live
+      # deliberation — drawing it would report thinking that already ended.
+      assert chip.object == nil
+
+      refute render_component(&ChatToolRenderer.tool_chip/1, chip: chip) =~
+               "data-engagement-object"
+    end
+
+    test "search hits carry their own lifecycle mark, and an unknown one stays neutral" do
+      chip =
+        ChatToolRenderer.chip(
+          "mcp__barkpark__task_ready",
+          ~s({"ok":true,"docs":[) <>
+            ~s({"doc_id":"task-a","title":"Ready one","type":"task","lifecycle_status":"ready"},) <>
+            ~s({"doc_id":"task-b","title":"Thinking","type":"task","lifecycle_status":"researching"},) <>
+            ~s({"doc_id":"task-c","title":"Newer server","type":"task","lifecycle_status":"marinating"}]})
+        )
+
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: chip)
+
+      assert html =~ ~s(data-life-state="ready")
+      assert html =~ ~s(data-life-state="researching")
+      assert html =~ ~s(data-life-state="marinating")
+      assert html =~ "var(--life-researching)"
+      assert html =~ "var(--fg-dim)"
+      assert html =~ "◎"
+    end
   end
 
   describe "MCP chips in the live transcript (charter D64)" do
@@ -5283,6 +5382,58 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
       assert rail_html(view) =~ ~s(data-rail-phase="done")
       assert rail_html(view) =~ "Strategize"
+    end
+
+    # ── tlv-s5: the rail's fall-through is neutral (TLV charter D14) ──────────
+
+    test "a rail status OUTSIDE the workflow vocabulary is neutral, never a bright live run",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      # A rail_snapshot REPLAYS verbatim on reopen (charter D57), so a status a
+      # different build wrote reaches the renderer untouched. The default used to
+      # be --life-in_progress: an unrecognised value rendered as a live run —
+      # the worst direction for a wrong guess, since it claims work is in flight.
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "queued epic"},
+            "status" => "queued",
+            "seq" => 1
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      html = rail_html(view)
+
+      assert html =~ ~s(data-rail-status="queued")
+      assert html =~ "var(--fg-dim)"
+      refute html =~ "var(--life-in_progress)"
+    end
+
+    test "the three REAL workflow statuses keep their exact hues after the default flip",
+         %{conn: conn} do
+      for {status, token} <- [
+            {"running", "var(--life-in_progress)"},
+            {"completed", "var(--life-done)"},
+            {"interrupted", "var(--life-blocked)"}
+          ] do
+        {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+        {:ok, _} =
+          StudioChat.set_rail_snapshot(s.id, %{
+            "t" => %{
+              "row" => %{"task_type" => "local_workflow", "description" => "an epic"},
+              "status" => status,
+              "seq" => 1
+            }
+          })
+
+        {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+
+        assert rail_html(view) =~ token,
+               "the #{status} rail row lost its hue to the default flip"
+      end
     end
 
     test "an INTERRUPTED cycle shows exactly the frontier phase, with agents visible but NOT breathing (D58)",

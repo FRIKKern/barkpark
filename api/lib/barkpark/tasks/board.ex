@@ -49,7 +49,13 @@ defmodule Barkpark.Tasks.Board do
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Validation
 
-  @columns [:open, :ready, :in_progress, :blocked, :done]
+  # The status ladder in render order. The five WORK columns come first; the two
+  # THOUGHT columns (TLV charter D11/D14) sit at the LADDER BOTTOM — a task being
+  # weighed (`considering`) or actively researched (`researching`) is VISIBLE and
+  # dim, out of the work funnel's way. Placement and meaning are DECOUPLED here:
+  # a column says WHERE a card sits, `color_role/2` says WHAT it is (see
+  # `enrich/1`), so a fall-through placement can never assert a bright work state.
+  @columns [:open, :ready, :in_progress, :blocked, :done, :considering, :researching]
 
   # Derived at compile time from the ONE claimability source of truth
   # (Validation.claimable_statuses/0 — ~w(open blocked)); never fork a local
@@ -72,7 +78,46 @@ defmodule Barkpark.Tasks.Board do
   # twin surfaces can't drift. It carries `cancelled: "✕"` for SHARED-TRUTH
   # parity even though the board FOLDS cancelled to a tally (the glyph is
   # shared; its placement isn't — D17).
-  @glyphs %{open: "○", ready: "○", in_progress: "⠋", blocked: "!", done: "✓", cancelled: "✕"}
+  # `considering` ◌ (U+25CC DOTTED CIRCLE) and `researching` ◎ (U+25CE BULLSEYE)
+  # mirror the GENERATED lifecycle manifest (design/tokens.json → tokens_gen.go /
+  # BarkparkWeb.Studio.TokensGen) added by tlv-s2 — never hand-picked here.
+  #
+  # `unknown` is the GUI's own fail-open mark: it is NOT a stored lifecycle state
+  # and has no TUI twin, so it is deliberately absent from the parity gate's
+  # shared-key list. It exists so `glyph_for/1` can be TOTAL — a lifecycle value
+  # this build has never heard of paints a neutral dot instead of raising.
+  @glyphs %{
+    open: "○",
+    ready: "○",
+    in_progress: "⠋",
+    blocked: "!",
+    done: "✓",
+    cancelled: "✕",
+    considering: "◌",
+    researching: "◎",
+    unknown: "·"
+  }
+
+  # ── col ≠ color_role (TLV charter D14) ──────────────────────────────────────
+  #
+  # `col` is PLACEMENT and `color_role` is MEANING, and they are resolved by two
+  # different functions. `bucket/1`'s cond falls through to `:open` so a card is
+  # never DROPPED, but that fall-through must not also paint the card as ordinary
+  # backlog — it used to (`color_role: col`), which made an unrecognised
+  # lifecycle value look like a claimable open task. This map is the explicit
+  # status → role read; anything absent from it is `:unknown` (dim neutral).
+  @color_roles %{
+    "open" => :open,
+    "in_progress" => :in_progress,
+    "blocked" => :blocked,
+    "done" => :done,
+    "cancelled" => :cancelled,
+    "considering" => :considering,
+    "researching" => :researching
+  }
+
+  # The fail-open role: visible, neutral, dim — never a work state.
+  @unknown_role :unknown
 
   @typedoc "A normalized-then-enriched card as it leaves `build/2`."
   @type card :: %{
@@ -126,16 +171,22 @@ defmodule Barkpark.Tasks.Board do
           kind: :moved | :closed | :cancelled | :entered | :updated | :ignored
         }
 
-  @doc "The status-ladder columns, in render order: open · ready · in_progress · blocked · done."
+  @doc """
+  The status-ladder columns, in render order: the five work columns
+  (open · ready · in_progress · blocked · done) then the two THOUGHT columns
+  (considering · researching) at the ladder bottom.
+  """
   @spec columns() :: [atom()]
   def columns, do: @columns
 
   @doc """
   The §1 white-ladder glyph map — the SINGLE SOURCE OF TRUTH for the GUI board,
   asserted codepoint-equal to the TUI's `StatusGlyph` table by the parity gate
-  (charter D17): `%{open: "○", ready: "○", in_progress: "⠋", blocked: "!",
-  done: "✓", cancelled: "✕"}`. Carries `cancelled` for shared truth even though
-  the board folds it to a tally.
+  (charter D17) for every SHARED lifecycle key: open ○ · ready ○ · in_progress ⠋
+  · blocked ! · done ✓ · cancelled ✕ · considering ◌ · researching ◎. Carries
+  `cancelled` for shared truth even though the board folds it to a tally, plus
+  the GUI-only `unknown: "·"` fail-open mark, which is not a lifecycle state and
+  has no TUI twin.
   """
   @spec glyphs() :: %{atom() => String.t()}
   def glyphs, do: @glyphs
@@ -418,10 +469,26 @@ defmodule Barkpark.Tasks.Board do
   end
 
   # Enrich a normalized card with its bucket + §1 glyph/color_role.
+  #
+  # THE DECOUPLE (TLV charter D14): the column is `bucket/1`'s placement, the
+  # role is `color_role/2`'s explicit status read, and the GLYPH follows the ROLE
+  # (what the card IS), not the column (where it happens to sit). So an
+  # unrecognised lifecycle value lands in `:open` — visible, never dropped — while
+  # painting the dim `:unknown` neutral dot rather than a bright backlog ○.
   defp enrich(card) do
     col = bucket(card)
-    Map.merge(card, %{col: col, glyph: glyph_for(col), color_role: col})
+    role = color_role(col, card)
+    Map.merge(card, %{col: col, glyph: glyph_for(role), color_role: role})
   end
+
+  # `:ready` is the one DERIVED role — an open/blocked card whose blockers are all
+  # done is genuinely claimable, and that overlay is exactly what the bright ○
+  # reports, so the column wins there. Every other role is read from the card's
+  # own stored `lifecycle_status`, with `@unknown_role` for anything unmapped.
+  defp color_role(:ready, _card), do: :ready
+
+  defp color_role(_col, card),
+    do: Map.get(@color_roles, card.lifecycle_status, @unknown_role)
 
   # Subtask lineage (wave 12) — a card whose doc_id other live cards name as
   # their `parent_id` carries a `:sub` summary: how many children, how many
@@ -453,7 +520,7 @@ defmodule Barkpark.Tasks.Board do
     }
   end
 
-  # Group + order enriched live cards into the five render columns, capping the
+  # Group + order enriched live cards into the render columns, capping the
   # done column at @done_window (newest-first). Returns `{columns, done_full}`
   # where `done_full` is the UNCAPPED, ordered done list for honest momentum
   # maths (D10).
@@ -859,7 +926,11 @@ defmodule Barkpark.Tasks.Board do
   # bucket. The card's own glyph/color keep the root's true state, so an
   # escalated card reads "open epic, work in flight" at a glance. Grouped and
   # filtered views deliberately stay PER-TASK — they are the drill-down.
-  @family_order [:in_progress, :ready, :open, :blocked, :done]
+  # Mini-tree row order, most-active first. The thought columns rank BELOW the
+  # work funnel and above done — a family row that is merely being weighed should
+  # not outrank a blocked one. (`family_rank/1` still answers 99 for anything
+  # unlisted, so the sort stays total.)
+  @family_order [:in_progress, :ready, :open, :blocked, :researching, :considering, :done]
   @family_row_depth 3
   @family_row_cap 24
 
@@ -1090,10 +1161,17 @@ defmodule Barkpark.Tasks.Board do
     |> Enum.sort_by(&priority_from_string/1)
   end
 
-  # Bucketing (charter): in_progress/done are stored states; ready is the
-  # derived overlay; open/blocked are the fall-through.
+  # Bucketing (charter): in_progress/done and the two THOUGHT states are stored
+  # states, matched by head clause BEFORE the cond; ready is the derived overlay;
+  # open/blocked are the fall-through.
+  #
+  # The `true -> :open` fall-through means PLACEMENT ONLY — a card whose stored
+  # status this build does not recognise still shows up (never dropped) but is
+  # coloured by `color_role/2`, not by the column it landed in.
   defp bucket(%{lifecycle_status: "in_progress"}), do: :in_progress
   defp bucket(%{lifecycle_status: "done"}), do: :done
+  defp bucket(%{lifecycle_status: "considering"}), do: :considering
+  defp bucket(%{lifecycle_status: "researching"}), do: :researching
 
   defp bucket(card) do
     cond do
@@ -1143,5 +1221,9 @@ defmodule Barkpark.Tasks.Board do
   # (opacity is the only difference, applied in CSS by color_role); in_progress
   # is the Braille spinner base frame (the live frame-cycle is a pure-CSS
   # `::before` animation in the render).
-  defp glyph_for(col), do: Map.fetch!(@glyphs, col)
+  #
+  # TOTAL by construction: this used to be `Map.fetch!/2`, which RAISED on any
+  # role the map had not heard of — the exact failure a fail-open surface must
+  # not have. An unmapped role paints the neutral `unknown` dot.
+  defp glyph_for(role), do: Map.get(@glyphs, role, @glyphs[@unknown_role])
 end

@@ -6573,9 +6573,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # The rail speaks the lifecycle palette (charter D60): a settled cycle is
   # --life-done, a live one --life-in_progress, an interrupted one --life-blocked.
+  #
+  # NOTE this rail colours the AGENT-WORKFLOW vocabulary (running / completed /
+  # interrupted), NOT the task lifecycle — the three cases below are exact and
+  # stay exact. What changed (TLV charter D14) is the DEFAULT: it used to be
+  # `--life-in_progress`, so ANY status this build has not heard of rendered as a
+  # bright live run — the worst possible direction for a wrong guess, since it
+  # reports work in flight that may not be. `running` is now its own explicit
+  # clause and the fall-through is neutral.
+  defp rail_status_color("running"), do: "var(--life-in_progress)"
   defp rail_status_color("completed"), do: "var(--life-done)"
   defp rail_status_color("interrupted"), do: "var(--life-blocked)"
-  defp rail_status_color(_), do: "var(--life-in_progress)"
+  defp rail_status_color(_), do: "var(--fg-dim)"
 
   # Phase-row glyph + color by journey status (charter D58/D60).
   defp rail_phase_glyph(:done), do: "✓"
