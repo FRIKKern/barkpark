@@ -487,13 +487,19 @@ jobs:
       - name: node-test-floor.test.sh syntax check
         run: bash -n scripts/node-test-floor.test.sh
       - name: "node-test-floor mutation matrix (hermetic mktemp fixtures, no network)"
-        # Nineteen assertions; the ones that matter prove the runner can FAIL: a
-        # zero-match pattern, a file registering zero tests (node reports that
-        # file as `# tests 1` -- the FILE counted as its own passing test, which
-        # defeats a naive tests>0 floor and defeated the first version of this
-        # one), a missing path beside a real one, a forwarded --test-reporter,
-        # and the per-file TAP blocks staying whole and in FILE order under the
-        # pool. That last one is not decoration: streaming the pool instead of
+        # Thirty-eight assertions; the ones that matter prove the runner can
+        # FAIL: a zero-match pattern, a file registering zero tests (node
+        # reports that file as `# tests 1` -- the FILE counted as its own
+        # passing test, which defeats a naive tests>0 floor and defeated the
+        # first version of this one), a missing path beside a real one, a
+        # forwarded --test-reporter, a suite that SHRANK below its committed
+        # `--floor N` literal, and the per-file TAP blocks staying whole and in
+        # FILE order under the pool. The shrink pair is the load-bearing one:
+        # case 8 runs a gutted tree WITHOUT a floor and asserts GREEN, case 10
+        # runs the same shape WITH one and asserts RED, so the only variable is
+        # the literal -- every other assertion this runner makes is derived from
+        # the tree it measures and therefore agrees with a gutted tree. The
+        # ordering case is not decoration either: streaming the pool instead of
         # buffering keeps the SUM correct while scrambling the order, so a
         # position-keyed consumer breaks silently -- verified by mutation.
         run: bash scripts/node-test-floor.test.sh

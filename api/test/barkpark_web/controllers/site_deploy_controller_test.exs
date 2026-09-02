@@ -670,9 +670,15 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       done = await_done("no-leak")
 
       refute Map.has_key?(done, "command")
+
+      # site-spawner (node slot truth): +served_port +served_slot, the slot the
+      # box measured Caddy to be serving. `health_exit_code` is deliberately NOT
+      # here and this pin is the proof: `echo hi` reports no HEALTH stage, and an
+      # unmeasured health code is OMITTED rather than defaulted to 0 (0 is the
+      # SUCCESS code, so a default would certify a gate that never ran).
       assert Map.keys(done) |> Enum.sort() == ~w(
                build_id content_rev exit_code failure_reason finished_at log mode
-               slug stages started_at state
+               served_port served_slot slug stages started_at state
              )
     end
 
