@@ -1785,6 +1785,159 @@ FAKENPM
   # separate a retired slot from a crashed one. This is a STATIC check of the file
   # instance-deploy.sh installs, because nothing else in this suite reads it: a
   # fake systemctl cannot observe a real unit's exit-status policy.
+  # =========================================================================
+  # STAGE MUST NOT DESTROY A LIVE-OR-PREVIOUS RELEASE.
+  # purge_failed_release_node deliberately KEEPS the bytes of a release a live or
+  # warm-previous slot still points at ("keeping its bytes, marking it
+  # health-failed") precisely so the <1s rollback path survives.  PLAN then routes
+  # a redeploy of that build into its health-failed arm (SKIP_BUILD=0) — which is
+  # the ONLY path on this engine that runs STAGE against an already-existing
+  # release dir, and therefore the only path the up-front `rm -rf "$RELDIR"`
+  # could ever reach.  It reached it: one function preserved the rollback target
+  # and the next one deleted it, and a copy that then failed (exit 13, ordinary on
+  # a full mount) left .previous naming a directory that no longer existed.
+  # Driven through the REAL verbs below, with a REAL mid-STAGE copy failure —
+  # never read off the source.
+  # =========================================================================
+  echo "[selftest] e2e: MUTATION — the pre-fix STAGE loses the rollback target, this one keeps it"
+
+  # A cp that copies genuine bytes and THEN reports failure (the ENOSPC shape).
+  # Armed only by BP_CP_FAIL_LOG and only for the staging copy (destination ends
+  # in `.partial/`), so every other cp in this suite is the real one, and the log
+  # it appends to is the non-vacuity sentinel: an empty cp.log means the copy the
+  # whole proof rests on never ran.
+  RBBIN="$TD/rb-bin"; mkdir -p "$RBBIN"
+  cat > "$RBBIN/cp" <<'FAKECP'
+#!/usr/bin/env bash
+real=/bin/cp; [ -x "$real" ] || real=/usr/bin/cp
+"$real" "$@"; rc=$?
+[ "$rc" -ne 0 ] && exit "$rc"
+dest=""; for a in "$@"; do dest="$a"; done
+if [ -n "${BP_CP_FAIL_LOG:-}" ]; then
+  case "$dest" in *.partial/) printf '%s\n' "$dest" >> "$BP_CP_FAIL_LOG"; exit 1;; esac
+fi
+exit 0
+FAKECP
+  chmod +x "$RBBIN/cp"
+
+  # The mutant: restore the pre-fix line, nothing else.  A mutation that did not
+  # apply is not a catch, so the swap is asserted three ways below (exactly one
+  # changed line, the pre-fix line present, the guarded line absent).
+  RBMUTD="$TD/rb-mutant"; RBMUT="$RBMUTD/site-deploy-node.sh"
+  mkdir -p "$RBMUTD/lib"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$RBMUTD/lib/"  # a mutant sources by its OWN dirname
+  awk '{ if ($0 == "  rm -rf \"$RELDIR.partial\" \"$RELDIR.aside\"") print "  rm -rf \"$RELDIR\" \"$RELDIR.partial\""; else print }' \
+    "$SELF" > "$RBMUT"
+  check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
+    [ "$(diff "$SELF" "$RBMUT" | grep -c '^[<>]')" = 2 ]
+  check "the mutant carries the PRE-FIX line"      grep -qF 'rm -rf "$RELDIR" "$RELDIR.partial"' "$RBMUT"
+  # Counted, not merely absent: this file mentions the guarded text in its OWN
+  # assertions, so "the mutant does not contain it" would be false for a reason
+  # that has nothing to do with STAGE.  The mutant must carry EXACTLY ONE FEWER
+  # occurrence than this engine, and this engine must carry at least one.
+  rb_guard_n() { grep -cF 'rm -rf "$RELDIR.partial" "$RELDIR.aside"' "$1" || true; }
+  check "this engine carries the guarded STAGE line" \
+    [ "$(rb_guard_n "$SELF")" -ge 1 ]
+  check "the mutant lost EXACTLY ONE occurrence of it (the STAGE line)" \
+    [ "$(( $(rb_guard_n "$SELF") - $(rb_guard_n "$RBMUT") ))" = 1 ]
+
+  RBSRC="$TD/rbsrc"; mkdir -p "$RBSRC"
+  printf '{"name":"selftest-rbguard","private":true}\n' > "$RBSRC/package.json"
+
+  # ONE fixture, run twice — the arms differ ONLY by which engine binary runs.
+  rb_arm() { # <engine> <slug> -> populates $TD/rb-<slug>/, echoes the STAGE-failure exit code
+    local eng="$1" slug="$2" base="$TD/rb-$2" pa pb
+    pa="$(free_port)"; pb="$(free_port)"
+    mkdir -p "$base/sites"
+    rb_deploy() { # <build_id>
+      env PATH="$RBBIN:$FAKEBIN:$PATH" \
+        SITE_SLUG="$slug" BUILD_ID="$1" CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
+        SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
+        BARKPARK_SITES_DIR="$base/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+        BARKPARK_CADDYFILE="$CF" \
+        BARKPARK_SITE_DEPLOY_LOCK="$base/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+        BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+        BP_CP_FAIL_LOG="${RB_CP_FAIL:-}" \
+        bash "$eng" > "$base/out.$1.log" 2>&1
+      echo $?
+    }
+    RB_CP_FAIL="" rb_deploy rb1 > "$base/rc1"                 # slot a goes live on rb1
+    printf 'ORIGINAL-%s\n' "$slug" > "$base/sites/$slug/releases/rb1/.rb-origin"
+    RB_CP_FAIL="" rb_deploy rb2 > "$base/rc2"                 # slot b goes live; .previous -> rb1
+    # Poison rb1 EXACTLY as purge_failed_release_node does for a live/previous
+    # release: keep every byte, drop the marker.  Same constant, so a rename of
+    # the marker cannot leave this fixture testing a file nothing reads.
+    : > "$base/sites/$slug/releases/rb1/$HEALTH_FAIL_MARK"
+    : > "$base/cp.log"
+    RB_CP_FAIL="$base/cp.log" rb_deploy rb1 > "$base/rc3"     # the re-deploy that must not cost rb1
+    rb_rollback() {
+      env PATH="$RBBIN:$FAKEBIN:$PATH" \
+        SITE_SLUG="$slug" SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
+        BARKPARK_SITES_DIR="$base/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+        BARKPARK_CADDYFILE="$CF" \
+        BARKPARK_SITE_DEPLOY_LOCK="$base/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+        BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" \
+        BARKPARK_SITE_NO_CAP=1 BP_CP_FAIL_LOG="" \
+        bash "$eng" --rollback > "$base/rb.log" 2>&1
+      echo $?
+    }
+    rb_rollback > "$base/rbrc"
+    cat "$base/rc3"
+  }
+
+  # ---- FIXED arm (this engine) --------------------------------------------
+  rbfix_rc="$(rb_arm "$SELF" rbfix)"; RBF="$TD/rb-rbfix"
+  check "FIXED: the two setup deploys landed"      sh -c "[ \"\$(cat '$RBF/rc1')\" = 0 ] && [ \"\$(cat '$RBF/rc2')\" = 0 ]"
+  check "FIXED: .previous names rb1 (rb1 IS the warm rollback target)" \
+    sh -c "awk '{print \$3}' '$RBF/sites/rbfix/.previous' | grep -qx rb1"
+  check "FIXED: the staging copy REALLY ran (cp.log non-empty — not a vacuous pass)" \
+    [ -s "$RBF/cp.log" ]
+  check "FIXED: the re-deploy failed in STAGE with the typed 13"  [ "$rbfix_rc" = 13 ]
+  check "FIXED: and said so on the machine channel"  grep -q '^BPSTAGE name=STAGE status=failed build_id=rb1' "$RBF/out.rb1.log"
+  check "FIXED: releases/rb1 SURVIVED the failed deploy"          [ -d "$RBF/sites/rbfix/releases/rb1" ]
+  check "FIXED: …with its ORIGINAL bytes, not a half-copy"        grep -qx 'ORIGINAL-rbfix' "$RBF/sites/rbfix/releases/rb1/.rb-origin"
+  check "FIXED: …and still bootable (server.js present)"          [ -f "$RBF/sites/rbfix/releases/rb1/server.js" ]
+  check "FIXED: no .partial residue"                              [ ! -e "$RBF/sites/rbfix/releases/rb1.partial" ]
+  check "FIXED: no .aside residue"                                [ ! -e "$RBF/sites/rbfix/releases/rb1.aside" ]
+  # The failure path PROVES the target is still there instead of leaving the
+  # operator to guess — the exit-13 detail says so in words.
+  check "FIXED: the exit-13 detail names the surviving release"   grep -q 'is UNTOUCHED, so any rollback target it held is still there' "$RBF/out.rb1.log"
+  # An interrupted swap must not be a second way to lose the release: drop the
+  # bytes at <id>.aside with nothing at <id> (the kill-between-the-renames state)
+  # and the next STAGE picks them back up.
+  mv "$RBF/sites/rbfix/releases/rb1" "$RBF/sites/rbfix/releases/rb1.aside"
+  rb_recover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
+    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" \
+    BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    BP_CP_FAIL_LOG="$RBF/cp2.log" \
+    bash "$SELF" > "$RBF/out.recover.log" 2>&1; echo $?)"
+  check "FIXED: an INTERRUPTED swap is recovered, not deleted (.aside -> release)" \
+    [ -d "$RBF/sites/rbfix/releases/rb1" ]
+  check "FIXED: …with the original bytes"          grep -qx 'ORIGINAL-rbfix' "$RBF/sites/rbfix/releases/rb1/.rb-origin"
+  check "FIXED: …and the recovery is on the record" grep -q 'recovered releases/rb1 from an interrupted swap' "$RBF/out.recover.log"
+  check "FIXED: …and this run still failed in STAGE (the copy really ran)" \
+    sh -c "[ \"$rb_recover_rc\" = 13 ] && [ -s '$RBF/cp2.log' ]"
+
+  check "FIXED: --rollback refuses on the HEALTH MARKER (the target exists)" \
+    sh -c "[ \"\$(cat '$RBF/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is marked health-failed\" '$RBF/rb.log'"
+  check "FIXED: …and NEVER reports the target as gone"            sh -c "! grep -q \"previous release 'rb1' is gone\" '$RBF/rb.log'"
+
+  # ---- MUTANT arm (pre-fix line restored), IDENTICAL fixture ---------------
+  rbmut_rc="$(rb_arm "$RBMUT" rbmut)"; RBM="$TD/rb-rbmut"
+  check "MUTANT: the two setup deploys landed the same way"       sh -c "[ \"\$(cat '$RBM/rc1')\" = 0 ] && [ \"\$(cat '$RBM/rc2')\" = 0 ]"
+  check "MUTANT: the staging copy REALLY ran here too"            [ -s "$RBM/cp.log" ]
+  check "MUTANT: the re-deploy failed in STAGE with the same 13"  [ "$rbmut_rc" = 13 ]
+  check "MUTANT: releases/rb1 is GONE — the failed deploy destroyed the rollback target" \
+    [ ! -d "$RBM/sites/rbmut/releases/rb1" ]
+  check "MUTANT: .previous still names rb1 (a pointer to nothing)" \
+    sh -c "awk '{print \$3}' '$RBM/sites/rbmut/.previous' | grep -qx rb1"
+  check "MUTANT: --rollback reports the target GONE"              sh -c "[ \"\$(cat '$RBM/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is gone\" '$RBM/rb.log'"
+  echo "  mutation proof: with the one line back to 'rm -rf \"\$RELDIR\" \"\$RELDIR.partial\"', the SAME fixture (rb1 warm-previous + health-failed, re-deployed, staging cp fails at exit 13) leaves releases/rb1 DELETED and --rollback saying the previous release is gone; with the guard, rb1 keeps its original bytes and the refusal is the honest one (marked health-failed)"
+
   echo "[selftest] the shipped unit template treats a SIGTERM exit (143) as a clean stop"
   UNIT_TMPL="$(cd "$(dirname "$SELF")" && pwd)/systemd/barkpark-site@.service"
   unit_ses_section() { awk '/^\[/{s=$0} /^SuccessExitStatus=/{print s; exit}' "$UNIT_TMPL"; }
@@ -2161,7 +2314,35 @@ if [ "$SKIP_BUILD" = 0 ]; then
     DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
-  rm -rf "$RELDIR" "$RELDIR.partial"
+  # NEVER delete releases/<build_id> before the new bytes exist.  That dir can be
+  # the LIVE release or the build .previous names as the warm-rollback target —
+  # and PLAN routes a redeploy of exactly such a build straight here:
+  # purge_failed_release_node KEEPS a live/previous release's bytes and only drops
+  # the poison marker (precisely so the rollback path survives), after which PLAN's
+  # health-failed arm sets SKIP_BUILD=0 and STAGE runs against that same dir.  An
+  # up-front `rm -rf` followed by a copy that fails (exit 13, ordinary on a full
+  # mount) therefore destroyed the very release a rollback would flip to: .previous
+  # kept naming it while its bytes were gone, and --rollback returned 21.
+  # A FAILED DEPLOY MUST NEVER COST THE ROLLBACK TARGET.
+  # So: copy into a fresh .partial, then SWAP — move the old dir ASIDE, rename the
+  # partial in, and remove the aside copy only once the rename has landed.  Every
+  # failure path before that last step leaves the existing release, and therefore
+  # the rollback path, byte-for-byte intact.  (Mirrors stage_dir_into_release in
+  # the static engine, deploy/site-deploy.sh — one shape for both runtimes.)
+  # The swap narrows the exposure to the gap BETWEEN the two renames (a
+  # microsecond, versus the whole copy the pre-fix `rm -rf` was exposed for), and
+  # even that gap is now recoverable rather than fatal: a kill in it leaves the
+  # old release under .aside and nothing at $RELDIR, so pick it back up instead
+  # of deleting it — it can be the only copy of a live-or-previous release left
+  # on the box.  Only when $RELDIR is genuinely absent; a present $RELDIR means
+  # the swap landed and the .aside is the stale half.
+  if [ ! -e "$RELDIR" ] && [ -d "$RELDIR.aside" ]; then
+    if mv "$RELDIR.aside" "$RELDIR" 2>/dev/null; then
+      log "STAGE: recovered releases/$BUILD_ID from an interrupted swap (.aside) before re-staging"
+    fi
+  fi
+  STAGE_ASIDE=""
+  rm -rf "$RELDIR.partial" "$RELDIR.aside"
   mkdir -p "$RELDIR.partial"
   # cp/mv carry no forensic of their own — capture the exit code + a disk read (a
   # copy that fails on a real box almost always fails on a full mount) so each
@@ -2170,7 +2351,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
   cp -a "$SITE_SRC/.next/standalone/." "$RELDIR.partial/"; cp_rc=$?
   if [ "$cp_rc" -ne 0 ]; then
     disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # 2) .next/static -> <release>/.next/static (standalone omits it by design).
@@ -2179,7 +2360,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
     cp -a "$SITE_SRC/.next/static/." "$RELDIR.partial/.next/static/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
       disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-      DETAIL="copy of .next/static into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+      DETAIL="copy of .next/static into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
       log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
   fi
@@ -2189,16 +2370,28 @@ if [ "$SKIP_BUILD" = 0 ]; then
     cp -a "$SITE_SRC/public/." "$RELDIR.partial/public/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
       disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-      DETAIL="copy of public/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+      DETAIL="copy of public/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
       log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
     fi
   fi
+  if [ -e "$RELDIR" ]; then
+    mv "$RELDIR" "$RELDIR.aside"; aside_rc=$?
+    if [ "$aside_rc" -ne 0 ]; then
+      rm -rf "$RELDIR.partial"
+      DETAIL="could not move the existing releases/$BUILD_ID aside before the swap (mv exit $aside_rc) — the staged tree was discarded and the existing release is UNTOUCHED, so any rollback target it held is still there; check ownership of the releases dir"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
+    STAGE_ASIDE="$RELDIR.aside"
+  fi
   mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
   if [ "$mv_rc" -ne 0 ]; then
+    # Put the old release BACK.  The swap is only a swap if it is reversible.
+    [ -n "$STAGE_ASIDE" ] && mv "$STAGE_ASIDE" "$RELDIR" 2>/dev/null
     rm -rf "$RELDIR.partial"
-    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
+    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership. Any previously staged tree was restored"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
+  [ -n "$STAGE_ASIDE" ] && rm -rf "$STAGE_ASIDE"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
