@@ -98,6 +98,18 @@ type fakeCP struct {
 	// teardown is queued) and keeps the row.
 	forceStatus string
 	keepRow     bool
+
+	// adoptSilently / adoptHost parameterise the ADOPT answer the same way, so
+	// a test can stand up the two control planes that make adopt's old receipt
+	// a lie while answering a perfectly well-formed 201:
+	//   adoptSilently — validates the payload, echoes it back, records NOTHING.
+	//   adoptHost     — records the row against a DIFFERENT host (the box the
+	//                   clone-swap just destroyed, say), so the dashboard drives
+	//                   a machine that no longer exists.
+	// Neither is detectable from the 201 body, which is why the read-back is
+	// the only thing that can tell them from an adoption that worked.
+	adoptSilently bool
+	adoptHost     string
 }
 
 func newFakeCP(t *testing.T, rows []cpBarkpark) *fakeCP {
@@ -158,9 +170,27 @@ func newFakeCP(t *testing.T, rows []cpBarkpark) *fakeCP {
 			w.WriteHeader(code)
 			_, _ = fmt.Fprintf(w, `{"ok":true,"status":%q}`, status)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/internal/barkparks":
+			slug, _ := body["slug"].(string)
+			team, _ := body["team_id"].(string)
+			host, _ := body["host"].(string)
+			rawURL, _ := body["url"].(string)
+			stored := host
+			if f.adoptHost != "" {
+				stored = f.adoptHost
+			}
+			if !f.adoptSilently {
+				f.mu.Lock()
+				f.rows = append(f.rows, cpBarkpark{
+					ID: "adopted-1", Slug: slug, DNSLabel: slug, TeamID: team,
+					Host: stored, URL: rawURL, Mode: "managed",
+				})
+				f.mu.Unlock()
+			}
+			// The BODY echoes the attrs it was handed either way — a lying
+			// plane and an honest one are byte-identical here on purpose.
 			w.WriteHeader(http.StatusCreated)
-			_, _ = fmt.Fprintf(w, `{"ok":true,"barkpark":{"id":"adopted-1","slug":%q,"team_id":%q}}`,
-				body["slug"], body["team_id"])
+			_, _ = fmt.Fprintf(w, `{"ok":true,"barkpark":{"id":"adopted-1","slug":%q,"team_id":%q,"host":%q}}`,
+				slug, team, host)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -972,6 +1002,305 @@ func TestInstanceEjectDetachIsConfirmedNotAssumed(t *testing.T) {
 		}
 		if note, _ := got["note"].(string); !strings.Contains(note, "row-gy") {
 			t.Errorf("the partial does not name the surviving row: %s", stdout)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// resurrect + adopt: the receipt residue (pds-w27-bl-…-verb-receipt-residue)
+// ---------------------------------------------------------------------------
+
+// instHealthStub answers the /api/schemas probe with `code` and counts the
+// hits, passing every other instHTTP call (the control-plane fake!) through to
+// the real transport. instHealthOK is the always-200 special case; a resurrect
+// receipt has to distinguish PROBED-OK from PROBED-AND-FAILED from NOT-PROBED,
+// and only the third one is invisible to a stub that always succeeds.
+func instHealthStub(t *testing.T, code int, hits *int) {
+	t.Helper()
+	old := instHTTP
+	instHTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/api/schemas") {
+			*hits++
+			rec := httptest.NewRecorder()
+			rec.WriteHeader(code)
+			return rec.Result(), nil
+		}
+		return http.DefaultTransport.RoundTrip(req)
+	})}
+	t.Cleanup(func() { instHTTP = old })
+}
+
+// instResurrectFake stands up the wire for one resurrect of okey.barkpark.cloud
+// from archive 777. `created` is the raw `server` object POST /servers answers
+// with, so a caller can decide whether the create response already settles the
+// running+IPv4 poll or the GET /servers/10 read-back has to.
+func instResurrectFake(t *testing.T, created string) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	instSSHKeyLookup(f)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"servers":[]}`)
+	})
+	f.mux.HandleFunc("GET /images", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"images":[
+			{"id":777,"type":"snapshot","status":"available","created":"2026-07-02T10:00:00Z",
+			 "labels":{"barkpark-archive":"true","barkpark-fqdn":"okey.barkpark.cloud","barkpark-server-type":"cx23","barkpark-location":"fsn1"}}
+		]}`)
+	})
+	f.mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"server":`+created+`,
+			"action":{"id":40,"status":"success","progress":100},"next_actions":[]}`)
+	})
+	f.mux.HandleFunc("POST /zones/barkpark.cloud/rrsets/okey/A/actions/set_records", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":41,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":40,"status":"success"},{"id":41,"status":"success"}]}`)
+	})
+	return f
+}
+
+// instResurrectRunning is a create response that already reports running with a
+// public IPv4 — the common case, where instCreateFromArchive's poll is
+// satisfied on its first look and issues no GET at all.
+const instResurrectRunning = `{"id":10,"name":"bp-okey-r777","status":"running",
+	"public_net":{"ipv4":{"ip":"192.0.2.77"}},"image":{"id":777,"type":"snapshot"}}`
+
+// TestInstanceResurrectReceiptStatesHealthInAllThreeModes pins the residue the
+// wave-27 gate widening left standing: `--no-health` produced a receipt where
+// `health` was simply ABSENT. An absent key is not a skip — it reads exactly
+// like a receipt written before the key existed, and exactly like a probe that
+// crashed before it could record anything. Three modes, three receipts, and the
+// test asserts they are three DISTINCT strings, because a skip that renders as
+// the same bytes as a pass is the whole bug.
+func TestInstanceResurrectReceiptStatesHealthInAllThreeModes(t *testing.T) {
+	type mode struct {
+		name     string
+		args     []string
+		httpCode int
+		wantExit int
+		wantOK   bool
+	}
+	modes := []mode{
+		{"probed ok", nil, 200, exitOK, true},
+		{"declined", []string{"--no-health"}, 200, exitOK, true},
+		{"probed and failed", nil, 503, exitGeneric, false},
+	}
+	health := map[string]string{}
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			instTestTuning(t)
+			hits := 0
+			instHealthStub(t, m.httpCode, &hits)
+			instResurrectFake(t, instResurrectRunning)
+
+			args := append([]string{"json", "hetzner", "instance", "resurrect", "okey.barkpark.cloud"}, m.args...)
+			stdout, stderr, code := runHzCLI(t, args[0], args[1:]...)
+			if code != m.wantExit {
+				t.Fatalf("resurrect %v exited %d, want %d; stderr: %s stdout: %s", m.args, code, m.wantExit, stderr, stdout)
+			}
+			got := instJSONReceipt(t, stdout)
+			if got["ok"] != m.wantOK {
+				t.Errorf("receipt ok = %v, want %v: %s", got["ok"], m.wantOK, stdout)
+			}
+			raw, present := got["health"]
+			if !present {
+				t.Fatalf("receipt carries NO health key in mode %q — silence is not a report: %s", m.name, stdout)
+			}
+			text, _ := raw.(string)
+			if strings.TrimSpace(text) == "" {
+				t.Fatalf("receipt health is empty in mode %q: %s", m.name, stdout)
+			}
+			health[m.name] = text
+
+			// The probe count is the independent witness that the key is not
+			// merely a different string for the same behaviour.
+			wantHits := hits > 0
+			if (m.args == nil) != wantHits {
+				t.Errorf("mode %q probed /api/schemas %d times — the receipt and the wire disagree about whether the gate ran", m.name, hits)
+			}
+		})
+	}
+	if health["declined"] == health["probed ok"] {
+		t.Errorf("a declined health gate and a passed one produce the SAME health value (%q) — "+
+			"the receipt cannot tell an operator which happened", health["declined"])
+	}
+	if !strings.Contains(health["declined"], "skipped") || !strings.Contains(health["declined"], "no-health") {
+		t.Errorf("the declined receipt says %q — it has to name the skip AND the flag that caused it", health["declined"])
+	}
+	if health["probed and failed"] == health["probed ok"] {
+		t.Errorf("a failed health gate and a passed one produce the SAME health value (%q)", health["probed ok"])
+	}
+}
+
+// TestInstanceResurrectImageIDIsReadBackNotRequested is the other half of the
+// residue. `image_id` was `img.ID` — the archive the verb ASKED Hetzner to boot,
+// rendered in a receipt that reads as a statement about the box that came up.
+// It is right on every honest create, which is exactly why it survived: the
+// only input that can tell an echo from an observation is a server that reports
+// a DIFFERENT image, and no test had ever fed one in.
+func TestInstanceResurrectImageIDIsReadBackNotRequested(t *testing.T) {
+	instTestTuning(t)
+	instHealthOK(t)
+	// The create response is deliberately NOT settled (initializing, no IPv4),
+	// so instCreateFromArchive must take its GET /servers/10 read-back — and
+	// that read-back is where the image below comes from.
+	f := instResurrectFake(t, `{"id":10,"name":"bp-okey-r777","status":"initializing","public_net":{"ipv4":{"ip":""}}}`)
+	f.mux.HandleFunc("GET /servers/10", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"server":{"id":10,"name":"bp-okey-r777","status":"running",
+			"public_net":{"ipv4":{"ip":"192.0.2.77"}},"image":{"id":700,"type":"snapshot"}}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "resurrect", "okey.barkpark.cloud")
+	if code != exitOK {
+		t.Fatalf("resurrect exited %d, stderr: %s stdout: %s", code, stderr, stdout)
+	}
+	if f.count("GET", "/servers/10") == 0 {
+		t.Fatal("resurrect never re-read the server it created — this test's premise has expired")
+	}
+	got := instJSONReceipt(t, stdout)
+	if got["image_id"] != float64(700) {
+		t.Errorf("receipt image_id = %v, want 700 — the image the BOX reports, not the 777 the request named: %s",
+			got["image_id"], stdout)
+	}
+	if got["requested_image_id"] != float64(777) {
+		t.Errorf("receipt requested_image_id = %v, want 777: %s", got["requested_image_id"], stdout)
+	}
+	if got["image_observed"] != true {
+		t.Errorf("receipt image_observed = %v, want true: %s", got["image_observed"], stdout)
+	}
+	dis, _ := got["image_disagreement"].(string)
+	if !strings.Contains(dis, "777") || !strings.Contains(dis, "700") {
+		t.Errorf("receipt image_disagreement = %q — a box that came up on an image nobody asked for must be "+
+			"REPORTED, naming both ids: %s", dis, stdout)
+	}
+}
+
+// instAdoptFake stands up the hetzner wire for one adopt of
+// gyldendal.barkpark.cloud: the standalone box, its archive, the clone, DNS,
+// and the old box's teardown.
+func instAdoptFake(t *testing.T) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	instSSHKeyLookup(f)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(23, "bp-gyldendal-1", "192.0.2.23", "gyldendal.barkpark.cloud")+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/23/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":800,"type":"snapshot"},"action":{"id":50,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /images/800", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"image":{"id":800,"type":"snapshot","status":"available","labels":{"barkpark-server-type":"cx23","barkpark-location":"fsn1"}}}`)
+	})
+	f.mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{
+			"server":{"id":24,"name":"bp-gyldendal-r800","status":"running",
+				"public_net":{"ipv4":{"ip":"192.0.2.24"}},"image":{"id":800,"type":"snapshot"}},
+			"action":{"id":51,"status":"success","progress":100},"next_actions":[]}`)
+	})
+	f.mux.HandleFunc("POST /zones/barkpark.cloud/rrsets/gyldendal/A/actions/set_records", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":52,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("DELETE /servers/23", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"action":{"id":53,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":50,"status":"success"},{"id":51,"status":"success"},{"id":52,"status":"success"},{"id":53,"status":"success"}]}`)
+	})
+	return f
+}
+
+// TestInstanceAdoptRegistrationIsConfirmedNotAssumed is the post-condition proof
+// for adopt's REGISTRY half — the half the wave-27 exemption explicitly left
+// standing. The server half was already honest (instCloneSwap health-gates the
+// clone before destroying the old box); registry_id and team_id came straight
+// out of cp.Adopt's 201 body, which is the control plane repeating the attrs it
+// was handed. Two well-formed 201s below are lies, and neither is visible in
+// that body: one records nothing at all, one records the row against a host
+// this very verb has already destroyed.
+func TestInstanceAdoptRegistrationIsConfirmedNotAssumed(t *testing.T) {
+	run := func(t *testing.T, tune func(*fakeCP)) (string, string, int, *fakeCP) {
+		t.Helper()
+		instTestTuning(t)
+		instHealthOK(t)
+		instAdoptFake(t)
+		cp := newFakeCP(t, nil)
+		tune(cp)
+		stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "adopt", "gyldendal.barkpark.cloud",
+			"--team", "team-7", "--control-url", cp.srv.URL, "--worker-token", "wtok")
+		return stdout, stderr, code, cp
+	}
+
+	confirmed := ""
+	t.Run("a plane that really records the row", func(t *testing.T) {
+		stdout, stderr, code, cp := run(t, func(*fakeCP) {})
+		if code != exitOK {
+			t.Fatalf("adopt exited %d, stderr: %s stdout: %s", code, stderr, stdout)
+		}
+		reads := 0
+		for _, r := range cp.requests() {
+			if strings.HasPrefix(r, "GET /v1/internal/barkparks") {
+				reads++
+			}
+		}
+		if reads == 0 {
+			t.Fatal("adopt never re-read the registry — registry_id is a 201-body echo, and a 201 says the payload " +
+				"parsed, not that a row exists")
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["registry_id"] != "adopted-1" || got["team_id"] != "team-7" {
+			t.Errorf("receipt registry_id/team_id = %v/%v, want adopted-1/team-7: %s", got["registry_id"], got["team_id"], stdout)
+		}
+		if got["registry_host"] != "192.0.2.24" {
+			t.Errorf("receipt registry_host = %v, want the clone's 192.0.2.24: %s", got["registry_host"], stdout)
+		}
+		if _, unconfirmed := got["confirmation"]; unconfirmed {
+			t.Errorf("a confirmed adoption must not carry a confirmation key: %s", stdout)
+		}
+		confirmed = stdout
+	})
+
+	t.Run("a plane that 201s and records nothing", func(t *testing.T) {
+		stdout, stderr, code, _ := run(t, func(cp *fakeCP) { cp.adoptSilently = true })
+		if code != exitOK {
+			t.Fatalf("adopt exited %d — the clone IS serving, so an unconfirmed REGISTRATION is not a failed verb; stderr: %s", code, stderr)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["confirmation"] != "unavailable" || got["complete"] != false {
+			t.Errorf("receipt = %s, want confirmation: unavailable and complete: false when the row is not in the registry", stdout)
+		}
+		if _, claimed := got["registry_id"]; claimed {
+			t.Errorf("an unconfirmed adoption reports a registry_id it never read back: %s", stdout)
+		}
+		note, _ := got["note"].(string)
+		if !strings.Contains(note, "adopted-1") || !strings.Contains(note, "does not carry it") {
+			t.Errorf("the note does not name the row the plane claimed: %q", note)
+		}
+		if stdout == confirmed {
+			t.Error("the unconfirmed receipt is byte-identical to the confirmed one — the read-back changes nothing")
+		}
+	})
+
+	t.Run("a plane that records the row against the wrong host", func(t *testing.T) {
+		// 192.0.2.23 is the OLD box — the one instCloneSwap just destroyed.
+		stdout, stderr, code, _ := run(t, func(cp *fakeCP) { cp.adoptHost = "192.0.2.23" })
+		if code != exitOK {
+			t.Fatalf("adopt exited %d, stderr: %s", code, stderr)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["confirmation"] != "unavailable" || got["complete"] != false {
+			t.Errorf("receipt = %s, want an unconfirmed adoption when the row's host is not the clone's", stdout)
+		}
+		note, _ := got["note"].(string)
+		if !strings.Contains(note, "192.0.2.23") || !strings.Contains(note, "192.0.2.24") {
+			t.Errorf("the note does not name BOTH the host the registry holds and the clone's: %q", note)
+		}
+		if stdout == confirmed {
+			t.Error("a row pointing at a destroyed box produces the same receipt as a correct adoption")
 		}
 	})
 }

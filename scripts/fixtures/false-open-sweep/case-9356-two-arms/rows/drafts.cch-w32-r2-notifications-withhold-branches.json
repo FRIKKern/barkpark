@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "drafts.cch-w32-r2-notifications-withhold-branches",
+    "kind": "task",
+    "type": "task",
+    "title": "notifications withhold branches",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "built and proven, part 1.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 2.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 3.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 4.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 5.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 6.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 7.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "built and proven, part 8.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "MERGE-GATED: the PR is merged to main.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}

@@ -715,6 +715,24 @@ defmodule BarkparkWeb.Router do
   # key's own workspace binding.
   pipeline :ticket_key do
     plug(:accepts, ["json"])
+    # Baseline JSON security headers (nosniff + referrer-policy), the SAME line
+    # and the SAME position `:api` and `:session_token_root` carry right after
+    # `accepts` (task-5bf037daa116ea70). This was the one browser-reachable /v1
+    # bucket without it, and it is the LOWEST-trust one: outsider-held keys
+    # uploading and downloading outsider-supplied bytes. Before this line the
+    # only response on the bucket carrying `nosniff` was the attachment stream,
+    # and it carried it because `TicketsAttachmentsController.stream_file/2`
+    # hand-sets it — so a second byte-serving GET added here tomorrow shipped
+    # with NO nosniff unless its author remembered to copy that controller
+    # check. Deny-by-default belongs at the MOUNT. Mounted BEFORE
+    # RequireTicketKey so the halting 401/403 envelopes get the headers too
+    # (the plug is `register_before_send`, and it never overwrites a header a
+    # controller already set — so the stream's own nosniff still wins).
+    #
+    # NOT adding ErrorEnvelopeNegotiation here: it changes the ERROR ENVELOPE
+    # SHAPE this surface emits, which is a client-visible contract change and
+    # not what this security-header fix is scoped to. Left as a known gap.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.RequireTicketKey)
     # Per-key abuse rails on the WRITE surface (charter Decision 9). Mounted
     # AFTER RequireTicketKey so the bucket key can read the resolved
@@ -2255,10 +2273,61 @@ defmodule BarkparkWeb.Router do
     post("/search/:dataset/reindex", SearchController, :reindex)
     get("/export/:dataset", ExportController, :export)
 
-    get("/analytics/:dataset", AnalyticsController, :index)
-
     get("/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/revision/:dataset/:id", HistoryController, :show)
+  end
+
+  # ── Flat analytics — token-required AND grant-folded (task-633d94b5a598c0f7)
+  #
+  # WHY ITS OWN SCOPE. This route used to sit in the `[:api, :require_token]`
+  # block above, which never runs `:api_grant_read` — the ONLY mount of
+  # `Plugs.AssignGrantScope`, the ONLY plug that ever assigns
+  # `:grant_scoped_read`, which `ScopeHelpers.scope_opts/1` folds into
+  # `:grant_scoped`, which is the flag `Content.Scope.maybe_scope_to_grants/2`
+  # opens on. `AnalyticsController.index/2` already threads `scope_opts(conn)`
+  # into all three aggregates and #14445 already put `maybe_scope_to_grants/2`
+  # into all three — so the ONLY thing missing was the pipeline, and the fix is
+  # this move and nothing else.
+  #
+  # The flag DEFAULTS TO FALSE, so on the old pipeline the key was not merely
+  # unset, it was UNSETTABLE: absence meant "do not narrow", not "narrow to
+  # nothing". An OWNED api_token held by a Default NON-member with an active
+  # covering grant was narrowed on `/v1/data/query/:dataset/:type` and read the
+  # WHOLE Default census — every type name and count, plus `recent_activity`'s
+  # per-document `doc_id`s — on `/v1/data/analytics/:dataset`. BEARER ONLY: the
+  # scoped `/w/:ws/p/:proj` twin needs the bearer AND a session cookie (its grant
+  # arm lives in `ResolveWorkspace` and wants a signed-in user), while the flat
+  # path resolves the user from the token's own `owner_user_id` via
+  # `ResolveTokenOwner`. The wider door was the un-narrowed one.
+  #
+  # ORDER IS LOAD-BEARING — `:require_token` BEFORE `:api_grant_read`. That
+  # keeps the route token-required (an anonymous caller is refused by
+  # `RequireToken` and never reaches the overlay) and it is what makes reuse of
+  # `:api_grant_read` free here, where router.ex:155-158 judged it a "posture
+  # change nobody asked for" for `:api_strict_bearer`: the two plugs that
+  # objection names are already no-ops behind `:require_token`. `OptionalToken,
+  # strict_on_presented: true` can only fire on a presented-but-unverifiable
+  # bearer, which `RequireToken` has already 401'd; `Plugs.PublicRead` is
+  # mounted BY `:require_token` itself, and it halts on the public tier before
+  # the second copy runs (and no-ops for every other tier by construction). What
+  # is left is exactly the pair this fix needs — `ResolveTokenOwner` +
+  # `AssignGrantScope` — so no principal but the grantee changes.
+  #
+  # STILL A READ-ONLY MOUNT. `AssignGrantScope`'s blast-radius rule is that it
+  # never rides a write: `CallerContext.from_conn/1` prefers an assigned
+  # `:caller_context` over the `:api_token`, so setting it on a write could
+  # DOWNGRADE the caller. This scope holds one GET. Its former neighbours keep
+  # bare `[:api, :require_token]` — deliberately: `POST .../reindex` is a write
+  # and must never carry these plugs, and export/listen/history/revision are a
+  # separate question (their query builders do not call
+  # `maybe_scope_to_grants/2` at all, so the pipeline alone would be inert
+  # there — a fix, not a move, and out of this row's fence).
+  #
+  # Pinned by `test/barkpark_web/controllers/flat_analytics_grant_enforcement_test.exs`.
+  scope "/v1/data", BarkparkWeb do
+    pipe_through([:api, :require_token, :api_grant_read])
+
+    get("/analytics/:dataset", AnalyticsController, :index)
   end
 
   # ── Claude chat transport (charter bp-chat-tui D21-D24; Connectors D18/D19a).

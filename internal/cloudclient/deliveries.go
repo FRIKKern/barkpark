@@ -190,9 +190,22 @@ func (e *DeliveriesError) Error() string {
 }
 
 // PlatformDeliveries reads the platform delivery record via
-// GET /v1/deliveries[?sha=][&limit=] (Bearer — a session OR a PAT carrying
-// ability "read"; the route is deliberately not operator-gated, because a record
-// only a browser session can read is a record no script can ever check).
+// GET /v1/deliveries[?sha=][&limit=] (Bearer — a session, a PAT carrying ability
+// "read", OR the faceless WORKER token; the route is deliberately not
+// operator-gated, because a record only a browser session can read is a record
+// no script can ever check).
+//
+// THE WORKER IS ON THAT LIST SINCE task-e2acb66e9ed0da09, and it is the
+// principal that WRITES these rows (POST /v1/internal/platform-deliveries, which
+// deploy.yml's crown step calls with WORKER_TOKEN and nothing else). Until then
+// the route answered it 401, so `bp cloud deliveries <sha>` was dark for every
+// CI caller and crown-reconcile read the table over SSH+psql instead.
+//
+// THIS CLIENT IS CREDENTIAL-AGNOSTIC AND MUST STAY SO. It sends `c.Token`
+// verbatim as `Authorization: Bearer <token>` (client.go doWithHeaders) and
+// makes no judgement about which of the three kinds it holds — so the verb
+// works for whichever credential the caller configured the moment the ROUTE
+// accepts it. Pinned by TestCloudDeliveriesSendsTheBearerItWasGiven.
 //
 // AN UNKNOWN SHA IS A 200 WITH AN EMPTY LIST, never a 404 — "nothing was ever
 // recorded for this sha" is the single most useful thing this table can say

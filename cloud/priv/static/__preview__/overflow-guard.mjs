@@ -345,6 +345,46 @@ const FLEET_WIDTHS = [320, 360, 390, 430, 620, 721, 769, 800, 830, 860, 899, 900
 const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
 const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
 
+// cchi-w23 — EVERY SUB-HOST THIS LEG ASSERTS ON, AND WHETHER A ROW MAY LACK IT.
+// The leg walks `.fleet-row` correctly (`querySelectorAll(...).forEach`) and
+// then reads each host with `r.querySelector(s); if (!e) return;` — a SECOND
+// level whose zero was never counted and never refused. Driven: renaming
+// `.fleet-url`'s four emitting branches, and separately `.fleet-meta`'s sole
+// one, each left this leg at rc=0 printing the BYTE-IDENTICAL "✓ 90 / 90 cells
+// clean (330 fleet rows measured …) … 0 clipped text cells". 330 text hosts
+// deleted, zero measured, zero noticed.
+//
+// THE STRENGTH OF THE REFUSAL IS READ OFF THE EMITTER, NOT OFF TODAY'S COUNT.
+// Four of the six hosts are emitted UNCONDITIONALLY by `fleetRowHtml` —
+// `.fleet-name`, the `urlHtml` branch chain (all five branches emit a
+// `.fleet-url`), `.status-pill` and `.fleet-badges` — so a row that lacks one is
+// a finding at the ROW. Two are conditional and a bare row owes them nothing:
+//   `.fleet-meta`          `fleetMetaHtml` ends `return parts.length ? '<div
+//                          class="fleet-meta">'… : "";` — a row carrying none of
+//                          region/server_type/version/channel/autoupdate/verify/
+//                          commit-distance renders no meta line at all.
+//   `.status-pill-detail`  `statusPill` emits it as `(s.detail ? … : "")` — a
+//                          state with no explanatory sentence renders none.
+// Those two are refused at the CELL instead: a selector that stopped being
+// emitted reds in all 90 cells, while one legitimately bare row only moves the
+// printed count. Both numerator and denominator are printed per selector, so
+// 5/5 falling to 3/5 is READ rather than inferred from a total that shifted.
+//
+// MEASURED ON THESE THREE FIXTURES TODAY: every selector below reads 330/330,
+// `.fleet-meta` INCLUDED — the filing's "`.fleet-meta`=240 against rows=330, 90
+// rows silently skipped every run" does NOT reproduce on these bytes. The census
+// is printed so the next reader inherits the number instead of re-deriving it,
+// and `optional` stays calibrated on the emitter so a fixture that does go bare
+// is not mistaken for a deleted class.
+const FLEET_SUB_HOSTS = [
+  { sel: ".fleet-name", optional: false },
+  { sel: ".fleet-url", optional: false },
+  { sel: ".fleet-meta", optional: true, why: "fleetMetaHtml returns \"\" when a row carries none of region/server_type/version/channel/autoupdate/verify/commit-distance" },
+  { sel: ".status-pill-detail", optional: true, why: "statusPill emits it as `(s.detail ? … : \"\")` — a state with no explanatory sentence renders none" },
+  { sel: ".status-pill", optional: false },
+  { sel: ".fleet-badges", optional: false },
+];
+
 // ITEMISED, ROW-BEARING, AND UNABLE TO ROT (review addition). Widening the axis
 // above turned up ONE pre-existing hit this slice's `@media (min-width: 900px)`
 // fix cannot reach, in the STACKED band below 899. It is not swept under a
@@ -382,13 +422,41 @@ const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
 // the single #view-instance section.
 const INST = "5b2c1e00-0000-4000-8000-0000000000a1";
 const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
+//
+// cchi-w23 — THE RAIL POPULATION IS DECLARED PER ROUTE, NEVER TALLIED AFTER THE
+// FACT. The rail half of this leg used to print "36 .detail-rail .status-pill(s)
+// measured on both axes" across 108 cells and refuse only the LEG-LEVEL zero
+// (`railPills === 0`, after both loops close). 36 is exactly 2 routes x 9 widths
+// x 2 themes: FOUR of the six routes contribute nothing, and the aggregate
+// cannot tell "four routes structurally carry no rail pill" from "the rail
+// stopped rendering on the two that do". The four are not one class, either —
+// driven, per cell, on these bytes:
+//   `rail: false`  inst-timeline / inst-metrics render `#instance-tabpanel` and
+//                  NO `.detail-rail` at all; `#fleet` is a list view with none.
+//   `railPill: false`  instance-detail DOES render `<aside class="detail-rail
+//                  detail-rail--cards">` (app.js, the Identity/Runtime groups) —
+//                  but every rung is `railRow`/`railRowCopy`/`railValue`, i.e.
+//                  `<span class="v">` TEXT, so the rail exists and carries zero
+//                  `.status-pill`. Only the SITE rail emits one, through
+//                  `railRowHtml("Content binding", siteBindingPill(...))`.
+// So each route declares BOTH facts and BOTH are asserted per cell in BOTH
+// directions: a route that owes a rail and renders none reds, and a route
+// declared bare that starts rendering one reds too — the FLEET_KNOWN precedent
+// above ("an entry that matches NOTHING is itself a FAILURE"), because an
+// annotation that cannot go stale is an annotation that forgives the next drift.
 const BAND_ROUTES = [
-  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", tab: "Overview", ready: ".detail-grid--instance" },
-  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", tab: "Timeline", ready: "#instance-tabpanel" },
-  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", tab: "Metrics", ready: "#instance-tabpanel" },
-  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid" },
-  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid" },
-  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", tab: null, ready: ".fleet-row" },
+  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", tab: "Overview", ready: ".detail-grid--instance",
+    rail: true, railPill: false, railWhy: "the instance rail is `.detail-rail--cards`: railRow/railRowCopy/railValue rungs only, no .status-pill anywhere in it" },
+  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", tab: "Timeline", ready: "#instance-tabpanel",
+    rail: false, railPill: false, railWhy: "the Timeline sub-tab renders #instance-tabpanel and no .detail-rail at all" },
+  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", tab: "Metrics", ready: "#instance-tabpanel",
+    rail: false, railPill: false, railWhy: "the Metrics sub-tab renders #instance-tabpanel and no .detail-rail at all" },
+  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid",
+    rail: true, railPill: true, railWhy: null },
+  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid",
+    rail: true, railPill: true, railWhy: null },
+  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", tab: null, ready: ".fleet-row",
+    rail: false, railPill: false, railWhy: "#fleet is the list view — no detail rail exists on it" },
 ];
 
 // W14-S3 RETIRED THE ONE PIN THIS LEG USED TO CARRY. #fleet's 21px overhang at
@@ -1578,11 +1646,17 @@ async function main() {
     //    route that was asked for is the route that rendered.
     if (requested.includes("W13-detail-route-band")) {
       const D = "W13-detail-route-band";
+      const railOwed = BAND_ROUTES.filter((r) => r.railPill).length * BAND_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${BAND_ROUTES.length} routes x ${BAND_WIDTHS.length} widths x 2 themes` +
-        ` (${BAND_ROUTES.length * BAND_WIDTHS.length * 2} cells) + .detail-rail .status-pill on both axes\n`,
+        ` (${BAND_ROUTES.length * BAND_WIDTHS.length * 2} cells) + .detail-rail .status-pill on both axes` +
+        ` (${BAND_ROUTES.filter((r) => r.railPill).length} of the ${BAND_ROUTES.length} routes owe a rail pill — ` +
+        `${railOwed} cells — and every cell's rail, pill and label population is asserted, not tallied)\n`,
       );
       let cells = 0, offenders = 0, misrouted = 0, railPills = 0, railBad = 0;
+      // cchi-w23: the sub-populations this leg ASSERTS ON, counted so a zero can
+      // be refused and printed rather than inferred from a shrinking total.
+      let railsSeen = 0, railLabels = 0;
       for (const r of BAND_ROUTES) {
         for (const theme of ["light", "dark"]) {
           // Enter at 900 — ABOVE the band — so a route that only renders at one
@@ -1610,8 +1684,16 @@ async function main() {
               `  var pr=p.getBoundingClientRect(); var l=p.querySelector('.status-pill-label');` +
               `  return {sw:p.scrollWidth,cw:p.clientWidth,sh:p.scrollHeight,ch:p.clientHeight,` +
               `    lh:l?+l.getBoundingClientRect().height.toFixed(2):0,ph:+pr.height.toFixed(2),` +
+              // cchi-w23 SECOND ORDER: whether the LABEL sub-host exists at all
+              // is now carried out of the browser. `lsw`/`lcw`/`lh` all degrade
+              // to 0 through the ternaries when `l` is null, and `0 > 0` is
+              // false — so a rail whose label element vanished measured NOTHING
+              // on half this leg's four rail assertions while printing
+              // "measured on both axes". The flag is what makes that a finding.
+              `    hasLabel:!!l,` +
               `    lsw:l?l.scrollWidth:0,lcw:l?l.clientWidth:0,t:(p.textContent||'').slice(0,40)};});` +
               `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', rp:rp,` +
+              ` rails:document.querySelectorAll('.detail-rail').length,` +
               ` tab:t?t.textContent:null, theme:d.getAttribute('data-theme')};})()`,
             );
             cells++;
@@ -1630,10 +1712,37 @@ async function main() {
               offenders++;
               fail(D, `${r.name}/${theme}@${width}: scrollWidth ${m.sw} > viewport ${m.cw} — ${over}px of the page is off-screen at rest, with no cue`);
             }
-            // (3) THE RAIL'S PILLS — element geometry, both axes. Counted
+            // (3) THE RAIL'S POPULATION, PER CELL AND IN BOTH DIRECTIONS
+            // (cchi-w23). The leg-level `railPills === 0` below fires only
+            // after both loops close, so it could not tell 36 pills from two
+            // routes apart from 36 pills that should have been 108. Each route
+            // declares what it owes at BAND_ROUTES and every cell is held to it.
+            railsSeen += m.rails;
+            const cellPills = m.rp.length;
+            if (r.rail && m.rails === 0) {
+              fail(D, `${r.name}/${theme}@${width}: zero \`.detail-rail\` in a route declared to render one — the rail stopped rendering, so every rail assertion below measured nothing. This is not a pass.`);
+            } else if (!r.rail && m.rails > 0) {
+              fail(D, `${r.name}/${theme}@${width}: ${m.rails} \`.detail-rail\` on a route declared to render NONE (${r.railWhy}) — the annotation at BAND_ROUTES has gone stale. Update it rather than letting an unasserted rail ride along.`);
+            }
+            if (r.railPill && cellPills === 0) {
+              fail(D, `${r.name}/${theme}@${width}: zero \`.detail-rail .status-pill\` in a route declared to carry one — "0 outside their own chip" is true of an empty set, which is not what this leg claims. This is not a pass.`);
+            } else if (!r.railPill && cellPills > 0) {
+              fail(D, `${r.name}/${theme}@${width}: ${cellPills} \`.detail-rail .status-pill\` on a route declared to carry none (${r.railWhy}) — the annotation at BAND_ROUTES has gone stale; this leg's printed rail total silently changed meaning.`);
+            }
+            // (4) THE RAIL'S PILLS — element geometry, both axes. Counted
             // separately from `cells` so this leg's 108/108 stays 108/108.
             for (const p of m.rp) {
               railPills++;
+              // SECOND ORDER, THE `withBtns === 0` SHAPE: two of the four
+              // assertions below read the LABEL, and their ternaries degrade a
+              // missing label to `0 > 0` — silently false. A pill without its
+              // label is therefore HALF-MEASURED, and half-measured is a
+              // finding here, not a skip.
+              if (!p.hasLabel) {
+                fail(D, `${r.name}/${theme}@${width} .detail-rail .status-pill: no \`.status-pill-label\` inside it — \`p.lsw > p.lcw\` and \`p.lh > p.ph + 0.5\` both collapse to \`0 > 0\` through their own ternaries, so HALF this leg's four rail assertions measured nothing while the ok-line still said "on both axes"`);
+              } else {
+                railLabels++;
+              }
               if (p.sw > p.cw) {
                 railBad++;
                 fail(D, `${r.name}/${theme}@${width} .detail-rail .status-pill: scrollWidth ${p.sw} > clientWidth ${p.cw} — ${Math.round((1 - p.cw / p.sw) * 100)}% of "${p.t}" renders OUTSIDE its own chip (the label declares no overflow, so it is painted, not clipped) and the page never scrolls, which is why every page-level leg above walks past it`);
@@ -1657,13 +1766,26 @@ async function main() {
         }
       }
       // AUDITED: an empty list is not a clean list. If the rail stops rendering
-      // a pill this leg would score 0 rail defects and read as a pass.
+      // a pill this leg would score 0 rail defects and read as a pass. The
+      // per-cell refusals above make this one a backstop rather than the only
+      // net — it is kept because it is the one line that survives a future edit
+      // that drops every `railPill: true` from BAND_ROUTES.
       if (railPills === 0) {
         fail(D, `zero .detail-rail .status-pill measured across ${cells} cells — the rail pill stopped rendering, so its assertions measured nothing. This is not a pass.`);
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
-          `${railPills} .detail-rail .status-pill(s) measured on both axes, ${railBad} outside their own chip`,
+          `${railPills} .detail-rail .status-pill(s) measured on both axes — ${railPills}/${railOwed} of the cells that OWE one ` +
+          `(${BAND_ROUTES.filter((r) => r.railPill).map((r) => r.name).join(" + ")} x ${BAND_WIDTHS.length} widths x 2 themes), ` +
+          `${railLabels} of them carrying a \`.status-pill-label\`, so the label pair (\`lsw > lcw\`, \`lh > ph\`) measured ${railLabels} boxes ` +
+          `and not \`0 > 0\`; ${railBad} outside their own chip`,
+        );
+        okLine(
+          `${railsSeen} \`.detail-rail\` across ${cells} cells, DERIVED per route rather than tallied: the other ` +
+          `${BAND_ROUTES.filter((r) => !r.railPill).length} routes are declared bare and asserted bare per cell — ` +
+          BAND_ROUTES.filter((r) => !r.railPill).map((r) => `${r.name} (${r.railWhy})`).join("; ") +
+          `. A route that stops rendering its rail, and a bare route that starts rendering one, both RED here instead of ` +
+          `moving the printed total in silence`,
         );
         okLine(
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
@@ -3010,9 +3132,14 @@ async function main() {
       const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
-        ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT)\n`,
+        ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT;` +
+        ` all ${FLEET_SUB_HOSTS.length} sub-hosts CENSUSED per row and their zero refused per cell)\n`,
       );
       let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0, foreignRows = 0;
+      // cchi-w23: per-selector sub-host census, and the count of legitimately
+      // bare rows the two conditional emitters account for.
+      const subSeen = {};
+      let subBare = 0;
       const knownSeen = new Set();
       for (const scen of FLEET_SCENS) {
         for (const theme of ["light", "dark"]) {
@@ -3031,7 +3158,13 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var sels=${JSON.stringify(FLEET_TEXT_SELS)};` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,docRows:document.querySelectorAll('.fleet-row').length,clips:[],ell:[],sq:[],tall:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,docRows:document.querySelectorAll('.fleet-row').length,clips:[],ell:[],sq:[],tall:[],sub:{},bare:[]};` +
+              // cchi-w23 SECOND ORDER: the census of the sub-hosts this leg
+              // asserts on, taken in the SAME walk that measures them. Without
+              // it every `r.querySelector(s); if(!e) return;` below is a silent
+              // skip, and 330 deleted text hosts print as 330 measured rows.
+              `var SUB=${JSON.stringify(FLEET_SUB_HOSTS.map((h) => h.sel))};` +
+              `SUB.forEach(function(s){out.sub[s]=0;});` +
               // cch-w24-s5 — THE WALK IS SCOPED TO THE VIEW IT JUST COMPUTED.
               // It used to compute `v` and then iterate `document.querySelectorAll`,
               // using the scope only to LABEL the output. `.fleet-row` is a
@@ -3047,6 +3180,7 @@ async function main() {
               // changes the query string and reloads, which is a property of the
               // harness, not of the leg.
               `[].slice.call(v?v.querySelectorAll('.fleet-row'):[]).forEach(function(r,i){out.rows++;` +
+              `  SUB.forEach(function(s){if(r.querySelector(s)) out.sub[s]++; else out.bare.push({i:i,s:s});});` +
               `  sels.forEach(function(s){var e=r.querySelector(s); if(!e) return;` +
               `    if(e.scrollWidth>e.clientWidth) out.clips.push({i:i,s:s,sw:e.scrollWidth,cw:e.clientWidth,t:(e.textContent||'').slice(0,32)});});` +
               `  var p=r.querySelector('.status-pill-detail');` +
@@ -3078,6 +3212,30 @@ async function main() {
             // renders zero rows would score 0 clips and read as a pass.
             if (m.rows === 0) fail(D, `${scen}/${theme}@${width}: zero .fleet-row rendered IN THE VISIBLE VIEW — nothing was measured, this is not a pass`);
             rowsSeen += m.rows;
+            // cchi-w23 — THE SECOND LEVEL, COUNTED AND REFUSED PER CELL. Every
+            // assertion below this line reaches its host through
+            // `r.querySelector(sel)` and returns on null, so a host that stopped
+            // being emitted is measured ZERO times and scored ZERO defects. That
+            // is what the `.fleet-url` and `.fleet-meta` rename mutations each
+            // proved: byte-identical green with the whole population deleted.
+            for (const h of FLEET_SUB_HOSTS) {
+              const n = m.sub[h.sel] || 0;
+              subSeen[h.sel] = (subSeen[h.sel] || 0) + n;
+              if (n === 0) {
+                // A CELL with none is a finding for every host, optional or not:
+                // "0 clipped text cells" is trivially true of a selector nothing
+                // emits, which is not what this leg claims.
+                fail(D, `${scen}/${theme}@${width}: zero \`${h.sel}\` across ${m.rows} rendered .fleet-row — the sub-host this leg asserts on is not in the DOM, so its comparisons ran ${m.rows} times against nothing. "0 clipped" is true of an empty set; this is not a pass.`);
+              } else if (!h.optional && n < m.rows) {
+                // MANDATORY hosts are refused at the ROW, because `fleetRowHtml`
+                // emits them unconditionally — a row without one is drift, not a
+                // fixture doing nothing wrong.
+                const missing = m.bare.filter((b) => b.s === h.sel).map((b) => `row${b.i}`).join(", ");
+                fail(D, `${scen}/${theme}@${width}: \`${h.sel}\` present on ${n} of ${m.rows} rows (${missing} carry none) — fleetRowHtml emits it unconditionally, so a bare row means the class was renamed or the branch was dropped, and every assertion on it silently skipped those rows`);
+              } else if (h.optional && n < m.rows) {
+                subBare += m.rows - n;
+              }
+            }
             // cch-w24-s5 — the rows the walk REFUSED, counted and named rather
             // than silently dropped: a scope that cannot report what it excluded
             // is indistinguishable from a scope that excluded nothing.
@@ -3130,6 +3288,17 @@ async function main() {
         }
       }
       if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          // cchi-w23: the SUB-HOST census, printed beside the row count it used
+          // to be mistaken for. "330 fleet rows measured" said nothing about how
+          // many of them carried the element each assertion actually reads —
+          // which is why deleting all 330 `.fleet-url` left this line unchanged.
+          `sub-hosts measured per row (not inferred from the row count): ` +
+          FLEET_SUB_HOSTS.map((h) => `${h.sel}=${subSeen[h.sel] || 0}/${rowsSeen}${h.optional ? "*" : ""}`).join(", ") +
+          `. \`*\` = conditionally emitted, so a bare row is legitimate and refused only at the CELL` +
+          (subBare ? ` (${subBare} bare row-host(s) this run)` : ` (0 bare row-hosts this run)`) +
+          `; every other selector is emitted unconditionally by fleetRowHtml and a bare ROW reds`,
+        );
         okLine(
           `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured IN THE VISIBLE VIEW, ` +
           `${foreignRows} .fleet-row(s) elsewhere in the document refused, ${knownSeen.size} known-row cells itemised: ${FLEET_KNOWN.map((k) => k.row).join(", ") || "none"}) across ` +
@@ -4574,6 +4743,9 @@ async function main() {
         ` (${cellCount} cells; #instance/<id> page overflow + EVERY .copy-btn's right edge)\n`,
       );
       let cells = 0, copiesSeen = 0, offscreen = 0, pageOver = 0;
+      // cchi-w23: the sub-population the containment sentence is ABOUT.
+      let tabStrips = 0, tabLinks = 0, stripsOver = 0, stripCells = 0;
+      const stripOx = new Set();
       for (const scen of HEAD_SCENS) {
         for (const theme of ["light", "dark"]) {
           // Enter at 900 — ABOVE the band — and pin the hash: `?scen=` alone
@@ -4592,7 +4764,7 @@ async function main() {
               `var d=document.documentElement;` +
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
-              `  copies:0,urlCopies:0,worst:0,bad:[],strips:[]};` +
+              `  copies:0,urlCopies:0,worst:0,bad:[],strips:[],tabStrips:0,tabLinks:0};` +
               `[].slice.call(document.querySelectorAll('.copy-btn')).forEach(function(b,i){` +
               `  var r=b.getBoundingClientRect(); out.copies++;` +
               `  if(b.closest('.detail-url')) out.urlCopies++;` +
@@ -4602,7 +4774,18 @@ async function main() {
               `});` +
               // The containment claim, measured rather than assumed: any strip
               // wider than its own box must own a non-visible overflow-x.
+              //
+              // cchi-w23 — `strips` IS A DEFECT LIST, NOT A CENSUS, so it is no
+              // longer the only thing carried out. It is pushed ONLY when
+              // `sw > cw`, which means an empty `strips` cannot tell "every strip
+              // fits" from "there is no strip". Driven: renaming the SOLE
+              // emitting template (`<nav class="inst-tabs">`, app.js) left this
+              // leg at rc=0 with BYTE-IDENTICAL output — second ok-line and all —
+              // while its sentence about `.inst-tabs` had zero elements behind
+              // it. `tabStrips` and `tabLinks` are the census the refusals below
+              // are built on.
               `[].slice.call(document.querySelectorAll('.inst-tabs')).forEach(function(s){` +
+              `  out.tabStrips++; out.tabLinks+=s.querySelectorAll('a.inst-tab').length;` +
               `  if(s.scrollWidth>s.clientWidth) out.strips.push({ox:getComputedStyle(s).overflowX,sw:s.scrollWidth,cw:s.clientWidth});` +
               `});` +
               `return out;})()`,
@@ -4634,8 +4817,27 @@ async function main() {
               offscreen++;
               fail(D, `${scen}/${theme}@${width} .copy-btn[${b.i}]${b.inUrl ? " (the ADDRESS control)" : ""}: right edge ${b.right} is outside the ${m.pcw}px viewport — a person cannot reach "${b.lbl}" without scrolling the page sideways`);
             }
-            // (3) THE CONTAINMENT, asserted rather than allowlisted.
+            // (3) THE CONTAINMENT, asserted rather than allowlisted — AND ITS
+            //     POPULATION COUNTED FIRST (cchi-w23). The second ok-line below
+            //     is a sentence about `.inst-tabs`; with zero of them in the DOM
+            //     it is a claim this leg's selector cannot back, and that is
+            //     exactly the state the rename mutation reproduced at rc=0.
+            if (m.tabStrips === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero \`.inst-tabs\` in the instance workspace — this leg's second ok-line asserts that the tab strip CONTAINS its own scroll, and a claim about an element that is not in the DOM is not a measurement. The strip's absence would also silently retire the a.inst-tab false positive this leg exists to exclude by construction.`);
+              row.push(`${width}:0t`);
+              continue;
+            }
+            // SECOND ORDER, the `withBtns === 0` shape: a strip with no tabs in
+            // it contains nothing, so "the strip scrolls itself" is true of an
+            // empty box. The overflow it is asserted to own comes FROM the tabs.
+            if (m.tabLinks === 0) {
+              fail(D, `${scen}/${theme}@${width}: ${m.tabStrips} \`.inst-tabs\` carrying ZERO \`a.inst-tab\` — an empty strip trivially satisfies "contains its own scroll" because there is nothing to contain, which is not what this leg claims`);
+            }
+            tabStrips += m.tabStrips;
+            tabLinks += m.tabLinks;
+            if (m.strips.length) { stripsOver += m.strips.length; stripCells++; }
             for (const s of m.strips) {
+              stripOx.add(s.ox);
               if (s.ox === "visible") {
                 fail(D, `${scen}/${theme}@${width} .inst-tabs: scrollWidth ${s.sw} > clientWidth ${s.cw} with computed overflow-x:visible — the tab strip stopped containing its own scroll, so its tabs now push the PAGE instead of scrolling inside it`);
               }
@@ -4645,6 +4847,17 @@ async function main() {
           process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
         }
       }
+      // cchi-w23 — THE CONTAINMENT AXIS MUST HAVE FIRED SOMEWHERE. Every strip
+      // fitting its box at every width is not a refutation of the claim, it is
+      // the claim never being TESTED: `overflow-x` is only decidable where
+      // `scrollWidth > clientWidth`, so a run in which no strip ever overflowed
+      // would let the strip compute `visible` without a word. This is the
+      // leg-level companion to the per-cell presence refusal above, and the
+      // reason the width set reaches down to 320 (measured: the strip overflows
+      // at 320/360/375/390 and fits from 430 up).
+      if (tabStrips > 0 && stripsOver === 0) {
+        fail(D, `no \`.inst-tabs\` was WIDER than its own box in any of the ${cells} cells (${tabStrips} strips seen) — the containment assertion (\`overflow-x\` must not compute \`visible\`) is only decidable on an overflowing strip, so it fired nowhere and this leg's second ok-line would be a sentence nothing measured`);
+      }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cells clean (${copiesSeen} .copy-btn measured, ${offscreen} outside the viewport, ` +
@@ -4653,9 +4866,13 @@ async function main() {
           `it replaced. The band is 320-ONLY: 360-620 are the no-regression control, not padding`,
         );
         okLine(
-          `\`a.inst-tab\` at 360-390 is NOT suppressed here — .inst-tabs computes overflow-x:auto, so the strip ` +
+          `\`a.inst-tab\` at 360-390 is NOT suppressed here — .inst-tabs computes overflow-x:${[...stripOx].join("/") || "n/a"}, so the strip ` +
           `scrolls itself and never moves documentElement.scrollWidth; that containment is asserted per cell ` +
-          `(a strip that ever computed overflow-x:visible reds) instead of being allowlisted away`,
+          `(a strip that ever computed overflow-x:visible reds) instead of being allowlisted away. THE POPULATION ` +
+          `BEHIND THAT SENTENCE, printed rather than assumed: ${tabStrips} \`.inst-tabs\` and ${tabLinks} \`a.inst-tab\` ` +
+          `across ${cells} cells (zero of either, in ANY cell, REDS — renaming the sole emitting template used to leave ` +
+          `this line byte-identical with nothing behind it), of which ${stripCells} cell(s) carried a strip actually WIDER ` +
+          `than its box, i.e. ${stripsOver} strip(s) on which \`overflow-x\` was decidable at all; zero of those also REDS`,
         );
       }
     }

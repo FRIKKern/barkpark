@@ -1,0 +1,9 @@
+{
+  "exit": 3,
+  "refusal": "ROSTER_INCOMPLETE",
+  "must_contain": [
+    "REFUSAL:ROSTER_INCOMPLETE",
+    "child_count=6",
+    "carries 4 children"
+  ]
+}
