@@ -3472,6 +3472,77 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert conflict_resp.status == 409
       refute Map.has_key?(Jason.decode!(conflict_resp.resp_body), "help")
     end
+
+    # ─── the lease the claim GRANTED (claim-lease, wave 27) ────────────────
+    #
+    # A claim IS a lease and the receipt described everything about it except
+    # its duration: the epoch rode the envelope, help[] rode the envelope, the
+    # expiry rode nothing. It lived only in TtlSweeper's TTL and in
+    # content.claim.ts_iso — two facts a caller had to join by reading server
+    # source, so a lead who claimed four rows learned the lease length by
+    # watching one lapse 29s before its PR opened (pr-task-gate refused the PR;
+    # `bp task next` handed the sibling row to a second lead mid-build).
+    test "claim: the envelope carries the lease it granted — expiry AND length, derived from the SAME TTL the sweeper reaps on",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, 2700)
+
+      lease = payload["lease"]
+      assert lease["seconds"] == ttl
+      assert lease["minutes"] == div(ttl, 60)
+
+      # DERIVED, never a second clock: granted_at is the claim's own ts_iso and
+      # expires_at is exactly ttl later, so the boundary the caller is told is
+      # the boundary TtlSweeper.sweep/1 will apply. A drift between the number
+      # the sweeper enforces and the number the receipt promises would be this
+      # defect with a receipt bolted on.
+      {:ok, granted, _} = DateTime.from_iso8601(lease["granted_at"])
+      {:ok, expires, _} = DateTime.from_iso8601(lease["expires_at"])
+      assert DateTime.diff(expires, granted, :second) == ttl
+
+      {:ok, claim_ts, _} = DateTime.from_iso8601(payload["doc"]["claim"]["ts_iso"])
+      assert DateTime.compare(granted, claim_ts) == :eq
+    end
+
+    test "claim_by_id: the targeted claim carries the same lease", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("lease-byid"), scope)
+
+      payload =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "helper-1"}))
+        |> then(&Jason.decode!(&1.resp_body))
+
+      assert payload["ok"] == true
+      ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds, 2700)
+      assert payload["lease"]["seconds"] == ttl
+      assert payload["lease"]["minutes"] == div(ttl, 60)
+      assert is_binary(payload["lease"]["expires_at"])
+    end
+
+    # A pulse RENEWS the lease (Tasks.Pulse refreshes ts_iso), so its receipt
+    # must report the NEW window — the point of a heartbeat is that the row
+    # stops being reapable, and a receipt echoing the claim-time expiry would
+    # tell the operator the opposite.
+    test "pulse: the receipt reports the RENEWED lease, not the one the claim granted",
+         %{conn: conn, scope: scope} do
+      payload = help_claim!(conn, scope, %{})
+      doc_id = bare_id(payload)
+      {:ok, claimed_expiry, _} = DateTime.from_iso8601(payload["lease"]["expires_at"])
+
+      pulsed =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/pulse",
+          Jason.encode!(%{worker_id: "helper-1", now: "halfway through"})
+        )
+        |> then(&Jason.decode!(&1.resp_body))
+
+      assert pulsed["ok"] == true
+      {:ok, renewed_expiry, _} = DateTime.from_iso8601(pulsed["lease"]["expires_at"])
+      assert DateTime.compare(renewed_expiry, claimed_expiry) != :lt
+    end
   end
 
   defp event_document(doc_id, mutation) do
