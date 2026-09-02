@@ -109,6 +109,12 @@ on:
       # `changes` job's per-target filters rather than copying them, so an edit
       # to that workflow can invalidate this matrix without touching the script.
       - "scripts/deploy-convergence-check.sh"
+      # DEPLOY STARVATION (task-8e5eae5c71635a5e). Same INPUT relationship:
+      # the concurrency gate reads deploy.yml's own stanza and its harness
+      # EXTRACTS the changes/f step body, so an edit to that workflow can
+      # invalidate this matrix without touching either script.
+      - "scripts/deploy-concurrency-check.sh"
+      - "scripts/deploy-concurrency-check.test.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -281,6 +287,12 @@ on:
       # `changes` job's per-target filters rather than copying them, so an edit
       # to that workflow can invalidate this matrix without touching the script.
       - "scripts/deploy-convergence-check.sh"
+      # DEPLOY STARVATION (task-8e5eae5c71635a5e). Same INPUT relationship:
+      # the concurrency gate reads deploy.yml's own stanza and its harness
+      # EXTRACTS the changes/f step body, so an edit to that workflow can
+      # invalidate this matrix without touching either script.
+      - "scripts/deploy-concurrency-check.sh"
+      - "scripts/deploy-concurrency-check.test.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -654,6 +666,52 @@ jobs:
         # owed. A guard with only the first half trades a false positive for a
         # false negative, which on this axis means a silent stale production.
         run: bash scripts/deploy-convergence-check.sh --selftest
+
+  # ── DEPLOY STARVATION (task-8e5eae5c71635a5e) ──────────────────────────────
+  # deploy-convergence above answers "did the box end up on the right commit?".
+  # This one answers the question upstream of it: can a queued deploy REACH a
+  # runner at all? Measured 2026-09-02 — one concurrency group for every push,
+  # so each merge evicted the pending run and the survivor was re-queued at the
+  # BACK of a 390-run FIFO. Six consecutive push runs were cancelled before
+  # starting and production sat 1.5 h behind main, with nothing red anywhere:
+  # a cancelled-before-start run reports no failure to report.
+  deploy-concurrency:
+    name: a queued deploy cannot be evicted (per-sha group + already-covered exit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # DEFAULT depth. Every git object this harness needs it creates itself,
+        # in a throwaway repo under mktemp.
+      - name: python3 + PyYAML are present (both subjects are yaml-PARSED, not grepped)
+        # Same idiom as the doc-gates parity job below: INSTALL rather than
+        # demand. Whether the runner image ships PyYAML is an image fact, and a
+        # red reading `ModuleNotFoundError: yaml` teaches nothing about this
+        # repo. A missing python3 stays a hard, named failure.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
+      - name: deploy-concurrency-check.sh syntax check
+        run: bash -n scripts/deploy-concurrency-check.sh
+      - name: deploy-concurrency-check.test.sh syntax check
+        run: bash -n scripts/deploy-concurrency-check.test.sh
+      - name: the gate can still LOSE (16 cases incl. the verbatim pre-fix stanza)
+        # The harness drives the gate END-TO-END on exit codes, not scan text,
+        # and its part B EXTRACTS the `changes` job's detect step from the real
+        # deploy.yml and dry-runs it over planted shas with a stubbed `gh`. Both
+        # halves refuse rather than pass when they cannot measure: an
+        # unsubstituted `${{ }}` left in the extracted body, a missing
+        # already-covered arm, or zero cases run are all exit 2. Disarming the
+        # arm in a scratch copy took it to 14 passed / 2 FAILED.
+        run: bash scripts/deploy-concurrency-check.test.sh
+      - name: then the live deploy.yml stanza itself
+        # Harness FIRST, subject second — the house selftest-first idiom. A gate
+        # that has lost the ability to fail must red before its green is read.
+        run: bash scripts/deploy-concurrency-check.sh
 
   console-path-ratchet:
     name: console-path-escape-check.sh classification matrix
@@ -1063,7 +1121,7 @@ jobs:
       - name: the parity guard can still LOSE, then the live doc-gates.yml passes
         # doc-gates.yml hosts ~14 guards behind a hand-enumerated `paths:`
         # filter, and behind it TWICE — push and pull_request each carry their
-        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 15-case
+        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 22-case
         # selftest proves BOTH directions (a matched pair passes, a one-sided
         # pair reds), the fail-closed arm (a zero-entry or unparseable block is
         # exit 2 HARNESS-UNAVAILABLE, never a pass — `[] == []` is the vacuous
