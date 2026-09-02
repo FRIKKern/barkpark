@@ -63,6 +63,8 @@ defmodule Barkpark.Plugins.Capabilities do
 
   alias Barkpark.Plugins.Registry
 
+  require Logger
+
   @typedoc "The six closed auth tiers from the frozen schema enum."
   @type tier :: String.t()
 
@@ -455,14 +457,55 @@ defmodule Barkpark.Plugins.Capabilities do
     end
   end
 
-  # Normalize a plugin-supplied command (atom-keyed cli_command()) into the
-  # string-keyed wire shape the manifest emits, recursively for http/args/flags.
-  defp normalize_command(cmd) when is_map(cmd) do
+  @doc """
+  Normalize a plugin-supplied command (atom-keyed `cli_command()`) into the
+  string-keyed wire shape the manifest emits, recursively for http/args/flags.
+
+  FAIL CLOSED on `writes` (pds-bl-plugin-cli-command-writes-fails-open).
+  `core_cmd/8` takes `Keyword.fetch!(opts, :writes)`, so a CORE command can
+  never ship without the bit. Plugin commands arrive through here instead, and
+  `Barkpark.Plugin`'s `required(:writes) => boolean()` is a TYPESPEC — read by
+  dialyzer and by nothing at runtime. A plugin command that omitted it emitted
+  no `writes` key at all, and every consumer of that bit reads an ABSENT key as
+  `false` (the Go `manifest.Command.Writes` zero value), i.e. as "this command
+  only reads":
+
+    * `internal/cli/run.go` — the prod write-guard is `cmd.Writes && isProd(..)`,
+      so the confirmation never fired for the mutator.
+    * `internal/cli/usage.go` — `soleReadVerb` refuses to infer a verb whose
+      `Writes` is set; with the bit absent a verbless invocation auto-dispatched
+      straight into the write.
+    * `internal/cli/mcp_bridge.go` — the command was advertised to an MCP client
+      as `ReadOnlyHint` rather than `DestructiveHint`.
+
+  An ABSENT (or non-boolean) bit now normalizes to `true`. That is the safe
+  direction and not a symmetric choice: being wrongly treated as a WRITER costs
+  one confirmation prompt, while being wrongly treated as a READER costs an
+  unconfirmed write. The warning names the offending command so the plugin
+  author is told rather than silently protected. A command that declares
+  `writes: false` explicitly is untouched and still means "read".
+  """
+  @spec normalize_command(map()) :: map()
+  def normalize_command(cmd) when is_map(cmd) do
     cmd
     |> stringify_shallow()
     |> Map.update("http", %{}, &stringify_shallow/1)
     |> Map.update("args", [], fn args -> Enum.map(args || [], &stringify_shallow/1) end)
     |> Map.update("flags", [], fn flags -> Enum.map(flags || [], &stringify_shallow/1) end)
+    |> put_writes_fail_closed()
+  end
+
+  defp put_writes_fail_closed(%{"writes" => writes} = cmd) when is_boolean(writes), do: cmd
+
+  defp put_writes_fail_closed(cmd) do
+    Logger.warning(
+      "plugin cli_command " <>
+        "#{inspect(Map.get(cmd, "noun"))}.#{inspect(Map.get(cmd, "verb"))} " <>
+        "declared no boolean `writes`; defaulting to writes=true (fail-closed). " <>
+        "Declare `writes: false` explicitly if this command only reads."
+    )
+
+    Map.put(cmd, "writes", true)
   end
 
   defp stringify_shallow(map) when is_map(map) do
