@@ -55,8 +55,9 @@ defmodule BarkparkWeb.RequestStats do
   **BLINDNESS — two traffic shapes this meter can NEVER see** (documented
   non-classes, not bugs):
 
-    * `static_served` — `Plug.Static` (endpoint.ex:56) halts BEFORE
-      `Plug.Telemetry` (endpoint.ex:75), so a served static file emits ZERO
+    * `static_served` — `Plug.Static` (endpoint.ex, `plug Plug.Static`) halts
+      BEFORE `Plug.Telemetry` (endpoint.ex, `plug Plug.Telemetry`), so a
+      served static file emits ZERO
       stop events. Static hits are structurally invisible here (L1-proven on
       the live box: static 200s moved nothing).
     * `lv_connected` — LiveView socket dispatch precedes all user plugs; even a
