@@ -36,7 +36,6 @@ import (
 //     a strict prefix — names that id as a suggestion. A suggestion, never a
 //     redirect: the CLI does not silently fetch a document the caller did not
 //     ask for.
-//
 const taskMatchFlag = "--match"
 
 // taskLsCommandID and taskGetCommandID are the manifest ids this file keys on.
