@@ -71,6 +71,31 @@ defmodule BarkparkWeb.SearchScopeSeatMatrixTest do
         @ds
       )
 
+    # NULL THE SCHEMA ROW'S SCOPE EXPLICITLY, same reason as the shared
+    # document below. `upsert_schema/2` runs unscoped, but `WriteScope` still
+    # stamps an unscoped write with whatever workspace currently occupies the
+    # Default seat — so at setup time (before any test vacates it) the schema
+    # row lands OWNED by the seeded Default, not shared-layer. The anonymous
+    # :shared_only sentinel narrows the schema-visibility allowlist
+    # (`Content.Schema.public_type_names/2` -> `scope_to_workspace_or_global`)
+    # to `workspace_id IS NULL` rows only, so a Default-owned "post" schema
+    # drops OUT of that allowlist entirely: `d.type in []` -> every anonymous
+    # search under the vacant seat goes WHERE false, and the door reads as
+    # "no leak" for a reason that has nothing to do with tenancy — the exact
+    # blindness the moduledoc's control paragraph warns about. The bound
+    # LEAK-OBSERVABILITY CONTROL doesn't catch this because its token bypasses
+    # the schema-visibility gate entirely (`bypasses_visibility_gate?/1` — any
+    # non-public-read api_token). Anonymous is the only caller that reaches
+    # this gate, so only an anonymous-caller assertion (the SHARED-layer arm
+    # below) can observe it.
+    {n_schema, _} =
+      from(s in Barkpark.Content.SchemaDefinition,
+        where: s.name == ^"post" and s.dataset == ^@ds
+      )
+      |> Repo.update_all(set: [workspace_id: nil, project_id: nil])
+
+    assert n_schema > 0, "the schema fixture matched no rows — it is not shared-layer"
+
     ws_a = create_workspace!()
     proj_a = create_project!(ws_a)
 
