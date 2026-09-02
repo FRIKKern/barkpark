@@ -25,6 +25,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
     * `POST   /v1/tasks/:doc_id/stage`      — `Tasks.stage/3` (sanctioned thought-state transition)
+    * `POST   /v1/tasks/:doc_id/landed`     — `Tasks.record_landing/2` (NON-holder landing mark: no worker_id, no epoch)
 
   `GET /v1/tasks/events` (keyset replay) honours NO `filter[...]` key — `since`
   and `limit` are its only narrowings, and a filter key is a 400 naming it. The
@@ -925,6 +926,50 @@ defmodule BarkparkWeb.TasksController do
         bad_request(conn, "#{field} is required")
 
       {:error, :invalid_stamp, msg} ->
+        bad_request(conn, msg)
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/landed ──────────────────────────────────────
+  # THE NON-HOLDER LANDING MARK (task-59fe7b40b719b379). Body/query:
+  #   { "commit": "<sha>", "pr": "<number>", "note": "<sentence>",
+  #     "criterion": <0-based index|null> }
+  #
+  # NO worker_id and NO observed_epoch — deliberately, and that absence IS the
+  # feature. A push-to-main workflow holds no claim and knows no epoch, so
+  # `stamp` refuses it 409 not_holder (check_holder then check_fencing) and
+  # `close` is not CI's to call. This route sits on the same :token_root bucket
+  # as every other /v1/tasks write, so it is still bearer-gated and still
+  # write-tier (RequireWriteForMutation) — what it drops is the HOLDER gate, not
+  # authentication. `Tasks.Landed` owns the blast radius: content.landed plus at
+  # most ONE merge-shaped criterion.
+  def landed(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, criterion} <- Params.parse_landed_criterion(params["criterion"]),
+         :ok <- Params.check_landed_payload(params, criterion),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        []
+        |> Params.put_opt(:commit, params["commit"])
+        |> Params.put_opt(:pr, params["pr"])
+        |> Params.put_opt(:note, params["note"])
+        |> Params.put_opt(:criterion, criterion)
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.record_landing(task.id, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+        {:error, reason} ->
+          # Every remaining failure is a STATE conflict (the index does not
+          # resolve / the row is already met / the row is not merge-shaped /
+          # a concurrent write moved the rev). Shape errors were 400'd above.
+          conflict(conn, reason, :landed)
+      end
+    else
+      {:error, :invalid_landed, msg} ->
         bad_request(conn, msg)
 
       {:error, :not_found} ->

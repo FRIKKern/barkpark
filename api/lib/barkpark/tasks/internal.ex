@@ -456,6 +456,55 @@ defmodule Barkpark.Tasks.Internal do
     end
   end
 
+  # ─── The land digest (ONE merge rule, shared) ─────────────────────────────
+  #
+  # UNION into any existing `content.landed` so a re-close, a CI backfill and a
+  # non-holder landing mark ACCUMULATE rather than clobber. A nil/empty/
+  # malformed payload leaves content untouched (never erases a prior digest).
+  #
+  # This lived as a `defp` on `Tasks.Close` until `Tasks.Landed` needed the SAME
+  # rule (task-59fe7b40b719b379): two verbs write one key, so they must not grow
+  # two subtly-different merges — the `merge_criteria` precedent, applied to the
+  # digest.
+  #
+  # `commits` and `notes` joined the key list with that move. They are the two
+  # halves of a landing SENTENCE ("this commit, and what it means") that only a
+  # landing mark carries; before, a caller that passed either got a 2xx and no
+  # persisted key. Widening a union can only persist MORE of what a caller
+  # actually sent — no existing close passes them, so close's stored shape is
+  # unchanged.
+  @landed_keys ~w(prs files capability_slugs commits notes)
+
+  def merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
+    existing =
+      case Map.get(content, "landed") do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    merged =
+      Enum.reduce(@landed_keys, existing, fn key, acc ->
+        case normalize_landed_list(Map.get(landed, key) || Map.get(landed, safe_atom(key))) do
+          [] -> acc
+          incoming -> Map.put(acc, key, Enum.uniq((Map.get(acc, key) || []) ++ incoming))
+        end
+      end)
+
+    if map_size(merged) == 0, do: content, else: Map.put(content, "landed", merged)
+  end
+
+  def merge_landed(content, _), do: content
+
+  def normalize_landed_list(nil), do: []
+  def normalize_landed_list(list) when is_list(list), do: Enum.reject(list, &is_nil/1)
+  def normalize_landed_list(scalar), do: [scalar]
+
+  def safe_atom(k) do
+    String.to_existing_atom(k)
+  rescue
+    ArgumentError -> :__missing__
+  end
+
   # Mutation-events insert. The existing `mutation_events` schema (used by the
   # document spine) is reused verbatim — the `mutation` text column carries our
   # `task.claimed` / `task.closed` / `task.mutated` kinds, the `document` map

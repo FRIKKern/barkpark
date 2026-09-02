@@ -523,6 +523,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/release", BarkparkWeb.TasksController, :release, auth: :token_root},
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
+      {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
@@ -950,6 +951,68 @@ defmodule Barkpark.Plugins.Tasks do
           }
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.landed",
+        noun: "task",
+        verb: "landed",
+        summary:
+          "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. " <>
+            "This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a " <>
+            "push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) " <>
+            "and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so " <>
+            "a second landing accumulates a second commit instead of replacing the first, and a close's own land " <>
+            "digest is never clobbered (one merge rule, shared with close). " <>
+            "--criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to " <>
+            "met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries " <>
+            "\"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. " <>
+            "Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met " <>
+            "(409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no " <>
+            "override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a " <>
+            "refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false " <>
+            "on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). " <>
+            "Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: " <>
+            "not lifecycle_status, not the claim, not a second criterion.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/landed"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id the landing is recorded on."
+          }
+        ],
+        flags: [
+          %{
+            name: "commit",
+            type: "string",
+            summary: "The commit sha that landed. Unioned into content.landed.commits."
+          },
+          %{
+            name: "pr",
+            type: "string",
+            summary: "The PR number that merged. Unioned into content.landed.prs."
+          },
+          %{
+            name: "note",
+            type: "string",
+            summary:
+              "The landing sentence. Unioned into content.landed.notes, and REQUIRED with --criterion because it is the evidence written onto that criterion."
+          },
+          %{
+            name: "criterion",
+            type: "int",
+            summary:
+              "ZERO-BASED index into acceptance_criteria — the first criterion is 0, NOT 1. Flips that ONE row to met=true with --note as evidence, and only when the row is merge-shaped and not already met; any other index is a 409 naming why. Omit it to record the landing sentence alone."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,
