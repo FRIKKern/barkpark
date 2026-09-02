@@ -22,9 +22,24 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
     prev = Application.get_env(:barkpark, Persistence, [])
     Application.put_env(:barkpark, Persistence, dir: dir)
 
+    # `wipe_pointer/1` below (and every `Indexer.swap/2` these tests run)
+    # rewrites the Indexer's live_dataset pointer TABLE, a single
+    # `:persistent_term` shared by every scope in the VM. It is global AND
+    # UNOWNED — nothing tears it down between modules — so a scope this file
+    # wipes stays wiped, and a scope it seeds stays seeded, for whatever ExUnit
+    # shuffles in next. Capture the whole table and put it back.
+    pointer_term = {Indexer, :live_dataset}
+    prev_pointer = :persistent_term.get(pointer_term, :__absent__)
+
     on_exit(fn ->
       Application.put_env(:barkpark, Persistence, prev)
       File.rm_rf!(dir)
+
+      # Erase when there was no prior table, so an absent key stays absent.
+      case prev_pointer do
+        :__absent__ -> :persistent_term.erase(pointer_term)
+        table -> :persistent_term.put(pointer_term, table)
+      end
     end)
 
     %{dir: dir}
