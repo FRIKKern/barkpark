@@ -633,7 +633,7 @@ tripwire '89.167.28.206' \
 tripwire 'v1=<hex>' \
   "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \
-  "docs/auth.md docs/api-v1.md api/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md templates/place-directory/README.md tooling/doc-onboarding/TRUTH-AUDIT.md"
+  "docs/auth.md docs/api-v1.md api/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/branch-protection-and-overrides.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md templates/place-directory/README.md tooling/doc-onboarding/TRUTH-AUDIT.md"
 
 if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
   echo "ok:   allowlist staleness not applicable to a custom DOCS_ANCHORS_ROOT"

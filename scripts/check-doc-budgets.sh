@@ -529,6 +529,8 @@ docs/contracts/task-claim-lifecycle.md 6000
 docs/contracts/close-packet.md 4400
 README.md 7400
 docs/ops/PROD_OPS.md 6000
+docs/ops/merge-gates.md 64000
+docs/ops/branch-protection-and-overrides.md 10400
 
 docs/api-v1.md 14000
 
