@@ -44,6 +44,8 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
    Elixir gates run inside that worktree (`cd api && mix test <files>`; never borrow
    `_build` from another tree). Go: `go build ./... && go test ./internal/cli/...`.
+   `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
+   `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).
 5. **Commit rules** (worker): `git add <exact paths>`; `git commit -- <exact paths>`;
    then `git log -1 --stat` and READ the list — a file you did not write means another
