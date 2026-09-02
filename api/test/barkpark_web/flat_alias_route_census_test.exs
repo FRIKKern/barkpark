@@ -942,6 +942,15 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # TasksController.renew — the NON-HOLDER PR lease extension (Tasks.Renew).
+    # Same scoping posture as every sibling: find_task_by_doc_id/2 resolves the
+    # row through ScopeHelpers, so a token can only renew its own workspace's
+    # rows even though the verb holds no claim.
+    {"POST", "/v1/tasks/:doc_id/renew"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
+         "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
+         "from the token before AssignDefaultScope can stamp Default."},
     # TasksController.release
     {"POST", "/v1/tasks/:doc_id/release"} =>
       {:workspace_derived,

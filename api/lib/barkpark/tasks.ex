@@ -93,6 +93,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Pulse
   alias Barkpark.Tasks.QueueGate
+  alias Barkpark.Tasks.Renew
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Stage
@@ -555,6 +556,27 @@ defmodule Barkpark.Tasks do
   @spec pulse_by_id(binary(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, :not_found | :not_holder | :stale_claim}
   def pulse_by_id(task_uuid, worker_id, opts \\ []), do: Pulse.pulse(task_uuid, worker_id, opts)
+
+  @doc """
+  Extend (or clear) the PR lease extension on a claimed task — the NON-HOLDER
+  renew a CI job can call (`POST /v1/tasks/:doc_id/renew`). Writes exactly ONE
+  key, `content.claim.lease_extension`, a bounded self-expiring window the TTL
+  sweeper honours; the epoch, the worker, `ts_iso` and `work_digest` are all
+  DELIBERATELY untouched, so a lead's stamp/close CAS is undisturbed. No holder
+  check and no epoch fence — the caller is CI, which can never be the holder —
+  but the row must be `in_progress` with a live `claim.worker`, and total
+  extension is capped from the first grant. Emits `task.lease_renewed`. See
+  `Barkpark.Tasks.Renew` for the decision and the rejected alternative.
+
+      Tasks.renew_lease_by_id(task_uuid, pr: 15234)
+      Tasks.renew_lease_by_id(task_uuid, pr: 15234, state: "merged")
+
+  Errors: `:not_found`, `:not_claimed`, `:extension_cap_reached`, `:stale_claim`.
+  """
+  @spec renew_lease_by_id(binary(), keyword()) ::
+          {:ok, Document.t()}
+          | {:error, :not_found | :not_claimed | :extension_cap_reached | :stale_claim}
+  def renew_lease_by_id(task_uuid, opts \\ []), do: Renew.renew(task_uuid, opts)
 
   @doc """
   Stage a task between the thought/backlog states — the sanctioned
