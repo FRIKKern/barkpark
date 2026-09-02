@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "child_count": 2,
+  "children": [
+    {
+      "doc_id": "task-85c531c2adbf0dff",
+      "title": "bp can say a box is suspended and why, but still not since when",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 0,
+        "total": 0
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    },
+    {
+      "doc_id": "cch-w60-bl-a-row-with-criteria",
+      "title": "a row with criteria",
+      "lifecycle_status": "open",
+      "criteria_progress": {
+        "met": 1,
+        "total": 2
+      },
+      "execution_class": "unclaimed",
+      "inserted_at": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "doc": {
+    "doc_id": "fixture-epic",
+    "kind": "task",
+    "type": "task",
+    "title": "fixture epic",
+    "lifecycle_status": "in_progress",
+    "content": {
+      "kind": "task"
+    }
+  }
+}

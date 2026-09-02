@@ -1,0 +1,10 @@
+{
+  "doc_id": "fixture-epic",
+  "kind": "task",
+  "type": "task",
+  "title": "fixture epic",
+  "lifecycle_status": "in_progress",
+  "content": {
+    "kind": "task"
+  }
+}

@@ -399,7 +399,7 @@ func TestSuggestUnknownNounAuthHidden(t *testing.T) {
 	// Human output (table/plain): both the primary line and the help block render.
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	code := suggestUnknownNoun(w, tree, "none", "task")
+	code := suggestUnknownNoun(w, tree, "none", "task", tokenProvenance{})
 	if code != exitUsage {
 		t.Errorf("auth-hidden exit = %d, want %d", code, exitUsage)
 	}
@@ -420,7 +420,7 @@ func TestSuggestUnknownNounAuthHidden(t *testing.T) {
 	var mstdout, mstderr bytes.Buffer
 	mw := newWriter(&mstdout, &mstderr)
 	mw.output = "json"
-	suggestUnknownNoun(mw, tree, "none", "task")
+	suggestUnknownNoun(mw, tree, "none", "task", tokenProvenance{})
 	env := mstdout.String()
 	for _, want := range []string{`"hint"`, "barkpark login", "hidden at your auth tier"} {
 		if !strings.Contains(env, want) {
@@ -437,7 +437,7 @@ func TestSuggestUnknownNounGenuineTypo(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	code := suggestUnknownNoun(w, tree, "none", "serach")
+	code := suggestUnknownNoun(w, tree, "none", "serach", tokenProvenance{})
 	if code != exitUsage {
 		t.Errorf("typo exit = %d, want %d", code, exitUsage)
 	}
@@ -462,7 +462,7 @@ func TestSuggestUnknownNounAdminNeverHidden(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
-	suggestUnknownNoun(w, tree, "admin", "task")
+	suggestUnknownNoun(w, tree, "admin", "task", tokenProvenance{})
 	out := stderr.String()
 	if !strings.Contains(out, "unknown command") {
 		t.Errorf("admin should get the ordinary unknown-command diagnosis:\n%s", out)

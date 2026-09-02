@@ -43,16 +43,34 @@ name: pr-task-gate
 #     bypass: if the task cannot be filed, the lane REFUSES (red) rather than
 #     passing with a warning nobody reads. A bypass with no attributable record
 #     is indistinguishable from the gate being off.
-#     STATE OF THE LANE, re-derived 2026-09-01: `BARKPARK_TASK_TOKEN` IS NOW
-#     PROVISIONED (`gh secret list`: created 2026-08-25T11:00:10Z, alongside a
-#     new BARKPARK_INGEST_TOKEN; the owner is a User, so no org tier can hide
-#     it). The previous derivation, dated 2026-08-04, enumerated the secrets as
-#     BREAKGLASS_TOKEN, CP_HOST, DEPLOY_SSH_KEY, GUERRILLA_HOST,
-#     HETZNER_DNS_TOKEN, NPM_TOKEN — accurate on its date, and the token landed
-#     21 days later. It is kept here rather than deleted because the shape is
-#     the lesson: a comment stating a measured STATE needs its date read as
-#     hard as its claim, and this one went on asserting an absence for a week
-#     after the absence ended.
+#     STATE OF THE LANE, re-derived 2026-09-01T20:40Z. `BARKPARK_TASK_TOKEN` is
+#     PROVISIONED, and WHAT it is provisioned WITH is now part of the record:
+#     a LEAST-PRIVILEGE app token with `read,write` scope, labelled
+#     `ci-pr-task-gate-2026-09-01`, set 2026-09-01T20:40Z. It is NOT — and must
+#     never again be — the instance admin token.
+#     WHY THAT SENTENCE IS HERE. The value behind this same secret name from
+#     2026-08-25T11:00:10Z until 20:26Z on 2026-09-01 WAS an instance admin
+#     token, and it was leaked. Revoking it at 20:26Z did not disable this gate;
+#     it made the gate LIE. Every read below answered HTTP 401, the script
+#     retried it as though a 401 were a blip, and the required check reported
+#     "The task ledger did not answer after the gate's bounded retries" — an
+#     outage story about a ledger that was up and answering. Thirty agents'
+#     PRs sat on that verdict for fourteen minutes, following an instruction
+#     ("re-run once the ledger is up") that could never have worked. The
+#     classifier in scripts/pr-task-gate.sh and the exit-3 arm in the verify
+#     step below exist because of those fourteen minutes.
+#     The two OLDER derivations are kept, as this file already keeps them,
+#     because the shape is the lesson: a comment stating a measured STATE needs
+#     its date read as hard as its claim.
+#       · 2026-09-01 (earlier that day): "IS NOW PROVISIONED (`gh secret list`:
+#         created 2026-08-25T11:00:10Z, alongside a new BARKPARK_INGEST_TOKEN;
+#         the owner is a User, so no org tier can hide it)" — true about the
+#         secret's EXISTENCE, and silent about what was in it, which was the
+#         half that mattered.
+#       · 2026-08-04: enumerated the secrets as BREAKGLASS_TOKEN, CP_HOST,
+#         DEPLOY_SSH_KEY, GUERRILLA_HOST, HETZNER_DNS_TOKEN, NPM_TOKEN —
+#         accurate on its date; the token landed 21 days later and this comment
+#         went on asserting an absence for a week after the absence ended.
 #     So the `hotfix!` lane is now ARMED: `hotfix_record` can file its override
 #     task, and applying the label routes through a RECORDED bypass rather than
 #     a guaranteed red. The refusal below still stands for the case the record
@@ -351,12 +369,17 @@ jobs:
           # open if this is ever empty or unreadable.
           PR_OPENED_AT: ${{ github.event.pull_request.created_at }}
           # Authenticated ledger read (wave-3 token plumbing). Same secret the
-          # hotfix_record step uses. It is UNPROVISIONED today, and fork PRs never
-          # receive secrets, so this is normally empty — the gate adds the Bearer
-          # header ONLY when it is set, and treats a token-absent 404 as an outage
-          # (exit 2, "provision BARKPARK_TASK_TOKEN"), never a PR accusation. Once
-          # the secret exists, a future private-task flip on the ledger cannot make
-          # main unmergeable: authenticated reads still see the task.
+          # hotfix_record step uses, and since 2026-09-01T20:40Z that secret is
+          # the least-privilege `read,write` app token labelled
+          # `ci-pr-task-gate-2026-09-01` — see the provenance block at the top of
+          # this file, and never put an instance admin token here again.
+          # Fork PRs still receive no secrets, so this can be empty: the gate
+          # adds the Bearer header ONLY when it is set, and treats a token-absent
+          # 404 as an outage (exit 2, "provision BARKPARK_TASK_TOKEN"), never a
+          # PR accusation. A future private-task flip on the ledger therefore
+          # cannot make main unmergeable: authenticated reads still see the task.
+          # If the ledger REFUSES this token (401/403) the script exits 3, not 2
+          # — a rejected credential is not an outage and no re-run clears it.
           LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
         run: |
           # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
@@ -367,8 +390,42 @@ jobs:
           # step body under `bash --noprofile --norc -e -o pipefail` so it cannot
           # silently revert.
           set -uo pipefail
+          # THE SCRIPT'S OWN STDERR IS EVIDENCE, so it is captured rather than
+          # only streamed. On 2026-09-01 the attempt lines said `ledger returned
+          # HTTP 401` three times and the verdict said `the ledger did not
+          # answer`; the two sat in the same log and only the verdict reached
+          # the check-run summary, which is the surface a blocked author reads.
+          # The capture is replayed to stderr immediately, so nothing that used
+          # to appear in the log stops appearing — including fail()'s own
+          # `::error title=PR is not task-backed::` annotation.
+          # RUNNER_TEMP is defaulted because scripts/pr-task-gate.test.sh runs
+          # this body verbatim OUTSIDE Actions, where `set -u` would abort on it.
+          err="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pr-task-gate.err"
           rc=0
-          bash scripts/pr-task-gate.sh || rc=$?
+          bash scripts/pr-task-gate.sh 2>"$err" || rc=$?
+          cat "$err" >&2
+          # The last few lines the script actually printed, flattened to one
+          # line for the annotation. `|| true` because grep exits non-zero on no
+          # match and this step runs under `-e`.
+          evidence="$(grep -E '^pr-task-gate: ' "$err" | tail -4 | tr '\n' ' ' || true)"
+          [ -n "$evidence" ] || evidence="(the gate printed no pr-task-gate: line — see the step log)"
+          if [ "$rc" = "3" ]; then
+            # THE CREDENTIAL ARM. Exit 3 = the ledger ANSWERED and refused this
+            # gate's token (401/403). It is a repo-configuration fault, not an
+            # outage and not a finding against the PR, and — this is the whole
+            # point — it is the one class of red that pressing "Re-run" cannot
+            # clear. It gets its own title so it can never again be reported as
+            # the ledger being unreachable.
+            echo "::error title=BARKPARK_TASK_TOKEN was REFUSED — this is not an outage::The task ledger answered and REJECTED this gate's credential (HTTP 401/403). Re-running this check will NOT clear it. Fix the repository secret BARKPARK_TASK_TOKEN: it must be a LEAST-PRIVILEGE app token scoped read,write and minted for this gate — never the instance admin token (one was set here and revoked 2026-09-01T20:26Z, which is the incident this arm exists for). Re-mint, gh secret set BARKPARK_TASK_TOKEN, then re-run. Evidence: ${evidence}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$rc" = "5" ]; then
+            # THE MALFORMED-ANSWER ARM. Exit 5 = 2xx, authenticated, and the
+            # body could not be read as a task document. Nothing to wait for and
+            # no token to re-mint, so it must not borrow either sentence.
+            echo "::error title=Ledger answered with a payload this gate cannot read::The task ledger answered (2xx) but its body carried no readable task document, so whether this PR is task-backed is UNKNOWN. This is NOT an outage (it answered) and NOT a credential fault (it authenticated) — the ledger's read path is returning something unexpected. Re-run once it serves documents again; if it persists, that is a ledger bug, not a finding against this PR. Evidence: ${evidence}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           if [ "$rc" = "2" ]; then
             # Exit 2 = "could not check", after the script's own bounded retries.
             # It is a FAILURE, not a pass: GitHub has no `neutral` conclusion for
@@ -390,7 +447,16 @@ jobs:
             # scripts/pr-task-gate.test.sh executes this file's own
             # `hotfix_record` body with an empty token and cross-checks this
             # text against merge-gates.md, so the false lane cannot drift back.
-            echo "::error title=Ledger unreachable — task backing UNVERIFIED::The task ledger did not answer after the gate's bounded retries, so whether this PR is task-backed is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up. Do NOT reach for the 'hotfix!' label: it files its override record on the SAME ledger host whose outage produced this message, so it cannot complete while the ledger is down. The one armed override is admin break-glass — scripts/breakglass.sh --open --reason ... --task ... , merge, then --close (docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            #
+            # AND IT NOW QUOTES THE ATTEMPTS. "The ledger did not answer" is a
+            # CLAIM, and on 2026-09-01 it was a false one: the attempt lines in
+            # the very same log read `ledger returned HTTP 401` three times. The
+            # sentence may no longer stand alone — the evidence it summarises is
+            # appended, so a reader can always see whether the gate's story
+            # matches what actually came back. A 401 can no longer reach this
+            # arm at all (it exits 3 above); appending the evidence is the
+            # belt-and-braces that keeps the NEXT mis-classification visible.
+            echo "::error title=Ledger unreachable — task backing UNVERIFIED::The task ledger did not answer after the gate's bounded retries, so whether this PR is task-backed is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up. Do NOT reach for the 'hotfix!' label: it files its override record on the SAME ledger host whose outage produced this message, so it cannot complete while the ledger is down. The one armed override is admin break-glass — scripts/breakglass.sh --open --reason ... --task ... , merge, then --close (docs/ops/merge-gates.md). Evidence — what the ledger actually returned on each attempt: ${evidence}" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           exit "$rc"
