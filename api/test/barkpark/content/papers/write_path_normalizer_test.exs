@@ -433,6 +433,154 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
     end
   end
 
+  # ── the two table-head dialects the gate and the normalizer disagreed on ────
+
+  describe "the `header` spelling is normalized, not just validated (task-7abe292dbfe567a6)" do
+    # `header` is a FIRST-CLASS head dialect at both the gate
+    # (`render_block_errors/2` reads `Map.get(block, "head") || Map.get(block,
+    # "header")`) and the renderer (compose.ex `declared_head` falls back to
+    # `header`) — but `normalize_table_leaves/1` only ever reached `rows` and
+    # `head`. So a TipTap text-keyed leaf (`%{"type" => "text", "text" => …}`)
+    # inside a `header` cell got NO inline-leaf dialect rescue: the block
+    # published (the gate accepts the shape) and then rendered the header cell
+    # as the empty string, forever — exactly the failure #11616 fixed for
+    # every other inline-bearing surface.
+    @header_dialect_table %{
+      "type" => "table",
+      "header" => [[%{"type" => "text", "text" => "Quantity"}]],
+      "rows" => [[[%{"type" => "text", "text" => "51"}]]]
+    }
+
+    test "a text-keyed leaf in a `header` cell is rescued to the canonical `value` key" do
+      assert [block] = BlockOps.normalize_render_shapes([@header_dialect_table])
+
+      assert block["header"] == [[%{"type" => "text", "value" => "Quantity"}]]
+
+      # the `rows` twin was already rescued — that asymmetry IS the defect
+      assert block["rows"] == [[[%{"type" => "text", "value" => "51"}]]]
+    end
+
+    test "the rescue is render-PRESERVING — the row's stated blocker has expired" do
+      # THE ROW DEFERRED THIS FIX ON A PREMISE THAT IS NO LONGER TRUE. It said
+      # widening the rescue to `header` "changes rendered BYTES for papers that
+      # publish today", because a text-keyed leaf "renders as the empty string
+      # forever" — which is what #14561's negative-arm criterion forbade.
+      #
+      # `Render.Inline.compose_inline/2` has dual-read `value || text` since
+      # 2026-08-23 (inline.ex: `case coerce_text_value(Map.get(n, "value", ""))
+      # do "" -> coerce_text_value(Map.get(n, "text", ""))`), and its Go twin
+      # does the same through `attrStrFirst(n, "value", "text")`. The leaf
+      # already renders. What was missing is CANONICALIZATION of the stored
+      # bytes — the single job this write chokepoint exists to do — so the fix
+      # is byte-identical at the reader and #14561's criterion is satisfied,
+      # not traded away.
+      raw_html = Render.render_blocks([@header_dialect_table])
+      normalized_html = Render.render_blocks(BlockOps.normalize_render_shapes([@header_dialect_table]))
+
+      # non-vacuity: both halves of the block actually render.
+      assert raw_html =~ "Quantity"
+      assert raw_html =~ "51"
+
+      assert normalized_html == raw_html
+    end
+
+    test "a `header` already carrying canonical leaves is byte-identical" do
+      canonical = %{
+        "type" => "table",
+        "header" => [[%{"type" => "text", "value" => "Quantity"}]],
+        "rows" => [[[%{"type" => "text", "value" => "51"}]]]
+      }
+
+      assert BlockOps.normalize_render_shapes([canonical]) == [canonical]
+    end
+
+    test "the `header` rescue is idempotent" do
+      once = BlockOps.normalize_render_shapes([@header_dialect_table])
+      assert BlockOps.normalize_render_shapes(once) == once
+    end
+  end
+
+  describe "`head: true` is the promote-row-0 dialect, not a refusal (task-7abe292dbfe567a6)" do
+    # compose.ex renders `{true, [first | rest]}` by promoting row 0 to the
+    # head row, and `{true, []}` by rendering a headless table. The gate did
+    # neither: with the head equal to `true` the case fell through to
+    # `render_table_row_errors(true, path)`, whose catch-all emitted
+    # "blocks[N].head has no renderable cells". `normalize_array_table/2`
+    # rescues the shape ONLY when there is a row 0 that
+    # `normalize_legacy_table_row/1` can normalize — an EMPTY `rows` list has
+    # no row 0 to promote, so the flag survives normalization and the block
+    # that the reader renders fine could never publish.
+    test "`head: true` with no rows survives normalization and now passes the gate" do
+      block = %{"type" => "table", "head" => true, "rows" => []}
+
+      assert [normalized] = blocks = BlockOps.normalize_render_shapes([block])
+
+      # non-vacuity: the flag is STILL there — the gate fix is what changed,
+      # not a normalizer that quietly deleted the dialect.
+      assert normalized["head"] == true
+
+      assert BlockOps.validate_render_shapes(blocks) == :ok
+    end
+
+    test "`header: true` with no rows is accepted through the same fallback" do
+      block = %{"type" => "table", "header" => true, "rows" => []}
+
+      assert [normalized] = blocks = BlockOps.normalize_render_shapes([block])
+      assert normalized["header"] == true
+      assert BlockOps.validate_render_shapes(blocks) == :ok
+    end
+
+    test "the reader promotes row 0 — the gate refused a block compose renders whole" do
+      raw = %{
+        "type" => "table",
+        "head" => true,
+        "rows" => [
+          [[%{"type" => "text", "value" => "Metric"}]],
+          [[%{"type" => "text", "value" => "a"}]]
+        ]
+      }
+
+      # The reader: row 0 becomes the head row, row 1 the body.
+      html = Render.render_blocks([raw])
+      assert html =~ "Metric"
+      assert html =~ "a"
+
+      # The gate, on the RAW shape: every row is renderable, and the ONLY
+      # complaint is the head flag the renderer understands.
+      assert BlockOps.validate_render_shapes([raw]) == :ok
+    end
+
+    test "`head: true` WITH a row 0 still normalizes to promoted cells (unchanged)" do
+      # The gate's new `true` arm must not mask the normalizer: where a row 0
+      # exists, the flag is still resolved into real head cells and dropped.
+      block = %{"type" => "table", "head" => true, "rows" => [["Metric", "Value"], ["a", "b"]]}
+
+      assert [normalized] = blocks = BlockOps.normalize_render_shapes([block])
+
+      assert normalized["head"] == [
+               [%{"type" => "text", "value" => "Metric"}],
+               [%{"type" => "text", "value" => "Value"}]
+             ]
+
+      assert BlockOps.validate_render_shapes(blocks) == :ok
+    end
+
+    test "a head that is neither `true` nor a row of cells is STILL refused" do
+      # The `true` arm is a named dialect, not a hole: any other unrenderable
+      # head keeps its refusal, path and all.
+      for bad <- [42, "Metric", %{"no" => "cells"}] do
+        block = %{"type" => "table", "head" => bad, "rows" => [[["a"]]]}
+        blocks = BlockOps.normalize_render_shapes([block])
+
+        assert {:error, {:invalid_paper_structure, %{"blocks" => errors}}} =
+                 BlockOps.validate_render_shapes(blocks),
+               "expected a refusal for head #{inspect(bad)}"
+
+        assert "blocks[0].head has no renderable cells" in errors
+      end
+    end
+  end
+
   # ── idempotency ─────────────────────────────────────────────────────────────
 
   test "the whole normalization pass is idempotent" do
