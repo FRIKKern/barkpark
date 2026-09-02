@@ -79,15 +79,59 @@ defmodule BarkparkCloud.Notifications.Transactional do
     """)
   end
 
-  @doc "Build the test email the settings page's \"Send test\" button fires."
-  @spec test_email(String.t()) :: Swoosh.Email.t()
-  def test_email(to) when is_binary(to) do
-    base_email(to, "Barkpark Cloud test email", """
+  @doc """
+  Build the test email the settings page's "Send test" button fires.
+
+  cch-w40-bl. The body used to read "If you received it, your notification email
+  is working" — a claim this send CANNOT make. Delivery here always rides the
+  platform `Mailer` (see the moduledoc); it never touches a team's own relay. A
+  team that selected `transport: "smtp"` and pointed it at a dead host therefore
+  passed this test 100% of the time, and then every real alert silently fell back
+  to the platform transport anyway.
+
+  The honest fix is DISCLOSURE, not routing: the body names the carrier it
+  actually exercised, and `:selected_transport` (the team's
+  `EmailSettings.transport`, passed by `Notifications.deliver_test/2`) lets it add
+  — in the same breath — that the transport the team SELECTED is not the one this
+  test proved. Routing the probe over an unverified relay is a separate, larger
+  risk: it can hang the request path.
+
+  `:selected_transport` is disclosure only. Omit it and the mail is exactly the
+  platform-transport sentence, with no claim about any team relay.
+  """
+  @spec test_email(String.t(), keyword()) :: Swoosh.Email.t()
+  def test_email(to, opts \\ []) when is_binary(to) do
+    body = """
     This is a test email from Barkpark Cloud.
 
-    If you received it, your notification email is working.
-    """)
+    It was sent over the Barkpark platform mail transport. If you received it,
+    that transport is working.
+    """
+
+    base_email(
+      to,
+      "Barkpark Cloud test email",
+      body <> transport_caveat(Keyword.get(opts, :selected_transport))
+    )
   end
+
+  # "instance" IS the platform transport, so a team on it had exactly the thing
+  # it selected exercised and there is nothing left to say — the disclosure can
+  # LOSE. Any other selection (today only "smtp", per
+  # `EmailSettings.transports/0`) was NOT exercised, and silence there is the
+  # original lie. An absent/unknown value adds nothing: unknown is not a
+  # mismatch.
+  defp transport_caveat("smtp") do
+    """
+
+    This test did NOT use your relay.
+
+    Your team is set to send alerts over its own SMTP relay. Receiving this mail
+    proves the platform transport only — it does not prove your SMTP settings.
+    """
+  end
+
+  defp transport_caveat(_), do: ""
 
   ## Delivery wrappers — build + deliver over the PLATFORM transport.
 
@@ -105,8 +149,12 @@ defmodule BarkparkCloud.Notifications.Transactional do
   def deliver_email_change_code(to, code),
     do: email_change_code_email(to, code) |> Mailer.deliver()
 
-  @spec deliver_test(String.t()) :: {:ok, term()} | {:error, term()}
-  def deliver_test(to), do: to |> test_email() |> Mailer.deliver()
+  # cch-w40-bl: `opts` is passed to `test_email/2` for COPY only. Arity 1 still
+  # exists and still means exactly what it always meant — build, then
+  # `Mailer.deliver/1` with NO override, i.e. the platform transport. Nothing
+  # here reads a team's relay config and nothing here can be made to.
+  @spec deliver_test(String.t(), keyword()) :: {:ok, term()} | {:error, term()}
+  def deliver_test(to, opts \\ []), do: to |> test_email(opts) |> Mailer.deliver()
 
   # Build a plain-text email from the platform From. HTML bodies are a later
   # polish (YAGNI) — the transactional path's job is to reliably DELIVER, not to

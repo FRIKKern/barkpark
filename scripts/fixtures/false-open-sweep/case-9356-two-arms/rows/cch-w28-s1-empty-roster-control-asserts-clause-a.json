@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w28-s1-empty-roster-control-asserts-clause-a",
+    "kind": "task",
+    "type": "task",
+    "title": "empty-roster control asserts clause A",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "The control asserts clause A on an empty roster.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "The refusal names the clause, not the count.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "A hermetic harness covers the empty case.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "The fixture is committed.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "The guard can lose.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "MERGE-GATED: PR #9356 green on Console gate and merged to main.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        },
+        {
+          "criterion": "The lead stamps the merge SHA.",
+          "evidence": "",
+          "met": true
+        }
+      ]
+    }
+  }
+}

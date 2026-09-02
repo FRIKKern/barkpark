@@ -28,6 +28,12 @@ defmodule BarkparkCloud.Web.Auth do
       token. When no worker token is configured (e.g. dev with `WORKER_TOKEN`
       unset), it fails CLOSED — every request 401s rather than opening the
       internal endpoints to all.
+
+  One DISJUNCTION composes over them: `require_user_or_pat_or_worker/2`, for a
+  PLATFORM-scoped read whose writer is the worker itself. It admits the worker
+  FACELESSLY (no `:current_user`, no `:current_team`) and clamps it to
+  `["read"]`, so it can never be a back door to a write. Read its own @doc
+  before putting a second route behind it.
   """
   import Plug.Conn
 
@@ -295,14 +301,81 @@ defmodule BarkparkCloud.Web.Auth do
   timing.
   """
   def require_worker(conn, _opts) do
+    if worker_bearer?(conn), do: conn, else: unauthorized(conn)
+  end
+
+  # ONE definition of "this bearer IS the worker". `require_worker/2` halts on a
+  # miss; `require_user_or_pat_or_worker/2` needs the same question answered
+  # WITHOUT halting, because a non-worker there is not a refusal — it is the
+  # next credential to try. A second copy of the compare is how one of them
+  # would eventually stop failing closed on a blank `:worker_token`.
+  @spec worker_bearer?(Plug.Conn.t()) :: boolean()
+  defp worker_bearer?(conn) do
     configured = worker_token()
 
     with token when is_binary(token) <- bearer_token(conn),
-         true <- is_binary(configured) and configured != "",
-         true <- Plug.Crypto.secure_compare(token, configured) do
-      conn
+         true <- is_binary(configured) and configured != "" do
+      Plug.Crypto.secure_compare(token, configured)
     else
-      _ -> unauthorized(conn)
+      _ -> false
+    end
+  end
+
+  @doc """
+  Require a USER credential (session or PAT) **or** the shared WORKER token —
+  the gate for a PLATFORM-SCOPED read whose WRITER is the worker itself
+  (`GET /v1/deliveries`, task-e2acb66e9ed0da09).
+
+  ## Why this exists
+
+  The platform delivery record is WRITTEN by `POST /v1/internal/platform-
+  deliveries` under `require_worker/2` — deploy.yml's crown step carries
+  `WORKER_TOKEN` and nothing else. Under `require_user_or_pat/2` alone the read
+  half answered that same principal **401**: the record had no working API read
+  path for the credential that writes it, and crown-reconcile survived only by
+  SSH-ing into the control plane and reading `platform_deliveries` out of its
+  postgres container — 22 times in run 31311887504. A fallback that always fires
+  is a broken door with a working window.
+
+  ## Why widening to the worker grants nothing new
+
+  The worker token is not a tenant credential and never becomes one here. It is
+  a faceless off-box shared secret that ALREADY reaches `/v1/internal/*` — the
+  cross-team `GET /v1/internal/barkparks` list, every team's provision-job
+  queue, and the writer of these very rows. Admitting it to a read of the
+  platform's own per-sha deploy record is STRICTLY SUBSUMED by what it holds
+  already. What it must not do is inherit a USER's reach, so:
+
+    * NO `:current_user` and NO `:current_team` are assigned. The worker stays
+      faceless, exactly as under `require_worker/2`. A route that reads
+      `conn.assigns.current_user` MUST NOT use this plug — it would match on
+      nil.
+    * `:current_abilities` is `["read"]`, never `["root"]`. The worker satisfies
+      `require_ability("read")` and is 403'd by `write`, `deploy` and `root`, so
+      composing this plug onto a mutating route cannot silently hand the worker
+      a write.
+    * `:current_principal` is `:worker`, so a handler can tell the three apart
+      without re-deriving them from the bearer.
+
+  ## Order
+
+  The worker compare runs FIRST: it is a constant-time compare against a flat
+  shared secret and needs no database round-trip, and (per this module's
+  moduledoc) a user/agent token can never equal it — the namespaces do not
+  overlap. So trying it first cannot shadow a human credential.
+
+  Fails CLOSED on every axis: an unset/blank `:worker_token` matches nothing,
+  and a bearer that is neither the worker nor a valid session/PAT falls through
+  to `require_user_or_pat/2`'s 401.
+  """
+  @spec require_user_or_pat_or_worker(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
+  def require_user_or_pat_or_worker(conn, opts) do
+    if worker_bearer?(conn) do
+      conn
+      |> assign(:current_principal, :worker)
+      |> assign(:current_abilities, ["read"])
+    else
+      require_user_or_pat(conn, opts)
     end
   end
 
@@ -324,10 +397,20 @@ defmodule BarkparkCloud.Web.Auth do
 
   Distinct from `require_worker/2` (the faceless off-box provisioner secret
   behind `/v1/internal/*` + `/v1/admin/*`): this gates the human operator's
-  browser SESSION, which is 401-dead against the worker surface. This is the
-  DECLARED interim operator principal per charter GR9/GR39 — never a team role
-  (owner/admin is a different axis: authority reads from the membership row, not
-  a global allowlist — Authz law).
+  browser SESSION, which is 401-dead against the worker surface. Never a team
+  role (owner/admin is a different axis: authority reads from the membership
+  row, not a global allowlist — Authz law).
+
+  THE RULING (`isu-backlog-operator-principal`, closing charter GR9/GR39's open
+  question): this is THE human principal for the fleet self-update controls, not
+  an interim placeholder, and it is reachable from BOTH shipped human surfaces —
+  the console SPA and `bp cloud rollout`, which now calls
+  `/v1/operator/autoupdate[/halt|/resume]` with the caller's session instead of
+  aiming it at the worker-gated `/v1/admin/autoupdate*` trio no `bp login` token
+  could ever open. The worker routes were NOT widened to accept a session: the
+  two doors are disjoint in both directions, and
+  `test/barkpark_cloud/web/router_operator_test.exs` §2b asserts that as a
+  full-equality matrix (worker 401/200 · operator 200/401 · plain 403/401).
   """
   @spec require_platform_operator(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def require_platform_operator(conn, opts) do

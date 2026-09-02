@@ -1,0 +1,20 @@
+[
+  {
+    "number": 12345,
+    "title": "fix(x): the thing",
+    "body": "Fixes the thing.\n\nTask: cch-w40-bl-still-open-row\n",
+    "mergedAt": "2026-08-20T00:00:00Z",
+    "mergeCommit": {
+      "oid": "bbbbbbbbbbbb2222"
+    }
+  },
+  {
+    "number": 12346,
+    "title": "chore: noise",
+    "body": "Unrelated.\n\nTask: yet-another-row\n",
+    "mergedAt": "2026-08-21T00:00:00Z",
+    "mergeCommit": {
+      "oid": "cccccccccccc3333"
+    }
+  }
+]

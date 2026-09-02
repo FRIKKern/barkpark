@@ -211,5 +211,44 @@ defmodule BarkparkWeb.TokenControllerTest do
       resp = mint(conn, raw, %{"label" => "   ", "permissions" => ["public-read"]})
       assert resp.status == 422
     end
+
+    # The module comment above `fetch_permissions/1` promises that a bad
+    # `permissions` value "collapses to the forbidden path". `is_list/1` only
+    # checks the CONTAINER, so a list of maps used to reach `to_string/1` and
+    # raise Protocol.UndefinedError (String.Chars is not implemented for Map) —
+    # a 500 where the contract says 422. Elements must be checked too.
+    test "permissions as a list of MAPS → 422 :invalid, never a 500", %{
+      conn: conn,
+      admin_raw: raw
+    } do
+      resp =
+        mint(conn, raw, %{
+          "label" => "perm-map-#{System.unique_integer([:positive])}",
+          "permissions" => [%{"a" => "b"}]
+        })
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "unprocessable"
+      assert body["error"]["message"] =~ ":invalid"
+    end
+
+    test "permissions as a list of INTEGERS → 422 :invalid (not a stringified perm)", %{
+      conn: conn,
+      admin_raw: raw
+    } do
+      resp =
+        mint(conn, raw, %{
+          "label" => "perm-int-#{System.unique_integer([:positive])}",
+          "permissions" => [1, 2]
+        })
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "unprocessable"
+      # NOT `["1", "2"]` — a non-binary element is invalid by SHAPE, so both
+      # non-string element kinds land on the same deterministic envelope.
+      assert body["error"]["message"] =~ ":invalid"
+    end
   end
 end

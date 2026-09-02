@@ -32,6 +32,35 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
 
+// ── index.html's shipped `hidden` (cch-w43-s6) ───────────────────────────────
+// The shim used to default EVERY element to hidden:false, and never read
+// index.html at all. That default is not neutral — it is a CLAIM, and the
+// shipped page contradicts it on 38 elements. #team-menu is one of them
+// (`<div class="team-menu" id="team-menu" role="menu" hidden>`), so the first
+// #ws-switch click CLOSED an already-closed menu and only the second opened
+// it. A check written against that boot state pins the SHIM's invention as the
+// app's contract and would go red against a correct app — the harness judging
+// the app by state the harness made up.
+//
+// Scanned with the same flat open-tag grammar parseChildren uses, keyed by id:
+// all 38 hidden-bearing tags in index.html carry an id, and only registry (#id)
+// elements are ever asked for their boot state. App-RENDERED markup is
+// deliberately NOT seeded — a node the app painted owns its own hidden state,
+// and reflecting it here would make this shim answer for markup index.html
+// never shipped.
+const INDEX_HTML = fs.readFileSync(path.join(HERE, "..", "index.html"), "utf8");
+const HIDDEN_IDS = (() => {
+  const ids = new Set();
+  const OPEN_TAG_RE = /<([a-zA-Z][\w-]*)\b([^>]*)>/g;
+  let m;
+  while ((m = OPEN_TAG_RE.exec(INDEX_HTML)) !== null) {
+    if (!/(^|\s)hidden(\s|=|\/|$)/.test(m[2])) continue;
+    const id = /\bid="([^"]+)"/.exec(m[2]);
+    if (id) ids.add(id[1]);
+  }
+  return ids;
+})();
+
 // ── minimal DOM shim ─────────────────────────────────────────────────────────
 // An element is a plain bag of the props app.js reads/writes. The critical
 // invariant: getElementById(id) and querySelector("#id") return the SAME object
@@ -212,7 +241,9 @@ function makeDom() {
       tagName: (tagName || "div").toUpperCase(),
       textContent: "",
       value: "",
-      hidden: false,
+      // Seeded from index.html, not invented: an element the page ships
+      // `hidden` BOOTS hidden here too (see HIDDEN_IDS above).
+      hidden: HIDDEN_IDS.has(id || ""),
       className: "",
       disabled: false,
       // (d) The fourth incapacity. Present and true: every element this shim
@@ -267,6 +298,13 @@ function makeDom() {
       hasAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k); },
       focus() {},
       blur() {},
+      // The search box's re-render restores the caret with
+      // setSelectionRange(len, len) (app.js renderTeamMenu). Absent here, the
+      // team picker's filter path threw TypeError on the FIRST keystroke, so
+      // no check could ever type into it. Inert (the shim models no caret) but
+      // PRESENT, which is the whole difference between a path that runs and a
+      // path that cannot be reached at all.
+      setSelectionRange() {},
       appendChild(child) {
         if (!child) return child;
         kids.push(child);
@@ -397,7 +435,7 @@ function makeDom() {
 //     (before/after bytes). Without it the whole corpus resolves /v1/me on the
 //     first microtask and no late-answer defect can be represented at all.
 function bootScenario(name, opts) {
-  const { registry, document } = makeDom();
+  const { registry, document, byId } = makeDom();
 
   // Backing stores we control so each scenario boots clean.
   const store = new Map();
@@ -426,12 +464,21 @@ function bootScenario(name, opts) {
   // needs a real path (e.g. /activate, to unlock isActivateFlow()) sets them.
   // Default "/"+"" keeps every pre-existing hash-routed scenario unchanged; the
   // browser harness (mock.js) ignores these and uses the actually-served path.
+  // Every full-reload the app performs, in order. NOT a no-op: a swallowed
+  // reload is indistinguishable from a code path that never ran, and the team
+  // picker's pin write (localStorage.setItem("bp.active-team", id) immediately
+  // followed by location.reload()) is the one place where the reload IS the
+  // second half of the contract — every team-scoped cache must repopulate. The
+  // shim shipped no `reload` at all, so that handler threw TypeError after the
+  // write, i.e. the only writer of the pin could not be driven to completion.
+  const reloads = [];
   const location = {
     hash: scen.deepLink || "#overview",
     pathname: scen.pathname || "/",
     search: scen.search || "",
     origin: "http://localhost",
     href: "http://localhost/",
+    reload() { reloads.push({ href: location.href, hash: location.hash }); },
   };
 
   // Per-boot mutable fixture state (cch-w2, D39). Handed to route() so a
@@ -462,12 +509,35 @@ function bootScenario(name, opts) {
     // reflects whatever the fixture state is when it actually answers.
     const answer = () => {
       const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
+      // extraMembership (cch-w43-s6), smoke-only and defaulting OFF: APPEND one
+      // further membership to the teams[] a 200 /v1/me already answers with.
+      //
+      // Why it has to exist. The corpus mints exactly ONE membership per actor,
+      // deliberately (scenarios.mjs, me(): "a SECOND team here would be a
+      // scenario-level claim ... that no fixture asks for"), and the switcher's
+      // active row is that same team. So renderTeamMenu's non-active arm — the
+      // SOLE writer of localStorage["bp.active-team"], the pin api() sends as
+      // x-barkpark-team on every request — is unreachable from every committed
+      // fixture, and an assertion that cannot reach a branch does not guard it.
+      // This is ADDITIVE by construction: the corpus's own membership is never
+      // replaced or reordered, so the rendered-list half of the guard below
+      // still reads what the CORPUS serves, and the appended row is structurally
+      // guaranteed non-active (meCache.team.id is the corpus's team, always).
+      // No scenario, no census literal, and route() is untouched — the envelope
+      // census still measures exactly what scenarios.mjs answers.
+      let body = res.body;
+      if (opts && opts.extraMembership && res.status === 200 &&
+          p.split("?")[0].endsWith("/v1/me")) {
+        body = Object.assign({}, body, {
+          teams: ((body && body.teams) || []).concat([opts.extraMembership]),
+        });
+      }
       return {
         ok: res.status >= 200 && res.status < 300,
         status: res.status,
         headers: { get: (h) => (String(h).toLowerCase() === "content-type" ? "application/json" : null) },
-        json: () => Promise.resolve(res.body),
-        text: () => Promise.resolve(JSON.stringify(res.body)),
+        json: () => Promise.resolve(body),
+        text: () => Promise.resolve(JSON.stringify(body)),
       };
     };
     if (opts && opts.deferMe && p.split("?")[0].endsWith("/v1/me")) {
@@ -520,7 +590,15 @@ function bootScenario(name, opts) {
   vm.createContext(sandbox);
   vm.runInContext(APP_JS, sandbox, { filename: "app.js" });
 
-  return { registry, hooks: captured.hooks, calls, fixtureState, resolveMe };
+  // localStorage/reloads are handed back so a check can observe what the app
+  // WROTE, not merely what it painted: the team pin is written to storage and
+  // then the page reloads, and neither half is visible in any innerHTML.
+  // byId is the SAME lookup app.js's $() makes. A check that wants an element's
+  // BOOT state ("does #team-menu ship hidden?") has to be able to ask for it
+  // without a click having created the registry entry first — reading it off
+  // `registry` alone answers undefined for every id the boot never touched,
+  // which is indistinguishable from an element that booted visible.
+  return { registry, byId, hooks: captured.hooks, calls, fixtureState, resolveMe, localStorage, reloads };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -582,6 +660,238 @@ async function assertLateMeRepaintsTheRail() {
 // host for another instrument, so the two top-level awaits (this one and the
 // billing guard below main()) now run as main()'s FIRST two steps — same order,
 // same output, same exit codes, but only when smoke.mjs is the entry point.
+
+
+// ── cch-w43-s6 · THE TEAM SWITCHER'S FIRST RENDERED PROOF ────────────────────
+// Not an EXPECTATION (it owns a HARNESS CAPABILITY and drives one existing
+// scenario twice, the same shape as the late-/v1/me guard above): it adds no
+// SCENARIOS key, no EXPECTATIONS key, and moves no census literal.
+//
+// What had no guard at all. `grep 'ws-switch\|team-menu\|renderTeamMenu'` over
+// this file returned ZERO lines. The switcher's only pin anywhere in the repo
+// is five regexes over readFileSync(app.js) in __app.test.mjs — a source-text
+// scan, and a vacuous one: truncating renderTeamMenu's list to
+// `.slice(0, 0)` — structurally incapable of ever listing a team — satisfies
+// every one of those regexes and ships the whole console suite green. Only a
+// RENDERED click can tell the two apart, and this is that click.
+//
+// The two halves are inseparable, which is why they land together:
+//   • the DOM shim seeding (HIDDEN_IDS) without this guard changes no
+//     behaviour — measured: the full suite is byte-identical before and after;
+//   • this guard without the seeding cannot be written honestly, because
+//     #team-menu booted VISIBLE in the shim and index.html ships it `hidden`,
+//     so the first click closed it and only the second opened one. A
+//     "click once, assert open" check written over that boot state pins the
+//     harness's invention and would go RED against a correct app.
+//
+// Two things it deliberately does NOT do (charter D488/D489):
+//   • it asserts NO input-listener count. The 1/2/4/8/16 doubling on
+//     #team-menu-q is an artifact of this shim's identity model (PARSED_TAGS is
+//     "button|a", so an <input> is never a parsed child and $() falls through
+//     to a persistent registry stub). A real browser destroys the node on the
+//     innerHTML replacement. `fired === 1` would pin the harness, not the app.
+//   • nothing seeds localStorage["bp.active-team"]. teamAuthorityState's
+//     `stale` arm compares the pin against the one the answer was fetched
+//     under, and stays quiet only while both are null; a seeded pin flips every
+//     scenario to `stale`, membersContext returns null and the corpus reds en
+//     masse. The pin is observed as a WRITE — and the boot value is asserted
+//     null first, so a future seed reds HERE rather than everywhere.
+const SWITCHER_SCENARIO = "members-populated";
+
+// The painted .team-list, sliced out of #team-menu's markup. It is read as a
+// STRING on purpose: parseChildren is FLAT, so a parsed <button> stub carries
+// its attributes and NO inner markup — the row's name and its ✓ exist only in
+// the HTML, and a selector-shaped assertion over the stubs would match nothing
+// and pass vacuously.
+function teamListHtml(menuHtml) {
+  const start = String(menuHtml || "").indexOf('<div class="team-list">');
+  if (start === -1) return "";
+  const foot = menuHtml.indexOf('<button type="button" class="team-item team-foot"', start);
+  return menuHtml.slice(start, foot === -1 ? menuHtml.length : foot);
+}
+function teamRowsHtml(listHtml) {
+  return listHtml.split('<button type="button" class="team-item"').slice(1);
+}
+
+// ONE real click through the registry — el.click() returns how many handlers
+// actually ran, so a never-wired control reports 0 instead of passing as a
+// success.
+async function openTeamMenu(boot) {
+  const fired = boot.byId("ws-switch").click();
+  await flush();
+  return fired;
+}
+
+async function assertTeamSwitcherListsTheTeamsTheEnvelopeNames() {
+  const broken = [];
+  const envelope = SCENARIOS[SWITCHER_SCENARIO].data.me || {};
+  const scenTeams = envelope.teams || [];
+  const activeId = (envelope.team || {}).id || "";
+  let listHtml = "";
+
+  // ── half 1 · the CORPUS's own envelope, rendered ──────────────────────────
+  {
+    const boot = bootScenario(SWITCHER_SCENARIO);
+    await flush();
+    const menu = boot.byId("team-menu");
+    if (menu.hidden !== true) {
+      broken.push("#team-menu did not BOOT hidden — index.html ships it `hidden`, so a harness that starts " +
+        "it open makes the first #ws-switch click CLOSE it, and every claim below would be measuring the " +
+        "shim's invention rather than the app");
+    }
+    const fired = await openTeamMenu(boot);
+    if (fired < 1) {
+      broken.push("#ws-switch ran " + fired + " click handler(s) — the switcher is DEAD, not merely wrong");
+    }
+    if (menu.hidden !== false) {
+      broken.push("ONE click on #ws-switch left #team-menu hidden — it never opened");
+    }
+    listHtml = teamListHtml(menu.innerHTML || "");
+    if (scenTeams.length === 0) {
+      broken.push("the " + SWITCHER_SCENARIO + " /v1/me envelope names NO membership, so \"the menu lists " +
+        "the user's teams\" is unfalsifiable here — the corpus stopped minting teams[] and this guard has " +
+        "nothing left to compare against");
+    } else if (!listHtml) {
+      broken.push("no .team-list painted inside #team-menu (" + (menu.innerHTML || "").length + " bytes) — " +
+        "the picker rendered nothing, so every row assertion below is vacuous");
+    } else {
+      if (listHtml.indexOf("No teams yet") !== -1) {
+        broken.push("the switcher told the OWNER of " + JSON.stringify(scenTeams[0].name) + " they belong to " +
+          "NO team, while /v1/me names " + scenTeams.length + " membership(s): .team-list is " +
+          JSON.stringify(listHtml) + " — absence reported as a determinate answer");
+      }
+      const rows = teamRowsHtml(listHtml);
+      for (const t of scenTeams) {
+        const row = rows.find((r) => r.indexOf('data-team="' + t.id + '"') !== -1);
+        if (!row) {
+          broken.push("the envelope names membership " + JSON.stringify(t.id) + " and NO rendered row carries " +
+            "data-team=" + JSON.stringify(t.id));
+          continue;
+        }
+        if (row.indexOf(">" + t.name + "<") === -1) {
+          broken.push("the row for " + JSON.stringify(t.id) + " renders no name — " + JSON.stringify(t.name) +
+            " is what the envelope says it is called");
+        }
+        const marked = row.indexOf('class="team-check"') !== -1;
+        if (marked !== (t.id === activeId)) {
+          broken.push("the row for " + JSON.stringify(t.name) + " is " + (marked ? "MARKED" : "NOT marked") +
+            " current and it is " + (t.id === activeId ? "" : "NOT ") + "the active team (meCache.team.id = " +
+            JSON.stringify(activeId) + ")");
+        }
+      }
+
+      // The SEARCH FILTER, driven. Not garnish: its handler ends in
+      // setSelectionRange(), which this shim did not implement, so a real
+      // keystroke threw TypeError out of dispatchEvent and the whole filter arm
+      // was unreachable by any check. Both directions are asserted (a query
+      // that matches NOTHING, then one that matches), because a filter that
+      // never narrows and a filter that never restores are different bugs and a
+      // one-way probe cannot tell them apart. The handler COUNT is deliberately
+      // not asserted — only that at least one ran (D488).
+      const q = boot.byId("team-menu-q");
+      const miss = "zzz-no-such-team";
+      q.value = miss;
+      const firedMiss = q.dispatchEvent({ type: "input" });
+      await flush();
+      const missList = teamListHtml(menu.innerHTML || "");
+      if (firedMiss < 1) {
+        broken.push("typing into #team-menu-q ran " + firedMiss + " input handler(s) — the filter is not wired");
+      }
+      if (missList.indexOf("No team matches") === -1) {
+        broken.push("a query no team can match left the list at " + JSON.stringify(missList) + " — the filter " +
+          "either did not run or reported the wrong absence (a filtered-to-empty list must say so in the " +
+          "query's own words, not fall back to \"No teams yet\")");
+      }
+      const hit = String(scenTeams[0].name).slice(0, 3);
+      q.value = hit;
+      q.dispatchEvent({ type: "input" });
+      await flush();
+      const hitList = teamListHtml(menu.innerHTML || "");
+      if (hitList.indexOf('data-team="' + scenTeams[0].id + '"') === -1) {
+        broken.push("clearing the query back to " + JSON.stringify(hit) + " did not restore the row for " +
+          JSON.stringify(scenTeams[0].name) + " — the filter narrows and never widens: " +
+          JSON.stringify(hitList));
+      }
+    }
+  }
+
+  // ── half 2 · the PIN WRITE, the only thing that writes bp.active-team ─────
+  // The appended membership is the harness's (see extraMembership in
+  // bootScenario, and why the corpus cannot supply one); the ACTIVE row it is
+  // measured beside is the corpus's.
+  {
+    const extra = {
+      id: "5b2c1e00-0000-4000-8000-0000000000f1",
+      name: "Northwind Trading",
+      slug: "northwind",
+      role: "member",
+    };
+    const boot = bootScenario(SWITCHER_SCENARIO, { extraMembership: extra });
+    await flush();
+    const menu = boot.byId("team-menu");
+    const pinAtBoot = boot.localStorage.getItem("bp.active-team");
+    if (pinAtBoot !== null) {
+      broken.push("bp.active-team was ALREADY " + JSON.stringify(pinAtBoot) + " at boot — nothing may seed the " +
+        "pin (D489): a seeded pin flips teamAuthorityState to `stale` corpus-wide, and this guard would then " +
+        "be reading the seed back rather than a write");
+    }
+    await openTeamMenu(boot);
+    const rowFor = (id) => menu.querySelectorAll("[data-team]").find((el) => el.getAttribute("data-team") === id);
+
+    if (!rowFor(extra.id)) {
+      broken.push("the appended membership " + JSON.stringify(extra.id) + " painted no row, so the non-active " +
+        "arm — the only path that writes bp.active-team — is unreachable and everything below is vacuous");
+    } else {
+      // Re-pinning the team you are ALREADY on must write nothing and reload
+      // nothing: the guard app.js spends its early-return on.
+      const activeRow = rowFor(activeId);
+      if (!activeRow) {
+        broken.push("no row carries the ACTIVE team " + JSON.stringify(activeId) + " — the no-op arm cannot be " +
+          "measured");
+      } else {
+        const firedActive = activeRow.click();
+        await flush();
+        if (firedActive < 1) broken.push("the active team row ran " + firedActive + " click handler(s)");
+        const afterActive = boot.localStorage.getItem("bp.active-team");
+        if (afterActive !== null) {
+          broken.push("clicking the ALREADY-ACTIVE team wrote bp.active-team = " + JSON.stringify(afterActive) +
+            " — a re-pin plus a full page reload for a switch that did not happen");
+        }
+        if (boot.reloads.length !== 0) {
+          broken.push("clicking the already-active team RELOADED the page " + boot.reloads.length + " time(s)");
+        }
+        if (menu.hidden !== true) broken.push("clicking the active team left the menu OPEN — it must close");
+        await openTeamMenu(boot); // reopen: the rows are freshly-rendered stubs
+      }
+      const target = rowFor(extra.id);
+      const firedOther = target ? target.click() : 0;
+      await flush();
+      if (firedOther < 1) {
+        broken.push("the non-active team row ran " + firedOther + " click handler(s) — the switcher cannot switch");
+      }
+      const pin = boot.localStorage.getItem("bp.active-team");
+      if (pin !== extra.id) {
+        broken.push("clicking " + JSON.stringify(extra.name) + " left bp.active-team = " + JSON.stringify(pin) +
+          " (expected " + JSON.stringify(extra.id) + ") — the pin api() sends as x-barkpark-team, and that " +
+          "teamAuthorityState compares against, was never written");
+      }
+      if (boot.reloads.length !== 1) {
+        broken.push("the pin write fired " + boot.reloads.length + " reload(s), not 1 — every team-scoped cache " +
+          "(fleet, subscription, members) is stale the instant the pin moves, and only the reload repopulates them");
+      }
+    }
+  }
+
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " team-switcher — " + SWITCHER_SCENARIO + ": #team-menu boots " +
+    "hidden, ONE #ws-switch click lists " + scenTeams.length + " membership(s) the envelope names with the " +
+    "active one ✓-marked; the already-active row writes nothing, a non-active row pins bp.active-team + reloads\n");
+  process.stdout.write("       .team-list → " + (listHtml || "(nothing painted)") + "\n");
+  if (broken.length) {
+    process.stdout.write("\nteam-switcher guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
 
 // ── EXPECTATIONS: the per-scenario view skeleton (edit HERE when markup moves) ─
 const EXPECTATIONS = {
@@ -4212,6 +4522,7 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertBillingStatesNoNumeralItCannotSupport();
+  await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);

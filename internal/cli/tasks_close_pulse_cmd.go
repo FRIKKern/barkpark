@@ -33,6 +33,15 @@ package cli
 // (tasks_close_pulse_execute_test.go). A suite that exercised only the happy
 // path would re-certify the bug rather than catch it.
 //
+// A SEALED ROW THAT NAMES A WORKER IS NOT A HALF-LANDED CLOSE. The claim map
+// SURVIVES a successful close by design — the server stamps `closed_by` +
+// `closed_at` onto it in the same atomic write as the seal and keeps
+// `claim.worker` as the attribution — so "the row is sealed but X STILL HOLDS
+// the claim" fired on every ordinary close of a claimed task, and told the
+// operator to "close again" on a row that would 409 as already-terminal. The
+// half-landed test is now the ABSENCE of that close-out stamp, plus one bounded
+// re-read before the refusal is printed (closeClaimIsLive / closeClaimNeedsSecondLook).
+//
 // THE ONE INFERENCE THAT REMAINS, STATED PLAINLY. Every OTHER non-2xx — auth,
 // validation, not_found, conflict, rate-limit — returns WITHOUT a second read,
 // on the assumption that the server refused BEFORE any commit. That assumption
@@ -46,8 +55,10 @@ package cli
 // hidden.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -95,7 +106,38 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		}
 		return exitGeneric
 	}
+	// THE ONE BOUNDED SECOND LOOK. The seal is there and the ONLY thing wrong is
+	// a claim that still reads live. That is the one mismatch a read can invent
+	// out of timing rather than out of state — every other one (a missing seal,
+	// the wrong seal, a draft row) is a fact the store will keep repeating. Ask
+	// once more, briefly, and only then call it half-landed: a refusal that
+	// tells an operator to "close again" on a row the store already sealed
+	// sends them into a 409, so this message has to earn itself twice.
+	if closeClaimNeedsSecondLook(req, stored, readback) {
+		time.Sleep(closeClaimRecheckDelay)
+		if s2, rb2, err2 := taskboard.FetchSeal(taskReadbackClient(ctx), req.docID); err2 == nil {
+			stored, readback = s2, rb2
+		}
+	}
 	return renderCloseVerdict(out, req, stored, readback, rc)
+}
+
+// closeClaimRecheckDelay is the whole budget of the second look — short enough
+// that an operator never notices it and a genuine half-landed close is still
+// reported in the same breath, long enough to outlast a read that overtook a
+// write. A var so tests can drive both arms without sleeping.
+var closeClaimRecheckDelay = 400 * time.Millisecond
+
+// closeClaimNeedsSecondLook reports whether the ONLY complaint against the
+// stored row is a claim that still looks live. Anything else — an absent seal,
+// the wrong seal, a draft row — is state, not timing, and is refused on the
+// first read.
+func closeClaimNeedsSecondLook(req closeRequest, stored taskboard.SealRow, readback apiclient.TaskReadback) bool {
+	if readback.IsDraft() {
+		return false
+	}
+	return len(closeSealMismatches(req, stored)) == 0 &&
+		closeClaimIsLive(req, stored, readback)
 }
 
 // closeRequestOf re-resolves the close invocation through the SAME splitArgs +
@@ -140,7 +182,7 @@ func renderCloseVerdict(out *writer, req closeRequest, stored taskboard.SealRow,
 		return exitConflict
 	}
 
-	mismatches := closeMismatches(req, stored)
+	mismatches := closeMismatches(req, stored, readback)
 	if len(mismatches) == 0 {
 		if origRC == exitServer {
 			out.progressf("✓ the store holds the seal despite the POST answering a server error (exit %d) — a 5xx can commit the write before the response fails; the read-back is the truth here, not the transport error", origRC)
@@ -176,7 +218,17 @@ func storedSealSummary(stored taskboard.SealRow) string {
 // closeMismatches is the pure comparison behind the verdict: every way the
 // stored row fails to be the close that was asked for. An empty result means the
 // store genuinely holds the seal.
-func closeMismatches(req closeRequest, stored taskboard.SealRow) []string {
+func closeMismatches(req closeRequest, stored taskboard.SealRow, readback apiclient.TaskReadback) []string {
+	out := closeSealMismatches(req, stored)
+	if closeClaimIsLive(req, stored, readback) {
+		out = append(out, fmt.Sprintf("the row is sealed but %s STILL HOLDS the claim — the close half-landed", stored.ClaimWorker))
+	}
+	return out
+}
+
+// closeSealMismatches is the SEAL half of the comparison — the part that is pure
+// state and never worth a second read.
+func closeSealMismatches(req closeRequest, stored taskboard.SealRow) []string {
 	var out []string
 	switch {
 	case stored.LifecycleStatus == "":
@@ -187,13 +239,61 @@ func closeMismatches(req closeRequest, stored taskboard.SealRow) []string {
 		out = append(out, fmt.Sprintf("lifecycle_status is %q in the store, not the %q that was asked for — the close did not land",
 			stored.LifecycleStatus, req.wantSeal))
 	}
-	// A live claim under a sealed row is a half-landed close: the seal took and
-	// the lease release did not, so the board shows a closed task somebody still
-	// holds.
-	if stored.ClaimWorker != "" && stored.LifecycleStatus == req.wantSeal {
-		out = append(out, fmt.Sprintf("the row is sealed but %s STILL HOLDS the claim — the close half-landed", stored.ClaimWorker))
-	}
 	return out
+}
+
+// closeClaimIsLive is the CLAIM half: a live claim under a sealed row is a
+// half-landed close — the seal took and the lease release did not, so the board
+// shows a closed task somebody still holds.
+//
+// A NAMED WORKER IS NOT A LIVE LEASE, and reading it as one is how this check
+// spent its first life crying wolf on every ordinary close. The server does not
+// delete `content.claim` when it seals a row: `Tasks.Close.apply_close_update/9`
+// KEEPS the map and stamps `closed_by` + `closed_at` onto it in the SAME atomic
+// write as `lifecycle_status`, deliberately, so a closed row still says who did
+// the work and when. `claim.worker` therefore survives every successful close —
+// a sealed row that names a worker is the NORMAL shape, not a broken one. Only
+// a claim with NO close-out stamp is a lease the close failed to settle, and
+// that is the row this refuses.
+func closeClaimIsLive(req closeRequest, stored taskboard.SealRow, readback apiclient.TaskReadback) bool {
+	if stored.ClaimWorker == "" || stored.LifecycleStatus != req.wantSeal {
+		return false
+	}
+	return !closeClaimIsSettled(req, readback)
+}
+
+// closeClaimIsSettled decodes the close-out stamp off the raw `doc.claim` the
+// read-back carried. It reads the RAW claim rather than taskboard.SealRow
+// because the stamp is the server's own record of THIS close: `closed_by` is the
+// worker id the close was made with, written in the same rev-CAS update as the
+// seal, so a stamp naming this worker cannot be present unless the close landed
+// whole.
+//
+// `closed_at` alone also settles it — a server that stamped the timestamp and
+// not the id has still recorded a close-out, and inventing a half-landed close
+// out of a missing id would be the same false red in a smaller costume.
+func closeClaimIsSettled(req closeRequest, readback apiclient.TaskReadback) bool {
+	if len(readback.Claim) == 0 {
+		return false
+	}
+	var claim struct {
+		ClosedBy string `json:"closed_by"`
+		ClosedAt string `json:"closed_at"`
+	}
+	if json.Unmarshal(readback.Claim, &claim) != nil {
+		return false
+	}
+	closedBy := strings.TrimSpace(claim.ClosedBy)
+	if closedBy != "" {
+		// When the close named a worker, the stamp has to name the SAME one —
+		// an older close-out stamp left by somebody else settles nothing about
+		// this one.
+		if w := strings.TrimSpace(req.worker); w != "" {
+			return closedBy == w
+		}
+		return true
+	}
+	return strings.TrimSpace(claim.ClosedAt) != ""
 }
 
 // ── pulse ───────────────────────────────────────────────────────────────────

@@ -205,3 +205,44 @@ func TestDetailValueRendersEveryShape(t *testing.T) {
 		t.Errorf("parts are not key-sorted: %s", got)
 	}
 }
+
+// details.retry_after — the wait a rate_limited refusal names, and the field
+// the CLI discarded while `bp task close` died on a 429 the server had already
+// told it how to survive (task-154120e78138085a). The reader must survive every
+// shape `details` takes, exactly like every other accessor in this package:
+// a wrong shape returns ok=false, never a wrong number.
+func TestRetryAfterSeconds(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   string
+		want   float64
+		wantOK bool
+	}{
+		{"the measured envelope", `{"error":{"code":"rate_limited","message":"too many requests","details":{"retry_after":1}}}`, 1, true},
+		{"fractional", `{"error":{"code":"rate_limited","message":"m","details":{"retry_after":0.25}}}`, 0.25, true},
+		{"zero is a value, not an absence", `{"error":{"code":"rate_limited","message":"m","details":{"retry_after":0}}}`, 0, true},
+		{"negative rides through — policy belongs to the caller", `{"error":{"code":"rate_limited","message":"m","details":{"retry_after":-3}}}`, -3, true},
+		{"no details at all", `{"error":{"code":"rate_limited","message":"m"}}`, 0, false},
+		{"details without the key", `{"error":{"code":"rate_limited","message":"m","details":{"other":1}}}`, 0, false},
+		{"details is a list", `{"error":{"code":"rate_limited","message":"m","details":[1]}}`, 0, false},
+		{"details is a scalar", `{"error":{"code":"rate_limited","message":"m","details":"soon"}}`, 0, false},
+		{"the value is a string", `{"error":{"code":"rate_limited","message":"m","details":{"retry_after":"soon"}}}`, 0, false},
+		{"the value is null", `{"error":{"code":"rate_limited","message":"m","details":{"retry_after":null}}}`, 0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env, ok := Parse([]byte(c.body))
+			if !ok {
+				t.Fatalf("Parse declined %s", c.body)
+			}
+			got, gotOK := env.RetryAfterSeconds()
+			if gotOK != c.wantOK || (gotOK && got != c.want) {
+				t.Errorf("RetryAfterSeconds() = (%v, %v), want (%v, %v)", got, gotOK, c.want, c.wantOK)
+			}
+			// A bad details shape must never cost the sibling fields.
+			if env.Message == "" && env.Code == "" {
+				t.Error("the envelope lost both code and message")
+			}
+		})
+	}
+}

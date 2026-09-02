@@ -1,0 +1,21 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [
+    {
+      "row": "task-85c531c2adbf0dff",
+      "arm": "A",
+      "pr": 14001,
+      "class": "FULL"
+    }
+  ],
+  "must_contain": [
+    "arm-B coverage: 1/2 rows carry acceptance_criteria",
+    "1 row(s) carry NONE, so arm B is STRUCTURALLY BLIND to them (arm A still sees them): task-85c531c2adbf0dff",
+    "RESULT: 1 of 2 open rows carry a merge receipt",
+    "The floor is also short by construction: 1 row(s) carry no acceptance_criteria,"
+  ],
+  "must_not_contain": [
+    "REFUSAL:ROW_FETCH_INCOMPLETE"
+  ]
+}
