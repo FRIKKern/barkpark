@@ -10985,6 +10985,340 @@ test("diagnosis: a DEGRADED root is a measured FLOOR — 'or more', with the sub
   assert.match(html, /overlayfs/);
 });
 
+// ── #14795 the space RESIDUAL: what the roots did NOT measure ────────────────
+//
+// The deploy lane put `residual` + a per-root `excluded_reason` on the wire and
+// the console rendered neither, so both landed in the database and reached `bp`
+// but never the browser. Without the residual line, the roots above it are a
+// SUBSET of the disk with nothing saying how large a subset — which is the
+// silence the whole axis was built to end, one layer up.
+//
+// The wording reference is the Go CLI's shipped renderer
+// (internal/cli/cloud_instance_top_cmd.go spaceResidualLine / wordExclusion);
+// these assert its SEMANTICS, not its layout.
+
+test("#14795: the residual helpers are exported", () => {
+  for (const name of ["spaceResidualHead", "spaceResidualNote", "spaceResidualHtml",
+                      "spaceExclusionText", "spaceSharePct"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("#14795 state 1 of 3 — a DEFINED residual renders bytes AND the share, with the volume behind it", () => {
+  const model = hooks.spaceModel({
+    sites: { dir: "/opt/barkpark/sites", bytes: 4402341478, top: [], count: 0 },
+    consumer_roots: [{ path: "/var/lib/containerd", status: "read", bytes: 15032385536, count: 1, top: [] }],
+    residual: {
+      status: "computed",
+      bytes: 5368709120,          // 5 GiB unaccounted
+      of_bytes: 32212254720,      // of this box's 30 GiB used
+      measured_bytes: 26843545600,
+      counted_roots: 2,
+      excluded_roots: 1,
+      pg_source: "du-root",
+    },
+  }, null);
+
+  assert.equal(model.residual.status, "computed");
+  assert.equal(model.residual.bytes, 5368709120);
+  assert.equal(model.residual.ofBytes, 32212254720);
+
+  const html = hooks.spacePanelHtml(model);
+  assert.match(html, /Unaccounted/, "the line the panel was missing must exist at all");
+  assert.match(html, /5\.0 GB/, "a computed residual renders its size");
+  // NEVER A PERCENTAGE WITHOUT THE VOLUME BEHIND IT: the share and its
+  // denominator travel together, so nothing here can be quoted as a percent
+  // nobody can check.
+  assert.match(html, /16\.7% of this box&#39;s 30\.0 GB used/,
+    "the share must carry the denominator that produced it");
+  // COVERAGE IS THIS BOX'S, NEVER THE FLEET'S — said in as many words, because
+  // coverage is anti-correlated with trouble and a fleet average reads highest
+  // exactly where it is least true.
+  assert.match(html, /THIS box&#39;s coverage, never the fleet&#39;s/);
+  // The roots the subtraction was made over, counted — 2 measured + 1 excluded.
+  assert.match(html, /measured 2 of 3 root\(s\) on this box/);
+  assert.match(html, /the rest are named above with the reason they were not subtracted/);
+  // Which postgres measurement was used, rather than assumed.
+  assert.match(html, /postgres counted once, via its du root/);
+  assert.doesNotMatch(html, /not computable|not reported/,
+    "a computed residual must not also carry a refusal word");
+});
+
+test("#14795 state 2 of 3 — an UNDEFINED residual is a REFUSAL: no bytes, no percentage, never the -1", () => {
+  // The agent's clamp, on the wire: a negative arithmetic result becomes
+  // status "undefined" and `bytes` KEEPS the -1 sentinel (see
+  // MetricsSpaceResidual in internal/cloudclient/client.go — "a view must word
+  // it, never print it"). Disjoint trees on one filesystem cannot exceed its
+  // used total, so this state means the roots overlap or cross a mount.
+  const model = hooks.spaceModel({
+    sites: { dir: "/opt/barkpark/sites", bytes: 4402341478, top: [], count: 0 },
+    residual: {
+      status: "undefined",
+      bytes: -1,
+      of_bytes: 32212254720,       // 30 GiB used
+      measured_bytes: 34359738368, // 32 GiB measured — more than the box HAS used
+      reason: "measured-exceeds-root-used",
+    },
+  }, null);
+
+  // The MODEL is faithful to the wire; the VIEW is where the refusal happens.
+  // Nulling the sentinel in the fold would make this branch untestable — every
+  // arm would print the same em-dash and deleting the refusal would change
+  // nothing on screen.
+  assert.equal(model.residual.bytes, -1, "the model carries the wire's sentinel verbatim");
+
+  const head = hooks.spaceResidualHead(model.residual);
+  const note = hooks.spaceResidualNote(model.residual);
+  assert.equal(head, "not computable", "the head is a refusal word, never a size");
+  assert.doesNotMatch(note, /%/, "a refusal must not carry a share of anything");
+
+  const html = hooks.spacePanelHtml(model);
+  // THE GUARD. Revert spaceResidualHead's `undefined` branch to print bytes and
+  // this reds with "-1" in the rendered panel.
+  assert.doesNotMatch(html, /-1/,
+    "the wire's -1 sentinel must never reach a human eye — a view words it, it never prints it");
+  // And never the OTHER way an arithmetic failure could be laundered: 0 B
+  // unaccounted is the strongest claim this axis can make.
+  assert.doesNotMatch(html, /0 B unaccounted|>0 B</,
+    "a refusal must never be clamped to zero — that would claim we saw everything");
+  // The refusal, worded, with the reason a reader can act on.
+  assert.match(html, /not computable/);
+  assert.match(html, /the measured roots total 32\.0 GB against this box&#39;s 30\.0 GB used/,
+    "the refusal names the two figures that produced it");
+  assert.match(html, /the roots overlap or cross a mount/);
+  assert.match(html, /No figure is reported rather than a negative one/);
+});
+
+test("#14795 state 3 of 3 — an agent that PREDATES the residual says 'not reported', never 0 B", () => {
+  const model = hooks.spaceModel({
+    sites: { dir: "/opt/barkpark/sites", bytes: 4402341478, top: [], count: 0 },
+    consumer_roots: [{ path: "/var/lib/containerd", status: "read", bytes: 15032385536, count: 1, top: [] }],
+  }, null);
+  assert.equal(model.residual, null, "no `residual` key at all is a MISSING field, not a zero");
+
+  const html = hooks.spacePanelHtml(model);
+  assert.match(html, /Unaccounted/, "the absence is itself the fact — the line still renders");
+  assert.match(html, /not reported/);
+  assert.match(html, /this agent predates the residual/);
+  assert.match(html, /SUBSET of this box&#39;s disk and nothing says how large a subset/,
+    "an absent residual must say what the roots above it are NOT");
+  assert.doesNotMatch(html, /0 B/, "an unmeasured residual is not an empty one");
+  assert.doesNotMatch(html, /%/, "no share can be computed from a reading nobody made");
+  // The three states are three: none of them collapses into another.
+  assert.notEqual(hooks.spaceResidualHead(null), hooks.spaceResidualHead({ status: "undefined", bytes: -1, ofBytes: null, measuredBytes: null, countedRoots: null, excludedRoots: null, reason: null, pgSource: null }));
+});
+
+test("#14795: an UNMEASURED residual names WHY it could not be computed, and df is refused as a substitute", () => {
+  for (const [reason, needle] of [
+    ["root-used-unmeasured", /nothing to subtract from/],
+    ["root-device-unverified", /roots that cannot be placed cannot be subtracted/],
+  ]) {
+    const m = hooks.spaceModel({ residual: { status: "unmeasured", bytes: -1, reason: reason } }, null);
+    const html = hooks.spacePanelHtml(m);
+    assert.match(html, /not computed/);
+    assert.match(html, needle);
+    assert.doesNotMatch(html, /-1/, "the sentinel never reaches an eye on this arm either");
+  }
+  // df's capacity percent is ceil(used/(used+avail)) with root-reserved blocks
+  // excluded — a share of a DIFFERENT whole. Saying so is the point.
+  const m = hooks.spaceModel({ residual: { status: "unmeasured", reason: "root-used-unmeasured" } }, null);
+  assert.match(hooks.spacePanelHtml(m), /share of a different whole and is not a substitute/);
+});
+
+test("#14795: the residual fold is TOTAL — garbage degrades to a refusal, never to a figure", () => {
+  for (const bad of [null, undefined, "x", 7, []]) {
+    assert.equal(hooks.spaceModel({ residual: bad }, null).residual, null,
+      "a non-object residual is an ABSENT residual, never a computed one");
+  }
+  // An unrecognised status word degrades to "unmeasured" — never to "computed",
+  // which is the only arm that prints a number.
+  const m = hooks.spaceModel({ residual: { status: "brand-new-word", bytes: 999, of_bytes: 1000 } }, null);
+  assert.equal(m.residual.status, "unmeasured");
+  assert.equal(hooks.spaceResidualHead(m.residual), "not computed",
+    "an unknown status must never open the arm that prints bytes");
+  // A "computed" residual with no denominator is not a reading: a share with no
+  // whole is not a share.
+  const noDenom = hooks.spaceModel({ residual: { status: "computed", bytes: 500 } }, null);
+  assert.equal(hooks.spaceResidualHead(noDenom.residual), "not reported");
+  assert.equal(hooks.spaceSharePct(5, 0), "—", "a non-positive denominator is never divided by");
+  assert.equal(hooks.spaceSharePct(5, null), "—");
+});
+
+test("#14795: a root held OUT of the residual says WHY, beside the root — and an absent key adds nothing", () => {
+  // excluded_reason is INDEPENDENT of status: an overlay mount is a complete,
+  // CORRECT reading of a tree that is not on the root filesystem, so it reads
+  // "read" with real bytes and still cannot be subtracted. Gating the note on a
+  // status would drop it on exactly the roots that carry it.
+  const model = hooks.spaceModel({
+    consumer_roots: [
+      { path: "/var/lib/containerd", status: "read", bytes: 15032385536, count: 1, top: [], excluded_reason: "cross-mount" },
+      { path: "/opt/barkpark/sites", status: "read", bytes: 4402341478, count: 1, top: [] },
+      { path: "/var/lib/postgresql", status: "read", bytes: 3650722201, count: 1, top: [], excluded_reason: "under:/var/lib" },
+      { path: "/mnt/vol", status: "absent", bytes: -1, excluded_reason: "device-unverified" },
+      { path: "/srv/extra", status: "read", bytes: 4096, count: 1, top: [], excluded_reason: "a-slug-this-console-has-never-seen" },
+    ],
+  }, null);
+
+  assert.equal(model.consumerRoots[0].excludedReason, "cross-mount");
+  assert.equal(model.consumerRoots[1].excludedReason, null, "a root with no exclusion carries none");
+  assert.equal(model.consumerRoots[3].excludedReason, "device-unverified",
+    "the reason survives on a NON-read root too — status and exclusion are independent");
+
+  const html = hooks.spacePanelHtml(model);
+  assert.match(html, /on a different filesystem than \/, so these bytes are not in this box&#39;s root-filesystem total/);
+  assert.match(html, /already counted inside \/var\/lib/);
+  assert.match(html, /this agent could not tell which filesystem it is on, and unknown is not the same as same/);
+  // An UNKNOWN slug is carried verbatim, never dropped: a reason we have no
+  // sentence for is still a reason, and vanishing turns "held out, because X"
+  // into "counted".
+  assert.match(html, /NOT subtracted: a-slug-this-console-has-never-seen/);
+  // Exactly four notes for four excluded roots — the fifth root grows nothing.
+  assert.equal((html.match(/NOT subtracted/g) || []).length, 4,
+    "a root with no excluded_reason must render no note at all");
+});
+
+// ── #14886 slot_units: IS THE BLUE/GREEN DEPLOY PAIR INTACT ──────────────────
+//
+// On 2026-08-06 `barkpark-slot@blue` sat in `failed` while every operator
+// surface read `ok`, because every verdict on the row was computed from HOST
+// vitals and none of them could see a dead slot. The CLI half shipped
+// (internal/cli/cloud_status_cmd.go slotUnitMarker); the console rendered
+// nothing.
+
+const SLOT_FAILED_PAIR = {
+  id: "bp-slot-1", name: "guerrilla", host: "guerrilla.example", slug: "guerrilla",
+  health_status: "up", agent_status: "online",
+  pressure: {
+    slot_units: [
+      { unit: "barkpark-slot@green.service", active_state: "active", sub_state: "running", main_pid: 4711 },
+      {
+        unit: "barkpark-slot@blue.service", active_state: "failed", sub_state: "failed",
+        result: "exit-code", exec_main_status: 143, main_pid: 0,
+        state_since: "Tue 2026-09-01 11:07:52 UTC",
+      },
+      {
+        unit: "barkpark-site@search__b.service", active_state: "failed", sub_state: "failed",
+        result: "exit-code", exec_main_status: 143,
+      },
+    ],
+    slot_units_truncated: 3,
+  },
+};
+
+test("#14886: the slot_units helpers are exported", () => {
+  for (const name of ["slotUnitsModel", "slotUnitsText", "fleetSlotUnitsText", "slotUnitShortName"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("#14886: a FAILED slot is visible AT A GLANCE on the fleet row — state, name, why, and since when", () => {
+  const m = hooks.slotUnitsModel(SLOT_FAILED_PAIR);
+  assert.equal(m.state, "failed");
+  assert.deepEqual([...m.serving.map((u) => u.name)], ["green"]);
+  assert.deepEqual([...m.failedSlots.map((u) => u.name)], ["blue"]);
+  assert.deepEqual([...m.failedSites.map((u) => u.name)], ["search__b"]);
+  // An `active` unit with MainPID 0 has no process; a failed one never vouches.
+  assert.equal(m.failedSlots[0].mainPid, 0);
+
+  const row = hooks.fleetRow(SLOT_FAILED_PAIR);
+  // THE CASE THE FIELD IS ABOUT: the box IS serving, and half the pair is down
+  // anyway — the next deploy has nowhere to cut over TO.
+  assert.match(row, /serving on green/);
+  assert.match(row, /blue slot FAILED/, "the failed half is named, in a word nobody scans past");
+  // result AND exec_main_status, together or not at all: 143 is 128+15, a clean
+  // SIGTERM filed as an exit code (PR #14863). `exit-code` alone reports a
+  // deliberate retire as a crash.
+  assert.match(row, /\(exit-code 143\)/);
+  // systemd's own timestamp, verbatim — never reformatted into a second source
+  // of truth for a fact systemd already states.
+  assert.match(row, /since Tue 2026-09-01 11:07:52 UTC/);
+  // The capped SITE list says it is capped, rather than passing for a whole one.
+  assert.match(row, /1 site unit\(s\) failed: search__b/);
+  assert.match(row, /\(\+3 more, TRUNCATED by the agent&#39;s cap\)/,
+    "a truncated list must SAY it was truncated");
+});
+
+test("#14886: an absent slot_units key reads 'not reported' on the instance rail — never an empty green", () => {
+  // Three states, kept three. `length === 0` is true of BOTH the unmeasured and
+  // the measured-intact box, so a reader that means "we looked and it is clean"
+  // must test for the ARRAY, not for emptiness.
+  const never = { id: "x", name: "n", host: "h", slug: "n", pressure: {} };
+  const noPressure = { id: "x", name: "n", host: "h", slug: "n" };
+  const measuredEmpty = { id: "x", name: "n", host: "h", slug: "n", pressure: { slot_units: [] } };
+
+  assert.equal(hooks.slotUnitsModel(never).state, "unmeasured");
+  assert.equal(hooks.slotUnitsModel(noPressure).state, "unmeasured",
+    "a fleet row from an older control plane is UNMEASURED, not intact");
+  assert.equal(hooks.slotUnitsModel(measuredEmpty).state, "empty");
+  assert.notEqual(hooks.slotUnitsText(hooks.slotUnitsModel(never)),
+    hooks.slotUnitsText(hooks.slotUnitsModel(measuredEmpty)),
+    "unmeasured and measured-intact must not render the same sentence");
+
+  const railed = hooks.instanceOverviewHtml(never, {});
+  assert.match(railed, /Deploy pair<\/span><span class="v plain">not reported/,
+    "an unmeasured deploy pair says so out loud, beside a green Health row");
+  assert.match(railed, /nothing here says whether the blue\/green pair is intact/);
+  // And a FAILED pair reaches the same rail with the failure spelled out.
+  assert.match(hooks.instanceOverviewHtml(SLOT_FAILED_PAIR, {}), /Deploy pair<\/span><span class="v plain">serving on green; blue slot FAILED/);
+});
+
+test("#14886: the fleet LIST stays silent on every state but a failure — the same rule the Go table keeps", () => {
+  // slotUnitMarker returns "" for both unmeasured and intact: neither has a
+  // failure to NAME, and a list a person scans must not grow a segment on every
+  // row to say nothing. The three-state readout lives on the rail.
+  const intact = {
+    id: "i", name: "i", host: "h", slug: "i",
+    pressure: {
+      slot_units: [
+        { unit: "barkpark-slot@blue.service", active_state: "active", sub_state: "running", main_pid: 21 },
+        { unit: "barkpark-slot@green.service", active_state: "active", sub_state: "running", main_pid: 22 },
+      ],
+      slot_units_truncated: 0,
+    },
+  };
+  const m = hooks.slotUnitsModel(intact);
+  assert.equal(m.state, "serving");
+  assert.equal(hooks.slotUnitsText(m), "serving on blue+green");
+  assert.equal(hooks.fleetSlotUnitsText(intact), "", "an intact pair adds no fleet-list segment");
+  assert.equal(hooks.fleetSlotUnitsText({ pressure: {} }), "", "nor does an unmeasured one");
+  assert.match(hooks.fleetSlotUnitsText(SLOT_FAILED_PAIR), /blue slot FAILED/);
+
+  // An `active` slot whose main pid is 0 or missing is NOT serving — that is how
+  // a box with nothing running reads healthy.
+  for (const pid of [0, null, undefined, -1]) {
+    const zombie = { pressure: { slot_units: [{ unit: "barkpark-slot@blue.service", active_state: "active", sub_state: "exited", main_pid: pid }] } };
+    const zm = hooks.slotUnitsModel(zombie);
+    assert.deepEqual([...zm.serving], [], "an active unit with no process is not serving (pid " + String(pid) + ")");
+    assert.equal(zm.state, "idle");
+    assert.equal(hooks.slotUnitsText(zm), "no blue/green slot is active");
+  }
+});
+
+test("#14886: the slot_units fold is TOTAL — garbage never fabricates an intact pair", () => {
+  for (const bad of [null, undefined, 0, "x", [], { pressure: "nope" }, { pressure: { slot_units: "nope" } }]) {
+    const m = hooks.slotUnitsModel(bad);
+    assert.equal(m.state, "unmeasured");
+    assert.match(hooks.slotUnitsText(m), /^not reported/);
+  }
+  // A row with no unit name cannot be rendered or acted on.
+  const m = hooks.slotUnitsModel({ pressure: { slot_units: [{ active_state: "failed" }, "junk", null] } });
+  assert.equal(m.state, "empty", "nothing survived the filter, so nothing is claimed");
+  assert.equal(hooks.slotUnitsText(m), "measured — systemd reported no barkpark-slot units on this box");
+  // A unit matching neither template shape is carried VERBATIM, not mangled.
+  assert.equal(hooks.slotUnitShortName("caddy.service"), "caddy");
+  assert.equal(hooks.slotUnitShortName("barkpark-slot@green.service"), "green");
+  assert.equal(hooks.slotUnitShortName("barkpark-site@search__b.service"), "search__b");
+  // A truncation with no VISIBLE failures still says it truncated — and still
+  // counts as a failure. `slot_units_truncated` counts failed SITE units the
+  // agent's cap hid, so a capped list that read "intact" would be the cap
+  // laundering the very failures it withheld.
+  const t = hooks.slotUnitsModel({ pressure: { slot_units: [], slot_units_truncated: 5 } });
+  assert.equal(t.state, "failed", "hidden failures are still failures");
+  assert.equal(hooks.slotUnitsText(t), "5 failed site unit(s) TRUNCATED by the agent's cap");
+  assert.match(hooks.fleetSlotUnitsText({ pressure: { slot_units: [], slot_units_truncated: 5 } }),
+    /5 failed site unit\(s\) TRUNCATED/, "a cap that hides failures reaches the fleet list too");
+});
+
 test("diagnosis: the models are TOTAL — garbage never throws, and never fabricates calm", () => {
   for (const bad of [null, undefined, 0, "x", [], { signals: "nope" }, { state: "made-up" }]) {
     const m = hooks.pressureModel(bad);
