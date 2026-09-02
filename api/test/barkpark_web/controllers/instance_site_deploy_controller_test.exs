@@ -179,12 +179,22 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
 
       assert Enum.sort(Map.keys(door)) == [
                "capacity",
+               "door_open_admissions",
+               "door_open_admissions_total",
                "in_flight_slugs",
                "measured_at",
                "observed_in_flight",
                "refusals_since",
                "refusals_total"
              ]
+
+      # The door's OTHER half: builds it let through without a second opinion
+      # (no /proc/locks, an unreadable one, a lock it could not stat). It has
+      # always failed open in those cases; until dr-w12 it did so silently, so
+      # the leak the refusal count hides had no number at all. Counted by
+      # reason, so the dev-box case never hides the operator case.
+      assert is_integer(door["door_open_admissions_total"])
+      assert is_map(door["door_open_admissions"])
 
       # RE-ANCHORED (dr-w26-s7). This used to read `== body["build_slots"]`,
       # which compared the wire to a wire field the wire itself produced from
