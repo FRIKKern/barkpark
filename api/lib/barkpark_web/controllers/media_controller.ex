@@ -5,6 +5,7 @@ defmodule BarkparkWeb.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.{Blobstore, Delivery, Renditions}
   alias Barkpark.Media.Storage.{Access, MediaFile}
+  alias Barkpark.Media.WhereUsed
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -740,13 +741,42 @@ defmodule BarkparkWeb.MediaController do
   end
 
   @doc "Delete a media file."
-  def delete(conn, %{"id" => id}) do
-    # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row `Repo.delete/2`
-    # removed (media.ex:425-452). This used to discard it and echo the `:id` path
-    # param; `filename` is stored state the request never carries, so reverting
-    # to the echo reds the differential.
-    with {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+  def delete(conn, %{"id" => id} = params) do
+    # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed media as
+    # RAW `/media/files/...` URL STRINGS, invisible to every reference graph, so
+    # this door used to answer 200 while blanking a live page. Consult usage
+    # BEFORE the irreversible `Media.delete_file/2`. See `Media.WhereUsed`.
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         :ok <- refuse_if_referenced(conn, file, params),
+         # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row
+         # `Repo.delete/2` removed (media.ex:425-452). This used to discard it
+         # and echo the `:id` path param; `filename` is stored state the request
+         # never carries, so reverting to the echo reds the differential.
+         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
       json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
+    end
+  end
+
+  # `:ok` to proceed, or a HALTED conn carrying the 409 census. Returning the
+  # conn (not an error tuple) keeps the refusal out of `Content.Errors` — the
+  # envelope reuses the public `conflict` code but carries a `details` census
+  # that no shared builder would know how to assemble.
+  defp refuse_if_referenced(conn, file, params) do
+    if WhereUsed.forced?(params) do
+      :ok
+    else
+      case WhereUsed.referrers(file) do
+        %{count: 0} ->
+          :ok
+
+        census ->
+          env = Errors.stamp(WhereUsed.refusal_envelope(file, census), conn)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{error: env})
+          |> halt()
+      end
     end
   end
 

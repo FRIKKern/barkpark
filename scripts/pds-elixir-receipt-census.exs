@@ -67,6 +67,7 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --sites    # + every emitted site, one per line
 #   elixir scripts/pds-elixir-receipt-census.exs --files-from FILE   # corpus-refusal rehearsal
 #   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
+#   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
 # EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused OR
@@ -1165,7 +1166,7 @@ defmodule PDS.Census do
       literal: "Scim.delete_group(org, group)",
       anchor_mfa: "BarkparkWeb.ScimGroupsController.delete/2", def_fp: "48311107",
       verdict: "PROVEN", basis: :end_to_end,
-      note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670, and that verdict outlived its defect by a whole wave). Scim.delete_group/2 (scim.ex:502-516) now returns {:error, :not_found} when Repo.delete_all removed nothing, so {:ok, 0} is UNREACHABLE, and the caller cases on the tag rather than discarding it: {:ok, _n} -> 204, {:error, :not_found} -> a SCIM 404. Driven and read back: scim_groups_controller_test.exs:215 deletes the row out from under the request through a repo telemetry handler, then asserts the 404 AND `refute Repo.get(Group, gid)`."},
+      note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670, and that verdict outlived its defect by a whole wave). Scim.delete_group/2 (scim.ex:502-516) now returns {:error, :not_found} when Repo.delete_all removed nothing, so {:ok, 0} is UNREACHABLE, and the caller cases on the tag rather than discarding it: {:ok, _n} -> 204, {:error, :not_found} -> a SCIM 404. Driven and read back: scim_groups_controller_test.exs `the group vanishes between the read and the delete → 404, never 204` deletes the row out from under the request through a repo telemetry handler, then asserts the 404 AND `refute Repo.get(Group, gid)`."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "Scim.deprovision_user(org, user, hard: true)",
       anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067",
@@ -1175,7 +1176,7 @@ defmodule PDS.Census do
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
       anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031",
       verdict: "PROVEN", basis: :end_to_end,
-      note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs:129 posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
+      note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs `clears the session and redirects to /studio` posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
       anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "99902146",
@@ -1221,7 +1222,9 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/app_token_controller.ex",
             "BarkparkWeb.AppTokenController.delete_by_id/2", "15384850", "117712781"},
       verdict: "PROVEN", basis: :end_to_end,
-      evidence: "api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs:162"},
+      evidence:
+        {"api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs",
+         ~S|test "revoking by id actually stops the token authenticating", %{admin: admin} do|}},
     # barkpark_web/controllers/auth_controller.ex:177
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.erase/2", "14672314", "70062513"},
@@ -1233,7 +1236,7 @@ defmodule PDS.Census do
       note:
         "AUTHORED, not inherited: PATCH /v1/auth/password is a new door on the existing " <>
         "Accounts.update_user_password/3 primitive. NOT DEMOTED FOR WEAKNESS — the cited " <>
-        "suite (auth_password_test.exs:30) is a genuine behavioural end-to-end: it drives " <>
+        "suite (auth_password_test.exs `changes the password with current-password reauth, then the session is dead`) is a genuine behavioural end-to-end: it drives " <>
         "the route, then certifies the post-condition through a SECOND route, asserting the " <>
         "old password 401s on /v1/auth/login while the new one 201s, and that the acting " <>
         "session is revoked. What it does not do is read the stored row, and end_to_end's " <>
@@ -1246,7 +1249,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/auth_controller.ex:329
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.revoke_session/2", "14482306", "17656195"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:369"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
+        {"api/test/barkpark_web/controllers/auth_controller_test.exs",
+         ~S|test "revoking ANOTHER session kills it, keeps mine, and audits", %{token_a: a, token_b: b} do|}},
     # barkpark_web/controllers/auth_controller.ex:351
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.logout/2", "893943", "17468236"},
@@ -1270,22 +1275,30 @@ defmodule PDS.Census do
     # barkpark_web/controllers/auth_controller.ex:463
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.reset/2", "117976982", "93237454"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs:64",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs",
+         ~S|test "the receipt's sessionsRevoked EQUALS the rows the revoke stamped", %{user: user} do|},
       attestation:
-        "mutation: hardcode sessionsRevoked — `mix test api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs:64` reds on Repo.aggregate",
+        "mutation: hardcode sessionsRevoked — `mix test api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs` — the test `the receipt's sessionsRevoked EQUALS the rows the revoke stamped` — reds on Repo.aggregate",
     },
     # barkpark_web/controllers/auth_controller.ex:528
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.mfa_verify/2", "16615157", "38279071"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
+        {"api/test/barkpark_web/controllers/auth_controller_test.exs",
+         ~S|test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{|}},
     # barkpark_web/controllers/auth_controller.ex:567
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.mfa_disable/2", "103479204", "17468236"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
+        {"api/test/barkpark_web/controllers/auth_controller_test.exs",
+         ~S|test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{|}},
     # barkpark_web/controllers/auth_controller.ex:600
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.mfa_step_up/2", "85508749", "111398976"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
+        {"api/test/barkpark_web/controllers/auth_controller_test.exs",
+         ~S|test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{|}},
     # barkpark_web/controllers/bulldocs_form_controller.ex:50
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
             "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "127244318"},
@@ -1299,11 +1312,13 @@ defmodule PDS.Census do
             "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs:319) reads nothing back at all, so it cannot even assert that."},
+        "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:244
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_html/4", "19560303", "124223564"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:97"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs",
+         ~S|test "a second POST with the same slug updates in place (upsert)", %{conn: conn} do|}},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:321
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_session/2", "11366553", "107043790"},
@@ -1328,13 +1343,13 @@ defmodule PDS.Census do
             "BarkparkWeb.BulldocsIngestController.apply_op_batch/4", "93603959", "10224315"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. The brief ruled it end_to_end_unmutated; the arm refused the citation (bulldocs_ingest_controller_test.exs:595 drives the batch route but never reads the paper back), so the receipt-vs-stored-row question is unjudged."},
+        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. The brief ruled it end_to_end_unmutated; the arm refused the citation (bulldocs_ingest_controller_test.exs `a 3-op batch applies atomically and returns a minimal receipt with the new rev` drives the batch route but never reads the paper back), so the receipt-vs-stored-row question is unjudged."},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:715
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.apply_op/2", "85655901", "15024779"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. Same shape as its batch sibling: bulldocs_ingest_controller_test.exs:397 drives the single-op route and asserts the returned fragment, and nothing reads the stored paper back."},
+        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. Same shape as its batch sibling: bulldocs_ingest_controller_test.exs `valid op + bearer applies, bumps rev, broadcasts a delta, returns the fragment` drives the single-op route and asserts the returned fragment, and nothing reads the stored paper back."},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:814
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.propose/2", "78347098", "122622379"},
@@ -1350,7 +1365,7 @@ defmodule PDS.Census do
             "BarkparkWeb.BulldocsIngestController.sync_persist/6", "94329464", "19447210"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "DEMOTED BY THE FALSIFIER'S OWN LENS, same shape as its apply_op siblings. The cycle test (bulldocs_bpml_api_test.exs:221) pushes, then re-PULLS the paper over the public HTTP read path and asserts the stored document byte-equals the receipt's canonical BPML — a real read-back the arm cannot see, because it keys on a `Repo.` read in the cited block. The row says what the lens can stand behind."},
+        "DEMOTED BY THE FALSIFIER'S OWN LENS, same shape as its apply_op siblings. The cycle test (bulldocs_bpml_api_test.exs `the full cycle: pull, edit the file, push, converge on canonical`) pushes, then re-PULLS the paper over the public HTTP read path and asserts the stored document byte-equals the receipt's canonical BPML — a real read-back the arm cannot see, because it keys on a `Repo.` read in the cited block. The row says what the lens can stand behind."},
     # BPML create-on-push (masterplan W3 / charter D41, rides #11934) — the CREATED
     # receipt: `ok: true, created: true` after Content.upsert_paper births the paper
     # through the full publish wall on an absent slug.
@@ -1358,7 +1373,7 @@ defmodule PDS.Census do
             "BarkparkWeb.BulldocsIngestController.sync_create_persist/6", "68602513", "127789733"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "A RECEIPT, not a phantom, but UNJUDGED by this lens — same shape as its sync_persist/6 sibling. The create test (bulldocs_ingest_controller_test.exs:1382) drives the create-on-push sync route AND reads the stored row back with `Content.get_paper(slug)`, asserting the persisted title, blocks, description and tags — a genuine receipt-vs-stored-row differential. But `Content.get_paper(` is not in @repo_tokens (`Repo.` · `Content.get_document(` · `Conflicts.list(`), so end_to_end's falsifier cannot see the second hop; the row says what the lens can stand behind, not more."},
+        "A RECEIPT, not a phantom, but UNJUDGED by this lens — same shape as its sync_persist/6 sibling. The create test (bulldocs_ingest_controller_test.exs `a wall-passing document CREATES the paper (200 created), and pulls back clean`) drives the create-on-push sync route AND reads the stored row back with `Content.get_paper(slug)`, asserting the persisted title, blocks, description and tags — a genuine receipt-vs-stored-row differential. But `Content.get_paper(` is not in @repo_tokens (`Repo.` · `Content.get_document(` · `Conflicts.list(`), so end_to_end's falsifier cannot see the second hop; the row says what the lens can stand behind, not more."},
     # barkpark_web/controllers/bulldocs_intents_controller.ex:50
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
             "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},
@@ -1385,8 +1400,9 @@ defmodule PDS.Census do
     # today's tree carries THREE. Their disposition is stated HERE so the absence
     # is a judgment and not a silence:
     #
-    #   :220 merge_reconcile_failed — BOUGHT, GENUINELY, at
-    #     api/test/barkpark_web/controllers/github_webhook_integration_test.exs:287.
+    #   :220 merge_reconcile_failed — BOUGHT, GENUINELY, in
+    #     api/test/barkpark_web/controllers/github_webhook_integration_test.exs, by the
+    #     test `a LOST rev-CAS race → 500 merge_reconcile_failed and the gate stays UNMET`.
     #     No seam is stubbed: the REAL MergeEvents -> Tasks.reconcile_merge_gate ->
     #     Postgres path runs and LOSES A REAL rev-CAS. `reconcile_merge_gate/3`
     #     opens a txn, takes `pg_advisory_xact_lock`, reads the task by PK, then
@@ -1432,62 +1448,90 @@ defmodule PDS.Census do
     # barkpark_web/controllers/github_webhook_controller.ex:111
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "124460091"},
-      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:201"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
+        {"api/test/barkpark/plugins/github/inbound_events_test.exs",
+         ~S|test "Bot-sender close → :dropped, NO detach (the App's own close echo)",|}},
     # barkpark_web/controllers/github_webhook_controller.ex:115
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "96836141"},
-      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:201"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
+        {"api/test/barkpark/plugins/github/inbound_events_test.exs",
+         ~S|test "Bot-sender close → :dropped, NO detach (the App's own close echo)",|}},
     # barkpark_web/controllers/github_webhook_controller.ex:120
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "39153928"},
-      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:235"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
+        {"api/test/barkpark/plugins/github/inbound_events_test.exs",
+         ~S|test "a Bot-sender deleted → :dropped, NO detach", %{scope: scope} do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:145
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "38180227"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:165"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a signed issues.opened delivery → 2xx and a real gh-<num> task is born" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:150
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "96836141"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:112"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "bot-drop result (:dropped) answers 200 — never a retry-storm on a loop cut" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:154
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "39153928"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:122"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "a non-opened, non-inbound action (edited → :ignored) answers 202 via Intake" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:161
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "109773520"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:189
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "46526763"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:209",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a signed merged pull_request → the stamped: receipt matches the stored row", %{|},
       attestation:
-        "mutation: render stamped: without the merge write — `mix test api/test/barkpark_web/controllers/github_webhook_integration_test.exs:209` reds on Repo.get!",
+        "mutation: render stamped: without the merge write — `mix test api/test/barkpark_web/controllers/github_webhook_integration_test.exs` — the test `a signed merged pull_request → the stamped: receipt matches the stored row` — reds on Repo.get!",
     },
     # barkpark_web/controllers/github_webhook_controller.ex:194
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "107251666"},
-      verdict: "UNJUDGED", basis: :partial_tag_coverage, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244",
+      verdict: "UNJUDGED", basis: :partial_tag_coverage, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a REDELIVERED merged pull_request → reconciled: already_stamped and NO second write", %{|},
       tags: [
-        %{tag: :already_stamped, verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244",
+        %{tag: :already_stamped, verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+         ~S|test "a REDELIVERED merged pull_request → reconciled: already_stamped and NO second write", %{|},
           attestation:
-            "PDS w36 crit 4 — the no-write post-condition mutation-proven on the WRITE path, never the classifier. Wave 36's own mutation moved the classification, which flips the printed tag FIRST, so the `rev` assert was carried by the receipt assert and never stood alone. The mutation that isolates it: a stray touch inside `Tasks.Close.reconcile_merge_gate/3`'s transaction (`Repo.update_all(from(d in Document, where: d.id == ^task_id), set: [rev: generate_rev(), updated_at: DateTime.utc_now()])`, right after the advisory lock and BEFORE `reconcile_locked/4` classifies) — the receipt still reads `reconciled: \"already_stamped\"` and the `stamped:` case at :209 stays green, while :244's rev assert and the store-only sibling at :331 both red."},
-        %{tag: :no_marker, verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+            "PDS w36 crit 4 — the no-write post-condition mutation-proven on the WRITE path, never the classifier. Wave 36's own mutation moved the classification, which flips the printed tag FIRST, so the `rev` assert was carried by the receipt assert and never stood alone. The mutation that isolates it: a stray touch inside `Tasks.Close.reconcile_merge_gate/3`'s transaction (`Repo.update_all(from(d in Document, where: d.id == ^task_id), set: [rev: generate_rev(), updated_at: DateTime.utc_now()])`, right after the advisory lock and BEFORE `reconcile_locked/4` classifies) — the receipt still reads `reconciled: \"already_stamped\"` and the `stamped:` case `a signed merged pull_request → the stamped: receipt matches the stored row` stays green, while the cited test's own rev assert and the store-only sibling `a REDELIVERED merged pull_request writes NOTHING — store-only post-condition` both red."},
+        %{tag: :no_marker, verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
         %{tag: :no_guardable_marker, verdict: "UNJUDGED", basis: :no_observer, evidence: ""},
       ],
     },
     # barkpark_web/controllers/github_webhook_controller.ex:200
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "28623217"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:205
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "62383269"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
     # barkpark_web/controllers/github_webhook_controller.ex:209
     %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "1432007"},
-      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
+        {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
+         ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
     # barkpark_web/controllers/oidc_controller.ex:82
     %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
             "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
@@ -1506,9 +1550,11 @@ defmodule PDS.Census do
     # barkpark_web/controllers/plugin_settings_controller.ex:65
     %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
             "BarkparkWeb.PluginSettingsController.delete/2", "52373358", "17468236"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:272",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs",
+         ~S|test "PUT ok:true means the settings map is stored AND a write audit row exists", %{|},
       attestation:
-        "mutation: 200 without deleting the row — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:272` reds",
+        "mutation: 200 without deleting the row — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs` — the test `PUT ok:true means the settings map is stored AND a write audit row exists` — reds",
     },
     # barkpark_web/controllers/pulse_controller.ex:58
     %{key: {"api/lib/barkpark_web/controllers/pulse_controller.ex",
@@ -1521,7 +1567,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/saml_controller.ex:66
     %{key: {"api/lib/barkpark_web/controllers/saml_controller.ex",
             "BarkparkWeb.SamlController.acs/2", "32993266", "73996638"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/saml_controller_test.exs:117"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/saml_controller_test.exs",
+         ~S|test "POST ACS consumes a signed response, mints a session, and JIT-provisions", %{conn: conn} do|}},
     # barkpark_web/controllers/search_controller.ex:190
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.reindex/2", "43259676", "54848977"},
@@ -1529,14 +1577,18 @@ defmodule PDS.Census do
     # barkpark_web/controllers/search_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:67",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs",
+         ~S|test "search surface: ok:true is read back — the row is GONE", %{conn: conn} do|},
       attestation:
-        "mutation: flip `Synonyms.delete/4` to return {:ok, 0} without deleting — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:67` reds on the Repo read",
+        "mutation: flip `Synonyms.delete/4` to return {:ok, 0} without deleting — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs` — the test `search surface: ok:true is read back — the row is GONE` — reds on the Repo read",
     },
     # barkpark_web/controllers/search_controller.ex:337
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.search_interaction/2", "79721084", "115364326"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/integration/v1_data_search_suggestions_test.exs:84"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/integration/v1_data_search_suggestions_test.exs",
+         ~S|test "interaction records click against search event", %{conn: conn} do|}},
     # barkpark_web/controllers/search_controller.ex:340
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
@@ -1548,9 +1600,11 @@ defmodule PDS.Census do
     # barkpark_web/controllers/secret_controller.ex:80
     %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
             "BarkparkWeb.SecretController.delete/2", "115609568", "17468236"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:145",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs",
+         ~S|test "ok:true means the secret is gone AND the delete audit row exists", %{conn: conn} do|},
       attestation:
-        "mutation: skip the audit insert — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:145` reds on the audit row",
+        "mutation: skip the audit insert — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs` — the test `ok:true means the secret is gone AND the delete audit row exists` — reds on the audit row",
     },
     # barkpark_web/controllers/self_update_controller.ex:24
     %{key: {"api/lib/barkpark_web/controllers/self_update_controller.ex",
@@ -1582,7 +1636,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2919"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/tasks_controller_test.exs",
+         ~S|test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",|}},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
@@ -1590,19 +1646,27 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:435
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim_by_id/2", "59151065", "67476"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:105"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_test.exs",
+         ~S|test "claim (claim.ex do_claim)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:558
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.release/2", "64399052", "86587931"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:950"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/tasks_controller_test.exs",
+         ~S|test "holder release clears the lease and assignee, bumps epoch, and emits exactly one event",|}},
     # barkpark_web/controllers/tasks_controller.ex:587
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.close_response/3", "102889179", "17778956"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:149"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_test.exs",
+         ~S|test "close (close.ex apply_close_update)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:652
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3631"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
+        {"api/test/barkpark_web/controllers/tasks_controller_test.exs",
+         ~S|test "a park with a trigger persists all three keys", %{conn: conn, scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:963 — the NON-HOLDER landing
     # mark (task-59fe7b40b719b379). AUTHORED, not inherited: POST
     # /v1/tasks/:doc_id/landed is a new routed-write arrival, and this row is what
@@ -1619,15 +1683,21 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.landed/2", "128978084", "84462998"},
       verdict: "PROVEN", basis: :end_to_end_unmutated,
-      evidence: "api/test/barkpark_web/controllers/tasks_landed_test.exs:92"},
+      evidence:
+        {"api/test/barkpark_web/controllers/tasks_landed_test.exs",
+         ~S|test "a fresh row records commit/pr/note with NO worker_id and NO epoch",|}},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:126"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_test.exs",
+         ~S|test "stamp (stamp.ex apply_stamp_update)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:861
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:169"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
+         ~S|test "pulse (pulse.ex apply_pulse)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:961
     # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
     # unchanged success body to edges_for_kind/3, so the emitting def moved and
@@ -1661,27 +1731,39 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1289
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.add_edge/2", "32780970", "67314930"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:165"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_test.exs",
+         ~S|test "merge reconcile (close.ex write_reconcile)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:1327
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.relabel/2", "7475620", "84462998"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:209"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
+         ~S|test "relabel (mutations.ex relabel_by_id)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:1352
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2105"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
+        {"api/test/barkpark_web/controllers/tasks_controller_test.exs",
+         ~S|test "add: union-adds two paper refs, emits task.referenced; remove is idempotent",|}},
     # barkpark_web/controllers/tasks_controller.ex:1379
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:234"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
+         ~S|test "session refs (mutations.ex update_ref_list_by_id — the SAME arm, second endpoint)",|}},
     # barkpark_web/controllers/tasks_controller.ex:1422
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.move/2", "90153949", "84462998"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:194"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
+         ~S|test "move (move.ex do_move)", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:1655
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.fleet_beat/2", "8622444", "8757049"},
-      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:266"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence:
+        {"api/test/barkpark/tasks/receipt_honesty_remainder_test.exs",
+         ~S|test "the beat receipt's every key is the stored listener row", %{scope: scope} do|}},
     # barkpark_web/controllers/tasks_controller.ex:1696
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.fleet_roster/2", "116314994", "118018566"},
@@ -1708,16 +1790,20 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
             "BarkparkWeb.TicketsController.render_ticket/3", "77961612", "114383917"},
       verdict: "PROVEN", basis: :end_to_end,
-      evidence: "api/test/barkpark_web/controllers/tickets_controller_test.exs:237",
+      evidence:
+        {"api/test/barkpark_web/controllers/tickets_controller_test.exs",
+         ~S|test "the 201 ticket names a real row and reports that row's content faithfully",|},
       attestation:
-        "mutation on the WRITE path, not the renderer: `Thread.create/2` persists a `waiting_since` DIFFERENT from the one it returns (`Content.create_document` gets the mutated content, the caller gets the honest struct), so render_ticket/3 prints a faithful-looking 201 over a row that says something else — `mix test api/test/barkpark_web/controllers/tickets_controller_test.exs:237` reds on the stored-vs-printed compare while every receipt-only test in the file stays green.",
+        "mutation on the WRITE path, not the renderer: `Thread.create/2` persists a `waiting_since` DIFFERENT from the one it returns (`Content.create_document` gets the mutated content, the caller gets the honest struct), so render_ticket/3 prints a faithful-looking 201 over a row that says something else — `mix test api/test/barkpark_web/controllers/tickets_controller_test.exs` — the test `the 201 ticket names a real row and reports that row's content faithfully` — reds on the stored-vs-printed compare while every receipt-only test in the file stays green.",
     },
     # barkpark_web/controllers/v1/media_controller.ex:188
     %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
             "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:82",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs",
+         ~S|test "media surface: ok:true is read back — the row is GONE", %{conn: conn} do|},
       attestation:
-        "mutation: return the media surface's receipt without the delete — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:82` reds",
+        "mutation: return the media surface's receipt without the delete — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs` — the test `media surface: ok:true is read back — the row is GONE` — reds",
     },
     # barkpark_web/controllers/v1/media_controller.ex:228
     %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
@@ -1745,9 +1831,11 @@ defmodule PDS.Census do
     # differential that judges it: this is the one register row this change touches.
     %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
             "BarkparkWeb.WebauthnController.delete/2", "99456611", "84283662"},
-      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/webauthn_controller_test.exs:438",
+      verdict: "PROVEN", basis: :end_to_end, evidence:
+        {"api/test/barkpark_web/controllers/webauthn_controller_test.exs",
+         ~S|test "delete (200 receipt) renders the ROW Repo.delete removed — nickname and " <>|},
       attestation:
-        "mutation: revert the receipt to the bare success map — `mix test api/test/barkpark_web/controllers/webauthn_controller_test.exs:438` reds on created_at being nil",
+        "mutation: revert the receipt to the bare success map — `mix test api/test/barkpark_web/controllers/webauthn_controller_test.exs` — the test `delete (200 receipt) renders the ROW Repo.delete removed — nickname and created_at are store fields the request never carried` — reds on created_at being nil",
     }
   ]
 
@@ -1758,6 +1846,7 @@ defmodule PDS.Census do
     case parse_args(argv) do
       {:error, msgs} -> refuse_args(msgs)
       %{selftest?: true} -> selftest()
+      %{citations?: true} -> citations_run()
       %{keys?: true} = opts -> keys_run(opts)
       opts -> census(opts)
     end
@@ -1767,13 +1856,21 @@ defmodule PDS.Census do
   # not a warning, not a shrug. `--files-from` is the one flag that takes a value, so its
   # value is consumed here and never re-read as a flag.
   defp parse_args(argv),
-    do: parse_args(argv, %{sites?: false, keys?: false, selftest?: false, files_from: nil}, [])
+    do:
+      parse_args(
+        argv,
+        %{sites?: false, keys?: false, selftest?: false, citations?: false, files_from: nil},
+        []
+      )
 
   defp parse_args([], opts, []), do: opts
   defp parse_args([], _opts, bad), do: {:error, Enum.reverse(bad)}
   defp parse_args(["--sites" | rest], o, bad), do: parse_args(rest, %{o | sites?: true}, bad)
   defp parse_args(["--keys" | rest], o, bad), do: parse_args(rest, %{o | keys?: true}, bad)
   defp parse_args(["--selftest" | rest], o, bad), do: parse_args(rest, %{o | selftest?: true}, bad)
+
+  defp parse_args(["--citations" | rest], o, bad),
+    do: parse_args(rest, %{o | citations?: true}, bad)
 
   defp parse_args(["--files-from", path | rest], o, bad),
     do: parse_args(rest, %{o | files_from: path}, bad)
@@ -1789,7 +1886,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --citations · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -2810,6 +2907,12 @@ defmodule PDS.Census do
   # `path:line` orphans every row the moment somebody inserts a line above one. The key
   # printed here is {path, module.name/arity, head_hash, expr_fp} — NO LINE NUMBER — so a
   # clause inserted above a registered site produces neither an orphan nor an arrival.
+  #
+  # THE SAME DOCTRINE NOW HOLDS ONE FIELD OVER (PDS wave 48). Until this wave the register
+  # KEY was hash-guarded while the row's `evidence:` CITATION was a bare `"path:line"`, so
+  # the half of the row a reader opens to check the verdict was the half nothing guarded.
+  # A citation is now `{path, marker}` and resolves by content — see the block comment
+  # above cited_findings/4, and `--citations` for the report that measures it.
   #
   # THE NORMALISER IS THE TOTAL METADATA DROP (PDS-D498): `{f, _meta, a} -> {f, [], a}` on
   # every node, then `:erlang.phash2` OF THE TERM. It is NOT PDS-D477's partial drop of 11
@@ -6544,6 +6647,13 @@ defmodule PDS.Census do
   @pair_atom "ok:" <> " true"
   @selftest_filler 620
 
+  # THE PADDING CASE'S TWO CONSTANTS. @cite_pad_file is the file the two rows that drove
+  # this wave name (task-7886ee755e5290f8 cites it four times); @cite_pad_lines is the
+  # insertion the case rehearses — 100, the figure the row asked for, and the same SHAPE
+  # as the +121 that produced the original refusal.
+  @cite_pad_file "api/test/barkpark_web/controllers/tasks_controller_test.exs"
+  @cite_pad_lines 100
+
   @selftest_cases [
     %{
       name: "BASELINE-GREEN",
@@ -7106,6 +7216,42 @@ defmodule PDS.Census do
       expect: ["CENSUS OK", @drift_row_injected],
       refute: ["D448-DRIFT-REFUSES"],
       proves: "with the arm removed the census returns to its pre-wave-47 behaviour — a row whose baseline no longer descends from the tree PRINTS ITS DRIFT AND EXITS 0 ANYWAY — so the red the case above produces is produced by baseline_checks/2 and not by a neighbouring check the mutation happened to disturb. The two cases differ by exactly one mutation: the sibling moves the baseline and exits 1, this moves the same baseline AND drops the arm and exits 0"
+    },
+    # THE CITATION-DRIFT CASE (PDS wave 48, task-7886ee755e5290f8 /
+    # pds-bl-w38-census-citations-drift-blind), AND WHY IT CARRIES NO MUTATION.
+    #
+    # Every other case here proves an arm can go RED by breaking the script. This one
+    # proves a property of the RESOLUTION, and the property is a DIFFERENTIAL between two
+    # trees, so its falsifier is the second tree rather than a mutant: `--citations` is run
+    # over the cited files, and over the SAME files with @cite_pad_lines lines inserted
+    # immediately above the first cited test in @cite_pad_file. The case passes only if
+    # every resolved BLOCK is byte-identical across the two runs AND at least one citation
+    # into the padded file moved its LINE by exactly @cite_pad_lines.
+    #
+    # THOSE TWO CLAUSES ARE THE EXACT INVERSE OF THE DEFECT. A positional resolver — the
+    # pre-wave-48 `"path:line"` shape — keeps the LINE (it is a literal that does not track
+    # the file) and changes the BLOCK, so it fails the block clause; and it cannot carry a
+    # mutation, because a positional resolver needs a RECORDED line and the register no
+    # longer holds one. THE ARM IS PROVEN ARMED BY RUN INSTEAD, and the run is on the PR:
+    # a scratch copy whose resolve_marker/2 returns a marker-derived CONSTANT — the truest
+    # emulation of "a number that does not track the file" — reds this case by name with
+    # POSITIONAL.
+    #
+    # WHAT IT DOES NOT CATCH, MEASURED, NOT ASSUMED. A resolver that shifts BOTH runs by
+    # the same offset (a scratch copy returning `line - @cite_pad_lines`) is INVISIBLE
+    # here, and that copy was run: SELFTEST OK, this case PASS. That is not a hole — a
+    # uniform offset still TRACKS the file, which is the property under test — but the
+    # first draft of this comment claimed "no mutation could make this case vacuous", and
+    # that sentence was refuted by the first mutation tried. The claim this case supports
+    # is exactly its two clauses, and nothing wider.
+    %{
+      name: "CITATION-CONTENT-KEYED",
+      corpus: :cite_pristine,
+      argv: ["--citations"],
+      mut: nil,
+      exit: 0,
+      expect: {:citation_drift, :invariant},
+      proves: "inserting #{@cite_pad_lines} lines above a cited test moves every citation's resolved LINE and NOTHING else — the resolved blocks are identical, so no line insertion can change a verdict. MEASURED on origin/main before this wave: four citations into #{@cite_pad_file} resolved to a blank line, a comment and a bare assert, and BASIS-FALSIFIERS passed all four"
     }
   ]
 
@@ -7142,12 +7288,18 @@ defmodule PDS.Census do
       full: Path.join(root, "full"),
       tiny: Path.join(root, "tiny"),
       repaired: Path.join(root, "repaired"),
-      repo: File.cwd!()
+      repo: File.cwd!(),
+      # THE FIFTH AND SIXTH CORPORA hold ONLY the cited test files — `--citations` opens
+      # nothing else — so the pair costs a handful of file copies rather than a tree walk.
+      # The sixth is the fifth with @cite_pad_lines lines inserted above a cited test.
+      cite_pristine: Path.join(root, "cite-pristine"),
+      cite_padded: Path.join(root, "cite-padded")
     }
 
     write_corpus!(dirs.full, @selftest_filler, :pre_9114)
     write_corpus!(dirs.tiny, 0)
     write_corpus!(dirs.repaired, @selftest_filler, :repaired)
+    write_citation_corpora!(dirs.cite_pristine, dirs.cite_padded)
 
     results = Enum.map(@selftest_cases, &run_selftest_case(&1, src, dirs, root))
     File.rm_rf!(root)
@@ -7181,9 +7333,64 @@ defmodule PDS.Census do
       # point — `cmd | tail` reports tail's status and once logged an exit-2 refusal as 0.
       {out, code} = System.cmd("elixir", [script | c.argv], cd: dir, stderr_to_stdout: true)
 
-      judge_selftest_case(base, c, out, code, {script, dir})
+      judge_selftest_case(base, c, out, code, {script, dir, dirs})
     else
       {:error, why} -> Map.merge(base, %{ok?: false, why: why})
+    end
+  end
+
+  # ------------------------------------------------------- the citation report
+  #
+  # ONE TSV LINE PER CITED ROW: path, the line the MARKER resolved to, a fingerprint of
+  # the RESOLVED BLOCK, and the marker itself. It exists so the drift property can be
+  # MEASURED instead of argued — run it over a tree, run it over the same tree with lines
+  # inserted above a cited test, and the BLOCK fingerprints must be identical while the
+  # LINE moves. `--selftest`'s CITATION-CONTENT-KEYED case does exactly that on every run.
+  #
+  # IT FAILS CLOSED. A citation that will not resolve is printed as UNRESOLVED and the run
+  # exits 1; a register with no citations at all exits 1 too, because a report over an
+  # empty set certifies nothing (the zero-floor lesson from the keys arm, one field over).
+  defp citations_run do
+    {rows, _cache} =
+      @register
+      |> Enum.filter(&match?({_p, _m}, Map.get(&1, :evidence)))
+      |> Enum.map_reduce(%{}, fn r, cache ->
+        {path, marker} = r.evidence
+
+        if File.exists?(path) do
+          {lines, cache} = file_lines(path, cache)
+
+          case resolve_marker(lines, marker) do
+            {:ok, line} ->
+              {{:ok, path, marker, line, :erlang.phash2(cited_text(lines, line))}, cache}
+
+            {:error, why} ->
+              {{:error, path, marker, why}, cache}
+          end
+        else
+          {{:error, path, marker, "that PATH DOES NOT EXIST"}, cache}
+        end
+      end)
+
+    Enum.each(rows, fn
+      {:ok, path, marker, line, fp} -> p("#{path}\t#{line}\t#{fp}\t#{marker}")
+      {:error, path, marker, why} -> p("#{path}\tUNRESOLVED\t-\t#{marker}\t#{why}")
+    end)
+
+    unresolved = Enum.count(rows, &match?({:error, _, _, _}, &1))
+
+    p("citations #{length(rows)} · resolved #{length(rows) - unresolved} · unresolved #{unresolved}")
+
+    cond do
+      rows == [] ->
+        p("REFUSED: NO CITATIONS — the register carries no {path, marker} evidence at all, so this report certifies nothing.")
+        System.halt(1)
+
+      unresolved > 0 ->
+        System.halt(1)
+
+      true ->
+        System.halt(0)
     end
   end
 
@@ -7227,6 +7434,68 @@ defmodule PDS.Census do
     end
   end
 
+  # THE DRIFT DIFFERENTIAL, JUDGED. `out` is the pristine run this case already made;
+  # the padded run is made here, from the SAME (possibly mutated) script, so the two
+  # readings differ by the tree and by nothing else.
+  defp judge_selftest_case(base, %{expect: {:citation_drift, :invariant}}, out, code, ctx) do
+    {script, _dir, dirs} = ctx
+
+    {padded_out, padded_code} =
+      System.cmd("elixir", [script, "--citations"], cd: dirs.cite_padded, stderr_to_stdout: true)
+
+    a = parse_citation_report(out)
+    b = parse_citation_report(padded_out)
+
+    changed =
+      a
+      |> Enum.filter(fn {k, {_line, fp}} -> Map.has_key?(b, k) and elem(Map.fetch!(b, k), 1) != fp end)
+      |> Enum.map(&elem(&1, 0))
+
+    moved =
+      Enum.filter(a, fn {{path, _m} = k, {line, _fp}} ->
+        path == @cite_pad_file and Map.has_key?(b, k) and
+          elem(Map.fetch!(b, k), 0) - line == @cite_pad_lines
+      end)
+
+    red = fn why -> Map.merge(base, %{ok?: false, why: why}) end
+
+    cond do
+      code != 0 ->
+        red.("the PRISTINE `--citations` run exited #{code}, not 0:\n#{out}")
+
+      padded_code != 0 ->
+        red.(
+          "the PADDED `--citations` run exited #{padded_code} — a citation stopped resolving once " <>
+            "#{@cite_pad_lines} lines were inserted, which is the drift this shape exists to survive:\n#{padded_out}"
+        )
+
+      map_size(a) == 0 ->
+        red.("VACUOUS: the pristine run reported ZERO citations, so the invariant below holds over nothing")
+
+      Enum.sort(Map.keys(a)) != Enum.sort(Map.keys(b)) ->
+        red.("the two runs reported DIFFERENT citation SETS — the comparison below would be between two different things")
+
+      changed != [] ->
+        red.(
+          "POSITIONAL: #{length(changed)} citation(s) resolved a DIFFERENT BLOCK under a " <>
+            "#{@cite_pad_lines}-line insertion — #{changed |> Enum.take(3) |> Enum.map_join(" · ", fn {p, m} -> "#{Path.basename(p)} :: #{String.slice(m, 0, 60)}" end)}"
+        )
+
+      moved == [] ->
+        red.(
+          "VACUOUS: not one citation into #{@cite_pad_file} moved its resolved line by " <>
+            "#{@cite_pad_lines} — the padding did not land, so identical blocks prove nothing"
+        )
+
+      true ->
+        Map.merge(base, %{
+          ok?: true,
+          why:
+            "#{map_size(a)} DISTINCT citation(s) (rows sharing a {path, marker} collapse to one) · #{length(moved)} of them moved exactly #{@cite_pad_lines} line(s) under the insertion · 0 resolved a different block"
+        })
+    end
+  end
+
   # `refute:` EXISTS BECAUSE A PRESENCE-ONLY ASSERTION CANNOT SEE AN OVER-NAMING (PDS
   # wave 40). A classifier that names SIX request echoes on a corpus carrying six is only
   # half-proven: the other half is that it names NONE on the repaired corpus, and no list
@@ -7257,7 +7526,28 @@ defmodule PDS.Census do
     end
   end
 
-  defp keys_floor_verdict(out, code, want_exit, {script, dir}) do
+  # THE TSV BACK INTO A MAP. Unresolved rows carry a fifth column and are skipped on
+  # purpose — the exit code already refused them, and a half-parsed row must never look
+  # like a resolved one.
+  defp parse_citation_report(out) do
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.flat_map(fn l ->
+      case String.split(l, "\t") do
+        [path, line, fp, marker] ->
+          case Integer.parse(line) do
+            {n, ""} -> [{{path, marker}, {n, fp}}]
+            _ -> []
+          end
+
+        _ ->
+          []
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp keys_floor_verdict(out, code, want_exit, {script, dir, _dirs}) do
     lines = String.split(out, "\n", trim: true)
     tsv = Enum.filter(lines, &String.contains?(&1, "\t"))
     n = length(tsv)
@@ -7346,6 +7636,75 @@ defmodule PDS.Census do
       0 -> {:error, "MUTATION ANCHOR GONE — #{inspect(String.slice(from, 0, 48))} no longer occurs"}
       n -> {:error, "MUTATION ANCHOR AMBIGUOUS — #{inspect(String.slice(from, 0, 48))} occurs #{n} times"}
     end
+  end
+
+  # THE CITATION CORPORA. Only the cited paths are copied, because `--citations` opens
+  # only those; the padded copy differs from the pristine one by @cite_pad_lines comment
+  # lines inserted immediately ABOVE the first cited test in @cite_pad_file — mid-file,
+  # the way a real PR inserts, not at the top.
+  defp write_citation_corpora!(pristine, padded) do
+    paths = cited_paths()
+
+    unless @cite_pad_file in paths do
+      raise "the padding target #{@cite_pad_file} is not a cited path — this case would pad a file " <>
+              "no citation reads, and would pass while proving nothing"
+    end
+
+    Enum.each(paths, fn rel ->
+      body = File.read!(rel)
+      write_rel!(pristine, rel, body)
+      write_rel!(padded, rel, if(rel == @cite_pad_file, do: pad_above_first_citation(body), else: body))
+    end)
+  end
+
+  defp cited_paths do
+    @register
+    |> Enum.flat_map(fn r ->
+      case Map.get(r, :evidence) do
+        {path, _marker} -> [path]
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp write_rel!(dir, rel, body) do
+    dst = Path.join(dir, rel)
+    File.mkdir_p!(Path.dirname(dst))
+    File.write!(dst, body)
+  end
+
+  defp pad_above_first_citation(body) do
+    lines = String.split(body, "\n")
+
+    resolved =
+      @register
+      |> Enum.flat_map(fn r ->
+        case Map.get(r, :evidence) do
+          {@cite_pad_file, marker} ->
+            case resolve_marker(lines, marker) do
+              {:ok, n} -> [n]
+              {:error, _} -> []
+            end
+
+          _ ->
+            []
+        end
+      end)
+
+    if resolved == [] do
+      raise "no citation into #{@cite_pad_file} resolves, so there is nothing to pad above — " <>
+              "re-point @cite_pad_file at a file the register actually cites"
+    end
+
+    pad =
+      List.duplicate(
+        "  # selftest padding: a line inserted above the cited test, the way #14949 inserted 121",
+        @cite_pad_lines
+      )
+
+    {before, rest} = Enum.split(lines, Enum.min(resolved) - 1)
+    Enum.join(before ++ pad ++ rest, "\n")
   end
 
   # THE SYNTHETIC CORPUS. Small on purpose: it carries one emitter, one consumer, one
@@ -7892,27 +8251,121 @@ defmodule PDS.Census do
     end
   end
 
+  # ----------------------------------------------- the citation is a CONTENT key
+  #
+  # THE DEFECT THIS SHAPE CLOSES (task-7886ee755e5290f8 · pds-bl-w38-census-citations-
+  # drift-blind). Until this wave `evidence:` was the string `"path:line"`, split on `:`
+  # and handed to `block_at/2` as a LITERAL line number. Nothing keyed it, nothing hashed
+  # it, and the failure was not hypothetical: MEASURED on origin/main at 546cd9d836, FOUR
+  # of the register's citations into tasks_controller_test.exs resolved to a BLANK LINE
+  # (:741, :2798), a COMMENT (:3510) and a bare `assert` (:1984) — and BASIS-FALSIFIERS
+  # passed all four, because `block_at/2` started at an indent-0/2 line, found no closing
+  # `end` at that indentation, and swallowed its 200-line cap out of a 3.9k-line controller
+  # test where a `conn` token and a `Repo.` token are never more than a few lines away.
+  # A citation that cannot be wrong is not evidence. THE WORSE HALF IS THE PASS, not the
+  # refusal: a refusal at least stops the run.
+  #
+  # THE SHAPE: `{path, marker}`, where `marker` is the EXACT TRIMMED SOURCE TEXT of the
+  # cited test's (or describe's) declaration line. The line is resolved AT RUN TIME by
+  # scanning the file for that text, so:
+  #
+  #   * INSERTING LINES ANYWHERE IN THE FILE CANNOT MOVE THE VERDICT. The marker is found
+  #     wherever it now sits. This is the property `--citations` + the CITATION-CONTENT-
+  #     KEYED selftest case assert by RUNNING the resolution over a padded copy of a cited
+  #     file and requiring every resolved BLOCK to be byte-identical while the resolved
+  #     LINE moves by exactly the padding.
+  #   * RENAMING OR DELETING THE CITED TEST REFUSES. No line reads the marker any more, so
+  #     the row reds — the citation names a test that no longer exists, which is exactly
+  #     the claim a stale citation makes silently today.
+  #   * A DUPLICATED MARKER REFUSES. Two lines reading the same text is an ambiguous
+  #     citation, and picking one by position is the defect wearing a new coat.
+  #   * EDITING THE CITED TEST'S BODY DOES NOT REFUSE, ON PURPOSE. The falsifiers below
+  #     READ that body — an edit that removes the conn hop or the `Repo.` read-back reds
+  #     the row on its own predicate, which is a judgment about the EVIDENCE and not about
+  #     bytes. WHY NOT A BLOCK HASH (the `head_hash`/`expr_fp` shape the backlog row
+  #     offered): a hash over the cited block reds on every whitespace change and every
+  #     added assertion, so the cheapest repair a reader sees is RE-TYPING the hash until
+  #     the arm goes quiet — the same blind re-derivation that produced the four wrong
+  #     numbers above. The register KEY is hash-guarded because it names a def whose body
+  #     IS the claim; the citation names a WITNESS, and a witness is allowed to gain a
+  #     sentence. What must never drift is WHICH witness, and that is what the marker pins.
   defp cited_findings(r, "", tier, cache),
     do: {[finding(r, tier, "carries no citation, and its falsifier needs one")], cache}
 
-  defp cited_findings(r, ev, tier, cache) do
-    case String.split(ev, ":") do
-      [path, line] ->
-        if File.exists?(path) do
-          {text, cache} = cited_text(path, String.to_integer(line), cache)
-          {judge_citation(r, ev, tier, text), cache}
-        else
-          # ALWAYS A RED, whatever the basis's tier: an unopenable citation is not a weak
-          # judgment, it is no judgment at all.
-          {[finding(r, :reds, "cites #{ev}, and that PATH DOES NOT EXIST")], cache}
-        end
+  defp cited_findings(r, {path, marker}, tier, cache)
+       when is_binary(path) and is_binary(marker) do
+    if File.exists?(path) do
+      {lines, cache} = file_lines(path, cache)
 
-      _ ->
-        {[finding(r, :reds, "cites #{inspect(ev)}, which is not a `path:line`")], cache}
+      case resolve_marker(lines, marker) do
+        {:ok, line} ->
+          {judge_citation(r, path, marker, tier, cited_text(lines, line)), cache}
+
+        {:error, why} ->
+          # ALWAYS A RED, whatever the basis's tier: a citation that resolves to nothing
+          # is not a weak judgment, it is no judgment at all.
+          {[finding(r, :reds, "cites #{cite(path, marker)}, and #{why}")], cache}
+      end
+    else
+      {[finding(r, :reds, "cites #{cite(path, marker)}, and that PATH DOES NOT EXIST")], cache}
     end
   end
 
-  defp judge_citation(r, ev, tier, text) do
+  # THE OLD SHAPE IS REFUSED, NEVER RESOLVED. A leftover `"path:line"` string reaching
+  # this clause means a row was written against the retired vocabulary; resolving it
+  # positionally "to be helpful" would reinstate the defect one row at a time.
+  defp cited_findings(r, ev, _tier, cache) do
+    {[
+       finding(
+         r,
+         :reds,
+         "cites #{inspect(ev)}, which is not a `{path, marker}` CONTENT citation. `\"path:line\"` " <>
+           "is the retired positional shape (a line number is not evidence — see the block comment " <>
+           "above cited_findings/4); re-cite the row on the cited test's declaration line, verbatim."
+       )
+     ], cache}
+  end
+
+  # THE DISPLAY FORM. One spelling, so a finding, the `--citations` report and this
+  # comment cannot drift apart.
+  defp cite(path, marker), do: "#{path} :: #{marker}"
+
+  defp file_lines(path, cache) do
+    lines = Map.get_lazy(cache, path, fn -> path |> File.read!() |> String.split("\n") end)
+    {lines, Map.put(cache, path, lines)}
+  end
+
+  # EXACT, TRIMMED, AND EXACTLY-ONCE. Trimmed because indentation is layout, not content
+  # (a test moved into a `describe` keeps its identity); exact because a prefix or a
+  # substring match is draggable by any line a PR inserts that happens to contain the
+  # fragment — which is the positional defect with extra steps.
+  defp resolve_marker(lines, marker) do
+    hits =
+      lines
+      |> Enum.with_index(1)
+      |> Enum.filter(fn {l, _n} -> String.trim(l) == marker end)
+      |> Enum.map(&elem(&1, 1))
+
+    case hits do
+      [line] ->
+        {:ok, line}
+
+      [] ->
+        {:error,
+         "NO LINE IN THAT FILE READS THAT MARKER — the cited test was renamed, re-signed or " <>
+           "deleted. RE-CITE it on the test that carries the evidence today, or demote the row; " <>
+           "do NOT re-point it at a line number"}
+
+      many ->
+        {:error,
+         "#{length(many)} LINES READ THAT MARKER (lines #{Enum.join(many, ", ")}) — an AMBIGUOUS " <>
+           "citation. Picking one by position is the defect this shape exists to stop; make the " <>
+           "cited test's declaration line unique, or cite its enclosing `describe`"}
+    end
+  end
+
+  defp judge_citation(r, path, marker, tier, text) do
+    ev = cite(path, marker)
     conn? = Enum.any?(@conn_tokens, &String.contains?(text, &1))
     repo? = Enum.any?(@repo_tokens, &String.contains?(text, &1))
 
@@ -7933,10 +8386,8 @@ defmodule PDS.Census do
         # the basis — so it is the one arm @repo_tokens can hurt, and its safety was
         # measured only over @stub_citation_allowlist. A citation that arrives from
         # anywhere else REDS rather than silently spending an unmeasured probe.
-        cited_file = ev |> String.split(":") |> List.first()
-
         cond do
-          cited_file not in @stub_citation_allowlist ->
+          path not in @stub_citation_allowlist ->
             [finding(r, :reds, "cites #{ev}, OUTSIDE the measured-safe citation set for `stub_mapping_only` (#{Enum.join(@stub_citation_allowlist, ", ")}). This falsifier is INVERTED — a store read refutes it — and @repo_tokens' zero-collateral was measured only over that set. RE-MEASURE the widened probe against this file, then widen the allowlist.")]
 
           repo? ->
@@ -7989,9 +8440,7 @@ defmodule PDS.Census do
   # THE CITED BLOCK PLUS ITS HELPERS, ONE LEVEL DEEP. The block runs from the cited line to
   # the `end` at its own indentation (capped, because a runaway scan would swallow the file
   # and green everything).
-  defp cited_text(path, line, cache) do
-    lines = Map.get_lazy(cache, path, fn -> path |> File.read!() |> String.split("\n") end)
-    cache = Map.put(cache, path, lines)
+  defp cited_text(lines, line) do
     block = block_at(lines, line)
 
     helpers =
@@ -8002,7 +8451,7 @@ defmodule PDS.Census do
       |> Enum.flat_map(&helper_body(lines, &1))
       |> Enum.join("\n")
 
-    {block <> "\n" <> helpers, cache}
+    block <> "\n" <> helpers
   end
 
   defp block_at(lines, line) do

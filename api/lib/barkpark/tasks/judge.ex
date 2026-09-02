@@ -17,6 +17,10 @@ defmodule Barkpark.Tasks.Judge do
     * **Mockable.** The HTTP call goes through a swappable adapter
       (`config :barkpark, :judge_http_adapter`), mirroring the webhook
       dispatcher's `ReqAdapter` seam — tests inject a fake, no network.
+    * **Relocatable.** The endpoint is config-read too
+      (`config :barkpark, :anthropic_api_url`, `ANTHROPIC_API_URL`), so an
+      operator behind an Anthropic-compatible gateway can move the URL as well
+      as the key and the model. See `endpoint/0`.
 
   The rubric mirrors `tooling/task-obsession/judge_prompt.md` (the canonical,
   calibration-frozen prompt); keep the two in sync. Structured outputs
@@ -24,7 +28,14 @@ defmodule Barkpark.Tasks.Judge do
   """
   require Logger
 
-  @endpoint "https://api.anthropic.com/v1/messages"
+  # The DEFAULT endpoint, not the value — see `endpoint/0`. It used to be read
+  # directly at the call site, which a release BUILD freezes: the adapter, the
+  # model and the key were all config-read here and only the URL was not, so an
+  # operator routing Anthropic-compatible traffic through a gateway (LiteLLM, an
+  # internal proxy, a Bedrock-style shim) could supply the key and the model and
+  # still not move the URL — the feature was simply unreachable for them
+  # (gh-9531 residual, task-eeabfd9bf3ed8371).
+  @default_endpoint "https://api.anthropic.com/v1/messages"
   @model "claude-opus-4-8"
   @anthropic_version "2023-06-01"
   @max_tokens 1024
@@ -105,7 +116,7 @@ defmodule Barkpark.Tasks.Judge do
       }
     }
 
-    case adapter().post(@endpoint, body, headers()) do
+    case adapter().post(endpoint(), body, headers()) do
       {:ok, 200, resp} -> parse_verdict(resp)
       {:ok, status, _resp} -> {:error, {:http_status, status}}
       {:error, _} = err -> err
@@ -148,6 +159,63 @@ defmodule Barkpark.Tasks.Judge do
       {"anthropic-version", @anthropic_version},
       {"content-type", "application/json"}
     ]
+  end
+
+  @doc """
+  The Anthropic-compatible Messages endpoint this judge posts to.
+
+  Read at CALL time from `config :barkpark, :anthropic_api_url`
+  (`ANTHROPIC_API_URL` in `config/runtime.exs`), defaulting to Anthropic's own
+  URL — an unconfigured deployment is byte-identical to before. Shares one key
+  with `Barkpark.StudioChat.Titles`, exactly as `:anthropic_api_key` is already
+  shared: one gateway serves both callers.
+
+  FAILS CLOSED: a configured-but-malformed URL raises rather than falling back
+  to api.anthropic.com. A silent fallback would send an operator's prompts —
+  and their key — to the vendor they deliberately routed away from.
+  `Barkpark.Application.start/2` resolves it once at boot, so a typo refuses the
+  node instead of surfacing as a judge that quietly never runs (every error on
+  this path is swallowed by design: the judge fails OPEN so an outage cannot
+  block a create).
+  """
+  @spec endpoint() :: String.t()
+  def endpoint do
+    case Application.get_env(:barkpark, :anthropic_api_url) do
+      nil -> @default_endpoint
+      configured -> validate_endpoint!(configured)
+    end
+  end
+
+  @doc "The compile-time fallback endpoint — what \"unconfigured\" means, for tests."
+  @spec default_endpoint() :: String.t()
+  def default_endpoint, do: @default_endpoint
+
+  # An http(s) URL with a host and no whitespace or control characters. The
+  # value is handed to an HTTP client, so a CR/LF smuggled through config is
+  # request splitting, not a typo.
+  defp validate_endpoint!(value) when is_binary(value) do
+    uri = URI.parse(value)
+
+    if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" and
+         not Regex.match?(~r/[\s[:cntrl:]]/, value) do
+      value
+    else
+      bad_endpoint!(value)
+    end
+  end
+
+  defp validate_endpoint!(other), do: bad_endpoint!(other)
+
+  defp bad_endpoint!(value) do
+    raise ArgumentError, """
+    invalid Anthropic API URL: #{inspect(value)}.
+
+    Expected an http(s) URL for an Anthropic-compatible Messages endpoint, e.g.
+    "https://gateway.internal/v1/messages".
+
+    Set ANTHROPIC_API_URL to your gateway, or leave it unset to keep the
+    #{@default_endpoint} default.
+    """
   end
 
   defp adapter, do: Application.get_env(:barkpark, :judge_http_adapter, __MODULE__.ReqAdapter)

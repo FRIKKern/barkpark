@@ -17,10 +17,12 @@ defmodule BarkparkCloud.FkCensusTest do
 
   ## Mutation proof (merge criterion)
 
-  Comment out one real assoc_constraint (e.g. `env_var.ex`
+  Comment out one real assoc_constraint (e.g. `agent_event.ex`
   `assoc_constraint(:barkpark)`) and the census goes RED with `:missing_constraint`
   for `:barkpark_id`; declare a wrong constraint `name:` and it goes RED with
   `:inert_name`; restore and it goes GREEN with an empty `git diff cloud/lib`.
+  (The example named `env_var.ex` until that schema was deleted with the team
+  env-var feature — cch-w53-bl, Option A, 2026-09-02.)
 
   ## Authority + local-drift caveat
 

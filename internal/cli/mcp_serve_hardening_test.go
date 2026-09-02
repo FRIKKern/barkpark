@@ -198,7 +198,7 @@ func TestCuratedTaskToolNamesMatchRegistration(t *testing.T) {
 // unauthenticated /mcp listener. A bare &http.Server{Handler: h} arms NONE of
 // them, which is the filed defect.
 func TestMCPHTTPServerTimeoutsArmed(t *testing.T) {
-	srv := newMCPHTTPServer(http.NotFoundHandler())
+	srv := newMCPHTTPServer(http.NotFoundHandler(), nil)
 	if srv.ReadHeaderTimeout != mcpHTTPReadHeaderTimeout || srv.ReadHeaderTimeout <= 0 {
 		t.Errorf("ReadHeaderTimeout = %v, want %v (>0): the slowloris clamp", srv.ReadHeaderTimeout, mcpHTTPReadHeaderTimeout)
 	}
@@ -251,7 +251,7 @@ func slowSSEHandler(chunks int, gap time.Duration) http.Handler {
 // after asserting the constructor armed a positive value (the non-vacuity
 // guard — a zero would make the shrink the only thing under test).
 func TestMCPHTTPReadHeaderTimeoutClosesSlowloris(t *testing.T) {
-	srv := newMCPHTTPServer(http.NotFoundHandler())
+	srv := newMCPHTTPServer(http.NotFoundHandler(), nil)
 	if srv.ReadHeaderTimeout <= 0 {
 		t.Fatalf("newMCPHTTPServer armed ReadHeaderTimeout = %v; nothing to shrink", srv.ReadHeaderTimeout)
 	}
@@ -284,7 +284,7 @@ func TestMCPHTTPReadHeaderTimeoutClosesSlowloris(t *testing.T) {
 // a response that outlives it still completes. Proven by shrinking ReadTimeout
 // well below the response duration.
 func TestMCPHTTPReadTimeoutDoesNotTruncateSSE(t *testing.T) {
-	srv := newMCPHTTPServer(slowSSEHandler(4, 150*time.Millisecond)) // ~600ms
+	srv := newMCPHTTPServer(slowSSEHandler(4, 150*time.Millisecond), nil) // ~600ms
 	if srv.ReadTimeout <= 0 {
 		t.Fatalf("newMCPHTTPServer armed ReadTimeout = %v; nothing to shrink", srv.ReadTimeout)
 	}
@@ -305,7 +305,7 @@ func TestMCPHTTPReadTimeoutDoesNotTruncateSSE(t *testing.T) {
 // mid-stream. It documents the hazard so a later "tidy up the timeouts" pass
 // cannot quietly set it.
 func TestMCPHTTPWriteTimeoutWouldTruncateSSE(t *testing.T) {
-	srv := newMCPHTTPServer(slowSSEHandler(4, 150*time.Millisecond)) // ~600ms
+	srv := newMCPHTTPServer(slowSSEHandler(4, 150*time.Millisecond), nil) // ~600ms
 	if srv.WriteTimeout != 0 {
 		t.Fatalf("newMCPHTTPServer set WriteTimeout = %v; production must leave it 0", srv.WriteTimeout)
 	}
