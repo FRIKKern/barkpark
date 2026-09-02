@@ -150,7 +150,7 @@ func TestRunPaginatedAll_RefusesACollectionThatShiftsUnderTheWalk(t *testing.T) 
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}, Paginated: true}
 
-	code := runPaginatedAll(out, cmd, srv.URL, map[string]string{})
+	code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{})
 	if code != exitGeneric {
 		served := servedDocIDs(t, stdout.Bytes())
 		inResult := false
@@ -218,7 +218,7 @@ func TestRunPaginatedAll_RetriesAShiftThatSettles(t *testing.T) {
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}, Paginated: true}
 
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 		t.Fatalf("exit = %d, want %d — a shift that settles must be retried, not refused; stdout=%q stderr=%q",
 			code, exitOK, stdout.String(), stderr.String())
 	}
@@ -261,7 +261,7 @@ func TestRunPaginatedAll_StableCollectionWalksCleanWithALookahead(t *testing.T) 
 	out.output = "json"
 	cmd := manifest.Command{Noun: "task", Verb: "ready", HTTP: manifest.HTTP{Method: "GET"}, Paginated: true}
 
-	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}, paginatedAllOpts{}); code != exitOK {
 		t.Fatalf("exit = %d, want %d (false pagination_shifted on a still collection); stdout=%q stderr=%q",
 			code, exitOK, stdout.String(), stderr.String())
 	}

@@ -32,8 +32,13 @@ defmodule BarkparkWeb.Studio.StudioFocusAfterSelectTest do
   NON-VACUITY: the identical probe counts 1 for the `expand-pane` path (the
   D79 focus-return, pinned here as the contrast control) — so a probe that
   found 0 after a select was measuring a real absence, not a blind selector.
-  Re-derived on a tree containing current origin/main: before the fix the
-  select arms of this file were red with `found 0 focus-marked elements`.
+
+  RE-DERIVED on origin/main @ 5677280449 (2026-09-01), not inherited from the
+  wave-18 probe. With `focus_doc_on_open` in `Scope.select/2` reverted to a
+  flat `false`, the two select arms red on their `length(marks) == 1`
+  assertion with `found 0 focus-marked elements` WHILE the contrast arm stays
+  green at 1 — same run, same selector, so the probe is proven able both to
+  see a mark and to report its absence.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -65,15 +70,21 @@ defmodule BarkparkWeb.Studio.StudioFocusAfterSelectTest do
     :ok
   end
 
+  # Every assertion in this file goes through LazyHTML element/attribute
+  # queries — NEVER `html =~ "..."`. The Studio shell inlines its whole CSS
+  # sheet into the document, so a raw substring probe can match a comment or a
+  # selector in that sheet and report an element that is not in the DOM.
+  defp query(html, selector) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query(selector)
+    |> Enum.to_list()
+  end
+
   # The probe: every element carrying BOTH halves of the focus idiom. One
   # selector for the whole file so the select arms and the expand-pane
   # contrast arm cannot drift apart.
-  defp focus_marks(html) do
-    html
-    |> LazyHTML.from_document()
-    |> LazyHTML.query(~s([tabindex="-1"][phx-mounted]))
-    |> Enum.to_list()
-  end
+  defp focus_marks(html), do: query(html, ~s([tabindex="-1"][phx-mounted]))
 
   defp mount_desk(conn) do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post"))
@@ -110,14 +121,30 @@ defmodule BarkparkWeb.Studio.StudioFocusAfterSelectTest do
              found #{length(marks)} focus-marked elements
              """
 
-      [mark] = marks
-      classes = LazyHTML.attribute(mark, "class") |> List.first() |> to_string()
+      # WHICH element — asserted as an element query, not a class substring.
+      assert length(query(html, ~s(.pane-header.editor-header[tabindex="-1"][phx-mounted]))) == 1,
+             "the focus target must be the opened document's own header (document_header/1)"
 
-      assert classes =~ "editor-header",
-             "the focus target must be the opened document's own header, got class=#{inspect(classes)}"
+      assert query(html, ~s(.pane-column[tabindex="-1"])) == [],
+             "the strip must NEVER be the focus target — its activation fires " <>
+               "expand-pane with the document segment dropped, i.e. it CLOSES the document"
 
-      refute classes =~ "pane-column",
-             "the strip must NEVER be the focus target — its activation closes the document"
+      # The premise the whole row rests on: at this bucket the clicked row is
+      # destroyed by the patch, which is why focus had nowhere to go.
+      assert query(html, ~s([phx-click="select"][phx-value-id="focus-probe-post"])) == [],
+             "the clicked row must be GONE at #{bucket} — if it survived, no focus was lost"
+
+      # And the structural reason the strip/pane idiom cannot serve here.
+      case bucket do
+        "narrow" ->
+          assert length(query(html, ".pane-column")) == 1,
+                 "at narrow exactly one pane survives, as the collapsed strip"
+
+        "phone" ->
+          assert query(html, ".pane-column") == [],
+                 "at phone there is NO pane element at all — focus_pane_idx is " <>
+                   "structurally unusable, which is why the header carries the mark"
+      end
     end
   end
 
@@ -135,8 +162,17 @@ defmodule BarkparkWeb.Studio.StudioFocusAfterSelectTest do
                "aria-current), so the fix must not steal focus where none was lost"
 
       # The stronger claim the decision rests on: the row element itself is
-      # still in the DOM, now marked current.
-      assert html =~ ~s(phx-value-id="focus-probe-post")
+      # still in the DOM, now marked current. Asserted as an ELEMENT with an
+      # ATTRIBUTE — the previous `html =~ "phx-value-id=..."` substring form
+      # could be satisfied by the inlined stylesheet.
+      rows = query(html, ~s([phx-click="select"][phx-value-id="focus-probe-post"]))
+
+      assert length(rows) == 1,
+             "at #{bucket} the clicked row must survive the patch — that is WHY " <>
+               "nothing needs focusing here (got #{length(rows)} rows)"
+
+      assert LazyHTML.attribute(hd(rows), "aria-current") == ["true"],
+             "the surviving row re-renders wearing aria-current=\"true\""
     end
   end
 
@@ -160,8 +196,7 @@ defmodule BarkparkWeb.Studio.StudioFocusAfterSelectTest do
            "the probe must see the D79 expand-pane focus mark (got #{length(marks)}) — " <>
              "if this arm fails the select arms above prove nothing"
 
-    [mark] = marks
-    classes = LazyHTML.attribute(mark, "class") |> List.first() |> to_string()
-    assert classes =~ "pane-column"
+    assert length(query(html, ~s(.pane-column[tabindex="-1"][phx-mounted]))) == 1,
+           "the D79 mark rides the pane column, not the document header"
   end
 end

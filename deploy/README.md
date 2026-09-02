@@ -552,10 +552,12 @@ bash deploy/site-spawner-live-proof.sh               # the full live proof
   the live page, and a deliberately broken build must die at its named stage
   **without changing what a visitor sees**.
 
-### The two walls that will stop you first
+### The three walls that will stop you first
 
-Both are real, both are live today, and the script names them rather than
-letting you discover them as a confusing 404 an hour in.
+All three are real, and the script names them rather than letting you discover
+them as a confusing 404 an hour in. **Wall 1 is down on guerrilla as of
+2026-09-01** (the configured session's team now owns the box); wall 3 is the one
+that stops the run today.
 
 1. **`PREFLIGHT_NO_BARKPARK` (exit 32) — the credential.** A site is created
    under a *Barkpark*, and the Barkpark belongs to a *team*. A cross-team create
@@ -576,7 +578,83 @@ letting you discover them as a confusing 404 an hour in.
    corpus, so an unpinned build races and bakes a different `bp-doc-id` than the
    one you verified.
 
-### Status (2026-07-14)
+3. **`CREATE_MINT_REFUSED` (exit 39) — the control plane's OWN box credential.**
+   The one wall preflight cannot reach, and the one stopping the proof today. A
+   static site is content-bound at create, which means the control plane mints a
+   `public-read` token **on the box** — with *its own* stored admin credential
+   for that instance, not with your session:
+
+   ```
+   Registry.mint_public_read_token/5
+     → relay_admin(bp, :post, "/w/<ws>/p/<proj>/v1/tokens", …)
+       → 403 {"code":"forbidden","reason":"not_a_member"}
+         → 502 read_token_mint_failed
+   ```
+
+   When the box's `ResolveWorkspace` answers `:forbidden_membership`, the create
+   fails **even though your own session is perfectly valid** — preflight has just
+   proved your team owns the box. Nothing you do to your own login fixes it, so
+   it gets its own name: reading this as `CREATE_FAILED` sends an operator to
+   `bp login`, which is the one thing that cannot help.
+
+   **Confirm the split in one command** — your token on the very same route:
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' \
+     -H "Authorization: Bearer $(jq -r .token ~/.config/barkpark/config.json)" \
+     https://guerrilla.barkpark.cloud/w/default/p/default/v1/tokens
+   ```
+
+   `200` from your token while the create still 403s proves the refused
+   credential is the **control plane's**, not yours. Cross-check the box's
+   membership roll with `bp workspace member-ls`: a `revoked: true` admin row
+   beside a freshly rotated one is the signature — the box's admin token was
+   rotated and the control plane still holds the old one.
+
+   **The remedy is to re-seat the control plane's stored admin token for the
+   instance, and it is a human gate**: it rewrites a live production box's
+   credential, so it is not something a proof script should do on its own.
+   Preflight deliberately does **not** claim this wall is down — exercising the
+   mint is a *write*, so no read-only check can reach it. It is proven inline at
+   CREATE instead.
+
+### Status (2026-09-01)
+
+Measured live against guerrilla (`git_commit 8087211689` = `origin/main`,
+`running_release 0.2.26`) with a `bp` built from that same commit.
+
+**The server-side spine is in.** The three W3 slices merged, and the routes the
+2026-07-14 status called missing all exist today: `delete "/v1/sites/:id"`,
+`GET /v1/sites/:id/deployments/:dep_id`, and `POST /v1/sites/:id/rollback` are
+all in the control-plane router. Do not re-file those as gaps.
+
+**What the proof now reports:**
+
+- `--self-check` → **49/49 green**, offline. Every named red fires on input that
+  must trigger it.
+- `--preflight` → **PASSES**. `bp` speaks `cloud site`; the session's team
+  (`506f035e-…`) **owns guerrilla** (`b2b81e69-…`); type `paper` has published
+  content. Wall 1 (`PREFLIGHT_NO_BARKPARK`) is **down** — the old note that the
+  dev session's team owns zero barkparks no longer describes this machine.
+- the full run → **exits 39 `CREATE_MINT_REFUSED`** at step 1/5, with the box's
+  own words: *"guerrilla refused to mint the site's read token (HTTP 403):
+  forbidden — caller is not a member of this workspace"*.
+
+So the end-to-end spawn is **still unproven**, but the reason has moved: it is no
+longer a missing spine or a cross-team session, it is the **credential the
+control plane presents to the box** (wall 3 above). Deploy, live-content,
+rollback and broken-build containment have never been exercised on this box —
+their assertions are written, and their reds are proven to fire offline, but they
+have had no live run to judge.
+
+**Residue: none.** The mint happens *before* `Registry.create_site`, so a run
+that dies here creates no site row, no releases dir, no Caddy block and no orphan
+token. Two full attempts on 2026-09-01 left `GET /v1/sites` with zero `lp-` rows.
+
+### Superseded status (2026-07-14)
+
+The four statements below are **now false** — the slices merged and the routes
+landed. Kept only so a stale citation can be traced.
 
 The proof script is **live and reports an honest red**: `--self-check` is 22/22
 green, and the live run exits **32 `PREFLIGHT_NO_BARKPARK`**. The end-to-end

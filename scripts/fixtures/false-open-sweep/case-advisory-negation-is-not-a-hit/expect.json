@@ -1,0 +1,16 @@
+{
+  "exit": 0,
+  "refusal": null,
+  "receipts": [],
+  "advisory_negated_prs": [
+    13500
+  ],
+  "advisory_readable_prs": [
+    13501
+  ],
+  "must_contain": [
+    "ARM C (ADVISORY, EXCLUDED FROM EVERY COUNT)",
+    "1 readable · 1 NEGATED",
+    "NEGATED  #13500"
+  ]
+}

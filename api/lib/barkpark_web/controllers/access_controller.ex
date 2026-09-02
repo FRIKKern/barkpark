@@ -63,6 +63,44 @@ defmodule BarkparkWeb.AccessController do
   yours — answers alike. `index/2` authorizing without first resolving the
   workspace is the SAME accepted shape, not an oversight.
 
+  ## Grants confer READ or WRITE only — `admin` is NOT mintable (RULING)
+
+  `POST /v1/access` refuses a mint whose `capabilities` contain anything
+  outside `~w(read write)` with a **422 `unprocessable`**, BEFORE
+  `Access.mint/2` runs. The Studio picker already surfaced only read/write
+  (`@surfaced_caps` in `Handlers.Airdrop`); the server now matches it.
+
+  THE RULING (lead-security, 2026-09-02), verbatim:
+
+  > NARROW. POST /v1/access mints grants for non-operators; an "admin"
+  > capability grant is a third spelling of admin authority beside the
+  > membership role and the token permission bit, and today (see
+  > task-c7e2b87f1bbca815 and the live PAT escalation in
+  > felix-w24-bl-pat-admin-mint-seam) the repo is paying for every place
+  > `admin` is spelled without a workspace. The Studio picker already surfaces
+  > only read/write (@surfaced_caps in handlers/airdrop.ex); the server must
+  > match it. Reason for choosing narrow over "document as intentional": the
+  > admin arm is admitted by Tenancy.Auth.authorize/3 via
+  > %CallerContext{grants} while Caps.derive denies it — a three-oracle
+  > divergence that is only safe because no ctx-typed admin call site exists
+  > yet (the row's parity-table pin). Removing the mintable admin grant removes
+  > the cell instead of guarding it.
+
+  The refusal is deliberately at the HTTP EDGE, not in
+  `Barkpark.Access.Grant`'s `@capabilities`: the schema still accepts `admin`
+  so an existing stored grant keeps its meaning and `Access.validate/3` keeps
+  one vocabulary. The edge is the only PRODUCER of new grants that takes
+  client-supplied capabilities, so closing it closes the mint. If a ctx-typed
+  admin call site is ever added, revisit this ruling first — the parity table
+  in `test/barkpark_web/live/studio/caps_authorization_parity_test.exs` is the
+  pin that keeps the divergence declared.
+
+  422 rather than the no-escalation 403 is intentional: this is a
+  MALFORMED-REQUEST answer about a vocabulary that is public (the same answer
+  every caller gets, holder or not), so it opens no authorization oracle. The
+  403 no-escalation gate inside `Access.mint/2` is untouched and still governs
+  read/write.
+
   ## Field hygiene (SECURITY)
 
   Every grant rendered to JSON is field-WHITELISTED by `render_grant/1`; the
@@ -97,12 +135,44 @@ defmodule BarkparkWeb.AccessController do
   @mint_fields ~w(grantee_email workspace_id project_id dataset type doc_id
                   capabilities single_use expires_at)
 
+  # The ONLY capabilities a mint may CONFER — see the RULING in the moduledoc.
+  # `Barkpark.Access.Grant`'s @capabilities still knows `admin` (stored grants
+  # keep their meaning); this list is what a CLIENT may ask for.
+  @mintable_capabilities ~w(read write)
+
   # ── mint ──────────────────────────────────────────────────────────────────
 
   def mint(conn, params) do
     principal = conn.assigns[:api_token]
     attrs = Map.take(params, @mint_fields)
 
+    case narrow_capabilities(attrs) do
+      :ok ->
+        do_mint(conn, principal, attrs)
+
+      {:error, bad} ->
+        unprocessable(
+          conn,
+          "capabilities may only be read or write; unsupported: " <>
+            Enum.map_join(bad, ", ", &inspect/1)
+        )
+    end
+  end
+
+  # Refuse a mint that asks for anything outside @mintable_capabilities BEFORE
+  # `Access.mint/2` ever runs, so no grant row is written. A non-list (or absent)
+  # `capabilities` is left alone — `Access.mint/2` already fails it closed, and
+  # answering here would only duplicate that decision.
+  defp narrow_capabilities(%{"capabilities" => caps}) when is_list(caps) do
+    case Enum.reject(caps, &(is_binary(&1) and &1 in @mintable_capabilities)) do
+      [] -> :ok
+      bad -> {:error, bad}
+    end
+  end
+
+  defp narrow_capabilities(_attrs), do: :ok
+
+  defp do_mint(conn, principal, attrs) do
     case Access.mint(principal, attrs) do
       {:ok, %{grant: grant, token: raw}} ->
         conn

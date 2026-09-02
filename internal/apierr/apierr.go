@@ -235,3 +235,34 @@ func (e Envelope) Candidates() (similar, advise []Candidate) {
 	}
 	return d.Similar, d.Advise
 }
+
+// RetryAfterSeconds pulls details.retry_after — the wait, in seconds, that a
+// rate_limited (429) refusal names for the caller. The measured envelope is
+//
+//	{"error":{"code":"rate_limited","message":"too many requests",
+//	          "details":{"retry_after":1}}}
+//
+// ok is false whenever the field is absent, the details are not an object, or
+// the value is not a JSON number. Decoding into a *float64 (not an int) accepts
+// both the integer form the server sends today and a fractional one it may send
+// later; a non-number for that key makes the whole decode fail, which is
+// exactly the ok=false answer the caller wants.
+//
+// It reports the server's number verbatim and applies NO policy: whether a
+// value is worth waiting on, and what upper bound is sane, belongs to the
+// caller that will do the sleeping (see manifest.retryAfterDelay).
+func (e Envelope) RetryAfterSeconds() (float64, bool) {
+	if len(e.Details) == 0 {
+		return 0, false
+	}
+	var d struct {
+		RetryAfter *float64 `json:"retry_after"`
+	}
+	if json.Unmarshal(e.Details, &d) != nil {
+		return 0, false
+	}
+	if d.RetryAfter == nil {
+		return 0, false
+	}
+	return *d.RetryAfter, true
+}

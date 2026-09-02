@@ -405,6 +405,20 @@ func TestHetznerBackupRestore(t *testing.T) {
 	if _, invented := payload["bytes"]; invented {
 		t.Errorf("restore receipt = %v, must not invent a byte count for a stream it did not measure", payload)
 	}
+	// This fixture is a manifest-LESS dump (an object from before manifests
+	// existed). It restores — and the receipt says UNVERIFIED under its own
+	// key, with a reason, so a reader never counts it as a manifest that
+	// passed. The measured length/digest it DID observe ride alongside.
+	if payload["manifest_check"] != "unverified" {
+		t.Errorf("restore receipt manifest_check = %v, want \"unverified\" for a dump with no manifest", payload["manifest_check"])
+	}
+	reason, _ := payload["manifest_unverified_reason"].(string)
+	if !strings.Contains(reason, ".manifest.json") {
+		t.Errorf("restore receipt manifest_unverified_reason = %q, want it to name the manifest key it could not read", reason)
+	}
+	if payload["restored_bytes"] != float64(len(sql)) {
+		t.Errorf("restore receipt restored_bytes = %v, want the %d bytes actually streamed", payload["restored_bytes"], len(sql))
+	}
 }
 
 // restoreSinkFunc adapts a func to backup.RestoreSink.

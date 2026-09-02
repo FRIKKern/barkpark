@@ -2390,6 +2390,128 @@ test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all five copies there"
   }
 });
 
+// ── cchi-w20: --citation-inventory, and E17's collapsed-scan-set refusals ───
+//
+// E11's census is only as honest as the file list it iterates, and until this
+// wave NOTHING checked that list. `citationScanFiles()` builds it from two
+// readdir calls and one extension filter; every one of the three can silently
+// return nothing, and E11 then prints `0 error(s)` over an EMPTY set — a green
+// from a scan that read nothing, byte-identical to a green from a scan that read
+// everything. Measured on origin/main: editing the extension filter to a shape
+// no file matches left the whole gate at exit 0 with `0 error(s)`. With E17 the
+// same mutation exits 1 and names the collapse.
+//
+// THE DERIVATION HERE IS DELIBERATELY INDEPENDENT. These arms re-walk the two
+// directories from the documented rule rather than importing the gate's own
+// function — importing __css_check.mjs runs its whole gate during module
+// evaluation and ends in process.exit(), so an import can never return, which is
+// the exact reason --citation-inventory is a SUB-MODE and not an export. A
+// second implementation that must agree with the first is the point: change the
+// filter and this reds.
+const citationScanSetFrom = (root) => {
+  const scanned = (f) => /\.(m?js|css)$/.test(f);
+  const out = [];
+  for (const f of fs.readdirSync(root)) if (scanned(f)) out.push(f);
+  const pv = path.join(root, "__preview__");
+  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
+  return out.sort();
+};
+// The RULED alternation (charter D201 / cch-w16-s7), duplicated here for the
+// same reason the scan set is: the mode's count must be checkable without
+// trusting the mode.
+const CITATION_RULED = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?:js|mjs|sh))(?::~?|\s~))\d{2,}(?:-\d{2,})?/g;
+
+test("cchi-w20: --citation-inventory prints the REAL scan set crossed with the ruled alternation", () => {
+  const root = fileURLToPath(new URL(".", import.meta.url));
+  const files = citationScanSetFrom(root);
+  const perFile = new Map();
+  let ruled = 0;
+  for (const rel of files) {
+    const n = (fs.readFileSync(path.join(root, rel), "utf8").match(CITATION_RULED) || []).length;
+    perFile.set(rel, n);
+    ruled += n;
+  }
+  // NON-VACUITY FIRST. Every assertion below is about counts, and counts of zero
+  // pass trivially — a scan set that collapsed to nothing would make this whole
+  // test green while proving nothing. Pin the floor before comparing.
+  assert.ok(files.length > 10, `the scan set must be real, got ${files.length} file(s)`);
+  assert.ok(ruled > 0, `the ruled alternation must find something to inventory, got ${ruled}`);
+
+  const r = runCssCheck("--citation-inventory");
+  assert.equal(r.status, 0, "the real tree's scan set is intact, so the mode must exit 0:\n" + r.out);
+  assert.ok(
+    r.out.includes(
+      `${files.length} file(s) scanned (${files.filter((f) => !f.startsWith("__preview__" + path.sep)).length} top-level, ` +
+        `${files.filter((f) => f.startsWith("__preview__" + path.sep)).length} __preview__/), `,
+    ),
+    `the mode's scan set must equal this test's independent derivation (${files.length} files):\n` + r.out,
+  );
+  assert.ok(
+    r.out.includes(`${ruled} ruled-alternation hit(s), 0 E17 refusal(s)`),
+    `the mode's ruled-alternation total must equal this test's independent count (${ruled}):\n` + r.out,
+  );
+  // And the per-file cross, on the heaviest member — derived, never hardcoded,
+  // so it survives every merge that moves a citation between files.
+  const heaviest = [...perFile.entries()].sort((a, b) => b[1] - a[1])[0];
+  assert.ok(
+    r.out.includes(`ruled=${String(heaviest[1]).padStart(3)}  E11=`) &&
+      new RegExp(`ruled=\\s*${heaviest[1]}  E11=\\s*\\d+  ${heaviest[0].replace(/[.\\/]/g, "\\$&")}$`, "m").test(r.out),
+    `the mode must cross the set with the alternation per FILE (${heaviest[0]} = ${heaviest[1]}):\n` + r.out,
+  );
+});
+
+test("cchi-w20: --citation-inventory runs ABOVE the gate body, so a red gate cannot swallow it", () => {
+  // THE WHOLE REASON THIS IS A SUB-MODE. The gate runs at module top level and
+  // ends in process.exit(1) on any error, so an inventory derived by importing
+  // the module dies exactly when it is most wanted — the E11 widening commit
+  // reds the gate by construction. If the block ever slides below the gate body,
+  // the gate's own census banner appears in this output and this test reds.
+  const r = runCssCheck("--citation-inventory");
+  assert.equal(r.status, 0, r.out);
+  assert.ok(!/classes checked/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
+  assert.ok(!/contrast pairs/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
+});
+
+test("cchi-w20: E17 refuses an EMPTY scan set instead of reporting a clean census", () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-citinv-empty-"));
+  try {
+    const r = runCssCheck("--citation-inventory", d);
+    assert.equal(r.status, 1, "an empty scan set must REFUSE, not report 0 citations:\n" + r.out);
+    assert.match(r.out, /E17 .*citation scan set is EMPTY/, "the refusal must be NAMED:\n" + r.out);
+    assert.match(r.out, /0 file\(s\) scanned .*1 E17 refusal\(s\)/, r.out);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("cchi-w20: E17 refuses when the __preview__ arm of the derivation collapses", () => {
+  // The moved-directory case: a scan set that still has top-level members reads
+  // exactly like a healthy one at the totals line, and every preview harness
+  // silently stops being scanned.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-citinv-nopv-"));
+  try {
+    fs.writeFileSync(path.join(d, "app.js"), "// nothing to cite\n");
+    const r = runCssCheck("--citation-inventory", d);
+    assert.equal(r.status, 1, "a collapsed __preview__ arm must REFUSE:\n" + r.out);
+    assert.match(r.out, /E17 .*ZERO __preview__\/ members/, "the refusal must NAME the arm that collapsed:\n" + r.out);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("cchi-w20: E17 refuses when the TOP-LEVEL arm of the derivation collapses", () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-citinv-notop-"));
+  try {
+    fs.mkdirSync(path.join(d, "__preview__"));
+    fs.writeFileSync(path.join(d, "__preview__", "smoke.mjs"), "// nothing to cite\n");
+    const r = runCssCheck("--citation-inventory", d);
+    assert.equal(r.status, 1, "a collapsed top-level arm must REFUSE:\n" + r.out);
+    assert.match(r.out, /E17 .*ZERO top-level members/, "the refusal must NAME the arm that collapsed:\n" + r.out);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ───────────────────────
 // THE crown surface: the #operator view rendered honest over the real rollout
 // machinery. Pinned here: the fail-closed ROUTE gate (applyRoute is not
@@ -16748,6 +16870,94 @@ test("cch-w32-s1 notifChatTestToast: a non-2xx is still an honest error", () => 
   const legacy = hooks.notifChatTestToast({ ok: true, status: 202, data: { ok: true } }, "slack", true);
   assert.equal(legacy.kind, "success");
   assert.match(legacy.body, /Sent to slack\./);
+});
+
+// ── cch-w40-bl: the EMAIL test button stops answering yes when it cannot know ─
+//
+// `sendTestNotification` posts a literal `{}`, which the router's `chat_test?/1`
+// reads as the EMAIL branch → `Notifications.deliver_test/2` →
+// `Transactional.deliver_test/1` → `Mailer.deliver/1` with NO override. The send
+// can therefore only ever exercise the PLATFORM transport, whatever the team
+// selected — yet the toast said "Test email sent" and the mail said "your
+// notification email is working". A team on `smtp` with a dead relay passed
+// every time. The fix is the disclosure shape `notifChatTestToast` already
+// ships for the mute: name what was proved, and name what was NOT.
+test("cch-w40-bl notifEmailTestToast: a success names the transport it actually exercised", () => {
+  const t = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, "instance");
+  assert.equal(t.kind, "success");
+  assert.match(t.body, /Sent over the Barkpark platform transport\./,
+    "the toast must say which carrier the test rode — an unqualified 'sent' is the defect");
+  assert.doesNotMatch(t.title + " " + t.body, /notification email is working/i,
+    "the unqualified claim must not migrate from the email body into the toast");
+});
+
+test("cch-w40-bl notifEmailTestToast: a SELECTED transport the test did not use is disclosed", () => {
+  const smtp = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, "smtp");
+  assert.equal(smtp.kind, "success", "the test really did fire — the platform leg is a real probe");
+  assert.match(smtp.body, /Sent over the Barkpark platform transport\./);
+  assert.match(smtp.body, /set to send alerts over SMTP/,
+    "…and the team's own relay, which this send never touched, is named in the same breath");
+  assert.match(smtp.body, /does not prove that transport works/,
+    "the consequence is stated, not left for the reader to infer");
+});
+
+test("cch-w40-bl notifEmailTestToast: the disclosure can LOSE — it is not boilerplate", () => {
+  // `instance` IS the platform transport: the team's own selection was exercised
+  // and there is nothing outstanding. A disclosure that fires here would be
+  // noise, and noise is how a real one stops being read.
+  const inst = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, "instance");
+  assert.doesNotMatch(inst.body, /did not use/,
+    "an instance team had exactly its selection proved — nothing to disclose");
+  assert.doesNotMatch(inst.body, /SMTP/i, "and no relay it does not have is named");
+
+  // An absent/unknown selection is UNKNOWN, not a mismatch — inventing one is
+  // the same crime pointing the other way.
+  for (const unknown of [undefined, null, ""]) {
+    const t = hooks.notifEmailTestToast({ ok: true, data: { ok: true } }, unknown);
+    assert.equal(t.kind, "success");
+    assert.doesNotMatch(t.body, /did not use/,
+      `selectedTransport=${JSON.stringify(unknown)} is unknown, and unknown is not a mismatch`);
+  }
+});
+
+test("cch-w40-bl notifEmailTestToast: every failure arm survives the extraction", () => {
+  const rl = hooks.notifEmailTestToast({ ok: false, status: 429, data: { error: "rate_limited", retry_after: 7 } }, "smtp");
+  assert.equal(rl.kind, "error");
+  assert.match(rl.title, /Test not sent/);
+  assert.match(rl.body, /wait 7s/);
+  // A rate-limited request sent NOTHING, so it must not carry the success
+  // disclosure either — there is no probe to qualify.
+  assert.doesNotMatch(rl.body, /platform transport/);
+
+  const none = hooks.notifEmailTestToast({ ok: false, status: 422, data: { error: "no_recipient" } }, "instance");
+  assert.match(none.body, /No team member has a confirmed email/);
+
+  const generic = hooks.notifEmailTestToast({ ok: false, status: 500, data: {} }, "instance");
+  assert.equal(generic.kind, "error");
+  assert.ok(generic.body.length > 0, "the generic arm still says something");
+});
+
+test("cch-w40-bl: the always-send `test` row stops claiming a fan-out it cannot fire", () => {
+  const s = { channels: [], event_routes: {}, chat_default_on: [] };
+  const html = hooks.notifMatrixSectionHtml(s);
+  // The row itself STAYS — `test` is on the server's @always_send and hiding it
+  // would be the D342(d) lie pointing the other way. Only the false sentence goes.
+  assert.match(html, />Test</, "the always-send test row is still disclosed");
+  assert.doesNotMatch(html, /fire one with/,
+    "the sentence named the header button and described the CHAT fan-out — " +
+    "that button mails ONE member over the platform transport");
+  assert.match(html, /only the test buttons on this page emit it/,
+    "the corrected line names the real (and only) producer");
+  assert.match(html, /mails one team member over the Barkpark platform transport/,
+    "…and what the button it names actually does");
+
+  // charter D359 / cch-w32-s1: the OTHER always-send row's sentence is TRUE and
+  // is pinned above. This test asserts the corrected `test` row did not take it
+  // down with it — a copy edit next door is exactly how a true pin dies.
+  assert.match(html, /Always sent to every enabled channel — email and chat alike/,
+    "trial_expiring's line is true and must survive an edit to the row beside it");
+  assert.match(html, /silenced only by the master alerts switch above/,
+    "…including the clause D359 pins by exact string");
 });
 
 test("G-04 notifPageHtml: admin composes every section; member gets read-only + honest notice", () => {
