@@ -1,0 +1,1 @@
+The console, Go and the D32 fixture carry the same state set in the same order, verified from a clean origin/main extraction

@@ -1,0 +1,1 @@
+A deferral chain whose oldest refusal is N hours old prints a censored time bound in the status header, in chain vocabulary rather than still-waiting vocabulary

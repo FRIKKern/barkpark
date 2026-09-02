@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): PR merged and the live envelope re-read after deploy shows the `platform` node with a real `first_seen_at`, pasted with its as-of instant.

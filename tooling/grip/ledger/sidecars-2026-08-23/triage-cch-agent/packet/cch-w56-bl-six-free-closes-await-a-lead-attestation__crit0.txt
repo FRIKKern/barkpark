@@ -1,0 +1,1 @@
+The four wave-55 rows are closed done at N/N with evidence naming the PR and the merge commit sha. Evidence: `bp task get` read-back for each showing lifecycle done and met==total.

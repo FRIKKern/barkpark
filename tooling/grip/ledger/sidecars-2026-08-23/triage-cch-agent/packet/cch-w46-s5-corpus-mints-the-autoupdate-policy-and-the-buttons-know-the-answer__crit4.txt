@@ -1,0 +1,1 @@
+MUTATION PROOF: forcing the authority answer to "grant" REDS the new member test, and restoring it greens it. Evidence: both `# fail` lines.

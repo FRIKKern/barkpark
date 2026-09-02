@@ -1,0 +1,1 @@
+THE DERIVATION'S LIMIT IS RECORDED: the gap is derived from two independent counts with NO key linking an Oban job to the row it did not mint; the DAILY figures are the robust ones. And coalesced_attempts is >0 on exactly one row of 31,137 today, so an aggregate over it reports on one row. Both sentences in the commit or moduledoc

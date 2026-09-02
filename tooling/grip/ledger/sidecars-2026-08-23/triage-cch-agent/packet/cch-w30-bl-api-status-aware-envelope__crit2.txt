@@ -1,0 +1,1 @@
+The crash-vs-validation decision is made ONCE at the boundary: faultCopy call sites are reduced (or faultCopy is retired) and the ~29 vague friendly() fallbacks inherit honest server-fault copy without per-site edits. Proved by a census, not by a count of hand edits.

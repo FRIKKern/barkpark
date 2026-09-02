@@ -1,0 +1,1 @@
+A test pins that the verdict is correct in BOTH directions: failed-and-not-serving vs failed-but-the-OTHER-slot-is-serving.

@@ -1,0 +1,1 @@
+On a tree carrying BOTH #10005 and #10006, grep proves exactly one /v1/me retry wiring: `grep -c "loadMe().then" cloud/priv/static/app.js` counts only wireMeRetry and loadMe`s own callers, and no second addEventListener re-implements the re-entry.

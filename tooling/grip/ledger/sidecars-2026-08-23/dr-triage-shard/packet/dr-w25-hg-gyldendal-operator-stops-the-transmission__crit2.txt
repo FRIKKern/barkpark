@@ -1,0 +1,1 @@
+`select count(*) from barkparks where slug='gyldendal'` still returns 3 and `curl .../v1/tls/ask?domain=gyldendal.barkpark.cloud` still returns 200 — nothing legitimate was broken. Paste both.

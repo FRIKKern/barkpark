@@ -1,0 +1,1 @@
+#6414 is merged and its task hgw2-s5-ci-verdict-reader is closed on the claim epoch. Evidence: the merge sha and the close.

@@ -1,0 +1,1 @@
+A test asserts the classification holds — a new System.get_env in runtime.exs must be bare-listed or explicitly declared default-only — and is mutation-proved by removing one entry

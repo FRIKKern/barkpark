@@ -1,0 +1,1 @@
+A fixture exists for BOTH 403 slugs on the launch path, and each can lose. Evidence: the two scenarios plus a mutation red for each.

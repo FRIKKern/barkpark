@@ -1,0 +1,1 @@
+If kept, the harness gains at least one case exercising --predicate that FAILS when the derivation is reverted to the hardcoded constant.

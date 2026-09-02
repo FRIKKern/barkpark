@@ -1,0 +1,1 @@
+THE TWO ACCURATE-BUT-SHAPE-BANNED CITES ARE CALLED OUT: the PR body states that overflow-guard.mjs:97 and :234 cite smoke.mjs:372, which is CORRECT today, and that E11 bans the shape rather than falsehood — so re-anchoring them is not a bug fix. Evidence: the PR body line plus the grep showing smoke.mjs:372 is `hash: scen.deepLink || "#overview"`.

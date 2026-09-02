@@ -1,0 +1,1 @@
+The tier is DECIDED and WRITTEN: either the route raises to a team-admin gate (and the console's predicate + the binding census `elevated` count move in the same diff) or a code comment plus a charter row states why plain membership is correct for a site and not for an instance.

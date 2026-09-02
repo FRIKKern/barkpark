@@ -1,0 +1,1 @@
+If a leak is confirmed it is fixed at the RETRIEVAL seat keyed on the permission by membership - never by mounting PublicRead on a bare scoped pipeline (D49) - and shipped with a fail-before canary.

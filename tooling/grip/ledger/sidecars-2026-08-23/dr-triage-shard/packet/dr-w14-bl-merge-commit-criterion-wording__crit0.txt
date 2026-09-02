@@ -1,0 +1,1 @@
+The 25 criteria are identified by task slug and index, and their wording is corrected to a form the available tooling can actually satisfy

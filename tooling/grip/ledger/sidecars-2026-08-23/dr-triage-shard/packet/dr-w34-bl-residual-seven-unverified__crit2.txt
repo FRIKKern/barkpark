@@ -1,0 +1,1 @@
+The two saved-publish shas are either derived from the live deployments table or the artefact states plainly that they are a self-citation with no independent derivation.

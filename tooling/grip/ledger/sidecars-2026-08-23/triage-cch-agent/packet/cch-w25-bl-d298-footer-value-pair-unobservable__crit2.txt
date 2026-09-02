@@ -1,0 +1,1 @@
+The shipped value on .deploy-rail-fail is NOT changed by this row unless criterion 0 produces a measured difference. THE WRAP RULE at the head of app.css already chooses `anywhere` for a machine string on argument; a flip with no pixel behind it is exactly the unpriced change this epic refuses.

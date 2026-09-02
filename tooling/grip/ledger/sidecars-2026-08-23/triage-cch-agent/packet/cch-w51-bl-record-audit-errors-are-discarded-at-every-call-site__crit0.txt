@@ -1,0 +1,1 @@
+Every Accounts.record_audit/1 call site in cloud/lib either handles {:error, _} or routes through a wrapper that does; the discard idiom appears zero times

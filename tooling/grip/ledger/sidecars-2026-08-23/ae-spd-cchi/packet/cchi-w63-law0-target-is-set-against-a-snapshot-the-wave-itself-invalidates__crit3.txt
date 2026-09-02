@@ -1,0 +1,1 @@
+MERGE-GATED (the lead closes this): the PR is merged and `gh api repos/FRIKKern/barkpark/compare/<merge-sha>...main --jq .status` returns `ahead`.

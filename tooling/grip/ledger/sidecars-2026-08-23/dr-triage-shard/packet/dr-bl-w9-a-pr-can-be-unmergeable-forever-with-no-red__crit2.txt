@@ -1,0 +1,1 @@
+The check is proved by MUTATION against a head whose required run is absent, showing it fail, and against a healthy head, showing it pass. Evidence: both run outputs.

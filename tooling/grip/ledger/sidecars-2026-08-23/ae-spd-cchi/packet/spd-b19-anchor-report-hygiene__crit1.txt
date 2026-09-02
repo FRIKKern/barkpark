@@ -1,0 +1,1 @@
+Anchor criterion 3 is stamped with the good=0 / rot=1 mutation output quoted AND the ExUnit revert-red home named, because tooling/** cannot satisfy the required gate.

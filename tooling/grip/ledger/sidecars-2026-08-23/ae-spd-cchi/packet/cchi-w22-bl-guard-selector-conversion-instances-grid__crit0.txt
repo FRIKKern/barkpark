@@ -1,0 +1,1 @@
+The vacuity is reproduced before it is fixed: with the historical defect live and the cruel card at a non-zero index, the card assertion alone exits 0. Evidence: the run with `rc=$?`, with the leg's page-global half muted so the SELECTOR half decides alone.

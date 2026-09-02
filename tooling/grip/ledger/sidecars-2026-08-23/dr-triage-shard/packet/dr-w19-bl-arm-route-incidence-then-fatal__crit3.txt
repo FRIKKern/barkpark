@@ -1,0 +1,1 @@
+If the measurement is ZERO, the row closes with that number recorded — a measured zero is the answer, not a reason to keep the row open.

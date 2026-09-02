@@ -1,0 +1,1 @@
+Any fix is justified on the CSI adjacency population, never on the OSC fixture

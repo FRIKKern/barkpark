@@ -1,0 +1,1 @@
+Any claim that a 22-day 500 was fixed is removed; the measured facts (200 in 18.0s and 26.0s, one bodyless 502 from a compose recreate) replace it.

@@ -1,0 +1,1 @@
+Every caller of the dedup_unavailable envelope is enumerated before the wording or status changes, so no surface is silently re-classified.

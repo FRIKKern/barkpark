@@ -1,0 +1,1 @@
+Either @unique names its states explicitly excluding :completed WITH a behavioural test proven to red under the bare option, or the moduledoc states why :completed is deliberately included. Evidence: the diff.

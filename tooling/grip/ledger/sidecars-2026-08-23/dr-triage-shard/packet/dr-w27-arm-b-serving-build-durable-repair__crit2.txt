@@ -1,0 +1,1 @@
+Any return-shape change is stated explicitly with its blast radius through AutoDeployWorker.start_and_report/2, or the repair is shown to need none.

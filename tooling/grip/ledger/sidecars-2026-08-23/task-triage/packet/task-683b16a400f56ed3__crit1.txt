@@ -1,0 +1,1 @@
+WHAT IS EXPOSED IS EXPLICITLY BOUNDED. The tail/block has a stated cap in lines or bytes and the cap is enforced in code, not by hoping logs stay small. Evidence names the bound and shows it holding against a log larger than it.

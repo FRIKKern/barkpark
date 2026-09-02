@@ -1,0 +1,1 @@
+IF a rung: the ladder, the buckets, internal/cli/testdata/attention_order_cases.json, cloud/priv/static/__fixtures__/attention_order.json and semrole.For all move in ONE commit, and a test proves an unranked state still buckets to attention. Evidence: the single commit sha and the bucket test. IF a detail line: evidence that no rank, bucket or fixture changed at all.

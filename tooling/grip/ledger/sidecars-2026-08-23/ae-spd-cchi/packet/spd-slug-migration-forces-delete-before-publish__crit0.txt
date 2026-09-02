@@ -1,0 +1,1 @@
+A slug can be changed without a window in which the work item exists only as an unpublished draft

@@ -1,0 +1,1 @@
+A fleet-rate or consecutive-failure alert exists that fires on a RATE over a pinned window with volume beside it, and refuses to fire below roughly n=200.

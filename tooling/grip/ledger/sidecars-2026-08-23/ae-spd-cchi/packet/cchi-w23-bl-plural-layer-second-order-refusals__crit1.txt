@@ -1,0 +1,1 @@
+EVERY ASSERTED SUB-POPULATION IS COUNTED AND ITS ZERO IS REFUSED, PER CELL — not per leg. The three legs print the sub-host counts they measured, and a missing sub-host reds rather than being silently skipped. Quote the new ok-lines carrying the counts.

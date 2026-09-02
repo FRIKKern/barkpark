@@ -1,0 +1,1 @@
+HONEST BOUND: the distance is as fresh as the hourly sweep that wrote it, so the row states `commit_distance_checked_at` beside the number. A verdict with no as-of is a number that cannot be judged stale.

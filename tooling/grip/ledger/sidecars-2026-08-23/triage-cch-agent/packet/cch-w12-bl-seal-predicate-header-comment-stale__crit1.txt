@@ -1,0 +1,1 @@
+The comment states how it stays true - either it stops quoting a per-entry rung, or the run itself is the only place a rung is asserted. Evidence: the written approach.

@@ -1,0 +1,1 @@
+Pointer, keyboard, and touch access to every overlapped action remains intact while the presence indicator stays perceivable and does not cover focus rings at narrow or wide widths.

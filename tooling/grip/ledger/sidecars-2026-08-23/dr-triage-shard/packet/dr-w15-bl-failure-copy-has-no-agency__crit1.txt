@@ -1,0 +1,1 @@
+MUTATION PROOF: changing a class agency in deploy_ledger.ex changes what the customer-facing copy says about fault, and a test reds if the two taxonomies disagree

@@ -1,0 +1,1 @@
+cloudclient.Site decodes last_deployment and cloudclient.Deployment decodes stage, detail, console, trigger and environment — proven by a decode test over a real control-plane payload, not a hand-written fixture.

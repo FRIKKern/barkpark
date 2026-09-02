@@ -1,0 +1,1 @@
+`CC=clang mix test` on the touched auth/router test files passes, and `CC=clang go test ./internal/cli/...` passes.

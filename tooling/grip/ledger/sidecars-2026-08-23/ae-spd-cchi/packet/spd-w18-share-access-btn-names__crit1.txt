@@ -1,0 +1,1 @@
+studio_desk_add_button_name_test.exs is EXTENDED to cover both buttons, and deleting either aria-label reds it by name, with the mutation output quoted.

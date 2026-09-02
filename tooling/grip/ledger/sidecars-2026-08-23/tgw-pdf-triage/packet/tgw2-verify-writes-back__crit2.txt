@@ -1,0 +1,1 @@
+The stranded-file case (Decide crashes or cuts no slices) is ruled on explicitly - either swept, or the loss accepted with the reason stated in a code comment

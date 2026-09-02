@@ -1,0 +1,1 @@
+A scope naming a tenant slug that does not exist as a tenancy row is REFUSED rather than parsed into a live share

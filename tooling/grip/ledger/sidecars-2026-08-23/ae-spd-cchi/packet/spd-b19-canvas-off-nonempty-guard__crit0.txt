@@ -1,0 +1,1 @@
+A test pins BARKPARK_PAPER_CANVAS=0 with the prev/put_env/on_exit-delete_env idiom under async: false and asserts the paper shell's body region renders NON-ZERO visible characters for a blocks-list document - the character count quoted at both flag values.

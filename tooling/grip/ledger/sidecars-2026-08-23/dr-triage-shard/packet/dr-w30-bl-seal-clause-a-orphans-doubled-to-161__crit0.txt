@@ -1,0 +1,1 @@
+A seal reading is taken through scripts/seal-run.sh from a full-history CHECKOUT at the live origin/main tip, with head= and b-unavailable= quoted beside the verdict. Evidence: the VOUCHED line.

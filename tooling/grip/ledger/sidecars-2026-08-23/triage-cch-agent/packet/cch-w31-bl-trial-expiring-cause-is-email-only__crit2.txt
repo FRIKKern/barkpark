@@ -1,0 +1,1 @@
+A census takes LEFT = every event atom whose producer passes a detail-bearing payload and RIGHT = the render.ex arms that read it, from INDEPENDENT greps, mutation-proved by adding a detail-bearing producer with no chat arm and watching it red.

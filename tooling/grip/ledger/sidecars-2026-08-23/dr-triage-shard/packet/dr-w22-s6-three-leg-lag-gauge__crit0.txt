@@ -1,0 +1,1 @@
+AFTER dr-w21-s1 merges: the PR body pastes `git log --oneline -1 origin/main` showing s1's commit is an ancestor of this branch's base.

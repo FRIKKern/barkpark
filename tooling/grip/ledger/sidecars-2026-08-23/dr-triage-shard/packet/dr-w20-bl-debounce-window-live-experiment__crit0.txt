@@ -1,0 +1,1 @@
+The set of non-demo sites bound to this control plane is enumerated BEFORE the variable is set, and the freshness cost to each is stated (@schedule_in_default is global, not per-site).

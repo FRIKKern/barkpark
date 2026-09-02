@@ -1,0 +1,1 @@
+Tests pin both cases and red when the clamp/zero handling is reverted

@@ -1,0 +1,1 @@
+A regression test drives the foreign-scope event from a mounted socket and asserts the STORE (StoredShare count and Sharing.shared?), not just the flash

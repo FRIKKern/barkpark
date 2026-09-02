@@ -1,0 +1,1 @@
+merge-gates.md names break-glass as the repo's armed override, with a pointer to scripts/breakglass.sh and docs/ops/break-glass-log.md, and states out loud that it lowers enforce_admins repo-wide - a strictly larger blast radius than a per-PR label. Evidence: the new section.

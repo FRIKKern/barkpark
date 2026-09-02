@@ -1,0 +1,1 @@
+internal/cli/errors.go's flat-envelope arm stops setting message = the slug when `details` is present, or the row states by evidence why that arm is unreachable.

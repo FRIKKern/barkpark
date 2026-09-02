@@ -1,0 +1,1 @@
+gofmt -l internal/ empty; go build ./...; go vet; go test ./internal/cli/... green. Paste the tails.

@@ -1,0 +1,1 @@
+Gate run green with output pasted: bash deploy/site-deploy-node.sh --self-test

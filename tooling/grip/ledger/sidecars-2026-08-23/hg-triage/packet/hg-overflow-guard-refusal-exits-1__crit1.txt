@@ -1,0 +1,1 @@
+seal-predicate.mjs no longer prints "the defect is still measurable at origin/main" for a non-1 guard exit. Its own documented protocol already classifies exit 2 as always-mechanical; the message must match. NOTE: seal-predicate.mjs is FROZEN for the cloud-gui-remake seal — do not touch it until that epic has taken its terminal verdict.

@@ -1,0 +1,1 @@
+Every vacuous exit found is fixed in the shape wave 39 used on scripts/registration-deadlock-sweep.sh — a flag-gated refusal routed through the existing `fail()`, plus a stated NO COVERAGE line, plus an assertion in scripts/required-checks.test.sh that a MUTATION control proves can lose (quote the red on the mutant and the green on the clean tree).

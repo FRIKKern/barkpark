@@ -1,0 +1,1 @@
+The result is compared against the BEFORE numbers (3.83 rows/live, 2,268 rows over 807 chains, depths 184/143/102/59/21/4) and the verdict states plainly whether demand crossed under supply — a flat result is reported as a finding, not retried until it moves.

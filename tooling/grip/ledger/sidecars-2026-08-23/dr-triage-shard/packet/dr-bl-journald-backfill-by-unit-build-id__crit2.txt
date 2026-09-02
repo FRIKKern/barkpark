@@ -1,0 +1,1 @@
+The backfilled row count is reported against the 9,634 retained build units, with the shortfall explained rather than silently dropped

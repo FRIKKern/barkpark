@@ -1,0 +1,1 @@
+bp cloud site status emits a page-truncation marker when the pending set reaches the page edge without hitting a settled boundary, in BOTH the printed sentence and -o json

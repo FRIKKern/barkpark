@@ -1,0 +1,1 @@
+confirm_modal.ex no longer carries an inline style= with position/background; the scrim is a rule using hsl(var(--bp-scrim-hsl) / a)

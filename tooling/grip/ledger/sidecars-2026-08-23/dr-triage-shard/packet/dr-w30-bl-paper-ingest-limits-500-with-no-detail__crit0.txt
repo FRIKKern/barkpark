@@ -1,0 +1,1 @@
+The 17th-heading refusal returns a 4xx naming the outline cap and the current count, not a 500. Evidence: the response body from a payload with 17 headings.

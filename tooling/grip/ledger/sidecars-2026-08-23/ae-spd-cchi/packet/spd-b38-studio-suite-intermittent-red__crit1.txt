@@ -1,0 +1,1 @@
+The red is classified: either a genuine sandbox-ownership race (fix it, or state why the $callers drain does not cover this path) or pure host contention (state the reproduction conditions so a future wave does not attribute it to a slice).

@@ -1,0 +1,1 @@
+Full gate green on the folded state: node --check, __app.test.mjs, modal-oracle, smoke.mjs, __css_check, cssom-parity, breakpoint-sweep --census + its test — each rc read by redirect, never through a pipe.

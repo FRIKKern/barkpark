@@ -1,0 +1,1 @@
+The trend is fixture-drivable and makes no network call under the harness's gh-stripped PATH. Evidence: the harness passing.

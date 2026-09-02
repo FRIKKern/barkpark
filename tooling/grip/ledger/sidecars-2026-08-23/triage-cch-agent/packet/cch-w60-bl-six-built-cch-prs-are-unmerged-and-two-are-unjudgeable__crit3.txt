@@ -1,0 +1,1 @@
+The net effect on the epic's published-live roster is stated in both derivations (bp task get children, and a parent_id filter over bp task ls --all), before and after.

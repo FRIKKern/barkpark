@@ -1,0 +1,1 @@
+A detector makes the class observable — a max-age-in-non-terminal-status gauge or an equivalent — rather than relying on catching a specimen by hand

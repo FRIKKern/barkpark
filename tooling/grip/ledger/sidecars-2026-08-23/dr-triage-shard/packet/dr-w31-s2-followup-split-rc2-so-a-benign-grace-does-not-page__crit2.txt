@@ -1,0 +1,1 @@
+bash scripts/crown-reconcile.test.sh passes with the new arms, and every new arm is proven able to lose by mutation

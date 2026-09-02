@@ -1,0 +1,1 @@
+Fixed, or — if it is a legitimate limit — the limit is ENFORCED with a clear 4xx naming the field and the cap, never a bare 500. A protective test pins whichever outcome ships.

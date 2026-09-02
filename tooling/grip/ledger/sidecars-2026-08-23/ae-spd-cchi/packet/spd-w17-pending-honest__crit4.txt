@@ -1,0 +1,1 @@
+Any motion added carries a prefers-reduced-motion guard, matching root.html.heex:1129-1136

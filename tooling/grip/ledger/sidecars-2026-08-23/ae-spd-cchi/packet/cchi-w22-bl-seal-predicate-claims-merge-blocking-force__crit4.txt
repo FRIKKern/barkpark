@@ -1,0 +1,1 @@
+`node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` passes and any census literal it pins is re-derived rather than typed. Evidence: the run.

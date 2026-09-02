@@ -1,0 +1,1 @@
+A deployment whose build completed and staged an artifact is no longer captioned as a refusal; the recorded reason names what actually happened at HEALTH.

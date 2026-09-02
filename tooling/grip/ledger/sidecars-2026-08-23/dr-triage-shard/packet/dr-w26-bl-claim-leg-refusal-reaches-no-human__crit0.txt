@@ -1,0 +1,1 @@
+The 409 response carries the leg atom and its operator sentence, or a documented decision records why it must not (e.g. tenancy disclosure).

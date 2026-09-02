@@ -1,0 +1,1 @@
+THE GO SIDE DECODES AND RENDERS IT — no fifth decoded-by-nobody field. Paste the struct tag, the render, and a `grep -rn` over internal/ proving the field has a READER, not just a declaration

@@ -1,0 +1,1 @@
+Revert-red: removing the detection reds the new test by name.

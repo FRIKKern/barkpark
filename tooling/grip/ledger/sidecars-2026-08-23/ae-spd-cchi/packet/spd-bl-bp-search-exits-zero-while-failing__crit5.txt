@@ -1,0 +1,1 @@
+NEGATIVE ARM: a genuine EMPTY result -- server reachable, zero documents -- still exits 0, and stays distinguishable from the new environment code. The row's complaint is that 'a caller cannot distinguish an outage from an empty result set by exit code'; a fix that makes empty non-zero swaps one indistinguishability for another.

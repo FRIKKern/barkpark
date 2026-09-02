@@ -1,0 +1,1 @@
+A test proves the stored value TRACKS the rendered body: a change to the render changes the stored value. Evidence: the test and a mutation showing it can lose.

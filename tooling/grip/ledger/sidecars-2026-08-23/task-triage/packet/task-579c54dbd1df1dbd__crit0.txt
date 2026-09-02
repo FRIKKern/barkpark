@@ -1,0 +1,1 @@
+mobile LEGEND_ROLES filters via the status-manifest allowlist, not a hardcoded unknown blocklist

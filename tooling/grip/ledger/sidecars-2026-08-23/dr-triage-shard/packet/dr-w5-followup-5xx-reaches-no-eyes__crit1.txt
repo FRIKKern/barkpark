@@ -1,0 +1,1 @@
+bp cloud status renders the 5xx reading for a box that reports one, in the shape the ruling chose, and the number is the beat s own -- no second meter, no recomputation. Evidence: a LIVE read off the real control plane with BINARY PROVENANCE (bp built from the branch under test via git archive <sha> | tar -x, and the <sha> quoted beside the output).

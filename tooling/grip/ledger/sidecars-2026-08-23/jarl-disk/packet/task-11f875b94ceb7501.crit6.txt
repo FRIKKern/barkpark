@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): all required contexts green, read live from .github/required-checks.json.

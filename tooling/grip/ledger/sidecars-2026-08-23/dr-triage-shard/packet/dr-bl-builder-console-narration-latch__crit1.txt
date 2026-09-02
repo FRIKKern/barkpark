@@ -1,0 +1,1 @@
+Proven by driving the latch (three consecutive failed console POSTs) and asserting the resulting deployment is readable as truncated rather than as complete.

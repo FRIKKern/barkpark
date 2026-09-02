@@ -1,0 +1,1 @@
+A decision recorded for auto-proof: register deliberately, or clear its CP content_webhook_secret so a backfill skips it.

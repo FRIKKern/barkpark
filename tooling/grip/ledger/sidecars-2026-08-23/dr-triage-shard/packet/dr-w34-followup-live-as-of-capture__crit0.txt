@@ -1,0 +1,1 @@
+A live bp cloud deployments -o json capture, post-deploy, shows coverage_cohorts.as_of, deferral_wait.as_of, delivery.as_of and delivery.censored.as_of as the SAME string

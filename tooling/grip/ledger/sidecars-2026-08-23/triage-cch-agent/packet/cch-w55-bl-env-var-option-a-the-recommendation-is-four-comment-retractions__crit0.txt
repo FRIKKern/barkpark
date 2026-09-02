@@ -1,0 +1,1 @@
+The lead records the decision: retract-and-reserve, delete, or build injection — with the ~20-file cost and the claim-payload-manifest fixture dependency explicitly weighed. Evidence: the decision text and its charter D-row.

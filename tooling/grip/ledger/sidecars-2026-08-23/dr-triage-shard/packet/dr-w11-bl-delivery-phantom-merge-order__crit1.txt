@@ -1,0 +1,1 @@
+After BOTH have merged, cloud/test/barkpark_cloud/payload_key_set_census_test.exs is green on origin/main with exactly one allowlist row for {DeployLedger.census/3, :phantom, delivery} — quote the passing run

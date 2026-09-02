@@ -1,0 +1,1 @@
+The partial-row remainder no longer paints as a rule-tinted slab in light or dark at 1280/1920 — evidence quotes the rig cells or element screenshots before/after

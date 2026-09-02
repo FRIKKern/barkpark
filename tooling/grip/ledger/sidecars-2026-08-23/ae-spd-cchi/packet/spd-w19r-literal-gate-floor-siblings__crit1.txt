@@ -1,0 +1,1 @@
+scripts/web-literal-check.sh carries the same floor, with its current count (56) quoted.

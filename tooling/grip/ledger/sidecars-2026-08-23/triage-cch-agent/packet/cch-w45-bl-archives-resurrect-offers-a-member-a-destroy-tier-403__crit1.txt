@@ -1,0 +1,1 @@
+The Resurrect affordance consumes an authority answer instead of deriving solely from the slug — shown by the diff at archivesModel/archiveRowHtml.

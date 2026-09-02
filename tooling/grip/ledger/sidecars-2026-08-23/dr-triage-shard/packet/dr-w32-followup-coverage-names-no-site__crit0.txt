@@ -1,0 +1,1 @@
+AFTER-GATE: both dr-w33-s1-coverage-window-contract and dr-w33-s2-census-reader-stops-being-the-limiter are MERGED to origin/main before this slice is dispatched. Evidence: both merge commit shas, and `git merge-base --is-ancestor <sha> origin/main` returning ancestor for each.

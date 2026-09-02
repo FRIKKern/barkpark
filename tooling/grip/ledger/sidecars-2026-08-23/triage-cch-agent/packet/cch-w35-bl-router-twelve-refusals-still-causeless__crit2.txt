@@ -1,0 +1,1 @@
+Sites 4308 and 4633 receive their OWN slugs and NEVER an authority field, with the reason stated. Evidence: the two diffs plus the one-line rationale each.

@@ -1,0 +1,1 @@
+__binding_census.mjs's patchAutoupdate PIN and EXPECT moved in the SAME commit with the reason in the message, and the census is rc 0. Evidence: the census tail plus the commit message line. (This is bookkeeping, not the proof — D430.)

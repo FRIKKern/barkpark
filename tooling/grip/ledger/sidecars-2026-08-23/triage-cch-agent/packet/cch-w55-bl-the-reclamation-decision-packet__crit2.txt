@@ -1,0 +1,1 @@
+The console copy is re-checked against whatever is decided, so the plane and the sentence move together. Evidence: the copy diff or a statement that cch-w55-s2's sentence remains correct under the decision.

@@ -1,0 +1,1 @@
+payload_key_set_census_test.exs SELF-DECLARATION test still passes and the residue paragraph is deleted from the script (it no longer describes reality)

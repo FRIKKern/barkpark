@@ -1,0 +1,1 @@
+The PR body records the residual risk by name: 2 of the 7 abandoned publishes (search/947c0dbd0de8 and search-ember/91284be29666) never reached live at their own content_rev and were saved only by supersession.

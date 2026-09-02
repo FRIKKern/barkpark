@@ -1,0 +1,1 @@
+Clauses (b) and (c) are scored off a deploy-reliability register, or the predicate refuses to evaluate them for this epic by name. Paste the register.

@@ -1,0 +1,1 @@
+All three render three-valued through instanceAdminAuthority() — refuse disables and explains with FORBIDDEN_ROLE_COPY.admin verbatim, unknown says checking and NEVER refuses, grant is unchanged. No second authority predicate is minted. Evidence: the rendered HTML and a grep showing one definition.

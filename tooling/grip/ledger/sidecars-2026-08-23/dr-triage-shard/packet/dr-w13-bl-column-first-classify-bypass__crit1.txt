@@ -1,0 +1,1 @@
+A DISAGREEMENT fixture (column says one class, prose says another) proves which source wins, and is shown RED when the winning arm is removed

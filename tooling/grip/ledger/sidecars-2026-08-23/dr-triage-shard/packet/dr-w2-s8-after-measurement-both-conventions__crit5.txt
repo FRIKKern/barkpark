@@ -1,0 +1,1 @@
+The box was quiet: `uptime` is printed before and after every run, and the scope is described honestly as six sites over a couple of hours rather than as 'the fleet'.

@@ -1,0 +1,1 @@
+The instance smoke gains an independent second oracle — the bad-creds 401 probe (POST /v1/auth/login with an invalid address, live-verified 401) — so it no longer shares its single predicate with the pre-flip inner health gate.

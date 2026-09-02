@@ -1,0 +1,1 @@
+A written policy states who or what may re-dispatch a zombied run, and whether a run on a deleted branch is cancelled rather than retried

@@ -1,0 +1,1 @@
+The Go gate is green on the final state. Evidence: `CC=clang go build ./... && CC=clang go vet ./internal/cli/... && CC=clang go test ./internal/cli/... ./internal/semrole/...` and `gofmt -l ./internal` (must print nothing), all pasted in full.

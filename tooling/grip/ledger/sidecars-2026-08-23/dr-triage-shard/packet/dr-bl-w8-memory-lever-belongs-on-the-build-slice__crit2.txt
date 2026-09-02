@@ -1,0 +1,1 @@
+A charter decision is written for the memory lever; today the charter has no memory, swap, OOM or cgroup ruling to inherit. Evidence: the charter diff.

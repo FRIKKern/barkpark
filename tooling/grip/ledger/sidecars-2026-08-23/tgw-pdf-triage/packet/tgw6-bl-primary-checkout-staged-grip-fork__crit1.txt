@@ -1,0 +1,1 @@
+The 18 staged files are resolved: discarded, or committed to a branch with a stated reason — and the resolution quotes the blob-SHA match to truth-grip/wave5-decide

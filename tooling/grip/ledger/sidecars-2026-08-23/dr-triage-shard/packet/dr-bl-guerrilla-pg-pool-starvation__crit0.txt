@@ -1,0 +1,1 @@
+The pool defect is either repaired under jpf-bl-oban-pool-partition or explicitly re-owned, with the owner named. This row is a pointer, not a duplicate implementation.

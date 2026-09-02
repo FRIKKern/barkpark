@@ -1,0 +1,1 @@
+The carried sentence fires from the row's `carried` boolean and names the delivering run; paste the rendered bytes for a carried row and for a non-carried row.

@@ -1,0 +1,1 @@
+The team-scoped and operator surfaces call the same computation, proved by a test that reds if either grows a divergent branch

@@ -1,0 +1,1 @@
+The census emits the rate as an INSEPARABLE TRIPLE — terminal rate with its n, absorption with its n, and releases per hour — and a test proves a bare single rate cannot be constructed: removing any leg of the triple from the emitted map REDS the suite (quote the failing output)

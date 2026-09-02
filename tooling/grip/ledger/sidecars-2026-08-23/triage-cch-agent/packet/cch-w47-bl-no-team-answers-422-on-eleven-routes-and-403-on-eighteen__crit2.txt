@@ -1,0 +1,1 @@
+The console collapses to ONE no_team sentence, and the hand-written 422 workaround at app.js:7379-7383 is removed or re-justified in the diff.

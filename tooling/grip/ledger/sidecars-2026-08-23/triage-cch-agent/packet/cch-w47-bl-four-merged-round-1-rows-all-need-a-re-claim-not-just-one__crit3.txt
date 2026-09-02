@@ -1,0 +1,1 @@
+The epic's LIVE count is re-derived by a PAGINATED roster read (a single limit=500 read truncates at 581 children) and recorded as wave 47's Law-0 closing integer.

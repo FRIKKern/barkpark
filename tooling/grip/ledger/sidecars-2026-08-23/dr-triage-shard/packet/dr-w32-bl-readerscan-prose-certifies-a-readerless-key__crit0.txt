@@ -1,0 +1,1 @@
+ReaderScan stops scoring rendered page text and prose as a reader, or the :has_reader disposition requires a hit in a code tree rather than any tree.

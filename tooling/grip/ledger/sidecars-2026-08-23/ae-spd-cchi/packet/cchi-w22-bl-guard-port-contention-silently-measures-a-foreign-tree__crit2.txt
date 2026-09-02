@@ -1,0 +1,1 @@
+MUTATION: with the repair in, the same foreign-server setup now REFUSES at exit 2 naming the foreign tree, and a clean run still exits 0. Evidence: both runs with `rc=$?` read on its own line.

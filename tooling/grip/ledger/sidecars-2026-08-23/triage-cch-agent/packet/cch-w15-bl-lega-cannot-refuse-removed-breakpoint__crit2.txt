@@ -1,0 +1,1 @@
+`node cloud/priv/static/__preview__/breakpoint-sweep.mjs` exits 0 on an unmutated tree and `node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs` exits 0 with the new assertions.

@@ -1,0 +1,1 @@
+The wiring is proven complete by the harness rather than by eye: blocking_not_in_needs AND needs_without_decide are both empty, and removing the decide line makes needs_without_decide RED. Evidence: both runs.

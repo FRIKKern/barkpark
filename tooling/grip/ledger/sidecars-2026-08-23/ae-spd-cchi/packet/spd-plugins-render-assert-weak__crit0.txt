@@ -1,0 +1,1 @@
+The /studio/plugins render test asserts a named plugin-group row is PRESENT in the HTML, and reverting plugin_group_node/2 icon plus pane_builder fallback reds that RENDER test (not only the emitter test), with the failing output quoted.

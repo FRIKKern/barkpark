@@ -1,0 +1,1 @@
+The measurement is taken on a QUIET slot with the active slot resolved rather than assumed, and the slot's boot time is named. Evidence: the run output.

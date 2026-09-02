@@ -1,0 +1,1 @@
+The consumer states its window (cumulative since slot boot) and refuses rather than printing a number when the slot is too young. Evidence: a test over a fresh-slot fixture.

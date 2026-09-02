@@ -1,0 +1,1 @@
+The hardcoded 403 branch at the env-var WRITE failure copy is gone and the path falls through to friendly(). Evidence: the diff.

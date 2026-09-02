@@ -1,0 +1,1 @@
+Both --selftests still pass and both disarm cases (foreign-job regex, unnamed trailing step) still RED.

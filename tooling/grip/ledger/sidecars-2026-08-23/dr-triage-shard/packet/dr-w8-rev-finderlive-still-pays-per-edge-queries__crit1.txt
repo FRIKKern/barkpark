@@ -1,0 +1,1 @@
+The per-edge round trips on the FinderLive path are removed, counted BEFORE and AFTER with the [:barkpark, :repo, :query] telemetry counter, with both numbers read off deliberately-failing assertions so the counter is proven able to fail.

@@ -1,0 +1,1 @@
+If actions should be available, doc_actions is threaded into the paper branch and the rendered entry points are proven present in a real browser on a real paper

@@ -1,0 +1,1 @@
+If declined: the polling cost is acknowledged and the replacement for bp-loop-ledger.md:43's poll-and-merge loop is named

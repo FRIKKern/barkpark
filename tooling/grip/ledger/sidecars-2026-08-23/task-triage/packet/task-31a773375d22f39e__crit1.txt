@@ -1,0 +1,1 @@
+A negative value clamps to 0 width rather than rendering negative width

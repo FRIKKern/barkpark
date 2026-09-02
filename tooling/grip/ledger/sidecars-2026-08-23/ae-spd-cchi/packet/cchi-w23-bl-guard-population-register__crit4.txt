@@ -1,0 +1,1 @@
+CHARTER D258's CENSUS IS CORRECTED WHEREVER IT IS QUOTED IN CODE OR PROSE: no artefact still states 65/20, and any stated pair carries its counting rule. Quote a grep over the repo showing zero surviving 65/20 citations.

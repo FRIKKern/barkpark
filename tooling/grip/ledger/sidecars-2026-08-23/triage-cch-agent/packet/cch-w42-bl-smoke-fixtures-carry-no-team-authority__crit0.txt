@@ -1,0 +1,1 @@
+scenarios.mjs me() and mock.js /v1/me emit team_authority consistent with the role they already state, so a rendered assertion can observe the grant arm.

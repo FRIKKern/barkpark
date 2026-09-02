@@ -1,0 +1,1 @@
+The existing bp sites logs verb is EXTENDED to be deployment-keyed rather than a third surface being added, and its unreachable 'the builder writes it once the build starts' fallback message is corrected.

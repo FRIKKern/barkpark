@@ -1,0 +1,1 @@
+The pre-deploy state of /opt/barkpark/sites/search-capstone/src is re-derived on the box and printed: how many of the 66 template files are present, and whether the survivors are byte-identical to the template.

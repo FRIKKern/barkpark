@@ -1,0 +1,1 @@
+The actor is moved by IDENTITY, not role: a meAs(user, teamName, onb, role) sibling in operatorMe's existing override shape. teamMembers is BYTE-UNCHANGED (three consumers; two smoke assertions keyed to exactly 3 rows) and the peer-owner roster is a .concat, not an edit. Evidence: git diff of scenarios.mjs.

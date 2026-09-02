@@ -1,0 +1,1 @@
+TRUNCATION CAN LOSE: a test proves the truncation marker RISES when the list is cut at site_limit, and is false when it is not. Evidence: both assertions.

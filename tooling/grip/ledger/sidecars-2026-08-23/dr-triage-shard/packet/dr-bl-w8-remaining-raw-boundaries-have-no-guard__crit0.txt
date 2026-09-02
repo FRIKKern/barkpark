@@ -1,0 +1,1 @@
+console[].line passes through strip_ansi before scrub at the display boundary, and a test with a colourised console line proves it. Evidence: the test run.

@@ -1,0 +1,1 @@
+`.btn` (and the ghost/sm variants that need it) carry a :focus-visible ring in the bare `outline: 2px solid var(--ring)` idiom, and every existing .btn call site was visually reviewed for the change

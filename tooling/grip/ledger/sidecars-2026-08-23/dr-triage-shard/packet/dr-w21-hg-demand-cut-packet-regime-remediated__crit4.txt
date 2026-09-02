@@ -1,0 +1,1 @@
+The instrument gap is filed as its own row: a fleet search-latency p50 and an observed-build-concurrency gauge, neither of which exists, over a corpus that self-deletes in ~40 hours.

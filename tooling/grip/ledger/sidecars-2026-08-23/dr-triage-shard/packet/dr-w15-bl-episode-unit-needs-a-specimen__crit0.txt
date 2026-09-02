@@ -1,0 +1,1 @@
+A positive episode specimen is identified in the deployments ledger or in a documented fleet incident: a contiguous interval with a real interior transition whose buckets all clear a stated volume floor. The window is PINNED with both bounds.

@@ -1,0 +1,1 @@
+A mutation-proven test in reduce_test.go drives the accumulator past the cap and asserts the frozen length, the honest marker, and that the turn still settles

@@ -1,0 +1,1 @@
+Existing orphans are swept: the open-issue list carries no issue whose body names a task id that returns not_found, with the query that establishes it pasted

@@ -1,0 +1,1 @@
+Before/after attempts-per-live and deferral-chain length are measured over pinned windows with volume beside every rate, and the PR body states plainly that the change does NOT reduce publish-to-live latency.
