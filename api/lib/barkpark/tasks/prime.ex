@@ -10,7 +10,8 @@ defmodule Barkpark.Tasks.Prime do
   #     newest-touched first, capped at 100.
   #   * `recent_events` — the last `:limit` task `mutation_events`, newest
   #     first, as lean `{event, doc_id, at}` rows.
-  #   * `counts` — lifecycle_status → count totals for the scope.
+  #   * `counts` — lifecycle_status → count totals for the scope, twin-collapsed
+  #     (published wins) exactly as `/v1/tasks` counts them.
   #
   # Tenancy scoping is byte-identical to the former controller path: the same
   # fail-CLOSED `Scope.scope_to_workspace/3` on workspace, the same project /
@@ -22,6 +23,7 @@ defmodule Barkpark.Tasks.Prime do
 
   alias Barkpark.Content.{Document, MutationEvent, Scope}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Query, as: TaskQuery
 
   @type result :: %{
           in_progress: [Document.t()],
@@ -78,16 +80,42 @@ defmodule Barkpark.Tasks.Prime do
     |> Repo.all()
   end
 
+  # COUNTS ARE A POPULATION READ, so they collapse twins. A task can exist
+  # twice — `t1` and its `drafts.t1` shadow — and `Tasks.Query.collapse_twins/1`
+  # is "the ONE owner of the 'count a twinned task once' law for every task READ
+  # path". Every other population read already applies it (`/v1/tasks`,
+  # `docs_for_query/2`, `agg_docs/2`); this one grouped the RAW rows, so a
+  # twinned task whose two halves carry DIFFERENT lifecycle statuses landed a
+  # +1 in each bucket. Live repro 2026-08-17: prime said `in_progress = 11`
+  # while the collapsed listing returned 10 — the drift row was
+  # `drafts.cch-w62-bl-friendly-throws-on-the-nested-envelope-it-is-handed`
+  # (draft `in_progress`, published twin `done`), counted in BOTH.
+  #
+  # Published wins, and an UNPAIRED `drafts.<id>` row — the whole mutate-created
+  # population — has no distinct twin, so the NOT EXISTS is vacuously true and
+  # it still counts. The over-count is fixed without buying an under-count.
+  #
+  # NOT applied to `in_progress/3` above, deliberately: that is a CLAIM-recovery
+  # read, not a population read. Collapsing it would suppress a `drafts.` row
+  # holding a LIVE claim behind a published twin that is already `done` — which
+  # is precisely the divergent pair above — and delete the claim the caller is
+  # rehydrating from its own prime. Same distinction `collapse_twins/1` already
+  # draws for `StudioChat`'s claim lookups.
   defp lifecycle_counts(workspace_id, project_id) do
-    from(d in Document,
-      where: d.type == "task",
+    from(d in Document, where: d.type == "task")
+    |> TaskQuery.collapse_twins()
+    |> maybe_filter_workspace(workspace_id)
+    |> maybe_filter_project(project_id)
+    |> group_by_lifecycle()
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp group_by_lifecycle(query) do
+    from(d in query,
       group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
       select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
     )
-    |> maybe_filter_workspace(workspace_id)
-    |> maybe_filter_project(project_id)
-    |> Repo.all()
-    |> Map.new()
   end
 
   # Tenancy filters — identical semantics to the controller's former
