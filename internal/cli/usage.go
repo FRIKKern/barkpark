@@ -20,7 +20,7 @@ import (
 // sorts — so entries may accrete at the head.
 var usageBuiltins = []string{
 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
-	"doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
+	"dev", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
 	"make", "mcp", "migrate", "onramp", "paper", "provider", "register", "scaffy", "seed", "server",
 	"servers", "setup", "signup", "sites", "style", "subscribe", "task", "tasks", "team", "teams",
 	"tinker", "uninstall", "upgrade", "use", "vercel", "version", "whoami",

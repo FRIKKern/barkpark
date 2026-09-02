@@ -457,6 +457,12 @@ func Execute(args []string) int {
 		// `bp uninstall [--local]` — remove bp's local state (config, optionally
 		// the local dev stack). Never the binary, never a remote server.
 		return runUninstall(out, g, rest[1:])
+	case "dev":
+		// `bp dev pull <source> <target> <ws>/<ds>` — the single-verb PDS pull.
+		// A built-in (not a manifest command) because, like migrate, it spans
+		// TWO servers and must resolve both from the saved-server config before
+		// any network call; it then composes the shipped bundle verbs.
+		return runDev(out, g, rest[1:])
 	case "migrate":
 		// `bp migrate <from> <to> [flags]` — server-to-server data copy. A
 		// built-in (not a manifest command) because it spans TWO servers and
