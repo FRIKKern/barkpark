@@ -2342,14 +2342,20 @@ defmodule BarkparkWeb.Router do
   # nowhere, so the pipeline alone would have been inert. task-5fa8c834e1afa197
   # fixed it AT the builders (`Content.Export.export_stream/2`,
   # `Content.Revisions.list_revisions/4` + `get_revision/3`), which narrows the
-  # flat AND scoped mounts at once — so they stay bare here on purpose. LISTEN is
-  # NOT closed: `ListenController` resolves each event through the grant-narrowed
-  # `Content.get_document/4`, but on `{:error, :not_found}` `redacted_result/4`
-  # falls back to `Envelope.redact(event.document, …)` unless the type is
-  # `owner_scoped`, so an out-of-grant event still ships its `documentId`, `type`,
-  # `syncTags` AND frozen envelope to a grant-narrowed subscriber — its own row.
+  # flat AND scoped mounts at once — so they stay bare here on purpose. LISTEN IS
+  # NOW CLOSED TOO (task-c9c962c3451fd831), and by the same shape — at the
+  # consumer, not the pipeline. `ListenController` already resolved each event
+  # through the grant-narrowed `Content.get_document/4`, but on
+  # `{:error, :not_found}` `redacted_result/4` fell back to
+  # `Envelope.redact(event.document, …)` unless the type was `owner_scoped`, so an
+  # out-of-grant event still shipped its `documentId`, `type`, `syncTags` AND
+  # frozen envelope to a grant-narrowed subscriber. That fallback now returns
+  # `:drop` whenever the scope carried `:grant_scoped` — never a redacted frame,
+  # which would still be an existence oracle — on BOTH the replay and live legs.
   #
-  # Pinned by `test/barkpark_web/controllers/flat_analytics_grant_enforcement_test.exs`.
+  # Pinned by `test/barkpark_web/controllers/flat_analytics_grant_enforcement_test.exs`
+  # (analytics) and `test/barkpark_web/integration/listen_grant_narrowing_test.exs`
+  # (listen, both legs).
   scope "/v1/data", BarkparkWeb do
     pipe_through([:api, :require_token, :api_grant_read])
 
