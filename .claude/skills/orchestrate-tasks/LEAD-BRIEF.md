@@ -54,8 +54,9 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 6. **PR** (worker): `git push -u origin <lane>/<slug>`; `gh pr create` with a body that
    ends in the trailer line `Task: <doc_id>`. Report the PR URL and criteria status.
 7. **Review + merge** (you): read the diff, not the worker's prose. Run the gate once
-   yourself if the change is in a shared path. Merge with `scripts/bp-merge.sh <pr>`
-   (falls back to `gh pr merge --squash --delete-branch`). Red required checks: fix or
+   yourself if the change is in a shared path. Merge with `gh pr merge <pr> --squash --delete-branch` once `bash $ORCH/pr-required.sh <pr>` says
+   MERGEABLE (`scripts/bp-merge.sh` takes NO argument — it derives the PR from the current branch, so
+   it only works from inside that PR's worktree). Red required checks: fix or
    hand back; never bypass, never auto-merge.
 8. **Stamp + close** (you): `bp task stamp <id> lead-<lane> <epoch> --criterion N
    --criterion-text "<exact text>" --met --evidence "PR #… merged <sha>"` per met criterion
