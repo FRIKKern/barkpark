@@ -15,7 +15,40 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # ── inline walker (inline node/marks → Pd-tree fold) ───────────────────────
 
   def compose_inline_children(nodes) when is_list(nodes) do
-    Enum.map(nodes, &compose_inline(&1, false))
+    nodes
+    |> unwrap_block_wrappers()
+    |> Enum.map(&compose_inline(&1, false))
+  end
+
+  # A BLOCK-level node sitting in an inline array — `{"type":"paragraph",
+  # "content":[…]}` or `{"type":"list-item","content":[…]}` — carries its text
+  # one level deeper than every inline clause below looks. Without this, such a
+  # node falls to the catch-all `compose_inline/2` and composes to an empty
+  # string: the reader serves HTTP 200 and shows an empty bullet while the prose
+  # sits on disk, unreported. Measured 2026-09-02 on the live corpus: 75 list
+  # items across 4 published papers (56 `paragraph`-wrapped, 19 `list-item`-
+  # wrapped) rendered as `<li><span></span></li>` with their text intact in
+  # storage.
+  #
+  # `table_cell_content/1` in `Render.Compose` already unwraps exactly this
+  # shape for table cells, so the engine answered the same question two
+  # different ways depending on which container asked. This is the shared fix:
+  # `compose_inline_children/1` serves paragraphs, headings, list items and
+  # callouts alike, so patching the list path alone would leave a heading or a
+  # callout carrying the same shape just as blank.
+  #
+  # ONE LEVEL, and only when `content` is a NON-EMPTY list — a block node
+  # without content keeps today's behaviour, and anything nesting deeper is a
+  # separate finding, not something to recurse into here. Keyed on `content`
+  # rather than on a type allowlist because no inline clause in this module
+  # reads `"content"` at all (inline nodes carry `value`, `children` and marks),
+  # so the key cannot shadow a legitimate inline node while it does catch a
+  # block wrapper this corpus has not produced yet.
+  defp unwrap_block_wrappers(nodes) do
+    Enum.flat_map(nodes, fn
+      %{"content" => [_ | _] = inner} -> inner
+      node -> [node]
+    end)
   end
 
   # Tolerate scalar cells (a plain string where a list of inline nodes was
