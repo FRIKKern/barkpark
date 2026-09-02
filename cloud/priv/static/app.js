@@ -8455,12 +8455,17 @@
   // "Permanently tears down the server and stops billing." / "This can't be
   // undone.", and three quarters of that was a claim the control plane does not
   // support:
-  //   • THE ARCHIVE BUNDLE SURVIVES WITH NO REACH. ArchiveStore exports
-  //     derive_signing_key/4, list_archives/1 and sign_v4/1 — no delete, no
-  //     purge. Teardown makes ZERO object-storage requests and the bundle is
-  //     still listable afterwards. NO SENTENCE HERE NAMES A WINDOW OR A NUMBER
-  //     OF DAYS, because there is no reaper: inventing one would be the exact
-  //     defect this wave exists to remove.
+  //   • THE ARCHIVE BUNDLE SURVIVED WITH NO REACH — until cch-w54-bl. When
+  //     this copy was written, ArchiveStore exported derive_signing_key/4,
+  //     list_archives/1 and sign_v4/1 and NOTHING that deleted, so the sheet
+  //     was forbidden to name a window: inventing one would have been the very
+  //     defect that wave removed. The reaper now EXISTS —
+  //     ArchiveStore.delete_bundle/2 driven daily by
+  //     Workers.ArchiveRetentionWorker ("45 3 * * *") — so the sentence names
+  //     the real 30-day window and the real live-team carve-out. THE THREE
+  //     PLACES MOVE TOGETHER: @retention_days in that worker, this sentence,
+  //     and docs/ops/backup-dr.md. A number here that the worker does not
+  //     apply puts the lie straight back.
   //   • BILLING DOES NOT STOP HERE. DELETE /v1/barkparks/:id (web/router.ex)
   //     reaches no Billing function at all; cancellation is TEAM-scoped and
   //     lives on the Billing screen. Removing an instance — even the last one —
@@ -8483,8 +8488,9 @@
       lines.push(ext + " is your own DNS record — Barkpark Cloud never held it. The IP behind it goes back to " +
         "Hetzner, which hands that address to someone else, and we can't repoint the record for you.");
     }
-    lines.push("Any archive bundle this team has already made stays in object storage — Barkpark Cloud has no way " +
-      "to delete it.");
+    lines.push("Any archive bundle this team has already made stays in object storage for 30 days after the " +
+      "instance it came from was torn down; a daily sweep deletes it after that. While this team still has an " +
+      "instance, its most recent bundle is kept.");
     lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
       "your last instance.");
     lines.push(live
