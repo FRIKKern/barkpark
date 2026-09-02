@@ -72,6 +72,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # Same registered `malformed` code, one step narrower: a block list whose
+      # element is not an object. It rides `malformed` on purpose (a request-body
+      # SHAPE error, not a schema validation failure), so known_codes/0 and the
+      # OpenAPI Error.code enum stay unchanged — and it carries `details` naming
+      # every offending path, which is the only way it differs from the row above.
+      {"malformed_blocks",
+       {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}},
+       "malformed", 400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
@@ -92,10 +100,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # THE VETO — deterministic, 409, and it must NOT move when the outage arm
       # below does.
       {"halted", {:error, {:halted, "tenant is over quota"}}, "halted", 409, []},
-      # THE OUTAGE — transient, 503, its own retry hint, `reason` discriminating
-      # it from the veto it shares a code with.
-      {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}}, "halted",
-       503, [:reason]},
+      # THE OUTAGE — transient, 503, its own retry hint, wearing the public
+      # transient-storage code (one code = one status: `halted` stays 409),
+      # `reason` discriminating it from a media-volume fault.
+      {"dedup_unavailable", {:error, {:dedup_unavailable, "backlog scan timed out"}},
+       "storage_unavailable", 503, [:reason]},
       {"label_spine", {:error, {:label_spine, %{"tags" => ["required"]}}}, "label_spine", 422,
        [:details]},
       {"invalid_paper_structure", {:error, {:invalid_paper_structure, %{"blocks" => []}}},
@@ -159,6 +168,10 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
     env = Errors.to_envelope({:error, {:dedup_unavailable, "backlog scan timed out"}})
 
     assert env.status == 503, "a transient dedup outage must not render as a 4xx"
+
+    assert env.code == "storage_unavailable",
+           "one code = one status: `halted` is the 409 plugin veto; the CLI exit-code parity refuses a code at two statuses"
+
     assert env.message == "backlog scan timed out"
     assert env.reason == "dedup_unavailable"
     assert env.hint =~ "Transient"

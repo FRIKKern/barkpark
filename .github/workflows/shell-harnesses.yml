@@ -115,6 +115,7 @@ on:
       # invalidate this matrix without touching either script.
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
+      - "scripts/main-run-concurrency-check.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -317,6 +318,7 @@ on:
       # invalidate this matrix without touching either script.
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
+      - "scripts/main-run-concurrency-check.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -719,7 +721,7 @@ jobs:
   # starting and production sat 1.5 h behind main, with nothing red anywhere:
   # a cancelled-before-start run reports no failure to report.
   deploy-concurrency:
-    name: a queued deploy cannot be evicted (per-sha group + already-covered exit)
+    name: a queued deploy or main gate run cannot be evicted (per-sha groups + already-covered exit)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -755,6 +757,11 @@ jobs:
         # Harness FIRST, subject second — the house selftest-first idiom. A gate
         # that has lost the ability to fail must red before its green is read.
         run: bash scripts/deploy-concurrency-check.sh
+      # The same eviction shape on the MAIN runs of the two gate workflows
+      # (task-b04364c216f877e6): 37 of 40 main elixir runs since 10:27Z on
+      # 2026-09-02 were cancelled by the next merge. Per-sha group on main.
+      - name: main runs of elixir.yml + doc-gates.yml keep one group per main sha
+        run: bash scripts/main-run-concurrency-check.sh
 
   console-path-ratchet:
     name: console-path-escape-check.sh classification matrix

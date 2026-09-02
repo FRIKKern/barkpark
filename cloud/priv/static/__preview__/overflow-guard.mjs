@@ -3202,10 +3202,18 @@ async function main() {
     if (requested.includes("W23-account-modal-identity-bounded")) {
       const D = "W23-account-modal-identity-bounded";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.
-      //   account-modal-revoke = the CRUEL twin (158-char local part)
-      //   account-modal        = the KIND control (ada@acme.com)
+      //   account-modal-cruel-identity = the CRUEL twin (158-char local part)
+      //   account-modal                = the KIND control (ada@acme.com)
+      // cch-w23-bl-cruel-identity-own-scenario repointed the cruel half. It used
+      // to be `account-modal-revoke`, which was ALSO smoke.mjs's click oracle —
+      // so the revoke path was being driven through a 158-character identity as
+      // a side effect of this leg's fixture needs, and the scenario's own name
+      // said nothing about it. The cruel `me` now has a key that names it; the
+      // KIND control is unmoved, and so is every number this leg prints, because
+      // the cruel STRING (cruelAccountEmail) did not change — only which
+      // SCENARIOS key carries it.
       const AM_SCENS = [
-        { scen: "account-modal-revoke", cruel: true },
+        { scen: "account-modal-cruel-identity", cruel: true },
         { scen: "account-modal", cruel: false },
       ];
       // The phone band, the fold, and 1440. The defect is width-independent, so

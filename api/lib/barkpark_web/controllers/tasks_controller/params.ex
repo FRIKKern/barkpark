@@ -422,6 +422,35 @@ defmodule BarkparkWeb.TasksController.Params do
   # it). Checked against the RAW docs — the same inputs the render saw — so
   # the predicate can never drift from what actually got cut. Full view never
   # truncates, so it never carries the line.
+  @doc """
+  The `page` block every `/v1/tasks` list envelope carries: the window the
+  server actually served.
+
+  `has_more` is deliberately the CHEAP predicate `returned == limit` and not a
+  `COUNT(*)`. This whole change exists because one unbounded read over
+  `documents` was expensive; paying for a second scan just to narrate the first
+  would reintroduce the cost under a new name. The predicate is exact in the
+  direction that matters — `returned < limit` PROVES the page is the last one —
+  and over-reports only on an exactly-full final page, which tells a caller to
+  look again and find nothing. A reader that needs an exact total asks for one
+  (`bp task ls --all`, which pages by offset with a lookahead anchor).
+
+  `limit` is the EFFECTIVE limit after clamping, so `?limit=5000` reports 1000:
+  the number the caller asked for is not the number they got, and this field is
+  about what they got.
+  """
+  def page_meta(docs, page_opts) when is_list(docs) do
+    limit = Keyword.fetch!(page_opts, :limit)
+    returned = length(docs)
+
+    %{
+      limit: limit,
+      offset: Keyword.fetch!(page_opts, :offset),
+      returned: returned,
+      has_more: returned == limit
+    }
+  end
+
   def maybe_put_brief_truncation_help(base, _docs, :full), do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
@@ -982,6 +1011,29 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|If you meant to record a failed attempt on it, that is --miss --note "…". Check the index: | <>
         ~s|--criterion N is 0-BASED, so the first criterion is 0.|
 
+  # ─── The landing mark's two PERMIT refusals (task-59fe7b40b719b379) ───────
+  #
+  # `landed` is the one criteria write with no holder behind it, so its guards
+  # are the only thing standing between a CI token and a fabricated done. Both
+  # messages therefore have to name the STRUCTURAL fix, not just the wall:
+  # `merge_gate: true` on the row is what makes a landing mark able to seal it,
+  # and a human stamp is what a non-merge row still needs.
+  def criteria_hint(:criterion_not_merge_shaped, :landed),
+    do:
+      ~s|`landed` may only flip a merge-shaped criterion — one the lead seals when the PR merges. | <>
+        ~s|That row is not: it carries no "merge_gate": true, and its wording says nothing about being merge-gated | <>
+        ~s|or about a PR being merged to main. Nothing was written (the flip and the landing sentence ride one CAS). | <>
+        ~s|A criterion proven by WORK is stamped by whoever did the work — `bp task stamp <id> <worker> <epoch> | <>
+        ~s|--criterion N --criterion-text "…" --met --evidence "…"`. If this row really is the lead's merge gate, | <>
+        ~s|mark it "merge_gate": true on the criterion and the landing mark will seal it. | <>
+        ~s|Re-run without --criterion to record the landing sentence alone.|
+
+  def criteria_hint(:criterion_already_met, :landed),
+    do:
+      ~s|that criterion is already met, and `landed` NEVER overwrites a met criterion — the stored evidence is | <>
+        ~s|somebody's proof, and replacing it with a merge notice would erase the proof and leave the notice. | <>
+        ~s|Nothing was written. The landing sentence itself still lands: re-run without --criterion.|
+
   def criteria_hint(:criteria_mismatch, _surface),
     do:
       ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>
@@ -1387,6 +1439,83 @@ defmodule BarkparkWeb.TasksController.Params do
       end
     end
   end
+
+  @landed_criterion_msg "criterion must be a non-negative integer index into acceptance_criteria " <>
+                          "(0-BASED — the FIRST criterion is 0). Omit it to record the landing " <>
+                          "sentence without flipping anything."
+
+  @doc """
+  Parses the OPTIONAL `criterion` index off a landing mark. Absent / `nil` /
+  blank means "record the sentence, flip nothing" — the default shape — so it
+  is `{:ok, nil}`, not an error. Anything present must be a non-negative
+  integer (JSON body int, or the manifest flag's query-string spelling).
+
+  SHAPE only (→ 400). Whether the index RESOLVES, whether that row is
+  merge-shaped and whether it is already met are state questions, answered
+  under `Tasks.Landed`'s lock as 409s.
+  """
+  @spec parse_landed_criterion(term()) ::
+          {:ok, non_neg_integer() | nil} | {:error, :invalid_landed, String.t()}
+  def parse_landed_criterion(nil), do: {:ok, nil}
+  def parse_landed_criterion(""), do: {:ok, nil}
+  def parse_landed_criterion(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  def parse_landed_criterion(s) when is_binary(s) do
+    case Integer.parse(String.trim(s)) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> {:error, :invalid_landed, @landed_criterion_msg}
+    end
+  end
+
+  def parse_landed_criterion(_), do: {:error, :invalid_landed, @landed_criterion_msg}
+
+  @doc """
+  The two SHAPE rules a landing mark must satisfy before any DB work:
+
+    * at least one of `commit` / `pr` / `note` carries something — a landing
+      mark with nothing to say would burn a rev and emit an event that says
+      nothing;
+    * a `criterion` flip carries a `note`, because the note IS the evidence
+      written onto the criterion. A met with empty evidence is the exact shape
+      `Tasks.Stamp` refuses as `:evidence_required`.
+
+  Blank / whitespace-only strings count as ABSENT under both rules, matching
+  `Tasks.Landed`'s own trim, so `commit=" "` is a 400 here rather than an
+  `:empty_landing` 409 one layer down.
+  """
+  @spec check_landed_payload(map(), non_neg_integer() | nil) ::
+          :ok | {:error, :invalid_landed, String.t()}
+  def check_landed_payload(params, criterion) do
+    note = landed_present(Map.get(params, "note"))
+
+    cond do
+      is_nil(landed_present(Map.get(params, "commit"))) and
+        is_nil(landed_present(Map.get(params, "pr"))) and is_nil(note) ->
+        {:error, :invalid_landed,
+         "a landing mark must carry at least one of commit, pr, note — there is nothing to record"}
+
+      not is_nil(criterion) and is_nil(note) ->
+        {:error, :invalid_landed,
+         "note is required with criterion: the note IS the evidence written onto that criterion, " <>
+           "and a met flip with empty evidence is not a sealed row"}
+
+      true ->
+        :ok
+    end
+  end
+
+  # A landing field counts as present only when it has content. Integers (a JSON
+  # `pr`) are present by definition; blank/whitespace strings are not.
+  defp landed_present(v) when is_integer(v), do: v
+
+  defp landed_present(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      s -> s
+    end
+  end
+
+  defp landed_present(_), do: nil
 
   @doc """
   Reads the LEAD-ONLY `--merge-gated` override off a stamp request, from the

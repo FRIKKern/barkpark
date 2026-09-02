@@ -25,6 +25,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
     * `POST   /v1/tasks/:doc_id/stage`      — `Tasks.stage/3` (sanctioned thought-state transition)
+    * `POST   /v1/tasks/:doc_id/landed`     — `Tasks.record_landing/2` (NON-holder landing mark: no worker_id, no epoch)
 
   `GET /v1/tasks/events` (keyset replay) honours NO `filter[...]` key — `since`
   and `limit` are its only narrowings, and a filter key is a 400 naming it. The
@@ -77,17 +78,28 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, filters} <- Params.parse_route_filters(params, :ready),
          {:ok, phase_id} <- Params.ready_phase_id(params, filters),
          {:ok, order} <- Params.parse_ready_order(params["order"]) do
+      # The ready queue was ALREADY paged by default (Queue's 50) — it is the
+      # index, not this route, that shipped default == cap. Resolving the
+      # default HERE instead of letting `put_opt` drop a nil and Queue apply it
+      # downstream changes no query: the same number reaches the same `LIMIT`.
+      # It changes what the ROUTE can say — `page.limit` below is now the limit
+      # the caller actually got, on ready exactly as on index, instead of being
+      # unknowable to the renderer whenever `?limit=` was absent. The literal
+      # stays in Queue (`ready_default_limit/0`); never fork it here.
+      limit = Params.parse_limit(params["limit"], Tasks.Queue.ready_default_limit(), 1000)
+      offset = Params.parse_offset(params["offset"])
+
       opts =
         []
         |> Params.put_opt(:phase_id, phase_id)
-        |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
-        |> Params.put_opt(:offset, Params.parse_offset(params["offset"]))
+        |> Params.put_opt(:limit, limit)
+        |> Params.put_opt(:offset, offset)
         |> Params.put_opt(:order, order)
         |> Keyword.merge(scope_opts(conn))
 
       docs = Tasks.ready(opts)
 
-      json(conn, task_list_response(docs, conn, params))
+      json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
     else
       {:error, :invalid_ready_order} ->
         bad_request(conn, "order must be closure_nearest when set")
@@ -106,11 +118,26 @@ defmodule BarkparkWeb.TasksController do
   # which has exactly ONE caller) so the claim about the payload and the
   # payload are derived from the SAME list. Sealing first is safe: Params.seal/3
   # rewrites only `content`, and the count helpers read only id/doc_id.
-  defp task_list_response(docs, conn, params) do
+  #
+  # `page` (task-e2f5ecca0be9a6d1) is the truncation-VISIBILITY half of the
+  # default-page-size fix. Shrinking the index default from 1000 to 100 without
+  # it would trade one defect for a worse one: a caller who used to get every
+  # row would silently get a hundred, and a short answer that reads as a
+  # complete one is the failure mode this repo already paid for twice (the
+  # `--all` shift guard, the unreadable-page refusal). So every list response
+  # now states the window it served — `limit`, `offset`, `returned` and
+  # `has_more` — and `has_more` is the CHEAP predicate `returned == limit`, not
+  # a `COUNT(*)`: a second full scan to describe the first would re-earn the
+  # very cost this change exists to remove. It can therefore say `true` on an
+  # exactly-full last page; that errs toward "look again", the safe direction.
+  # ADDITIVE ONLY — `ok`, `docs` and `help` keep their names and shapes, so the
+  # SDK, the Studio and the taskboard read byte-identical fields.
+  defp task_list_response(docs, conn, params, page_opts) do
     docs = seal_docs(docs, conn)
 
     %{ok: true, docs: render_task_list(docs, conn, params)}
     |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
+    |> Map.put(:page, Params.page_meta(docs, page_opts))
   end
 
   # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
@@ -120,7 +147,7 @@ defmodule BarkparkWeb.TasksController do
   # shape with edge counts (the server default STAYS full — SDK/Studio/
   # taskboard untouched).
   # The docs arrive ALREADY sealed (field-visibility seal, fail-closed) — the
-  # seal lives in task_list_response/3, this function's only caller, so the
+  # seal lives in task_list_response/4, this function's only caller, so the
   # truncation-honesty help[] line sees exactly what is rendered here.
   defp render_task_list(docs, conn, params) do
     case Params.parse_view(params["view"]) do
@@ -314,7 +341,19 @@ defmodule BarkparkWeb.TasksController do
     # Clamp into [1, 1000] so a raw value can't reach `limit: ^limit` below:
     # `?limit=-1` would emit `LIMIT -1` (Postgres rejects a negative LIMIT → 500)
     # and `?limit=100000000` would fan the whole task corpus out in one Repo.all.
-    limit = Params.parse_limit(params["limit"], 1000, 1000)
+    #
+    # THE DEFAULT USED TO BE THE CAP (1000, 1000) — so the clamp above bounded
+    # only callers who ASKED for too much, and a bare `GET /v1/tasks` (every
+    # `bp task ls` with no flags, every ad-hoc curl) took the widest page the
+    # route can serve: one `Repo.all` + one batched child-count query + one
+    # render over the whole task corpus, measured at 8,525 rows / ~9 MB on
+    # guerrilla. Six of those concurrently is the shape that put `documents`
+    # at 21.4 billion seq_tup_read and queued the auth plugs behind it
+    # (task-e2f5ecca0be9a6d1). A default is what an UNINFORMED caller gets, so
+    # it must be the cheap answer; the cap is what an informed one may ask for
+    # and stays 1000. `?limit=` is honoured up to that cap exactly as before —
+    # nothing a caller can spell changed, only what silence means.
+    limit = Params.parse_limit(params["limit"], 100, 1000)
 
     # tlv-bl-tasks-ls-offset-broken (D19): offset used to be silently ignored —
     # every page repeated page 0 and `bp task ls --all` self-aborted with
@@ -377,7 +416,7 @@ defmodule BarkparkWeb.TasksController do
       |> Params.apply_index_order(parent)
 
     docs = Repo.all(query)
-    json(conn, task_list_response(docs, conn, params))
+    json(conn, task_list_response(docs, conn, params, limit: limit, offset: offset))
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────
@@ -925,6 +964,50 @@ defmodule BarkparkWeb.TasksController do
         bad_request(conn, "#{field} is required")
 
       {:error, :invalid_stamp, msg} ->
+        bad_request(conn, msg)
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/landed ──────────────────────────────────────
+  # THE NON-HOLDER LANDING MARK (task-59fe7b40b719b379). Body/query:
+  #   { "commit": "<sha>", "pr": "<number>", "note": "<sentence>",
+  #     "criterion": <0-based index|null> }
+  #
+  # NO worker_id and NO observed_epoch — deliberately, and that absence IS the
+  # feature. A push-to-main workflow holds no claim and knows no epoch, so
+  # `stamp` refuses it 409 not_holder (check_holder then check_fencing) and
+  # `close` is not CI's to call. This route sits on the same :token_root bucket
+  # as every other /v1/tasks write, so it is still bearer-gated and still
+  # write-tier (RequireWriteForMutation) — what it drops is the HOLDER gate, not
+  # authentication. `Tasks.Landed` owns the blast radius: content.landed plus at
+  # most ONE merge-shaped criterion.
+  def landed(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, criterion} <- Params.parse_landed_criterion(params["criterion"]),
+         :ok <- Params.check_landed_payload(params, criterion),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        []
+        |> Params.put_opt(:commit, params["commit"])
+        |> Params.put_opt(:pr, params["pr"])
+        |> Params.put_opt(:note, params["note"])
+        |> Params.put_opt(:criterion, criterion)
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.record_landing(task.id, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+        {:error, reason} ->
+          # Every remaining failure is a STATE conflict (the index does not
+          # resolve / the row is already met / the row is not merge-shaped /
+          # a concurrent write moved the rev). Shape errors were 400'd above.
+          conflict(conn, reason, :landed)
+      end
+    else
+      {:error, :invalid_landed, msg} ->
         bad_request(conn, msg)
 
       {:error, :not_found} ->

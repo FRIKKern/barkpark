@@ -107,6 +107,13 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
+  # task-e2f5ecca0be9a6d1: bulk fixture for the default-page-size tests. 101
+  # rows is one more than the new default, so a bounded page and a complete one
+  # are distinguishable by count alone.
+  defp seed_tasks!(scope, n, prefix) do
+    for _ <- 1..n, do: mk_task!(uniq(prefix), scope, %{})
+  end
+
   # axi-w2-s2: a card fixture with a caller-chosen TITLE (mk_task! pins
   # title = doc_id — too short for the truncation laws and too uniform for
   # the brief byte tripwires).
@@ -321,6 +328,115 @@ defmodule BarkparkWeb.TasksControllerTest do
       resp = conn |> authed() |> get("/v1/tasks?limit=100000000")
       assert resp.status == 200
       assert Jason.decode!(resp.resp_body)["ok"] == true
+    end
+  end
+
+  # task-e2f5ecca0be9a6d1 — GET /v1/tasks pages by DEFAULT.
+  #
+  # The defect was not the cap. The cap (1000) was fine and is unchanged. The
+  # defect was that the DEFAULT equalled it: `parse_limit(params["limit"], 1000,
+  # 1000)`, so the clamp bounded only callers who named a number and a caller
+  # who named none — every `bp task ls` with no flags, every ad-hoc curl — got
+  # the widest page the route can serve. On guerrilla that was 8,525 rows and
+  # ~9 MB per request, and six concurrent ones is the read shape that put
+  # `documents` at 21.4 billion seq_tup_read while the auth plugs queued behind
+  # it. A default is what an UNINFORMED caller gets; it has to be the cheap
+  # answer.
+  #
+  # Shrinking a default silently would be the worse bug — a caller who used to
+  # receive everything would now receive a hundred rows with no way to tell,
+  # and a short answer that reads as a complete one is exactly what the `--all`
+  # shift guard and the unreadable-page refusal already exist to prevent. So
+  # these tests pin BOTH halves: the page is bounded, AND the response says so.
+  describe "GET /v1/tasks default page size (task-e2f5ecca0be9a6d1)" do
+    test "a bare GET is bounded to 100 rows and REPORTS the truncation",
+         %{conn: conn, scope: scope} do
+      seed_tasks!(scope, 101, "page-default")
+
+      resp = conn |> authed() |> get("/v1/tasks")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert body["ok"] == true
+      # RED WITHOUT the default change: with `parse_limit(_, 1000, 1000)` this
+      # is 101 — the whole corpus in one Repo.all, which is the defect.
+      assert length(body["docs"]) == 100
+
+      # RED WITHOUT the `page` block: nil, and a caller cannot tell a bounded
+      # page from a complete one.
+      assert body["page"] == %{
+               "limit" => 100,
+               "offset" => 0,
+               "returned" => 100,
+               "has_more" => true
+             }
+    end
+
+    # The escape hatch is unchanged: a caller who KNOWS they want the corpus
+    # asks for it and still gets it, up to the cap.
+    test "?limit=1000 still serves every row, and says the page is complete",
+         %{conn: conn, scope: scope} do
+      seed_tasks!(scope, 101, "page-explicit")
+
+      resp = conn |> authed() |> get("/v1/tasks?limit=1000")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert length(body["docs"]) == 101
+      assert body["page"]["limit"] == 1000
+      assert body["page"]["returned"] == 101
+      # returned < limit PROVES this is the last page — the direction of
+      # has_more that is exact.
+      assert body["page"]["has_more"] == false
+    end
+
+    # Pre-existing behaviour, kept green and now OBSERVABLE: the cap still
+    # clamps, and `page.limit` reports the limit the caller GOT (1000), not the
+    # one they asked for (5000).
+    test "?limit=5000 clamps to the cap and reports the effective limit",
+         %{conn: conn, scope: scope} do
+      seed_tasks!(scope, 3, "page-clamp")
+
+      resp = conn |> authed() |> get("/v1/tasks?limit=5000")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert body["page"]["limit"] == 1000
+      assert body["page"]["returned"] == 3
+      assert body["page"]["has_more"] == false
+    end
+
+    test "?offset= is echoed in the page block", %{conn: conn, scope: scope} do
+      seed_tasks!(scope, 5, "page-offset")
+
+      resp = conn |> authed() |> get("/v1/tasks?limit=2&offset=2")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert body["page"] == %{
+               "limit" => 2,
+               "offset" => 2,
+               "returned" => 2,
+               "has_more" => true
+             }
+    end
+
+    # ready was ALREADY paged (Queue's @ready_default_limit) — it never shipped
+    # default == cap, so this route's default is deliberately NOT touched. The
+    # assertion is here so a later "make the two consistent" edit has to argue
+    # with a test rather than with a comment.
+    test "GET /v1/tasks/ready keeps its 50 default and reports it",
+         %{conn: conn, scope: scope} do
+      seed_tasks!(scope, 101, "page-ready")
+
+      resp = conn |> authed() |> get("/v1/tasks/ready")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert length(body["docs"]) == 50
+      assert body["page"]["limit"] == 50
+      assert body["page"]["offset"] == 0
+      assert body["page"]["has_more"] == true
     end
   end
 

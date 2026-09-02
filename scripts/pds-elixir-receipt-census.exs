@@ -358,13 +358,41 @@ defmodule PDS.Census do
   # WebauthnController.delete/2 was repaired in the same commit but KEPT its `ok` key
   # true beside the store fields it now renders, so it stays in the literal population
   # with its register key intact. A row that did not move is evidence too.
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  # Lens unchanged (build-free AST, substring counts, route depth 6, `transaction` NOT
+  # a write verb, corpus api/lib/**/*.ex = 833 files, CORPUS-INTACT this run); engine
+  # printed live by report_engine/0 on the same run.
+  #
+  # WHAT MOVED IT: task-59fe7b40b719b379 added ONE routed-write receipt —
+  # TasksController.landed/2's `ok: true` success arm, the emission that makes the
+  # non-holder landing mark auditable instead of an UNDISPOSED ARRIVAL. One emission
+  # moves four rows, exactly as the app-token revoke-by-id arrival did:
+  #
+  #   textual   106 -> 107  the new `ok: true` occurrence
+  #                         (107 == ast 98 + phantom 9).
+  #   ast        97 ->  98  the same one, as an AST-literal pair.
+  #   emitted    93 ->  94  the site emits on the wire.
+  #   write      55 ->  56  post /v1/tasks/:doc_id/landed joins the routed-write set;
+  #                         the depth-6 relation reaches Tasks.Landed.record/2's
+  #                         Repo write through the Tasks facade. Its ROUTED-WRITE
+  #                         arrival is disposed by the register row authored for it,
+  #                         not by an @routed_excluded entry — a judged site needs no
+  #                         exclusion.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 16, unrouted 22 read `==` in the
+  # same run. `read` holding at 16 is the tell that this arrival is a POST only — the
+  # verb adds no sibling GET — and `phantom` holding at 9 is the same tell as last
+  # wave: the receipt's own comments deliberately do not spell the needle, so an
+  # explanation cannot inflate the population it explains.
   @rederived %{
-    textual: 106,
-    ast: 97,
+    textual: 107,
+    ast: 98,
     phantom: 9,
     consumer: 4,
-    emitted: 93,
-    write: 55,
+    emitted: 94,
+    write: 56,
     read: 16,
     unrouted: 22
   }
@@ -1117,6 +1145,17 @@ defmodule PDS.Census do
   # body-identical RENAME. `anchor_mfa` catches the rename and is blind to a body edit
   # under a stable name. Neither alone is the arm.
   #
+  # THE ARM HAS NOW FIRED ON UNSEEN WORK, WHICH IS THE POINT (ct-bl-plan-paper-parity).
+  # It was shipped against a staleness already known; the ChatController.approval/2 row is
+  # the first it caught PROSPECTIVELY. A feature commit that touches no census file added a
+  # PlanPapers.publish_approved_plan/3 call inside that def; the LITERAL this row anchors on
+  # survived byte-for-byte, so ROSTER-ANCHORS-EXIST printed PASS exactly as it did over the
+  # two false verdicts of wave 39, and only `def_fp` moved (121603508 -> 99902146). The
+  # demotion is the whole mechanism working: the row was re-judged by hand against the new
+  # def, the verdict came back UNCHANGED, and the note now carries the third unread outcome.
+  # A CONFIRMED-UNCHANGED VERDICT IS NOT A WASTED RED — the alternative is a row that keeps
+  # asserting two reasons for a def that has three, which is the drift this arm exists for.
+  #
   # THE TWO REFUTED ROWS BELOW WERE RE-DERIVED AGAINST MERGED MAIN in the same wave that
   # shipped the arm, and both are now PROVEN: the callees were widened to report their own
   # outcome and both callers answer over it. The verdicts and notes recorded here are
@@ -1139,9 +1178,9 @@ defmodule PDS.Census do
       note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs:129 posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
-      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "121603508",
+      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "99902146",
       verdict: "UNJUDGED", basis: :unjudged_other,
-      note: "both arms of update_approval_status fold to :ok, and answer_approval's result is discarded with `_ =`."},
+      note: "RE-DERIVED on ct-bl-plan-paper-parity, which grew the enclosing approval/2 a third unread outcome and moved def_fp 121603508 -> 99902146; ROSTER-VERDICT-FRESH demoted the row to UNJUDGED and this is the re-derivation it asked for. THE VERDICT IS UNCHANGED and its basis is now THREEFOLD, not two: both arms of update_approval_status fold to :ok, answer_approval's result is discarded with `_ =`, and the newly added PlanPapers.publish_approved_plan/3 sits last in the `with` body where nothing reads its return either. The third one is DELIBERATE and does not worsen the row: the Paper projection is fire-and-forget by design (a publish miss must not fail a flip that already happened and a 204 that already stands), and it is declared as such in the clause comment above the call. What this row has always said still holds — the 204 reports the flip without reading a stored row back."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "persist_user_turn(id, content)",
       anchor_mfa: "BarkparkWeb.ChatController.create_message/2", def_fp: "83487517",
@@ -1527,7 +1566,7 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/tasks_controller.ex:83
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
-            "BarkparkWeb.TasksController.task_list_response/3", "83021484", "1576835"},
+            "BarkparkWeb.TasksController.task_list_response/4", "125262428", "1576835"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "wave 36 measured this receipt divergent and pds-w36-help-seal-fix repaired it; no committed differential naming task_list_response/3 resolves in the tree at this sha, so the REPAIR is unjudged here rather than credited. UPGRADE-ON-MERGE (wave 37 review, 2026-08-02): that slice lands api/test/barkpark_web/controllers/pds_w36_help_seal_probe_test.exs, whose PROBE A and PROBE D were re-verified RED by this reviewer against a faithful revert of the seal hoist. It cites the ROUTE, never the function name, so this note's wording stays literally true after the merge and no arm will red — re-derive the row to end_to_end by hand when the branch lands.",
@@ -1555,7 +1594,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:558
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.release/2", "64399052", "86587931"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:862"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:950"},
     # barkpark_web/controllers/tasks_controller.ex:587
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.close_response/3", "102889179", "17778956"},
@@ -1564,6 +1603,23 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3631"},
+    # barkpark_web/controllers/tasks_controller.ex:963 — the NON-HOLDER landing
+    # mark (task-59fe7b40b719b379). AUTHORED, not inherited: POST
+    # /v1/tasks/:doc_id/landed is a new routed-write arrival, and this row is what
+    # disposes it — a judged site needs no @routed_excluded entry.
+    # WHY end_to_end AND WHY `_unmutated`. The cited block drives the real route
+    # with a plain write-tier bearer and then reads the STORED row back
+    # (`stored/1` -> `Repo.get!`), asserting the response envelope only insofar as
+    # the store agrees with it — so both halves of end_to_end's falsifier hold on
+    # the citation itself. What was NOT exercised is a mutation of the RECEIPT: the
+    # branch's three mutation proofs move `Tasks.Landed`'s refusal guards, not this
+    # `json(conn, %{ok: true, doc: …})` arm, so the weaker `_unmutated` sibling is
+    # the honest one. Upgrading it needs a mutation that breaks the emission, not a
+    # better argument.
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.landed/2", "128978084", "84462998"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated,
+      evidence: "api/test/barkpark_web/controllers/tasks_landed_test.exs:92"},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
