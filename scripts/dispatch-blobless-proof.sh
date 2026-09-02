@@ -34,6 +34,12 @@
 #   bash scripts/dispatch-blobless-proof.sh 14874 15372     # explicit PRs
 #   bash scripts/dispatch-blobless-proof.sh --selftest      # hermetic: no gh, no network
 #
+# NOT WIRED INTO CI (yet), and deliberately so: the live mode needs `gh` and a
+# network, and wiring only `--selftest` into shell-harnesses.yml is a five-place
+# change (paths entry, dispatcher output, roster row, job, and the subset/union
+# invariant in shell-harnesses-dispatch.test.sh) against a contended file. It is
+# a follow-up. Run it by hand whenever a dispatcher's checkout options change.
+#
 # MEASURED 2026-09-02, alternating clones of this repo from GitHub:
 #   full clone (what fetch-depth: 0 does)   97.0 s   .git 791 MB
 #   blob:none partial clone                 26.9 s   .git 188 MB
