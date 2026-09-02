@@ -298,49 +298,65 @@ defmodule Barkpark.Content.Lifecycle do
             }
             |> WriteScope.inherit_scope_attrs(draft)
 
-          txn =
-            Repo.transaction(fn ->
-              {pub_result, prev_pub_rev} =
-                case Content.get_document(pid, type, dataset, opts) do
-                  {:ok, existing} ->
-                    {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+          # [acrc-publish-atomicity-txn-boundary] The published upsert, the
+          # fenced draft delete AND the `mutation_events` row now share ONE
+          # boundary. Before this wrap the `Repo.transaction` below closed and
+          # COMMITTED the publish, and only then did `tap_broadcast` insert the
+          # event — so a fault there left a published document that no webhook,
+          # SSE listener or cache-revalidation consumer ever learned about, with
+          # nothing to retry and no error to see on the next request.
+          #
+          # `write_atomically/1` (not a bare wrap) because `maybe_broadcast/2`
+          # DEFERS once a transaction is open: something has to flush the queue
+          # on commit and drop it on rollback, or publishing would go silent.
+          # The `Repo.transaction` below simply JOINS it; its `Repo.rollback/1`
+          # arms (a changeset error, a `:rev_mismatch` from `fenced_delete`)
+          # surface as the same `{:error, reason}` this code returned before.
+          result =
+            Broadcast.write_atomically(fn ->
+              txn =
+                Repo.transaction(fn ->
+                  {pub_result, prev_pub_rev} =
+                    case Content.get_document(pid, type, dataset, opts) do
+                      {:ok, existing} ->
+                        {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
-                  _ ->
-                    {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-                end
+                      _ ->
+                        {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
+                    end
 
-              case pub_result do
-                {:error, cs} ->
-                  Repo.rollback(cs)
+                  case pub_result do
+                    {:error, cs} ->
+                      Repo.rollback(cs)
 
-                {:ok, published} ->
-                  # Rev-fenced: if a concurrent write bumped the draft since
-                  # the read above, delete nothing and surface a rev_mismatch
-                  # (412) instead of destroying the newer edit. A vanished
-                  # draft resolves to {:error, :not_found} (prior semantics).
-                  case fenced_delete(draft) do
-                    :ok -> {published, prev_pub_rev}
-                    {:error, reason} -> Repo.rollback(reason)
+                    {:ok, published} ->
+                      # Rev-fenced: if a concurrent write bumped the draft since
+                      # the read above, delete nothing and surface a rev_mismatch
+                      # (412) instead of destroying the newer edit. A vanished
+                      # draft resolves to {:error, :not_found} (prior semantics).
+                      case fenced_delete(draft) do
+                        :ok -> {published, prev_pub_rev}
+                        {:error, reason} -> Repo.rollback(reason)
+                      end
                   end
+                end)
+
+              case txn do
+                {:ok, {published, prev_pub_rev}} ->
+                  Broadcast.tap_broadcast(
+                    {:ok, published},
+                    dataset,
+                    type,
+                    "publish",
+                    prev_pub_rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+
+                {:error, reason} ->
+                  {:error, reason}
               end
             end)
-
-          result =
-            case txn do
-              {:ok, {published, prev_pub_rev}} ->
-                Broadcast.tap_broadcast(
-                  {:ok, published},
-                  dataset,
-                  type,
-                  "publish",
-                  prev_pub_rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
-
-              {:error, reason} ->
-                {:error, reason}
-            end
 
           # Publishing a SHEET refreshes its PUBLISHED embedders with the
           # now-published content (the draft-save path deliberately skips
