@@ -1032,12 +1032,47 @@ defmodule Barkpark.Tenancy do
        when is_binary(principal_id) and is_binary(principal_type) do
     ws_attrs = put_derived_slug(attrs)
 
-    if slug_value(ws_attrs) == @default_slug do
+    if default_singleton_slug?(slug_value(ws_attrs)) do
       {:error, singleton_slug_error(ws_attrs)}
     else
       do_create_owned_workspace(ws_attrs, principal_id, principal_type, co_owner_user_id)
     end
   end
+
+  @doc """
+  True when `slug` is THE instance-default singleton slug — the one
+  `get_default_workspace/0` resolves, and the one `singleton_slug_error/1`
+  refuses a principal from claiming.
+
+  EXPORTED so a SECOND write path can consult the rule instead of restating it
+  (task-545166efceb1bc91). `WorkspaceBundle`'s import restores the root
+  `workspaces` row by raw `COPY`, which reaches neither this module's guard nor
+  `Workspace.changeset/2` — it asks HERE rather than comparing against its own
+  copy of the string, so a change to the singleton's identity moves both
+  chokepoints at once.
+  """
+  @spec default_singleton_slug?(term()) :: boolean()
+  def default_singleton_slug?(slug), do: slug == @default_slug
+
+  @doc """
+  Every workspace slug a PRINCIPAL may never end up holding: the
+  instance-default singleton (`default_singleton_slug?/1`) plus
+  `Workspace.reserved_slugs/0` — the routing-prefix list
+  `Workspace.changeset/2` enforces with `validate_exclusion`.
+
+  ONE list, two enforcement points. The changeset owns the ordinary create/
+  update path; `WorkspaceBundle`'s raw-`COPY` import consults this to close the
+  same door on the path a changeset never sees. Composed, never copied.
+  """
+  @spec reserved_workspace_slugs() :: [String.t()]
+  def reserved_workspace_slugs, do: [@default_slug | Workspace.reserved_slugs()]
+
+  @doc "True when `slug` is in `reserved_workspace_slugs/0`."
+  @spec reserved_workspace_slug?(term()) :: boolean()
+  def reserved_workspace_slug?(slug) when is_binary(slug),
+    do: slug in reserved_workspace_slugs()
+
+  def reserved_workspace_slug?(_other), do: false
 
   # ── Instance-singleton seat guard (task-94a6ed8ced1fc547) ───────────────────
   #
