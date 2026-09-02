@@ -158,10 +158,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   client-side is what keeps a read-mode socket from broadcasting "editing A1" to
   every peer while no editor renders.
 
-  STILL OPEN (`pds-w43-bl-sheetgrid-reader-half`): the `/sheets/:slug` reader.
-  `Geometry.grid_sel(_, _, :reader)` is `{0, 0, 0, 0}`, so no `<td>` ever carries
-  `sheet-sel` and the same hook would be a silent no-op there; giving the reader
-  a selection is a chrome-policy decision, not this re-key.
+  THE `/sheets/:slug` READER GETS A DIFFERENT HOOK, NOT THIS ONE
+  (`pds-w43-bl-sheetgrid-reader-half`). `Geometry.grid_sel(_, _, :reader)` is
+  still `{0, 0, 0, 0}`, so no `<td>` ever carries `sheet-sel` and `SheetGrid`
+  would be a silent no-op there. Main ruled on 2026-09-02: the reader gets a
+  "client-only selection + copy layer in bp-sheet-grid.js for `:reader` — paints
+  its own class, pushes ZERO events, reads `data-v` already on reader tds. An
+  anonymous principal never round-trips selection and gains no authority."
+  Reversing the chrome policy instead was REJECTED ("it widens the server
+  surface for a purely local affordance"). So `phx-hook` reads
+  `"SheetReaderSelect"` under `chrome: :reader` — a separate object in
+  bp-sheet-grid.js holding its own anchor/active pair, painting `sheet-rsel`
+  (never `sheet-sel`), with no `pushEvent` code path at all — while every
+  server-side clause here (`grid_sel`, `grid_cursor`, the three navigation-head
+  refusals) is unchanged.
 
   ## Per-user undo/redo (M4)
 
@@ -3047,11 +3057,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             View mode) used to sit on a highlight frozen at A1. `data-fns` /
             `data-fn-sigs` stay @editable-gated ON PURPOSE: their absence is
             exactly what the hook derives `_readOnly` from, which is what drops
-            every write event client-side. --%>
+            every write event client-side.
+
+            TWO HOOKS, ONE ATTRIBUTE (wave 43 reader half). `@hookable`
+            (chrome == :studio) still picks "SheetGrid", so the Studio path is
+            byte-identical. `chrome: :reader` now picks "SheetReaderSelect", a
+            SEPARATE and much smaller hook in bp-sheet-grid.js that owns a purely
+            CLIENT-SIDE anchor/active pair, paints its own `sheet-rsel` class,
+            and contains no pushEvent code path at all.
+
+            Per main's ruling (2026-09-02 10:52Z) that is option (b): "client-
+            only selection + copy layer in bp-sheet-grid.js for :reader — paints
+            its own class, pushes ZERO events, reads data-v already on reader
+            tds. An anonymous principal never round-trips selection and gains no
+            authority. […] (a) rejected: it widens the server surface for a
+            purely local affordance."
+
+            So NOTHING server-side moves: `Geometry.grid_sel(_, _, :reader)` is
+            still {0,0,0,0}, `grid_cursor(_, :reader)` is still {0,0}, and
+            select-all / nav-edge / nav-corner still refuse `chrome: :reader`
+            below. role / aria-describedby / aria-activedescendant stay keyed on
+            @hookable too — role="application" is edit-only by an earlier a11y
+            ruling (it muted AT table navigation on the reader); the reader hook
+            sets aria-activedescendant from the client instead. --%>
       <div
         id={if @editable, do: "#{@id}-grid", else: "#{@id}-grid-view"}
         class="sheet-grid-wrap"
-        phx-hook={if @hookable, do: "SheetGrid"}
+        phx-hook={
+          if @hookable, do: "SheetGrid", else: if(@chrome == :reader, do: "SheetReaderSelect")
+        }
         tabindex="0"
         role={if @hookable, do: "application", else: "region"}
         aria-label="Spreadsheet grid"
