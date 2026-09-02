@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  120 scenarios, 26 rendered, 94 in a COMMITTED residue literal.
+//   SCENARIO  121 scenarios, 26 rendered, 95 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -428,7 +428,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 12 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 15 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 10 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
-  "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
+  "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
   "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 5 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers` inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
@@ -533,13 +533,29 @@ export const RESIDUE_FAMILY_REASONS = {
 // `operator-me-recovers` and this one without writing a chronicle block, so the
 // last typed ordinal above is not the census.
 //
+// cch-w23-bl-cruel-identity-own-scenario moved it by ONE:
+// `account-modal-cruel-identity` — the 158-character email local part that used
+// to ride `account-modal-revoke` because THIS LITERAL was one of the four
+// censuses the wave-23 slice was fenced out of — is the 121st scenario and the
+// 95th residue entry. That fence is the whole reason the row existed: the
+// refusal below is cheap to pay and was instead paid by hiding a cruel identity
+// inside a scenario named for a click oracle. RESIDUE, not a cell, for the
+// family's standing reason (the account modal has no route of its own) and for
+// the cruel-twin reason `fleet-cruel-content` and `deploy-detail-cruel` already
+// carry: content length is overflow-guard's axis, not this sweep's, and this
+// fixture is driven at 7 widths x 2 themes by W23-account-modal-identity-bounded.
+// The sweep exited 2 with `UNLISTED scenario "account-modal-cruel-identity"
+// (family no-deeplink)` until the entry below was written; the numbers here were
+// RE-READ from `scenarioReport`, and the family stays at 13 because
+// `no-deeplink` already had five members.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
 // "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
 // spanning SEVEN lines, and three of the numbers under it were owned by
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 120 / 27 / 26 / 94 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 121 / 27 / 26 / 95 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
@@ -647,10 +663,11 @@ export const SCENARIO_RESIDUE = {
   "invite-already-member": "hash:#",
   "invite-invalid": "hash:#",
   "loggedout-reset": "hash:#",
-  // no-deeplink — 5
+  // no-deeplink — 6
   "account-modal": "no-deeplink",
   "account-modal-tall": "no-deeplink",
   "account-modal-revoke": "no-deeplink",
+  "account-modal-cruel-identity": "no-deeplink",
   "account-modal-2fa-badcode": "no-deeplink",
   "account-modal-2fa-on": "no-deeplink",
   // path:/activate — 5
