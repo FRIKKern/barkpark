@@ -179,3 +179,39 @@ bash scripts/ci-measure.sh --selftest     # 7 arms, no network
 The harness exits non-zero if the sample comes back materially short of what was asked, because
 a short sample is not a small sample — it is a biased one, skewed to whatever slice the fetch
 could still reach.
+
+## Inventory verdicts (task-f3d5bc684c23c48d)
+
+46 of 59 workflows are `pull_request`-triggered. Compute below is from six recent PR runs per
+workflow, measured off job steps.
+
+**A gotcha for anyone re-deriving the 46:** YAML 1.1 parses a bare `on:` key as the boolean `True`,
+so `d["on"]` finds nothing and reports a confident zero. Read `d.get("on", d.get(True))`.
+
+**Where the cost actually is.** Almost every workflow is already under 60 s per execution. The ten
+slowest per-run jobs are also the ten with the FEWEST PR runs (32-51 each), so moving them off the
+PR path saves almost nothing. The cost is concentrated in the handful that fire 1,227 times.
+
+| verdict | workflows | why |
+|---|---|---|
+| **KEEP — it can block** | `elixir` (1.25 min), `cloud`, `console-harness`, `pr-task-gate` | they produce the four required contexts |
+| **KEEP — under 60 s** | `security` 0.35, `go-format` 0.44, `go-tests` 0.48, `architecture` 0.27, `task-lease-renew` 0.27, `shell-harnesses` 0.33, `search-template-gates` 0.18, `pdrender-wasm` 0.47, `stale-verdict-watch` 0.46 | the policy's own second limb: cheap enough that venue is not worth a sign-off |
+| **CANDIDATE — over 60 s, cannot block** | `deploy-harnesses` 3.82, `grip-suite` 2.70, `studio-journey-smoke` 1.68, `js-tests` 1.59, `connectors` 1.48, `twoslash` 1.45, `mobile` 1.24, `ci` 1.20, `search-starter-smoke` 1.09, `typedoc` 0.92 | each has only 32-51 PR runs in the window, so the whole group is a minor prize — worth doing for latency per PR, not for job-minutes |
+| **ALREADY RIGHT** | `crown-reconcile`, `breakglass-watch`, `stale-verdict-watch` (626 push each, ~20 PR) | main-push watchers; they are not a PR cost |
+
+**The six identical 1,853s are the finding, and four of them cannot simply be moved.** `elixir`,
+`cloud`, `console-harness` and `pr-task-gate` carry required contexts. That leaves
+`required-checks-drift` and `compose-smoke` as the only two of the six whose venue is genuinely
+open — and they are where the policy work should start.
+
+### Two numbers I do NOT trust yet, stated rather than averaged away
+
+- **`required-checks-drift`**: the window sample says **4.14 min/exec at a 0.55 red rate**; the
+  six-recent-runs sample says **0 min/exec** (every sampled job was zero-step). Both cannot be
+  right. Re-measure it specifically before acting — at 1,227 PR runs, a 4-minute job and a
+  0-minute job are a 4,900-minute difference.
+- **`compose-smoke`**: same shape, 0 min/exec on six recent runs against 1.15 in the window sample.
+
+A per-workflow figure from six runs is thin for anything that skips often, which is most of these.
+The census counts above are exact; these compute figures are not, and the difference is why they
+are in separate tables.
