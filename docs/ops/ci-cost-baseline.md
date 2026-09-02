@@ -210,17 +210,35 @@ PR path saves almost nothing. The cost is concentrated in the handful that fire 
 `required-checks-drift` and `compose-smoke` as the only two of the six whose venue is genuinely
 open — and they are where the policy work should start.
 
-### Two numbers I do NOT trust yet, stated rather than averaged away
+### The two disputed numbers — RE-MEASURED and resolved
 
-- **`required-checks-drift`**: the window sample says **4.14 min/exec at a 0.55 red rate**; the
-  six-recent-runs sample says **0 min/exec** (every sampled job was zero-step). Both cannot be
-  right. Re-measure it specifically before acting — at 1,227 PR runs, a 4-minute job and a
-  0-minute job are a 4,900-minute difference.
-- **`compose-smoke`**: same shape, 0 min/exec on six recent runs against 1.15 in the window sample.
+Both were flagged as untrusted rather than averaged. Re-measured over **20 recent pull_request runs
+each**, compute from job steps:
 
-A per-workflow figure from six runs is thin for anything that skips often, which is most of these.
-The census counts above are exact; these compute figures are not, and the difference is why they
-are in separate tables.
+| workflow | window sample | 6-run sample | **20-run re-measure** | red rate | zero-step |
+|---|---|---|---|---|---|
+| `required-checks-drift` | 4.14 | 0 | **2.85 min/exec** | 0.10 | 39 of 60 jobs |
+| `compose-smoke` | 1.15 | 0 | **0.32 min/exec** | 0.43 | 47 of 61 jobs |
+
+Neither earlier figure was right, and the disagreement was sampling noise in both directions — the
+window sample's 0.55 red rate for `required-checks-drift` was also wrong (it is 0.10). This is why
+they were recorded as disputed instead of carried into a verdict: **a six-run sample of a workflow
+that skips or is cancelled two-thirds of the time is not a measurement.**
+
+**60% of `required-checks-drift`'s jobs were cancelled** (36 of 60) and 65% were zero-step. The ones
+that do execute cost 2.85 minutes.
+
+### What that means for the two verdicts
+
+- **`required-checks-drift` — MOVE IT OFF THE PER-PUSH PATH.** At ~1.05 executed jobs per run and
+  2.85 min each across 1,227 PR runs, it is on the order of **3,500 job-minutes** in the window,
+  which makes it the largest single item whose venue is actually open. It is a drift detector: it
+  answers "has the required-checks roster moved", a question about the *repo's* state, not about
+  this PR's diff. That belongs on push-to-main plus a schedule, with a named owner watching main's
+  red — not on every push of every PR.
+- **`compose-smoke` — LEAVE IT.** ~0.22 min per run, roughly **275 job-minutes** across the same
+  1,227 runs. It is not worth a sign-off, and its 0.43 red rate is the more interesting problem:
+  a check that fails two runs in five is a signal quality question, not a cost one.
 
 ## Note on the selftest's venue
 
