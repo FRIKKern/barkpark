@@ -70,7 +70,7 @@ defmodule BarkparkCloud.Registry do
   # a couple of missed sweeps cannot look like silence — see claim_leg/2.
   @recent_sample_window_hours 24
 
-  # The four terminal reasons `reap_stale_deployments/0` stamps. Named so the
+  # The five terminal reasons `reap_stale_deployments/0` stamps. Named so the
   # alert fan-out below can pair a reaped row with the reason it was just written
   # (a bulk `update_all` returns ids, not the row it wrote) without the two
   # drifting apart. `FailureCopy.classify/1` has a clause for each.
@@ -78,6 +78,23 @@ defmodule BarkparkCloud.Registry do
   @no_content_binding_reason "no content binding (create the site with `--dataset <workspace>/<project>/<dataset>`)"
   @stale_builder_reason "exceeded max deploy claim attempts (stale builder lease)"
   @instance_unreachable_reason "instance unreachable — deploy could not be delivered; check instance health"
+
+  # THE REFUSED DRIVER SPAWN (pass 0c). A box-driven row's FIRST driver is
+  # spawned by `Sites.Deploy.TaskStarter.start/1`; when the supervisor refuses
+  # the child (max_children, a dead supervisor) the row is never claimed, so it
+  # keeps `claim_epoch == 0` and `claimed_at` nil — outside EVERY claimed_at-gated
+  # pass below, and outside the orphan sweep's old `claim_epoch > 0` scope. The
+  # row is queued forever. `list_orphaned_static_deployments/0` now re-attempts
+  # such a row each sweep; this reason is what a row gets when those re-attempts
+  # have burned the same budget a claimed row gets.
+  #
+  # Word choice is load-bearing in two directions: it must NOT start with
+  # "exceeded max deploy claim attempts" (nothing ever claimed this row — that
+  # sentence would accuse a builder lease that never existed, and
+  # `DeployLedger.classify/2` would file it as STALE_LEASE), and it MUST carry
+  # "exceeded max" + "attempts" so `FailureCopy`'s generic retry clause already
+  # renders it without a new clause over there.
+  @spawn_refused_reason "exceeded max deploy start attempts — the deploy driver was never spawned (the control plane refused the child), so this build was never claimed; deploy again to retry"
 
   # BATCHING POLICY for a mass reap. `Notifications.dispatch_event/3` is
   # SYNCHRONOUS for email (cloud/ has no Oban for the mail path — only for chat),
@@ -7981,15 +7998,48 @@ defmodule BarkparkCloud.Registry do
 
   Content-bound only: an UNBOUND row is not an orphan, it is un-buildable, and
   the sweep's no-source pass terminates it with an honest reason.
+
+  ## The NEVER-CLAIMED orphan (task-c4c9a54cd073e011)
+
+  `claim_epoch > 0` alone described only HALF the orphan class, and the half it
+  missed is the one nothing else could see. A box-driven row's FIRST driver is
+  spawned by `Sites.Deploy.TaskStarter.start/1`; a supervisor that REFUSES the
+  child (max_children, a dead supervisor) leaves the row exactly as minted —
+  `queued`, `claim_epoch == 0`, `claimed_at` nil. Every reaper pass in
+  `reap_stale_deployments/0` is either `claimed_at`-gated (i–iv) or scoped to a
+  row that can never build (0a container-without-source, 0b unbound static), so a
+  static site WITH a dataset, or a node site, whose first spawn was refused
+  matched NOTHING and sat `queued` forever. The requeue path could not reach it
+  either: nothing had ever moved it to `building`, so there was nothing to
+  requeue.
+
+  So the scope is `claim_epoch > 0` OR "never claimed and older than the lease
+  horizon". The age gate is what keeps a FRESH row out: the route that minted it
+  is driving it right now, and `Deploy.run/1` claims within milliseconds — a
+  never-claimed row still `queued` a full `deployment_stale_after_seconds/0`
+  later is one whose driver never started. Human-cancelled rows are excluded by
+  `d.status == "queued"` (a cancel writes `"cancelled"`), so nothing resurrects a
+  build a person stopped.
+
+  Being FOUND here is a re-attempt, not a cure: if the spawn keeps being refused
+  the row stays `claim_epoch == 0` and comes back next sweep. Pass (0c) of
+  `reap_stale_deployments/0` is the bound — it terminates such a row once the
+  re-attempts have burned the same budget a claimed row gets.
   """
   @spec list_orphaned_static_deployments() :: [Deployment.t()]
   def list_orphaned_static_deployments do
+    never_claimed_before =
+      DateTime.utc_now()
+      |> DateTime.add(-deployment_stale_after_seconds(), :second)
+      |> DateTime.truncate(:microsecond)
+
     from(d in Deployment,
       join: s in Site,
       on: s.id == d.site_id,
       where:
-        d.status == "queued" and d.claim_epoch > 0 and s.kind in ["static", "node"] and
-          not is_nil(s.bootstrap_dataset),
+        d.status == "queued" and s.kind in ["static", "node"] and
+          not is_nil(s.bootstrap_dataset) and
+          (d.claim_epoch > 0 or d.inserted_at < ^never_claimed_before),
       order_by: [asc: d.inserted_at]
     )
     |> Repo.all()
@@ -8345,6 +8395,21 @@ defmodule BarkparkCloud.Registry do
       left untouched — they await the source-build path. Run FIRST so it only
       fails rows genuinely queued at sweep start, never a row the requeue pass
       moves building → queued in this same sweep.
+    * (0c) FAIL a `queued`, NEVER-CLAIMED (`claim_epoch == 0`) box-driven row
+      (static/node) whose REFUSED DRIVER SPAWN has now cost it the same budget a
+      claimed row gets — `max_deploy_claims/0` × `deployment_stale_after_seconds/0`
+      of age (task-c4c9a54cd073e011). The budget is expressed in TIME because a
+      never-claimed row has no epoch to count: nothing ever claimed it, so
+      `claim_epoch` is pinned at 0 no matter how many sweeps re-attempt the
+      spawn. This is the terminal half of a PAIR —
+      `list_orphaned_static_deployments/0` re-attempts such a row every sweep
+      (see its docstring); without a bound that retry loop IS the eternal
+      spinner, and without the retry a transient supervisor blip would kill a
+      perfectly good build. Container rows are out of scope on purpose: they wait
+      on the off-box builder's claim, and a long claim queue is not a fault
+      (`queued_deploy_age_map/1` is that class's read-only alarm). Run after
+      (0a)/(0b) so an un-buildable row still dies with the reason that names its
+      own cure, never this one.
     * (i) FAIL a stale `building` row whose `claim_epoch` has reached
       `max_deploy_claims/0` — terminal, so a permanently-crashing build stops
       looping. Run before the requeue pass so an exhausted row terminates
@@ -8367,15 +8432,22 @@ defmodule BarkparkCloud.Registry do
 
   Each pass is a status-guarded `update_all`, so a race with a concurrent claim
   simply no-ops on rows the other path already moved. Returns
-  `%{failed: n, requeued: n, released: n, pushing_failed: n, no_source_failed: n}`;
-  an empty sweep returns all-zeros and never raises.
+  `%{failed: n, requeued: n, released: n, pushing_failed: n, no_source_failed: n,
+  spawn_failed: n}`; an empty sweep returns all-zeros and never raises.
+
+  `spawn_failed` is deliberately its OWN key rather than another summand of
+  `no_source_failed` (which pairs 0a and 0b): "the driver was never spawned" and
+  "this row has nothing to build from" are different faults with different cures,
+  and a count that folds them together cannot tell an operator which one their
+  fleet is producing.
   """
   @spec reap_stale_deployments() :: %{
           failed: non_neg_integer(),
           requeued: non_neg_integer(),
           released: non_neg_integer(),
           pushing_failed: non_neg_integer(),
-          no_source_failed: non_neg_integer()
+          no_source_failed: non_neg_integer(),
+          spawn_failed: non_neg_integer()
         }
   def reap_stale_deployments do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
@@ -8439,6 +8511,45 @@ defmodule BarkparkCloud.Registry do
       )
 
     no_source_failed = container_failed + static_failed
+
+    # (0c) THE REFUSED DRIVER SPAWN, out of budget (task-c4c9a54cd073e011). A
+    # box-driven row (static/node) whose FIRST driver spawn was refused by
+    # `Sites.Deploy.TaskStarter.start/1` is never claimed: `claim_epoch` stays 0
+    # and `claimed_at` stays nil, so passes (i)–(iv) — all `claimed_at`-gated —
+    # cannot see it, (0a) excludes it by kind and (0b) by its dataset binding.
+    # It sat `queued` forever.
+    #
+    # `list_orphaned_static_deployments/0` now RE-ATTEMPTS such a row every
+    # sweep; this pass is its BOUND. The budget is TIME, not attempts, because
+    # `claim_epoch` cannot move for a row nothing ever claimed — so the row is
+    # given exactly what a claimed row is given (`max_deploy_claims/0` leases of
+    # `deployment_stale_after_seconds/0`) before it is told the truth.
+    #
+    # Container rows are out of scope: they legitimately wait on the off-box
+    # builder's claim (`queued_deploy_age_map/1` is that class's read-only
+    # alarm), and failing a queue for being a queue would be a new defect.
+    # `d.status == "queued"` also keeps a HUMAN-CANCELLED row (status
+    # "cancelled") out — nothing here resurrects or re-terminates one.
+    spawn_budget_before =
+      DateTime.add(now, -(max_claims * deployment_stale_after_seconds()), :second)
+
+    {spawn_failed, spawn_rows} =
+      from(d in Deployment,
+        join: s in Site,
+        on: s.id == d.site_id,
+        where:
+          d.status == "queued" and d.claim_epoch == 0 and s.kind in ["static", "node"] and
+            d.inserted_at < ^spawn_budget_before,
+        select: {d.id, d.site_id}
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason: @spawn_refused_reason,
+          detail: failure_detail(@spawn_refused_reason),
+          updated_at: now
+        ]
+      )
 
     # (i) Over budget: fail it (don't requeue). Run before the requeue pass so an
     # exhausted row terminates — the requeue pass's status guard then skips it.
@@ -8521,6 +8632,7 @@ defmodule BarkparkCloud.Registry do
     [
       {container_rows, @no_build_source_reason},
       {static_rows, @no_content_binding_reason},
+      {spawn_rows, @spawn_refused_reason},
       {failed_rows, @stale_builder_reason},
       {pushing_rows, @instance_unreachable_reason}
     ]
@@ -8534,7 +8646,8 @@ defmodule BarkparkCloud.Registry do
       requeued: requeued,
       released: released,
       pushing_failed: pushing_failed,
-      no_source_failed: no_source_failed
+      no_source_failed: no_source_failed,
+      spawn_failed: spawn_failed
     }
   end
 

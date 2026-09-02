@@ -332,6 +332,23 @@ func cpFindRow(rows []cpBarkpark, label, zone, ip string) *cpBarkpark {
 	return nil
 }
 
+// cpRowByID finds a registry row by ITS ID in a freshly-read list. Adopt's
+// post-condition addresses the row the control plane said it created, so the
+// match is on that id and nothing else: cpFindRow's dns_label/host heuristics
+// would happily hand back a pre-existing row for the same label under another
+// team and call the registration confirmed.
+func cpRowByID(rows []cpBarkpark, id string) *cpBarkpark {
+	if id == "" {
+		return nil
+	}
+	for i := range rows {
+		if rows[i].ID == id {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // shared plumbing
 // ---------------------------------------------------------------------------
@@ -690,6 +707,29 @@ func instCreateFromArchive(ctx context.Context, out *writer, hc *hcloud.Client, 
 		return nil, fmt.Errorf("create %s: created but never reached running with an IP", name)
 	}
 	return srv, nil
+}
+
+// instObserveImage renders the image half of a create-from-archive receipt out
+// of what the POLLED server reports, keeping the requested archive under a name
+// that says it is a request. hzObserveImage supplies the observed half (and the
+// image_observed: false it emits when the read-back carries no image at all,
+// which is the honest answer — not a fallback to the id that was asked for).
+//
+// The disagreement key exists because the only interesting case is the one the
+// old receipt could not express: a box that came up on an image nobody asked
+// for. An operator who resurrects from archive 777 and reads image_id: 700 has
+// a wrong box; an operator reading the request back at himself has no way to
+// find that out.
+func instObserveImage(srv *hcloud.Server, requested *hcloud.Image) map[string]any {
+	row := hzObserveImage(srv)
+	if requested != nil {
+		row["requested_image_id"] = requested.ID
+		if srv != nil && srv.Image != nil && srv.Image.ID != requested.ID {
+			row["image_disagreement"] = fmt.Sprintf(
+				"booted from archive %d but the box reports image %d", requested.ID, srv.Image.ID)
+		}
+	}
+	return row
 }
 
 // instDeleteServer deletes srv, re-checking the fqdn guard first: never delete
@@ -1131,8 +1171,26 @@ func runInstanceResurrect(out *writer, g globals, args []string) int {
 	if derr := instUpsertA(ctx, dns, fzone, label, ip); derr != nil {
 		return useError(out, "failed", "resurrect "+fqdn+": box is up at "+ip+" but DNS failed: "+derr.Error(), exitGeneric)
 	}
-	extra := map[string]any{"fqdn": fqdn, "ipv4": ip, "image_id": img.ID}
-	if !a.bools["no-health"] {
+	// THE IMAGE HALF OF THIS RECEIPT IS A READ-BACK, NOT THE REQUEST. `img` is
+	// the archive this verb ASKED Hetzner to boot; what the resurrected box
+	// actually runs is whatever the running+IPv4 poll inside
+	// instCreateFromArchive read back off the server. On every honest create
+	// those are the same id — which is exactly why printing the request as
+	// though it were the observation went unnoticed: it is right until the one
+	// time it is not. So `image_id` now carries the OBSERVED id, the requested
+	// archive rides under its own name, and a disagreement is reported.
+	extra := map[string]any{"fqdn": fqdn, "ipv4": ip}
+	for k, v := range instObserveImage(srv, img) {
+		extra[k] = v
+	}
+	if a.bools["no-health"] {
+		// SILENCE IS NOT A SKIP. An omitted `health` key is indistinguishable
+		// from a receipt written before the key existed, and from a probe that
+		// crashed — three different worlds rendered as the same absence.
+		// --no-health is the operator declining the post-condition, so the
+		// receipt says that in its own words and stays a ✓ for what it did do.
+		extra["health"] = "skipped (--no-health)"
+	} else {
 		out.info("waiting for https://%s/api/schemas …", fqdn)
 		if herr := instHealth(fqdn, ip); herr != nil {
 			extra["health"] = "FAILED: " + herr.Error()
@@ -1258,14 +1316,54 @@ func runInstanceAdopt(out *writer, g globals, args []string) int {
 	if aerr != nil {
 		return useError(out, "failed", "adopt "+fqdn+": clone "+clone.Name+" is serving but registration failed: "+aerr.Error(), exitGeneric)
 	}
-	return hzDone(out, "adopt", clone, map[string]any{
+	extra := map[string]any{
 		"fqdn":             fqdn,
 		"ipv4":             hzIPv4(clone),
 		"archive_image_id": obs.image.ID,
 		"archive_quiesced": obs.quiesced,
-		"registry_id":      row.ID,
-		"team_id":          row.TeamID,
-	})
+	}
+
+	// THE POST-CONDITION, and why adopt may not report registry_id on a 201
+	// alone — the same argument eject already makes about its detach, one
+	// resource over. cp.Adopt's 201 body is the control plane REPEATING the
+	// attrs it was handed; a plane that validated the payload, answered 201 and
+	// wrote no row produces a byte-identical receipt to one that adopted the
+	// box. So does a plane that recorded the row against the OLD box's IP,
+	// which strands the dashboard on a machine instCloneSwap just destroyed.
+	// The claim "this box is now a managed tenant" is earned by re-reading the
+	// registry: the row the plane named is present, and its host is the clone's
+	// IPv4. Anything else is an unconfirmed registration — not a failed verb
+	// (the clone is serving and DNS points at it) and NOT a silent ✓ either, so
+	// it takes hzPartial's confirmation-unavailable shape and sends the
+	// operator to look.
+	clonedIP := hzIPv4(clone)
+	unconfirmed := ""
+	rows, lerr := cp.List()
+	switch {
+	case lerr != nil:
+		extra["confirmation_error"] = lerr.Error()
+		unconfirmed = "the control plane accepted the registration but the registry could not be re-read to confirm the row exists"
+	default:
+		switch got := cpRowByID(rows, row.ID); {
+		case got == nil:
+			unconfirmed = fmt.Sprintf("the control plane answered 201 with registry row %q, but a fresh read of the "+
+				"registry does not carry it — nothing is managing this instance", row.ID)
+		case got.Host != clonedIP:
+			unconfirmed = fmt.Sprintf("registry row %s exists but its host is %q, not the clone's %s — the dashboard "+
+				"would drive a box this adopt already destroyed", got.ID, got.Host, clonedIP)
+		default:
+			extra["registry_id"] = got.ID
+			extra["team_id"] = got.TeamID
+			extra["registry_host"] = got.Host
+		}
+	}
+	if unconfirmed != "" {
+		extra["confirmation"] = "unavailable"
+		extra["adopt_reported_id"] = row.ID
+		return hzPartial(out, "adopt", clone, unconfirmed+" — re-check with `bp cloud hetzner instance audit`", extra)
+	}
+	extra["note"] = "registered — the row is present in a fresh registry read and its host is the clone"
+	return hzDone(out, "adopt", clone, extra)
 }
 
 func runInstanceEject(out *writer, g globals, args []string) int {

@@ -62,6 +62,9 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
         --btn-bg-hover: hsl(163 46% 17%);
+        --dur-1: 0.15s;
+        --dur-2: 0.18s;
+        --dur-3: 0.28s;
       }
       html[data-theme="dark"] .bp-auth {
         --primary: hsl(152.92 60% 52.94%);

@@ -1,14 +1,14 @@
 {
   "$comment": "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact, keyed `<path>#<artifact name>` (NOT path alone: one file may carry two generated regions, and each owns its own slot), taken over the GENERATED REGION ONLY (the marker interior for css/html surfaces, the whole file for go/ts/elixir). design/emit.mjs --write refuses to replace a region whose digest does not match, because those bytes were never emitted and replacing them destroys hand-written work (see commit 1d928b3bf). Rewritten by `node design/emit.mjs --write`; re-bless the tree with --adopt.",
   "regions": {
-    "api/assets/paper-editor/src/styles.css#paper-editor mirror": "3e9d1a3cfa28a39ceb7e181f49731ee7b96a11c35afbbf0dc84718042ea866d8",
-    "api/assets/paper-surface/paper-surface.css#paper-surface": "9e94063acf804ef2a985716e74a0cf0b1d06c30d32cbcb82e0a1493690546f46",
+    "api/assets/paper-editor/src/styles.css#paper-editor mirror": "8d5ba9019fee5d6e0fd1fe9b31cb94feb85062d35904d2ee21fe4ca6f059b2be",
+    "api/assets/paper-surface/paper-surface.css#paper-surface": "6aabaf540dde0a14a8a7048b36eedecfbacee045fe91d68f8b7f5ac133456cc7",
     "api/lib/barkpark/portable_doc/render/tokens_gen.ex#Elixir render tokens": "e241f3e1e2e6fd192271f2799ec2e5dda72aeabf6da88b105fe963b955cc64bb",
     "api/lib/barkpark_web/controllers/error_html.ex#error page (error_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
-    "api/lib/barkpark_web/controllers/session_html.ex#login (session_html)": "e1d3efae4186f38624928dae2a0ef78b588169a97cc4b271e829949a513a2461",
+    "api/lib/barkpark_web/controllers/session_html.ex#login (session_html)": "31667638d81efd9762630e7e8f79bd038c70c91c777ac612fdc45ffaf76e8e11",
     "api/lib/barkpark_web/controllers/status_controller.ex#status page chrome": "64ed2df4c3c3bb389c37ea147d0a02042787e568a15d1440484fc2fe9331c6f2",
-    "api/lib/barkpark_web/layouts/bulldocs.html.heex#/papers reader skin": "19a2ed4f46b5ac1d159debd28ddd44f6eadddd8a98734e5567883c3cdbb94d25",
-    "api/lib/barkpark_web/layouts/root.html.heex#Studio": "aec81cd6318fed7c253ea3d71592c1aec11c9dc220d119b69e6039f62525260f",
+    "api/lib/barkpark_web/layouts/bulldocs.html.heex#/papers reader skin": "24f79f02a81ea60b5dc75f62b00e93d28f34bf7a5405b2e957e4194a4d89cb8e",
+    "api/lib/barkpark_web/layouts/root.html.heex#Studio": "c2a134147d2f94a331c1d6581926de46ccee66b639c0a374c084b62a979292e8",
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
     "cloud/priv/static/app.css#cloud SPA": "2ae2ca4942a4bc70a6b748da9d6e3c8abc8a8e8f231061d5d7c7f30bdee3482b",
@@ -19,7 +19,7 @@
     "internal/semrole/chrome_gen.go#Go CLI chrome": "a55b48dbdff4c327e7a456bcc894f2a423d75c6509c91cd695355ae7ac90734d",
     "internal/semrole/tokens_gen.go#Go semrole": "e15a4495b1f473b8465bffc84c9dca5621e03aba8a42bb0577f03f400629c5bf",
     "internal/taskboard/tokens_gen.go#Go board": "9215c045732c56f88ced73d318b154a15e94724a369cdfe6a2d6417e7c9c9852",
-    "web/app/globals.css#web demo": "035a1f9a178e8a511dcb0d113b84c1720157c75e44b2b6af102e6654457cf9ba",
+    "web/app/globals.css#web demo": "db891fc852d8b37af88bba52186a9acae034fd7fa952761f2e3950ed35763497",
     "web/lib/tokens.gen.ts#web TS tokens": "66a0ed2b6c9a12ef4233fd7208c5ef7f9fad9d1a4597c30e42fa66eef3e466d8"
   }
 }

@@ -745,14 +745,31 @@ test("--ledger folds the real store, dedupes to one recipe per key, and SURFACES
   assert.equal(source.commands.length, source.stats.subjects,
     "deduped: exactly one recipe per (subject, quantity) key");
   assert.ok(source.commands.every((c) => typeof c === "string" && c.trim()));
-  // The rivals are SKIPPED, never dropped in silence — summarise()'s report has
-  // no field for them, so flattening to a bare string[] would lose them.
-  assert.equal(source.skippedRivals, source.stats.rows - source.stats.subjects);
-  assert.equal(source.rivalMethods.length, source.stats.rival_methods);
 
   const all = loadLedgerRecipes(LEDGER_DIR, { allRivals: true });
   assert.ok(all.commands.length >= source.commands.length);
   assert.equal(all.skippedRivals, 0);
+
+  // The rivals are SKIPPED, never dropped in silence — summarise()'s report has
+  // no field for them, so flattening to a bare string[] would lose them.
+  //
+  // THE WITNESS IS THE allRivals LOAD, NOT `rows - subjects`. loadLedgerRecipes
+  // counts DISTINCT rerun STRINGS per key, so what it skips is exactly what the
+  // allRivals load keeps and this one drops. This used to be asserted as
+  // `rows - subjects`, which is the same number ONLY while no two ROWS under one
+  // key carry byte-identical commands — an accident of the store, never a
+  // property of the reader. Re-recording an existing recipe through the write
+  // path (D118's append-only repair: the original row is never edited, a new
+  // attested run supersedes it) writes precisely that duplicate, with a fresher
+  // observed_at and nothing else changed, and the old identity went red on a
+  // store that was behaving correctly.
+  assert.equal(source.skippedRivals, all.commands.length - source.commands.length,
+    "skipped = every distinct command past the first, per key");
+  // The looser relation still holds and names the gap: a key holding two rows
+  // with the SAME command contributes to rows-subjects and not to skippedRivals.
+  assert.ok(source.skippedRivals <= source.stats.rows - source.stats.subjects,
+    "a repeated command is a re-run of one recipe, not a second way in");
+  assert.equal(source.rivalMethods.length, source.stats.rival_methods);
 });
 
 test("the pre-census block prints the fold facts summarise() has NO FIELD FOR", () => {
