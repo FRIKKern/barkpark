@@ -5,10 +5,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   Reads (`GET`/`HEAD`) and writes (other verbs) are billed against
   separate buckets. Limits come from
   `config :barkpark, :rate_limits` with per-dataset overrides in
-  `datasets: %{"ds" => %{read: N, write: M}}`. A token bucket is keyed on the
-  RESOLVED token (`Auth.verify_token/1`), NEVER on the raw Authorization header
-  — see `principal_id/1`. Unauthenticated callers, and callers presenting a
-  bearer this server cannot resolve to a principal, are bucketed by client IP,
+  `datasets: %{"ds" => %{read: N, write: M}}`. A credential bucket is keyed on a
+  RESOLVED token id — api_token or SCIM token, see `@principal_resolvers` —
+  NEVER on the raw Authorization header. Unauthenticated callers, and callers
+  presenting a bearer no resolver can verify, are bucketed by client IP,
   resolved through `Barkpark.RateLimiter.client_ip/1`
   — never `conn.remote_ip`, which behind the co-located Caddy is ALWAYS
   loopback and collapsed the whole anonymous internet into one shared bucket.
@@ -102,7 +102,8 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     end
   end
 
-  # THE BUCKET KEY MAY ONLY BE DERIVED FROM A VERIFIED PRINCIPAL.
+  # THE BUCKET KEY MAY ONLY BE DERIVED FROM A VERIFIED PRINCIPAL — AND EVERY
+  # CREDENTIAL KIND THIS PLUG METERS NEEDS A RESOLVER IN THE LIST BELOW.
   #
   # This used to be `hash_token(raw)` straight off the Authorization header — a
   # bare :crypto.hash/2 with no verify and no Repo lookup, so the bucket key was
@@ -123,44 +124,86 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # rotating bearer turned those two routes into an unbounded outbound-mail
   # amplifier and burned the per-account login lockout across every account.
   #
-  # So: resolve, or fall back to the IP bucket. `nil` here is not "anonymous",
-  # it is "no principal this server has vouched for", which is the same budget
-  # an anonymous caller gets — an unresolvable bearer buys the caller nothing.
+  # THE HALF THAT IS EASY TO GET WRONG, and did get shipped wrong once: falling
+  # back to the IP bucket for everything `Auth.verify_token/1` cannot resolve
+  # treats "a credential of a DIFFERENT kind" as "no credential at all". A SCIM
+  # bearer is a `Barkpark.Scim.Token`, not an `ApiToken`, so `pipeline :scim`
+  # (which meters BEFORE `RequireScimToken` resolves anything) collapsed an
+  # entire IdP's provisioning traffic — many requests from one egress address is
+  # SCIM's normal operating mode — into the anonymous per-IP budget. 18 SCIM
+  # tests went 429. `verify_token/1` is the resolver for ONE credential kind,
+  # not the definition of "verified".
   #
-  # COST, deliberately paid: this adds one indexed `api_tokens.token_hash`
-  # lookup per BEARER-carrying request ahead of the meter. On `:api` and its
-  # siblings that lookup already happens a few plugs later (`OptionalToken` →
-  # `Auth.verify_token/1`), so the marginal cost is one cached index hit; and
-  # under the rotating-bearer flood this closes, the attacker used to reach that
-  # same lookup unthrottled, so the fix strictly REDUCES the database work a
-  # flood can force. It never runs for a request that presents no bearer, which
-  # is the whole anonymous surface.
+  # So the invariant is two-sided, and both sides are load-bearing:
+  #
+  #   * a VERIFIED identity of ANY kind keys its own bucket;
+  #   * the IP bucket is for callers who presented no identity this server can
+  #     verify at all — an unresolvable bearer buys them nothing.
+  #
+  # @principal_resolvers IS THE REGISTRY. A new bearer-shaped credential kind
+  # metered by this plug adds a line HERE, and
+  # `RateLimitPrincipalCoverageTest` reds until it does: that test reads the
+  # router, finds every pipeline mounting this plug, and refuses any credential
+  # plug it does not know a resolver for. Order is cheapest-and-commonest
+  # first; each is an indexed hash lookup and the first hit wins.
+  #
+  # Non-Bearer schemes are out of scope by construction and always were:
+  # `PreviewToken` reads `Authorization: Preview <jwt>` and `RequireChatHost`
+  # reads `Authorization: Host <cred>`, so neither ever matched this clause,
+  # before the fix or after it. They key on IP, as they did on main.
+  #
+  # COST, deliberately paid: up to one indexed `token_hash` lookup per resolver
+  # per BEARER-carrying request, ahead of the meter. A LIVE credential stops at
+  # its own resolver (one lookup for an api_token, two for a SCIM token); only a
+  # bearer that resolves to nothing pays the full list. On `:api` and its
+  # siblings the api_token lookup already happens a few plugs later
+  # (`OptionalToken` → `Auth.verify_token/1`), so the marginal cost there is one
+  # cached index hit — and under the rotating-bearer flood this closes, the
+  # attacker used to reach that same lookup unthrottled with no limit ever
+  # binding, so the change still REDUCES the database work a flood can force.
+  # None of it runs for a request that presents no bearer, which is the whole
+  # anonymous surface.
+  @principal_resolvers [
+    # kind, {module, function} resolving a raw bearer to a stable id or nil.
+    # The kind is part of the bucket key, so ids from two credential tables can
+    # never collide into one bucket.
+    {"api", {Barkpark.Auth, :verify_token_id}},
+    {"scim", {Barkpark.Scim, :resolve_token_id}}
+  ]
+
   defp principal_id(conn) do
     case conn.assigns[:api_token] do
       # Free path: a plug ahead of us already resolved this bearer. Nothing in
       # the tree mounts RateLimit after token resolution today, so this is a
       # forward-compatibility branch, not the hot one.
-      %Barkpark.Auth.ApiToken{id: id} when is_binary(id) -> id
+      %Barkpark.Auth.ApiToken{id: id} when is_binary(id) -> "api:" <> id
       _ -> verified_bearer_id(conn)
     end
   end
 
   defp verified_bearer_id(conn) do
-    with ["Bearer " <> raw] <- get_req_header(conn, "authorization"),
-         true <- raw != "",
-         {:ok, %Barkpark.Auth.ApiToken{id: id}} <- Barkpark.Auth.verify_token(raw) do
-      id
-    else
+    case get_req_header(conn, "authorization") do
+      ["Bearer " <> raw] when byte_size(raw) > 0 -> resolve(raw, @principal_resolvers)
       _ -> nil
+    end
+  end
+
+  defp resolve(_raw, []), do: nil
+
+  defp resolve(raw, [{kind, {mod, fun}} | rest]) do
+    case apply(mod, fun, [raw]) do
+      id when is_binary(id) -> kind <> ":" <> id
+      _ -> resolve(raw, rest)
     end
   rescue
     # The limiter must never be the thing that 500s a request. A database blip
     # (or a test process without sandbox ownership) degrades to the IP bucket —
     # fail-CLOSED in the sense that matters here: the caller gets the SMALLER,
-    # unforgeable budget, never a fresh one.
-    _ -> nil
+    # unforgeable budget, never a fresh one. Scoped to ONE resolver so a broken
+    # one does not mask the rest.
+    _ -> resolve(raw, rest)
   catch
-    :exit, _ -> nil
+    :exit, _ -> resolve(raw, rest)
   end
 
   defp retry_after_seconds(per_minute) when is_integer(per_minute) and per_minute > 0 do

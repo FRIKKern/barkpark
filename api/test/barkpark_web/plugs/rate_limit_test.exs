@@ -323,6 +323,75 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
     end
   end
 
+  # A SCIM bearer is a `Barkpark.Scim.Token`, NOT an `ApiToken`, so
+  # `Auth.verify_token/1` cannot resolve it — and `pipeline :scim` meters BEFORE
+  # `RequireScimToken` resolves anything. The first cut of this fix therefore
+  # sent every SCIM request to the IP bucket and collapsed an entire IdP's
+  # provisioning traffic (many requests from ONE egress address is SCIM's normal
+  # operating mode) into the anonymous per-IP budget: 18 SCIM tests went 429 in
+  # CI, and production provisioning would have followed.
+  #
+  # Nothing in this file could have caught that, because nothing here knew a
+  # second credential kind existed. That is the whole reason this block is here.
+  describe "a SCIM bearer (a credential of a DIFFERENT kind)" do
+    @idp_peer {198, 51, 100, 77}
+
+    defp scim_token(slug) do
+      {:ok, org} = Barkpark.Tenancy.create_organization(%{slug: slug, name: slug})
+      {:ok, {raw, _tok}} = Barkpark.Scim.mint_token(org.id, "rate-limit-test")
+      raw
+    end
+
+    defp scim_write(raw) do
+      build(:post, "/scim/v2/Groups", %{}, [{"authorization", "Bearer " <> raw}])
+      |> Map.put(:remote_ip, @idp_peer)
+    end
+
+    defp passes?(conn), do: not RateLimit.call(conn, RateLimit.init([])).halted
+
+    test "two SCIM tokens from ONE address keep independent budgets" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      idp_a = scim_token("rl-scim-a-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower))
+      idp_b = scim_token("rl-scim-b-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower))
+
+      assert passes?(scim_write(idp_a))
+      # A has spent its own 1/min budget...
+      refute passes?(scim_write(idp_a))
+      # ...and B, provisioning through the SAME egress address, still has all of
+      # its own. Keyed on the IP this line reds, which is exactly the 429 CI saw.
+      assert passes?(scim_write(idp_b))
+    end
+
+    test "one SCIM token's repeated requests still share ITS bucket" do
+      with_limits(read_per_minute: 1, write_per_minute: 2)
+
+      # Guards the lazy way to pass the test above — a verified SCIM caller is
+      # still metered, it simply is not metered as an anonymous one.
+      raw = scim_token("rl-scim-c-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower))
+
+      assert passes?(scim_write(raw))
+      assert passes?(scim_write(raw))
+      refute passes?(scim_write(raw))
+    end
+
+    test "a REVOKED SCIM token falls back to the IP bucket" do
+      with_limits(read_per_minute: 1, write_per_minute: 1)
+
+      slug = "rl-scim-d-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+      {:ok, org} = Barkpark.Tenancy.create_organization(%{slug: slug, name: slug})
+      {:ok, {raw, tok}} = Barkpark.Scim.mint_token(org.id, "revoked")
+
+      {:ok, _} =
+        tok
+        |> Ecto.Changeset.change(revoked_at: DateTime.utc_now())
+        |> Barkpark.Repo.update()
+
+      assert passes?(scim_write(raw))
+      refute passes?(scim_write(raw))
+    end
+  end
+
   # Criterion 3: the fix must not cost a legitimate caller its own bucket.
   # Nothing in the file above proves this, because nothing above mints a token
   # that actually EXISTS — so IP fallback alone would have passed every one.
