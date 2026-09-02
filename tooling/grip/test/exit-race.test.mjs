@@ -15,8 +15,26 @@
 // and acceptance's had not: backfill ended `.then((code) => process.exit(code))`
 // with a `--json` stdout path, and acceptance called `process.exit(outcome.ok ?
 // 0 : 1)` on the line after printing its report — the report this epic cites as
-// its own evidence. This file is the pin so that cannot come back in any of the
-// three.
+// its own evidence. This file is the pin so that cannot come back.
+//
+// AND THE RULING GOVERNED MORE THAN THREE FILES. A `grep -n 'process.exit('
+// tooling/grip/*.mjs` after that second application still hit SIX more runnable
+// modules on paths that write stdout first: cli.mjs (`process.exit(main(argv))`
+// after the HELP screen and every adjudication verdict), seal.mjs
+// (`process.exit(main())` on the line after the whole seal report, whose LAST
+// line is the VERDICT-TOKEN), screen.mjs (four arms, all after selftest()'s and
+// census()'s tables), harvest.mjs (six arms, four of them after the check table
+// the verify prints), census.mjs (four arms, one of them straight after
+// `console.log(HELP)`) and trial-leads-vs-grep.mjs (`process.exit(main(argv))`
+// after the report or the `--json` document). None of those outputs exceeds a
+// 64 KiB pipe buffer TODAY — measured on the tree that ships this file:
+// census.mjs --json --limit 3 writes 4925 bytes, trial-leads-vs-grep --json over
+// the live ledger 16406, harvest.mjs --verify 2956, cli.mjs --help 544,
+// screen.mjs --selftest 137 — so the tear was LATENT in every one of them.
+// census's `--json` is the one that grows with the store and so the one that
+// reaches the buffer first. The exit STATUS of every converted arm is
+// unchanged; clause (A) below now covers all nine files, and clause (A2)
+// re-derives the list from disk so it cannot silently shrink.
 //
 // THE MEASUREMENT, and it is honest about its own reach:
 //
@@ -52,7 +70,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,8 +78,33 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GRIP = join(HERE, "..");
 
-/** The three entry guards charter D92 governs. ledger.mjs is the reference fix. */
-const GUARDED = ["backfill.mjs", "acceptance.mjs", "ledger.mjs"];
+/**
+ * EVERY entry point charter D92 governs — tooling/grip's whole runnable
+ * surface, not a sample. ledger.mjs is the reference fix, backfill and
+ * acceptance the second application, and the remaining six the residue this
+ * list closes.
+ *
+ * WHY THE RULE IS FILE-SCOPED AND NOT PATH-SCOPED. The clause below reds on ANY
+ * `process.exit(` in these files, a fatal arm that has written nothing to stdout
+ * included — an arm that, on its own, is harmless. That is deliberate, and it is
+ * the cheap direction to be wrong in: judging per-hit whether an arm is
+ * reachable after a write means re-deriving the control flow of nine CLIs on
+ * every edit, and the arm somebody adds next year is precisely the one nobody
+ * re-derives. Every fatal arm in these files was converted with its exit STATUS
+ * and its stderr TEXT preserved, so the blanket rule costs nothing and cannot be
+ * defeated by adding one more arm.
+ */
+const GUARDED = [
+  "acceptance.mjs",
+  "backfill.mjs",
+  "census.mjs",
+  "cli.mjs",
+  "harvest.mjs",
+  "ledger.mjs",
+  "screen.mjs",
+  "seal.mjs",
+  "trial-leads-vs-grep.mjs",
+];
 
 /**
  * Source with FULL-LINE comments removed. Deliberately conservative: a line
@@ -115,18 +158,64 @@ test("no D92-governed entry guard calls process.exit, and every one sets process
 });
 
 test("CONTROL: the tail scanner reports the exact shapes that shipped on main", () => {
-  // Verbatim from the pre-fix tree — the scanner must call BOTH of these out,
-  // or clause (A) above is green because it cannot see, not because it is true.
-  const backfillTail = "  main(process.argv.slice(2))\n    .then((code) => process.exit(code))\n";
-  const acceptanceTail = "  process.exit(outcome.ok ? 0 : 1);\n";
-  assert.equal(callsExit(backfillTail), true, "the backfill tail that shipped must read as an offender");
-  assert.equal(callsExit(acceptanceTail), true, "the acceptance tail that shipped must read as an offender");
-  assert.equal(setsExitCode(backfillTail), false, "and neither of them sets exitCode");
+  // Verbatim from the pre-fix tree, one per guarded file that had an offending
+  // arm — the scanner must call EVERY one of these out, or clause (A) above is
+  // green because it cannot see, not because it is true. A scanner that catches
+  // two of eight is the "counting doors is not counting what a door sees"
+  // failure, and it is invisible from a green.
+  const SHIPPED = {
+    "backfill.mjs": "  main(process.argv.slice(2))\n    .then((code) => process.exit(code))\n",
+    "acceptance.mjs": "  process.exit(outcome.ok ? 0 : 1);\n",
+    "cli.mjs": "  emitProvenance();\n  process.exit(main(process.argv));\n",
+    "seal.mjs": "if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());\n",
+    "screen.mjs": "      if (selftest() > 0) process.exit(1);\n",
+    "harvest.mjs": "    console.error(`FAIL: ${failed}/${CHECKS.length} checks failed.`);\n    process.exit(1);\n",
+    "census.mjs": "    console.log(HELP);\n    process.exit(0);\n",
+    "trial-leads-vs-grep.mjs": "  process.exit(main(process.argv.slice(2)));\n",
+  };
+  const unseen = Object.entries(SHIPPED).filter(([, tail]) => !callsExit(tail)).map(([name]) => name);
+  assert.deepEqual(unseen, [], "the scanner failed to read these shipped tails as offenders — clause (A) is blind, not true");
+  const falselyCredited = Object.entries(SHIPPED).filter(([, tail]) => setsExitCode(tail)).map(([name]) => name);
+  assert.deepEqual(falselyCredited, [], "and none of the pre-fix tails sets exitCode");
+
   // …and the scanner must NOT be fooled into a red by prose ABOUT the defect,
-  // which every one of the three fixed guards now carries above it.
+  // which every fixed guard now carries above it. The second sample is the line
+  // cli.mjs actually ships above its guard — a synthetic comment would prove
+  // less than the real one this file has to coexist with.
   const prose = "  // process.exit(code) TRUNCATES a not-yet-flushed pipe.\n  process.exitCode = 0;\n";
   assert.equal(callsExit(prose), false, "a full-line comment naming the anti-pattern is not a call");
   assert.equal(setsExitCode(prose), true, "and the fix underneath it must still be seen");
+  const shippedProse = "// This file used to end with a BARE `process.exit(main(process.argv))` at module\n";
+  assert.equal(callsExit(shippedProse), false, "cli.mjs's own prose about the old bare exit is not a call");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// (A2) THE LIST ITSELF. A hand-kept file list is a tripwire that goes blind the
+//      day somebody adds a tenth CLI — so re-derive the universe from disk.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("GUARDED names every tooling/grip module that reads argv positionally", () => {
+  // The derivation: a module that indexes `process.argv` (`process.argv[1]`,
+  // `[2]`, `.slice(2)`) is a RUNNABLE entry point and therefore governed. That
+  // is deliberately narrower than "mentions process.argv": leads.mjs asks
+  // `process.argv.includes("--full")` inside a helper the ledger CLI calls and
+  // is not itself runnable, so it is correctly out. If a new CLI appears with an
+  // indexed argv read and nobody adds it here, THIS is what reds — not a silent
+  // pass over a shorter list.
+  const entryPoints = readdirSync(GRIP)
+    .filter((f) => f.endsWith(".mjs"))
+    .filter((f) => /process\.argv\s*(\[|\.slice\s*\()/.test(codeOnly(readFileSync(join(GRIP, f), "utf8"))))
+    .sort();
+  assert.deepEqual(
+    entryPoints.filter((f) => !GUARDED.includes(f)), [],
+    "these tooling/grip modules read argv positionally — they are runnable entry points D92 governs, and " +
+      "GUARDED above does not name them, so clause (A) is not looking at them",
+  );
+  assert.deepEqual(
+    GUARDED.filter((f) => !entryPoints.includes(f)), [],
+    "GUARDED names a module that no longer reads argv positionally — either it was renamed or it stopped " +
+      "being an entry point; a stale name makes the list look longer than its reach",
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,6 +250,73 @@ test("acceptance survives a slow pipe whole in both output modes, and PASS still
   assert.equal(report.status, parsed.ok ? 0 : 1, "the report run's status must match the verdict, as before");
   assert.equal(json.status, report.status, "and both output modes must agree on it");
 });
+
+test("census --json survives a slow pipe whole, and its rejection statuses are unchanged", async () => {
+  // census's --json is the output in this directory that GROWS with the ledger,
+  // so it is the one that reaches the 64 KiB buffer first. --limit 3 keeps this
+  // clause under a second; the tail form it exercises is the same one every
+  // unbounded run uses.
+  const { out, status } = await readSlowly(["census.mjs", "--json", "--limit", "3"]);
+  const parsed = JSON.parse(out); // throws on a torn document
+  assert.equal(status, 0, "a clean census must still report 0 through the exitCode tail");
+  assert.ok(out.trimEnd().endsWith("}"), "the last byte of the document must have reached the reader");
+  assert.ok(Object.keys(parsed).length > 0, "the piped document arrived empty");
+
+  // The three named rejections leave the block with `break cliMain` now rather
+  // than process.exit — the STATUS each one reports is what census.test.mjs
+  // asserts and what a caller branches on, so pin it here too.
+  for (const argv of [
+    ["--totally-bogus-flag-xyz", "--limit", "5"],
+    ["--limit", "not-a-number"],
+    ["--all-rivals"],
+  ]) {
+    const r = await readSlowly(["census.mjs", ...argv]);
+    assert.equal(r.status, 2, `census ${argv.join(" ")} must still exit 2, got ${r.status}`);
+  }
+  const help = await readSlowly(["census.mjs", "--help"]);
+  assert.equal(help.status, 0, "--help must still exit 0");
+  assert.ok(help.out.includes("census"), "and it must still print the help screen it exits after");
+});
+
+test("harvest --verify survives a slow pipe whole, and every Fatal keeps its status", async () => {
+  // harvest's failing arms became `throw new Fatal(code, message)` handled by a
+  // single bottom-of-file catch. The whole point is that the STATUS did not
+  // move, so assert the statuses, not the refactor.
+  const { out, status } = await readSlowly(["harvest.mjs", "--verify"]);
+  assert.equal(status, 0, "a green fixture gate must still report 0");
+  assert.match(out.trimEnd().split("\n").pop(), /^PASS: \d+ checks green/, "the PASS line is the LAST thing --verify prints, so a torn pipe eats the verdict first");
+
+  const bad = await readSlowly(["harvest.mjs", "--no-such-mode"]);
+  assert.equal(bad.status, 2, "an unknown mode must still exit 2");
+  const selftest = await readSlowly(["harvest.mjs", "--selftest"]);
+  assert.equal(selftest.status, 0, "a clean --selftest must still exit 0");
+});
+
+test("cli and screen keep their statuses under the exitCode tail", async () => {
+  const help = await readSlowly(["cli.mjs", "--help"]);
+  assert.equal(help.status, 0, "cli --help must still exit 0");
+  assert.ok(help.out.includes("Exit:"), "and print the whole HELP screen, whose last section is the exit table");
+  const noArgs = await readSlowly(["cli.mjs"]);
+  assert.equal(noArgs.status, 2, "cli with no facts file must still exit EXIT.USAGE (2)");
+  const cliSelftest = await readSlowly(["cli.mjs", "--selftest"]);
+  assert.equal(cliSelftest.status, 0, "cli --selftest must still exit 0 — CI reads this status");
+
+  const screenSelftest = await readSlowly(["screen.mjs", "--selftest"]);
+  assert.equal(screenSelftest.status, 0, "screen --selftest must still exit 0");
+  assert.match(screenSelftest.out, /PASS: all three named sets hold\./, "the PASS line moved under an `else` when the exit above it went — a run that passes must still print it");
+  const screenBad = await readSlowly(["screen.mjs", "--no-such-mode"]);
+  assert.equal(screenBad.status, 2, "an unknown screen mode must still exit 2");
+});
+
+// WHAT (B) DOES NOT COVER, said out loud rather than left to look like coverage.
+// seal.mjs and trial-leads-vs-grep.mjs are in GUARDED and clause (A) reds on
+// either regaining a `process.exit(`, but neither gets a piped-parse clause
+// here: seal.mjs's live arms reach a Barkpark host this suite must not depend
+// on (seal.test.mjs drives it through its own fixtures), and
+// trial-leads-vs-grep.mjs --json over the live ledger measured 50s of wall
+// clock — a cost the whole suite would pay on every run to re-prove a mechanism
+// clause (C) already proves in milliseconds. Their exit statuses were exercised
+// by hand at conversion time and their tails are pinned by (A).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // (C) THE MECHANISM, at a size that actually tears. Two generated scripts whose
