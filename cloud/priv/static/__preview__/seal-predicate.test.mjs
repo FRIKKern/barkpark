@@ -2370,3 +2370,112 @@ test('wave 67 THE REFUSAL SURVIVES (no status): a gap row with no lifecycle_stat
   assert.match(noStatus.out, /drafts\.d-mute/);
   assert.match(noStatus.out, /no lifecycle_status/);
 });
+
+// ── BACKPRESSURE IS NOT AN INFRA FAULT ──────────────────────────────────────
+//
+// MEASURED 2026-09-01 17:02Z: under this campaign's own load (18 agent lanes, each
+// with a pulse loop and its own queries) the ledger answered `bp task ready` with
+// HTTP 429 and `retry_after=1`. This file's readers turned that into an exit-2 INFRA
+// FAULT, because the status gate is `!/^2\d\d$/` and a 429 is not a 2xx — so a
+// ONE SECOND WAIT was reported to the operator as a broken machine.
+//
+// These tests use the shim idiom the wave-29/30 tests above established: a `curl`
+// first on PATH for THIS spawn only. It is a hermetic fixture, not a network call,
+// and it is invisible to the CI recorder by construction (console-harness.yml says so
+// in as many words about the outage test's shim).
+//
+// A 429 shim that also COUNTS its invocations is what separates "retried" from
+// "gave up on the first answer" — the exit code alone cannot tell those apart, which
+// is precisely how the defect survived.
+const throttleShim = (dir, callLog, { retryAfter = 0, thenBody = null } = {}) => {
+  // `retry_after: 0` keeps the suite fast while still exercising the SERVER-NAMED
+  // path (asked-for, not defaulted). The wait ARITHMETIC is proven by the Go
+  // transport's own table; what only a spawn can prove is that this program retries
+  // at all and names the condition when it stops.
+  const body = `{"error":{"code":"rate_limited","message":"too many requests","request_id":"req_throttled_1","details":{"retry_after":${retryAfter}}}}`;
+  const script = thenBody === null
+    ? `#!/bin/sh\necho call >> ${callLog}\nprintf '%s\\n429\\n' '${body}'\n`
+    : `#!/bin/sh\necho call >> ${callLog}\nif [ "$(wc -l < ${callLog} | tr -d ' ')" -le 1 ]; then printf '%s\\n429\\n' '${body}'; else printf '%s\\n200\\n' '${thenBody}'; fi\n`;
+  writeFileSync(join(dir, 'curl'), script);
+  spawnSync('chmod', ['+x', join(dir, 'curl')]);
+};
+
+const spawnPredicate = (shimDir) => {
+  const r = spawnSync('node', [PREDICATE, '--repo', REPO, '--successor', 'TERMINAL'],
+    { encoding: 'utf8', timeout: 120000, env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}` } });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+};
+
+const callCount = (log) => {
+  try { return readFileSync(log, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; }
+};
+
+test('wave 68: a 429 is RETRIED, not reported as a broken ledger on the first answer', () => {
+  const shimDir = tmp('seal-pred-curl-429-');
+  const log = join(shimDir, 'calls.txt');
+  writeFileSync(log, '');
+  throttleShim(shimDir, log);
+  const r = spawnPredicate(shimDir);
+
+  // THE COUNT IS THE WHOLE TEST. A predicate that gave up on the first 429 exits with
+  // the SAME code as one that honored four backoffs; only the call log tells them
+  // apart, which is how "no retry" hid behind a plausible exit 2 for as long as it did.
+  assert.equal(callCount(log), 4,
+    'the roster read must be attempted RATE_LIMIT_ATTEMPTS times before a throttle is called terminal; 1 means the 429 was never retried at all');
+  assert.equal(r.status, INFRA,
+    'a throttle that outlives the backoff still measured nothing, so it is still exit 2 — this program must never certify a roster it could not read');
+});
+
+test('wave 68: a throttle is DISTINGUISHABLE from an unreadable ledger on the token line', () => {
+  // "the ledger is down" and "the ledger is busy and we are the ones making it busy"
+  // are different operator problems with different remedies. One undifferentiated
+  // exit 2 hides which one you have — which is the reason this file carries a
+  // machine-readable `code` at all (see the Infra class comment).
+  const shimDir = tmp('seal-pred-curl-429-code-');
+  const log = join(shimDir, 'calls.txt');
+  writeFileSync(log, '');
+  throttleShim(shimDir, log);
+  const r = spawnPredicate(shimDir);
+
+  assert.match(token(r.out), /code=LEDGER-RATE-LIMITED/);
+  assert.doesNotMatch(token(r.out), /code=LEDGER-UNREADABLE/,
+    'the pre-fix shape: a 429 rendered as the same undifferentiated unreadable-ledger fault as a 500');
+  assert.match(r.out, /BACKPRESSURE, not an outage/,
+    'the message must say what this is, so nobody pages an operator over a rate limit');
+  assert.match(r.out, /reduce the request rate/,
+    'and it must name the remedy, which is not "restart the ledger"');
+});
+
+test('wave 68: each backoff ANNOUNCES itself on stderr, so a slow run is never a mystery', () => {
+  // A predicate that quietly takes four seconds longer under load is a mystery, and a
+  // mystery gets "fixed" by someone deleting the backoff.
+  const shimDir = tmp('seal-pred-curl-429-say-');
+  const log = join(shimDir, 'calls.txt');
+  writeFileSync(log, '');
+  throttleShim(shimDir, log);
+  const r = spawnPredicate(shimDir);
+
+  const lines = r.out.split('\n').filter((l) => /rate limited \(429\)/.test(l) && /waiting/.test(l));
+  assert.equal(lines.length, 3, 'one line per backoff actually taken (4 attempts = 3 waits)');
+  assert.match(lines[0], /BACKPRESSURE, not a fault/);
+  assert.match(lines[0], /the server asked for it/,
+    'the line must not claim the server asked for a wait this program invented');
+  assert.match(lines[0], /attempt 1 of 4/);
+});
+
+test('wave 68: a 429 that CLEARS lets the read succeed — the retry recovers, it does not merely fail politely', () => {
+  // The mirror arm, and the one that proves the fix is a fix. A guard that only ever
+  // reds under 429 would be a different bug: the point is that the second attempt is
+  // ALLOWED TO WORK.
+  const shimDir = tmp('seal-pred-curl-429-recover-');
+  const log = join(shimDir, 'calls.txt');
+  writeFileSync(log, '');
+  throttleShim(shimDir, log, {
+    thenBody: '{"result":{"documents":[],"total":0,"count":0,"offset":0,"limit":500}}',
+  });
+  const r = spawnPredicate(shimDir);
+
+  assert.ok(callCount(log) >= 2, 'the throttled attempt and at least the one that succeeded');
+  assert.doesNotMatch(token(r.out), /code=LEDGER-RATE-LIMITED/,
+    'a throttle that CLEARED must not still be reported as a rate-limit fault — the read succeeded');
+});

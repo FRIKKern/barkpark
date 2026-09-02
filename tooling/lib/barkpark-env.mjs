@@ -105,3 +105,84 @@ export function banner(env, name = "barkpark") {
   const fo = env.fellOver ? ` (fell over to ${env.fellOver})` : "";
   return `${name} → ${env.host} [${env.kind}] dataset=${env.dataset} via ${env.source}${fo} ${env.reachable ? "✓" : "✗ UNREACHABLE"}`;
 }
+
+// ── BACKPRESSURE IS NOT A FAULT ─────────────────────────────────────────────
+//
+// MEASURED 2026-09-01 17:02Z: under this campaign's own load — 18 agent lanes,
+// each with a pulse loop and its own queries — the ledger answered `bp task
+// ready` with HTTP 429 and `retry_after=1`. Consumers across tooling/ map ANY
+// non-2xx to a terminal fault (`if (!r.ok) … process.exit(2)`), so a ONE SECOND
+// wait was reported to the operator as a broken ledger.
+//
+// A 429 is the only non-2xx that carries its own remedy: a 401 is a refusal, a
+// 404 an absence, a 500 a fault — none of them change by being asked again. The
+// server is saying "ask me again in one second", and a tool that reads that as
+// an outage teaches its operator to distrust the instrument.
+//
+// tooling/barkpark-sync/push.mjs already learned this the hard way and grew its
+// own inline loop. This is that pattern, lifted into the one module every
+// tooling script already imports for its connection, so the NEXT consumer gets
+// it by importing rather than by rediscovering it under load.
+//
+// BOUNDED, because an unbounded backoff is its own outage:
+//   * the wait comes from the server (`Retry-After`, else the envelope's
+//     `error.details.retry_after`), never from our own guesswork;
+//   * a single wait above MAX_WAIT_S is NOT slept out — the pulse plugin answers
+//     `Retry-After: 3600` on a spent daily cap, and honoring that literally
+//     would be indistinguishable from a hung process;
+//   * the total wait per call is capped;
+//   * every backoff says so on stderr, so a slow command is never a mystery.
+export const BACKPRESSURE = { ATTEMPTS: 4, DEFAULT_WAIT_S: 1, MAX_WAIT_S: 5, MAX_TOTAL_WAIT_S: 10 };
+
+// Pull the server's requested wait out of a Response + its already-read body.
+// The header is the standard spelling; `error.details.retry_after` is what
+// `Errors.to_envelope({:error, :rate_limited, %{retry_after: s}})` puts in the
+// body. Returns null when the server named nothing, so the caller can say so
+// rather than claiming the server asked for a number we invented.
+export function retryAfterOf(res, text) {
+  const h = Number(res && res.headers && res.headers.get && res.headers.get("retry-after"));
+  if (isFinite(h) && h >= 0 && (res.headers.get("retry-after") ?? "") !== "") return h;
+  try {
+    const d = JSON.parse(text);
+    const n = Number(d && d.error && d.error.details && d.error.details.retry_after);
+    if (isFinite(n) && n >= 0) return n;
+  } catch { /* a body that is not our envelope names no wait */ }
+  return null;
+}
+
+// fetch, with the bounded 429 backoff above. Returns { ok, status, body, res,
+// throttled, gaveUp } — `body` is the text, already read, so a caller never has
+// to worry about a consumed stream across retries.
+//
+// It retries a 429 for ANY method, and that is deliberate rather than careless:
+// every 429 this API emits comes from a Plug that HALTS the pipeline
+// (api/lib/barkpark_web/plugs/rate_limit.ex and its two siblings all
+// `put_status(429) |> halt()`), so the handler never ran and the write provably
+// did not happen. Replaying a refused request cannot duplicate it. Anything
+// that is NOT a 429 is returned untouched on the first answer.
+export async function fetchBackpressureAware(url, init = {}, opts = {}) {
+  const sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const say = opts.say || ((m) => process.stderr.write(m + "\n"));
+  const doFetch = opts.fetch || fetch;
+  let waited = 0;
+  for (let attempt = 1; ; attempt++) {
+    const res = await doFetch(url, init);
+    const body = await res.text();
+    if (res.status !== 429) return { ok: res.ok, status: res.status, body, res, throttled: false };
+
+    const asked = retryAfterOf(res, body);
+    const wait = asked === null ? BACKPRESSURE.DEFAULT_WAIT_S : asked;
+    const give = (why) => ({ ok: false, status: 429, body, res, throttled: true, gaveUp: why });
+
+    if (wait > BACKPRESSURE.MAX_WAIT_S)
+      return give(`the server asked for ${wait}s, longer than this tool will wait on your behalf (${BACKPRESSURE.MAX_WAIT_S}s); returned unslept`);
+    if (attempt >= BACKPRESSURE.ATTEMPTS)
+      return give(`the attempt cap of ${BACKPRESSURE.ATTEMPTS} is spent (waited ${waited}s in total)`);
+    if (waited + wait > BACKPRESSURE.MAX_TOTAL_WAIT_S)
+      return give(`a further ${wait}s would exceed the ${BACKPRESSURE.MAX_TOTAL_WAIT_S}s total-wait budget (already waited ${waited}s)`);
+
+    say(`[barkpark] rate limited (429) by ${url} — BACKPRESSURE, not a fault; waiting ${wait}s (${asked === null ? "no retry_after given, using our default" : "the server asked for it"}) and retrying (attempt ${attempt} of ${BACKPRESSURE.ATTEMPTS})`);
+    await sleep(wait * 1000);
+    waited += wait;
+  }
+}
