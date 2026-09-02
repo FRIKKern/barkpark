@@ -16936,10 +16936,14 @@
     if (isTrial) {
       var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
       var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
+      // cch-w50: the member twin takes the SAME clamp through the SAME model —
+      // the whole lesson of cch-w55-s3 was that a fix scoped to the owner card
+      // leaves the one person who can neither subscribe nor save the box reading
+      // the retracted sentence.
       return '<div class="card plan-card">' +
           '<div class="plan-head"><span class="plan-name">Free trial</span>' +
             '<span class="trial-chip">' + esc(chip) + "</span></div>" +
-          '<p class="plan-tagline">A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.</p>' +
+          '<p class="plan-tagline">' + trialTagline(days) + "</p>" +
         "</div>";
     }
     var plan = planFromSub(sub);
@@ -17249,6 +17253,40 @@
     });
   }
 
+  // ── cch-w50 · THE LAPSED-TRIAL COPY CLAMP ─────────────────────────────────
+  //
+  // `trial_days_remaining` reaching 0 means the window has CLOSED — the server
+  // clamps at 0 and never goes negative (`Billing.sub_days_remaining/1`: `if
+  // secs <= 0, do: 0`), so 0 is the terminal value, not a midpoint. Measured on
+  // the live control plane 2026-08-07: fifteen teams sat in exactly this state,
+  // every box already deprovisioned, and this file kept telling them "When the
+  // trial ends, the instance is torn down", "Pick a plan below to keep it" and
+  // "We'll remind you 3 days and 1 day before the trial ends" — three future
+  // tenses about an event three weeks past, and an offer to KEEP a box that no
+  // longer existed.
+  //
+  // The predicate is `<= 0` rather than `=== 0` so it cannot be defeated by a
+  // number the server does not produce; `null` (a non-trial or unloaded sub) is
+  // NOT ended — an unknown countdown must never render the terminal copy.
+  //
+  // ONE MODEL, BOTH CARDS. The owner card (trialCardHtml) and the read-only
+  // member twin (readOnlyPlanCardHtml) call `trialTagline` rather than each
+  // holding a copy of the sentence — the same reason cch-w55-s3 gave when the
+  // two taglines had already silently drifted apart once. An edit here moves
+  // both, and the pair pin in __app.test.mjs reds if it ever moves only one.
+  function trialEnded(days) { return typeof days === "number" && days <= 0; }
+
+  function trialTagline(days) {
+    return trialEnded(days)
+      // PAST/PRESENT ONLY. "is being torn down" is true whether the deprovision
+      // job is still queued (the worker runs hourly, so up to an hour passes
+      // between the window closing and the box going) or already drained — the
+      // one sentence that cannot be falsified by which side of that the reader
+      // is on. It promises nothing further.
+      ? "Your free trial has ended. The dedicated instance it ran on is being torn down."
+      : "A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.";
+  }
+
   // C-03: the trial state — countdown chip + the RATIFIED CTA, VERBATIM from the
   // ratification record (task-2ed0ea068f37345d): "Pick a plan below to keep it."
   // (the v4 prototype carries a superseded draft — never copy from it).
@@ -17272,12 +17310,24 @@
     var chipOpen = days !== null && days <= 3
       ? '<span class="trial-chip trial-chip--low">'
       : '<span class="trial-chip">';
+    // cch-w50: past the window, the RATIFIED CTA and the reminder line are both
+    // retracted. "Pick a plan below to keep it" offers to keep an instance that
+    // is already being torn down, and the reminder sentence promises two future
+    // emails for a threshold that passed — the worker's T-3/T-1 stamps are
+    // one-shot and, for a lapsed trial, already spent. The plan grid still opens
+    // below, so the replacement CTA keeps the true half ("below") and drops the
+    // false object; the reminder line is dropped outright, because an absent
+    // sentence promises nothing and there is no true version of it left to say.
+    var ended = trialEnded(days);
+
     return '<div class="card plan-card">' +
         '<div class="plan-head"><span class="plan-name">Free trial</span>' +
           chipOpen + esc(chip) + "</span></div>" +
-        '<p class="plan-tagline">A real dedicated instance, free while your trial runs. When the trial ends, the instance is torn down.</p>' +
-        '<p class="trial-cta">Pick a plan below to keep it.</p>' +
-        "<p class=\"plan-meta dim\">We'll remind you 3 days and 1 day before the trial ends.</p>" +
+        '<p class="plan-tagline">' + trialTagline(days) + "</p>" +
+        '<p class="trial-cta">' +
+          (ended ? "Pick a plan below to launch a new instance." : "Pick a plan below to keep it.") +
+        "</p>" +
+        (ended ? "" : "<p class=\"plan-meta dim\">We'll remind you 3 days and 1 day before the trial ends.</p>") +
       "</div>";
   }
 
@@ -25630,6 +25680,11 @@
       suspendedDay: suspendedDay,
       dunningBannerHtml: dunningBannerHtml,
       currentPlanCardHtml: currentPlanCardHtml,
+      // cch-w50: the lapsed-trial copy clamp, exported as its OWN model so the
+      // guard pins the predicate and the sentence directly — not only through
+      // the two cards that happen to call them today.
+      trialEnded: trialEnded,
+      trialTagline: trialTagline,
       trialCardHtml: trialCardHtml,
       tierCardHtml: tierCardHtml,
       billingChipModel: billingChipModel,
