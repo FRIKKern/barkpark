@@ -1,0 +1,20 @@
+[
+  {
+    "number": 13500,
+    "title": "chore: tidy",
+    "body": "Refactors the sweeper. This pays nothing toward cch-w20-bl-law-zero-orphan-count and does not change it.\n\nTask: an-unrelated-row\n",
+    "mergedAt": "2026-08-25T00:00:00Z",
+    "mergeCommit": {
+      "oid": "ffff5555"
+    }
+  },
+  {
+    "number": 13501,
+    "title": "fix: orphan counting",
+    "body": "Follow-up work for cch-w20-bl-law-zero-orphan-count landed here.\n\nTask: another-unrelated-row\n",
+    "mergedAt": "2026-08-26T00:00:00Z",
+    "mergeCommit": {
+      "oid": "99996666"
+    }
+  }
+]

@@ -215,4 +215,67 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
       assert {:error, _} = Auth.verify_token(theirs)
     end
   end
+
+  # ── The NULL-workspace arm of the SAME by-id check (arpss) ────────────────
+  #
+  # The block above proves the by-id confinement against rows that CARRY a
+  # workspace. `Auth.administrable_by?/2` reads `%ApiToken{workspace_id: ws_id}`
+  # straight into `TenancyAuth.workspace_admin?/2`, and `workspace_id` is
+  # nullable — `Auth.create_token/4` predates workspace binding, so unbound app
+  # rows are a real shape, not a hypothetical. Nothing tested what a nil does
+  # there. It denies only because `membership/3`'s `is_binary(workspace_id)`
+  # guard misses and the function lands on its terminal `nil`; that is three
+  # modules away from this route and reads like an accident at every hop.
+  #
+  # If nil ever passed, an unbound app token would be revocable by ANY
+  # admin-permissioned bearer on the instance — the same cross-tenant logout
+  # this file exists to prevent, reached through the column instead of the seam.
+  defp unbound_app_token!(mail) do
+    secret = raw("bpapp-nullws")
+
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token(secret),
+        label: "app:" <> mail,
+        dataset: @dataset,
+        permissions: @app_permissions,
+        workspace_id: nil
+      })
+      |> Barkpark.Repo.insert()
+
+    {secret, token}
+  end
+
+  describe "revoke by ID: the NULL-workspace arm" do
+    test "an app token with NO workspace binding is not revocable by id",
+         %{admin_a: admin_a} do
+      {victim, row} = unbound_app_token!(email())
+
+      # Premise: the row is a genuine `kind: \"api\"` app token — the family
+      # check inside `revoke_app_token_by_id/2` passes, so only the nil
+      # workspace arm can produce the denial.
+      assert row.kind == "api"
+      assert is_nil(row.workspace_id)
+
+      resp = json_conn(admin_a) |> delete("/v1/auth/app-tokens/#{row.id}")
+      assert resp.status == 404
+
+      # STATE: the credential is still alive.
+      assert match?({:ok, _}, Auth.verify_token(victim)),
+             "an unbound app token was revoked by row id — nil passed the workspace check"
+
+      assert is_nil(Barkpark.Repo.get!(Barkpark.Auth.ApiToken, row.id).revoked_at)
+    end
+
+    test "B's admin cannot reach it either — nil is a denial, not a wildcard",
+         %{admin_b: admin_b} do
+      {victim, row} = unbound_app_token!(email())
+
+      assert json_conn(admin_b) |> delete("/v1/auth/app-tokens/#{row.id}") |> Map.get(:status) ==
+               404
+
+      assert match?({:ok, _}, Auth.verify_token(victim))
+    end
+  end
 end

@@ -10,10 +10,28 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
   `200 {"state":"idle"}` on the fleet for a slug that had never existed, on a box
   that could not have deployed it.
 
-  The route rides `[:api, :require_token]` — the SAME Bearer seam as
-  `/v1/instance/request-stats`, which the agent's health gate already probes.
-  Never unauthenticated: door census and runner health are
-  instance-operational data.
+  ## Auth — `[:api, :require_admin]`, matching its `/v1/admin/site-deploy` twin
+
+  Until task-d7ac954aa57aa522 this route rode `[:api, :require_token]`, the
+  same Bearer seam as `/v1/instance/request-stats`, on the rule "never
+  unauthenticated: door census and runner health are instance-operational
+  data". NOT-ANONYMOUS is what that pipeline implements — `RequireToken` +
+  `PublicRead` (which denies only the `public-read` tier) +
+  `RequireWriteForMutation` (method-gated, so a GET passes untouched) — so any
+  read/write/admin token from ANY workspace reached it, a disposable 48h
+  playground visitor token included.
+
+  No CITED SAFE argument exists for this payload, and the one recorded for
+  `request-stats` (no path, no identifier, no tenant row) does not transfer:
+  `door.in_flight_slugs` is `DeployRunner.door_census/0`'s LIST of every site
+  slug building on the box right now. Those are other tenants' site
+  identifiers, by name — strictly more disclosive than the count beside them
+  (`door.observed_in_flight`), and the reason the narrower per-slug read this
+  route was written to replace, `GET /v1/admin/site-deploy`, has always been
+  `[:api, :require_admin]`. The tier now matches the twin. Nothing real breaks:
+  the only caller is the on-box agent's health gate, which already curls the
+  instance API with the instance admin token, and the route has no non-test
+  reader in-tree.
 
   Wire contract — FOUR keys: `200 {"configured": bool, "runner_alive": bool,
   "door": {…}, "serving": {…}}`.
@@ -51,7 +69,9 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
       same rule as everything else here). Carries `observed_in_flight` —
       `length(building_slugs(state))`, the SAME census the door admits or
       refuses on, which until now was interpolated into a log line and
-      discarded — plus `refusals_total` ALWAYS beside `refusals_since`, and
+      discarded — and `in_flight_slugs`, that same census UNAGGREGATED (the
+      field this route is admin-gated for; see Auth above) — plus
+      `refusals_total` ALWAYS beside `refusals_since`, and
       `measured_at` so the staleness is stated rather than implied. Any of them
       may be `null`: that means nothing was read, never zero.
     * `serving` — `ServingMemory.read/1`: the sha this box is serving and when

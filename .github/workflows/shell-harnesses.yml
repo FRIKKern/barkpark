@@ -1198,6 +1198,14 @@ jobs:
   # --root choices, so a third root or a re-narrowed filter reds by name.
   compose-smoke-dispatcher:
     name: compose-smoke dispatcher covers the census roots
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: harness syntax check
+        run: bash -n scripts/compose-smoke-dispatch.test.sh
+      - name: the dispatcher can fire on every root the census reads
+        run: bash scripts/compose-smoke-dispatch.test.sh
   # ── WORKFLOW TRIGGER COVERAGE (task-8556d43c305b2747) ──────────────────────
   # A path filter alternative that matches nothing can never fire, and the
   # workflow still reads as gated. twoslash.yml gated on apps/docs/** — zero of
@@ -1213,10 +1221,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: harness syntax check
-        run: bash -n scripts/compose-smoke-dispatch.test.sh
-      - name: the dispatcher can fire on every root the census reads
-        run: bash scripts/compose-smoke-dispatch.test.sh
       - name: subject syntax check
         run: bash -n scripts/workflow-trigger-coverage.sh
       - name: harness syntax check

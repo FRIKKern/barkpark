@@ -88,6 +88,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # spd-bl-focus-after-select — threaded through to document_header.
   attr(:focus_on_mount, :boolean, default: false)
 
+  # ── THERE IS NO `doc_actions` ATTR, AND THAT IS THE RULING (spd-b34) ────────
+  #
+  # `DocActions.resolved_doc_actions/1` is threaded into `studio_editor_shell`
+  # — the CLASSIC branch — and into that branch only. Its absence here is a
+  # decision, not a forgotten attribute, and it was ruled explicitly rather
+  # than left to be inferred from an omission:
+  #
+  #   THE PAPER PANE OWNS ITS OWN HEADER. It carries Share, and since #13042 a
+  #   Publish control (drafts only, `data-test-id="paper-publish"`), plus the
+  #   sidebar metadata affordances. The classic actions — open-secondary-picker,
+  #   select-secondary, duplicate-doc, view-graph — are EXCLUDED ON PURPOSE,
+  #   because the paper surface is a single-document reading/writing canvas
+  #   whose secondary pane is the paper SIDEBAR, not a second editor.
+  #
+  # So `doc_actions` is not the repair for a missing paper affordance. Anything
+  # a paper needs from that set is added to THIS header explicitly, one control
+  # at a time, with its own handler and its own reason — never by threading the
+  # whole classic bar in, which would also drag in three actions the surface has
+  # no meaning for.
+  #
+  # Pinned in BOTH directions (so a refactor cannot re-decide it by accident) by
+  # `test/barkpark_web/live/studio/studio_paper_doc_actions_ruling_test.exs`:
+  # threading the bar in reds the exclusion arm, dropping the pane's own
+  # controls reds the inclusion arm.
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
     title = (assigns.paper_doc && assigns.paper_doc.title) || slug || "Paper"
@@ -175,8 +199,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <:actions>
           <%!-- spd-bl-publish-affordance-triple — the hand path's missing
                 Publish. The doc-actions Publish CTA reaches the DOM only
-                through the studio_editor_shell branch papers never take, so
-                this pane never had one. Draft-only (see paper_draft? above);
+                through the studio_editor_shell branch, and papers do not take
+                that branch BY DESIGN (the ruling above `studio_paper_view/1`),
+                so the fix was to give this header its own control rather than
+                to thread the classic bar in. That is the pattern for every
+                future paper affordance. Draft-only (see paper_draft? above);
                 the handler re-guards server-side and the publish wall itself
                 is untouched (charter D229/D230). --%>
           <button
@@ -1468,6 +1495,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             pane emits (the never-blank notice's way back, "Open standalone")
             was built against an empty prefix — i.e. against a grammar this
             router does not serve. `rebuild_panes/1` already carries it. --%>
+      <%!-- spd-b34 — `doc_actions` is NOT a third member of that missing-thread
+            class, and must not be "closed" the way b39 and w19 were. Its
+            absence from this call site is the RULING written above
+            `studio_paper_view/1`: papers deliberately do not carry the classic
+            doc-action bar, and a paper affordance is added to the paper header
+            explicitly instead. Pinned both ways by
+            studio_paper_doc_actions_ruling_test.exs. --%>
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view

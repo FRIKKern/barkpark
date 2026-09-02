@@ -42,6 +42,8 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
 
   use BarkparkWeb, :controller
 
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets
   alias Barkpark.Plugins.Sheets.{Csv, XlsxImport}
@@ -59,7 +61,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
          {:ok, content} <- convert(kind, raw, params),
          {:ok, cell_count} <- check_cap(content),
          {:ok, slug, title, dataset} <- resolve_identity(params, upload),
-         {:ok, doc} <- save(slug, title, dataset, content) do
+         {:ok, doc} <- save(conn, slug, title, dataset, content) do
       json(conn, %{
         ok: true,
         slug: slug,
@@ -239,12 +241,20 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
     end
   end
 
-  defp save(slug, title, dataset, content) do
+  # The write carries the caller's tenancy scope (task-ef3eb91bf7f87d4c).
+  # Without it `Content.WriteScope.resolve_write_scope/1` fell through to the
+  # seeded Default for EVERY import, so an admin token bound to workspace B
+  # imported into Default and then could not export what it had just written
+  # once the read became scoped. Import and export now name the SAME tenant.
+  # The nil-scope posture is unchanged: an unresolved request yields the
+  # `:shared_only` sentinel, which `resolve_write_scope/1` collapses to nil and
+  # stamps Default exactly as before.
+  defp save(conn, slug, title, dataset, content) do
     case Content.upsert_document(
            "sheet",
            %{"doc_id" => slug, "title" => title, "content" => content},
            dataset,
-           source: "sheets_import"
+           [source: "sheets_import"] ++ scope_opts(conn)
          ) do
       {:ok, doc} ->
         {:ok, doc}

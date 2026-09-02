@@ -3294,6 +3294,15 @@
         {
           theme: "auto",
           rootId: rootId,
+          // The HOST owns the query when it says so, and then drives this graph
+          // through the `graph-matches` channel registered below. That
+          // suppresses the renderer's own in-canvas search box, which otherwise
+          // appears on any corpus past 30 nodes — /finder shipped BOTH for
+          // months: a server-side FTS that never touched the canvas beside a
+          // client-side substring filter that never touched the result list.
+          // Absent the attr this is false, so Studio's GraphPane (the same hook
+          // object) keeps its in-canvas box unchanged.
+          externalSearch: this.el.dataset.externalSearch === "true",
           onNodeClick: function (n) {
             if (n && n.id) self.pushEvent("node-clicked", { id: n.id });
           }
@@ -3316,6 +3325,20 @@
       // SAME rev source of truth as the data-rev attr path: stamp this._rev
       // from the payload so a subsequent identical attr-rev is correctly
       // deduped (no double-apply, no skip). Payload carries its own root.
+      // EXTERNAL SEARCH -> GRAPH. A host that set `data-external-search` pushes
+      // its weighted visible result set here on every query; `setMatches` dims
+      // everything else and scales each match's emphasis by `w`. The payload's
+      // `matches` is the whole contract: `null` = idle (clear the filter, full
+      // corpus undimmed), `[]` = a query that matched nothing (everything
+      // dims) — `setMatches` already reads those two apart. Safe before the
+      // corpus lands: `ingest()` re-stamps the active match after every data
+      // update, so a query typed during the async corpus derivation lights the
+      // nodes the moment they arrive.
+      this.handleEvent("graph-matches", function (payload) {
+        if (!self._renderer || !payload) return;
+        self._renderer.setMatches(payload.matches);
+      });
+
       this.handleEvent("graph-update", function (payload) {
         if (!self._renderer || !payload) return;
         if (payload.rev != null) self._rev = String(payload.rev);

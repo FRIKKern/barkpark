@@ -1436,7 +1436,7 @@ func agentSpec() GoLiveSpec {
 // token is redacted and never leaks into the narrated Title/Cmd.
 func TestAgentInstallStep_ShapeAndRedaction(t *testing.T) {
 	const tok = "agent-report-tok_AbC123"
-	s := agentInstallStep(tok, "https://api.barkpark.cloud", "https://acme.barkpark.cloud")
+	s := agentInstallStep(tok, "https://api.barkpark.cloud", "https://acme.barkpark.cloud", "")
 
 	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
 		t.Fatalf("agentInstallStep argv = %v, want [bash -lc <script>]", s.Argv)
@@ -1469,6 +1469,103 @@ func TestAgentInstallStep_ShapeAndRedaction(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("agent step Redact does not list the token: %v", s.Redact)
+	}
+}
+
+// TestAgentInstallStep_WritesTheHealthTokenFile pins the SOURCE-CONTROLLED half
+// of the health-token fix: when the go-live hands the step the box's admin
+// bearer, the step writes it to /etc/barkpark/agent.health.token at 0600 — the
+// exact file the committed unit's --health-token-file names. Before this, that
+// file existed on exactly ONE box, put there by a hand-added systemd drop-in, so
+// every other box reported req_per_s / p95_ms / err_5xx_per_s as -1 forever.
+//
+// The value rides in via $BP_AGENT_HEALTH_TOK and is redacted, like the report
+// token beside it: it must never land in the narrated Title/Cmd.
+func TestAgentInstallStep_WritesTheHealthTokenFile(t *testing.T) {
+	const (
+		tok       = "agent-report-tok_AbC123"
+		healthTok = "bp_admin_HealthBearer456"
+	)
+	s := agentInstallStep(tok, "https://api.barkpark.cloud", "https://acme.barkpark.cloud", healthTok)
+	script := s.Argv[2]
+	for _, want := range []string{
+		"export BP_AGENT_HEALTH_TOK='" + healthTok + "'",
+		`printf '%s' "$BP_AGENT_HEALTH_TOK" > /etc/barkpark/agent.health.token`,
+		"chmod 600 /etc/barkpark/agent.health.token",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("agent step script missing %q; script:\n%s", want, script)
+		}
+	}
+	// Written BEFORE the unit is installed + the service enabled, so the very
+	// first beat of the restarted agent is already metered.
+	if strings.Index(script, "agent.health.token") > strings.Index(script, "systemctl enable --now barkpark-agent") {
+		t.Error("health token must be written before the service is enabled")
+	}
+	if strings.Contains(s.Title, healthTok) || strings.Contains(s.Cmd, healthTok) {
+		t.Errorf("health token leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
+	}
+	found := false
+	for _, r := range s.Redact {
+		if r == healthTok {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("agent step Redact does not list the health token: %v", s.Redact)
+	}
+}
+
+// TestAgentInstallStep_NoHealthTokenWritesNoFile pins the tolerant half in both
+// directions. An empty health token (a resurrect, which carries only the freshly
+// minted REPORT token) must write no file and — critically — must not DELETE one:
+// a box that was already metered stays metered across a restore, and a box that
+// was not simply keeps the -1 sentinels it has always reported. An unsafe-shaped
+// value is dropped rather than interpolated: telemetry may not inject a shell
+// command, and may not fail a go-live either.
+func TestAgentInstallStep_NoHealthTokenWritesNoFile(t *testing.T) {
+	const tok = "agent-report-tok_AbC123"
+	for _, c := range []struct{ name, healthTok string }{
+		{"empty (resurrect / old control plane)", ""},
+		{"blank", "   "},
+		{"shell metacharacters", "tok'; rm -rf /; echo '"},
+		{"a command substitution", "$(cat /opt/barkpark/.env)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := agentInstallStep(tok, "https://api.barkpark.cloud", "https://acme.barkpark.cloud", c.healthTok)
+			script := s.Argv[2]
+			if strings.Contains(script, "agent.health.token") {
+				t.Errorf("script writes the health token file for %q; script:\n%s", c.healthTok, script)
+			}
+			if strings.Contains(script, "rm ") || strings.Contains(script, "unlink") {
+				t.Errorf("script must never delete an existing health token file; script:\n%s", script)
+			}
+			if trimmed := strings.TrimSpace(c.healthTok); trimmed != "" && strings.Contains(script, trimmed) {
+				t.Errorf("rejected health token was interpolated into the script:\n%s", script)
+			}
+			// The report token half is untouched by any of this.
+			if !strings.Contains(script, `printf '%s' "$BP_AGENT_TOK" > /etc/barkpark/agent.token`) {
+				t.Errorf("report token write regressed; script:\n%s", script)
+			}
+		})
+	}
+}
+
+// TestAgentInstallStep_HealthTokenPathMatchesTheCommittedUnit is the cross-half
+// tripwire on the provisioner side: the path the step WRITES must be the path the
+// committed unit READS. Two files, one string — if they ever diverge the box goes
+// silently unmetered, which is precisely the failure this row names.
+func TestAgentInstallStep_HealthTokenPathMatchesTheCommittedUnit(t *testing.T) {
+	b, err := os.ReadFile("../../../deploy/systemd/barkpark-agent.service")
+	if err != nil {
+		t.Fatalf("read committed unit: %v", err)
+	}
+	if !strings.Contains(string(b), "--health-token-file /etc/barkpark/agent.health.token") {
+		t.Fatal("committed unit does not read /etc/barkpark/agent.health.token")
+	}
+	s := agentInstallStep("agent-report-tok_AbC123", "https://api.barkpark.cloud", "https://acme.barkpark.cloud", "bp_admin_HealthBearer456")
+	if !strings.Contains(s.Argv[2], "> /etc/barkpark/agent.health.token") {
+		t.Fatal("agentInstallStep does not write /etc/barkpark/agent.health.token")
 	}
 }
 

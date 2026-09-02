@@ -10,7 +10,7 @@ deploy-failure history).
 A fresh slug POSTed to sync returns **404 code=not_found**, hint
 "sync edits an existing paper — publish it first, then pull".
 
-    TOK=bp_admin_AF86VO0Khsynvu0i0wa1oGl5I6_rDoLZ
+    TOK=bp_admin_[REDACTED — this credential was rotated and revoked 2026-09-01; see task-63c03c39bb2eee4c]
     S=w7-sentinel-probe-x-$(date +%s)
     curl -s -X POST "https://guerrilla.barkpark.cloud/v1/plugins/bulldocs/papers/$S/sync" \
       -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
