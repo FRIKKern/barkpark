@@ -292,6 +292,15 @@ on:
       - "scripts/fixtures/landed-mark/**"
       - "scripts/pr-task-gate.sh"
       - ".github/workflows/landed-mark.yml"
+      # ── TASK LEASE RENEW (task-16e56d05b809dd39) ────────────────────────────
+      # Per file, D26 — plus scripts/pr-task-gate.sh for the SAME reason the
+      # landed-mark block above names it: that file OWNS the `Task:` trailer
+      # grammar and task-lease-renew.sh delegates to it rather than carrying a
+      # third copy, so a change to the grammar can break this harness without
+      # touching either task-lease-renew file.
+      - "scripts/task-lease-renew.sh"
+      - "scripts/task-lease-renew.test.sh"
+      - ".github/workflows/task-lease-renew.yml"
   push:
     branches: [main]
     paths:
@@ -459,6 +468,11 @@ on:
       - "scripts/fixtures/landed-mark/**"
       - "scripts/pr-task-gate.sh"
       - ".github/workflows/landed-mark.yml"
+      # The renew lane's harness, on the push arm too: a lane wired on PRs only
+      # goes dark the moment a merge lands.
+      - "scripts/task-lease-renew.sh"
+      - "scripts/task-lease-renew.test.sh"
+      - ".github/workflows/task-lease-renew.yml"
 
 permissions:
   contents: read
@@ -1119,6 +1133,46 @@ jobs:
         # produces. There is no bare run to pair it with: the bare script is the
         # LIVE arm and needs the credential.
         run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
+
+  # ── TASK LEASE RENEW (task-16e56d05b809dd39) ───────────────────────────────
+  # scripts/task-lease-renew.sh is the CI half of the ledger lease extension: it
+  # POSTs /v1/tasks/:doc_id/renew so a claim does not lapse underneath its own
+  # open pull request while it waits out a 60-90 minute queue. The API half
+  # (Barkpark.Tasks.Renew) shipped INERT — nothing called it — and this is the
+  # caller.
+  #
+  # ADVISORY BY CONSTRUCTION, not by a flag. The subject exits 0 on EVERY ledger
+  # state it can meet (row gone, no live claim, cap spent, ledger down), because
+  # a red for a ledger state is the confusion the row was filed against. Exactly
+  # ONE arm is non-zero: 401/403, a refused BARKPARK_TASK_TOKEN, which would
+  # otherwise make every future run a silent no-op. The harness drives both
+  # directions rather than reading the table.
+  #
+  # Hermetic: a stub `curl` on PATH answers with canned codes and bodies and
+  # logs its argv, so the REAL request the subject builds is asserted rather
+  # than assumed. No network, no token, no bp — it cannot rot into a skip.
+  task-lease-renew:
+    name: task-lease-renew response classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the response reader is python3)
+        # The subject turns a missing python3 into exit 2 CANNOT MEASURE —
+        # correctly refusing rather than skipping, but illegibly so. Resolve it
+        # by NAME here, matching this file's idiom.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — task-lease-renew's response reader needs it" >&2
+            exit 1
+          }
+          python3 --version
+      - name: task-lease-renew.sh + harness syntax check
+        run: |
+          bash -n scripts/task-lease-renew.sh
+          bash -n scripts/task-lease-renew.test.sh
+      - name: every response class lands on its verdict (stub curl, no network)
+        run: bash scripts/task-lease-renew.test.sh
 
   landed-mark:
     name: landed-mark.sh selftest + idempotency mutation
