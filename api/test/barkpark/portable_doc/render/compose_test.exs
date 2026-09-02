@@ -679,4 +679,93 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       refute html =~ "bp-api-endpoint__method--"
     end
   end
+
+  # ── eyebrow content[] (task-993d136b0fbf2fd1) ──────────────────────────────
+  #
+  # The eyebrow clause read the flat `text` field ALONE
+  # (`[stringish(Map.get(b, "text", ""))]`) while its three sibling prose
+  # clauses (ingress / paragraph / pullquote) read `content` first through
+  # `paragraph_inline/1`. An eyebrow persisted as an inline array — the canvas
+  # node-view's own shape, and what `@barkpark/react` renders — composed to
+  # `[""]` and served a BLANK kicker. 3 such blocks are live on guerrilla
+  # (full-corpus census, 537 published papers, 2026-07-25).
+  describe "compose_block/2 eyebrow reads content[] like its sibling prose clauses" do
+    test "an eyebrow with an inline content array composes REAL text children" do
+      b = %{
+        "type" => "eyebrow",
+        "content" => [%{"type" => "text", "value" => "OPS · LIVE"}]
+      }
+
+      result = Compose.compose_block(b, :article)
+      assert result["kind"] == "PdParagraph"
+      assert result["_role"] == "eyebrow"
+      assert result["children"] == ["OPS · LIVE"]
+    end
+
+    test "an eyebrow's content[] survives to the rendered article HTML" do
+      html =
+        Render.render_blocks(
+          [
+            %{
+              "id" => "e-1",
+              "type" => "eyebrow",
+              "content" => [%{"type" => "text", "value" => "FIELD NOTES"}]
+            }
+          ],
+          %{style: :article}
+        )
+
+      assert html =~ ~s(class="bp-role-eyebrow")
+      assert html =~ "FIELD NOTES"
+    end
+
+    test "content[] and the flat text spelling of the SAME eyebrow compose identically" do
+      content_form = %{
+        "type" => "eyebrow",
+        "content" => [%{"type" => "text", "value" => "Week 35"}]
+      }
+
+      flat_form = %{"type" => "eyebrow", "text" => "Week 35"}
+
+      assert Compose.compose_block(content_form, :article) ==
+               Compose.compose_block(flat_form, :article)
+    end
+
+    test "content[] WINS over a stale flat text (the content ⟂ text law)" do
+      b = %{
+        "type" => "eyebrow",
+        "text" => "stale",
+        "content" => [%{"type" => "text", "value" => "fresh"}]
+      }
+
+      assert Compose.compose_block(b, :article)["children"] == ["fresh"]
+    end
+
+    test "an eyebrow's marked-up content[] keeps the mark (not flattened away)" do
+      b = %{
+        "type" => "eyebrow",
+        "content" => [
+          %{"type" => "text", "value" => "A "},
+          %{"type" => "strong", "children" => [%{"type" => "text", "value" => "B"}]}
+        ]
+      }
+
+      children = Compose.compose_block(b, :article)["children"]
+      assert length(children) == 2
+      assert Enum.at(children, 0) == "A "
+      assert is_map(Enum.at(children, 1))
+    end
+
+    # The fail-soft the guarded form preserves: an EMPTY content array is not a
+    # body, so the flat `text` still wins (and a numeric one still stringifies).
+    test "an EMPTY content array falls through to the flat text, numbers included" do
+      assert Compose.compose_block(
+               %{"type" => "eyebrow", "content" => [], "text" => "Kicker"},
+               :article
+             )["children"] == ["Kicker"]
+
+      assert Compose.compose_block(%{"type" => "eyebrow", "text" => 42}, :article)["children"] ==
+               ["42"]
+    end
+  end
 end

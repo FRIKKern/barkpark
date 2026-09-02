@@ -602,6 +602,109 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       assert Slots.note_body_text(n) == "Be bold"
     end
 
+    # ── top-level content[] (task-993d136b0fbf2fd1) ──────────────────────────
+    #
+    # A note persisted the WIDGET way — `{"type":"note","content":[…]}`, no flat
+    # `text` — read "" through every path: the legacy synthesis wraps the ABSENT
+    # `text` as an empty paragraph, which flattens to "". The reader served a
+    # blank note (1 live block on guerrilla, full-corpus census 2026-07-25)
+    # while `@barkpark/react` rendered it. `note_body_text/1` now falls back to
+    # the block's top-level `content`, the `callout_body_inline/1` law.
+    test "note_body_text/1 falls back to the block's top-level content[]" do
+      n = %{
+        "type" => "note",
+        "label" => "Ops",
+        "content" => [%{"type" => "text", "value" => "the widget body"}]
+      }
+
+      assert Slots.note_body_text(n) == "the widget body"
+      # …and the label/lead are NOT polluted by the body's inline array.
+      assert Slots.note_label_text(n) == "Ops"
+      assert Slots.note_lead_text(n) == ""
+    end
+
+    test "the top-level content[] fallback flattens marks like the slot path" do
+      n = %{
+        "type" => "note",
+        "content" => [
+          %{"type" => "text", "value" => "Be "},
+          %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold"}]}
+        ]
+      }
+
+      assert Slots.note_body_text(n) == "Be bold"
+    end
+
+    test "a NON-EMPTY flat text or body slot still WINS over top-level content[]" do
+      flat = %{
+        "type" => "note",
+        "text" => "the flat body",
+        "content" => [%{"type" => "text", "value" => "ignored"}]
+      }
+
+      assert Slots.note_body_text(flat) == "the flat body"
+
+      slotted = %{
+        "type" => "note",
+        "slots" => %{
+          "body" => [
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "the slot body"}]
+            }
+          ]
+        },
+        "content" => [%{"type" => "text", "value" => "ignored"}]
+      }
+
+      assert Slots.note_body_text(slotted) == "the slot body"
+    end
+
+    test "a note with NEITHER text nor content[] still reads \"\" (nil-safe)" do
+      assert Slots.note_body_text(%{"type" => "note", "label" => "L"}) == ""
+      assert Slots.note_body_text(%{"type" => "note", "content" => %{}}) == ""
+      assert Slots.note_body_text("not a map") == ""
+    end
+
+    # THE BOUNDARY the fallback must not cross. The silent-content-loss write
+    # gate (`Barkpark.Content.Papers.NoteCardFieldLossTest`) REFUSES a note whose
+    # prose was stranded under a SCALAR `content`, and it asks this very accessor
+    # whether the reader shows anything. Consuming a bare string here would
+    # silently disarm that ratchet, so the fallback takes a non-empty INLINE
+    # ARRAY only — the same guard `callout_body_inline/1` holds.
+    test "a SCALAR content stays unread, so the field-loss ratchet stays armed" do
+      stranded = %{"id" => "n1", "type" => "note", "content" => "Stranded note prose"}
+      assert Slots.note_body_text(stranded) == ""
+      assert Slots.lossy_shape?(stranded)
+
+      # …while the widget's INLINE-ARRAY content is real, rendered prose.
+      widget = %{
+        "id" => "n1",
+        "type" => "note",
+        "content" => [%{"type" => "text", "value" => "the widget body"}]
+      }
+
+      assert Slots.note_body_text(widget) == "the widget body"
+      refute Slots.lossy_shape?(widget)
+    end
+
+    test "a content-only note is no longer BLANK to the reader (end-to-end HTML)" do
+      html =
+        Barkpark.PortableDoc.Render.render_blocks(
+          [
+            %{
+              "id" => "n-1",
+              "type" => "note",
+              "label" => "Ops",
+              "content" => [%{"type" => "text", "value" => "the widget body"}]
+            }
+          ],
+          %{style: :article}
+        )
+
+      assert html =~ "the widget body"
+    end
+
     test "normalize_widget dual-writes flat ⇄ slots and is IDEMPOTENT" do
       n = Slots.normalize_widget(note_flat())
       assert n["label"] == "alive"
