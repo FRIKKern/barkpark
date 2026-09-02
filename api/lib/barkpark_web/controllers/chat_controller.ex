@@ -664,6 +664,16 @@ defmodule BarkparkWeb.ChatController do
         # re-GET the session at every turn boundary to notice one (charter D15).
         chunk_or_stop(conn, sse_title_frame(sid, title))
 
+      {:chat_task_transition, _sid, transition} ->
+        # A live ledger transition (tlv-bl-chat-live-transition-stream): the
+        # Recorder's scoped re-broadcast on the per-session topic. The sid is
+        # embedded in the topic the forwarder subscribed to, so it is
+        # authoritative — this clause ignores the tuple's sid, exactly like the
+        # workflow clause above. Secret-safe by construction (D23): the payload
+        # is a fixed set of ledger fields the Recorder built, never an inspect
+        # or a raw document.
+        chunk_or_stop(conn, sse_task_frame(transition))
+
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
         # so no stderr/path/token can reach the wire. The stream stays open — a
@@ -805,6 +815,16 @@ defmodule BarkparkWeb.ChatController do
   # stale the way a replayed frame can.
   def sse_title_frame(session_id, title),
     do: "event: title\ndata: #{Jason.encode!(%{session_id: session_id, title: title})}\n\n"
+
+  @doc false
+  # The live task-transition frame (tlv-bl-chat-live-transition-stream). ID-LESS
+  # and UNREPLAYABLE, exactly like `workflow`/`title`/`runtime`/`permission`
+  # (D5): a resuming client re-reads settled ledger truth, never a replayed
+  # transition. The payload carries its OWN `event_id` — the mutation_events row
+  # id — so the reducer dedupes a duplicate live delivery without that id ever
+  # becoming an SSE `Last-Event-ID` cursor for this stream.
+  def sse_task_frame(transition),
+    do: "event: task\ndata: #{Jason.encode!(transition)}\n\n"
 
   @doc false
   # The fixed public exit contract (D23): the reason enum, plus the numeric

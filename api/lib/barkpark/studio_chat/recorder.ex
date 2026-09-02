@@ -27,8 +27,14 @@ defmodule Barkpark.StudioChat.Recorder do
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
+  alias Barkpark.StudioChat.TaskTransition
 
   @registry Barkpark.StudioChat.RecorderRegistry
+  # The dataset the task ledger lives in — PINNED, mirroring the Tasks board
+  # LiveView's own `@dataset "production"`. The Recorder has no dataset of its
+  # own (a chat session is not scoped to one), and resolving it would cost a
+  # query on every turn spawn; the ledger's home is the board's, by definition.
+  @task_dataset "production"
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
   @idle_after_ms 30 * 60 * 1000
 
@@ -223,6 +229,13 @@ defmodule Barkpark.StudioChat.Recorder do
     provider = Map.get(opts, :provider, "claude")
     runtime_attempt = CycleFleet.get_runtime_attempt_by_session(id)
     runtime_ingress_token = make_ref()
+
+    # The ledger's document stream (tlv-bl-chat-live-transition-stream) — the
+    # SAME `documents:<dataset>` topic the Tasks board LiveView and Studio's
+    # Doing strip already ride. NO new bus: task lifecycle writes already
+    # broadcast here, and this Recorder only re-broadcasts the ones scoped to
+    # its own session on `topic/1`, exactly as `broadcast_workflow/2` does.
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@task_dataset}")
 
     # A Task holder authorized this managed attempt but is not the Studio
     # process's principal. Never mint or forward Task hands for that process.
@@ -456,7 +469,18 @@ defmodule Barkpark.StudioChat.Recorder do
       # (replay reads the same column). SESSION-LIFETIME — never reset per turn.
       # Persisted COARSELY: only a structural/state change (rail_signature) hits
       # the store; a token-only progress tick updates memory but skips Repo.
-      rail_snapshot: load_rail_snapshot(id)
+      rail_snapshot: load_rail_snapshot(id),
+      # Live task transitions for `bp chat` (tlv-bl-chat-live-transition-stream).
+      # `touched_tasks` is the STICKY scope set and `seen_task_events` the
+      # idempotency set — both owned by `StudioChat.TaskTransition`, the SAME
+      # pure rule Studio's chat_live folds, so the two surfaces cannot drift.
+      # Seeded EMPTY on purpose: init already does two store reads, and a
+      # Recorder is spawned per turn — a third ledger query for a set the first
+      # worker-matched broadcast fills in anyway is not worth the spawn latency.
+      # (Studio, which mounts once per tab and already reads held claims for the
+      # Doing strip, seeds from that existing read.)
+      touched_tasks: MapSet.new(),
+      seen_task_events: MapSet.new()
     }
   end
 
@@ -905,7 +929,60 @@ defmodule Barkpark.StudioChat.Recorder do
     end
   end
 
+  # A task-document mutation on the ledger stream
+  # (tlv-bl-chat-live-transition-stream). Projected through the SAME pure rule
+  # Studio's chat_live folds — scoped to THIS session's worker (sticky), keyed
+  # on the mutation_events row id — and re-broadcast on `topic/1` as a compact
+  # summary, exactly like `broadcast_workflow/2`'s second broadcast. The SSE
+  # forwarder subscribes only to `topic(session_id)`, so tenancy is safe by
+  # construction; the frame is id-less and unreplayable (charter D5/D24) — a
+  # reconnecting client re-reads settled ledger truth, never a replayed
+  # transition. NOTHING is persisted here: the durable projection stays exactly
+  # what it was, and the separate `task_prime` snapshot contract is untouched.
+  def handle_info({:document_changed, %{type: "task"} = msg}, state) do
+    worker = Runtime.worker_id(state.provider, state.session_id)
+
+    case TaskTransition.project(msg, worker, state.touched_tasks) do
+      {:ok, transition, touched} ->
+        state = %{state | touched_tasks: touched}
+
+        if MapSet.member?(state.seen_task_events, transition.key) do
+          {:noreply, state}
+        else
+          broadcast(
+            state,
+            {:chat_task_transition, state.session_id, transition_summary(transition)}
+          )
+
+          {:noreply,
+           %{state | seen_task_events: MapSet.put(state.seen_task_events, transition.key)}}
+        end
+
+      {:skip, touched} ->
+        {:noreply, %{state | touched_tasks: touched}}
+    end
+  end
+
+  # Every other document type on the ledger stream is not ours.
+  def handle_info({:document_changed, _msg}, state), do: {:noreply, state}
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # The compact wire summary the SSE `event: task` frame carries — the SAME
+  # fields Studio renders, so `bp chat` prints the identical `label` string
+  # rather than re-deriving one. `event_id` is the idempotency key the Go
+  # reducer dedupes on.
+  defp transition_summary(t) do
+    %{
+      event_id: t.key,
+      task_id: t.task_id,
+      title: t.title,
+      status: t.status,
+      mutation: t.mutation,
+      verb: t.verb,
+      label: t.label
+    }
+  end
 
   @impl true
   def terminate(_reason, state) do

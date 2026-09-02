@@ -1892,3 +1892,83 @@ func TestToolRowKeepsItsBlockBelowTheGutter(t *testing.T) {
 		t.Fatalf("the diff header path must survive:\n%s", out)
 	}
 }
+
+// ── live ledger transitions (tlv-bl-chat-live-transition-stream) ─────────────
+
+// TestTaskTransitionsRenderOneLineEach proves the terminal's decided treatment:
+// one dim line per transition, printing the SERVER's label verbatim (the same
+// string Studio's transcript row shows), and nothing at all when the session
+// touched no task — honest absence, never an empty band.
+func TestTaskTransitionsRenderOneLineEach(t *testing.T) {
+	if renderTaskTransitions(80, nil) != nil {
+		t.Fatal("no transitions must render no lines")
+	}
+
+	ts := []TaskTransition{
+		{EventID: "e1", TaskID: "task-a", Status: "in_progress", Verb: "claimed",
+			Label: "Mend the fence → in_progress (claimed)"},
+		{EventID: "e2", TaskID: "task-a", Status: "done", Verb: "closed",
+			Label: "Mend the fence → done (closed)"},
+	}
+	lines := renderTaskTransitions(100, ts)
+	if len(lines) != 2 {
+		t.Fatalf("want one line per transition, got %d: %v", len(lines), lines)
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(out, "in_progress (claimed)") || !strings.Contains(out, "done (closed)") {
+		t.Fatalf("each line must carry the server label, got:\n%s", out)
+	}
+	// Oldest first: the claim precedes the close, the order they arrived in.
+	if strings.Index(out, "(claimed)") > strings.Index(out, "(closed)") {
+		t.Fatalf("transitions must render in arrival order, got:\n%s", out)
+	}
+}
+
+// TestTaskTransitionsCapWithHonestOverflow: a long session accumulates rows, so
+// only the most recent handful paint — with a counted "+N earlier" header rather
+// than a silent truncation.
+func TestTaskTransitionsCapWithHonestOverflow(t *testing.T) {
+	var ts []TaskTransition
+	for i := 0; i < 9; i++ {
+		ts = append(ts, TaskTransition{
+			EventID: fmt.Sprintf("e%d", i),
+			TaskID:  fmt.Sprintf("task-%d", i),
+			Status:  "open",
+			Label:   fmt.Sprintf("Task %d → open (moved)", i),
+		})
+	}
+	out := strings.Join(renderTaskTransitions(100, ts), "\n")
+	if !strings.Contains(out, "+3 earlier task transitions") {
+		t.Fatalf("the overflow must be counted honestly, got:\n%s", out)
+	}
+	if strings.Contains(out, "Task 2 →") {
+		t.Fatalf("clipped rows must not paint, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Task 8 →") {
+		t.Fatalf("the newest transition must always paint, got:\n%s", out)
+	}
+}
+
+// TestTranscriptEndsWithTaskTransitions pins where the rows sit: after the
+// settled messages, the optimistic local sends, and the live tail — they are the
+// newest thing that happened and carry no seq to interleave by.
+func TestTranscriptEndsWithTaskTransitions(t *testing.T) {
+	m := Model{st: State{
+		Messages: []Message{{Seq: 1, Role: "user", SourceMarkdown: "hello"}},
+		Tail:     "streaming reply",
+		TaskTransitions: []TaskTransition{
+			{EventID: "e1", TaskID: "task-a", Status: "done", Label: "Mend the fence → done (closed)"},
+		},
+	}}
+	out := strings.Join(m.transcriptLines(80), "\n")
+	iHello := strings.Index(out, "hello")
+	iTail := strings.Index(out, "streaming reply")
+	iTrans := strings.Index(out, "done (closed)")
+	if iTrans < 0 {
+		t.Fatalf("the transition must render in the transcript, got:\n%s", out)
+	}
+	if !(iHello < iTail && iTail < iTrans) {
+		t.Fatalf("order must be settled → tail → transitions, got hello=%d tail=%d trans=%d\n%s",
+			iHello, iTail, iTrans, out)
+	}
+}

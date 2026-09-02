@@ -3679,6 +3679,208 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute render(view) =~ "data-role=\"chat-hand-task\""
     end
 
+    # ── live ledger transitions in the transcript (tlv) ───────────────────
+    #
+    # The Doing strip shows WHAT this session holds; these rows show WHEN it
+    # changed. The scope rule under test is the STICKY worker rule: a task is
+    # in scope while this session's worker holds its claim, and STAYS in scope
+    # afterwards — which is the only way a release/reap/kill (all of which
+    # clear or never carry the claim) can ever reach the transcript.
+
+    test "a claim by THIS session's worker renders a live transition row", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-1",
+          "Stage the candidate",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-1"
+        )
+      )
+
+      html = render(view)
+      assert html =~ ~s(data-role="task_transition")
+      assert html =~ ~s(data-task-transition="task-tlv-1")
+      assert html =~ ~s(data-task-status="in_progress")
+      assert html =~ "Stage the candidate → in_progress (claimed)"
+      # The lifecycle tint is a DESIGN TOKEN, never a literal colour.
+      assert html =~ "var(--life-in_progress)"
+    end
+
+    test "a transition arriving over the REAL dataset topic renders", %{view: view, sid: sid} do
+      # The direct `send/2` tests above bypass PubSub entirely, so they cannot
+      # tell a live subscription from a dead one. This one broadcasts on the
+      # SAME `documents:<dataset>` topic the ledger writes to, proving the
+      # subscription chat_live already holds is what carries the transition.
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      dataset = List.first(Barkpark.Content.list_datasets()) || "production"
+
+      {:document_changed, msg} =
+        task_changed(
+          "task-tlv-pubsub",
+          "Arrived over the bus",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-pubsub"
+        )
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:#{dataset}",
+        {:document_changed, msg}
+      )
+
+      # One round-trip through the LiveView process to settle the async cast.
+      html = render(view)
+      assert html =~ ~s(data-task-transition="task-tlv-pubsub")
+      assert html =~ "Arrived over the bus → in_progress (claimed)"
+    end
+
+    test "a replayed lifecycle event renders ONCE and keeps transcript order", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      claim =
+        task_changed(
+          "task-tlv-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-claim"
+        )
+
+      close =
+        task_changed(
+          "task-tlv-2",
+          "Dig the trench",
+          %{"lifecycle_status" => "done", "claim" => %{"worker" => worker}},
+          mutation: "task.closed",
+          event_id: "ev-tlv-close"
+        )
+
+      send(view.pid, claim)
+      send(view.pid, close)
+      # The duplicate: byte-identical to the claim, mutation_event id and all —
+      # a Last-Event-ID replay, or a two-topic double delivery.
+      send(view.pid, claim)
+
+      html = render(view)
+
+      assert transition_rows(html, "task-tlv-2") == 2,
+             "a replayed event must render once, not twice"
+
+      # ORDER preserved: the claim row still precedes the close row. A dedupe
+      # that re-appended (or that moved the row to the tail) would invert this.
+      claim_at = :binary.match(html, "Dig the trench → in_progress (claimed)")
+      close_at = :binary.match(html, "Dig the trench → done (closed)")
+      assert claim_at != :nomatch and close_at != :nomatch
+      assert elem(claim_at, 0) < elem(close_at, 0)
+    end
+
+    test "a release AFTER the claim still renders — the scope set is sticky", %{
+      view: view,
+      sid: sid
+    } do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-3",
+          "Hold the lease",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-3a"
+        )
+      )
+
+      # Tasks.Release CLEARS the claim lease, so this carries NO worker to match
+      # on. Only the sticky set can keep it in scope.
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-3",
+          "Hold the lease",
+          %{"lifecycle_status" => "open"},
+          mutation: "task.released",
+          event_id: "ev-tlv-3b"
+        )
+      )
+
+      html = render(view)
+      assert html =~ "Hold the lease → open (released)"
+      assert transition_rows(html, "task-tlv-3") == 2
+    end
+
+    test "another worker's task never reaches the transcript", %{view: view} do
+      send(
+        view.pid,
+        task_changed(
+          "task-tlv-4",
+          "Someone else's yard",
+          %{
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "claude-chat-deadbeef"}
+          },
+          mutation: "task.claimed",
+          event_id: "ev-tlv-4"
+        )
+      )
+
+      html = render(view)
+      refute html =~ ~s(data-task-transition="task-tlv-4")
+      refute html =~ "Someone else's yard →"
+    end
+
+    test "a pulse heartbeat is not a transition", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      content = %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}}
+
+      send(
+        view.pid,
+        task_changed("task-tlv-5", "Keep the lease warm", content,
+          mutation: "task.claimed",
+          event_id: "ev-tlv-5a"
+        )
+      )
+
+      send(
+        view.pid,
+        task_changed("task-tlv-5", "Keep the lease warm", content,
+          mutation: "task.pulse",
+          event_id: "ev-tlv-5b"
+        )
+      )
+
+      # The claim rendered; the timer-driven pulse that followed it did not.
+      assert transition_rows(render(view), "task-tlv-5") == 1
+    end
+
+    test "a draft-twin echo never renders a transition", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed(
+          "drafts.task-tlv-6",
+          "Draft twin",
+          %{"lifecycle_status" => "in_progress", "claim" => %{"worker" => worker}},
+          mutation: "task.claimed",
+          event_id: "ev-tlv-6"
+        )
+      )
+
+      refute render(view) =~ ~s(data-role="task_transition")
+    end
+
     test "the picker opens on the ready head and hands a task to Claude", %{view: view} do
       register_task_schema()
 
@@ -6916,19 +7118,51 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   # A task-document broadcast as the Doing strip sees it — the lean mirror of
   # Content.Broadcast.broadcast_document_mutation/3's :document_changed shape.
-  defp task_changed(doc_id, title, content) do
-    {:document_changed,
-     %{
-       type: "task",
-       doc_id: doc_id,
-       doc: %{
-         doc_id: doc_id,
-         title: title,
-         status: "published",
-         content: content,
-         updated_at: nil
-       }
-     }}
+  #
+  # `opts` adds the two fields the LIVE-TRANSITION fold reads
+  # (tlv-bl-chat-live-transition-stream): `:mutation`, the mutation_events kind
+  # string, and `:event_id`, the durable row id that IS the idempotency key.
+  # Omitting them reproduces the Doing-strip-only shape the strip tests use —
+  # and a broadcast with no mutation kind projects to no transition, which is
+  # exactly why those tests still assert a strip and no transcript row.
+  defp task_changed(doc_id, title, content, opts \\ []) do
+    msg =
+      %{
+        type: "task",
+        doc_id: doc_id,
+        rev: Keyword.get(opts, :rev, "rev-1"),
+        doc: %{
+          doc_id: doc_id,
+          title: title,
+          status: "published",
+          content: content,
+          updated_at: nil
+        }
+      }
+      |> then(fn m ->
+        case Keyword.get(opts, :mutation) do
+          nil -> m
+          kind -> Map.put(m, :mutation, kind)
+        end
+      end)
+      |> then(fn m ->
+        case Keyword.get(opts, :event_id) do
+          nil -> m
+          id -> Map.put(m, :event_id, id)
+        end
+      end)
+
+    {:document_changed, msg}
+  end
+
+  # How many live transition rows the transcript is currently painting for a
+  # task id. Counts the row's own data attribute, so a second render of the SAME
+  # event is a COUNT of 2 — the shape an idempotency regression takes.
+  defp transition_rows(html, task_id) do
+    html
+    |> String.split(~s(data-task-transition="#{task_id}"))
+    |> length()
+    |> Kernel.-(1)
   end
 
   # Register the tasks plugin's schema definitions under the flat default scope
