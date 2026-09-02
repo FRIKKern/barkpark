@@ -257,18 +257,18 @@ defmodule Barkpark.Content.Expand do
 
   # The referenced type's schema, for field-visibility redaction of the expanded
   # document. Nil when none resolves — redaction then falls back to the
-  # schema-free encrypted-field guard. Scoped via `opts`, with a global fallback
-  # mirroring `load_schemas/3`.
+  # schema-free encrypted-field guard. Scoped via `opts`, with the shared
+  # GLOBAL-schema fallback (@canonical capability:schema-resolution-for-redaction).
+  #
+  # BEHAVIOUR CHANGE: this site's own retry accepted `{:ok, schema}`
+  # UNCONDITIONALLY, so on a scoped miss it could bind a FOREIGN tenant's
+  # same-named schema and gate this tenant's expanded refs with another tenant's
+  # field visibility. The shared helper accepts the retry ONLY for a genuinely
+  # global (`workspace_id: nil`) row, closing that inverse hazard.
   defp ref_schema(ref_type, dataset, opts) do
-    case Content.get_schema(ref_type, dataset, opts) do
-      {:ok, schema} ->
-        schema
-
-      _ ->
-        case Content.get_schema(ref_type, dataset) do
-          {:ok, schema} -> schema
-          _ -> nil
-        end
+    case Content.Schema.get_schema_for_redaction(ref_type, dataset, opts) do
+      {:ok, schema} -> schema
+      :error -> nil
     end
   end
 end

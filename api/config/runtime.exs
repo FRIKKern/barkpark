@@ -788,6 +788,37 @@ if mail_from_overrides != [] do
   config :barkpark, :mail, mail_from_overrides
 end
 
+# gh-9531 residual (task-eeabfd9bf3ed8371) — two more DEPLOYMENT values this app
+# used to freeze at BUILD time in module attributes:
+#
+#   * ANTHROPIC_API_URL — the Anthropic-compatible Messages endpoint shared by
+#     `Barkpark.Tasks.Judge` and `Barkpark.StudioChat.Titles`. Both modules
+#     already config-read their adapter, model and key; only the URL was frozen,
+#     so an operator routing through a gateway (LiteLLM, an internal proxy, a
+#     Bedrock-style shim) could supply the key and the model and still not reach
+#     their own endpoint. One key for both, exactly as `:anthropic_api_key` is
+#     already shared.
+#   * ONIX_DATASET_HOST — the `host:` half of every ONIX `<RecordReference>`
+#     (`Barkpark.Plugins.OnixEdit.Export.dataset_host/0`). No call site passes
+#     the `:dataset_host` opt, so a self-hoster exporting to Bokbasen published
+#     their own catalogue under OUR namespace — wrong DATA, not wrong config.
+#     Changing it re-identifies every record a partner already holds, so set it
+#     before the first submission.
+#
+# Set only what is PRESENT, so an unset environment keeps the historical
+# literals and every existing deployment is unchanged. A present-but-malformed
+# value is NOT silently discarded: each reader raises, and
+# `Barkpark.Application.start/2` resolves all three at boot, so the node REFUSES
+# rather than quietly talking to the vendor (or stamping our domain onto someone
+# else's books).
+if anthropic_api_url = System.get_env("ANTHROPIC_API_URL") do
+  config :barkpark, :anthropic_api_url, anthropic_api_url
+end
+
+if onix_dataset_host = System.get_env("ONIX_DATASET_HOST") do
+  config :barkpark, Barkpark.Plugins.OnixEdit, dataset_host: onix_dataset_host
+end
+
 # Trust boundary for x-forwarded-for on every IP-keyed rate bucket
 # (Barkpark.RateLimiter.client_ip/1). NOT prod-gated: which fronts sit in front
 # of this box is a property of the DEPLOYMENT, not of MIX_ENV, and a self-hoster

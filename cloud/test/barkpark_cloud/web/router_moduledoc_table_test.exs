@@ -346,8 +346,15 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     end
   '''
 
+  # cch-w53-bl (env-var Option A, ruled 2026-09-02): this fixture used to model
+  # `POST /v1/env-vars`, which was deleted with the team env-var feature. It is
+  # re-pointed at `POST /v1/resurrect`, the surviving route with the SAME guard
+  # shape — a bare `Auth.require_user` followed by a post-guard cond that 403s a
+  # plain member with `required: "admin", scope: "team"`. The drift assertion
+  # below moves with it, so the must-FLAG control is still checked against a real
+  # route and not only against itself.
   @fixture_flag ~S'''
-    post "/v1/env-vars" do
+    post "/v1/resurrect" do
       conn = Auth.require_user(conn, [])
 
       cond do
@@ -357,7 +364,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
         not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
           Auth.forbidden(conn, required: "admin", scope: "team")
 
-        true -> json(conn, 201, %{env_var: %{}})
+        true -> json(conn, 202, %{ok: true})
       end
     end
   '''
@@ -411,7 +418,7 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     assert raw_route_guard("GET", "/v1/notifications/deliveries") ==
              guard_in(@fixture_clear, %{}, 0)
 
-    assert raw_route_guard("POST", "/v1/env-vars") == guard_in(@fixture_flag, %{}, 0)
+    assert raw_route_guard("POST", "/v1/resurrect") == guard_in(@fixture_flag, %{}, 0)
 
     assert raw_route_guard("POST", "/v1/fleet/supports") ==
              guard_in(@fixture_flag_deploy, %{}, 0)

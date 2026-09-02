@@ -10,16 +10,23 @@ defmodule BarkparkCloud.Web.RouterRefusalAuthorityProbeTest do
 
   What is pinned here, and what is deliberately NOT:
 
-    1. SIX REFUSALS NAME THEIR AUTHORITY — `required: "admin", scope: "team"`,
-       driven through the real router by a real member session.
+    1. FOUR REFUSALS NAME THEIR AUTHORITY — `required: "admin", scope: "team"`,
+       driven through the real router by a real member session. (SIX until
+       cch-w53-bl's env-var Option A deleted `POST`/`DELETE /v1/env-vars` with
+       the team env-var feature — the routes went, so their probes went.)
     2. TWO REFUSALS NAME A CAUSE AND NEVER AN AUTHORITY — the member-management
        arms sit INSIDE `with_team_role(conn, "admin", …)`, so the caller already
        IS an admin. A static `required: "admin"` there would be a new lie, and
        the CONTROL below proves no static label could be sound: the same admin
        refused on a peer admin SUCCEEDS on a plain member.
-    3. ONE REFUSAL STAYS BARE ON PURPOSE (charter D396(5)) — the cross-tenant
-       env-var arm refuses an ADMIN, so it is not a role refusal at all. The
-       guard fails if someone "helpfully" labels it.
+    3. THE THIRD ARM IS RETIRED, NOT WEAKENED. It pinned charter D396(5)'s
+       deliberately-bare cross-tenant env-var refusal — an ADMIN refused on
+       another team's `barkpark_id`, which is not a role refusal at all. That
+       route was deleted with the team env-var feature (cch-w53-bl, Option A,
+       ruled 2026-09-02), and no other route in `router.ex` refuses on
+       cross-tenant ownership from inside an admin-gated cond, so there is
+       nothing left for it to probe. D396(5) itself is untouched: the next route
+       that takes a foreign id inside an admin gate re-earns this arm.
 
   This is a guard that can lose: every assertion here is RED against the
   unmodified refusal literals.
@@ -28,7 +35,7 @@ defmodule BarkparkCloud.Web.RouterRefusalAuthorityProbeTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.Accounts
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -89,16 +96,13 @@ defmodule BarkparkCloud.Web.RouterRefusalAuthorityProbeTest do
     {team, session(member)}
   end
 
-  ## 1 — the six refusals that name their authority
+  ## 1 — the refusals that name their authority
 
   # {label, method, path, body} — every one reachable by a plain member session.
   @named [
     {"POST /v1/fleet/supports", :post, "/v1/fleet/supports", %{name: "support-1"}},
     {"DELETE /v1/fleet/supports/:id", :delete,
      "/v1/fleet/supports/00000000-0000-0000-0000-000000000001", nil},
-    {"POST /v1/env-vars", :post, "/v1/env-vars", %{key: "K", value: "v"}},
-    {"DELETE /v1/env-vars/:id", :delete, "/v1/env-vars/00000000-0000-0000-0000-000000000002",
-     nil},
     {"POST /v1/tokens", :post, "/v1/tokens", %{name: "probe-pat", abilities: ["deploy"]}},
     {"POST /v1/resurrect", :post, "/v1/resurrect", %{name: "box"}}
   ]
@@ -193,32 +197,6 @@ defmodule BarkparkCloud.Web.RouterRefusalAuthorityProbeTest do
     end
   end
 
-  ## 3 — the deliberate exception (charter D396(5))
-
-  describe "the cross-tenant env-var arm stays BARE on purpose" do
-    test "an ADMIN refused on another team's barkpark_id carries NO authority label" do
-      team = team_fixture()
-      admin = member_of(team, "admin")
-
-      other = team_fixture()
-      n = System.unique_integer([:positive])
-      {:ok, foreign} = Registry.register_barkpark(other, %{name: "BP #{n}", slug: "bp-#{n}"})
-
-      conn =
-        call(
-          :post,
-          "/v1/env-vars",
-          %{key: "K", value: "v", scope: "barkpark", barkpark_id: foreign.id},
-          session(admin)
-        )
-
-      assert conn.status == 403
-      b = body(conn)
-      assert b["error"] == "forbidden"
-      # The caller IS an admin — labelling this `required: "admin"` would tell
-      # them to acquire a role they already hold.
-      refute Map.has_key?(b, "required")
-      refute Map.has_key?(b, "reason")
-    end
-  end
+  # ## 3 — the deliberate exception (charter D396(5)) — RETIRED with the route it
+  # probed; see the moduledoc's item 3.
 end

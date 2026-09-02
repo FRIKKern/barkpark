@@ -123,9 +123,6 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/github/installation      admin disconnect GitHub (require_team_admin; 404 if none)
       GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
       POST    /v1/github/repos             admin create a repo from a template + push app files (deploy button)
-      GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
-      POST    /v1/env-vars         admin     create/update an env var (owner/admin)
-      DELETE  /v1/env-vars/:id     admin     delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
       PUT     /v1/notifications/settings  admin  update transport / per-event toggles / SMTP secrets
       PUT     /v1/notifications/channels admin  update per-channel transport settings
@@ -5503,135 +5500,6 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:github_error, _reason}} ->
             json(conn, 502, %{error: "github_error"})
-        end
-    end
-  end
-
-  # GET /v1/env-vars → 200 {env_vars: [...]} for the user's team. Values are NEVER
-  # in the payload — only key + scope + flags + comment (the masking discipline).
-  # A secret is set-and-forget, surfaced by key, not value.
-  get "/v1/env-vars" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      true ->
-        vars = Registry.list_env_vars(conn.assigns.current_team)
-        json(conn, 200, %{env_vars: Enum.map(vars, &env_var_json/1)})
-    end
-  end
-
-  # POST /v1/env-vars {key, value, scope?, barkpark_id?, is_secret?, is_shown_once?,
-  # comment?} → 201 {env_var}. Write-gated to owner/admin (Accounts.team_admin?/2).
-  # The plaintext `value` is encrypted at rest and NEVER echoed. A write to a
-  # write-once var → 409. A barkpark_id NOT owned by the team → 403 (the FK checks
-  # existence, not ownership — the context fails the cross-tenant write closed).
-  post "/v1/env-vars" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      # cch-w37-s2: NAME THE AUTHORITY — writing an env var is admin-gated on the
-      # resolved team. Bare, this refusal read to the console as the owner-only
-      # billing one.
-      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        Auth.forbidden(conn, required: "admin", scope: "team")
-
-      not is_binary(conn.body_params["key"]) or conn.body_params["key"] == "" ->
-        json(conn, 422, %{error: "key_required"})
-
-      true ->
-        attrs =
-          Map.take(
-            conn.body_params,
-            ~w(key value scope barkpark_id is_secret is_shown_once comment)
-          )
-
-        # activity-audit-log: the env-var insert + an `env_var.created` audit
-        # event commit atomically. Detail carries only the KEY NAME + scope —
-        # NEVER the plaintext value (which is Vault-encrypted at rest).
-        audited =
-          Accounts.audit(
-            %{
-              team_id: conn.assigns.current_team.id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "env_var.created",
-              target_type: "env_var"
-            },
-            fn -> Registry.put_env_var(conn.assigns.current_team, attrs) end,
-            fn ev -> %{target_id: ev.id, metadata: %{key: ev.key, scope: ev.scope}} end
-          )
-
-        case audited do
-          {:ok, ev} ->
-            push_event(conn.assigns.current_team.id, "audit")
-            json(conn, 201, %{env_var: env_var_json(ev)})
-
-          {:error, :write_once} ->
-            json(conn, 409, %{error: "write_once"})
-
-          # LEFT BARE ON PURPOSE — charter D396(5). This is the CROSS-TENANT arm:
-          # an ADMIN of team A is refused here on team B's barkpark_id, so it is
-          # not a role refusal at all and `required: "admin"` would be a NEW lie.
-          {:error, :barkpark_not_in_team} ->
-            json(conn, 403, %{error: "forbidden"})
-
-          {:error, changeset} ->
-            json(conn, 422, %{error: "invalid", details: errors(changeset)})
-        end
-    end
-  end
-
-  # DELETE /v1/env-vars/:id → 200 {ok: true} (owner/admin), 404 if not in the
-  # team (existence-leak protection — a wrong-team id is indistinguishable from
-  # a non-existent one).
-  delete "/v1/env-vars/:id" do
-    conn = Auth.require_user(conn, [])
-
-    cond do
-      conn.halted ->
-        conn
-
-      is_nil(conn.assigns.current_team) ->
-        json(conn, 422, %{error: "no_team"})
-
-      # cch-w37-s2: NAME THE AUTHORITY — the delete twin of POST /v1/env-vars.
-      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        Auth.forbidden(conn, required: "admin", scope: "team")
-
-      true ->
-        # activity-audit-log: the env-var delete + an `env_var.deleted` audit
-        # event commit atomically (key name only, never the value). A wrong-team
-        # / missing id rolls back with NO audit row.
-        audited =
-          Accounts.audit(
-            %{
-              team_id: conn.assigns.current_team.id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "env_var.deleted",
-              target_type: "env_var"
-            },
-            fn -> Registry.delete_env_var(conn.assigns.current_team, conn.path_params["id"]) end,
-            fn ev -> %{target_id: ev.id, metadata: %{key: ev.key, scope: ev.scope}} end
-          )
-
-        case audited do
-          {:ok, _} ->
-            push_event(conn.assigns.current_team.id, "audit")
-            json(conn, 200, %{ok: true})
-
-          {:error, :not_found} ->
-            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -12594,27 +12462,6 @@ defmodule BarkparkCloud.Web.Router do
       # exists to prevent.
       region: claim_region(barkpark),
       server_type: claim_server_type(barkpark),
-      # The decrypted team + instance env, merged most-specific-wins, sent ONLY
-      # over the worker-token-authed internal channel (TLS in prod). Resolved at
-      # CLAIM time so a retry / stale-claim re-pick would carry rotated values.
-      #
-      # RETRACTED ON REVIEW (wave 56): this comment used to say "The worker bakes
-      # these into the box's runtime env at provision time" and called this "the
-      # one place the plaintext must exist so the values can reach the instance".
-      # NO WORKER READS THIS KEY, and this repo already proves it mechanically:
-      # `cloud/test/barkpark_cloud/web/claim_payload_manifest_test.exs` (ARM 1)
-      # shows the worker DISCARDS `env` on all three claim shapes, because
-      # `internal/provisioner.JobSpec` declares no `env` field and every claim
-      # decode is a bare `json.Unmarshal`. So this comment asserted a delivery a
-      # merged guard in the same tree refutes — "an OLD worker simply ignores the
-      # key" is in fact EVERY worker. The console has said so since
-      # cch-w53-s1 ("Values are not delivered to any instance yet"); this comment
-      # and two moduledocs in cloud/lib were the last places claiming delivery.
-      # The key still ships (removing it is a contract change a future delivery
-      # slice would only have to re-add), but this is plaintext crossing a wire
-      # for nobody — which is its own reason to build delivery or drop the key.
-      # Filed separately.
-      env: Registry.resolved_env_for_barkpark(barkpark),
       # dwb-4: the content-template slug picked at launch (validated then). nil →
       # no bootstrap; an OLD worker ignores the key.
       template: barkpark.template
@@ -12769,23 +12616,6 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp add_provider_claim_fields(base, _barkpark), do: base
-
-  defp env_var_json(%Registry.EnvVar{} = e) do
-    # value_encrypted is NEVER serialized — the value stays at rest. The list
-    # view is metadata-only: a secret is set-and-forget, surfaced by key, not
-    # value (the masking discipline of provider_json/1 + site_json/1).
-    %{
-      id: e.id,
-      key: e.key,
-      scope: e.scope,
-      barkpark_id: e.barkpark_id,
-      is_secret: e.is_secret,
-      is_shown_once: e.is_shown_once,
-      comment: e.comment,
-      inserted_at: e.inserted_at,
-      updated_at: e.updated_at
-    }
-  end
 
   defp deprovision_claim_json(job, barkpark) do
     %{

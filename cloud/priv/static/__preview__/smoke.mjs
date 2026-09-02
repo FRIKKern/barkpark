@@ -2970,23 +2970,39 @@ const EXPECTATIONS = {
       // exactly one hit per string, app.js itself), so the sheet was free to
       // promise an erasure the plane does not perform. This leg already renders
       // the REAL sheet into #modal-body; it just never read the words.
-      // The three residues asserted here are all MEASURED, not stylistic: the
-      // archive bundle has no delete path at all, DELETE /v1/barkparks/:id
-      // reaches no Billing function, and a customer-owned DNS record is never
-      // retracted. The FORBIDDEN half matters as much: no window and
-      // no number of days may appear, because there is no reaper to back one.
+      // The residues asserted here are all MEASURED, not stylistic: DELETE
+      // /v1/barkparks/:id reaches no Billing function, and a customer-owned DNS
+      // record is never retracted.
+      //
+      // cch-w54-bl FLIPPED THE ARCHIVE-BUNDLE HALF. This leg used to FORBID a
+      // window ("no number of days may appear, because there is no reaper to
+      // back one"). There is a reaper now — ArchiveStore.delete_bundle/2 driven
+      // by Workers.ArchiveRetentionWorker on "45 3 * * *" — so the assertion is
+      // inverted: the sheet MUST name the 30 days the worker actually applies,
+      // and must no longer claim the plane cannot delete a bundle. The number
+      // is pinned here and in the worker's own test against
+      // ArchiveRetentionWorker.retention_days(), so a window changed on one
+      // side reds on the other.
       const sheet = reg.get("modal-body").innerHTML || "";
       assert.ok(sheet.includes('class="cm-consequences"'),
         "the destroy sheet must render its consequence list; got: " + sheet.slice(0, 200));
       assert.ok(sheet.includes("Tears down the server for good"),
         "the live arm must still say plainly what it destroys; got: " + sheet.slice(0, 400));
-      assert.ok(sheet.includes("archive bundle") && sheet.includes("no way to delete it"),
-        "the sheet must disclose the archive bundle the control plane cannot delete");
+      assert.ok(sheet.includes("archive bundle") && sheet.includes("30 days"),
+        "the sheet must state the archive bundle's real 30-day retention window; got: " + sheet.slice(0, 600));
+      assert.ok(sheet.includes("its most recent bundle is kept"),
+        "the sheet must state the live-team carve-out the sweep actually applies");
+      assert.ok(!sheet.includes("no way to delete it"),
+        "the sheet still claims the plane cannot delete a bundle — delete_bundle/2 exists and runs daily");
       assert.ok(sheet.includes("Billing does not stop here"),
         "the sheet must stop implying the teardown cancels the subscription");
-      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(sheet),
-        "the sheet named a window in days — there is no reaper, and inventing one is the very defect this fixes: " +
-        sheet.slice(0, 400));
+      // The window may be named ONLY as the 30 days the reaper applies. Any
+      // OTHER duration is an invented promise again, so the negative half
+      // survives the flip rather than being dropped.
+      const windows = sheet.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+      assert.ok(windows.length > 0, "the sheet named no retention window at all");
+      assert.ok(windows.every((w) => /^30\s*days$/i.test(w)),
+        "the sheet named a window the sweep does not apply: " + JSON.stringify(windows));
       assert.ok(sheet.includes("stays behind"),
         "the finality line must be about the row, with the residue named beside it");
       // THE CONDITIONAL, BOTH WAYS. The fixture instance carries NO custom host
@@ -3042,8 +3058,13 @@ const EXPECTATIONS = {
       // character would be red for a reason that has nothing to do with the copy.
       assert.ok(extSheet.includes("repoint the record for you"),
         "and the console must admit it cannot fix that record for them; got: " + extSheet.slice(0, 500));
-      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(extSheet),
-        "the custom-host branch named a window in days; got: " + extSheet.slice(0, 500));
+      // cch-w54-bl: same flip as the branch above — the only duration this
+      // sheet may name is the 30 days ArchiveRetentionWorker actually applies,
+      // and the DNS sentence itself must still name none of its own (the
+      // record dangles indefinitely; there is no sweep for it).
+      const extWindows = extSheet.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+      assert.ok(extWindows.every((w) => /^30\s*days$/i.test(w)),
+        "the custom-host branch named a window the plane does not apply: " + JSON.stringify(extWindows));
       // …and the PLATFORM side, whose zone the control plane does own end to end
       // (the attach modal accepts <name>.barkpark.cloud and nothing else), must
       // stay silent — the sentence is about a record we never held.
@@ -4109,7 +4130,7 @@ const EXPECTATIONS = {
       assert.ok(html.includes("token-eye"), "a show/hide toggle is offered");
     },
   },
-  // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
+  // ── G-06 Members (Settings wave, phase 4) ─────────────────────────────────
   // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
   // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
   // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — the roster at the
@@ -4309,81 +4330,6 @@ const EXPECTATIONS = {
         "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
     },
   },
-  // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
-  // secret + write-once chips, the sealed write-once note) + the add FORM.
-  "env-populated": {
-    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form — AND a real Delete click that shrinks the SERVER list 4→3",
-    async check(reg, hooks, ctx) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("set-section"), "the rows ride the .set-section anatomy");
-      assert.ok(body.includes("DATABASE_URL") && body.includes("STRIPE_SECRET_KEY") && body.includes("WORKER_TOKEN"), "every var key renders");
-      assert.ok(body.includes(">Secret<"), "a secret chip renders");
-      assert.ok(body.includes(">Write-once<"), "a write-once chip renders");
-      assert.ok(body.includes(">Team<") && body.includes(">Instance<"), "both scope chips render");
-      // The value is sealed forever — NEVER a reveal affordance anywhere.
-      assert.ok(!body.includes("Reveal") && !body.includes("Show value") && !body.includes("value=\"env"), "no reveal affordance — the value is sealed");
-      // The write-once row carries the honest sealed-and-unreplaceable note.
-      assert.ok(body.includes("Delete and recreate to change"), "the write-once row states it can't be changed in place");
-      // The admin add-var FORM section with its own save-row.
-      assert.ok(body.includes("Add a variable") && body.includes("set-save-row"), "the add-var form section renders with a save-row");
-      assert.ok(body.includes(">Delete<"), "admin rows carry Delete");
-
-      // ── cch-w10 LEG 4/5: DELETE A VARIABLE, CLICKED FOR REAL ──────────────
-      const rows = reg.get("env-body").querySelectorAll("[data-env-delete]");
-      assert.equal(rows.length, 4, "every admin row carries a wired Delete; got " + rows.length);
-      const varId = rows[0].getAttribute("data-env-delete");
-      const varKey = rows[0].getAttribute("data-key");
-      assert.equal(rows[0].click(), 1, "the row Delete dispatched no click handler — it is DEAD");
-      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 0,
-        "the row click must only open the confirm sheet — a sealed value must never go on a single click");
-      const sheet = reg.get("modal-body").innerHTML || "";
-      assert.ok(sheet.includes("Delete variable?") && sheet.includes(varKey),
-        "the sheet must name the variable; got: " + sheet.slice(0, 200));
-      assert.ok(sheet.includes("can&#39;t be recovered") || sheet.includes("can't be recovered"),
-        "the sheet must state the value is unrecoverable — the whole reason this verb needs a sheet");
-      const go = reg.get("env-delete-go");
-      assert.equal(go.click(), 1, "the sheet's Delete must be wired for \"click\"");
-      assert.equal(go.disabled, true, "the in-flight Delete must disable itself against a double-fire");
-      await ctx.settle();
-      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 1, "exactly one env-var DELETE on the wire");
-      assert.equal(ctx.state.envVars.length, 3,
-        "the server list must shrink by exactly one (4 → 3); got " + ctx.state.envVars.length);
-      assert.ok(!ctx.state.envVars.some((v) => v.id === varId), "and the deleted row is the one gone");
-      const after = reg.get("env-body").innerHTML || "";
-      // Anchored on the ROW markup, not a bare substring: the add-var form
-      // carries "DATABASE_URL" as its placeholder, so a naive includes() would
-      // have reported the deleted row as still present and sent the next reader
-      // hunting a bug that isn't there.
-      assert.ok(!after.includes('set-row-key">' + varKey + "<"),
-        "the deleted row must be gone from the repaint; got: " + after.slice(0, 300));
-      assert.equal(countMatches(after, 'class="set-row-key"'), 3, "three rows survive the refetch");
-      assert.ok(after.includes('set-row-key">STRIPE_SECRET_KEY<'), "and the survivors are still listed");
-    },
-  },
-  // The write-once 409 twin renders the same sealed note; the POST-collision copy
-  // itself is unit-pinned (envVarWriteFailureCopy) since the submit is click-driven.
-  "env-write-once-409": {
-    what: "Environment variables — the write-once row's sealed state (409 copy unit-pinned)",
-    check(reg) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("STRIPE_SECRET_KEY") && body.includes("Write-once"), "the write-once var renders");
-      assert.ok(body.includes("Delete and recreate to change"), "the sealed per-row note renders");
-    },
-  },
-  // Env-vars (member): read-only rows, NO add form, NO Delete (member-read law).
-  "env-member": {
-    what: "Environment variables (member) — read-only rows, no add form",
-    check(reg) {
-      assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
-      const body = reg.get("env-body").innerHTML || "";
-      assert.ok(body.includes("DATABASE_URL"), "the rows still render for a member");
-      assert.ok(!body.includes("Add a variable") && !body.includes("set-save-row"), "a member sees no add form");
-      assert.ok(!body.includes(">Delete<"), "a member sees no Delete affordance");
-    },
-  },
-
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
   // The crown surface, states-complete: rolling / halted / bounced / unreadable.
   "operator-console": {

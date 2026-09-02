@@ -5525,8 +5525,8 @@
   // makes init()'s route validator accept a deep-linked #operator for ANYONE, so
   // loadOperator fail-closed BOUNCES a non-operator to #overview (GR49). It is
   // deliberately absent from SETTINGS_VIEWS and from the ⌘K palette.
-  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "env", "activity", "operator"];
-  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members", "env"];
+  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "activity", "operator"];
+  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members"];
 
   // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
   // #site/<id>), or the invitation-accept landing (#invitations/accept —
@@ -5735,7 +5735,6 @@
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
     if (r.view === "members") loadMembers(); // C10: the team Members settings panel
-    if (r.view === "env") loadEnvVars(); // G-06: the team environment-variables panel
     if (r.view === "activity") loadActivity();
     if (r.view === "operator") loadOperator(); // GR39/GR49 — gate lives INSIDE (fail-closed)
   }
@@ -8455,12 +8454,17 @@
   // "Permanently tears down the server and stops billing." / "This can't be
   // undone.", and three quarters of that was a claim the control plane does not
   // support:
-  //   • THE ARCHIVE BUNDLE SURVIVES WITH NO REACH. ArchiveStore exports
-  //     derive_signing_key/4, list_archives/1 and sign_v4/1 — no delete, no
-  //     purge. Teardown makes ZERO object-storage requests and the bundle is
-  //     still listable afterwards. NO SENTENCE HERE NAMES A WINDOW OR A NUMBER
-  //     OF DAYS, because there is no reaper: inventing one would be the exact
-  //     defect this wave exists to remove.
+  //   • THE ARCHIVE BUNDLE SURVIVED WITH NO REACH — until cch-w54-bl. When
+  //     this copy was written, ArchiveStore exported derive_signing_key/4,
+  //     list_archives/1 and sign_v4/1 and NOTHING that deleted, so the sheet
+  //     was forbidden to name a window: inventing one would have been the very
+  //     defect that wave removed. The reaper now EXISTS —
+  //     ArchiveStore.delete_bundle/2 driven daily by
+  //     Workers.ArchiveRetentionWorker ("45 3 * * *") — so the sentence names
+  //     the real 30-day window and the real live-team carve-out. THE THREE
+  //     PLACES MOVE TOGETHER: @retention_days in that worker, this sentence,
+  //     and docs/ops/backup-dr.md. A number here that the worker does not
+  //     apply puts the lie straight back.
   //   • BILLING DOES NOT STOP HERE. DELETE /v1/barkparks/:id (web/router.ex)
   //     reaches no Billing function at all; cancellation is TEAM-scoped and
   //     lives on the Billing screen. Removing an instance — even the last one —
@@ -8483,8 +8487,9 @@
       lines.push(ext + " is your own DNS record — Barkpark Cloud never held it. The IP behind it goes back to " +
         "Hetzner, which hands that address to someone else, and we can't repoint the record for you.");
     }
-    lines.push("Any archive bundle this team has already made stays in object storage — Barkpark Cloud has no way " +
-      "to delete it.");
+    lines.push("Any archive bundle this team has already made stays in object storage for 30 days after the " +
+      "instance it came from was torn down; a daily sweep deletes it after that. While this team still has an " +
+      "instance, its most recent bundle is kept.");
     lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
       "your last instance.");
     lines.push(live
@@ -17901,7 +17906,7 @@
 
   // The ONE place a /v1/me answer becomes cached state — success OR failure, so
   // no caller can absorb the happy half and silently drop the other (which is
-  // precisely what loadMe, loadMembers and loadEnvVars each did). Returns
+  // precisely what loadMe and loadMembers each did). Returns
   // whether the answer landed.
   function absorbMe(r) {
     if (r && r.ok && r.data) {
@@ -18370,7 +18375,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 35 of the 58 declared verbs have no entry here: they render
+    // 33 of the 56 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -23594,265 +23599,6 @@
     if (v === "members") loadMembers();
   }
 
-  // ── Environment variables panel (Settings view) ─────────────────────────────
-  // The team's env-var ROWS off /v1/env-vars (GR36 / E-03 write-only doctrine
-  // transferred to rows). This is NOT the per-site env blob editor: each var is a
-  // row {key, scope, is_secret, is_shown_once, comment, timestamps} whose VALUE is
-  // sealed forever — no reveal route exists over HTTP, so the UI never renders a
-  // reveal affordance. Access model: member-read / admin-write (list is member-
-  // readable; POST/DELETE are owner/admin-only). A plain member sees the rows
-  // read-only with no add form and no delete controls (GR33 plain-member law).
-
-  // Pure: the human scope label. A barkpark-scoped var carries a barkpark_id and
-  // applies to one instance; otherwise it's team-wide.
-  function envScopeLabel(v) {
-    return (v && (v.scope === "barkpark" || v.barkpark_id)) ? "Instance" : "Team";
-  }
-
-  // Pure: honest copy for a failed env-vars fetch (member-readable, so a 403 here
-  // means teamless/permission drift rather than the normal member case).
-  function envVarsFailureCopy(status) {
-    if (status === 0) return "Network error — is the control plane reachable? Retry in a moment.";
-    if (status === 422) return "Your account isn't part of a team, so there are no environment variables.";
-    if (status === 403) return "You don't have permission to view this team's environment variables.";
-    return "We couldn't load your environment variables. Retry in a moment.";
-  }
-
-  // Pure: honest copy for a failed env-var write. write_once is the per-row truth
-  // (a shown-once key can't be overwritten — delete and recreate); the rest map to
-  // human sentences instead of raw error codes.
-  function envVarWriteFailureCopy(status, data) {
-    if (status === 409 && data && data.error === "write_once") {
-      return "A write-once variable with that key already exists. Delete it first, then create it again.";
-    }
-    // cch-w40-s1 — THE 403 CONSULTS WHAT THE SERVER PROVED. This arm used to
-    // return "Only team owners and admins can change environment variables." and
-    // it returned BEFORE faultCopy/friendly, structurally shadowing
-    // forbiddenEvidenceCopy — so the console's own authored guess outranked the
-    // server's evidence on every 403 this seam sees. TWO of them reach here and
-    // the sentence was wrong on both counts:
-    //   • router.ex:4355/4417 send `required: "admin", scope: "team"`. The old
-    //     sentence was roughly true and threw the evidence away anyway.
-    //   • router.ex:4394 is the CROSS-TENANT arm, left bare on purpose (D396(5)):
-    //     an admin of team A writing team B's barkpark_id. The caller IS an
-    //     owner-or-admin, so the old sentence was FLATLY FALSE and unfixable by
-    //     the person reading it — no role grant repairs a wrong-team id.
-    // Evidence first, then the curated generic, which now claims no role at all.
-    if (status === 403) return forbiddenEvidenceCopy(data) || ERRORS.forbidden;
-    if (status === 422 && data && data.error === "key_required") return "Enter a key.";
-    return faultCopy(status, data, "Check the values and try again.");
-  }
-
-  function envVarsErrorHtml(status) {
-    return '<div class="empty-state"><h2>Couldn\'t load environment variables</h2><p>' +
-      esc(envVarsFailureCopy(status)) +
-      '</p><p><button class="btn btn-primary btn-sm" data-env-retry type="button">Retry</button></p></div>';
-  }
-
-  // Pure: one env-var row — the mono key, the scope + secret + write-once chips,
-  // an optional comment, and (for admins) Delete. is_shown_once rows carry an
-  // honest note that they can't be changed in place (a POST would 409); the value
-  // is NEVER shown or revealable. `canWrite` gates the destructive affordance —
-  // a member row renders exactly the same metadata with no Delete button.
-  function envVarRowHtml(v, canWrite) {
-    var chips = '<span class="set-chip">' + esc(envScopeLabel(v)) + "</span>";
-    if (v.is_secret) chips += '<span class="set-chip">Secret</span>';
-    if (v.is_shown_once) chips += '<span class="set-chip">Write-once</span>';
-    var comment = v.comment
-      ? '<div class="set-row-note">' + esc(v.comment) + "</div>"
-      : "";
-    var once = v.is_shown_once
-      ? '<div class="set-row-note">Write-once — its value is sealed. Delete and recreate to change it.</div>'
-      : "";
-    var action = canWrite
-      ? '<button class="btn btn-ghost btn-sm" data-env-delete="' + esc(v.id) +
-          '" data-key="' + esc(v.key) + '" type="button">Delete</button>'
-      : "";
-    return '<div class="set-row">' +
-      '<div class="set-row-main"><div class="set-row-key">' + esc(v.key) + "</div>" +
-        '<div class="set-row-tags">' + chips + "</div>" +
-        comment + once + "</div>" +
-      '<div class="set-row-side">' + action + "</div></div>";
-  }
-
-  // Pure: the add-var form section (admin-only). A single independently-persisted
-  // FORM section, so it owns its own .set-save-row at the card foot (GR33 save
-  // law). Write-only: there is no value read-back anywhere, matching E-03.
-  function envAddFormHtml() {
-    return '<section class="set-section">' +
-      '<h2 class="set-h">Add a variable</h2>' +
-      '<p class="set-purpose">Values are encrypted at rest and never shown again after you save. ' +
-        'Mark a value <b>write-once</b> if it must never be readable or replaceable in place.</p>' +
-      '<div class="field"><label class="label" for="env-key">Key</label>' +
-        '<input class="form-input" id="env-key" type="text" placeholder="DATABASE_URL" autocapitalize="off" autocomplete="off" spellcheck="false" /></div>' +
-      '<div class="field"><label class="label" for="env-value">Value</label>' +
-        '<input class="form-input" id="env-value" type="text" placeholder="Paste the value" autocomplete="off" spellcheck="false" /></div>' +
-      '<div class="field"><label class="label" for="env-scope">Scope</label>' +
-        '<select class="form-input" id="env-scope">' +
-          '<option value="team" selected>Team — every instance</option>' +
-        "</select></div>" +
-      '<label class="set-toggle"><input type="checkbox" id="env-secret" checked /> Secret (mask everywhere it appears)</label>' +
-      '<label class="set-toggle"><input type="checkbox" id="env-once" /> Write-once (can never be read or replaced — only deleted)</label>' +
-      // cch-w22-s3: maxlength MATCHES the column and the changeset (varchar(255)
-      // / validate_length(:comment, max: 255)). Without it the field accepted 256
-      // characters, the changeset accepted them too (it capped at 1000), and the
-      // insert raised Postgrex 22001 — a bare 500 the SPA reported as "Check the
-      // values and try again". The changeset cap is the real gate; this attribute
-      // is the courtesy that stops a person typing past it in the first place.
-      '<div class="field"><label class="label" for="env-comment">Comment (optional)</label>' +
-        '<input class="form-input" id="env-comment" type="text" placeholder="What this is for" autocomplete="off" maxlength="255" /></div>' +
-      '<div class="cm-error" id="env-error" role="alert" hidden><p class="cm-error-msg" id="env-error-msg"></p></div>' +
-      '<div class="set-save-row">' +
-        '<button class="btn btn-primary" id="env-save" type="button">Add variable</button>' +
-      "</div></section>";
-  }
-
-  // Pure: the whole panel body — the existing-vars .set-section (member-readable)
-  // plus, for admins only, the add-var FORM section. `ctx.role` decides write
-  // access via assignableRoles (owner/admin → non-empty; member → empty).
-  function envVarsPanelHtml(vars, ctx) {
-    var canWrite = assignableRoles(ctx.role).length > 0;
-    var out = '<section class="set-section">' +
-      '<h2 class="set-h">Variables</h2>' +
-      // cch-w53-s1 — the injection claim is RETRACTED. The control plane ships
-      // `env:` in every provision claim, but provisioner.JobSpec declares no
-      // `env` json tag and decodes with a bare json.Unmarshal, so the value is
-      // dropped on the floor: nothing running or newly provisioned ever reads
-      // it. Stating storage (true) instead of delivery (false) — and NOT
-      // inventing a redeploy affordance, because no delivery path exists.
-      '<p class="set-purpose">Stored encrypted for your team. Values are not delivered to any instance yet — ' +
-        "nothing running or newly provisioned reads them. Keys are visible; values are sealed once saved.</p>" +
-      (vars.length
-        ? '<div class="set-list">' +
-            vars.map(function (v) { return envVarRowHtml(v, canWrite); }).join("") +
-          "</div>"
-        : '<p class="set-empty">No environment variables yet.' +
-            (canWrite ? " Add one below." : "") + "</p>") +
-      "</section>";
-    if (canWrite) out += envAddFormHtml();
-    return out;
-  }
-
-  // Load the env-vars panel: resolve the team context (reusing membersContext —
-  // both settings pages key off the same /v1/me role), then fetch the rows.
-  function loadEnvVars() {
-    var box = $("#env-body");
-    if (!box) return;
-    box.innerHTML = '<div class="loading">Loading environment variables&hellip;</div>';
-    var ctx = membersContext();
-    if (ctx) { fetchEnvVars(ctx); return; }
-    api("GET", "/v1/me").then(function (r) {
-      // cch-w36-s3, the twin of loadMembers above: a failed role read is not a
-      // teamless account. envVarsErrorHtml carries the honest copy + Retry.
-      if (!absorbMe(r)) {
-        box.innerHTML = envVarsErrorHtml(r.status);
-        var rb0 = box.querySelector("[data-env-retry]");
-        if (rb0) rb0.addEventListener("click", loadEnvVars);
-        return;
-      }
-      var c = membersContext();
-      if (!c) {
-        box.innerHTML = '<div class="empty-state"><h2>No team yet</h2>' +
-          "<p>Your account isn't part of a team, so there are no environment variables.</p></div>";
-        return;
-      }
-      fetchEnvVars(c);
-    });
-  }
-
-  function fetchEnvVars(ctx) {
-    var box = $("#env-body");
-    if (!box) return;
-    api("GET", "/v1/env-vars").then(function (r) {
-      if (box.isConnected === false) return;
-      if (!r.ok) {
-        box.innerHTML = envVarsErrorHtml(r.status);
-        var rb = box.querySelector("[data-env-retry]");
-        if (rb) rb.addEventListener("click", loadEnvVars);
-        return;
-      }
-      var vars = (r.data && r.data.env_vars) || [];
-      box.innerHTML = envVarsPanelHtml(vars, ctx);
-      wireEnvPanel(box, ctx);
-    });
-  }
-
-  function wireEnvPanel(box, ctx) {
-    var save = box.querySelector("#env-save");
-    if (save) save.addEventListener("click", function () { submitEnvVar(ctx); });
-    box.querySelectorAll("[data-env-delete]").forEach(function (b) {
-      b.addEventListener("click", function () {
-        confirmDeleteEnvVar(ctx, b.getAttribute("data-env-delete"), b.getAttribute("data-key"));
-      });
-    });
-  }
-
-  // Create a var: POST /v1/env-vars. On 201 the row is added (value never echoed);
-  // a 409 write_once / 422 renders inline at the form (the honest per-row truth),
-  // never a bare toast.
-  function submitEnvVar(ctx) {
-    var key = ($("#env-key").value || "").trim();
-    var value = $("#env-value").value || "";
-    var errBox = $("#env-error");
-    var errMsg = $("#env-error-msg");
-    function showErr(msg) { if (errMsg) setText(errMsg, msg); if (errBox) show(errBox); }
-    if (!key) { showErr("Enter a key."); return; }
-    var btn = $("#env-save");
-    btn.disabled = true;
-    btn.textContent = "Adding…";
-    if (errBox) hide(errBox);
-    var body = {
-      key: key,
-      value: value,
-      scope: ($("#env-scope") && $("#env-scope").value) || "team",
-      is_secret: !!($("#env-secret") && $("#env-secret").checked),
-      is_shown_once: !!($("#env-once") && $("#env-once").checked),
-      comment: ($("#env-comment") && $("#env-comment").value.trim()) || null,
-    };
-    api("POST", "/v1/env-vars", body).then(function (r) {
-      if (r.status === 201 && r.data && r.data.env_var) {
-        toast({ kind: "success", title: "Variable added" });
-        loadEnvVars();
-        return;
-      }
-      btn.disabled = false;
-      btn.textContent = "Add variable";
-      showErr(envVarWriteFailureCopy(r.status, r.data));
-    });
-  }
-
-  // Delete a var = standard confirm (recoverable by re-adding, but the value is
-  // gone — the confirm copy states that loss). DELETE /v1/env-vars/:id.
-  function confirmDeleteEnvVar(ctx, id, key) {
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Delete variable?</h2>' +
-      // cch-w53-s1 — this used to claim a CONTAINMENT: that the delete took the
-      // value off every box at its next start. Nothing was ever placed on an
-      // instance, so nothing is removed from one; the sheet now scopes the loss
-      // to the stored row, which is all the delete actually touches. The
-      // "can't be recovered" clause is a live pin (smoke.mjs env-populated and
-      // env-write-once-409) — it survives verbatim.
-      '<p class="modal-sub">Deleting <b>' + esc(key || "this variable") + "</b> removes it from your team's stored variables. " +
-        "No instance changes, because nothing delivers these values to an instance today. " +
-        "Its value is sealed, so it can't be recovered — you'd re-enter it to add it back.</p>" +
-      '<div class="modal-actions">' +
-        '<button class="btn" type="button" data-close>Cancel</button>' +
-        '<button class="btn btn-danger" id="env-delete-go" type="button">Delete</button>' +
-      "</div>"
-    );
-    $("#env-delete-go").addEventListener("click", function () {
-      var btn = $("#env-delete-go");
-      btn.disabled = true;
-      btn.textContent = "Deleting…";
-      api("DELETE", "/v1/env-vars/" + encodeURIComponent(id)).then(function (r) {
-        closeModal();
-        if (r.ok) toast({ kind: "success", title: "Variable deleted" });
-        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data, "That variable is still stored — please try again.") });
-        loadEnvVars();
-      });
-    });
-  }
-
   // =========================================================== DEVICE LOGIN (/activate)
   // The browser half of `bp login`'s copy-link device flow (bp-login-ux W1,
   // charter decisions 5/6/10). `bp` prints https://barkpark.cloud/activate + an
@@ -25822,7 +25568,7 @@
       // cch-w38-s1: attachDomain had ZERO assertions in the harness, and its
       // 422 arm was telling a TEAMLESS caller their domain syntax was wrong.
       // Impure (it fetches and paints its inline error), driven the same way
-      // loadMembers/loadEnvVars are.
+      // loadMembers is.
       attachDomain: attachDomain,
       // cch-w40-bl (D870): the domain-attach failure copy, pure now — the inline
       // 422 ternary answered every slug "Only <name>.barkpark.cloud …", discarding
@@ -26132,12 +25878,6 @@
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
-      // G-06 env-vars page: the pure row/panel model + honest failure copy. The
-      // value is sealed forever — envVarRowHtml never renders a reveal affordance;
-      // is_shown_once rows carry the write-once note; canWrite gates Delete only.
-      envScopeLabel: envScopeLabel, envVarsFailureCopy: envVarsFailureCopy,
-      envVarWriteFailureCopy: envVarWriteFailureCopy, envVarRowHtml: envVarRowHtml,
-      envVarsPanelHtml: envVarsPanelHtml, envAddFormHtml: envAddFormHtml,
       // OC7: the registered Settings views, so the quota bar's "Manage plan"
       // recovery route can be proved to land on a real view (never a dead end).
       settingsViews: SETTINGS_VIEWS.slice(),
@@ -26316,7 +26056,7 @@
           loaded: meLoaded, error: meError, fault: meErrorFault,
         };
       },
-      loadMembers: loadMembers, loadEnvVars: loadEnvVars,
+      loadMembers: loadMembers,
       // cch-w67-s4: the formerly-collapsing loaders, exported so the harness can
       // DRIVE their failure arms (the cch-w34-s1 precedent — the collapse lives
       // in the fetch callback, which no pure-helper pin can reach).

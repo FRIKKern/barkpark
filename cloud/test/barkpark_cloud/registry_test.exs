@@ -913,17 +913,6 @@ defmodule BarkparkCloud.RegistryTest do
       assert Registry.transition_deployment_with_site_update("not-a-uuid", "w1", 1, %{}, %{}) ==
                {:error, :not_found}
     end
-
-    test "put_env_var/2 returns :barkpark_not_in_team for a non-UUID barkpark_id instead of raising" do
-      team = team_fixture()
-
-      assert Registry.put_env_var(team, %{
-               "key" => "K",
-               "value" => "v",
-               "scope" => "barkpark",
-               "barkpark_id" => "not-a-uuid"
-             }) == {:error, :barkpark_not_in_team}
-    end
   end
 
   describe "append_provision_step/4 — capped append-only (dwb-14)" do

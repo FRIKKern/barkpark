@@ -44,6 +44,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   alias Barkpark.Plugins.OnixEdit.ApiTests
   alias Barkpark.Plugins.OnixEdit.Cli
   alias Barkpark.Plugins.OnixEdit.CodelistSeeders
+  alias Barkpark.Plugins.OnixEdit.Export
   alias Barkpark.Plugins.OnixEdit.Menu
   alias Barkpark.Plugins.OnixEdit.PluginSettings
   alias Barkpark.Plugins.OnixEdit.Routes
@@ -218,12 +219,49 @@ defmodule Barkpark.Plugins.OnixEdit do
 
   Lazy GenServer — does NOT fetch a token at boot; the first `Auth.token/0`
   call triggers the first fetch.
+
+  Plus a start-only child that resolves `Export.dataset_host/0` once
+  (task-eeabfd9bf3ed8371). This is the plugin-side half of the gh-9531
+  FAIL-CLOSED contract that `Barkpark.Application.start/2` applies to the
+  HOST's deployment literals: a configured-but-malformed `ONIX_DATASET_HOST`
+  must refuse the node at boot rather than surface later as a trading partner
+  ingesting a publisher's catalogue under the wrong RecordReference namespace
+  — visible only downstream, after the records are already keyed by it.
+
+  It lives HERE, not in `application.ex`, because the fresh-install invariant
+  (`Barkpark.Plugin` §Fresh-install invariant) forbids host code naming a
+  removable plugin module: with OnixEdit disabled this callback never runs, so
+  the check simply does not exist on that install. Unset env keeps the
+  historical `barkpark.cloud` literal, so it is a no-op for every deployment
+  that has not opted in.
   """
   @impl Barkpark.Plugin
   def register_workers(_ctx) do
     [
-      Barkpark.Plugins.OnixEdit.Bokbasen.Auth
+      Barkpark.Plugins.OnixEdit.Bokbasen.Auth,
+      %{
+        id: :onixedit_dataset_host_boot_check,
+        start: {__MODULE__, :start_dataset_host_check, []},
+        restart: :temporary
+      }
     ]
+  end
+
+  @doc """
+  Boot-time resolution of the ONIX RecordReference host — the child started by
+  `register_workers/1`.
+
+  Returns `:ignore` on success, so no process lingers: the whole point is the
+  RAISE. `Export.dataset_host/0` raises `ArgumentError` on a
+  configured-but-malformed value, and a child start function that raises takes
+  the supervisor — and with it `Barkpark.Application.start/2` — down. That is
+  what "fails closed" means here: the node refuses to serve rather than emit a
+  publisher's catalogue under our identifier namespace.
+  """
+  @spec start_dataset_host_check() :: :ignore
+  def start_dataset_host_check do
+    _ = Export.dataset_host()
+    :ignore
   end
 
   @doc """

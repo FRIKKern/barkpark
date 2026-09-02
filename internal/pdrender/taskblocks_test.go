@@ -281,3 +281,63 @@ func TestTaskDetailTimeline(t *testing.T) {
 		t.Errorf("detailTimeline with no `timeline` key must return nil, got %#v", got)
 	}
 }
+
+// TestTaskBoardThoughtStateLanes is the ROW-LOSS guard: a considering row and a
+// researching row must reach the board and land in lanes of their OWN.
+//
+// The bug it pins (mob-zb-bl-tui-board-thought-lanes): tlv-s3 widened
+// gridblocks.go's roleForStatus so `considering`/`researching` resolve to their
+// own ladder roles, but its file list omitted taskblocks.go — boardColumns
+// stayed the 5-entry set and Render collects lanes by iterating boardColumns
+// ALONE. So those rows bucketed into roles nobody collects and were SILENTLY
+// DROPPED (before the widening they at least fell back to `open`), making the
+// TUI board strictly worse than it had been.
+//
+// MUTATION PROOF: revert boardColumns to {"open","ready","progress","blocked",
+// "done"} and this test goes RED on the dropped titles; restore the 7 and it is
+// GREEN.
+func TestTaskBoardThoughtStateLanes(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "task-board", Attrs: map[string]any{"snapshot": []any{
+		map[string]any{"title": "weighing it", "status": "considering"},
+		map[string]any{"title": "digging in", "status": "researching"},
+		map[string]any{"title": "shipped", "status": "done"},
+	}}}
+
+	// Narrow enough that the lanes STACK, so every title renders verbatim.
+	got := renderBlock(reg, b, 40)
+	for _, want := range []string{"weighing it", "digging in", "shipped"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("row %q was DROPPED from the board, got:\n%s", want, got)
+		}
+	}
+	// Each thought state gets its OWN lane header (not folded into another).
+	for _, want := range []string{"Considering", "Researching", "Done"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected a %q lane header, got:\n%s", want, got)
+		}
+	}
+	// And the thought-state glyphs come from the shared roleGlyph source.
+	for role, glyph := range map[string]string{"considering": "◌", "researching": "◎"} {
+		if !strings.Contains(got, glyph) {
+			t.Errorf("expected the %s glyph %q on the board, got:\n%s", role, glyph, got)
+		}
+	}
+}
+
+// TestBoardColumnsMatchManifestLadder pins boardColumns to the manifest ladder
+// minus `cancel` — the SAME set react's BOARD_ROLES and Elixir's board_roles/0
+// carry (open ready progress blocked done considering researching), in the same
+// order. A manifest rung added without widening the board reds here.
+func TestBoardColumnsMatchManifestLadder(t *testing.T) {
+	var want []string
+	for _, role := range statusLadder {
+		if role == "cancel" {
+			continue
+		}
+		want = append(want, role)
+	}
+	if strings.Join(boardColumns, ",") != strings.Join(want, ",") {
+		t.Errorf("boardColumns = %v, want the manifest ladder minus cancel: %v", boardColumns, want)
+	}
+}
