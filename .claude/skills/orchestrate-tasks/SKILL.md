@@ -162,6 +162,22 @@ Mac sat at load 52 with builders waiting on a 10-job pipe.
 Run ONE local build throttle, not two: a machine-wide `mix` wrapper on PATH queues every agent;
 a second per-lane wrapper on top of it just splits the queue and hides the contention.
 
+## 2f. Cap WIP across the FLEET, not per lane
+
+Per-lane caps do not bound the fleet: 18 lanes x 6 = 108 possible open PRs against ~10 concurrent
+CI jobs. Throughput is fixed by the runners, so every PR past the point where the pipe stays full
+buys nothing and costs everyone latency — work-in-progress and waiting time move together at a
+fixed service rate.
+
+Measured 2026-09-02: 50 ready PRs, ~10 concurrent jobs, open→merge 139 min median / 434 p90.
+Set the fleet cap at roughly 3-4x the concurrent-job count, not at what the lanes would like:
+3 ready PRs per lane, everything else DRAFT, promote one draft per merge. Exempt a main-red fix,
+a CI-diet PR and a P0 — those unblock others, so holding them behind a cap is backwards.
+
+The lever nobody reaches for first is the right one: a lane that is saturated on FILES is idle
+anyway (§2e), so the drafts cost nothing real. `gh pr ready --undo <pr>` is free; a nine-hour
+queue is not.
+
 ## 3. Improve the system — a standing 1-of-5
 
 Every lead keeps one worker slot for **system improvement**: a trap the lane hit while
