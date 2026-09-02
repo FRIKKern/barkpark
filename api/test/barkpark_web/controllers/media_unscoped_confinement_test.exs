@@ -29,7 +29,7 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
   while breaking every legacy single-tenant install.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile

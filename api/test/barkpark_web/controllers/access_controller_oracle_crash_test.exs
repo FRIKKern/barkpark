@@ -48,7 +48,7 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
   `Repo.uuid_or_nil/1`, and `access_controller_test.exs` already pins
   `GET /v1/access/not-a-uuid` → 404.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

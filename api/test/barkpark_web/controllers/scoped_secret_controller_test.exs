@@ -26,7 +26,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     * AUDIT — scoped reveal/set/delete stamp the acting workspace on the
       audit row (D195).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 

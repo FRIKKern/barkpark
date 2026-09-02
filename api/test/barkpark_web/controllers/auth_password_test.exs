@@ -4,7 +4,7 @@ defmodule BarkparkWeb.AuthPasswordTest do
   `AuthGdprTest`'s shape for `/v1/auth/erase` — same re-auth pattern, same
   "does it actually take effect" style of assertion.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Accounts
 

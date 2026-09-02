@@ -18,7 +18,7 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
   `Accounts.revoke_all_user_sessions/1` so only ONE session is stamped reds the
   stored-row assertions in this file (see the task's mutation evidence).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

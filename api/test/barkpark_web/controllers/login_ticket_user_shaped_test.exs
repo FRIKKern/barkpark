@@ -15,7 +15,7 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
     * user-shaped tickets are single-use like token-shaped ones
     * a body without `email` keeps the legacy token-shaped behavior
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Auth

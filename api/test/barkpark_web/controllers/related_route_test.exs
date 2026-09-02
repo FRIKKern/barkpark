@@ -10,7 +10,7 @@ defmodule BarkparkWeb.RelatedRouteTest do
   project so the flat (Default-scoped) and `/w/default/p/default` mounts see
   the same rows.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo

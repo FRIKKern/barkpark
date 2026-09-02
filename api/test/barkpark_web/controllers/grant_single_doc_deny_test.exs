@@ -21,7 +21,7 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
   `Scope.maybe_scope_to_grants/2`); the deny is un-skipped and LIVE, protecting
   the fix.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
   import Barkpark.AccessFixtures

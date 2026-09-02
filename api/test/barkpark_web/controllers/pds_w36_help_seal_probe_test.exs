@@ -30,7 +30,7 @@ defmodule BarkparkWeb.PdsW36HelpSealProbeTest do
       reds this test. It carries the MIXED case too, so prime's honest positive
       direction is pinned on prime's own route rather than borrowed from C/D.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
 

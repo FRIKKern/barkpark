@@ -28,7 +28,7 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
   positive controls in the same run pin that a legitimate binary param still
   reaches its real (non-500) outcome, so the guards are not blanket refusals.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
 

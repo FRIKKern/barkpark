@@ -12,7 +12,7 @@ defmodule BarkparkWeb.LoginTicketTest do
     * unknown / used / expired all return the SAME failure — no oracle
     * hardening headers on the one-time-link response (no-store, no-referrer)
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [where: 2]
   import Phoenix.LiveViewTest

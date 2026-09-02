@@ -4,7 +4,7 @@ defmodule BarkparkWeb.ShareLinkTest do
   bound item (paper / doc / media), scoped to the LINK's own workspace and
   INDEPENDENT of any section share. Revocable; admin-only management.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Media}
   alias Barkpark.Content.Document

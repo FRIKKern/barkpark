@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.AuthControllerTest do
   @moduledoc "Phase 1 — the /v1/auth HTTP surface (register, login, MFA, sessions)."
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).

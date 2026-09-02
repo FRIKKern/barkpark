@@ -4,7 +4,7 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
   question-id allowlisted, size-capped, honeypotted. Every test posts
   anonymously — the whole point of the `:public_api` bucket.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.RateLimiterSandbox
   import Barkpark.TenancyFixtures

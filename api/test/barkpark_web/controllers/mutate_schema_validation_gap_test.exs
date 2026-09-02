@@ -45,7 +45,7 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
   the follow-on row would be asking someone to build a validator that already
   exists.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Content

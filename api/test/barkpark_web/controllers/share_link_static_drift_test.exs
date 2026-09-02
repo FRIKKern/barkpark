@@ -17,7 +17,7 @@ defmodule BarkparkWeb.ShareLinkStaticDriftTest do
   own verdict on the stored row so a fixture that failed to reach the intended
   population cannot pass silently.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

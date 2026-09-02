@@ -15,7 +15,7 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
        operator gets a `Logger.warning` naming how far the export got. A
        truncated backup must never look complete.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import ExUnit.CaptureLog
 

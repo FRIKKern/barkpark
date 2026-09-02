@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.AuthMagicLinkTest do
   @moduledoc "The passwordless magic-link HTTP surface (era-w2-passwordless)."
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.UserEmailToken

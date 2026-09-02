@@ -25,7 +25,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
   that forgot to thread scope returns the same rows either way. Every test
   below stands up TWO workspaces and asserts across the seam.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.RateLimiterSandbox
   import Barkpark.TenancyFixtures

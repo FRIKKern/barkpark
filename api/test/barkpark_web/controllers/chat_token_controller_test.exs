@@ -27,7 +27,7 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
   reds THE CLOSE (`expected owner_workspace_id=…, got nil`) and CROSS-TENANT
   (leak) — the suite fails for the right reason, not a vacuous green.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, StudioChat, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth

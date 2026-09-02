@@ -15,7 +15,7 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
   The first test below is that gap, driven end to end.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.RateLimiterSandbox
 

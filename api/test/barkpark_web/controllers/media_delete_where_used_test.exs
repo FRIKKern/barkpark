@@ -29,7 +29,7 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
   must still delete (or an operator with a genuinely dead reference is stuck).
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
   alias Barkpark.Content.Document

@@ -42,7 +42,7 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
   here would be the copy that later goes stale and disagrees with it. See the
   pointer comment below the last `describe` block.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.RateLimiterSandbox
 

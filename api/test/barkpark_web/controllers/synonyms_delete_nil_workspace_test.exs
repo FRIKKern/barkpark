@@ -34,7 +34,7 @@ defmodule BarkparkWeb.SynonymsDeleteNilWorkspaceTest do
       `AssignDefaultScope`, answers 200, and the seeded legacy/global row is
       destroyed. Restoring the guard greens it.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

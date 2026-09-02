@@ -49,7 +49,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
   that genuinely exists.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.AccessFixtures
   import Barkpark.TenancyFixtures

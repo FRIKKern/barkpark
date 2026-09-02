@@ -22,7 +22,7 @@ defmodule BarkparkWeb.MediaSynonymsFailClosedTest do
   does NOT assert `row.workspace_id == bound_ws.id` on the 200 path — that own-row
   guarantee only holds once Door 2 is merged (lead verifies at merge).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

@@ -31,7 +31,7 @@ defmodule BarkparkWeb.GraphDraftLeakTest do
   here stays green.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, TenancyFixtures}
 

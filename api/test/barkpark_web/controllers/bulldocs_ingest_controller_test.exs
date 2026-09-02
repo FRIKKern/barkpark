@@ -8,7 +8,7 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
   broadcasts on the per-doc PubSub topic, and that a bad / missing token is
   rejected.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
