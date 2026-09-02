@@ -1,0 +1,1 @@
+The change adds NO new notification producer - it annotates an existing receipt row.

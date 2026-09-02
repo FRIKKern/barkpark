@@ -1,0 +1,1 @@
+The cancel rate over a pinned window is measured with its volume printed beside it, and its effect on any per-delivering_run_id rate is quantified. Evidence: the query, the window, and the counts.

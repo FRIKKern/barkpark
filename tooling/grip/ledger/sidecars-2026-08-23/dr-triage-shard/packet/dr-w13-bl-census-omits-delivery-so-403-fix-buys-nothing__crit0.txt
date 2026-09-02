@@ -1,0 +1,1 @@
+DeployLedger.census/3 emits a :delivery node sourced from DeployLedger.delivery/3, and a test proves the key is present with its window

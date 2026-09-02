@@ -1,0 +1,1 @@
+A cli-v* release is cut whose tag has cd42c10bf as an ancestor, verified with git merge-base --is-ancestor

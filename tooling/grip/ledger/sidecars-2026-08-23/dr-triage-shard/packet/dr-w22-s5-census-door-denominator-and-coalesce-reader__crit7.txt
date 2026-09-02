@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): PR merged, and `bp cloud deployments -o table` re-run against the live control plane with a pinned window shows both the door term and the coalesce refusal, pasted with its as-of instant.

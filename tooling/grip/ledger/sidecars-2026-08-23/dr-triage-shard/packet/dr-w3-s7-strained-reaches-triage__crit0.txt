@@ -1,0 +1,1 @@
+THE FENCE IS LOAD-PER-CORE, NOT SWAP: attentionStatus returns "strained" when load1 >= 2.0 * cpu_cores on >= 2 of the last 3 beats. Swap is NOT a trigger anywhere in the implementation (charter D51: occupancy is a stock, it moved the wrong way against pressure in a live paired series, and five of six boxes have no swap configured at all).

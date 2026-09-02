@@ -1,0 +1,1 @@
+The PR body states the honest severity in these terms: the divergence is LATENT, not live — D467's claim that the two predicates agree on every reachable value is TRUE of origin/main, and what shipped wrong was a comment promising that drift is structurally impossible when a one-line single-limb edit produces it invisibly with the whole suite green.

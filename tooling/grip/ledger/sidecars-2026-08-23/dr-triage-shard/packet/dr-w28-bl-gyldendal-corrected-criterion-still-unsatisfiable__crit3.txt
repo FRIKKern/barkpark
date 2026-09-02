@@ -1,0 +1,1 @@
+The packet's ordering clause reads: NULL admin_token_encrypted FIRST, url SECOND, one BEGIN/COMMIT — and states that nulling url first disarms :admin_credential by erasing its own input (D457, re-verified: provisioning_fqdn_claim/1 is at registry.ex:5501, not the charter's stale 5416-7 cite).

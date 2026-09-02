@@ -1,0 +1,1 @@
+THE THREE STATES ARE DISTINGUISHED AND MUTATION-PROVEN: nil renders as unmeasured, a measured 0.0 renders as a real zero, and a positive rate renders as itself. Evidence: a test table covering all three, plus the mutation that collapses nil into 0.0 and the tests it reds.

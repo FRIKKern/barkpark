@@ -1,0 +1,1 @@
+A retention or growth answer for content_publishes is written down (prune, partition, or an explicit accepted unbounded-growth estimate with the measured row rate)

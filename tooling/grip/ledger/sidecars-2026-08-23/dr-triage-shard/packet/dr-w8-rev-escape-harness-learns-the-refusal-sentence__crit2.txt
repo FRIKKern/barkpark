@@ -1,0 +1,1 @@
+bash scripts/console-path-escape-check.test.sh passes with the new case count stated, and the count is higher than 172.

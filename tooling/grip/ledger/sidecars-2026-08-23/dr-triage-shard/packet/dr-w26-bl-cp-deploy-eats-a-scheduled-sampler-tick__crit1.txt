@@ -1,0 +1,1 @@
+A missing scheduled tick is distinguishable from a stopped worker WITHOUT reading container uptime by hand.

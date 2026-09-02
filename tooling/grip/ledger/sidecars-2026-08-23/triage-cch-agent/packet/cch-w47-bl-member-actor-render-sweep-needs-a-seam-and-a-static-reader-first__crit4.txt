@@ -1,0 +1,1 @@
+Every fence read tests BOTH `el.hidden === true` and `el.hasAttribute("hidden")`, with a test proving a markup-`hidden` control is seen as fenced.

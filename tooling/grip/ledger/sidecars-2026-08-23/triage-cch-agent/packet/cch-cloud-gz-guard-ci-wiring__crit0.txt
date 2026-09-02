@@ -1,0 +1,1 @@
+cloud.yml runs both `bash scripts/cloud-static-gz-guard.sh` and `bash scripts/cloud-static-gz-guard.sh --selftest` in the cloud lane. Evidence: the workflow diff plus a real check-run URL showing both steps executed.

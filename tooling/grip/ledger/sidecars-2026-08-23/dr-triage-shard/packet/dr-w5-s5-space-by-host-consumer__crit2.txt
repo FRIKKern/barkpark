@@ -1,0 +1,1 @@
+The per-root list stays capped at top-10 by bytes and the cadence stays 15 minutes (D58 untouched); the PR body states the measured payload growth against the 1685 B compressed baseline. Evidence: the encoded payload size before and after.

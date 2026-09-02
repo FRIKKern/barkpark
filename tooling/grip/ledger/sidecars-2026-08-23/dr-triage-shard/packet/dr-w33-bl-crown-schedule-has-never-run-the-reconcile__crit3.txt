@@ -1,0 +1,1 @@
+The 100%-postgres-fallback reader state is recorded with its cause (the /v1/deliveries 401 to the WORKER principal) so the wind-down names it as a residual rather than inheriting it silently. Evidence: the READER line from a live run and the ledger row or charter line carrying it.

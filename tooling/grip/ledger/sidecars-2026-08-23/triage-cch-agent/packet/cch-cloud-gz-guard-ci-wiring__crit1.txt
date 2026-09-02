@@ -1,0 +1,1 @@
+CLOUD_PATHS in scripts/cloud-path-escape-check.sh declares cloud/Dockerfile, cloud/.gitignore, cloud/lib/barkpark_cloud/web/router.ex and scripts/cloud-static-gz-guard.sh, so a PR touching any of them dispatches the job instead of skipping it green.

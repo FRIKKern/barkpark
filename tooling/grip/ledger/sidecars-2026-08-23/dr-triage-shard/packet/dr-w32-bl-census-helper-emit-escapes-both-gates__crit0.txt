@@ -1,0 +1,1 @@
+Every private helper whose map reaches census/3's wire is enumerated, and the count of currently-invisible emitted keys is stated as a number rather than an example.

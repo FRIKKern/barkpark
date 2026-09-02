@@ -1,0 +1,1 @@
+The adjacent parity gap is closed or deferred WITH its measurement: cloud router.ex emits `hint:` on 2 lines while `grep -c 'data.hint' cloud/priv/static/app.js` = 0 — the console never reads the one server-authored remedy field the cloud plane does emit. Re-run both counts.

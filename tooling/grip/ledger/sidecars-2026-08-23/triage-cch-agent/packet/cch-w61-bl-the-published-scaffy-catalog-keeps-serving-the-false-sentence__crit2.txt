@@ -1,0 +1,1 @@
+If a publish verb is added, it is proven to LOSE: a catalog document whose description diverges from its committed `.scaffy` source is detectable.

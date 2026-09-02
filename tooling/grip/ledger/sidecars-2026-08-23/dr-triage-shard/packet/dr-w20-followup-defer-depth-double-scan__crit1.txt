@@ -1,0 +1,1 @@
+If taken: current_deferral_depth/1 threads the list it already fetched into the same-cause count, and auto_deploy_worker_test.exs still proves the depth-derived windows (1->60, 2->120, cap 240) unchanged.

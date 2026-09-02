@@ -1,0 +1,1 @@
+Render policy is unchanged — the runway Dismiss stays OMIT for an unauthorised caller per D428, never a disabled ghost. Evidence: the render-site diff (or its absence) and the six plain-member smoke scenarios still green.

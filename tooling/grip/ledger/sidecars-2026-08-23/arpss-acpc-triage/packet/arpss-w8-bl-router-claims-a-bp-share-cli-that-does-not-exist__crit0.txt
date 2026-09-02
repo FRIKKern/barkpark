@@ -1,0 +1,1 @@
+router.ex no longer claims a `bp share` CLI consumer that does not exist, OR the command exists and is registered in the capabilities manifest. Evidence: the diff, plus the grep over internal/ that motivated it.

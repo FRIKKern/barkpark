@@ -1,0 +1,1 @@
+The post-regime drain distribution is re-taken after 2026-08-07T22:19Z (24h past the boundary) and again at 72h, using the recipe in tooling/grip/ledger/post-regime-drain-stability-2026-08-07.md, with n, p50, p95, max and the uncensored no_live_1h count recorded

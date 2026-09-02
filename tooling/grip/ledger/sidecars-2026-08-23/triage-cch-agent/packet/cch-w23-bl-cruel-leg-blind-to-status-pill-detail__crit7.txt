@@ -1,0 +1,1 @@
+NO REGRESSION ACROSS THE ESTATE: `node cloud/priv/static/__preview__/overflow-guard.mjs` with no --defect exits 0. Quote the OVERFLOW GUARD PASS line naming every leg.

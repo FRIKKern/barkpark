@@ -1,0 +1,1 @@
+renderDeployDelivery is shown printing a real measurement against a fixture carrying the key, so its null arm is no longer the only reachable arm

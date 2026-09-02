@@ -1,0 +1,1 @@
+A cross-epic ruling is recorded with cloud-console-hardening: either the list route is re-tiered to the read-ability tier, or automation access is deliberately refused with the reason written down

@@ -1,0 +1,1 @@
+A team-scoped read exists for its own notification_deliveries rows (route + tier pasted), or the gap is ruled closed with a defended reason

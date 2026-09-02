@@ -1,0 +1,1 @@
+A paired test asserts the ?view=brief child_count equals GET /v1/tasks/<epic>'s child_count for a twinned epic.

@@ -1,0 +1,1 @@
+scripts/format-drift-ceiling.sh carries a min-files plausibility floor mirroring GO_CEILING_MIN_FILES and fails closed BEFORE trusting any count.

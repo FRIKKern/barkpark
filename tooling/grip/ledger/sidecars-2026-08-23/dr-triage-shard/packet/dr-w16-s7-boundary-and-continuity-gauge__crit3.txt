@@ -1,0 +1,1 @@
+THE CORRECTED CONTINUITY PREDICATE FIRES ON SPECIMEN (a): on a two-window fixture built from prod's 08-01 and 08-06 daily shape (2217/284/1933/0 and 2205/566/866/773), it reports BOX_BUSY_409 with share_before ~76.68% OF ATTEMPTS, share_after 0.0 and verdict :renamed. Paste the assertion and the run

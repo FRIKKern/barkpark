@@ -208,12 +208,15 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
     end
 
     test "unknown functions keep the file's cached value and gain stale (bound grill decision)" do
+      # `NOTAFUNC` is a name no spreadsheet has — the point of this test is the
+      # UNKNOWN-name path, and a real Excel name (this said `NPV`) stops being
+      # unknown the moment the engine implements it.
       content =
-        [%Sheet{name: "Calc", rows: [[[{:formula, "NPV(0.1,A2:A9)", value: 123.45}]]]}]
+        [%Sheet{name: "Calc", rows: [[[{:formula, "NOTAFUNC(0.1,A2:A9)", value: 123.45}]]]}]
         |> write_xlsx()
         |> import!()
 
-      assert cell(content, 0, "A1") == %{"f" => "NPV(0.1,A2:A9)", "v" => 123.45}
+      assert cell(content, 0, "A1") == %{"f" => "NOTAFUNC(0.1,A2:A9)", "v" => 123.45}
 
       recomputed = Engine.recompute(content)
 
@@ -222,10 +225,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       # re-evaluated so the surfaces can say so out loud.
       assert get_in(recomputed, ["tabs", Access.at(0), "cells", "A1"]) ==
                %{
-                 "f" => "NPV(0.1,A2:A9)",
+                 "f" => "NOTAFUNC(0.1,A2:A9)",
                  "v" => 123.45,
                  "stale" => true,
-                 "stale_fn" => "NPV"
+                 "stale_fn" => "NOTAFUNC"
                }
     end
 

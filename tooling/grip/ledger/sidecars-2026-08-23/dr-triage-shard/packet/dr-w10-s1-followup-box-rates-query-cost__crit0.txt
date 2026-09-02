@@ -1,0 +1,1 @@
+EXPLAIN (ANALYZE, BUFFERS) output for box_rates/3 on the live corpus is quoted with ms and buffers

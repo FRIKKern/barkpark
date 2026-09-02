@@ -1,0 +1,1 @@
+The Updates panel renders the MEASURED reason when update_state is unknown and update_unavailable_reason is present, instead of the blank Unknown pill. Quote the before/after strings.

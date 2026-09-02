@@ -1,0 +1,1 @@
+All six --admin-prescribing memory files are rewritten to the new merge verb, with pr-task-gate-lease-lapse.md rewritten to the landed lease predicate rather than to --admin. Evidence: the six diffs.

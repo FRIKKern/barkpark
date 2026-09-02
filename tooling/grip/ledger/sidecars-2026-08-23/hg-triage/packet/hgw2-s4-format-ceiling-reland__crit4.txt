@@ -1,0 +1,1 @@
+--selftest EXISTS and is not swallowed (its output differs from a bare run), carries the Go sibling's four cases including rostered-but-clean must RED, and runs as a CI tripwire step mirroring go-format.yml:57. Evidence: the output and the workflow step.

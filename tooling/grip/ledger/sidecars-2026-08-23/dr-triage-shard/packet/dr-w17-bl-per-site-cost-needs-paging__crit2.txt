@@ -1,0 +1,1 @@
+The deferral framing is the measured one: terminal for the ROW (0 of 2,124 ever set became_live_at) and transient for the SITE in 86.5% of cases (followed by a same-site live within one hour)

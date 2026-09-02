@@ -1,0 +1,1 @@
+The two UPDATEs ran in ONE transaction with admin_token_encrypted nulled FIRST and url second; paste the psql transcript including the BEGIN/COMMIT and the before-state SELECT.

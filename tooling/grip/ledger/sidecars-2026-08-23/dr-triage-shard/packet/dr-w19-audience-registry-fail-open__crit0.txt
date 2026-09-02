@@ -1,0 +1,1 @@
+A candidate deploy-health signal set is DERIVED from source (Go client methods + notifications senders), not hand-listed, and the derivation is mutation-proven to shrink when the source changes.

@@ -1,0 +1,1 @@
+A test feeds a deliberately unmapped state and asserts the attention bucket; it REDS if the defensive fallback is removed

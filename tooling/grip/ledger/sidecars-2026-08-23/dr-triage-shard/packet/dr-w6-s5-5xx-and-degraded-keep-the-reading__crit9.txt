@@ -1,0 +1,1 @@
+The diff touches no ceded or foreign surface. Evidence: `git diff --name-only origin/main...HEAD` pasted in full, with zero entries under `cloud/priv/static/`, `internal/cloudclient/` or `internal/semrole/`.

@@ -1,0 +1,1 @@
+A ruling is recorded: either the population is still empty and the alert stays filed, or a threshold is DERIVED from the re-taken distribution naming its unit, window and regime

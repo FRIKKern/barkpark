@@ -1,0 +1,1 @@
+Web reader (.bp-paper-surface) and editor body render paper blocks with zero vertical margins; an empty paragraph block renders at exactly 1lh and N consecutive spacers render as N rows (never collapsed)

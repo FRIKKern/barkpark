@@ -1,0 +1,1 @@
+`ErrorJSON.render/2` matches `%DBConnection.ConnectionError{}` off `assigns.reason` and answers a named class instead of the `unknown error` constant. Evidence: a test driving a raised ConnectionError through the real error path and asserting the rendered body.

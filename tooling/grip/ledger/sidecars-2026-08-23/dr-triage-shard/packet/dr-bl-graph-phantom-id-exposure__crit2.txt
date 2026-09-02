@@ -1,0 +1,1 @@
+The ruling is written onto this row either way, and the visible_schemas/2 comment in api/lib/barkpark_web/controllers/tasks_controller.ex is updated to cite the measurement rather than the shipped-as-is argument it currently rests on.

@@ -1,0 +1,1 @@
+The script's blindness outside api/lib and api/test is either fixed or stated in the header, naming api/priv/repo/migrations as the known-uncovered drifted file. Evidence: the diff or the header text.

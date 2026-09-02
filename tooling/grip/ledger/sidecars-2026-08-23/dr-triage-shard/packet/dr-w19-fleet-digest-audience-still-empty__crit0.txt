@@ -1,0 +1,1 @@
+deliver_fleet_digest/1 resolves a NON-EMPTY recipient population that does not depend on the :platform_admin_emails allowlist (config.exs:370 defaults to []), and a test asserts a digest addressed to at least one reachable recipient on a fixture with PLATFORM_ADMIN_EMAILS unset — the exact prod condition. Evidence: the test name and the run.

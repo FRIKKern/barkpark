@@ -1,0 +1,1 @@
+cloud/lib/barkpark_cloud/sites/deploy.ex stage_caption/2 non-failed arm is a single FailureCopy.raw/1 call, and grep over cloud/lib finds ZERO remaining hand-rolled strip_ansi-then-scrub pipes.

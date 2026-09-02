@@ -1,0 +1,1 @@
+Each of the four fully-paid rows is closed with its receipt named (the SHA or PR that paid it), and each close states that the headline describes a REPAIRED defect so a future title-keyed sweep does not resurrect it.

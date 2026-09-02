@@ -1,0 +1,1 @@
+The PR body / paper states whether the rate is explained ENTIRELY by the shared pool (in which case this row folds into `jpf-bl-oban-pool-partition`) or whether the route itself is doing something the other families are not.

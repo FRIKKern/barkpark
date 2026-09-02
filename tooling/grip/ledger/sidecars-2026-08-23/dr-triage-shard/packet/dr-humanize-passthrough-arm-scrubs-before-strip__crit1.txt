@@ -1,0 +1,1 @@
+A test proves the pass-through arm no longer leaks a colourised, non-prefixed, sub-32-char secret through humanize/1, and that a MATCHED class arm renders its literal unchanged.

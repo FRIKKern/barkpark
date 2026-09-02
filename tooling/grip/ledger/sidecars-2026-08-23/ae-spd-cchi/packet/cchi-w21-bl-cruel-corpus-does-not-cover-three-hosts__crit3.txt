@@ -1,0 +1,1 @@
+THE GATE IS TAUGHT IN THE SAME COMMIT: the bare breakpoint-sweep exits 0, not 2, with the new content present.

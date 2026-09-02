@@ -1,0 +1,1 @@
+The gap is DRIVEN before it is fixed: a test dispatches trial_expiring with a real detail payload and asserts the chat body today carries none of it.

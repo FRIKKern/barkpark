@@ -1,0 +1,1 @@
+A test drives door_census/0 with NO census table present and asserts every measurement is nil while capacity still renders

@@ -1,0 +1,1 @@
+A human decides whether PLATFORM_ADMIN_EMAILS should be set on prod, and records the decision either way

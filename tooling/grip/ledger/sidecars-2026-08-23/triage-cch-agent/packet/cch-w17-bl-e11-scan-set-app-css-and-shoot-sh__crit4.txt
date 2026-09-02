@@ -1,0 +1,1 @@
+The edits are behaviourally inert: `git diff cloud/priv/static/app.css` touches comment lines only and no declaration, `node cloud/priv/static/__preview__/cssom-parity.mjs` exits 0 with MISSES 0 and the baseline line unchanged, and `node --test cloud/priv/static/__app.test.mjs` exits 0. Evidence: the diff plus both runs.

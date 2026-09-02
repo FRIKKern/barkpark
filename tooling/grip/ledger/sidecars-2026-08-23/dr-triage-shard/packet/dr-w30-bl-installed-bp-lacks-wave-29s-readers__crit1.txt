@@ -1,0 +1,1 @@
+That guard is proven ABLE TO LOSE: with a fresh binary it passes, with a stale one it reds. Evidence: both runs.

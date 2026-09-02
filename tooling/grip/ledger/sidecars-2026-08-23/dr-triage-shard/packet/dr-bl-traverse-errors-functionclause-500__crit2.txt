@@ -1,0 +1,1 @@
+A fresh journal scan after dr-w31-s1 is live shows the FunctionClauseError family count moving toward zero (before/after numbers, same window length).

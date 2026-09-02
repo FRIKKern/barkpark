@@ -1,0 +1,1 @@
+The PR body states that the filed 'first committed vertical assertion' premise was FALSE (overflow-guard.mjs:984/:1091/:1201 and breakpoint-sweep.mjs:1453 already assert vertical shapes) and that the real gap was the absence of any PHONE width on the sweep's axis.

@@ -1,0 +1,1 @@
+A staleness verdict reaches the user from OUTSIDE the installed binary — a server-side signal on an authenticated call or in the capabilities manifest — and a stale client demonstrably surfaces it

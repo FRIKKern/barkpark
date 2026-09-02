@@ -1,0 +1,1 @@
+A site at n=1 prints a refusal, not 100% — paste it

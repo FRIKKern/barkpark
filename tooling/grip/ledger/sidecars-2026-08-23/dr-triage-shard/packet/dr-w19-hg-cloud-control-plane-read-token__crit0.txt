@@ -1,0 +1,1 @@
+A control-plane read credential is armed as a GitHub Actions secret (working name BARKPARK_CLOUD_READ_TOKEN) and proven to read `bp cloud webhook list guerrilla --dataset production -o json` from a runner.

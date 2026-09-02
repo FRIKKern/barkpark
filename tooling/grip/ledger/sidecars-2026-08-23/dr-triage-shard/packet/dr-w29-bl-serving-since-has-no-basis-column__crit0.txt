@@ -1,0 +1,1 @@
+`platform_deliveries` carries the basis that produced each row's `serving_since`, written by the recorder, with the two live values distinguished. Evidence: the migration plus a live row of each target.

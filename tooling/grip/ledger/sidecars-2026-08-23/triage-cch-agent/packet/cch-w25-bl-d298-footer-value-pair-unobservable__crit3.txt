@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this criterion, never the builder): merged to main, MERGE sha from gh pr view <n> --json mergeCommit, confirmed by git merge-base --is-ancestor.

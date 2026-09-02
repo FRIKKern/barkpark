@@ -1,0 +1,1 @@
+The guard runs in CI in a job that cannot skip on the change it measures (the deliberately unfiltered path-escape job, charter D26) — quote the workflow step and the run.

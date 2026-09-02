@@ -1,0 +1,1 @@
+FAIL-BEFORE: the client assertion is shown RED against origin/main and GREEN after.

@@ -1,0 +1,1 @@
+The frozen-classification consequence is stated: a future taxonomy repair will not retroactively apply to post-2026-08-07 deferred rows

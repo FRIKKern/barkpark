@@ -1,0 +1,1 @@
+A ruling is written: ROUTE is either admitted into @stage_names (a D346 doctrine change that must also move dr-w21-s5's ExUnit pin) or given a named sibling channel. The ruling states which, and why.

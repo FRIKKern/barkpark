@@ -1,0 +1,1 @@
+The status is reconsidered honestly: a pool that could not lend a connection is a 503 with a Retry-After, not a 500 -- or, if 500 is kept, the PR body says why.

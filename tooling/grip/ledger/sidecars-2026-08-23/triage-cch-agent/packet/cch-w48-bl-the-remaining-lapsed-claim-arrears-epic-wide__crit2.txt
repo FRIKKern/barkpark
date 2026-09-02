@@ -1,0 +1,1 @@
+Rows that were NEVER claimed (claim.worker null AND previous_worker null, e.g. 0/9 and 0/8) are left OPEN and the PR says why — closing them as paid would be the D85 fabrication pattern.

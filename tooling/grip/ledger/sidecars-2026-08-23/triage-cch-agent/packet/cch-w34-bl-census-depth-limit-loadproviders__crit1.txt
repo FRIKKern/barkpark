@@ -1,0 +1,1 @@
+The new depth is RE-BASELINED: the pinned allowlist is regenerated and every newly-surfaced site is either fixed or filed with a task id in its allowlist comment. Evidence: the allowlist diff.

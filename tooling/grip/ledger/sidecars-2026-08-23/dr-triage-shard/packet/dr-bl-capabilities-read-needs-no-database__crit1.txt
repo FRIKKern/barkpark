@@ -1,0 +1,1 @@
+get_default_project/0 no longer re-invokes get_default_workspace/0 — the redundant second round-trip is removed regardless of caching.

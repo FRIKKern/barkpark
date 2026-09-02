@@ -1,0 +1,1 @@
+continue-on-error is REMOVED from the Sobelow job

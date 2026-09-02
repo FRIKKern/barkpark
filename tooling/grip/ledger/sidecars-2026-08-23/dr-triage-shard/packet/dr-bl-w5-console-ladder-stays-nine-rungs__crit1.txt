@@ -1,0 +1,1 @@
+The ladder lands in ONE commit: `ATTENTION_RANK`, `bucketOf`'s two thresholds, a `classifyBp` arm, a `statusOf` arm, a pure `strainedOf(bp)`/`fillingOf(bp)` reading `bp.pressure`, plus `KINDS` + the `REP` fixture row + the rank assertions in `__app.test.mjs`.

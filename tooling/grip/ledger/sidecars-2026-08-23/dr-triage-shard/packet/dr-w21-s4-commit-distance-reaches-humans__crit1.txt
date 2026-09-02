@@ -1,0 +1,1 @@
+barkpark_json/4 emits commit_distance, commit_ancestry and commit_distance_checked_at on GET /v1/barkparks. A route-level test (a conn, not a hand-built fixture) asserts the keys and REDS if the emission is deleted.

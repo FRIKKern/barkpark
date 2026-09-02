@@ -1,0 +1,1 @@
+REVERT-RED: reverting the slot fill makes the new test fail on a named line, and the failing output is quoted.

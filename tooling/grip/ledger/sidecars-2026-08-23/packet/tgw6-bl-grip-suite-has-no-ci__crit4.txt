@@ -1,0 +1,1 @@
+GRIP_LIVE is left UNSET and the PR body names why `# skipped 1` is an environment assertion (rerun.test.mjs:789) that a GRIP_LIVE=1 job would invert. Evidence: paste the skip line and the note.

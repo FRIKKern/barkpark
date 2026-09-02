@@ -1,0 +1,1 @@
+Every workflow's self-description of its own blocking authority is derived from .github/required-checks.json rather than hand-written, so a spec flip cannot strand a stale sentence. Evidence: the mechanism and the diff.

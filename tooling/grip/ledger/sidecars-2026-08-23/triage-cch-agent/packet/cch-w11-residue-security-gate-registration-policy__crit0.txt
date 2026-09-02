@@ -1,0 +1,1 @@
+An advisory-red policy is written down in the repo (who bumps, within what window, what the break-glass is while a fleet-wide advisory red stands) and is referenced from .github/required-checks.json's _readme.

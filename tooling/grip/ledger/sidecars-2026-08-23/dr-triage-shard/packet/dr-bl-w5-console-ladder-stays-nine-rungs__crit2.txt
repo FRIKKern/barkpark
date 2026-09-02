@@ -1,0 +1,1 @@
+The node harness is green at its CURRENT count (914 on origin/main -- the charter's older citation of 887 is stale) and the bucket counts are UNCHANGED from today's.

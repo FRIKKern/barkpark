@@ -1,0 +1,1 @@
+`bp cloud deliveries <sha>` renders merged / queued-behind-our-own-group / built / serving / delivering run id in `-o table`, and a Go test asserts on the RENDERED table bytes, not on the struct.

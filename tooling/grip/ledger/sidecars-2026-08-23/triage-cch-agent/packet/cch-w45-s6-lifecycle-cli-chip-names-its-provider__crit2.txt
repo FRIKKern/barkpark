@@ -1,0 +1,1 @@
+Both pins are UPDATED to the flagged strings and remain exact-equality assertions — neither was relaxed to a substring or regex check (show the two diff hunks).

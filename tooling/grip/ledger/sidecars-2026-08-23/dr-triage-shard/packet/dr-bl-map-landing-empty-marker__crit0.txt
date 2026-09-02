@@ -1,0 +1,1 @@
+The listings read carries its upstream status out of any catch instead of discarding it, mirroring lib/graph.ts.

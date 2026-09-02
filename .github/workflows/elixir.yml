@@ -907,7 +907,7 @@ jobs:
     # editing it recompiles). Strictly narrower than the test set.
     #
     # NO `needs: mix-test`. There was never a correctness edge — own checkout,
-    # own `rm -rf _build/prod`, a disjoint cache namespace, no artifact hand-off
+    # own build tree in a disjoint cache namespace, no artifact hand-off
     # (`validation-perf` is the live precedent) — it only serialised 177s onto
     # the critical path (16m36s → 13m39s) and MANUFACTURED hazard (3) of charter
     # D19: a skip meaning "upstream died" rather than "not needed". With the
@@ -940,7 +940,7 @@ jobs:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
 
-      - name: Cache deps (prod build is intentionally NOT cached)
+      - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v4
         with:
           path: api/deps
@@ -948,15 +948,110 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-prod-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
 
-      - name: Clean prod build (Golden Rule #1 — no partial cleans)
-        run: rm -rf _build/prod
-        env:
-          MIX_ENV: prod
+      # ── THE DEPENDENCY BUILD CACHE, AND WHY IT IS NOT PAST MISTAKE #1 ──
+      #
+      # Read the CLAUDE.md rules this looks like it breaks before touching it.
+      # Golden Rule #1 says never compile without cleaning `_build/prod` first;
+      # Past Mistake #1 records a partial clean that left stale HEEx in the
+      # Layouts module and served old HTML for hours; Past Mistake #2 records a
+      # missing `mix deps.compile --force` that left `Plug.Exception` undefined
+      # at runtime. Every one of those describes the production SERVER, where a
+      # stale module was SERVED to users. This is a CI runner whose only output
+      # is an exit code, and — the part that actually matters — the thing that
+      # went stale in Past Mistake #1 was OUR OWN module, which this cache never
+      # restores. The application still compiles from nothing on every run
+      # (`mix compile --warnings-as-errors` below sees an empty tree for
+      # `barkpark`); only `_build/prod/lib/<dep>` comes back, and a dependency's
+      # compiled output is a pure function of runner OS, OTP, Elixir and
+      # mix.lock — which is exactly this key. The rules stay; this is not the
+      # case they are about, and the two claims in that sentence are ENFORCED by
+      # scripts/prod-build-cache-guard.sh a few steps down rather than promised
+      # here. Do not "fix" this back to an unconditional full rebuild. MEASURED
+      # 2026-09-02 from step timestamps, medians: 176.5s over the 10 most recent
+      # completed main runs before this change, 112.0s over 10 replica jobs on
+      # the cached path, with `mix deps.compile` falling 83.5s -> 11.0s. The
+      # fallback path was measured on the same instrument and costs nothing:
+      # 177.0s over 10 cache-MISS replicas, i.e. within noise of the 176.5s it
+      # replaces, so a cold cache is never a regression.
+      #
+      # NO `restore-keys:`, unlike the sources cache above. A prefix match would
+      # hand this job dependency BEAM compiled from a DIFFERENT mix.lock; the
+      # completeness arm of the guard would still pass (all the names are there)
+      # and `mix deps.compile` would trust the manifests. Exact key or nothing.
+      - name: Restore compiled dependency artifacts (prod)
+        id: prod_dep_build
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/prod/lib
+          key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps (prod)
         run: mix deps.get
         env:
           MIX_ENV: prod
+
+      # DISTRUST VACUOUS GREEN — run the tripwire's own mutation harness
+      # BEFORE trusting the verdict it hands this job. 11 cases, ~0.2s: it
+      # plants an `Elixir.Barkpark.Stale.beam` inside an allowlisted
+      # dependency's ebin and asserts the guard REDS, deletes one dependency's
+      # directory and asserts it FALLS BACK rather than passing, and shrinks
+      # each input list to nothing and asserts neither shrink can produce a
+      # pass. A tripwire nobody has watched fail is not a tripwire, and one
+      # proven only once at authoring time is not one either — so it is proven
+      # on every run of the gate it protects.
+      - name: Prove the tripwire can fail (guard --selftest)
+        run: bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        working-directory: .
+
+      # THE TRIPWIRE. Two arms, and the job is not allowed to proceed on a
+      # tree that fails either:
+      #   * contamination — a directory not named in mix.lock, or ANY
+      #     `Elixir.Barkpark*.beam` anywhere under the restored tree. HARD FAIL,
+      #     never a silent clean-up: a tree that can hold one of our modules can
+      #     hold a STALE one, and that is Past Mistake #1 exactly.
+      #   * completeness — every dependency `MIX_ENV=prod mix deps` names must
+      #     have a non-empty ebin. Anything short and we throw the whole tree
+      #     away and take the original `rm -rf _build/prod` + `--force` path,
+      #     saying so in the log. That fallback is what keeps Past Mistake #2
+      #     closed; without it a partial cache silently yields a half-built
+      #     prod tree.
+      # Both input lists are re-derived here on every run and both carry a floor
+      # inside the guard, because a `mix deps` that errored into an empty pipe
+      # would make the completeness check pass over nothing.
+      - name: Audit the restored dependency build tree
+        id: depbuild_audit
+        run: |
+          set -uo pipefail
+          sed -n 's/^  "\([a-z0-9_][a-z0-9_]*\)".*/\1/p' mix.lock | sort -u > "$RUNNER_TEMP/dep-allowlist.txt"
+          # `|| true`: a `mix deps` that fails leaves the required list EMPTY,
+          # which the guard's floor turns into a fallback — never into a
+          # completeness check that passes over nothing.
+          (MIX_ENV=prod mix deps 2>/dev/null || true) \
+            | sed -n 's/^\* \([a-z0-9_][a-z0-9_]*\) .*/\1/p' | sort -u > "$RUNNER_TEMP/dep-required.txt"
+          echo "mix.lock names: $(wc -l < "$RUNNER_TEMP/dep-allowlist.txt")   prod deps: $(wc -l < "$RUNNER_TEMP/dep-required.txt")"
+          # `set +e` is load-bearing: GitHub runs `run:` blocks under
+          # `bash -e`, so without it the guard's non-zero verdicts (3 = fall
+          # back, 1 = contaminated) would kill the step before this script can
+          # tell them apart, and BOTH would surface as the same opaque red.
+          set +e
+          bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" \
+            _build/prod/lib "$RUNNER_TEMP/dep-allowlist.txt" "$RUNNER_TEMP/dep-required.txt"
+          verdict=$?
+          set -e
+          case "$verdict" in
+            0)
+              echo "mode=cached" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "FALLBACK: no usable dependency build cache — taking the full 'rm -rf _build/prod' + 'mix deps.compile --force' path (Past Mistake #2)."
+              rm -rf _build/prod
+              echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::prod dependency build cache is CONTAMINATED (guard exit $verdict) — see the CONTAMINANT lines above"
+              exit 1
+              ;;
+          esac
 
       # THIS IS THE ONLY REMAINING libvips INSTALL, and it is deliberate: it
       # keeps a system libvips available where the prod artifact is compiled,
@@ -965,16 +1060,74 @@ jobs:
       # here rather than discovered in prod. mix-test dropped its copy because
       # vix's default precompiled NIF bundles libvips and that lane never
       # touches the system `vips` binary (`:requires_vips` is default-excluded
-      # there). This job is off the critical path, so its ~37s is free
-      # wall-clock.
+      # there).
+      #
+      # THE OLD COMMENT HERE PRICED THIS STEP AT "~37s of free wall-clock,
+      # because this job is off the critical path". That premise is dead — this
+      # job IS the thing being shrunk — so the step was measured instead of
+      # argued about. MEASURED 2026-09-02, 39s median of 10 completed replica
+      # jobs; four candidate replacements, on branch gates/prod-compile-bench:
+      #
+      #   apt-get update + install ............ 9s + 23s = 32s   passed
+      #   install only, no update ............. 25s              passed
+      #   install --no-install-recommends ..... 7s               FAILED
+      #   download debs to a cache + dpkg -i .. 18s + 21s        FAILED
+      #
+      # AND THEN THE OPTIMISTIC VARIANT WAS MEASURED AT SCALE AND DIED. Skipping
+      # `apt-get update` works only while the runner image's package index is no
+      # older than the archive. The --no-install-recommends job did not fail on
+      # the flag; it 404'd on
+      # `libblkid-dev_2.39.3-9ubuntu6.5_amd64.deb`, apt's own advice being
+      # "maybe run apt-get update", because it landed on image
+      # ubuntu24/20260823.283 while the job that passed landed on 20260831.293 —
+      # same run, same minute, two images. A "try without the refresh, fall back
+      # to it" shape was then run across 20 jobs: 20 of 20 took the fallback,
+      # 0 of 20 found a fresh index. So the speculative attempt costs ~7s of
+      # doomed downloading every time and pays ~9s at a measured rate of about
+      # one run in twenty. It was written, measured, and removed.
+      #
+      # The honest win here is ZERO, and this comment is what that buys: the
+      # next reader gets the number and the date instead of "free wall-clock",
+      # and does not spend the afternoon rediscovering the 404. Do not delete
+      # the install to make the number smaller — see the first paragraph.
       - name: Install libvips for media renditions (Phase 1)
         run: sudo apt-get update && sudo apt-get install -y libvips-dev
         working-directory: .
 
-      - name: Force-recompile deps (prod)
-        run: mix deps.compile --force
+      - name: Compile deps (prod)
+        # Two paths, one step, so the before/after step timings stay comparable.
+        # `--force` is NOT gone: it is what the fallback runs, and the fallback
+        # is what the audit step selects whenever the restored tree is anything
+        # less than complete.
+        run: |
+          if [ "${{ steps.depbuild_audit.outputs.mode }}" = "cached" ]; then
+            echo "Dependency build tree restored and audited dependency-only + complete."
+            mix deps.compile
+          else
+            echo "No usable dependency build cache — full forced rebuild."
+            mix deps.compile --force
+          fi
         env:
           MIX_ENV: prod
+
+      # SAVED HERE, BEFORE `mix compile`, ON PURPOSE. This is the one moment in
+      # the job at which the tree provably holds dependency artifacts and
+      # nothing else — our application has not been compiled yet. Saving in a
+      # post-job hook instead would archive `_build/prod/lib/barkpark` along
+      # with everything else and poison the next run's cache; the tripwire above
+      # would catch it, but catching it every run is not a design.
+      - name: Drop our own application's build dir before saving
+        if: steps.depbuild_audit.outputs.mode == 'rebuild'
+        # `mix deps.compile` creates the app's own (empty) build dir as a side
+        # effect. It is not a dependency, so it must not enter the cache.
+        run: rm -rf _build/prod/lib/barkpark
+
+      - name: Save compiled dependency artifacts (prod)
+        if: steps.depbuild_audit.outputs.mode == 'rebuild'
+        uses: actions/cache/save@v4
+        with:
+          path: api/_build/prod/lib
+          key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Prod compile (--warnings-as-errors)
         # The gate. If this fails, the PR must be fixed before merge.

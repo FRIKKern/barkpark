@@ -1,0 +1,1 @@
+The coalesce term renders its live REFUSAL and reason, never a `0`. The PR body pastes the rendered line showing `refused` and the `since 2026-08-07T10:02:23Z` boundary.

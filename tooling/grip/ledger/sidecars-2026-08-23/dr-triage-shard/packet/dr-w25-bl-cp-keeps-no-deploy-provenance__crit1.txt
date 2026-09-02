@@ -1,0 +1,1 @@
+A question of the form 'which sha was the control plane serving at <timestamp> three months ago' is answerable. Demonstrate it.

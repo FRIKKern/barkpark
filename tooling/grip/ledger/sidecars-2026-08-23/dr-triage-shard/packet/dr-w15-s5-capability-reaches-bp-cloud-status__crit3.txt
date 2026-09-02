@@ -1,0 +1,1 @@
+git_commit renders in bp cloud status in BOTH the human table and -o json, proving the free win; paste both renderings

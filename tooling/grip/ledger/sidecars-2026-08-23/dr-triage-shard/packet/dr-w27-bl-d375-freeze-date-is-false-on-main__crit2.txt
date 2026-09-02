@@ -1,0 +1,1 @@
+The step-function shape (per-day rows/failed) is recorded so nobody re-reads the collapse as a single-instant freeze.

@@ -1,0 +1,1 @@
+A selected record with no matching settled record is detectable (evidence: the query or the run)

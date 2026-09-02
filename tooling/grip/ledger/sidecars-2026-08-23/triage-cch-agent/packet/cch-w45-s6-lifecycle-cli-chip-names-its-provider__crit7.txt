@@ -1,0 +1,1 @@
+node --check cloud/priv/static/app.js passes; node --test cloud/priv/static/__app.test.mjs run FULL-TREE passes; node cloud/priv/static/__css_check.mjs exits 0; node cloud/priv/static/__binding_census.mjs exits 0 and unchanged.

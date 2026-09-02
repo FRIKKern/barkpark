@@ -1,0 +1,1 @@
+Verify the primary checkout is no longer ahead/behind, retained work is recoverable, and the canonical epic-cycle workflow matches origin/main.

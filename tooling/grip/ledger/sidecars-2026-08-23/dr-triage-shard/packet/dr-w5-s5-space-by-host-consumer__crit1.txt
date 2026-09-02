@@ -1,0 +1,1 @@
+Each root reports its OWN total plus its named children, and a root that does not exist reports UNMEASURED (-1 / nil) rather than 0 or an empty list -- the existing discard-never-partially-land branch (report.go:956) must still hold per-root. Evidence: a test with one existing root and one absent root, asserting -1/nil for the absent one.

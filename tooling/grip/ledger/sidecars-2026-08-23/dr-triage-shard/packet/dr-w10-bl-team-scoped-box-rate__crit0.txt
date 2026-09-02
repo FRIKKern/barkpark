@@ -1,0 +1,1 @@
+A team-scoped surface returns a per-box deploy rate with its denominator and absorption to a non-admin token, proved by a live 200 with a plain team session

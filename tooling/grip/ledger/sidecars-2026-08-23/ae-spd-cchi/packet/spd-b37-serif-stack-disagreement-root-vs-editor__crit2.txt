@@ -1,0 +1,1 @@
+Reader, editor, email/web, and measurement fixtures use the ratified token or document their intentional exception, with visual/readability checks in light and dark contexts.

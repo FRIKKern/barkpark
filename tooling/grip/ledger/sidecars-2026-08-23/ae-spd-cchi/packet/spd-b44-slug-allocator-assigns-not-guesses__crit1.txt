@@ -1,0 +1,1 @@
+A create-time near-duplicate check on CONTENT exists and is demonstrated to flag the spd-b27 / spd-b37 pair, which unique slugs did not catch.

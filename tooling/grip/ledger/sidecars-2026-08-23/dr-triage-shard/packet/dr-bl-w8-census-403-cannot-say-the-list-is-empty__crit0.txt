@@ -1,0 +1,1 @@
+The unconfigured branch is split from the not-on-the-list branch and carries an additive evidence key naming the empty allowlist. Evidence: both 403 bodies side by side.

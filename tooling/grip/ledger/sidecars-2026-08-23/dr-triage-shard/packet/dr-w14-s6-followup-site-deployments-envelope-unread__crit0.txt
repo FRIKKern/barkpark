@@ -1,0 +1,1 @@
+internal/cloudclient/client.go:1156's anonymous decode struct is replaced by a NAMED struct carrying next_cursor and publish_clock alongside Deployments, and a test decodes a real envelope body asserting all three are populated. Evidence: the diff and the passing test name.

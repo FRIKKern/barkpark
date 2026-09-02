@@ -1,0 +1,1 @@
+A Go fixture with a chain longer than siteStatusLedgerPage produces the marker, and FAILS when the marker is removed — proven by mutation

@@ -1,0 +1,1 @@
+internal/semrole/semrole_test.go's token table carries 'unavailable' asserting the warn role, and the assertion FAILS when the new case is removed — prove by mutation, not by reading.

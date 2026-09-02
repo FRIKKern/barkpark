@@ -1,0 +1,1 @@
+spd-w18-guard-rings-and-label's merge criterion is closed too (#7900 f1ac08c29), or the reason it cannot be is recorded.

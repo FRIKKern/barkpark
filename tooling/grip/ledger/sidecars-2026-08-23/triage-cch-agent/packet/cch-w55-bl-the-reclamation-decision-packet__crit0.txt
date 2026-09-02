@@ -1,0 +1,1 @@
+The lead records a decision among archive / poweroff / decommission / nothing, with the ordering constraint (a safe automated deprovision is downstream of an archive job kind) explicitly accepted or overruled. Evidence: the decision text and its charter D-row.

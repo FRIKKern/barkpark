@@ -1,0 +1,1 @@
+Both dr-w8-s2 and dr-w8-s6 are merged to main (verified by .mergeCommit.oid ancestry, not by mergeStateStatus).

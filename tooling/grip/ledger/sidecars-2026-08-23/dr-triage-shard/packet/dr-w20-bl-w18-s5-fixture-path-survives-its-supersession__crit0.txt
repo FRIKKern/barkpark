@@ -1,0 +1,1 @@
+dr-w18-s5's criterion 10 (the go-tests.yml fixture-path item) is recovered verbatim from its stored acceptance criteria and checked against today's tree.

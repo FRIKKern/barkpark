@@ -1,0 +1,1 @@
+MUTATION PROOF that the blocking gate can now lose: re-run cch-w55-s2's two mutations — the fixture reverted to the false 'archive it instead' sentence, and the remedy clause re-added to the true sentence — and show __app.test.mjs going NON-ZERO on both. Today both reddened the preview smoke by name while __app.test.mjs stayed rc=0, which is why this row exists.

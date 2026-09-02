@@ -1,0 +1,1 @@
+The fall-through is reproduced on a real overlap: two phx-click elements where the in-flight one covers the other, with the wrong event named in the frame trace (matched on type:click, never counted).

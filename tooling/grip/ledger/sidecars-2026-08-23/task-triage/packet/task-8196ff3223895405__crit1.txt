@@ -1,0 +1,1 @@
+Removing the ratchet leaves the plain gate silent on a dark table AND reds the selftest by name.

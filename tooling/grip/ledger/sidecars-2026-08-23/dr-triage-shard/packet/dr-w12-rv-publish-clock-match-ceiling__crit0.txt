@@ -1,0 +1,1 @@
+The match ceiling is RULED with a measured basis (the distribution of matched wait_seconds on the live corpus), not a round number chosen for looking sensible

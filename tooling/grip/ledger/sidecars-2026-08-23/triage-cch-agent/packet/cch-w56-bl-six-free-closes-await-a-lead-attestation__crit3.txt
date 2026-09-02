@@ -1,0 +1,1 @@
+The open `drafts.` twins of cch-w53-s6 and cch-w54-s1 are discarded so the roster stops carrying them. Evidence: `bp task ls --all` showing the drafts no longer live under the epic.

@@ -1,0 +1,1 @@
+humanize/1's unclassified pass-through no longer leaks: classify stays FIRST, then strip_ansi, then scrub, and the moduledoc's "MUST stay that way" ruling at failure_copy.ex:176 is edited EXPLICITLY rather than contradicted silently.

@@ -1,0 +1,1 @@
+THE ZERO-BLAST CLAIM IS RE-VERIFIED ON YOUR TREE, not inherited: smoke 108 rc 0, breakpoint-sweep still `108 scenarios · 25 distinct covered by 26 cells · 83 residue over 13 families`, sweep.test 51/51, me-envelope 29 rc 0. Evidence: all four outputs.

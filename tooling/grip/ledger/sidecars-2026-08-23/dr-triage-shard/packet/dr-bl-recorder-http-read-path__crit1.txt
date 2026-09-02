@@ -1,0 +1,1 @@
+Scrubbing happens at WRITE, in the order strip_ansi |> scrub, and the stored bytes are already redacted — proven by reading the stored artifact directly, not the rendered response.

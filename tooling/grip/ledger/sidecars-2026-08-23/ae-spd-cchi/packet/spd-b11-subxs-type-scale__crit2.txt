@@ -1,0 +1,1 @@
+A before/after visual comparison at 1440px is recorded for at least three affected surfaces, since no automated gate can see a density change

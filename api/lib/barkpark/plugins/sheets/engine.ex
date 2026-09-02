@@ -168,6 +168,24 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       `VARP`/`STDEVP` (population, `n`). A domain miss — empty input or `k` out
       of range — is `#NUM!`; the variance floors (`VAR`/`STDEV` below two
       values, `VARP`/`STDEVP` below one) are `#DIV/0!`.
+    * Financial — the Excel annuity family. `PMT`, `FV`, `PV` and `NPER`
+      are closed-form solutions of ONE identity,
+      `pv·(1+r)^n + pmt·(1+r·type)·((1+r)^n − 1)/r + fv = 0` (degenerating at
+      `r = 0` to `pv + pmt·n + fv = 0`), each solving it for a different
+      unknown — which is why they share Excel's SIGN CONVENTION: money paid
+      out is negative, money received positive (a loan's `PMT` is negative; a
+      savings plan of negative payments has a positive `FV`). The optional
+      trailing `type` says when a payment lands — `0` end of period (Excel's
+      default), `1` beginning; anything else is `#NUM!`. `RATE` solves the
+      same identity for `r` and has no closed form: Newton–Raphson from
+      `[guess]` (default `0.1`), bounded at 100 steps. The cash-flow pair is
+      `NPV(rate, value…)` — with Excel's off-by-one, `value1` discounted ONE
+      period, not zero — and `IRR(values, [guess])`, NPV's inverse with the
+      first flow at period 0, likewise Newton-bounded. A root that does not
+      exist or is not reached is `#NUM!`, never a raise and never a hang:
+      `IRR` flows that never change sign, an `NPER` term no real `n` reaches,
+      an iterate leaving the domain (`1 + r ≤ 0`), and running out of steps
+      all answer `#NUM!`.
 
   ## Dynamic arrays (array-in / scalar-out, no spill)
 
@@ -488,7 +506,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 XLOOKUP SUMPRODUCT ADDRESS
                 AVERAGEA MAXA MINA GEOMEAN HARMEAN MROUND QUOTIENT JOIN
                 NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC
-                TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK)
+                TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK
+                PMT FV PV NPV IRR RATE NPER)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
   @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
@@ -1060,6 +1079,72 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         "YEARFRAC",
         [farg("start_date"), farg("end_date"), fopt("basis")],
         "Returns the fraction of a year between two dates."
+      ),
+      fspec(
+        "PMT",
+        [
+          farg("rate"),
+          farg("number_of_periods"),
+          farg("present_value"),
+          fopt("future_value"),
+          fopt("end_or_beginning")
+        ],
+        "Returns the periodic payment for an annuity."
+      ),
+      fspec(
+        "FV",
+        [
+          farg("rate"),
+          farg("number_of_periods"),
+          farg("payment_amount"),
+          fopt("present_value"),
+          fopt("end_or_beginning")
+        ],
+        "Returns the future value of an annuity."
+      ),
+      fspec(
+        "PV",
+        [
+          farg("rate"),
+          farg("number_of_periods"),
+          farg("payment_amount"),
+          fopt("future_value"),
+          fopt("end_or_beginning")
+        ],
+        "Returns the present value of an annuity."
+      ),
+      fspec(
+        "NPER",
+        [
+          farg("rate"),
+          farg("payment_amount"),
+          farg("present_value"),
+          fopt("future_value"),
+          fopt("end_or_beginning")
+        ],
+        "Returns the number of payment periods for an annuity."
+      ),
+      fspec(
+        "NPV",
+        [farg("discount"), farg("cashflow1"), frest("cashflow2")],
+        "Returns the net present value of a series of future cash flows."
+      ),
+      fspec(
+        "IRR",
+        [farg("cashflow_amounts"), fopt("rate_guess")],
+        "Returns the internal rate of return of a series of cash flows."
+      ),
+      fspec(
+        "RATE",
+        [
+          farg("number_of_periods"),
+          farg("payment_per_period"),
+          farg("present_value"),
+          fopt("future_value"),
+          fopt("end_or_beginning"),
+          fopt("rate_guess")
+        ],
+        "Returns the interest rate per period of an annuity."
       )
     ]
   end
@@ -3999,7 +4084,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # mid-bar row; a scalar arg is a 1-cell series. The result is a plain binary,
   # so `output/1` types it "s" and it rides every surface as a display string.
   defp call("SPARKLINE", [arg], ctx) do
-    case sparkline_series(arg, ctx) do
+    case numeric_series(arg, ctx) do
       {:error, _} = e -> e
       nums -> sparkline_bars(nums)
     end
@@ -4556,8 +4641,280 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # ── financial: the Excel annuity family ─────────────────────────────────────
+  #
+  # ONE identity underlies PMT / FV / PV / NPER / RATE — Excel's own:
+  #
+  #     pv·(1+r)^n  +  pmt·(1+r·type)·((1+r)^n − 1)/r  +  fv  =  0
+  #
+  # degenerating at r = 0 to `pv + pmt·n + fv = 0`. Each of the five solves it
+  # for a different unknown, which is why they share the SIGN CONVENTION: money
+  # paid OUT is negative, money received positive. `type` picks when a payment
+  # lands (0 end of period — the default; 1 beginning); Excel makes any other
+  # `type` a #NUM!, and so does this, rather than truncating it silently.
+  #
+  # PMT/FV/PV/NPER are closed forms. RATE and IRR have no closed form and run
+  # Newton–Raphson bounded at @fin_max_iter steps: every exit that is not a
+  # converged root — the iterate leaving the domain (1+r ≤ 0), a flat
+  # derivative, a float blow-up, or simply running out of steps — is #NUM!.
+  # Nothing here can raise and nothing here can spin: recompute stays total.
+  @fin_max_iter 100
+  @fin_tol 1.0e-12
+
+  defp call("PMT", [r, n, pv], ctx), do: call("PMT", [r, n, pv, {:num, 0}, {:num, 0}], ctx)
+  defp call("PMT", [r, n, pv, fv], ctx), do: call("PMT", [r, n, pv, fv, {:num, 0}], ctx)
+
+  defp call("PMT", [_, _, _, _, _] = asts, ctx) do
+    with {:ok, [rate, nper, pv, fv, type]} <- fin_nums(asts, ctx),
+         :ok <- fin_type(type) do
+      cond do
+        nper == 0 ->
+          err(:num)
+
+        rate == 0 ->
+          safe_arith(fn -> -(pv + fv) / nper end)
+
+        true ->
+          fin_growth(rate, nper, fn g ->
+            -(pv * g + fv) * rate / ((g - 1) * (1 + rate * type))
+          end)
+      end
+    end
+  end
+
+  defp call("FV", [r, n, pmt], ctx), do: call("FV", [r, n, pmt, {:num, 0}, {:num, 0}], ctx)
+  defp call("FV", [r, n, pmt, pv], ctx), do: call("FV", [r, n, pmt, pv, {:num, 0}], ctx)
+
+  defp call("FV", [_, _, _, _, _] = asts, ctx) do
+    with {:ok, [rate, nper, pmt, pv, type]} <- fin_nums(asts, ctx),
+         :ok <- fin_type(type) do
+      if rate == 0 do
+        safe_arith(fn -> -(pv + pmt * nper) end)
+      else
+        fin_growth(rate, nper, fn g ->
+          -(pv * g + pmt * (1 + rate * type) * (g - 1) / rate)
+        end)
+      end
+    end
+  end
+
+  defp call("PV", [r, n, pmt], ctx), do: call("PV", [r, n, pmt, {:num, 0}, {:num, 0}], ctx)
+  defp call("PV", [r, n, pmt, fv], ctx), do: call("PV", [r, n, pmt, fv, {:num, 0}], ctx)
+
+  defp call("PV", [_, _, _, _, _] = asts, ctx) do
+    with {:ok, [rate, nper, pmt, fv, type]} <- fin_nums(asts, ctx),
+         :ok <- fin_type(type) do
+      if rate == 0 do
+        safe_arith(fn -> -(fv + pmt * nper) end)
+      else
+        fin_growth(rate, nper, fn g ->
+          -(fv + pmt * (1 + rate * type) * (g - 1) / rate) / g
+        end)
+      end
+    end
+  end
+
+  defp call("NPER", [r, pmt, pv], ctx),
+    do: call("NPER", [r, pmt, pv, {:num, 0}, {:num, 0}], ctx)
+
+  defp call("NPER", [r, pmt, pv, fv], ctx),
+    do: call("NPER", [r, pmt, pv, fv, {:num, 0}], ctx)
+
+  defp call("NPER", [_, _, _, _, _] = asts, ctx) do
+    with {:ok, [rate, pmt, pv, fv, type]} <- fin_nums(asts, ctx),
+         :ok <- fin_type(type) do
+      fin_nper(rate, pmt, pv, fv, type)
+    end
+  end
+
+  # NPV(rate, value…) — Excel's documented OFF-BY-ONE: value1 is discounted ONE
+  # period, not zero, because the flows are taken to land at the END of period 1
+  # (an initial outlay at time zero is added OUTSIDE the call: `NPV(r, …) + A1`).
+  # Position IS the semantics here, so the series keeps reading order — see
+  # numeric_series/2 — unlike an aggregate, for which order is irrelevant.
+  # A rate of exactly -1 divides by zero: #DIV/0!, as Excel gives.
+  defp call("NPV", [rate_ast | value_asts], ctx) when value_asts != [] do
+    with rate when is_number(rate) <- eval_number(rate_ast, ctx),
+         {:ok, flows} <- fin_flows(value_asts, ctx) do
+      if rate == -1 do
+        err(:div0)
+      else
+        safe_arith(fn ->
+          flows
+          |> Enum.with_index(1)
+          |> Enum.reduce(0, fn {v, i}, acc -> acc + v / :math.pow(1 + rate, i) end)
+        end)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("IRR", [values_ast], ctx), do: call("IRR", [values_ast, {:num, 0.1}], ctx)
+
+  defp call("IRR", [values_ast, guess_ast], ctx) do
+    with {:ok, flows} <- fin_flows([values_ast], ctx),
+         guess when is_number(guess) <- eval_number(guess_ast, ctx) do
+      fin_irr(flows, guess)
+    else
+      {:error, _} = e -> e
+    end
+  end
+
+  defp call("RATE", [n, pmt, pv], ctx),
+    do: call("RATE", [n, pmt, pv, {:num, 0}, {:num, 0}, {:num, 0.1}], ctx)
+
+  defp call("RATE", [n, pmt, pv, fv], ctx),
+    do: call("RATE", [n, pmt, pv, fv, {:num, 0}, {:num, 0.1}], ctx)
+
+  defp call("RATE", [n, pmt, pv, fv, t], ctx),
+    do: call("RATE", [n, pmt, pv, fv, t, {:num, 0.1}], ctx)
+
+  defp call("RATE", [_, _, _, _, _, _] = asts, ctx) do
+    with {:ok, [nper, pmt, pv, fv, type, guess]} <- fin_nums(asts, ctx),
+         :ok <- fin_type(type) do
+      if nper <= 0 do
+        err(:num)
+      else
+        fin_newton(&rate_probe(nper, pmt, pv, fv, type, &1), guess, @fin_max_iter)
+      end
+    end
+  end
+
   # Known function, wrong arity (and the unreachable unknown-name fallthrough).
   defp call(_name, _args, _ctx), do: err(:value)
+
+  # ── financial helpers ───────────────────────────────────────────────────────
+
+  # Evaluate a financial function's whole argument list to numbers, short-
+  # circuiting on the FIRST error left to right (a range in a scalar slot is
+  # #VALUE!, as everywhere else; a blank reads 0).
+  defp fin_nums(asts, ctx) do
+    vals = Enum.map(asts, &eval_number(&1, ctx))
+
+    case Enum.find(vals, &match?({:error, _}, &1)) do
+      {:error, _} = e -> e
+      nil -> {:ok, vals}
+    end
+  end
+
+  # Excel: a `type` that is neither 0 nor 1 is #NUM!.
+  defp fin_type(type) when type == 0 or type == 1, do: :ok
+  defp fin_type(_type), do: err(:num)
+
+  # (1+rate)^nper handed to the caller's closure. power/2 already canonicalises
+  # an out-of-range power to #NUM!, and safe_arith catches a blow-up (or a
+  # divide by a zero denominator — `(1+r)^n = 1` with r ≠ 0, `1 + r·type = 0`)
+  # in the closure itself.
+  defp fin_growth(rate, nper, fun) do
+    case power(1 + rate, nper) do
+      {:error, _} = e -> e
+      g -> safe_arith(fn -> fun.(g) end)
+    end
+  end
+
+  # NPER inverts the identity through a logarithm: with r ≠ 0 the payment leg is
+  # a geometric series, so n = ln((a − fv·r) / (pv·r + a)) / ln(1+r) where
+  # a = pmt·(1 + r·type). A non-positive log argument means the cash flows never
+  # reach fv — no real n exists, which is #NUM!, not a raise.
+  defp fin_nper(rate, pmt, pv, fv, type) do
+    cond do
+      rate == 0 and pmt == 0 -> err(:num)
+      rate == 0 -> safe_arith(fn -> -(pv + fv) / pmt end)
+      1 + rate <= 0 -> err(:num)
+      true -> fin_nper_log(rate, pmt, pv, fv, type)
+    end
+  end
+
+  defp fin_nper_log(rate, pmt, pv, fv, type) do
+    safe_arith(fn ->
+      a = pmt * (1 + rate * type)
+      num = a - fv * rate
+      den = pv * rate + a
+      q = if den == 0, do: 0, else: num / den
+
+      if q <= 0,
+        do: err(:num),
+        else: :math.log(q) / :math.log(1 + rate)
+    end)
+  end
+
+  # IRR is NPV's inverse with the FIRST flow at period 0 (NPV's first value
+  # already sits at period 1). Excel requires at least one positive and one
+  # negative flow: without a sign change there is no root at all, so that is
+  # #NUM! before a single iteration burns.
+  defp fin_irr(flows, guess) do
+    cond do
+      length(flows) < 2 -> err(:num)
+      not (Enum.any?(flows, &(&1 > 0)) and Enum.any?(flows, &(&1 < 0))) -> err(:num)
+      true -> fin_newton(&irr_probe(flows, &1), guess, @fin_max_iter)
+    end
+  end
+
+  # {NPV-at-r, d/dr}: sum vᵢ/(1+r)^i over i = 0.. and its derivative
+  # −i·vᵢ/(1+r)^(i+1) (the i = 0 term is constant, so it contributes nothing).
+  defp irr_probe(flows, r) do
+    flows
+    |> Enum.with_index()
+    |> Enum.reduce({0.0, 0.0}, fn {v, i}, {f, d} ->
+      p = :math.pow(1 + r, i)
+      {f + v / p, if(i == 0, do: d, else: d - i * v / (p * (1 + r)))}
+    end)
+  end
+
+  # {annuity-identity-at-r, d/dr} — RATE's probe. `r = 0` is a removable
+  # singularity of the payment leg (the (g−1)/r factor); nudge off it rather
+  # than dividing by zero, which costs the probe nothing and keeps the root
+  # itself reachable.
+  defp rate_probe(n, pmt, pv, fv, type, r0) do
+    r = if r0 == 0, do: 1.0e-10, else: r0
+    g = :math.pow(1 + r, n)
+    dg = n * :math.pow(1 + r, n - 1)
+    f = pv * g + pmt * (1 + r * type) * (g - 1) / r + fv
+
+    d =
+      pv * dg +
+        pmt * (type * (g - 1) / r + (1 + r * type) * (dg * r - (g - 1)) / (r * r))
+
+    {f, d}
+  end
+
+  # Newton–Raphson over a `{value, derivative}` probe, bounded at `steps`. The
+  # bound is the whole point: a probe with no root (or a chaotic orbit) must
+  # answer #NUM! in finite time, never spin a recompute.
+  defp fin_newton(_probe, _r, 0), do: err(:num)
+
+  defp fin_newton(probe, r, steps) do
+    if 1 + r <= 0 do
+      err(:num)
+    else
+      case safe_arith(fn -> probe.(r) end) do
+        {:error, _} = e ->
+          e
+
+        {_f, d} when d == 0 ->
+          err(:num)
+
+        {f, d} ->
+          next = r - f / d
+
+          if abs(next - r) <= @fin_tol * max(1.0, abs(next)),
+            do: next,
+            else: fin_newton(probe, next, steps - 1)
+      end
+    end
+  end
+
+  # Each argument's own ordered numeric series, concatenated left to right —
+  # what NPV/IRR discount BY POSITION.
+  defp fin_flows(asts, ctx) do
+    Enum.reduce_while(asts, {:ok, []}, fn ast, {:ok, acc} ->
+      case numeric_series(ast, ctx) do
+        {:error, _} = e -> {:halt, e}
+        vals -> {:cont, {:ok, acc ++ vals}}
+      end
+    end)
+  end
 
   # ROW/COLUMN's coordinate read: a ref/range AST's top-left row (idx 1) or
   # column (idx 0); a non-ref argument is #VALUE!.
@@ -5022,12 +5379,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     |> Enum.reject(&(&1 == :blank))
   end
 
-  # SPARKLINE's numeric series in reading order (row-major: sorted by {row,col}),
-  # blanks/text skipped like the aggregates. An error anywhere in a range
-  # short-circuits to that error (returned as an `{:error, _}` tuple); otherwise
-  # a bare list of numbers is returned. A scalar arg is a 1-cell series (a blank
-  # scalar -> []); a non-numeric scalar is #VALUE! like a strict aggregate.
-  defp sparkline_series({:range, p1, p2}, ctx) do
+  # An argument's numeric series in reading order (row-major: sorted by
+  # {row,col}), blanks/text skipped like the aggregates. An error anywhere in a
+  # range short-circuits to that error (returned as an `{:error, _}` tuple);
+  # otherwise a bare list of numbers is returned. A scalar arg is a 1-cell
+  # series (a blank scalar -> []); a non-numeric scalar is #VALUE! like a
+  # strict aggregate. Read by SPARKLINE (which draws the series) and by
+  # NPV/IRR (which discount it BY POSITION — hence the reading-order sort).
+  defp numeric_series({:range, p1, p2}, ctx) do
     {p1, p2, ctx} = localize_range(p1, p2, ctx)
     cells = Enum.map(occupied_positions(p1, p2, ctx), fn pos -> {pos, cell_at(pos, ctx)} end)
 
@@ -5043,7 +5402,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
-  defp sparkline_series(arg, ctx) do
+  defp numeric_series(arg, ctx) do
     case eval(arg, ctx) do
       {:error, _} = e -> e
       # A dynamic array (SORT/UNIQUE/FILTER) feeds SPARKLINE the same way a

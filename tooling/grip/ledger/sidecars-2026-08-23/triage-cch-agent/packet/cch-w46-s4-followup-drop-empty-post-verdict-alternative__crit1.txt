@@ -1,0 +1,1 @@
+Deleting report-main-failure from either workflow reds that workflow's ratchet at the LIVE assertion, not only in the mutation matrix.

@@ -92,6 +92,7 @@ defmodule Barkpark.Content.Lifecycle do
         # BEFORE the wall and the :before_publish hook fire, so a refusal is
         # side-effect-free (the Writer-seam gate-position precedent).
         with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
+             :ok <- ensure_bound_title_agrees(draft),
              :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
           publish_after_gate(draft, pid, type, dataset, opts)
         end
@@ -155,6 +156,79 @@ defmodule Barkpark.Content.Lifecycle do
   end
 
   defp prepare_paper_render_shapes(draft, _type), do: {:ok, draft}
+
+  # THE PUBLISH-DOOR TITLE-DIVERGENCE REFUSAL.
+  #
+  # `content["blocks"]` is the SOLE source of every projected `content[fieldName]`
+  # on a write that carries a block list: `Writer.maybe_project_document_content/2`
+  # re-derives them through `Projection.project/3`, and its own comment states
+  # that "projection remains the SOLE writer of the projected keys". The row
+  # `title` COLUMN is written OUTSIDE that projection — `Content.Mutations`
+  # builds `attrs["title"]` from the patch's `set` map while DROPPING `"title"`
+  # from the merged content — so `doc patch <type> <id> --set title=X` on a
+  # blocks-bearing document lands the column while the bound title block
+  # overwrites `content["title"]` straight back to its create-time value. The
+  # patch answers 200 with a freshly bumped `_rev`; only a read of the stored row
+  # shows the value was discarded.
+  #
+  # This gate does not repair that write. It stops the divergence being COPIED
+  # ONTO THE PUBLISHED ROW, which is where it stops being recoverable:
+  # `publish_after_gate/5` builds `pub_attrs` with `"title" => draft.title` (the
+  # column) and `"content" => pub_content` (carrying the stale block/preview
+  # title), the generated `search_vector` then indexes BOTH, `doc get` answers
+  # one title, and the Studio editor and every preview card read the other. A
+  # reader of the published row has no way to tell which of the two the author
+  # meant.
+  #
+  # DELIBERATELY NARROW, so it can only fire on the measured shape:
+  #
+  #   * only when `content["blocks"]` is a LIST — the exact discriminator the
+  #     projector itself keys on. A document the projector never touches cannot
+  #     have had a projected key discarded.
+  #   * only the block BOUND to `"title"` (`Projection.bound?/1` plus a
+  #     `fieldName` of `"title"`), never a FREE `role: "title"` block. A paper's
+  #     title block is free, so the paper path is untouched.
+  #   * only when both sides are non-blank strings AND they differ. A nil or
+  #     blank block value is a cleared index entry (`Projection.projected_value/1`
+  #     documents `nil` as exactly that), not two competing titles.
+  #
+  # It never guesses which side wins. Choosing one would invent an authorial
+  # intent the document does not record — the column and the block are equally
+  # plausible, and picking silently is the same class of defect as the discard
+  # that produced them. So it REFUSES and names both values plus the write that
+  # reconciles them.
+  #
+  # It rides `{:halted, reason}` — the publish door's existing veto vocabulary
+  # (`Content.Errors` renders it as a 409 `halted` carrying the reason verbatim:
+  # deterministic, terminal, already in the CLI exit-code table and the served
+  # OpenAPI `Error.code` enum). A new tag would render as a bare 500
+  # `internal_error`, which is the opaque shape this gate exists to end.
+  defp ensure_bound_title_agrees(%Document{title: column, content: content})
+       when is_map(content) do
+    with blocks when is_list(blocks) <- Map.get(content, "blocks"),
+         %{} = block <- Enum.find(blocks, &bound_title_block?/1),
+         block_title <- Projection.projected_value(block),
+         true <- present?(column) and present?(block_title) and column != block_title do
+      {:error,
+       {:halted,
+        "publish refused: this document carries two different titles. The row title column is " <>
+          "#{inspect(column)} while the bound title block (and therefore the projected " <>
+          "content[\"title\"] and content[\"preview\"]) is #{inspect(block_title)}. " <>
+          "Publishing would put both on one row and index both for search, with nothing to say " <>
+          "which was meant. `doc patch --set title=` writes the COLUMN ONLY — the block is what " <>
+          "projection re-derives the content title from — so set the title through the title " <>
+          "block, then publish."}}
+    else
+      _ -> :ok
+    end
+  end
+
+  defp ensure_bound_title_agrees(_draft), do: :ok
+
+  defp bound_title_block?(block),
+    do: is_map(block) and Projection.bound?(block) and Map.get(block, "fieldName") == "title"
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   # The STORED location `Projection.read_blocks/1` would read this content's
   # block list from, in that function's own clause order, or nil when the list

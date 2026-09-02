@@ -1,0 +1,1 @@
+crown-reconcile.sh distinguishes a grace-deferred silence from an unreadable silence with its own exit code, and both still exit non-zero in the workflow

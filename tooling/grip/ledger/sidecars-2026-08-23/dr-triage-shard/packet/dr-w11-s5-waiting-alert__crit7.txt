@@ -1,0 +1,1 @@
+Gate green: cd cloud && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_cloud/notifications/ — paste the tests/failures line

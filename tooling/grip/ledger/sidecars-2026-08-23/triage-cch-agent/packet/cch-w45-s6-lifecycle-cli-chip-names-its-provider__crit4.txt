@@ -1,0 +1,1 @@
+MUTATION PROOF: deleting the flag from app.js with the new guard untouched REDS it, and the message NAMES the offending command string. Paste the red output.

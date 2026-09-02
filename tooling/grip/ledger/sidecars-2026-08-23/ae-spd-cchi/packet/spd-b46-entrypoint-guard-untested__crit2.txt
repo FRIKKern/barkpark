@@ -1,0 +1,1 @@
+The test runs in CI on changes to scripts/studio-desk-measure.mjs and needs NO deployed box, no ssh and no browser — it must be cheap enough that nobody is tempted to skip it.

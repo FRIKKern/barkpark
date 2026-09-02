@@ -1,0 +1,1 @@
+GATE (Go, FULL package — never name-filtered): CC=/usr/bin/clang go build ./... && CC=/usr/bin/clang go vet ./internal/cli/... && CC=/usr/bin/clang go test ./... is green, output pasted

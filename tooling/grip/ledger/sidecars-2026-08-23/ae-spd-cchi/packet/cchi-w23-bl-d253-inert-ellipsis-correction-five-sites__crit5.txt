@@ -1,0 +1,1 @@
+breakpoint-sweep.mjs:1044's LAX CUE TEST IS ADDRESSED IN THE SAME BREATH: it is either tightened to the corrected predicate or left with a comment stating why the correction does not reach it. Quote whichever landed.

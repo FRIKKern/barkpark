@@ -1,0 +1,1 @@
+BOTH colour gates green with output pasted — `bash scripts/studio-literal-check.sh && node design/check.mjs` — with Part E's root.html.heex row at delta 0 (they have inverse blind spots; one is not evidence for the other)

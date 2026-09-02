@@ -1,0 +1,1 @@
+Sections 10 and 11 are either moved behind live_stage or the file drops its hermetic claim — decided, not both

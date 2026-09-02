@@ -1,0 +1,1 @@
+registry.ex reveal_admin_token/1 @doc no longer claims /credentials is the only caller; it names the derived call sites or points at the census that enumerates them.

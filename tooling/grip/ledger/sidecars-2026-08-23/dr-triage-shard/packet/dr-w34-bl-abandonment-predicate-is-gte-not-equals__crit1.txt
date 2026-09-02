@@ -1,0 +1,1 @@
+All four arms exist as tests, including arm 4 (depth 13 / bound 6), and swapping >= to = REDS arm 4 - paste that red.

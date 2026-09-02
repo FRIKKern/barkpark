@@ -1,0 +1,1 @@
+#9890 is merged AND its diff is confirmed to contain the agent rebuild on both self-update lanes. Evidence: the merge sha and the relevant diff hunk quoted.

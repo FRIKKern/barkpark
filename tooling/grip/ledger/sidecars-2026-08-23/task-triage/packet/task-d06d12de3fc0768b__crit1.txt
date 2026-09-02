@@ -1,0 +1,1 @@
+bp paper view / pdrender injects zero inter-block blank rows of its own (authored spacers only) and renders the table header row

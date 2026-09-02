@@ -1,0 +1,1 @@
+view_edit_parity_test stays 20/20 green and statTracks still steps [7]@1280 to [8]@1920 on the existing proof fixtures — evidence quotes the green line and the report values

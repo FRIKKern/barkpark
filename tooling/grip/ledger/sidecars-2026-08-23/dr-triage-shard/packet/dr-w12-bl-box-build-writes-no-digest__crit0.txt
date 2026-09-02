@@ -1,0 +1,1 @@
+Box-build releases write a digest and the control plane stamps it on the deployment row

@@ -1,0 +1,1 @@
+A press on a studio-tab strip control and a press on a top-bar control each render a named state in the SAME #bp-press-answer region, proven on the deployed authenticated build with the event trace quoted.

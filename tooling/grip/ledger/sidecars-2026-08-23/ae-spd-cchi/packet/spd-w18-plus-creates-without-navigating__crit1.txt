@@ -1,0 +1,1 @@
+A press of the "+" whose navigation does not arrive says so on screen (a flash or a named pending state), so a human never silently creates a second Untitled draft by pressing again.

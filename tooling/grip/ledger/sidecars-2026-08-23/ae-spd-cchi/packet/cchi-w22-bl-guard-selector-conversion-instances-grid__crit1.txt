@@ -1,0 +1,1 @@
+The converted assertion reds on the same bytes and names the offending index. Evidence: the run with `rc=$?` and the finding line.

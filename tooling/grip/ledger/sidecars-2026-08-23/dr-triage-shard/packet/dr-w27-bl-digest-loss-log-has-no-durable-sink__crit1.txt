@@ -1,0 +1,1 @@
+Per-message relay logging exists, or the PR states in one line that remote-MTA acceptance is unprovable and stops any surface claiming 'delivered to a human inbox'.

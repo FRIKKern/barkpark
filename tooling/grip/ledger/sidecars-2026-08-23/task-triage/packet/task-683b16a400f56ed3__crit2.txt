@@ -1,0 +1,1 @@
+AN EVICTED LOG IS DISTINGUISHED FROM ONE THAT NEVER EXISTED. Retention is 7 days / 2,000 logs / 256MB, so a log CAN be legitimately gone. The surface must say which case it is rather than returning empty for both — returning nothing for an evicted log is the same lie this thread is about.

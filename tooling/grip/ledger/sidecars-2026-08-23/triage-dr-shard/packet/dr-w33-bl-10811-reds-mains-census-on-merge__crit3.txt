@@ -1,0 +1,1 @@
+The other open PRs touching the same pins (#10129, #10086) are checked for collision and the merge order is stated, because both floors are == and all three touch client.go. Evidence: the stated order and the collision check.

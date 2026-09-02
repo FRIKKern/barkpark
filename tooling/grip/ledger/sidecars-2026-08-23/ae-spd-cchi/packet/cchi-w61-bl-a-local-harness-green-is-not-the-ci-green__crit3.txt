@@ -1,0 +1,1 @@
+The runner's banner prints the RESOLVED binary's actual major (measured), never the declared major beside an unchecked path — prove it by overriding NODE_BIN and showing the banner reports the truth.

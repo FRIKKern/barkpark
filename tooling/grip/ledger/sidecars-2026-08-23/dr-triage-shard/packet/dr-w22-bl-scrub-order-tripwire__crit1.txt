@@ -1,0 +1,1 @@
+MUTATION PROOF: re-introducing deployment_json/1 old pipe makes the check RED, pasted in the PR body; removing it makes it green

@@ -1,0 +1,1 @@
+A decision is recorded for whether a mechanism should re-fire stale checks when a path set widens, or whether it stays a manual lead act.

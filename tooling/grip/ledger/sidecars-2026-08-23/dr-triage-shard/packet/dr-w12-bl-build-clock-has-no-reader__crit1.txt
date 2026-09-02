@@ -1,0 +1,1 @@
+A fixture proves the naive all-rows interval and the un-overlapped interval differ, so the 4.2x trap cannot be re-introduced silently

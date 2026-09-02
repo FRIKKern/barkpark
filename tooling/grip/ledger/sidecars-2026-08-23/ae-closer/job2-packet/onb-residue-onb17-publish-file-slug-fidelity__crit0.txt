@@ -1,0 +1,1 @@
+The defect is reproduced (or refuted) against the current CLI with a quoted transcript naming the command, the given slug, and the resulting doc id

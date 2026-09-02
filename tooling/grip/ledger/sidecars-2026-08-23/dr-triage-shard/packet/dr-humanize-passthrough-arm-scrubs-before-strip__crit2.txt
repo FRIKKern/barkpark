@@ -1,0 +1,1 @@
+MUTATION pasted RED: restoring humanize/1 to classify |> scrub |> strip_ansi fails the new test.

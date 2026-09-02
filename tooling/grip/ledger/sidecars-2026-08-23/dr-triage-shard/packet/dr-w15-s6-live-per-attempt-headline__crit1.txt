@@ -1,0 +1,1 @@
+bp cloud deployments renders live-per-attempt as a CO-EQUAL headline beside the failure rate, and a refusing live_rate prints its refusal in the headline's own place. Paste the rendered table for a measured window AND for a refusing one.

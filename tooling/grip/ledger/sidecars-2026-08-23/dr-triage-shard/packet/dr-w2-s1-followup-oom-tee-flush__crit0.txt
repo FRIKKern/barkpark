@@ -1,0 +1,1 @@
+A MemoryMax-capped transient unit is genuinely oom-killed on Guerrilla and the teed file final lines are compared against journald - the delta is reported either way.

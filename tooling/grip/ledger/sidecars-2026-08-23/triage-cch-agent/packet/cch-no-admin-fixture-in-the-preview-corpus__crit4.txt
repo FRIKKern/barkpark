@@ -1,0 +1,1 @@
+Two SCENARIO_RESIDUE entries land in the EXISTING hash:#settings family so families stays 13, and the builder confirms the refusal ORDER matches the brief: smoke's assertCensus refuses first (rc 1), the sweep second (rc 2), and breakpoint-sweep.test.mjs fails exactly ONE test, not the four every stale D-row predicts. Evidence: the three refusal outputs.

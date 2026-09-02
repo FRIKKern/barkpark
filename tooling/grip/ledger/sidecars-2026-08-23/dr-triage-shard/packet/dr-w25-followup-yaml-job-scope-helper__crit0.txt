@@ -1,0 +1,1 @@
+The 2-space job-boundary scan exists in ONE place both check-deployyml-filters.sh and check-deploy-smoke.sh call, or is replaced by a real YAML parse.

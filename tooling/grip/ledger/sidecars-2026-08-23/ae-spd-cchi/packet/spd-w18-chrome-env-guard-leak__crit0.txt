@@ -1,0 +1,1 @@
+`CHROME=/nonexistent/chrome node tooling/search-smoke/journey-smoke.mjs --self-test` exits 2 with a GUARD message naming the bad path, and the output is quoted.

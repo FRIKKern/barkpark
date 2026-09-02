@@ -1,0 +1,1 @@
+#7747's body citations are corrected (@abilities lives at user_token.ex:83) and its 'session is the only credential' claim is fixed - a root PAT also passes.

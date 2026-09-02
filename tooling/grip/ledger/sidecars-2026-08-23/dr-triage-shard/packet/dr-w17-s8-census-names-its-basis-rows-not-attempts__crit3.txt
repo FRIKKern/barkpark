@@ -1,0 +1,1 @@
+THE MAGNITUDE IS STATED AND RE-DERIVED: paste your own re-run of the Oban-jobs-vs-content-auto-rows gap per day on cloud-db-1, and the resulting corrected live-per-attempt for 2026-08-06 (25.67% -> ~14.94%). State that the row-based rate is therefore a CEILING and that the gap is load-dependent (0 on quiet days, 1,584 on a busy one)

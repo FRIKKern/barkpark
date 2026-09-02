@@ -1,0 +1,1 @@
+EDGE-GUARDED: a test drives three consecutive sweeps with the same site still waiting and asserts exactly ONE notification is dispatched; removing the edge guard REDS it — paste the mutated failure
