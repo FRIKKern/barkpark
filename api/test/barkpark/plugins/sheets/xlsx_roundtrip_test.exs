@@ -10,6 +10,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Plugins.Sheets
   alias Barkpark.Plugins.Sheets.{Fmt, XlsxExport, XlsxImport}
   alias Barkpark.Plugins.Sheets.Engine
   alias Elixlsx.{Sheet, Workbook}
@@ -619,15 +620,58 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
     end
   end
 
-  # ── conditional formatting: the CF-D2 v1 baked-not-exported contract ────────
+  # ── conditional formatting: the rules themselves round-trip (CF-X) ──────────
 
-  describe "conditional formatting (CF-D2 v1 asymmetry)" do
-    # v1 bakes the CF-COMPUTED style into the exported cell but does NOT export
-    # the rules as xlsx conditionalFormatting XML (CF-D2). The accepted,
-    # deliberate asymmetry: export→import of a CF-matched cell yields the baked
-    # fill as a MANUAL "s" (visually faithful, lossy on the rule) and the tab
-    # carries no cond_formats back. This test PINS that contract.
-    test "a CF-matched cell re-imports as a manual style; the rule itself does not survive" do
+  @cf_fixture_path Path.expand(
+                     "../../../support/fixtures/sheet-cond-format-eval.json",
+                     __DIR__
+                   )
+  @cf_fixture @cf_fixture_path |> File.read!() |> Jason.decode!()
+
+  # The rule kinds `CondFormat` supports today. The fixture also carries one
+  # unknown-op row ("startswith"), which is not a rule at all — the kernel
+  # drops it, so there is nothing to export or re-import.
+  @cf_ops ~w(gt lt eq between contains)
+
+  # Four styles cycled across the fixture rules so the exported `<dxfs>` table
+  # exercises dedup (many rules, four entries) and both halves of a dxf (the
+  # `<font>` flags and the `<fill>`). Every one carries a `"bg"` — the storage
+  # gate requires it, and a rule storage would refuse is not a rule the
+  # converters carry.
+  @cf_styles [
+    %{"bg" => "#ff0000"},
+    %{"bg" => "#00ff00", "b" => true},
+    %{"bg" => "#123456", "b" => true, "i" => true},
+    %{"bg" => "#0000ff", "i" => true}
+  ]
+
+  # One stored rule per supported-op fixture row: the row's op/value(s) become
+  # the rule's `when` VERBATIM (type-mismatched rule values included — those
+  # are dead rules the kernel keeps and must still round-trip), with a distinct
+  # range + id per row (the storage gate forbids duplicates of either).
+  defp cf_fixture_rules do
+    @cf_fixture["rows"]
+    |> Enum.filter(&(&1["op"] in @cf_ops))
+    |> Enum.with_index(1)
+    |> Enum.map(fn {row, i} ->
+      when_map = %{"op" => row["op"], "value" => row["value"]}
+
+      when_map =
+        if Map.has_key?(row, "value2"),
+          do: Map.put(when_map, "value2", row["value2"]),
+          else: when_map
+
+      %{
+        "id" => "r#{i}",
+        "range" => "A#{i}:B#{i}",
+        "when" => when_map,
+        "style" => Enum.at(@cf_styles, rem(i, length(@cf_styles)))
+      }
+    end)
+  end
+
+  describe "conditional formatting (CF-X — the rules round-trip)" do
+    test "a CF rule survives export → import as a RULE, and the cell keeps the baked style" do
       content = %{
         "tabs" => [
           %{
@@ -647,13 +691,233 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
 
       {:ok, binary} = XlsxExport.to_binary(content)
       imported = import!(binary)
+      xml = sheet_n_xml(binary, 1)
 
-      # the matched cell's CF fill/bold survive as a plain manual style…
+      # the RULE itself comes back, in the canonical stored shape…
+      assert hd(imported["tabs"])["cond_formats"] == hd(content["tabs"])["cond_formats"]
+      # …the worksheet really carries conditionalFormatting XML…
+      assert xml =~ ~s(<conditionalFormatting sqref="A1:A2">)
+      assert xml =~ ~s(type="cellIs")
+      assert xml =~ ~s(operator="greaterThan")
+      assert xml =~ "<formula>100</formula>"
+      # …styles.xml carries the matching dxf…
+      assert styles_xml(binary) =~ ~s(<bgColor rgb="FFFF0000"/>)
+      # …and the BAKED style is still on the matched cell (a viewer that
+      # ignores rules keeps seeing the colour), the unmatched cell unstyled.
       assert cell(imported, 0, "A1")["s"] == %{"bg" => "#ff0000", "b" => true}
-      # …the unmatched cell gains no style…
       refute Map.has_key?(cell(imported, 0, "A2"), "s")
-      # …and the RULE is gone (not exported as conditionalFormatting — CF-D2).
-      refute Map.has_key?(hd(imported["tabs"]), "cond_formats")
+    end
+
+    test "every storable rule in the CF golden fixture round-trips byte-identically" do
+      rules = cf_fixture_rules()
+      # exactly one fixture row (the unknown op "startswith") is not a rule at
+      # all — `CondFormat` never admits it, so it never reached this list.
+      assert length(rules) == length(@cf_fixture["rows"]) - 1
+
+      # Of what IS a rule, the ones a DOCUMENT can actually hold are the ones
+      # the single shared storage validator admits. The fixture deliberately
+      # carries type-mismatched rule values (the JS-coercion traps: a string
+      # threshold on gt/between, a numeric and an empty `contains` needle) —
+      # dead rules here, live ones in Excel, and rules `before_save` refuses.
+      {storable, unstorable} =
+        Enum.split_with(rules, &(Sheets.cond_format_list_errors([&1], 0) == []))
+
+      assert Enum.map(unstorable, & &1["when"]) == [
+               %{"op" => "gt", "value" => "100"},
+               %{"op" => "between", "value" => 10, "value2" => "20"},
+               %{"op" => "contains", "value" => 4},
+               %{"op" => "contains", "value" => ""}
+             ]
+
+      content = %{
+        "tabs" => [
+          %{"name" => "CF", "cond_formats" => rules, "cells" => %{"A1" => %{"v" => 150}}}
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+
+      # every storable rule comes back byte-identical — id, range, when
+      # (value TYPES included: 42 stays an integer, "hello" a string, true a
+      # boolean) and style — and the unstorable ones were never written.
+      assert hd(import!(binary)["tabs"])["cond_formats"] == storable
+      assert length(storable) == length(rules) - 4
+
+      xml = sheet_n_xml(binary, 1)
+      assert length(Regex.scan(~r/<cfRule /, xml)) == length(storable)
+      # four distinct rule styles → a four-entry workbook dxf table, not one
+      # per rule.
+      assert styles_xml(binary) =~ ~s(<dxfs count="4">)
+    end
+
+    test "rules on TWO tabs round-trip per tab, in list order" do
+      build = fn prefix, ops ->
+        ops
+        |> Enum.with_index(1)
+        |> Enum.map(fn {{op, value}, i} ->
+          %{
+            "id" => "#{prefix}#{i}",
+            "range" => "A#{i}:C#{i}",
+            "when" => %{"op" => op, "value" => value},
+            "style" => %{"bg" => "#ff0000"}
+          }
+        end)
+      end
+
+      first = build.("a", [{"gt", 10}, {"contains", "ok"}])
+      second = build.("b", [{"lt", 3}, {"eq", true}, {"contains", "x"}])
+
+      content = %{
+        "tabs" => [
+          %{"name" => "One", "cond_formats" => first, "cells" => %{"A1" => %{"v" => 50}}},
+          %{"name" => "Two", "cond_formats" => second, "cells" => %{"A1" => %{"v" => 1}}}
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      assert Enum.map(imported["tabs"], & &1["cond_formats"]) == [first, second]
+    end
+
+    test "an unknown cfRule type is skipped without failing the import" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "cond_formats" => [
+              %{
+                "id" => "r1",
+                "range" => "A1:A2",
+                "when" => %{"op" => "gt", "value" => 100},
+                "style" => %{"bg" => "#ff0000"}
+              }
+            ],
+            "cells" => %{"A1" => %{"v" => 150}}
+          }
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+
+      # a colorScale rule — a kind Barkpark has no model for — spliced in beside
+      # ours, exactly as Excel would author it.
+      alien =
+        ~s(<conditionalFormatting sqref="D1:D9"><cfRule type="colorScale" priority="9">) <>
+          ~s(<colorScale><cfvo type="min"/><cfvo type="max"/>) <>
+          ~s(<color rgb="FFFFFFFF"/><color rgb="FF63BE7B"/></colorScale></cfRule>) <>
+          ~s(</conditionalFormatting>)
+
+      patched =
+        rewrite_sheet1(
+          binary,
+          &String.replace(&1, "<pageMargins", alien <> "<pageMargins", global: false)
+        )
+
+      assert {:ok, imported} = XlsxImport.to_content(patched)
+      assert hd(imported["tabs"])["cond_formats"] == hd(content["tabs"])["cond_formats"]
+    end
+
+    test "a foreign cellIs rule with no Barkpark ext gets a synthesized id" do
+      # An Excel-authored package carries no `<extLst>` id. The import still has
+      # to produce a gate-legal rule (`id` is a required key), so it synthesizes
+      # a per-tab-unique one rather than emit a rule storage would reject.
+      content = %{"tabs" => [%{"name" => "CF", "cells" => %{"A1" => %{"v" => 5}}}]}
+      {:ok, binary} = XlsxExport.to_binary(content)
+
+      foreign =
+        ~s(<conditionalFormatting sqref="A1:A9"><cfRule type="cellIs" dxfId="0" ) <>
+          ~s(priority="1" operator="lessThan"><formula>3</formula></cfRule>) <>
+          ~s(</conditionalFormatting>)
+
+      dxfs =
+        ~s(<dxfs count="1"><dxf><fill><patternFill>) <>
+          ~s(<bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf></dxfs>)
+
+      patched =
+        binary
+        |> rewrite_sheet1(
+          &String.replace(&1, "<pageMargins", foreign <> "<pageMargins", global: false)
+        )
+        |> rewrite_member("xl/styles.xml", fn xml ->
+          String.replace(xml, "</styleSheet>", dxfs <> "</styleSheet>", global: false)
+        end)
+
+      assert {:ok, imported} = XlsxImport.to_content(patched)
+
+      assert hd(imported["tabs"])["cond_formats"] == [
+               %{
+                 "id" => "cf1",
+                 "range" => "A1:A9",
+                 "when" => %{"op" => "lt", "value" => 3},
+                 "style" => %{"bg" => "#ffc7ce"}
+               }
+             ]
+    end
+
+    test "a foreign rule the storage gate would refuse is dropped, never imported" do
+      # The import feeds `Content.upsert_document/4`, so a rule `before_save`
+      # rejects would 409 the WHOLE upload. Three real-world shapes, all
+      # authored here exactly as Excel writes them:
+      #   dxf 0 — Excel's "Bold red text" preset: a font colour and NO fill, so
+      #           the rule has no `style.bg`, which the gate requires.
+      #   dxf 1 — a normal fill, used by two rules over the SAME range (the
+      #           gate forbids a duplicate normalized range).
+      content = %{"tabs" => [%{"name" => "CF", "cells" => %{"A1" => %{"v" => 5}}}]}
+      {:ok, binary} = XlsxExport.to_binary(content)
+
+      rules =
+        ~s(<conditionalFormatting sqref="A1:A9"><cfRule type="cellIs" dxfId="0" ) <>
+          ~s(priority="1" operator="greaterThan"><formula>1</formula></cfRule>) <>
+          ~s(</conditionalFormatting>) <>
+          ~s(<conditionalFormatting sqref="B1:B9"><cfRule type="cellIs" dxfId="1" ) <>
+          ~s(priority="2" operator="lessThan"><formula>9</formula></cfRule>) <>
+          ~s(</conditionalFormatting>) <>
+          ~s(<conditionalFormatting sqref="B9:B1"><cfRule type="cellIs" dxfId="1" ) <>
+          ~s(priority="3" operator="equal"><formula>4</formula></cfRule>) <>
+          ~s(</conditionalFormatting>)
+
+      dxfs =
+        ~s(<dxfs count="2">) <>
+          ~s(<dxf><font><b/><color rgb="FF9C0006"/></font></dxf>) <>
+          ~s(<dxf><fill><patternFill><bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf>) <>
+          ~s(</dxfs>)
+
+      patched =
+        binary
+        |> rewrite_sheet1(
+          &String.replace(&1, "<pageMargins", rules <> "<pageMargins", global: false)
+        )
+        |> rewrite_member("xl/styles.xml", fn xml ->
+          String.replace(xml, "</styleSheet>", dxfs <> "</styleSheet>", global: false)
+        end)
+
+      assert {:ok, imported} = XlsxImport.to_content(patched)
+      cond_formats = hd(imported["tabs"])["cond_formats"]
+
+      # the bg-less rule is gone, and B1:B9 kept exactly ONE rule (the first by
+      # priority; "B9:B1" normalizes to the same range)
+      assert cond_formats == [
+               %{
+                 "id" => "cf1",
+                 "range" => "B1:B9",
+                 "when" => %{"op" => "lt", "value" => 9},
+                 "style" => %{"bg" => "#ffc7ce"}
+               }
+             ]
+
+      # the load-bearing claim: whatever comes back, the save path accepts it
+      assert Sheets.cond_format_list_errors(cond_formats, 0) == []
+    end
+
+    test "a tab with no rules exports no conditionalFormatting and imports without the key" do
+      content = %{"tabs" => [%{"name" => "Plain", "cells" => %{"A1" => %{"v" => 1}}}]}
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+
+      refute sheet_n_xml(binary, 1) =~ "conditionalFormatting"
+      refute styles_xml(binary) =~ "dxfs"
+      refute Map.has_key?(hd(import!(binary)["tabs"]), "cond_formats")
     end
   end
 
@@ -741,6 +1005,29 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
     target = ~c"xl/worksheets/sheet#{n}.xml"
     {_name, xml} = Enum.find(entries, fn {name, _} -> name == target end)
     to_string(xml)
+  end
+
+  # Raw XML of the workbook's styles part.
+  defp styles_xml(binary) do
+    {:ok, entries} = :zip.extract(binary, [:memory])
+    {_name, xml} = Enum.find(entries, fn {name, _} -> to_string(name) == "xl/styles.xml" end)
+    to_string(xml)
+  end
+
+  # Rewrite ANY named member's XML through `fun` and repackage (the general
+  # form of `rewrite_sheet1/2` — used to hand-author a foreign styles.xml).
+  defp rewrite_member(binary, member, fun) do
+    {:ok, entries} = :zip.extract(binary, [:memory])
+
+    patched =
+      Enum.map(entries, fn {name, content} ->
+        if to_string(name) == member,
+          do: {name, content |> to_string() |> fun.()},
+          else: {name, content}
+      end)
+
+    {:ok, {_name, out}} = :zip.create(~c"t.xlsx", patched, [:memory])
+    out
   end
 
   # ── tab-name locks (sanitize + case-insensitive dedupe on export) ───────────

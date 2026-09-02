@@ -411,8 +411,13 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
     test "no-rules content exports byte-identically to before (empty compose is a true no-op)" do
       # A doc carrying manual styles but no CF rules. The compose call collapses
       # to the manual style, so the bytes must match the SAME doc exported with
-      # (a) no cond_formats key, (b) an empty list, and (c) a rule that matches
-      # NOTHING — every no-match path must leave the export identical.
+      # no cond_formats key at all — and so must an EMPTY list.
+      #
+      # A non-matching RULE is a different story since CF-X: the rule is now
+      # exported as conditionalFormatting XML whether or not it fires today (it
+      # fires the moment a cell changes), so the packages differ. What must NOT
+      # change is the CELLS — the whole `<sheetData>` block is byte-identical,
+      # and the only additions are the CF block and its dxf.
       base_cells = %{
         "A1" => %{"v" => "Header", "s" => %{"b" => true, "bg" => "#eeeeee"}},
         "A2" => %{"v" => 42},
@@ -444,7 +449,19 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       assert {:ok, bin_non_match} = XlsxExport.to_binary(non_matching)
 
       assert bin_empty == bin_no_key
-      assert bin_non_match == bin_no_key
+
+      # the non-matching rule adds a CF block + a dxf, and NOTHING else:
+      # the cells (sheetData) are byte-identical to the no-rules export.
+      assert sheet_data(bin_non_match) == sheet_data(bin_no_key)
+      assert sheet1_xml(bin_non_match) =~ ~s(<conditionalFormatting sqref="A1:A3">)
+      refute sheet1_xml(bin_no_key) =~ "conditionalFormatting"
+    end
+
+    # The `<sheetData>…</sheetData>` span of the first worksheet — every cell
+    # the export wrote, and nothing else (`sheet1_xml/1` is shared above).
+    defp sheet_data(binary) do
+      [span] = Regex.run(~r{<sheetData>.*</sheetData>}s, sheet1_xml(binary))
+      span
     end
 
     test "CF applies on a frozen head row too (CF-AM2 — CF follows manual on all rows)" do
