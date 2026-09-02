@@ -250,6 +250,30 @@ do_retire() {
   done < <(ls -1dt "$RELEASES"/*/ 2>/dev/null)
 }
 
+# The ONE place that decides whether a candidate rollback target is servable,
+# and the ONE place that words the refusal.  --rollback and --rollback-preflight
+# BOTH call it, so they can no longer disagree: preflight used to check only the
+# symlink, a non-empty .previous and dir existence, so it printed TARGET_BUILD=
+# and exited 0 over a release do_rollback refuses at 21 — a green preflight for a
+# rollback that cannot happen.  Prebuilt releases keep their poison marker
+# UNCONDITIONALLY (purge_failed_release), so that false green was the ORDINARY
+# prebuilt failure path, not a corner.
+# The remedy is per-arm: a box-built release can be rebuilt from source, but a
+# PREBUILT one has no source on this box at all — PLAN's prebuilt path exits 11
+# rather than rebuild the provisioned template, so telling the operator to
+# "redeploy, PLAN will rebuild it" names a move that release does not have.
+# RETURNS: 0 blocked (and logs WHY plus the actual next move), 1 servable.
+rollback_target_blocked() { # <build_id>
+  local prev="$1"
+  [ -f "$RELEASES/$prev/$HEALTH_FAIL_MARK" ] || return 1
+  if [ -f "$RELEASES/$prev/$PREBUILT_MARK" ]; then
+    log "rollback: previous release '$prev' FAILED its health gate and is marked broken — refusing to serve it (no_previous). It was staged from UPLOADED prebuilt bytes and this box has no source for it: RE-UPLOAD the artifact for build '$prev' and redeploy."
+  else
+    log "rollback: previous release '$prev' FAILED its health gate and is marked broken — refusing to serve it (no_previous). Redeploy that build_id: PLAN will rebuild it from source."
+  fi
+  return 0
+}
+
 # ROLLBACK: repoint current to the .previous release (sub-second, no rebuild).
 # Typed returns: 21 no_previous, 22 not_supported, 24 flip failed.
 do_rollback() {
@@ -265,10 +289,7 @@ do_rollback() {
   # live/rollback target keeps its bytes but carries the poison marker (see
   # purge_failed_release).  Flipping onto it would put a build we proved bad in
   # front of visitors — the one thing this engine promises never to do.
-  if [ -f "$RELEASES/$prev/$HEALTH_FAIL_MARK" ]; then
-    log "rollback: previous release '$prev' FAILED its health gate and is marked broken — refusing to serve it (no_previous). Redeploy that build_id: PLAN will rebuild it from source."
-    return 21
-  fi
+  if rollback_target_blocked "$prev"; then return 21; fi
   livenow="$(basename "$(readlink "$CURRENT")")"
   if [ "$prev" = "$livenow" ]; then log "rollback: previous == current ($prev) — nothing to do"; return 0; fi
   ln -sfn "releases/$prev" "$CURRENT.tmp" || return 24
@@ -528,31 +549,55 @@ purge_failed_release() {
 }
 
 # STAGE's one copy idiom, shared by the two arms that produce bytes (a local
-# build's dist/, and an uploaded prebuilt tree).  Stage into a .partial dir then
-# rename, so a crash mid-copy never leaves a half-populated releases/<build_id>/
-# that a later PLAN mistakes for staged.  cp/mv carry no forensic of their own —
+# build's dist/, and an uploaded prebuilt tree).  Stage into a .partial dir, then
+# swap it in, so a crash mid-copy never leaves a half-populated
+# releases/<build_id>/ that a later PLAN mistakes for staged — and so a FAILED
+# copy never destroys the release that was already there (see the body).  cp/mv carry no forensic of their own —
 # capture the exit code + a disk read (the copy that fails on a real box almost
 # always fails on a full /opt) so the detail names the next move instead of a
 # bare "copy failed".  Exits 13 (STAGE failed) on either failure, after emitting.
 stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
-  local src="$1" what="$2" sha="${3:-}" cp_rc mv_rc disk
-  rm -rf "$RELDIR" "$RELDIR.partial"
+  local src="$1" what="$2" sha="${3:-}" cp_rc mv_rc disk aside="" aside_rc
+  # NEVER delete releases/<build_id> before the new bytes exist.  That dir can be
+  # the LIVE release or the .previous rollback target — a re-upload with
+  # --deployment <id> takes PLAN's prebuilt arm and lands right here — so an
+  # up-front `rm -rf` followed by a cp that fails (exit 13, ordinary on a full
+  # /opt) destroyed the very release a rollback would flip to: .previous pointed
+  # at a missing dir and do_rollback returned 21.  A FAILED DEPLOY MUST NEVER
+  # COST THE ROLLBACK TARGET.
+  # So: copy into a fresh .partial, then SWAP — move the old dir ASIDE, rename
+  # the partial in, and remove the aside copy only once the rename has landed.
+  # Every failure path before that last step leaves the existing release, and
+  # therefore the rollback path, byte-for-byte intact.
+  rm -rf "$RELDIR.partial" "$RELDIR.aside"
   mkdir -p "$RELDIR.partial"
   cp -a "$src/." "$RELDIR.partial/"; cp_rc=$?
   if [ "$cp_rc" -ne 0 ]; then
     disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-    DETAIL="copy of $what into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+    DETAIL="copy of $what into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # The provenance marker rides INSIDE the atomic rename — a release dir never
   # exists without it, so no reader can see prebuilt bytes as locally built.
   [ -n "$sha" ] && printf '%s\n' "$sha" > "$RELDIR.partial/$PREBUILT_MARK"
+  if [ -e "$RELDIR" ]; then
+    mv "$RELDIR" "$RELDIR.aside"; aside_rc=$?
+    if [ "$aside_rc" -ne 0 ]; then
+      rm -rf "$RELDIR.partial"
+      DETAIL="could not move the existing releases/$BUILD_ID aside before the swap (mv exit $aside_rc) — the staged tree was discarded and the existing release is untouched; check ownership of the releases dir"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
+    aside="$RELDIR.aside"
+  fi
   mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
   if [ "$mv_rc" -ne 0 ]; then
+    # Put the old release BACK.  The swap is only a swap if it is reversible.
+    [ -n "$aside" ] && mv "$aside" "$RELDIR" 2>/dev/null
     rm -rf "$RELDIR.partial"
-    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
+    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership. Any previously staged tree was restored"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
+  [ -n "$aside" ] && rm -rf "$aside"
   return 0
 }
 
@@ -1411,6 +1456,215 @@ FAKENPM
     check "PLAN noop"                                 pb_saw PLAN noop pb1
 
     # -----------------------------------------------------------------------
+    # PREBUILT ROLLBACK.  The whole PREBUILT e2e above contains no occurrence of
+    # rollback, RETIRE or .previous — the lane that CANNOT rebuild from source is
+    # exactly the lane whose rollback nobody tested.  Three facts below, each
+    # driven through the real verbs (--rollback / --rollback-preflight), never
+    # read off the source.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a PREBUILT release rolls BACK and FORWARD again, re-staging nothing"
+    PRSRC="$E2E/prsrc"; PR_SITE="$E2E/sites/pbroll"
+    mkdir -p "$PRSRC"
+    printf '{"name":"selftest-pbroll","private":true}\n' > "$PRSRC/package.json"
+    pr_deploy() { # <build_id> <prebuilt_dir> <sha256> -> exit code; stdout $E2E/pr.out
+      env PATH="$FAKEBIN:$PATH" \
+        SITE_SLUG=pbroll BUILD_ID="$1" CONTENT_REV=rev-1 SITE_SRC="$PRSRC" \
+        PREBUILT_DIR="$2" PREBUILT_SHA256="$3" \
+        BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$E2E/pbroll.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$E2E/pr.out" 2>&1
+      echo $?
+    }
+    pr_verb() { # <--rollback|--rollback-preflight> <outfile> -> exit code
+      env PATH="$FAKEBIN:$PATH" \
+        SITE_SLUG=pbroll BARKPARK_SITES_DIR="$E2E/sites" \
+        BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$E2E/pbroll.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" "$1" > "$2" 2>&1
+      echo $?
+    }
+    pr_live() { readlink "$PR_SITE/current" 2>/dev/null || true; }
+
+    mk_prebuilt "$E2E/pbroll1" pr1 "UPLOADED-pr1"
+    mk_prebuilt "$E2E/pbroll2" pr2 "UPLOADED-pr2"
+    rc="$(pr_deploy pr1 "$E2E/pbroll1" "$SHA_A")"
+    check "pr1 (prebuilt) goes live"                  [ "$rc" = 0 ]
+    rc="$(pr_deploy pr2 "$E2E/pbroll2" "$SHA_B")"
+    check "pr2 (prebuilt) goes live"                  [ "$rc" = 0 ]
+    check "live is pr2"                               [ "$(pr_live)" = releases/pr2 ]
+    check "the prebuilt pr1 is now the rollback target" [ "$(cat "$PR_SITE/.previous")" = pr1 ]
+    : > "$PRSRC/.npm-calls"
+    rc="$(pr_verb --rollback "$E2E/pr.rb1")"
+    check "rollback ONTO a prebuilt release exits 0"   [ "$rc" = 0 ]
+    check "…and the uploaded pr1 bytes are what is served" \
+      grep -q 'UPLOADED-pr1' "$PR_SITE/current/index.html"
+    check "…and it names the target on the machine channel" grep -qx 'TARGET_BUILD=pr1' "$E2E/pr.rb1"
+    check "A ROLLBACK RE-STAGES NOTHING (no STAGE stage on the wire at all)" \
+      absent '^BPSTAGE name=STAGE' "$E2E/pr.rb1"
+    check "…and ran no npm (a prebuilt box has no source to run)" [ ! -s "$PRSRC/.npm-calls" ]
+    check "…and pr1 still carries the digest it was uploaded with" \
+      [ "$(cat "$PR_SITE/releases/pr1/$PREBUILT_MARK" 2>/dev/null)" = "$SHA_A" ]
+    check "…and .previous now points FORWARD at pr2"  [ "$(cat "$PR_SITE/.previous")" = pr2 ]
+    rc="$(pr_verb --rollback "$E2E/pr.rb2")"
+    check "rollback FROM a prebuilt release flips forward again" [ "$rc" = 0 ]
+    check "…serving pr2's uploaded bytes"             grep -q 'UPLOADED-pr2' "$PR_SITE/current/index.html"
+    check "…still no re-stage"                        absent '^BPSTAGE name=STAGE' "$E2E/pr.rb2"
+
+    echo "[selftest] e2e: a health-failed PREBUILT target names RE-UPLOAD, and preflight AGREES with --rollback"
+    # current=pr2, .previous=pr1.  Poison pr1 exactly as purge_failed_release
+    # does for a prebuilt release — which it does UNCONDITIONALLY, so this is the
+    # ORDINARY prebuilt failure state, not a corner.
+    : > "$PR_SITE/releases/pr1/$HEALTH_FAIL_MARK"
+    rc="$(pr_verb --rollback-preflight "$E2E/pr.pf1")"
+    check "preflight REFUSES a poisoned target (21)"  [ "$rc" = 21 ]
+    check "preflight prints NO TARGET_BUILD for a rollback that cannot happen" \
+      absent '^TARGET_BUILD=' "$E2E/pr.pf1"
+    rc="$(pr_verb --rollback "$E2E/pr.rb3")"
+    check "the real rollback refuses it too (21) — the two verbs AGREE" [ "$rc" = 21 ]
+    check "the refusal names RE-UPLOAD, the only move a prebuilt release has" \
+      grep -q "RE-UPLOAD the artifact for build 'pr1'" "$E2E/pr.rb3"
+    check "the PREBUILT arm never promises PLAN will rebuild it from source" \
+      absent 'PLAN will rebuild it from source' "$E2E/pr.rb3"
+    check "current unmoved by the refusal"            [ "$(pr_live)" = releases/pr2 ]
+    # NEGATIVE CONTROL — the same poisoned target WITHOUT the prebuilt marker
+    # still gets the rebuild remedy.  Without this row, "never says rebuild"
+    # would also pass if the branch simply never fired.
+    mv "$PR_SITE/releases/pr1/$PREBUILT_MARK" "$PR_SITE/releases/pr1/.stashed-mark"
+    rc="$(pr_verb --rollback "$E2E/pr.rb4")"
+    check "control: a BOX-BUILT poisoned target also exits 21" [ "$rc" = 21 ]
+    check "control: and it DOES name the rebuild remedy (the branch discriminates)" \
+      grep -q 'PLAN will rebuild it from source' "$E2E/pr.rb4"
+    mv "$PR_SITE/releases/pr1/.stashed-mark" "$PR_SITE/releases/pr1/$PREBUILT_MARK"
+    # AGREEMENT IN THE OTHER DIRECTION: a clean target must green on BOTH.
+    rm -f "$PR_SITE/releases/pr1/$HEALTH_FAIL_MARK"
+    rc="$(pr_verb --rollback-preflight "$E2E/pr.pf2")"
+    check "preflight greens once the target is clean" [ "$rc" = 0 ]
+    check "…and names pr1"                            grep -qx 'TARGET_BUILD=pr1' "$E2E/pr.pf2"
+    rc="$(pr_verb --rollback "$E2E/pr.rb5")"
+    check "and the real rollback then SUCCEEDS (agreement both ways)" [ "$rc" = 0 ]
+    check "…now serving pr1"                          [ "$(pr_live)" = releases/pr1 ]
+
+    # -----------------------------------------------------------------------
+    # MUTATION TEST — a failed re-upload must not cost the rollback target.
+    # The scenario is wave 9's own resume half: prebuilt pm1 live, pm2 live so
+    # .previous = pm1, then the operator re-uploads --deployment pm1.  PLAN takes
+    # the prebuilt arm, STAGE lands on releases/pm1 — and the copy fails.
+    # Driven TWICE against IDENTICAL fixtures: once against a mutant that carries
+    # the pre-fix `rm -rf "$RELDIR"` first line verbatim, once against this
+    # script.  A one-sided run would prove nothing.
+    # The copy fails for a REAL reason and genuinely runs: a `cp` ahead on PATH
+    # copies real bytes into .partial and then exits 1 (an ENOSPC mid-copy on a
+    # full /opt — the failure the exit-13 STAGE path exists for).  It is armed
+    # only by BP_CP_FAIL_LOG and only for a `cp -a <src>/. <dst>.partial/`, and
+    # it leaves a sentinel both arms assert on, so "the copy failed" can never be
+    # "the copy never ran".
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: MUTATION — the pre-fix STAGE loses the rollback target, this one keeps it"
+    MB="$E2E/mutbin"; mkdir -p "$MB"
+    cat > "$MB/cp" <<'FAKECP'
+#!/usr/bin/env bash
+if [ -n "${BP_CP_FAIL_LOG:-}" ] && [ "$#" -eq 3 ] && [ "$1" = "-a" ]; then
+  case "$3" in
+    *.partial/)
+      src="${2%/.}"
+      /bin/cp -a "$src/index.html" "$3" 2>/dev/null
+      printf 'fake cp ran: %s -> %s\n' "$src" "$3" >> "$BP_CP_FAIL_LOG"
+      exit 1 ;;
+  esac
+fi
+exec /bin/cp "$@"
+FAKECP
+    chmod +x "$MB/cp"
+
+    MUT="$E2E/mutant/site-deploy.sh"
+    # A mutant engine copy must find the shared lib it sources by its OWN dirname.
+    mkdir -p "$E2E/mutant/lib"
+    cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$E2E/mutant/lib/"
+    MUT_OLD='  rm -rf "$RELDIR" "$RELDIR.partial"'
+    MUT_NEW='  rm -rf "$RELDIR.partial" "$RELDIR.aside"'
+    # The mutation must APPLY, exactly once — awk exits 1 unless it replaced one
+    # line, and the diff is asserted non-empty.  A silent no-op mutation produces
+    # a green that means nothing.
+    awk -v old="$MUT_NEW" -v new="$MUT_OLD" \
+      '$0 == old { print new; n++; next } { print } END { if (n != 1) exit 1 }' \
+      "$SELF" > "$MUT"; mut_rc=$?
+    check "the mutation applied to EXACTLY ONE line"  [ "$mut_rc" = 0 ]
+    check "the mutant genuinely differs from the script" sh -c "! cmp -s '$SELF' '$MUT'"
+    check "the mutant carries the PRE-FIX destructive line" grep -qxF "$MUT_OLD" "$MUT"
+    check "the mutant no longer carries the guarded line"   sh -c "! grep -qxF '$MUT_NEW' '$MUT'"
+
+    MSRC="$E2E/mutsrc"; mkdir -p "$MSRC"
+    printf '{"name":"selftest-mutsite","private":true}\n' > "$MSRC/package.json"
+    mk_prebuilt "$E2E/mut-pm1" pm1 "UPLOADED-pm1-ORIGINAL"
+    mk_prebuilt "$E2E/mut-pm2" pm2 "UPLOADED-pm2"
+    mk_prebuilt "$E2E/mut-pm1b" pm1 "UPLOADED-pm1-REUPLOAD"
+    mut_deploy() { # <script> <sitesdir> <build_id> <prebuilt_dir> <sha> [cp_fail_log]
+      env PATH="$MB:$FAKEBIN:$PATH" \
+        SITE_SLUG=mutsite BUILD_ID="$3" CONTENT_REV=rev-1 SITE_SRC="$MSRC" \
+        PREBUILT_DIR="$4" PREBUILT_SHA256="$5" BP_CP_FAIL_LOG="${6:-}" \
+        BARKPARK_SITES_DIR="$2" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$2/deploy.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$1" > "$2/out.log" 2>&1
+      echo $?
+    }
+    mut_rollback() { # <script> <sitesdir> -> exit code
+      env PATH="$MB:$FAKEBIN:$PATH" \
+        SITE_SLUG=mutsite BARKPARK_SITES_DIR="$2" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$2/deploy.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$1" --rollback > "$2/rb.log" 2>&1
+      echo $?
+    }
+    mut_scenario() { # <script> <sitesdir> -> echoes the FAILING re-upload's exit code
+      mkdir -p "$2"
+      mut_deploy "$1" "$2" pm1 "$E2E/mut-pm1" "$SHA_A" >/dev/null
+      mut_deploy "$1" "$2" pm2 "$E2E/mut-pm2" "$SHA_B" >/dev/null
+      # current=pm2, .previous=pm1.  Now the re-upload of pm1, with a copy that fails.
+      mut_deploy "$1" "$2" pm1 "$E2E/mut-pm1b" "$SHA_C" "$2/cp.log"
+    }
+
+    OLDS="$E2E/mut-old"; NEWS="$E2E/mut-new"
+    old_rc="$(mut_scenario "$MUT" "$OLDS")"
+    new_rc="$(mut_scenario "$SELF" "$NEWS")"
+    # Both arms reached the SAME failing line — otherwise the comparison below is
+    # between two different experiments.
+    check "mutant: the fixture set pm1 as the rollback target" [ "$(cat "$OLDS/mutsite/.previous")" = pm1 ]
+    check "fixed:  the fixture set pm1 as the rollback target" [ "$(cat "$NEWS/mutsite/.previous")" = pm1 ]
+    check "mutant: the failing re-upload exits 13 (STAGE failed)" [ "$old_rc" = 13 ]
+    check "fixed:  the failing re-upload exits 13 too (same failure)" [ "$new_rc" = 13 ]
+    check "mutant: the copy REALLY RAN and wrote bytes before failing" [ -s "$OLDS/cp.log" ]
+    check "fixed:  the copy REALLY RAN and wrote bytes before failing" [ -s "$NEWS/cp.log" ]
+    check "mutant: STAGE failed on the machine channel" \
+      grep -q '^BPSTAGE name=STAGE status=failed build_id=pm1' "$OLDS/out.log"
+    check "fixed:  STAGE failed on the machine channel" \
+      grep -q '^BPSTAGE name=STAGE status=failed build_id=pm1' "$NEWS/out.log"
+    # THE DEFECT, reproduced.
+    check "MUTANT LOSES IT: releases/pm1 is GONE after the failed deploy" \
+      [ ! -d "$OLDS/mutsite/releases/pm1" ]
+    check "MUTANT LOSES IT: .previous still names the release it deleted" \
+      [ "$(cat "$OLDS/mutsite/.previous")" = pm1 ]
+    check "MUTANT LOSES IT: the rollback is now IMPOSSIBLE (21 no_previous)" \
+      [ "$(mut_rollback "$MUT" "$OLDS")" = 21 ]
+    # THE FIX, on the identical fixture.
+    check "FIX KEEPS IT: releases/pm1 survived the failed deploy" \
+      [ -d "$NEWS/mutsite/releases/pm1" ]
+    check "FIX KEEPS IT: with its ORIGINAL uploaded bytes, not the failed upload's" \
+      grep -q 'UPLOADED-pm1-ORIGINAL' "$NEWS/mutsite/releases/pm1/index.html"
+    check "FIX KEEPS IT: and its ORIGINAL digest" \
+      [ "$(cat "$NEWS/mutsite/releases/pm1/$PREBUILT_MARK" 2>/dev/null)" = "$SHA_A" ]
+    check "FIX KEEPS IT: no .partial residue"     [ ! -e "$NEWS/mutsite/releases/pm1.partial" ]
+    check "FIX KEEPS IT: no .aside residue"       [ ! -e "$NEWS/mutsite/releases/pm1.aside" ]
+    check "FIX KEEPS IT: the rollback still WORKS (exit 0)" \
+      [ "$(mut_rollback "$SELF" "$NEWS")" = 0 ]
+    check "FIX KEEPS IT: and it serves the ORIGINAL pm1 bytes" \
+      grep -q 'UPLOADED-pm1-ORIGINAL' "$NEWS/mutsite/current/index.html"
+    check "the STAGE failure detail says the existing release is untouched" \
+      grep -q 'is UNTOUCHED' "$NEWS/out.log"
+
+    # -----------------------------------------------------------------------
     # DEEP PATH, THROUGH THE WHOLE ENGINE — the fixtures above drive health_gate
     # directly; this arm proves the probe is WIRED: a real uploaded dist whose
     # index.html links to an ACCENTED deep page goes live (exit 0, zero npm),
@@ -1521,6 +1775,17 @@ FAKENPM
     check "armed run exits 0"                            [ "$rc" = 0 ]
     check "armed run really wrote the marker into the Caddyfile" \
       grep -q 'BARKPARK_SITE_ROUTE:routefail' "$RF/Caddyfile.ok"
+    # The engine's own release-root markers live INSIDE the served tree, so an
+    # un-hidden file_server discloses the artifact digest and — worse — that the
+    # LIVE release is one this engine already knows failed its health gate.
+    check "the armed file_server HIDES the prebuilt digest marker" \
+      grep -qE 'hide .*\.bp-prebuilt-sha256' "$RF/Caddyfile.ok"
+    check "the armed file_server HIDES the health-failed marker" \
+      grep -qE 'hide .*\.bp-health-failed' "$RF/Caddyfile.ok"
+    check "the hide rides INSIDE a file_server block, not loose in the site" \
+      grep -qE 'file_server \{' "$RF/Caddyfile.ok"
+    check "the armed Caddyfile is still brace-balanced with the nested block" \
+      bash -c "[ \$(grep -c '{' '$RF/Caddyfile.ok') = \$(grep -c '}' '$RF/Caddyfile.ok') ]"
     check "armed run emits NO ROUTE failure"             absent '^BPSTAGE name=ROUTE status=failed' "$RF/ok.out"
     # D346: the SUCCESS path speaks on the durable channel too. Before this, an
     # arm outcome only ever reached the operator through log() — stdout, which
@@ -2036,6 +2301,9 @@ if [ "$MODE" = preflight ]; then
   fi
   prev="$(cat "$ROOT/.previous")"
   if [ ! -d "$RELEASES/$prev" ]; then log "previous release '$prev' dir is gone (no_previous)"; exit 21; fi
+  # Same predicate --rollback uses: a preflight that ignores the poison marker
+  # reports a rollback the real verb refuses.
+  if rollback_target_blocked "$prev"; then exit 21; fi
   log "rollback possible: would repoint current ($(live_build)) -> releases/$prev"
   echo "TARGET_BUILD=$prev"
   exit 0
@@ -2487,7 +2755,13 @@ arm_caddy_site_route() {
 	# handle_path strips the /sites/$SITE_SLUG prefix; root follows the symlink.
 	handle_path /sites/$SITE_SLUG/* {
 		root * $ROOT/current
-		file_server
+		# The release-root markers ($PREBUILT_MARK / $HEALTH_FAIL_MARK) live INSIDE
+		# the served tree. Un-hidden, a plain GET discloses the artifact digest
+		# and — worse — that the LIVE release is one the engine already knows
+		# failed its health gate. hide keeps them internal.
+		file_server {
+			hide $PREBUILT_MARK $HEALTH_FAIL_MARK
+		}
 	}
 SITEROUTE
 )"
