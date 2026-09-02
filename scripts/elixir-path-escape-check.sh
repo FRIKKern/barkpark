@@ -152,6 +152,7 @@ cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh
 docs/api-v1.md
+docs/api/error-codes.md
 docs/openapi.json
 internal/chat/testdata/**
 internal/pdrender/testdata/**
