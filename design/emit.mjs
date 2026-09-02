@@ -2046,6 +2046,49 @@ function sheetsBlock(themes = loadThemes()) {
 // reader-dark-parity stays green because the guard's edit-side scan reads
 // paper-surface.css only, and the reader-coverage scan still finds these dark
 // re-skins inside prefers-color-scheme blocks.
+// PRINT — the reader's paged output. A paper prints as ink on white whatever
+// the screen was wearing, and BOTH dark routes survive into paged output: a
+// print preview keeps the OS `prefers-color-scheme` AND keeps whatever
+// `data-theme` the pre-paint toggle stamped. The reader's @media print block
+// (the hand region of bulldocs.html.heex) forces a white ground but never
+// re-stamped the ink, so an OS-dark reader printed the DARK palette's ink onto
+// that white — #e7ede9 on #fff, ~1.2:1, a page that looks blank.
+//
+// This re-stamps the LIGHT palette under print, from the SAME token data the
+// light blocks above emit — never a hand-copy, so a palette edit reaches print
+// with the rest of it (and the values stay inside the GENERATED marker, where
+// check.mjs Part E's literal ledger does not count them).
+//
+// TWO selector shapes because the dark palette arrives two ways:
+//   * the bare pair matches the `@media (prefers-color-scheme: dark)` block's
+//     specificity exactly and wins on source order (it is emitted later);
+//   * the `[data-theme]` pair matches `[data-theme="dark"]`'s specificity, so a
+//     reader who explicitly toggled dark prints light as well.
+// `root` is the ROOT-element selector the palette hangs off: `html` for the base
+// palette, `html[data-bp-theme="x"]` for a theme. `[data-theme]` is appended as a
+// COMPOUND (no space) because data-bp-theme and data-theme both sit on <html>.
+const printRestamp = (root, lightLines) => {
+  const sel = (tail) => `      ${root} ${tail}`;
+  const selStamped = (tail) => `      ${root}[data-theme] ${tail}`;
+  const art = "body:has(.bp-paper-article)";
+  const shell = `${art} .bp-paper-shell.bp-paper-article`;
+  return [
+    "    /* PRINT: the LIGHT palette, re-stamped from the same token data as the",
+    "       light blocks above — paged output is ink on white whatever the screen",
+    "       scheme or the stamped [data-theme] was. See printRestamp in",
+    "       design/emit.mjs; the white ground + chrome hiding stay in the hand",
+    "       region's @media print block further down this sheet. */",
+    "    @media print {",
+    sel(art + ","),
+    sel(shell + ","),
+    selStamped(art + ","),
+    selStamped(shell + " {"),
+    ...lightLines.map((l) => "        " + l.trim()),
+    "      }",
+    "    }",
+  ];
+};
+
 const bulldocsThemeBlock = (name, t) => {
   const rl = t.color.paper.reader.light;
   const rd = t.color.paper.reader.dark;
@@ -2134,6 +2177,7 @@ const bulldocsThemeBlock = (name, t) => {
     `    ${p}[data-theme="dark"] #bp-mailapp {`,
     ...mailVars("dark"),
     "    }",
+    ...printRestamp(p, readerVars(rl, "light", lightExtra)),
   ].join("\n");
 };
 
@@ -2311,6 +2355,24 @@ function bulldocsBlock(themes = loadThemes()) {
     `      --mail-paper: ${mc.paper.dark}; --mail-bar: ${mc.bar.dark}; --mail-rule: ${mc.rule.dark};`,
     `      --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
     "    }",
+    ...printRestamp("html", [
+      `--paper-bg:         ${rl["bg"]};`,
+      `--paper-bg-deep:    ${rl["bg-deep"]};`,
+      `--paper-ink:        ${rl["ink"]};`,
+      `--paper-ink-soft:   ${rl["ink-soft"]};`,
+      `--paper-rule:       ${rl["rule"]};`,
+      `--paper-accent:     ${rl["accent"]};`,
+      `--paper-accent-soft: ${rl["accent-soft"]};`,
+      `--paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
+      `--paper-ink-faint:    ${sfl["ink-faint"]};`,
+      `--paper-chrome-bg:    ${sfl["chrome-bg"]};`,
+      `--paper-chrome-border: ${sfl["chrome-border"]};`,
+      `--bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
+      `--bp-tone-success-bg: ${cl.success.bg}; --bp-tone-success-fg: ${cl.success.fg};`,
+      `--bp-tone-warning-bg: ${cl.warning.bg}; --bp-tone-warning-fg: ${cl.warning.fg};`,
+      `--bp-tone-danger-bg:  ${cl.danger.bg}; --bp-tone-danger-fg:  ${cl.danger.fg};`,
+      `--bp-tone-neutral-bg: ${cl.neutral.bg}; --bp-tone-neutral-fg: ${cl.neutral.fg};`,
+    ]),
     ...(themed ? ["    " + THEME_BANNER, themed] : []),
   ].join("\n");
 }
