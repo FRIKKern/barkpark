@@ -182,7 +182,17 @@ func TestNeverRetriesAnythingElse(t *testing.T) {
 		{"400 validation", http.StatusBadRequest, `{"error":{"code":"validation_failed"}}`, "a refusal is an answer; repeating it is noise"},
 		{"401 unauthorized", http.StatusUnauthorized, `{"error":{"code":"auth"}}`, "a bad token is not transient"},
 		{"404 not found", http.StatusNotFound, `{"error":{"code":"not_found"}}`, "absence is not a blip"},
-		{"429 rate limited", http.StatusTooManyRequests, `{"error":{"code":"rate_limited"}}`, "hammering a rate limiter is the opposite of helping"},
+		// 429 USED TO BE A ROW HERE, and its stated reason — "hammering a rate
+		// limiter is the opposite of helping" — was right about hammering and
+		// wrong about the remedy. Not retrying at all made every throttle
+		// render as a machine failure: MEASURED 2026-09-01 17:02Z, `bp task
+		// ready` was answered 429 with retry_after=1 under this fleet's own
+		// load and the one-second wait was reported to the operator as a broken
+		// ledger. The row moved to retry_backpressure_test.go, where the retry
+		// is PACED BY THE SERVER'S OWN NUMBER rather than hammering: it honors
+		// retry_after, caps the single wait, caps the total wait, and hands the
+		// 429 back unslept when the server asks for longer than we will ever
+		// wait. This list stays the home of "handed back on the first try".
 		{"502 bad gateway", http.StatusBadGateway, `bad gateway`, "a proxy fault is a different defect and must stay visible"},
 		{"503 unavailable", http.StatusServiceUnavailable, `{"error":{"code":"unavailable"}}`, "not the code this transport claims to handle"},
 		{"500 with a DIFFERENT code", http.StatusInternalServerError, `{"error":{"code":"db_migration_failed"}}`, "only internal_error is claimed as transient"},
