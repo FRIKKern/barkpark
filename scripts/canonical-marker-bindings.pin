@@ -47,6 +47,7 @@ task-chip-resolve	resolve_wikilink
 task-claimable-statuses	claimable_statuses
 task-criteria-progress	progress
 task-publish-wall-preflight	checkLabelSpineLocal
+task-resource-fence	claim_by_id
 taskboard-render	Render
 teams-tenant-id	teamsTenantId
 template-manifest	Load
