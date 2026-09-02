@@ -61,6 +61,15 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     manifest["commands"] |> Enum.find(&(&1["id"] == id))
   end
 
+  # Every command the manifest fold stamped with plugin provenance
+  # (`source: "plugin:<name>"`, or the bare `"plugin"` fallback when the
+  # noun→plugin mapping is ambiguous). Used by the plugin half of the `writes`
+  # honesty invariant below.
+  defp plugin_commands(conn) do
+    capabilities(conn)["commands"]
+    |> Enum.filter(&String.starts_with?(to_string(&1["source"] || ""), "plugin"))
+  end
+
   # Bearer helper for the undeclared-verb-family invocation tests below — a
   # SECOND, test-local token distinct from @token/capabilities/1 (those two
   # are reserved for the manifest-shape assertions throughout this file).
@@ -1387,6 +1396,111 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       assert cmd["http"]["method"] == "GET"
       assert cmd["writes"] == false
+    end
+
+    # ── The PLUGIN half of the same invariant ─────────────────────────────
+    #
+    # The three tests above filter `source == "core"` — deliberately, when they
+    # were written, because the 16 mislabelled commands were all core. These
+    # three re-run the same three questions over the plugin split
+    # (`source: "plugin:<name>"`, folded in by `Capabilities.build_superset/2`
+    # via `Registry.collect_cli_commands/1`).
+    #
+    # WHAT EACH ONE ACTUALLY BUYS — established by mutation against the bundled
+    # `ticket` plugin, not by reading the code:
+    #
+    #   * DELETING `writes:` from a plugin POST command (ticket.answer):
+    #     ALL 101 tests in this file still pass. `declare_writes_fail_closed/2`
+    #     (plugins/capabilities.ex) coerces an absent/non-boolean bit to `true`
+    #     with a Logger.warning BEFORE the fold reaches the wire, so the
+    #     omission is not observable at the manifest boundary at all. The test
+    #     below named "DECLARES the writes bit" therefore CANNOT catch the
+    #     omission its name suggests — the only arm of it that can fail is the
+    #     `length(cmds) >= 20` floor, which catches the `source` filter going
+    #     blind. The omission case is proven by `WritesFixturePlugin` further
+    #     down, which is the only test in this file that reds without
+    #     `declare_writes_fail_closed/2`. Do not read this one as coverage for it.
+    #
+    #   * Flipping a plugin POST to an explicit `writes: false`:
+    #     reds "every plugin-contributed non-GET command carries writes == true"
+    #     AND the whole-manifest "every command whose HTTP method is not GET
+    #     carries writes == true" above, which does not filter by source. So the
+    #     plugin arm is a live detector but strictly redundant; it survives
+    #     because it names the plugin split in its failure message.
+    #
+    #   * Flipping a plugin GET to `writes: true` (ticket.inbox):
+    #     reds ONLY "every plugin-contributed GET command carries writes ==
+    #     false". Nothing else in this file covers the GET direction across the
+    #     manifest — the core arm checks a single id (`doc.get`). That test is
+    #     the one genuinely new guard here, and it is why the bit stays a
+    #     SIGNAL rather than a blanket true.
+    #
+    # The downstream stake, unchanged: an absent or false `writes` decodes in Go
+    # as `manifest.Command.Writes == false` (internal/manifest/manifest.go),
+    # which `bridgeAnnotations` (internal/cli/mcp_bridge.go) turns into
+    # `ReadOnlyHint: true` — a mutator advertised to every MCP client as a safe
+    # read, and `bp`'s prod write confirmation skipped for it.
+
+    test "the plugin split is non-empty and every command in it reaches the wire with a BOOLEAN writes bit (the omission itself is caught by WritesFixturePlugin, not here)",
+         %{conn: conn} do
+      cmds = plugin_commands(conn)
+
+      # Non-vacuity: the bundled plugins contribute a substantial verb set. If
+      # this floor trips, the filter stopped matching and the assertions below
+      # are running over an empty list.
+      assert length(cmds) >= 20,
+             "expected the bundled plugins to contribute >= 20 commands, got #{length(cmds)}"
+
+      undeclared =
+        cmds
+        |> Enum.reject(&is_boolean(&1["writes"]))
+        |> Enum.map(&{&1["id"], &1["source"], &1["writes"]})
+        |> Enum.sort()
+
+      assert undeclared == [],
+             """
+             These plugin-contributed commands do not declare a boolean `writes`.
+             An absent key decodes as Go's zero value (false) and the MCP bridge
+             turns that into ReadOnlyHint: true — a mutator advertised as safe:
+
+                 #{inspect(undeclared, pretty: true)}
+             """
+    end
+
+    test "every plugin-contributed non-GET command carries writes == true", %{conn: conn} do
+      liars =
+        plugin_commands(conn)
+        |> Enum.filter(&(&1["http"]["method"] != "GET"))
+        |> Enum.reject(&(&1["writes"] == true))
+        |> Enum.map(&{&1["id"], &1["source"], &1["http"]["method"], &1["writes"]})
+        |> Enum.sort()
+
+      assert liars == [],
+             """
+             These plugin-contributed commands mutate over a non-GET method but
+             are advertised read-only — an MCP client reads `writes` as
+             ReadOnlyHint and will call them without confirmation:
+
+                 #{inspect(liars, pretty: true)}
+             """
+    end
+
+    test "every plugin-contributed GET command carries writes == false", %{conn: conn} do
+      false_alarms =
+        plugin_commands(conn)
+        |> Enum.filter(&(&1["http"]["method"] == "GET"))
+        |> Enum.reject(&(&1["writes"] == false))
+        |> Enum.map(&{&1["id"], &1["source"], &1["writes"]})
+        |> Enum.sort()
+
+      assert false_alarms == [],
+             """
+             These plugin-contributed GET commands advertise writes == true. The
+             bit must stay a SIGNAL — a blanket true is as useless to an MCP
+             client as a blanket false:
+
+                 #{inspect(false_alarms, pretty: true)}
+             """
     end
   end
 
