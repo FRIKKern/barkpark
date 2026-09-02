@@ -906,6 +906,99 @@ defmodule BarkparkWeb.SearchChannelTest do
   # itself proves nothing, and this file must still COMPILE against unmodified
   # main so the red-first run reports failures rather than a compile error.
   # ---------------------------------------------------------------------------
+  # The connect budget's IP key rides the canonical client-ip resolver
+  #
+  # A bucket is only a limit if the client cannot choose its own key.
+  # `x-forwarded-for` is client-supplied text, and a caller reaching the box
+  # directly could otherwise mint a fresh key per connection and have no
+  # effective per-IP limit at all. `Barkpark.RateLimiter.client_ip/1`
+  # (@canonical capability:rate-limit-client-ip) owns that decision; these
+  # tests prove `UserSocket` actually rides it, in BOTH directions — a forged
+  # header from an untrusted peer must not move the key, AND a chain from a
+  # TRUSTED peer must still be honoured, because ignoring the header outright
+  # would also pass the first test while collapsing every visitor behind our
+  # own Caddy into one bucket in production.
+  #
+  # NON-VACUITY: every connect below uses a FRESH token. The token key would
+  # otherwise be the thing refusing, and these tests would pass no matter what
+  # the IP key did.
+  # ---------------------------------------------------------------------------
+
+  describe "the connect budget's IP key" do
+    setup %{ws: ws} do
+      prev = Application.get_env(:barkpark, :user_socket)
+      Application.put_env(:barkpark, :user_socket, connects_per_minute: 2)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:barkpark, :user_socket)
+          cfg -> Application.put_env(:barkpark, :user_socket, cfg)
+        end
+      end)
+
+      # A fresh token per connect, so only the IP key can refuse.
+      mint = fn ->
+        raw = "test-tok-ip-#{System.unique_integer([:positive])}"
+        {:ok, _} = Auth.create_token(raw, "ip-budget", "test", ["read"], ws.id)
+        raw
+      end
+
+      %{mint: mint}
+    end
+
+    test "a forged x-forwarded-for from an UNTRUSTED peer does not move the bucket key", %{
+      mint: mint
+    } do
+      # 203.0.113.7 is not a trusted proxy, so the resolver must ignore the
+      # header entirely and key on the verified peer.
+      peer = fn xff ->
+        %{peer_data: %{address: {203, 0, 113, 7}}, x_headers: [{"x-forwarded-for", xff}]}
+      end
+
+      assert {:ok, _} = connect(UserSocket, %{"token" => mint.()}, connect_info: peer.("9.9.9.9"))
+      assert {:ok, _} = connect(UserSocket, %{"token" => mint.()}, connect_info: peer.("9.9.9.9"))
+
+      # Third connect ROTATES the forged header. If the header were believed,
+      # this would be a brand-new bucket with a full allowance — i.e. no per-IP
+      # limit at all. It must still be refused.
+      assert :error =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: peer.("8.8.8.8"))
+
+      # ...and a genuinely different PEER still connects, which proves the
+      # refusal above came from the IP bucket and not from something global.
+      other =
+        %{peer_data: %{address: {198, 51, 100, 4}}, x_headers: [{"x-forwarded-for", "9.9.9.9"}]}
+
+      assert {:ok, _} = connect(UserSocket, %{"token" => mint.()}, connect_info: other)
+    end
+
+    test "a chain from a TRUSTED peer IS honoured — the header is not merely ignored", %{
+      mint: mint
+    } do
+      # Loopback is trusted (Caddy runs on the box and dials localhost), so the
+      # forwarded hop is the real client and two different hops are two
+      # different buckets. Without this direction, "ignore x-forwarded-for
+      # always" would pass the test above and collapse the whole anonymous
+      # internet into one bucket behind our own front.
+      front = fn xff ->
+        %{peer_data: %{address: {127, 0, 0, 1}}, x_headers: [{"x-forwarded-for", xff}]}
+      end
+
+      assert {:ok, _} =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: front.("9.9.9.9"))
+
+      assert {:ok, _} =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: front.("9.9.9.9"))
+
+      assert :error = connect(UserSocket, %{"token" => mint.()}, connect_info: front.("9.9.9.9"))
+
+      # A different client behind the same front is a different bucket.
+      assert {:ok, _} =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: front.("7.7.7.7"))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
 
   describe "revocation and seat-removal teardown" do
     setup %{ws: ws, proj: proj} do

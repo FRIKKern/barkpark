@@ -31,19 +31,31 @@ defmodule BarkparkWeb.UserSocket do
   `rate_limiter.ex` — this call site does NOT introduce a slower window, so
   that invariant is untouched.
 
-  KEYS, and an honest gap. The bucket is keyed on the token row's id, and
-  ADDITIONALLY on the peer IP when the transport hands one over. Today it does
-  not: `socket "/socket", BarkparkWeb.UserSocket, websocket: true`
-  (endpoint.ex) declares no `connect_info`, so `connect/3` receives an empty
-  map and only the per-token key is live. Per-token is a real cap — it is the
-  key the flagship's published credential collapses onto — but it is a SHARED
-  bucket for every visitor of a given site, so it bounds aggregate load rather
-  than isolating one abuser. Declaring
-  `websocket: [connect_info: [:peer_data, :x_headers]]` on that socket turns
-  the per-IP key on with no change here. Until then the per-IP half is dark,
-  and that is stated rather than assumed.
+  KEYS. Every key must have budget, and there are two. The token row's id is
+  the one the flagship's published credential collapses onto — a real cap, but
+  a bucket SHARED by every visitor of a given site, so on its own it bounds
+  aggregate load rather than isolating one abuser. The second is the client IP,
+  which is what actually separates one abuser from a site's other visitors.
+
+  The IP key is resolved by `Barkpark.RateLimiter.client_ip/1` — the ONE owner
+  of the trust boundary in this tree (`@canonical capability:
+  rate-limit-client-ip`), the same resolver `Plugs.RateLimit` keys the HTTP
+  buckets on. `x-forwarded-for` is client-supplied text until something decides
+  whether the peer that sent it is one of our fronts, so this module hands the
+  resolver the peer address and the forwarded chain and lets it decide: the
+  header is ignored outright for an untrusted peer, and walked right-to-left
+  for a trusted one. A caller reaching the box directly therefore cannot rotate
+  its own bucket key by forging a header — the exact hole that resolver exists
+  to close, not re-litigated here.
+
+  Both values reach `connect/3` because `endpoint.ex` declares
+  `websocket: [connect_info: [:peer_data, :x_headers]]` on this socket. Without
+  that declaration `connect_info` is `%{}`, `peer_ip/1` returns nil and the
+  budget silently degrades to token-only — so the endpoint line is load-bearing,
+  not decoration.
 
   Tunable via `config :barkpark, :user_socket, connects_per_minute: _`.
+
   ## The socket id IS the revocation handle
 
   `connect/3` runs `verify_token/1` exactly ONCE. That function enforces
@@ -114,16 +126,29 @@ defmodule BarkparkWeb.UserSocket do
     end
   end
 
-  # `connect_info` is `%{}` unless the endpoint asks for `:peer_data` — see the
-  # moduledoc. Deliberately NOT reading `x-forwarded-for` by hand: the trust
-  # boundary for a forwarded chain lives in `RateLimiter.client_ip/1` and
-  # believing a raw header here would let a caller choose its own bucket key,
-  # which is the exact hole that function exists to close.
-  defp peer_ip(%{peer_data: %{address: address}}) when is_tuple(address) do
-    case :inet.ntoa(address) do
-      {:error, _} -> nil
-      chars -> List.to_string(chars)
-    end
+  # THE TRUST BOUNDARY IS NOT REIMPLEMENTED HERE. A bucket is only a limit if
+  # the client cannot choose its own key, and `x-forwarded-for` is client-
+  # supplied text until something decides whether the peer that sent it is one
+  # of our fronts. That decision has exactly one owner in this tree —
+  # `Barkpark.RateLimiter.client_ip/1` (@canonical capability:
+  # rate-limit-client-ip), the same resolver `Plugs.RateLimit` keys the HTTP
+  # buckets on. It ignores the header entirely for an untrusted peer, walks the
+  # chain RIGHT-to-left for a trusted one (Caddy appends the address it actually
+  # saw, so a caller-supplied prefix is discarded), falls back to the peer on
+  # anything unparseable, and canonicalises the address so alternate spellings
+  # of one IP collapse to one key.
+  #
+  # It reads a `%Plug.Conn{}`, and a socket connect has none — so we hand it the
+  # two fields it actually reads rather than forking its logic. `:x_headers`
+  # arrives lowercased from the transport, which is the shape
+  # `get_req_header/2` expects.
+  defp peer_ip(%{peer_data: %{address: address}} = connect_info) when is_tuple(address) do
+    conn = %Plug.Conn{
+      remote_ip: address,
+      req_headers: Map.get(connect_info, :x_headers, [])
+    }
+
+    RateLimiter.client_ip(conn)
   end
 
   defp peer_ip(_), do: nil
