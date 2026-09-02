@@ -3675,7 +3675,16 @@
     ["test", "Test",
      "No producer — only the test buttons on this page emit it: “Send test email” mails one team member over the Barkpark platform transport, and each channel’s own “Send test” fires that channel."],
     ["trial_expiring", "Trial ending",
-     "Always sent to every enabled channel — email and chat alike; no per-event toggle, silenced only by the master alerts switch above."]
+     "Always sent to every enabled channel — email and chat alike; no per-event toggle, silenced only by the master alerts switch above."],
+    // cch-w52-bl: the TEARDOWN's own notice. The row above is the ADVANCE
+    // warning; this one reports what was destroyed, and it exists because the
+    // teardown used to dispatch nothing at all — a team that missed both advance
+    // notices learned its instances were gone at the outage. Stated here, not
+    // column-ised: a per-event opt-out for “we destroyed your instances” is an
+    // offer to be un-told a fact (D342(d)), and the row is what keeps the
+    // bidirectional census green now that cloud/lib dispatches the event.
+    ["trial_expired", "Trial ended",
+     "Sent once when a lapsed trial's instances are torn down — names what went, to every enabled channel; no per-event toggle, silenced only by the master alerts switch above."]
   ];
 
   // The email transport single-select (GR34: pill()/`.seg` segmented control).

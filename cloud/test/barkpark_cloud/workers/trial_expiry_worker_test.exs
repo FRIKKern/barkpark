@@ -66,6 +66,32 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
     )
   end
 
+  # cch-w52-bl — the TEARDOWN notice's own delivery rows, at ANY status. The
+  # measured defect was `delivery_rows_any_status = 0`, so this counts rows
+  # regardless of outcome: a count restricted to `sent` would report the same 0
+  # for "nothing was dispatched" and for "the send failed", and only the first is
+  # the bug.
+  defp teardown_notice_rows(team_id) do
+    Repo.all(
+      from(d in Delivery,
+        where: d.team_id == ^team_id and d.event == "trial_expired",
+        order_by: d.recipient
+      )
+    )
+  end
+
+  # A second member, so the teardown notice's ROLE split is driven rather than
+  # asserted in prose.
+  defp add_member(team, role) do
+    n = System.unique_integer([:positive])
+
+    {:ok, user} =
+      Accounts.register_user(%{email: "m-#{n}@example.com", password: "correct horse staple"})
+
+    {:ok, _} = Accounts.add_member(team, user, role)
+    user.email
+  end
+
   ## 1. Cron wiring
 
   test "worker is scheduled hourly on the maintenance queue" do
@@ -480,6 +506,146 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
       assert {:ok, %{expired: 0, finalized: 0}} = perform_job(TrialExpiryWorker, %{})
       assert Repo.get!(Subscription, sub.id).status == "active"
       assert is_nil(Repo.get(Team, team.id).trial_notice_3d_sent_at)
+    end
+  end
+
+  ## 10. cch-w52-bl — THE TEARDOWN'S OWN NOTICE
+  ##
+  ## Measured during wave 52 by running this worker against a trial whose window
+  ## was already closed: `%{expired: 1, teardowns: 1}`, `delivery_rows_any_status
+  ## = 0`, and the ONLY artefact was a `{"deprovision","pending"}` ProvisionJob.
+  ## The T-3/T-1 advance notices were the only warning a team ever got; a team
+  ## that missed both learned its instances were gone at the outage.
+  ##
+  ## These tests assert the DELIVERY ROWS and the enqueued chat job — the record
+  ## a person could have been reached through — never that a particular function
+  ## was called. Every one of them fails on the pre-change worker with
+  ## `teardown_notice_rows == []`.
+
+  describe "cch-w52-bl: the teardown notifies" do
+    test "the teardown writes a trial_expired delivery row for EVERY member, naming what went" do
+      {team, _sub} = trial_team(-3600)
+      member = add_member(team, "member")
+      # ONE box, not two, and that is the product's own ceiling rather than a
+      # convenience: `Registry.register_barkpark/2` refuses a trial team's second
+      # instance with `{:error, :limit_reached}`. The plural clause of
+      # `Render.teardown_clause/1` is driven in render_test.exs, where a payload
+      # can carry a list no trial team could ever have owned.
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %{expired: 1, teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
+
+      rows = teardown_notice_rows(team.id)
+
+      assert length(rows) == 2,
+             "one row per team member — the reach of a teardown notice is maximal"
+
+      assert Enum.all?(rows, &(&1.kind == "alert" and &1.status == "sent"))
+      assert member in Enum.map(rows, & &1.recipient)
+
+      # The COPY, off the real mail this dispatch produced: the instance is
+      # NAMED, in the past tense, and nothing is promised in the future tense.
+      mails =
+        Map.new(1..2, fn _ ->
+          assert_receive {:email, email}
+          {elem(hd(email.to), 1), email}
+        end)
+
+      for {_addr, email} <- mails do
+        assert email.subject == "Your Barkpark free trial has ended"
+        assert email.text_body =~ "#{bp.name} has been torn down"
+        refute email.text_body =~ "will be"
+        refute email.text_body =~ "ends in"
+      end
+
+      # The one action left, split on the door that actually refuses a member.
+      assert mails[member].text_body =~ "Only the team owner can subscribe"
+      refute mails[member].text_body =~ "Subscribe to a paid plan to run Barkpark again."
+    end
+
+    test "a SECOND pass over the same lapsed trial mails nothing more (the dedup IS the budget)" do
+      {team, sub} = trial_team(-3600)
+      bp = barkpark_fixture(team)
+
+      assert {:ok, %{teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
+      assert [%Delivery{}] = teardown_notice_rows(team.id)
+
+      # Pass 2: the box is still up and its teardown is still pending, so the
+      # enqueue is refused (`:already_deprovisioning`) and there is nothing to
+      # report. No second row.
+      assert {:ok, %{expired: 1, teardowns: 0, finalized: 0}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      assert length(teardown_notice_rows(team.id)) == 1
+
+      # Pass 3: the teardown has HAPPENED (the deprovision deletes the barkpark
+      # row) — the trial is finalised and leaves `active_trials/1` for good, so no
+      # later pass can ever mail about it again.
+      Repo.delete!(bp)
+
+      assert {:ok, %{expired: 1, teardowns: 0, finalized: 1}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      assert Repo.get!(Subscription, sub.id).status == "canceled"
+      assert length(teardown_notice_rows(team.id)) == 1
+
+      assert {:ok, %{expired: 0}} = perform_job(TrialExpiryWorker, %{})
+      assert length(teardown_notice_rows(team.id)) == 1
+    end
+
+    test "the teardown notice reaches a SLACK-ONLY team, rendered as itself" do
+      {team, _sub} = trial_team(-3600)
+      bp = barkpark_fixture(team)
+
+      {:ok, _} =
+        BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
+          "url" => "https://hooks.slack.com/x"
+        })
+
+      assert {:ok, %{teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
+
+      assert_enqueued(
+        worker: BarkparkCloud.Workers.ChatNotificationWorker,
+        args: %{channel_type: "slack", event: "trial_expired"}
+      )
+
+      assert [%{args: %{"payload" => payload}}] =
+               all_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
+
+      assert payload["instances"] == [bp.name]
+
+      # NOT the catch-all: `{"Barkpark Cloud", "Event: trial_expired for …", :info}`
+      # is Discord GREEN, and a teardown report arriving as good news is the exact
+      # failure the wave-32 census exists to foreclose.
+      assert {"Trial ended", body, :warning} =
+               BarkparkCloud.Notifications.Render.render("trial_expired", payload)
+
+      assert body =~ "#{bp.name} has been torn down"
+      refute body =~ "Event: trial_expired"
+    end
+
+    test "a lapsed trial with NOTHING to tear down sends no teardown notice (the stated limit)" do
+      # The cch-w50 ghost shape: window closed, zero boxes. This pass tore nothing
+      # down, so a teardown report here would describe an act it did not perform
+      # and could name nothing. It is finalised, silently.
+      {team, _sub} = trial_team(-3600)
+      assert Registry.list_barkparks(team) == []
+
+      assert {:ok, %{expired: 1, teardowns: 0, finalized: 1}} =
+               perform_job(TrialExpiryWorker, %{})
+
+      assert teardown_notice_rows(team.id) == []
+    end
+
+    test "a MUTED team gets no teardown notice — the master switch still governs" do
+      {team, _sub} = trial_team(-3600)
+      _bp = barkpark_fixture(team)
+      {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => false})
+
+      assert {:ok, %{teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
+
+      assert teardown_notice_rows(team.id) == []
+      refute_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
     end
   end
 end
