@@ -1,0 +1,1 @@
+The classifier seam change and any census GROUP BY widening are separated, and if the fold is widened its group-cardinality effect is measured against the ~1,400-group baseline, not assumed.

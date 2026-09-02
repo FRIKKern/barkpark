@@ -1,0 +1,1 @@
+dr-w6-s5's criterion 10 is re-cut so it no longer forbids the files its own fix requires, with the change recorded on the task.

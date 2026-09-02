@@ -1,0 +1,1 @@
+The census confirms the coalescing invariant still holds at the 240s cap: no (site, content_rev) shows two simultaneously-pending AutoDeployWorker jobs.

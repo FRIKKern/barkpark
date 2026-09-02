@@ -1,0 +1,1 @@
+Every modal body that renders inside .modal-card is driven at 320/360/390/430 in both themes and its min-content floor is recorded — a body the preview harness cannot reach is named with the reason, not silently omitted.

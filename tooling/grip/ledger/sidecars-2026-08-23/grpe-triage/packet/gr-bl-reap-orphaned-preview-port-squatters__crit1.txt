@@ -1,0 +1,1 @@
+The guard no longer depends on a single hardcoded default port: it either binds an ephemeral port or fails loudly with a distinct exit code when its chosen port is occupied, so a port problem can never again be mistaken for a pixel regression.

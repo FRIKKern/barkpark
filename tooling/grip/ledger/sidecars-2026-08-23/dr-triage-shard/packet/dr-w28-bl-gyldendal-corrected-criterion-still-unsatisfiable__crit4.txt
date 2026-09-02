@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the operator has run the transaction and the delivery-proving reasons have stopped appearing.

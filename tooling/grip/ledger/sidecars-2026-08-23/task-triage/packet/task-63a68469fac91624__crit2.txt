@@ -1,0 +1,1 @@
+Test pins the resolved series colours so a future theme change that recollides trips CI

@@ -1,0 +1,1 @@
+The 2FA enroll phase is DRIVEN at 320/360/390/430/480 in both themes, with the QR, the secret, Copy and Confirm all measured against the viewport. Evidence: the run output at each width.

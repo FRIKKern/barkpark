@@ -173,13 +173,32 @@ defmodule Barkpark.Plugins.OnixEditTest do
       assert "/onixedit/export/:dataset/:id" in paths
     end
 
-    test "register_workers/1 contributes the Bokbasen.Auth token cache" do
+    test "register_workers/1 contributes the Bokbasen.Auth token cache and the dataset-host boot check" do
       # Goal barkpark-G1, task s2: OnixEdit overrides the no-op default and
       # asks the host to start its OAuth2 token cache as part of the boot
       # supervision tree. The previous hardcode in Barkpark.Application is
       # gone; this callback is the only way Auth gets started.
+      #
+      # The SECOND child is the dataset-host boot check. It lives here rather
+      # than in Barkpark.Application on purpose: a call from the host's boot
+      # path would make a core module depend on a removable plugin and break
+      # the fresh-install invariant, and boot_collectors.ex rescues around the
+      # host's own boot work, so a raise there would be swallowed instead of
+      # failing closed. A plugin child spec is the only path that both escapes
+      # that rescue and disappears entirely when OnixEdit is disabled.
+      #
+      # Asserted as a whole list, not `in`: this callback IS the boot
+      # supervision contract, so a third child appearing unannounced should
+      # red here rather than ride along unnoticed.
       assert OnixEdit.register_workers(%{phase: :boot}) ==
-               [Barkpark.Plugins.OnixEdit.Bokbasen.Auth]
+               [
+                 Barkpark.Plugins.OnixEdit.Bokbasen.Auth,
+                 %{
+                   id: :onixedit_dataset_host_boot_check,
+                   start: {Barkpark.Plugins.OnixEdit, :start_dataset_host_check, []},
+                   restart: :temporary
+                 }
+               ]
     end
   end
 

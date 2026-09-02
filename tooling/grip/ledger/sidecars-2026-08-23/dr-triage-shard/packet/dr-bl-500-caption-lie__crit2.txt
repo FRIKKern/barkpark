@@ -1,0 +1,1 @@
+Either the completed artifact is retained for retry, or the PR states explicitly and with evidence why discarding it is correct.

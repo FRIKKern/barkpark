@@ -1,0 +1,1 @@
+A test pins the chosen behaviour for a poll-phase refusal at BOTH 409 and 503, and is shown RED against the current classifier

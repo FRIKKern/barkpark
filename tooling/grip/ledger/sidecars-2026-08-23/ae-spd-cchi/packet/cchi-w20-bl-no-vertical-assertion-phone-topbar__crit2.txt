@@ -1,0 +1,1 @@
+THE ASSERTION CAN LOSE, proven by mutation on a deliberate height regression, with the byte-identical restore returning rc=0.

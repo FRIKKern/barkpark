@@ -1,0 +1,1 @@
+A forged shares-add naming a workspace the principal holds no membership in is REFUSED, and no shares row is created

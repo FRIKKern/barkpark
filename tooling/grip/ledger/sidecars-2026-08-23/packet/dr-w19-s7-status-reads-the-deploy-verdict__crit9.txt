@@ -1,0 +1,1 @@
+The PR body states the honest bound: live_rate is the headline and NOT a fence, because any floor calibrated on July's 91.7-95.6% makes today's 27.4% permanently red — the over-alarm problem moves with the term.

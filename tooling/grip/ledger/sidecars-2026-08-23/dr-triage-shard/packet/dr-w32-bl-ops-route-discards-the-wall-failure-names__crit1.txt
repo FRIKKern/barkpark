@@ -1,0 +1,1 @@
+The ops route surfaces the wall's named failures with the same vocabulary the publish route now uses, and a test pins the rendered details.

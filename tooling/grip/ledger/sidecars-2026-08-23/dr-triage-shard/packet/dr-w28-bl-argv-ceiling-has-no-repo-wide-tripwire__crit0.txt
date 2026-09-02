@@ -1,0 +1,1 @@
+The tripwire exists and names the bound (32 * PAGE_SIZE = 131,072) and the ratified cure (--slurpfile, honest-gates D44).

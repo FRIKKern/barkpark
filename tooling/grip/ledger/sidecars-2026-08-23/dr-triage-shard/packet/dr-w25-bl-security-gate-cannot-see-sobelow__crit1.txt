@@ -1,0 +1,1 @@
+The three inherited Config.CSRF findings at router.ex 615/556/532 are dispositioned — fixed or re-baselined with a rationale.

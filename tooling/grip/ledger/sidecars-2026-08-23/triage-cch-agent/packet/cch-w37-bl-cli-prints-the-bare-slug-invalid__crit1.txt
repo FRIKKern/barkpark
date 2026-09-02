@@ -1,0 +1,1 @@
+cloudError folds the first `details` entry into the message without regressing the `detail` path; both shapes are asserted.

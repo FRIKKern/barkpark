@@ -1,0 +1,1 @@
+freshnessModel has a real deferred arm with a non-unknown dot, proven by driving the shipped helper through the harness sandbox

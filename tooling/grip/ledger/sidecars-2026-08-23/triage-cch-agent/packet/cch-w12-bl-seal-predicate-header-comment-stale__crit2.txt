@@ -1,0 +1,1 @@
+The claim is re-derived from a worktree pinned at origin/main, and the report says so (the primary checkout's copy lacks --ladder-only entirely). Evidence: the rev-parse plus the run.

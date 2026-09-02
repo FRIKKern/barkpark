@@ -1,0 +1,1 @@
+The capabilities manifest and the CLI help state which verb is fenced, so the asymmetry is discoverable without reading the controller.

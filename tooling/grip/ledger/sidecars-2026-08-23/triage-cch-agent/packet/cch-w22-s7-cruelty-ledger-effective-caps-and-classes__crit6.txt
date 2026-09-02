@@ -1,0 +1,1 @@
+ONE SHARED `CRUEL_WIDTHS` IS KEPT and the `:2004-2006` straddle assertion survives intact; if 740 is added, say why. Evidence: the diff plus the axis-assertion block unchanged.

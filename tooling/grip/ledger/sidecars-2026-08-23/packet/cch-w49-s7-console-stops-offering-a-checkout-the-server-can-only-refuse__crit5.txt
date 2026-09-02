@@ -1,0 +1,1 @@
+UNKNOWN IS FAIL-OPEN: with the capability key absent or the read failed, the CTAs stay standing — driven, bytes quoted — and the PR body states why that is safe (the server refuses in state C after s2).

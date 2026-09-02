@@ -1,0 +1,1 @@
+An explicit call timeout strictly greater than ctl_cmd_timeout_ms() bounds the trigger call, and a test pins that relationship so a future widening of the callee reds

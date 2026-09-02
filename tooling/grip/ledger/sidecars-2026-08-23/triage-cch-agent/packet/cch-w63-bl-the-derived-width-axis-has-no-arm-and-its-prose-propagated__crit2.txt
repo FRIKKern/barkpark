@@ -1,0 +1,1 @@
+The residue-family axis vs cell.hash axis mapping is DEFINED in writing before any 'swept by N cells' clause is recounted, and the definition explains why hash:#billing and hash:#notifications have zero cells on the keying axis while their prose is true on the other. Paste the definition.

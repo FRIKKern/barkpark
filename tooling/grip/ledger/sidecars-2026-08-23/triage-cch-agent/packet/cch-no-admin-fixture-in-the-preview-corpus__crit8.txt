@@ -1,0 +1,1 @@
+Full local gate GREEN: smoke, breakpoint-sweep, breakpoint-sweep.test, __app.test, __binding_census, __me_envelope_census, overflow-guard. Evidence: the gate transcript.

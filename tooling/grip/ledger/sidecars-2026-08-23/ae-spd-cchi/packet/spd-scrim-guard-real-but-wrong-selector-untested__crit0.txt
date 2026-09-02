@@ -1,0 +1,1 @@
+SCRIM_SELECTOR is mutated to a plausible-but-wrong REAL selector and the outcome is recorded — exit code, stderr, artifact presence, and the guard's applies/passed counts if a run completes

@@ -1,0 +1,1 @@
+A test inserts a console entry carrying a NON-PREFIXED, SUB-32-CHAR, COLOURISED secret, reads it back through the real route, and asserts both the secret and the 0x1B byte are gone - and REDS when the call is reverted to a bare scrub. Evidence: green run plus mutation run.

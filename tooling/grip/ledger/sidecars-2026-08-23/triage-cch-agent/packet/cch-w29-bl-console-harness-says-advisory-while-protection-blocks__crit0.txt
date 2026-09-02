@@ -1,0 +1,1 @@
+All three 'ADVISORY today' sentences (:312, :442, :509) state the live required set correctly, re-derived from `gh api repos/{owner}/{repo}/branches/main/protection` at edit time rather than copied. Evidence: the gh api output and the three diffs.

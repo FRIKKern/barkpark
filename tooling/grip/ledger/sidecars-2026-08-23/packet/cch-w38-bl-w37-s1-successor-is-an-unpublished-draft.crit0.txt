@@ -1,0 +1,1 @@
+drafts.cch-w37-s1-invalid-precedence-details-win is disposed: either published as the row of record, or cancelled with a published successor cut in its place. Evidence: bp task get on the resulting slug showing status published.

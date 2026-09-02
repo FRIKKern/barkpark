@@ -1,0 +1,1 @@
+The Caddy-unbound standby slots are enumerated AT EXECUTION TIME from the live Caddyfile and ss output, never from the ports quoted in this description

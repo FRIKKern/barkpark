@@ -1,0 +1,1 @@
+The census runs green (exit 0) against the merge base's app.js — i.e. against the POST-cch-w39-s1 tree, not a pre-fix tree — proving the pins were written after the fixes landed.

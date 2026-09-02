@@ -1,0 +1,1 @@
+A regression test pins both, and it FAILS against today's behaviour. Evidence: the test names and the demonstrated fail-before.

@@ -1,0 +1,1 @@
+The seam choice is written down with its tradeoff: a per-PR required check couples merges to guerrilla's availability, which this epic has measured as flaky, so if that seam is chosen the coupling is stated and bounded; if a review-phase or scheduled seam is chosen, say why.

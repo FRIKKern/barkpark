@@ -1,0 +1,1 @@
+After crossing a 7,22,37,52 boundary, ZERO new usage_samples rows for b1259514 carry unavailable_reason. (Rows WILL still be written — the sweep is host-keyed — so the absence of the REASON KEY is the proof, not the absence of rows.) Paste the query and the count.

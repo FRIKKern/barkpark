@@ -1,0 +1,1 @@
+The PR body carries a FULL-SUITE DELTA, baseline vs branch, as a delta and not a pass/fail — and it is a list-diff of failing test NAMES, never a bare count. Two runs of the same tree gave 33 and 34 failures; quoting a count as a delta produced a wrong 13 where the true figure was 19.

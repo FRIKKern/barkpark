@@ -1,0 +1,1 @@
+If the SQL fallback never answers (the route works for the worker principal), it is DELETED rather than left as untested code. If it does answer, its column set is proved against the live schema.

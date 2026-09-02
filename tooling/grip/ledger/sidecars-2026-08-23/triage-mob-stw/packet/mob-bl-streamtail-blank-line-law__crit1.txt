@@ -1,0 +1,1 @@
+The 41-test corpus plus chat_live_test and chat_render_golden_test stay green at a recorded seed with goldens unregenerated.

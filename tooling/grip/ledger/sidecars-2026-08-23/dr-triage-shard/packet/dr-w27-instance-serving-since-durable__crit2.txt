@@ -1,0 +1,1 @@
+The value is NOT minted by the reader: show that reading it twice without a deploy returns the same instant, and that the authed site-deploy route was never called by the recorder.

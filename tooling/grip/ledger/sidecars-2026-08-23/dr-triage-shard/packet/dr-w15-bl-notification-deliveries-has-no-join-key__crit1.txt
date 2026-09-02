@@ -1,0 +1,1 @@
+If the key is added, a test proves a deployment_failed delivery row carries the deployment it was sent for

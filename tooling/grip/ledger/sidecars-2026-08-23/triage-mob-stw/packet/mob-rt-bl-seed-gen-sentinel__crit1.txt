@@ -1,0 +1,1 @@
+A test drives the REAL store through the attach-mid-turn restart sequence and shows the live tail SURVIVES, and is proven able to fail by restoring the 0 seed.

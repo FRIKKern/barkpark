@@ -1,0 +1,1 @@
+The owning session is identified or the stage is confirmed ownerless before anything is discarded — this checkout is shared and an uncommitted edit is silently lost on any switch

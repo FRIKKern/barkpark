@@ -1,0 +1,1 @@
+The account modal`s unknown arm consumes wireMeRetry with selfHealing:false and repaints via openAccountModal — proved by a node assertion, not by reading the diff.

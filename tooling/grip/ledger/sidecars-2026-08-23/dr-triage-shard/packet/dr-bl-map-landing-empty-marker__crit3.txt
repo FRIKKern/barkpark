@@ -1,0 +1,1 @@
+Gate green with output pasted: bash deploy/site-deploy-node.sh --self-test AND cd templates/search-starter && npm run typecheck && npm test

@@ -1,0 +1,1 @@
+Both surfaces (internal/cli/cloud_status_cmd.go and cloud/priv/static/app.js) implement that decision together, with the decision-32 fixture updated if the vocabulary moved.

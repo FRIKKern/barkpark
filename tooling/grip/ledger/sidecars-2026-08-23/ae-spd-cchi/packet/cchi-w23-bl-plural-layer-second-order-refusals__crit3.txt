@@ -1,0 +1,1 @@
+W13's FOUR ZERO-RAIL ROUTES ARE HANDLED: either the leg refuses zero rail pills PER CELL, or the four routes that structurally render none are named in the leg with their reason. Quote whichever landed, and the count line showing it is no longer 36 unexplained.

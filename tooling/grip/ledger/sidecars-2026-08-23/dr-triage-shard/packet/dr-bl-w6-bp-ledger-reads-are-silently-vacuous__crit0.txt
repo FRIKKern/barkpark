@@ -1,0 +1,1 @@
+`bp doc get task drafts.<id>` either resolves the draft or fails with an error that NAMES the addressing problem (never a bare `not_found`). Evidence: the before/after command output for a draft that exists.

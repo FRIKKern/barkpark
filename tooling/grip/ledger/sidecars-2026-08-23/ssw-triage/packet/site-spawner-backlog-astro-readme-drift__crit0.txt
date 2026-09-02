@@ -1,0 +1,1 @@
+The Astro starter README lists all five emitted health/deploy markers and explains bp-site-base.

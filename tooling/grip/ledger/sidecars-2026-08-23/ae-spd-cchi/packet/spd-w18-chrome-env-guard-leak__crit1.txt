@@ -1,0 +1,1 @@
+`node tooling/search-smoke/journey-smoke.mjs --self-test` still exits 0 with a real Chrome, so the fix did not disarm the harness.

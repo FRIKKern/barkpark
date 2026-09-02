@@ -1,0 +1,1 @@
+Census arm (a) is extended to NOTIF_ALWAYS_SEND, so a producerless always-send row cannot pass, proved by a mutation adding one.

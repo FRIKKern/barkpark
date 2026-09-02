@@ -1,0 +1,1 @@
+console-harness.yml:270-277's triage sentence is updated in the SAME PR - a solitary `not ok 56` no longer means 'the ledger was unreachable' once this lands. Evidence: the YAML diff.

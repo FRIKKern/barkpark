@@ -1,0 +1,1 @@
+Gate green: cd api && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_web/controllers/tasks_controller_test.exs

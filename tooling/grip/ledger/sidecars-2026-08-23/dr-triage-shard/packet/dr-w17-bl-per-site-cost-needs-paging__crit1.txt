@@ -1,0 +1,1 @@
+Attempts-per-live and minutes-to-live are rendered as COST beside the site outcome, never folded into a reliability rate; the 8-day attempts-per-live series is quoted so nobody re-quotes D252's ~3.2 as the shape

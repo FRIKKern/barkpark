@@ -1,0 +1,1 @@
+THE BLIND SPOT IS CLOSED, PROVEN BY THE SAME MUTATION THAT USED TO PASS: add a bogus key inside site_row/2's map literal and paste the RED naming it. On origin/main today that exact mutation passes silently at 11/0 — paste that BEFORE run too, so the pair is shown to have changed the outcome

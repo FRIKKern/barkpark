@@ -1,0 +1,1 @@
+The mobile gate is green with counts re-derived at claim: npx jest, pnpm typecheck, pnpm lint.

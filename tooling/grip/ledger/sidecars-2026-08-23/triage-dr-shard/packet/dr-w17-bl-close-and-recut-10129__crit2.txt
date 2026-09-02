@@ -1,0 +1,1 @@
+The three-way ladder drift (Go 11 / fixture 11 / app.js 9) is either gated or filed as its own row, with the note that a fixture-only PR runs NO Go suite so any touch must carry a .go file in the same PR (charter D57's trap)

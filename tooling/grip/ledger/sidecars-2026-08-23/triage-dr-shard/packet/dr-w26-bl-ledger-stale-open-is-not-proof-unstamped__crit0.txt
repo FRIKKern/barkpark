@@ -1,0 +1,1 @@
+Every open row is classified branch -> PR -> main and the class is recorded on the row, so 'open' stops meaning three different things.

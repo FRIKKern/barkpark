@@ -1,0 +1,1 @@
+A guard that can lose: a node:vm assertion over siteRow for the never-deployed and preview-only states, proven by mutation (revert the chip, the test goes not ok naming the state). Evidence: the passing counts and the mutated run failure lines with exit codes.

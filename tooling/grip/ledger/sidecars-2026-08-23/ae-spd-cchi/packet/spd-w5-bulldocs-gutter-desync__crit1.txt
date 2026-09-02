@@ -1,0 +1,1 @@
+The new pin is proven non-vacuous by changing one side only and observing a named failure, with the red pasted

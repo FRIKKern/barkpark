@@ -1,0 +1,1 @@
+The residue-measurement protocol in the charter states that any bp-side parent_id census must filter the `drafts.` prefix, with the reconciliation arithmetic recorded.

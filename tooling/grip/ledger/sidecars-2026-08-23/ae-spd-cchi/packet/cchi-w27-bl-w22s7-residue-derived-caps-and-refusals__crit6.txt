@@ -1,0 +1,1 @@
+The two dead citations inside shipped instruments are corrected in the same diff: overflow-guard.mjs:3763 cites scenarios.mjs:1433-1442 for GONE-KIND throws that are ~270 lines lower, and smoke.mjs:2851 attributes SCENARIO_RESIDUE to overflow-guard.mjs when it lives in breakpoint-sweep.mjs.

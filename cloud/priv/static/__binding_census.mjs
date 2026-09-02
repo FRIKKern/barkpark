@@ -458,10 +458,6 @@ const PIN = [
   { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canRemoveMember", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "RANK-RELATIVE below the router, with an owner escape hatch the PATCH path lacks. RE-PINNED off assignableRoles by the (2k) arm below: canRemoveMember(actorRole, targetRole, isSelf) mirrors remove_member_as/3, hatch included. A SEPARATE predicate from the PATCH row on purpose — the two laws disagree on owner-vs-owner, so one boolean cannot state both" },
   { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
-  // ── env vars — elevated, and ONLY the inline cond says so
-  { fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "POST /v1/env-vars refuses non-admins inside a cond; the form renders only when canWrite" },
-  { fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "DELETE /v1/env-vars/:id, same inline cond; the Delete action renders only when canWrite" },
-
   // ── device-link activation
   { fn: "activateInspect", verb: "POST", route: "/v1/auth/device/inspect", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: inspect your own device code" },
   { fn: "submitActivateDecision", verb: "POST", route: "/v1/auth/device/approve|/v1/auth/device/deny", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; THE LITERAL-PREFIX TRAP — see ruling (b)" },
@@ -533,8 +529,6 @@ const INLINE_COND_ROUTES = [
   "DELETE /v1/fleet/supports/:id",
   "POST /v1/barkparks/:id/agent-key",
   "GET /v1/barkparks/:id/agent-key (status poll — same cond, admin-narrated read)",
-  "POST /v1/env-vars",
-  "DELETE /v1/env-vars/:id",
   "POST /v1/launch + POST /v1/go-live (go_live/1)",
   "POST /v1/resurrect (resurrect/1)",
 ];
@@ -1118,7 +1112,13 @@ if (unresolved.length) {
 // grew 6 -> 8 in the same commit) and ships UNPREDICATED — the paste form
 // renders on every live support row regardless of authority — so elevated and
 // unpredicated both move by one, honestly. See the row's own note.
-const EXPECT = { total: 81, elevated: 41, predicated: 36, unpredicated: 5 };
+// cch-w53-bl env-var Option A (ruled 2026-09-02): 81 -> 79. The team env-var
+// feature is DELETED — its console writers submitEnvVar (POST /v1/env-vars) and
+// confirmDeleteEnvVar (DELETE /v1/env-vars/:id) are gone with the three routes
+// they called, so `total`, `elevated` and `predicated` each fall by exactly two
+// (both rows were elevated AND predicated on assignableRoles). `unpredicated`
+// does NOT move — neither row was in it.
+const EXPECT = { total: 79, elevated: 39, predicated: 34, unpredicated: 5 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

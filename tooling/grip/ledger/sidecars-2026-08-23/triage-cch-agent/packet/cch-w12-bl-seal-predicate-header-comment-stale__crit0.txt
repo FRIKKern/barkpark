@@ -1,0 +1,1 @@
+The header no longer states a rung reading that the live ladder contradicts. Evidence: the diff plus the --ladder-only output it now agrees with.

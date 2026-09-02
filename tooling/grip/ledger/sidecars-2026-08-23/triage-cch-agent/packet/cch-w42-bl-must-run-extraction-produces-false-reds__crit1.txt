@@ -1,0 +1,1 @@
+A run of the corrected recipe shows 0 fail, and a run of the old one shows the false reds, both quoted with counts and not durations.

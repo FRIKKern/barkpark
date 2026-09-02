@@ -1,0 +1,1 @@
+The mechanism is established by measurement, not by reading — a reproduction, a log, or an instrumented run that shows where the fan-out is lost

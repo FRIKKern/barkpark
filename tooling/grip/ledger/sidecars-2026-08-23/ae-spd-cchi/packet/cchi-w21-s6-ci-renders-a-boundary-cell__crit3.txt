@@ -1,0 +1,1 @@
+THE EXIT VOCABULARY IS PRESERVED: the step maps rc 0/1/2 exactly as the existing render steps do, with exit 2 producing an `::error … UNINTERPRETABLE` and a red — proven by pasting the case ladder.

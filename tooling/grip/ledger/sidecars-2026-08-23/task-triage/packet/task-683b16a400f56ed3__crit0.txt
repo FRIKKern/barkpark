@@ -1,0 +1,1 @@
+A CAUSE IS ANSWERABLE WITHOUT SSH. `bp cloud site status <site>` and/or the deployments API expose more of a failed build's durable log than the one-line failure_reason. Evidence quotes the command and its output for a recorded failure, showing at least one error the reason line does not carry.

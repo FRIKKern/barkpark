@@ -1,0 +1,1 @@
+Attempts-per-live, rows per (site, content_rev) split on had-deferral, the deferral-depth histogram, the deferred/live mix and search p50 by concurrent-build count are all re-measured against the stated baselines, with volume beside every rate.

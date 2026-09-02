@@ -1,0 +1,1 @@
+MUTATION PROOF BOTH DIRECTIONS: a host with a paintable ellipsis is shown still exempt, and a host with an inert one is shown newly reported.

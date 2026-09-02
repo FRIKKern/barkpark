@@ -1,0 +1,1 @@
+The predicate refuses or downgrades rather than silently certifying when spec and reality cannot both be true, proven by mutation: with the spec listing a context the drift detector reports absent, the predicate's verdict changes. Evidence: both runs with exit codes read from $?.

@@ -1,0 +1,1 @@
+The drift is reproduced: the committed spec's four contexts diffed against live protection's two, with the diff's exit status read. Evidence: the diff output and `enforce_admins`.

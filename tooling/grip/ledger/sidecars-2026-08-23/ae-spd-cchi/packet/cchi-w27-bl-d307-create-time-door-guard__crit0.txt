@@ -1,0 +1,1 @@
+`surface` becomes an ENUM (or at minimum a required leading token), not free prose — today the same wave authored both 'cloud console SPA — ...' and 'cloud console instruments — ...' and classifying by substring is a regex over English.

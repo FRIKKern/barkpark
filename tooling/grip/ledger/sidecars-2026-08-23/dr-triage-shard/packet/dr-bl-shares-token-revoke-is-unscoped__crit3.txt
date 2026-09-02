@@ -1,0 +1,1 @@
+Verified by a fresh mint -> revoke -> 401 round-trip on a throwaway token, plus a revoked_at read-back. (A 'request that now fails' is UNSATISFIABLE for pre-existing tokens: the mint returns an unprefixed base64url ONCE and no ledger records one.)

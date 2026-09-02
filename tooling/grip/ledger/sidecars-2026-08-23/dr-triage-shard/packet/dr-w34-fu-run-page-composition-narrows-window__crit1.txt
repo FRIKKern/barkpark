@@ -1,0 +1,1 @@
+A verdict is recorded: one page of 100 still covers the 24h window, or it does not and the fetch is changed.

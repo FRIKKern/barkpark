@@ -1,0 +1,1 @@
+The change is proved to matter rather than asserted: with a temporary async:true log-emitting module in the same directory, the file reds at async:true and stays green at async:false. Evidence: both runs, counts quoted, temporary module removed.

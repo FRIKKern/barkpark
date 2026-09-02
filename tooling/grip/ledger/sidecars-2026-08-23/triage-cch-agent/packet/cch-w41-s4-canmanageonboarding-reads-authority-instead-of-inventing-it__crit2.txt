@@ -1,0 +1,1 @@
+THE DECISIVE PIN: a payload where role and team_authority.admin DISAGREE (both directions) proves the predicate follows the server's stated authority and not the role string. Evidence: the two assertions and their output.

@@ -1,0 +1,1 @@
+A written RULING on RUNG vs DETAIL LINE lands in the PR body with its reason, and (if RUNG) every one of the five surfaces moves atomically — noting that `cloud/priv/static/**` is ceded to cloud-console-hardening wave 37 this cycle. Evidence: the quoted ruling paragraph.

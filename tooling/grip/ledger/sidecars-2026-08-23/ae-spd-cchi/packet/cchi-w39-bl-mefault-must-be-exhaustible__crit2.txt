@@ -1,0 +1,1 @@
+The scenario census bump is RE-READ from the merge base and never carried: the SCENARIOS key, the breakpoint-sweep residue, its test literals AND its title string, and the smoke EXPECTATION are each re-derived from a fresh run whose output is quoted.

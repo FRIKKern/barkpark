@@ -1,0 +1,1 @@
+The verdict is recorded as either a normalisation (task closes not-a-defect) or a data-loss defect with a matching priority, and the reasoning is written down.

@@ -93,6 +93,11 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # cloud-console-hardening D21/D41: the SAME fence, proved on the OTHER two
+      # writers of the paper-editor mirror region. It shipped in #15455 executed by
+      # no workflow at all — a regression test nobody runs is a comment with a
+      # process cost, so it is wired here beside its emit-fence sibling.
+      - "design/mirror-fence.test.mjs"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -264,6 +269,11 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # cloud-console-hardening D21/D41: the SAME fence, proved on the OTHER two
+      # writers of the paper-editor mirror region. It shipped in #15455 executed by
+      # no workflow at all — a regression test nobody runs is a comment with a
+      # process cost, so it is wired here beside its emit-fence sibling.
+      - "design/mirror-fence.test.mjs"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -605,6 +615,11 @@ jobs:
           # naming the lines, and it does NOT over-fire on a legitimate token edit.
           # Deleting the run() pre-flight block reds this (proven able to fail).
           node design/emit-fence.test.mjs
+
+          # cloud-console-hardening D21/D41: the mirror-region half of the same
+          # attribution fence — paper-editor-mirror.mjs and the Studio writer.
+          # Zero-dep (node:test + node:assert), 7 assertions.
+          node design/mirror-fence.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens

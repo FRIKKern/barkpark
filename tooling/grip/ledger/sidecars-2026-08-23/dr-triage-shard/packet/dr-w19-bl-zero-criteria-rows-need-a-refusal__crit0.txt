@@ -1,0 +1,1 @@
+The six live zero-criteria rows are each resolved: backfilled with rubric-quality criteria, collapsed into a row that already covers them, or cancelled with a stated reason — the disposition of each is listed by id.

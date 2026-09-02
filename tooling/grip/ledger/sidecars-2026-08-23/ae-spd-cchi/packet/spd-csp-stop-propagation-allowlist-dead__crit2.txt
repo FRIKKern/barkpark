@@ -1,0 +1,1 @@
+The emitted Browser CSP no longer contains the retired stop-propagation hash while every still-used inline-handler hash remains unchanged.

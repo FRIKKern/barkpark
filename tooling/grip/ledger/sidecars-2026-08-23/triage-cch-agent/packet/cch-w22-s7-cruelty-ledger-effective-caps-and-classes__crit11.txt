@@ -1,0 +1,1 @@
+AT LEAST FIVE SURVIVED-CONTACT VERDICTS ARE RECORDED WITH NUMBERS RATHER THAN CONVERTED INTO SLICES: members, `.fleet-meta`/`.fleet-infra` (INADMISSIBLE, with its measured spill as the written reason), GR109, `.set-matrix` (including the corner-cover accuracy fix), and `.a2f-secret-value` as content. Evidence: each verdict with its measured numbers.

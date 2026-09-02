@@ -1,0 +1,1 @@
+The three banned fixes are named in the report and none was used: try/catch around the spawn, a NO_SEAL-or-INFRA disjunction, and deleting the control. Evidence: the diff and the statement.

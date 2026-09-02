@@ -1,0 +1,1 @@
+If the ruling changes behaviour, a test pins that a box below min_sample on 24h but above it on the longer horizon does NOT come out unmetered, and the test is mutation-proved able to lose

@@ -1,0 +1,1 @@
+The arm's anti-vacuity floors are on the INPUTS and name the positive control BY NAME (not merely non-empty), so a reflection that silently returns fewer modules cannot go green with fewer keys.

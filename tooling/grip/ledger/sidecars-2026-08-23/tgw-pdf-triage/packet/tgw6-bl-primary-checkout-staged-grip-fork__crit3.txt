@@ -1,0 +1,1 @@
+`git status --porcelain -- tooling/grip` in the primary checkout is empty, and its HEAD is no longer behind origin/main

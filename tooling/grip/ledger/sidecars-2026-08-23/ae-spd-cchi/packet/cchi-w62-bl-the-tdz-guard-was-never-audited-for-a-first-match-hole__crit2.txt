@@ -1,0 +1,1 @@
+The vacuous-green state is addressed: when the lexer loses the module boundary the guard must not print 'crossings: 0 (structurally impossible without a top-level await)' as a verdict about a file it failed to parse. Either it refuses, or the sentence says plainly that this green is not a verdict.

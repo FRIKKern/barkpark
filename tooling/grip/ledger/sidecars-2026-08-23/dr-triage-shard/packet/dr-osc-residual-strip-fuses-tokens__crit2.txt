@@ -1,0 +1,1 @@
+The copy change is bounded: the PR body shows a before/after over the captured-line corpus (or a stated sample) proving no ordinary stripped line gains a spurious delimiter that changes its meaning.

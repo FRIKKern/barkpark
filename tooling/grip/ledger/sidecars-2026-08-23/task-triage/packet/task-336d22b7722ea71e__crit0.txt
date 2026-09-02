@@ -1,0 +1,1 @@
+An ANONYMOUS request to /finder yields a graph payload containing zero private-visibility nodes. Evidence: the probe re-run, showing 0 nodes where it showed 1.

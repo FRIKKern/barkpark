@@ -1,0 +1,1 @@
+The truncation is reproduced and its CAUSE is named at file:line, not inferred. Evidence: paste the file-vs-pipe line counts and the offending call site.

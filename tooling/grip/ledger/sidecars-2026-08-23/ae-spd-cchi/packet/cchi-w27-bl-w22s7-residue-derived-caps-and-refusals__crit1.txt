@@ -1,0 +1,1 @@
+Every cap is DERIVED from changeset + migration + downstream — reading `validate_change` as well as `validate_length` — and the derivation reproduces the two known answers: env_var.comment effective 255 (NOT 1000, because `add :comment, :string` is a bare varchar), and site.domains 253 by FORMAT under @domain_format, which a validate_length census cannot see.

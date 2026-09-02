@@ -1,0 +1,1 @@
+notifCanManage, billingCanManage, billingIsOwner and assignableRoles are BYTE-FOR-BYTE UNTOUCHED (D477 drops the first; D487 refuses billing because the band answers "grant" to an admin while billing's gate is owner-only; cch-w42-s3 owns assignableRoles). Evidence: the diff, and the PR body stating each exclusion with its reason.

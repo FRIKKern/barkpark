@@ -1,0 +1,1 @@
+INLINE_COND_SITES (and INLINE_COND_EXCLUDED) live in ONE exported module imported by both __binding_census.mjs and the sweep — one route->fence table, not two.

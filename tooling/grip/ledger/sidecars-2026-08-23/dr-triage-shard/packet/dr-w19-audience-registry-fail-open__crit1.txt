@@ -1,0 +1,1 @@
+A candidate absent from @signals REDS naming the file:line, unless an explicit stated-reason row excuses it.

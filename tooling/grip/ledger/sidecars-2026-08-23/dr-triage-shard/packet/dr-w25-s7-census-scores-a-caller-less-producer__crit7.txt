@@ -1,0 +1,1 @@
+`.github/workflows/deploy.yml` is added to CLOUD_PATHS in scripts/cloud-path-escape-check.sh IN THE SAME COMMIT, and `echo .github/workflows/deploy.yml | bash scripts/cloud-path-escape-check.sh --match cloud` flips from `false` on origin/main to `true`. Paste both runs.

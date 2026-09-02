@@ -1,0 +1,1 @@
+The fix pins the state the golden depends on rather than excluding the test; the combined studio run is green over at least 10 consecutive runs.

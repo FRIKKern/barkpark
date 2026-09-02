@@ -1,0 +1,1 @@
+A controlled probe drives a known number of /v1/graph calls on an otherwise quiet guerrilla and records BEAM RSS and pool checkout time per call

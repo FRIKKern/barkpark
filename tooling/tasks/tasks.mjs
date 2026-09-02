@@ -27,7 +27,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveEnv, banner, flag } from "../lib/barkpark-env.mjs";
+import { resolveEnv, banner, flag, fetchBackpressureAware } from "../lib/barkpark-env.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -123,9 +123,19 @@ const tracked = new Set(git(["ls-files"]).split("\n").filter(Boolean));
 // ──────────── pull the tasks from Barkpark ────────────
 async function fetchTasks() {
   const url = `${HOST}/v1/data/query/${SRC_DATASET}/task?perspective=raw&limit=${LIMIT}`;
-  const r = await fetch(url, { headers: { Authorization: "Bearer " + DEV } });
+  // A 429 IS NOT "IS BARKPARK UP". Measured 2026-09-01 under this fleet's own
+  // load: the ledger answered this exact read with 429 retry_after=1 and the
+  // line below reported a one-second throttle as a dead server, sending the
+  // reader to check a host that was healthy. The backoff is bounded and the
+  // two conditions now say different things — see barkpark-env.mjs.
+  const r = await fetchBackpressureAware(url, { headers: { Authorization: "Bearer " + DEV } });
+  if (r.throttled) {
+    e(`[tasks] the ledger is RATE LIMITING this client (HTTP 429) — ${r.gaveUp}.`);
+    e(`[tasks] Barkpark at ${HOST} is HEALTHY and busy; this is backpressure, not an outage. Re-run when the fleet is quieter, or reduce the request rate.`);
+    process.exit(2);
+  }
   if (!r.ok) { e(`[tasks] task query failed ${r.status} — is Barkpark up at ${HOST}?`); process.exit(2); }
-  const j = await r.json();
+  const j = JSON.parse(r.body);
   const arr = j.result?.documents || j.documents || (Array.isArray(j.result) ? j.result : Array.isArray(j) ? j : []);
   // real tasks only: kind:task / kind:phase / kind:epic — skip events and anything draft-shaped.
   return arr.filter((t) => t && t._id && (t.kind === "task" || (t.labels || []).some((l) => /^kind:(task|phase|epic|goal)$/.test(l)) || t.kind === undefined && t.title));

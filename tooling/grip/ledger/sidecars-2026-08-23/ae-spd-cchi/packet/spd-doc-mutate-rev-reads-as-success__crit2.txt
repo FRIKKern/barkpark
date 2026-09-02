@@ -1,0 +1,1 @@
+`bp task get <id> --perspective raw` either works or fails with a real error code, never the usage banner

@@ -1,0 +1,1 @@
+A runnable derivation prints, for every epic instrument, its reader-surface hit count and its first-emission commit date — measured, not quoted.

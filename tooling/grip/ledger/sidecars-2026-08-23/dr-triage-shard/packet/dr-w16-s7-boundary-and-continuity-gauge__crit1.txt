@@ -1,0 +1,1 @@
+A WINDOW STRADDLING THE BOUNDARY REFUSES: a test proves a comparing surface refuses rather than reporting a cross-boundary failure-rate delta, and a window entirely on one side does not refuse. Paste both runs

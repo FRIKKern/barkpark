@@ -1,0 +1,1 @@
+Each of the eleven never-fired exit_label templates is either REMOVED, or retained with a comment stating it is a tripwire for an unobserved condition — decided deliberately, not left ambiguous

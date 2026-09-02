@@ -1,0 +1,1 @@
+NO BATCH CLOSE: each merge-gated criterion carries its own four-part verification — PR merged, the merge commit an ancestor of origin/main, the gate green on the PR head, and the artifact actually present on main — quoted per row. Record that both server refusals (`criteria_unmet:N` inside close, `merge_gated_criterion` without --merge-gated) are CORRECT and not breakage.

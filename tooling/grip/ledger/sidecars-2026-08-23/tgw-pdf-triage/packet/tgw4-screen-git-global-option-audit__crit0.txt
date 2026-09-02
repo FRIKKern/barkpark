@@ -1,0 +1,1 @@
+screenCommand("git -C /tmp/repo push origin main") is REFUSED, with a test that reds on the pre-audit code (or, if it was already refused, a test pinning that it stays refused)

@@ -1,0 +1,1 @@
+pg is counted once. A test asserts that a /var/lib/postgresql du root and PGSizeBytes are never both subtracted, and the payload states which was used.

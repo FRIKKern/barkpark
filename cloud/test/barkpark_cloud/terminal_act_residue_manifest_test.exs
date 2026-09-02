@@ -161,7 +161,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # HERE:
   #
   #   * `?mode=detach` — the caller asserts it already tore the box AND its A
-  #     record down itself. DESTROYS: the support row and its six cascade
+  #     record down itself. DESTROYS: the support row and its five cascade
   #     children. SURVIVES: nothing the row pointed at — that is the caller's
   #     assertion, and `bp cloud support remove` sends the mode ONLY on a run
   #     whose own by-value zone sweep actually ran. TOLD: push_event(team, "fleet").
@@ -177,11 +177,17 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   @delete_barkpark_call_sites 6
   @billing_cancel_route {"post", "/v1/billing/cancel"}
 
-  # The six tables whose FK to `barkparks` is ON DELETE CASCADE. The seventh FK
+  # The five tables whose FK to `barkparks` is ON DELETE CASCADE. The sixth FK
   # edge — `barkparks.fleet_parent_id` — is `:nilify_all` and is this register's
   # built-in negative control (migration
   # 20260723000000_add_fleet_group_to_barkparks.exs:30).
-  @cascade_children ~w(agent_events agent_tokens env_vars provision_jobs sites usage_samples)
+  #
+  # SIX -> FIVE (cch-w53-bl env-var Option A, ruled 2026-09-02): `env_vars` was
+  # the sixth cascade child until the team env-var feature was deleted and the
+  # table dropped (prod held zero rows ever). The seed below and every count
+  # helper derive from this list, so the row it used to contribute is gone from
+  # all of them at once.
+  @cascade_children ~w(agent_events agent_tokens provision_jobs sites usage_samples)
 
   ## ── Fixtures (copied verbatim from web/router_audit_test.exs) ────────────
 
@@ -298,21 +304,6 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     )
 
     q.(
-      "INSERT INTO env_vars (id, team_id, barkpark_id, key, value_encrypted, scope, inserted_at, updated_at) " <>
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-      [
-        id.(),
-        team_id,
-        bp_id,
-        "SECRET_#{System.unique_integer([:positive])}",
-        "ct",
-        "barkpark",
-        now,
-        now
-      ]
-    )
-
-    q.(
       "INSERT INTO provision_jobs (id, barkpark_id, kind, status, inserted_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6)",
       [id.(), bp_id, "provision", "failed", now, now]
     )
@@ -331,7 +322,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     :ok
   end
 
-  # {table => row count for this barkpark}, for all six cascade children.
+  # {table => row count for this barkpark}, for all five cascade children.
   defp child_counts(%Barkpark{} = bp) do
     bp_id = Ecto.UUID.dump!(bp.id)
 
@@ -436,7 +427,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 1: DELETE /v1/barkparks/:id, NON-LIVE arm ────────────────────────
 
-  test "ROW 1 — decommission (non-live): DESTROYS the row and all SIX cascade children; the audit row SURVIVES" do
+  test "ROW 1 — decommission (non-live): DESTROYS the row and all FIVE cascade children; the audit row SURVIVES" do
     {user, team, token} = logged_in()
     bp = barkpark_fixture(team, %{name: "Doomed"})
     :ok = seed_children!(bp)
@@ -466,7 +457,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert ev.target_id == bp.id
   end
 
-  ## ── ROW 2: the NEGATIVE CONTROL — the seventh FK edge is not a cascade ───
+  ## ── ROW 2: the NEGATIVE CONTROL — the sixth FK edge is not a cascade ───
 
   test "ROW 2 (NEGATIVE CONTROL) — fleet_parent_id is :nilify_all: deleting a fleet MAIN leaves its SUPPORT box standing, orphaned" do
     {_user, team, token} = logged_in()
@@ -540,7 +531,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert conn.status == 202
     assert json_body(conn) == %{"ok" => true, "status" => "deprovisioning"}
 
-    # DESTROYED: nothing. The row, the host, and all six children are exactly
+    # DESTROYED: nothing. The row, the host, and all five children are exactly
     # where they were — the ONLY change is one more provision_jobs row, the
     # pending deprovision job.
     after_counts = child_counts(bp)
@@ -567,7 +558,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 5: THE LIVE TEARDOWN, END TO END, IN-PROCESS ─────────────────────
 
-  test "ROW 5 — the LIVE teardown DESTROYS the row and all six children, and SAYS SO on the trail" do
+  test "ROW 5 — the LIVE teardown DESTROYS the row and all five children, and SAYS SO on the trail" do
     {_user, team, token} = logged_in()
     bp = barkpark_fixture(team, %{name: "Live", host: "10.0.0.1"})
     :ok = seed_children!(bp)
@@ -818,7 +809,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     # is the whole act.
     assert json_body(conn)["status"] == "canceled"
 
-    # SURVIVES: the box, its host, and all six children. A verb the console calls
+    # SURVIVES: the box, its host, and all five children. A verb the console calls
     # a cancellation leaves every billable artefact exactly where it was; the
     # only thing that moved is a flag.
     assert %Barkpark{host: "10.0.0.2"} = survivor = Repo.get(Barkpark, bp.id)

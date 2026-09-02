@@ -1,0 +1,1 @@
+Obtain explicit owner or steward sign-off for the reconciliation plan, and preserve legitimate unpushed/dirty work in a named recoverable branch, commit, patch, or stash with its identifier recorded.

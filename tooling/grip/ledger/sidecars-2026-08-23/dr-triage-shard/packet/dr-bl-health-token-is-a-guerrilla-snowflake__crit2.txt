@@ -1,0 +1,1 @@
+The guerrilla drop-in is either reconciled with the committed unit or documented as intentionally redundant, so the next restart does not silently change behaviour.

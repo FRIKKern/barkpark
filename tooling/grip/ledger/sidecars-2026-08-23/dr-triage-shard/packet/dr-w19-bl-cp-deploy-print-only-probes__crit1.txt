@@ -1,0 +1,1 @@
+The same repair is applied to instance-deploy.sh:793's identical shape, or the PR body states why it is deliberately deferred.

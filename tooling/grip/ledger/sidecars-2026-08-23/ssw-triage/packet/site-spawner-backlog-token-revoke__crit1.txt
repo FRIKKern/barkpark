@@ -1,0 +1,1 @@
+An admin-authorized, tenant-scoped content API revoke operation proves mint→authorized read→revoke→403 and rejects foreign, malformed, repeated, or already-revoked identifiers without enumeration.

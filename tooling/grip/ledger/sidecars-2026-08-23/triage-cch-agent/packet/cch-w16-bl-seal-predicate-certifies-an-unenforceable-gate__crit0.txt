@@ -1,0 +1,1 @@
+The divergence is reproduced: the live protection read shows exactly two contexts while the committed spec declares four with enforced:true, and the seal predicate's certification sentence is quoted verbatim. Evidence: the gh api output, the committed spec, and the predicate's line.

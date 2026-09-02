@@ -1,0 +1,1 @@
+A new pure-model guard asserts the --provider flag across the WHOLE azure action list and carries a non-empty floor on that list, so an emptied fixture cannot satisfy it vacuously.

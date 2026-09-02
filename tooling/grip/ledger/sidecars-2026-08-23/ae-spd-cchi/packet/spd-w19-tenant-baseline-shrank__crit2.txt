@@ -1,0 +1,1 @@
+bash scripts/tenant-scope-check.sh --selftest still PASSES against the tightened manifest (quoted).

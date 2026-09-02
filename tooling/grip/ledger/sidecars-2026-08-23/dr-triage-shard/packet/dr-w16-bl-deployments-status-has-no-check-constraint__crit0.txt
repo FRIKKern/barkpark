@@ -1,0 +1,1 @@
+A migration adds a CHECK constraint on deployments.status matching the application's @statuses list

@@ -1,0 +1,1 @@
+check-deployyml-filters.sh can detect a path targeting the WRONG job, not merely zero jobs — proved by a mutation that reds it.

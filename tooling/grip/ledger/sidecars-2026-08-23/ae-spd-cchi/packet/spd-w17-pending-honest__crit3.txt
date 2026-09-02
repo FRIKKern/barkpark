@@ -1,0 +1,1 @@
+The pending state is ANNOUNCED through the existing role=status aria-live=polite idiom (editor.ex:460 is the model), not a new invented pattern

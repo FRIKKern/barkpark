@@ -1,0 +1,1 @@
+Every deployed static site on guerrilla is checked for its BARKPARK_SITE_ROUTE marker in the live Caddyfile AND for a non-404 on its advertised public URL; the counts are pasted with the total denominator beside them.

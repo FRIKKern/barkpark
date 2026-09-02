@@ -1,0 +1,1 @@
+A `MemorySwapMax` value is set and its effect measured over at least one full deploy cycle including a blue/green cutover. Evidence: the unit config, the before/after OOM-kill counts, and `/proc/pressure/memory` readings on a quiet box with `uptime` alongside.

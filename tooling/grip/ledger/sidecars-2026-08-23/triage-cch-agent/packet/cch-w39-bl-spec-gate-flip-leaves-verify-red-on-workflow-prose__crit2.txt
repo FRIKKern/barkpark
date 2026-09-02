@@ -1,0 +1,1 @@
+required-checks-drift.yml prose is reworded so the BLOCKING job name is not inside the 200-character window of the ADVISORY job disclaimer, and verify then exits 0 against the 5-context candidate with the synthetic read-back. The window is NOT widened and the clause is NOT weakened. Evidence: the diff plus the green run.

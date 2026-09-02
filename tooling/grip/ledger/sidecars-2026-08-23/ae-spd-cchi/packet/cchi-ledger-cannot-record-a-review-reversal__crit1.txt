@@ -1,0 +1,1 @@
+Mutation-proved: attempt the reversal on a scratch task and show the ledger records it where a reader sees it, then show the pre-fix path (a raw met:true -> met:false patch) still 409s or is superseded.

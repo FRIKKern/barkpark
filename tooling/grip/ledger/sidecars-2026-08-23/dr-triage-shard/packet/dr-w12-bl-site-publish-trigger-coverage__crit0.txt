@@ -1,0 +1,1 @@
+A queryable coverage predicate reports, per content-bound site, whether it has a publish trigger, with the six-site no-secret mint gap as its OWN named bucket rather than folded into 'unregistered'

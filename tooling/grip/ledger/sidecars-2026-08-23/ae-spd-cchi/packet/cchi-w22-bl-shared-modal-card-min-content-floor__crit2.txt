@@ -1,0 +1,1 @@
+No body receives the track clamp alone. Evidence: for each fixed body, the spill scan (every descendant iterated, never sampled) returns zero at every driven width.

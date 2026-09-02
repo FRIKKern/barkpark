@@ -1,0 +1,1 @@
+D42's factual arm holds: an all-null pressure block, an absent `pressure` key, and a quiet metered box ALL still read `ok / healthy`. Only a POSITIVE reading strains.

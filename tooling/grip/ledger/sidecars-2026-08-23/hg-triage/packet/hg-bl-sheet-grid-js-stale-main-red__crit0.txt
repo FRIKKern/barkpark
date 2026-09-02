@@ -1,0 +1,1 @@
+The harness failure is reproduced locally at current origin/main HEAD and the failing assertion is quoted verbatim

@@ -1,0 +1,1 @@
+Honest verdict recorded either way — if screen.mjs was already safe via its subcommand allowlist, say so with the run output rather than filing a phantom fix

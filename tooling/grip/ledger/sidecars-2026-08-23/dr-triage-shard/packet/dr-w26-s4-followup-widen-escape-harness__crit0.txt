@@ -1,0 +1,1 @@
+cloud-path-escape-check.test.sh proves exact-entry prefix semantics with probes that do NOT live under scripts/ or .github/workflows/, and the suite is green before any widening

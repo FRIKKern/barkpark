@@ -1,0 +1,1 @@
+PlatformDelivery.to_json/1 is a census pair and @emitted_floor moves when it gains a key.

@@ -1,0 +1,1 @@
+#6055, #6053 and #6551 are rebased onto post-shim main and render `Elixir gate`, or are explicitly closed with a stated reason. Evidence: the per-PR conclusion after rebase.

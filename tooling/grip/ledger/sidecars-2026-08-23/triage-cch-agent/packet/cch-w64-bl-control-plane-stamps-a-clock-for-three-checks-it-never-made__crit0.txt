@@ -1,0 +1,1 @@
+A test reds on unmodified main by asserting that no_admin_token, decrypt_failed and not_live leave update_checked_at untouched, and passes after the fix.

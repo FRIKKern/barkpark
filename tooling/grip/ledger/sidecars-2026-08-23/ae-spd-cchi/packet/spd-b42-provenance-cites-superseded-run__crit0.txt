@@ -1,0 +1,1 @@
+spd-b42-georgia-default-shortfall-inflow-width cites served SHA 65541e2d4 / slot blue and the committed artifact path scripts/measurements/spd-visible-table-2026-07-20.json

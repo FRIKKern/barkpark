@@ -1,0 +1,1 @@
+classifyBp buckets on commit_ancestry/commit_distance beside update_state; a box with commit_ancestry "behind" cannot render live-green. Paste the rendered heading via the __app.test.mjs harness.

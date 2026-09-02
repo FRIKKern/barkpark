@@ -1,0 +1,1 @@
+s5's new api test file passes mix format --check-formatted with a real (unpiped) exit code

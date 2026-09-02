@@ -1,0 +1,1 @@
+The denominator is ALL-STATUS attempts, not attempts-minus-deferred: a test pins that a window containing deferrals reports live/attempted and NOT live/(attempted - deferred). Paste the assertion.

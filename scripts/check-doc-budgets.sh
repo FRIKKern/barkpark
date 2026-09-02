@@ -776,7 +776,7 @@ fi
 # makes both sides zero and the check agrees with itself. So the number is
 # pinned here, by hand. Adding or removing a cap row is therefore a two-line
 # edit: the row, and this number. That is intended friction, not an oversight.
-CAPS_ROWS_EXPECTED=36
+CAPS_ROWS_EXPECTED=37
 CAPS_ROWS_WALKED=0
 CAPS_PATHS=""
 if [ "$SPAN_ONLY" != "1" ]; then
@@ -810,6 +810,7 @@ docs/ops/merge-gates.md 64000
 docs/ops/branch-protection-and-overrides.md 10400
 
 docs/api-v1.md 14000
+docs/api/error-codes.md 1900
 
 docs/auth.md 5600
 docs/auth-user-sessions.md 16000

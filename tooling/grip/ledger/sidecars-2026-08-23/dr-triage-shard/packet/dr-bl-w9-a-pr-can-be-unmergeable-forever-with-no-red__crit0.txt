@@ -1,0 +1,1 @@
+A check reports a MISSING required context as loudly as a failing one, so 'absent' and 'green' are never indistinguishable. Evidence: the check's output on a head with a zombied required run.

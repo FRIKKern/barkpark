@@ -1,0 +1,1 @@
+Headline, class shares and site shares all render at the SAME precision. Evidence: one rendered page.

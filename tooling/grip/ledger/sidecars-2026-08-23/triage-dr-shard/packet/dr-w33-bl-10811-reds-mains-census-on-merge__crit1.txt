@@ -1,0 +1,1 @@
+Both parts of the co-edit ship together: the tag floor is raised to the number the gate PRINTS (264 -> 266 as measured, re-derived not assumed) AND the coalesced_attempts allowlist row is deleted. Evidence: both diff hunks.

@@ -1,0 +1,1 @@
+A committed assertion prices the phone topbar's vertical cost at 320/360/390/430 in both themes on both billing scenarios, with the measured heights recorded.

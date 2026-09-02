@@ -1,0 +1,1 @@
+MERGE-GATED (the LEAD closes this): the PR is merged to main with every required context green on the merge commit, and ancestry is verified with `git merge-base --is-ancestor <squash-sha> origin/main` exiting 0.

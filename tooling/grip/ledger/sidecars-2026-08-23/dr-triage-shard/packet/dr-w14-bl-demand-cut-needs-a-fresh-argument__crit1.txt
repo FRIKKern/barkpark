@@ -1,0 +1,1 @@
+Charter D206 is amended in place so it no longer cites a precondition D223 ruled unbuildable

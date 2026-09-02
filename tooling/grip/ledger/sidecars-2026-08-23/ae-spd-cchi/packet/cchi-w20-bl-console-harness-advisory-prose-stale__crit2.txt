@@ -1,0 +1,1 @@
+`.github/required-checks.json` is NOT touched by this row and the diff proves it.

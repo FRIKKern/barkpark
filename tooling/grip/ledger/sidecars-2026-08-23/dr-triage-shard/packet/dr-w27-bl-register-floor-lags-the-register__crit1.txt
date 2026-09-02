@@ -1,0 +1,1 @@
+cd cloud && mix test test/barkpark_cloud/reader_less_instrument_census_test.exs is green after the change.

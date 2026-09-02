@@ -186,6 +186,13 @@ services:
       - BARKPARK_RELEASE_CAPTURE_TOKEN
       # Claude chat / console
       - ANTHROPIC_API_KEY
+      # gh-9531 residual (task-eeabfd9bf3ed8371): the Anthropic-compatible
+      # Messages endpoint (judge + Studio chat titles) and the ONIX
+      # RecordReference host namespace. Both passthrough-only and optional —
+      # unset keeps api.anthropic.com / barkpark.cloud, and a MALFORMED value
+      # refuses the node at boot rather than silently using ours.
+      - ANTHROPIC_API_URL
+      - ONIX_DATASET_HOST
       - BARKPARK_CLAUDE_CHAT
       - BARKPARK_TMUX_CONSOLE
     volumes:

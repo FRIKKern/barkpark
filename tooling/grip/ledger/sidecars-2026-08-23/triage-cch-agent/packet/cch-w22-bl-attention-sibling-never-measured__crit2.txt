@@ -1,0 +1,1 @@
+The 66.1%-hidden `.instance-card-head` cell is either filed as its own person-facing row or shown to be already paid. Evidence: the row id, or the driven cell showing it clean.

@@ -1,0 +1,1 @@
+A CENSUS EXISTS FIRST: every rule in app.css declaring `text-overflow: ellipsis` without a nowrap-family `white-space` (or a line-clamp) is enumerated with file:line, and the count is recorded.

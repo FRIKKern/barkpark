@@ -1,0 +1,1 @@
+code_rev/1's `version` fallback no longer greens on the frozen const "0.1.0": either it stops falling back to version, or the code_rev_unknown counter is shown to catch the frozen case, with the inert-sweep measurement pasted.

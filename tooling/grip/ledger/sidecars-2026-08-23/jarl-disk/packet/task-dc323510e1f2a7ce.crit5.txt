@@ -1,0 +1,1 @@
+MERGE-GATED — RESERVED FOR THE LEAD. The PR carrying this fix is merged with every required check green, read live from .github/required-checks.json. The worker does not merge and does not stamp this row.

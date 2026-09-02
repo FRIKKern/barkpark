@@ -1,0 +1,1 @@
+MapFinderLanding emits bp-corpus-status ONLY when bp-doc-id is empty, shaped by markers.corpusStatusMarkerValue — no second implementation.

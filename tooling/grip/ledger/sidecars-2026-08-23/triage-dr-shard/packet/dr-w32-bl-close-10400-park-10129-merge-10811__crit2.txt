@@ -1,0 +1,1 @@
+#10811's conflict set is re-derived with git merge-tree at assignment time and it is either rebased and merged or explicitly deferred with a stated reason.

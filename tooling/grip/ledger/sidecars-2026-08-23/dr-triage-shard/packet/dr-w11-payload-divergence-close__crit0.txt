@@ -1,0 +1,1 @@
+Every KNOWN OPEN row in payload_key_set_census_test.exs is either closed (emitted/decoded) or moved to RECONCILED with a ruling — quote the allowlist diff

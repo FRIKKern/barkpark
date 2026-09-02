@@ -1,0 +1,1 @@
+`node --check` clean and __app.test.mjs 957+N pass / 0 fail; __binding_census.mjs rc 0 with its submitAddSupport row and EXPECT moved in the same commit as mechanical bookkeeping. Evidence: both outputs.

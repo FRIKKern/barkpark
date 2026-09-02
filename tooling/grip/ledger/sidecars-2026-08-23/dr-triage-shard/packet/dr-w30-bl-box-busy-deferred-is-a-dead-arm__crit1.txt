@@ -1,0 +1,1 @@
+If the arm is UNREACHABLE in current code, that is stated as a taxonomy defect (a class that can never be produced) and a guard is proposed. Evidence: the reachability analysis naming the call site.

@@ -1,0 +1,1 @@
+scripts/required-checks-apply.sh's refusals — documented in HEADER PROSE at :75-89 rather than enforced — are either ENFORCED in code or the prose is deleted; quote each prose refusal beside the line that now enforces it, or beside the deletion.

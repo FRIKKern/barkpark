@@ -1,0 +1,1 @@
+A guard leg queries .deploy-detail with querySelectorAll, refuses at zero, and asserts the clipper walk, the element box and the glyph rects — proven to RED on origin/main CSS before any remedy.

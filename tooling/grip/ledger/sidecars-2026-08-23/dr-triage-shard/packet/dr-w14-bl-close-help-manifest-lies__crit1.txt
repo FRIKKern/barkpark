@@ -1,0 +1,1 @@
+docs/cli/fixtures/full-manifest.json is regenerated so the fixture and the served manifest agree

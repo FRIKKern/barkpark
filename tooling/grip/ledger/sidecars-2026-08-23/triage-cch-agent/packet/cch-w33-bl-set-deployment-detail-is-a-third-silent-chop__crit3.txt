@@ -1,0 +1,1 @@
+The guard can lose: a fixture driving an oversized detail reds when the disclosure is removed. Evidence: the red.

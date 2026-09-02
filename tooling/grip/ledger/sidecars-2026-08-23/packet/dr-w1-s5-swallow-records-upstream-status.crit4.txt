@@ -1,0 +1,1 @@
+RED-then-GREEN differential run and pasted: build search-starter against guerrilla with a public-read token and observe the named 403 in the marker/detail; swap ONLY the token tier for one that can read /v1/graph and observe a populated bp-doc-id.

@@ -1,0 +1,1 @@
+The existing per-site bp sites deployments verb is deliberately superseded or extended rather than left as a third parallel unclassified surface, and the choice is stated in the PR body.
