@@ -21,12 +21,48 @@ defmodule Barkpark.SelfUpdate.Runner do
   via `BARKPARK_SELF_UPDATE_CD`.
 
   Never-crash contract: `trigger/0` and `status/0` never raise — a dead
-  process degrades to `{:error, :disabled}` / an idle status map, and a
-  command that fails to start or dies abnormally lands as a `:done` state
-  with a non-zero exit code, never as a Runner crash.
+  process degrades to `{:error, :disabled}` / a reattached (else idle) status
+  map, and a command that fails to start or dies abnormally lands as a `:done`
+  state with a non-zero exit code, never as a Runner crash.
+
+  ## The run outlives the process that owns it (task-dba2b246d420c372)
+
+  The default command is `bash scripts/self-update.sh`, which fast-forwards the
+  checkout so the post-merge hook rebuilds and RESTARTS THE SERVICE. The BEAM
+  that started the run is therefore killed BY the run, on the happy path. In-memory
+  state alone means the operator who pressed the button comes back to `:idle` with
+  an empty log — indistinguishable from "never ran". That is not an edge case; it
+  is the normal outcome of a successful update.
+
+  So the run is also written to disk, in the shape `Barkpark.Sites.DeployRunner`
+  already uses for the same problem:
+
+    * `<run_state_dir>/current.manifest.json` — the POINTER to the current/last
+      run (run_tag, mode, started_at, log path). Overwritten per trigger.
+    * `<run_state_dir>/<run_tag>.log` — the command's output, appended as it
+      arrives, so a run cut short still has everything printed before the cut.
+    * `<run_state_dir>/<run_tag>.terminal.json` — the durable RECORD: state,
+      exit code, started_at/finished_at. Written when the run reaches a terminal
+      state, and this is the only thing that can answer "how did it end".
+
+  `init/1` reattaches from those files, and the `status/0` fallback (Runner not
+  running at all) reads them too. Three outcomes:
+
+    * no manifest → `:idle` (this box has never run one)
+    * manifest + terminal record → that record's `:done` state, exit code and log
+    * manifest, NO terminal record → `:interrupted`: the BEAM died mid-run, which
+      is exactly what a successful self-update does to it. The log is reported;
+      the exit code is `nil`, because nothing ever observed one. The interruption
+      is stamped as a terminal record on reattach so the answer stays stable.
+
+  There is deliberately no re-attach to the PROCESS: unlike DeployRunner's systemd
+  units, the child here died with the BEAM's port. Reattaching to the RECORD is
+  the whole job.
   """
 
   use GenServer
+
+  require Logger
 
   @default_command {"bash", ["scripts/self-update.sh"]}
   # Rollback rides the SAME Runner single-flight as self-update (one run slot
@@ -39,6 +75,12 @@ defmodule Barkpark.SelfUpdate.Runner do
   @default_rollback_preflight_command {"bash",
                                        ["deploy/instance-deploy.sh", "--rollback-preflight"]}
   @default_max_log_lines 500
+  # Directory for the run manifest / log / terminal records (see the moduledoc).
+  # Config-overridable per env, which is also how the tests get a tmp dir.
+  @default_run_state_dirname ".bp-self-update-runs"
+  # Retention: newest N runs' log + terminal record survive a prune.
+  @default_max_run_records 20
+  @manifest_name "current.manifest.json"
 
   # Deadlines. The preflight is read-only but a hung git/ssh under it would block
   # the admin request forever; the main run holds `running?`=true until the port
@@ -185,12 +227,17 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   @doc """
-  The current run status: `state` (`:idle` | `:running` | `:done`),
-  `exit_code` (nil until a run finishes), the bounded `log` (oldest line
+  The current run status: `state` (`:idle` | `:running` | `:done` |
+  `:interrupted`), `exit_code` (nil until a run finishes, and nil forever for an
+  `:interrupted` run — nothing observed one), the bounded `log` (oldest line
   first), and `started_at` / `finished_at`. Never raises.
+
+  `:interrupted` means a run was started and the BEAM went away before it
+  finished — the ordinary outcome of a successful self-update, which restarts
+  this service. It is reported from disk, not from memory.
   """
   @spec status() :: map()
-  def status, do: safe_call(:status, render_status(initial_state()))
+  def status, do: safe_call(:status, render_status(reattached_state()))
 
   defp safe_call(msg, fallback) do
     case Process.whereis(__MODULE__) do
@@ -213,7 +260,10 @@ defmodule Barkpark.SelfUpdate.Runner do
     # The command port is linked to this process; trap so an abnormal port
     # death becomes a :done state instead of taking the Runner down.
     Process.flag(:trap_exit, true)
-    {:ok, initial_state()}
+    # Reattach to whatever the PREVIOUS BEAM left on disk before answering any
+    # status call. On the self-update happy path that previous BEAM was killed by
+    # the very run we are reporting on (see the moduledoc).
+    {:ok, reattached_state()}
   end
 
   @impl true
@@ -232,6 +282,12 @@ defmodule Barkpark.SelfUpdate.Runner do
             # can't wedge true (and block every future trigger) until a BEAM restart.
             schedule_run_deadline(port)
 
+            started_at = DateTime.utc_now()
+            run_tag = new_run_tag(mode, started_at)
+            # Write the pointer BEFORE replying: from here on the run exists on
+            # disk even if this BEAM never gets another scheduling slice.
+            _ = write_manifest(run_tag, mode, started_at)
+
             {:reply, {:ok, :started},
              %{
                state
@@ -239,7 +295,8 @@ defmodule Barkpark.SelfUpdate.Runner do
                  port: port,
                  mode: mode,
                  log: [],
-                 started_at: DateTime.utc_now(),
+                 run_tag: run_tag,
+                 started_at: started_at,
                  finished_at: nil
              }}
 
@@ -259,13 +316,13 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    {:noreply, %{state | run: {:done, code}, port: nil, finished_at: DateTime.utc_now()}}
+    {:noreply, finish(state, code)}
   end
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) when state.run == :running do
     # Abnormal port death without an exit_status — record a failure, never crash.
     state = push_log(state, "[runner] command port closed: #{inspect(reason)}")
-    {:noreply, %{state | run: {:done, -1}, port: nil, finished_at: DateTime.utc_now()}}
+    {:noreply, finish(state, -1)}
   end
 
   # Deadline watchdog fired for the CURRENT run — force-close the port and record
@@ -278,7 +335,7 @@ defmodule Barkpark.SelfUpdate.Runner do
     state =
       push_log(state, "[runner] run exceeded #{run_deadline_ms()}ms deadline — force-closed")
 
-    {:noreply, %{state | run: {:done, -2}, port: nil, finished_at: DateTime.utc_now()}}
+    {:noreply, finish(state, -2)}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -293,23 +350,27 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
   # NO signal — it terminates only a program that exits on stdin EOF or dies to
-  # SIGPIPE, which is most but not all of them (GH #6681 proved the gap on the
-  # Codex runtime, where `Session.reap_port/1` now SIGKILLs the pid after the
-  # close). This watchdog has the same hole for a self-update child that ignores
-  # EOF; reaping here is filed, not done. Tolerate an already-closed port
-  # (ArgumentError) so the watchdog never crashes the Runner.
-  defp close_port(port) do
-    Port.close(port)
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
-  end
+  # SIGPIPE, which is most but not all of them (GH #6681). This watchdog is the
+  # sharpest case in the tree: the deadline fires precisely BECAUSE the update
+  # child is misbehaving, so the one thing a bare close cannot assume is that
+  # this particular child honours EOF. `PortReaper.reap/1` reads the os_pid while
+  # the port is still open, closes it, and SIGKILLs the pid best-effort. It is
+  # total (never raises, never exits), so the watchdog still cannot crash the
+  # Runner on an already-closed port.
+  defp close_port(port), do: Barkpark.PortReaper.reap(port)
 
   defp initial_state do
     # `mode` records which verb the current/last run is — defaults to
     # :self_update so a box that has never run reports the primary verb.
-    %{run: :idle, port: nil, mode: :self_update, log: [], started_at: nil, finished_at: nil}
+    %{
+      run: :idle,
+      port: nil,
+      mode: :self_update,
+      log: [],
+      run_tag: nil,
+      started_at: nil,
+      finished_at: nil
+    }
   end
 
   # Each mode resolves its own injectable command (tests stub these); the
@@ -348,9 +409,13 @@ defmodule Barkpark.SelfUpdate.Runner do
     Keyword.get(config(), :cd) || Path.dirname(File.cwd!())
   end
 
-  # Bounded log: newest-first internally, oldest dropped beyond the cap.
+  # Bounded log: newest-first internally, oldest dropped beyond the cap. The
+  # DISK copy is unbounded-by-line but append-only and per-run: it is the only
+  # thing that survives the restart this run causes, and dropping the oldest
+  # lines there would drop exactly the "what did the update do" prefix.
   defp push_log(state, line) do
     max = Keyword.get(config(), :max_log_lines, @default_max_log_lines)
+    _ = append_log_line(state[:run_tag], line)
     %{state | log: Enum.take([line | state.log], max)}
   end
 
@@ -367,8 +432,277 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   defp run_state(:idle), do: :idle
   defp run_state(:running), do: :running
+  defp run_state(:interrupted), do: :interrupted
   defp run_state({:done, _code}), do: :done
 
   defp run_exit_code({:done, code}), do: code
   defp run_exit_code(_run), do: nil
+
+  # ── durable run records ────────────────────────────────────────────────
+  # Everything below is best-effort by contract: a box with an unwritable run
+  # state dir must still run updates. A failed write costs the operator the
+  # post-restart status, never the update.
+
+  @doc """
+  Where the run manifest, logs and terminal records live. `run_state_dir:` in
+  this module's config overrides it; the default sits beside the checkout the
+  run operates on.
+  """
+  @spec run_state_dir() :: String.t()
+  def run_state_dir do
+    Keyword.get(config(), :run_state_dir) || Path.join(run_cd(), @default_run_state_dirname)
+  end
+
+  # A run_tag is unique per run: the mode, the start instant, and 4 random hex
+  # so two runs inside the same second cannot share a log.
+  defp new_run_tag(mode, %DateTime{} = started_at) do
+    stamp =
+      started_at
+      |> DateTime.to_iso8601(:basic)
+      |> String.replace(~r/[^0-9TZ]/, "")
+
+    "#{mode}-#{stamp}-#{Base.encode16(:crypto.strong_rand_bytes(2), case: :lower)}"
+  end
+
+  # Reachability for the Sobelow traversal skips below: every path handed to
+  # File.* in this module is `run_state_dir()` (a config constant, or the
+  # checkout's own parent) joined with a run_tag this module MINTED from a mode
+  # atom + a timestamp + random hex. No request data, no caller-supplied path.
+  defp manifest_path, do: Path.join(run_state_dir(), @manifest_name)
+  defp log_path(run_tag), do: Path.join(run_state_dir(), "#{run_tag}.log")
+  defp terminal_path(run_tag), do: Path.join(run_state_dir(), "#{run_tag}.terminal.json")
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_manifest(run_tag, mode, started_at) do
+    dir = run_state_dir()
+    File.mkdir_p!(dir)
+
+    payload = %{
+      "run_tag" => run_tag,
+      "mode" => to_string(mode),
+      "started_at" => DateTime.to_iso8601(started_at),
+      "log_file" => log_path(run_tag)
+    }
+
+    result = File.write(manifest_path(), Jason.encode!(payload))
+    _ = prune_run_records(dir)
+    result
+  rescue
+    error ->
+      Logger.warning("[self-update] could not write the run manifest: #{inspect(error)}")
+      :ok
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp append_log_line(run_tag, line) when is_binary(run_tag) do
+    File.write(log_path(run_tag), [line, "\n"], [:append])
+  rescue
+    _ -> :ok
+  end
+
+  defp append_log_line(_run_tag, _line), do: :ok
+
+  # The one place a terminal record is written. `state` is either an atom
+  # (:interrupted) or an exit code.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_terminal_record(run_tag, mode, run_state, exit_code, started_at, finished_at)
+       when is_binary(run_tag) do
+    File.mkdir_p!(run_state_dir())
+
+    payload = %{
+      "run_tag" => run_tag,
+      "mode" => to_string(mode),
+      "state" => to_string(run_state),
+      "exit_code" => exit_code,
+      "started_at" => iso_or_nil(started_at),
+      "finished_at" => iso_or_nil(finished_at)
+    }
+
+    File.write(terminal_path(run_tag), Jason.encode!(payload))
+  rescue
+    error ->
+      Logger.warning("[self-update] could not write the terminal record: #{inspect(error)}")
+      :ok
+  end
+
+  defp write_terminal_record(_run_tag, _mode, _state, _code, _started, _finished), do: :ok
+
+  defp iso_or_nil(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp iso_or_nil(_), do: nil
+
+  # Terminal transition: stamp the record, THEN move in-memory state. Both
+  # orderings are observable only through status/0, but the record is the copy
+  # that survives, so it is written first.
+  defp finish(state, exit_code) do
+    finished_at = DateTime.utc_now()
+
+    _ =
+      write_terminal_record(
+        state[:run_tag],
+        state.mode,
+        :done,
+        exit_code,
+        state.started_at,
+        finished_at
+      )
+
+    %{state | run: {:done, exit_code}, port: nil, finished_at: finished_at}
+  end
+
+  # Rebuild the last known run from disk. Total: any unreadable/garbage record
+  # degrades to the idle state, never a crash on boot or on a status call.
+  defp reattached_state do
+    case read_manifest() do
+      {:ok, manifest} -> reattach_from(manifest)
+      :error -> initial_state()
+    end
+  rescue
+    _ -> initial_state()
+  catch
+    _, _ -> initial_state()
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_manifest do
+    with {:ok, raw} <- File.read(manifest_path()),
+         {:ok, %{"run_tag" => tag} = manifest} when is_binary(tag) <- Jason.decode(raw) do
+      {:ok, manifest}
+    else
+      _ -> :error
+    end
+  end
+
+  defp reattach_from(%{"run_tag" => run_tag} = manifest) do
+    mode = decode_mode(manifest["mode"])
+    started_at = decode_dt(manifest["started_at"])
+    log = read_log(run_tag)
+
+    case read_terminal_record(run_tag) do
+      {:ok, %{"state" => "interrupted"} = record} ->
+        %{
+          initial_state()
+          | run: :interrupted,
+            mode: mode,
+            run_tag: run_tag,
+            log: log,
+            started_at: started_at,
+            finished_at: decode_dt(record["finished_at"])
+        }
+
+      {:ok, record} ->
+        %{
+          initial_state()
+          | run: {:done, record["exit_code"]},
+            mode: mode,
+            run_tag: run_tag,
+            log: log,
+            started_at: started_at,
+            finished_at: decode_dt(record["finished_at"])
+        }
+
+      :error ->
+        # A manifest with no terminal record: the run was in flight when this
+        # BEAM's predecessor went away — which is precisely what a successful
+        # self-update does. Stamp the interruption so the answer is durable and
+        # this reconstruction happens once, not on every boot.
+        finished_at = log_mtime(run_tag)
+
+        _ =
+          write_terminal_record(run_tag, mode, :interrupted, nil, started_at, finished_at)
+
+        %{
+          initial_state()
+          | run: :interrupted,
+            mode: mode,
+            run_tag: run_tag,
+            log: log,
+            started_at: started_at,
+            finished_at: finished_at
+        }
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_terminal_record(run_tag) do
+    with {:ok, raw} <- File.read(terminal_path(run_tag)),
+         {:ok, record} when is_map(record) <- Jason.decode(raw) do
+      {:ok, record}
+    else
+      _ -> :error
+    end
+  end
+
+  # Newest-first, capped the same way the live log is.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_log(run_tag) do
+    max = Keyword.get(config(), :max_log_lines, @default_max_log_lines)
+
+    case File.read(log_path(run_tag)) do
+      {:ok, contents} ->
+        contents
+        |> String.split("\n")
+        |> Enum.reverse()
+        |> Enum.drop_while(&(&1 == ""))
+        |> Enum.take(max)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp log_mtime(run_tag) do
+    case File.stat(log_path(run_tag), time: :posix) do
+      {:ok, %File.Stat{mtime: mtime}} -> DateTime.from_unix!(mtime)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp decode_mode("rollback"), do: :rollback
+  defp decode_mode(_), do: :self_update
+
+  defp decode_dt(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> dt
+      _ -> nil
+    end
+  end
+
+  defp decode_dt(_), do: nil
+
+  # Keep the newest N runs' artifacts. The manifest is a pointer and is never
+  # pruned; a run whose log is pruned keeps nothing to report, which is the
+  # honest outcome for the 21st-oldest run on the box.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp prune_run_records(dir) do
+    max = Keyword.get(config(), :max_run_records, @default_max_run_records)
+
+    tags =
+      dir
+      |> File.ls!()
+      |> Enum.filter(&String.ends_with?(&1, ".terminal.json"))
+      |> Enum.map(&String.replace_suffix(&1, ".terminal.json", ""))
+
+    tags
+    |> Enum.sort_by(&log_sort_key(dir, &1), :desc)
+    |> Enum.drop(max)
+    |> Enum.each(fn tag ->
+      _ = File.rm(terminal_path(tag))
+      _ = File.rm(log_path(tag))
+    end)
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp log_sort_key(dir, tag) do
+    case File.stat(Path.join(dir, "#{tag}.terminal.json"), time: :posix) do
+      {:ok, %File.Stat{mtime: mtime}} -> mtime
+      _ -> 0
+    end
+  end
 end

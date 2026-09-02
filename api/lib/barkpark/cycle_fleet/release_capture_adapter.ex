@@ -331,13 +331,12 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
       end)
     end
 
-    defp close_command_port(port) do
-      Port.close(port)
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
-    end
+    # Reached on the two abort paths only (output over the cap, deadline blown) —
+    # i.e. exactly when the capture child is behaving badly enough that assuming
+    # it exits on stdin EOF is the assumption least likely to hold. Closing the
+    # port signals the child nothing, so reap the OS process: `PortReaper.reap/1`
+    # reads the os_pid while the port is open, closes it, then SIGKILLs.
+    defp close_command_port(port), do: Barkpark.PortReaper.reap(port)
 
     defp normalize_headers(headers) do
       Map.new(headers, fn {name, value} ->
@@ -408,8 +407,19 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
       timeout = Keyword.get(opts, :timeout, @default_timeout)
       expected_content_type = Keyword.get(opts, :expected_content_type)
 
+      # `async_nolink` against the app's TaskSupervisor, NOT a linked `Task.async`
+      # (task-455ede261044ef0b). A raise inside Req or the body collector runs in
+      # the task; with a link that exit is delivered to the CALLING process — the
+      # Phoenix request process, which does not trap exits — and kills it outright.
+      # `rescue` cannot catch a linked exit, so the caller's own error handling was
+      # unreachable for the whole crash class: CycleFleet.activate_release_gate/3
+      # already has `{:error, _} -> fail_release_challenge(challenge.id,
+      # "capture_failed", failure)`, and that arm never ran. The challenge was left
+      # with no terminal status and the operator got a bare 500. Unlinked, the
+      # crash comes back as `{:exit, reason}` from `Task.yield/2` and becomes an
+      # error tuple like every other failure here.
       task =
-        Task.async(fn ->
+        Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
           Req.get(url,
             headers: headers,
             redirect: false,
@@ -439,6 +449,11 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
 
         nil ->
           {:error, :request_timeout}
+
+        # A crash in the request task. Named rather than folded into the bare
+        # clause below so the challenge's failure detail says what happened.
+        {:exit, reason} ->
+          {:error, {:http_request_crashed, reason}}
 
         _ ->
           {:error, :invalid_http_response}

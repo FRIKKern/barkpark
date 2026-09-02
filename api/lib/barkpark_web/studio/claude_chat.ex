@@ -1679,7 +1679,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           "claude chat: stdout buffer #{buffered} bytes exceeds #{cap}-byte cap; closing session"
         )
 
-        if port in Port.list(), do: Port.close(port)
+        # Reap, do not merely close: a session killed for flooding its stdout
+        # buffer is by definition a child that is not behaving, and closing the
+        # port signals it nothing (GH #6681). `PortReaper.reap/1` also drops the
+        # `port in Port.list()` membership test — a check-then-act whose window
+        # widens under load — and confines its rescue to the close alone.
+        Barkpark.PortReaper.reap(port)
 
         send(
           state.sink,
@@ -1749,11 +1754,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       # test bought nothing — the raise has to be handled either way — so the
       # check is gone and the rescue is confined to the close. Cleanup now
       # runs on every teardown path, raised or not.
-      try do
-        Port.close(port)
-      rescue
-        _ -> :ok
-      end
+      # REAP, DON'T JUST CLOSE (GH #6681). The close alone signals the CLI
+      # nothing; a child that does not exit on EOF outlives the session,
+      # reparented to init. `PortReaper.reap/1` keeps the shape this comment
+      # describes — the rescue confined to the close, no membership test — and
+      # SIGKILLs the os_pid it read while the port was still open. It is total,
+      # so both cleanups below still run on every teardown path.
+      Barkpark.PortReaper.reap(port)
 
       cleanup_stderr(state)
       cleanup_mcp(state)
