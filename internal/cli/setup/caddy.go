@@ -168,6 +168,16 @@ func caddyInstallStep() step {
 	// round trip (seconds per provision, and immune to an apt-mirror hiccup). A
 	// bare-ubuntu box still takes the full documented install path.
 	script := "command -v caddy >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive && " + strings.Join([]string{
+		// REFRESH FIRST (D-caddy-apt-404). A stock Hetzner Ubuntu image ships a
+		// STALE apt index: it pins curl/libcurl4 at a point release the mirror has
+		// already superseded and deleted, so the very first `apt-get install`
+		// resolves 7.81.0-1ubuntu1.26, asks mirror.hetzner.com for a .deb that is
+		// no longer published, and dies `404 Not Found` → exit 100 → the whole
+		// go-live fails at this step with a bare box. Three managed provisions died
+		// exactly here on 2026-09-02. The `apt-get update` below is NOT this: it
+		// exists to pick up the Caddy repo just added, and runs far too late to
+		// save the install above. A refresh must lead.
+		"apt-get update",
 		"apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl",
 		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
 		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list",

@@ -26,6 +26,14 @@ name: mobile
 #     dispatcher in both registers and requires zero unknown blocks (D51). A
 #     regen that adds a type is a NEW obligation for mobile, and this path is
 #     what makes the regen PR the place it surfaces.
+#   web/__tests__/fixtures/engine-errors.json  the engine-generated Sheets error
+#     vocabulary (asserted equal to `Sheets.Engine.error_values/0` by
+#     api/test/barkpark/sheets_parity_test.exs), read by
+#     __tests__/sheetErrorVocabulary.test.ts, which pins the mobile sheet
+#     block's ERROR_VALUES to it in BOTH directions. Same precedent js-tests.yml
+#     took in #15404: without the path, a vocabulary bump regenerated
+#     engine-side never runs this gate and the mobile mirror goes stale green —
+#     which is exactly how `#NAME?` (#15374) reached main unmirrored here.
 #
 # Churn cost of the two additions was measured before taking it: ~1.2% more
 # mobile-gate runs.
@@ -41,6 +49,7 @@ on:
       - "internal/pdrender/testdata/**"
       - "js/packages/react/src/**"
       - "api/test/support/fixtures/pd-parity/**"
+      - "web/__tests__/fixtures/engine-errors.json"
       - "pnpm-workspace.yaml"
       - ".github/workflows/mobile.yml"
   pull_request:
@@ -49,6 +58,7 @@ on:
       - "internal/pdrender/testdata/**"
       - "js/packages/react/src/**"
       - "api/test/support/fixtures/pd-parity/**"
+      - "web/__tests__/fixtures/engine-errors.json"
       - "pnpm-workspace.yaml"
       - ".github/workflows/mobile.yml"
 
