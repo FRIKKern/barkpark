@@ -279,7 +279,13 @@ defmodule BarkparkWeb.V1.MediaController do
     opts =
       [
         limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
-        offset: parse_int(params["offset"], 0),
+        # SAME ceiling as `MediaSearchParams.parse/1` — this action does not go
+        # through it, and it reaches the identical paginator: `query_files/2`
+        # tail-calls `Delivery.Search.search/2`, whose `paginate_ids/2` fetches
+        # `limit + offset + 20` rows into the BEAM before dropping `offset`.
+        # Derived by grepping every `parse_int(params["offset"]` site, not from
+        # the filing's list, which named only the SearchParams door.
+        offset: MediaSearchParams.clamp_offset(parse_int(params["offset"], 0)),
         mime_type: blank_to_nil(params["type"] || params["mimeType"]),
         kind: blank_to_nil(params["kind"]),
         q: blank_to_nil(params["q"])
