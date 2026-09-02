@@ -188,33 +188,16 @@ could still reach.
 
 ## Inventory verdicts (task-f3d5bc684c23c48d)
 
+**The full one-line-per-workflow roster lives in `docs/ops/ci-workflow-verdicts.md`** — 46 workflows,
+verdict and rationale each. It is a separate file because this one is at its cap and the roster is a
+different fact-topic with its own owner.
+
 **Do not optimise by duration.** The ten slowest workflows per run are also the ten with the FEWEST
-PR runs — 32 to 51 each — so moving the whole slow group off the PR path saves almost nothing. Cost
-here is `duration x frequency`, and frequency spans three orders of magnitude while duration spans
-one. Anyone who sorts this table by `min/exec` and starts at the top will spend the evening on the
-cheapest half of the problem.
+PR runs — 32 to 51 each. Cost is `duration x frequency`, and frequency spans three orders of
+magnitude while duration spans one, so sorting by `min/exec` and starting at the top spends the
+evening on the cheapest half of the problem.
 
-46 of 59 workflows are `pull_request`-triggered. Compute below is from six recent PR runs per
-workflow, measured off job steps.
-
-**A gotcha for anyone re-deriving the 46:** YAML 1.1 parses a bare `on:` key as the boolean `True`,
-so `d["on"]` finds nothing and reports a confident zero. Read `d.get("on", d.get(True))`.
-
-**Where the cost actually is.** Almost every workflow is already under 60 s per execution. The ten
-slowest per-run jobs are also the ten with the FEWEST PR runs (32-51 each), so moving them off the
-PR path saves almost nothing. The cost is concentrated in the handful that fire 1,227 times.
-
-| verdict | workflows | why |
-|---|---|---|
-| **KEEP — it can block** | `elixir` (1.25 min), `cloud`, `console-harness`, `pr-task-gate` | they produce the four required contexts |
-| **KEEP — under 60 s** | `security` 0.35, `go-format` 0.44, `go-tests` 0.48, `architecture` 0.27, `task-lease-renew` 0.27, `shell-harnesses` 0.33, `search-template-gates` 0.18, `pdrender-wasm` 0.47, `stale-verdict-watch` 0.46 | the policy's own second limb: cheap enough that venue is not worth a sign-off |
-| **CANDIDATE — over 60 s, cannot block** | `deploy-harnesses` 3.82, `grip-suite` 2.70, `studio-journey-smoke` 1.68, `js-tests` 1.59, `connectors` 1.48, `twoslash` 1.45, `mobile` 1.24, `ci` 1.20, `search-starter-smoke` 1.09, `typedoc` 0.92 | each has only 32-51 PR runs in the window, so the whole group is a minor prize — worth doing for latency per PR, not for job-minutes |
-| **ALREADY RIGHT** | `crown-reconcile`, `breakglass-watch`, `stale-verdict-watch` (626 push each, ~20 PR) | main-push watchers; they are not a PR cost |
-
-**The six identical 1,853s are the finding, and four of them cannot simply be moved.** `elixir`,
-`cloud`, `console-harness` and `pr-task-gate` carry required contexts. That leaves
-`required-checks-drift` and `compose-smoke` as the only two of the six whose venue is genuinely
-open — and they are where the policy work should start.
+Verdict tally: 4 KEEP-REQ, 20 KEEP-CHEAP, 8 CANDIDATE, 1 MOVE, 5 DORMANT, 8 UNMEASURED.
 
 ### The two disputed numbers — RE-MEASURED and resolved
 
