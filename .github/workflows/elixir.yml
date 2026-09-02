@@ -68,7 +68,13 @@ on:
     branches: [main]
 
 concurrency:
-  group: elixir-${{ github.ref }}
+  # One group per PUSH SHA on main, per REF everywhere else. GitHub keeps ONE
+  # not-yet-started run per group, so a shared main group meant every merge
+  # evicted the previous main run before a runner picked it up — measured
+  # 2026-09-02: 37 of 40 main runs since 10:27Z cancelled, 1 completed. A
+  # per-sha group lets every main run complete; the cost is one run per merge,
+  # which is what this workflow already intends. PR refs keep superseding.
+  group: elixir-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
   # otherwise starves the suite (2026-06-10: 19 consecutive main runs
   # cancelled, zero completions all day).
