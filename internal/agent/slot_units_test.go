@@ -77,7 +77,7 @@ type fakeSystemctl struct {
 	calls    int
 }
 
-func (f *fakeSystemctl) run(name string, args ...string) (string, error) {
+func (f *fakeSystemctl) run(_ []string, name string, args ...string) (string, error) {
 	f.calls++
 	if name != "systemctl" {
 		return "", fmt.Errorf("unexpected command %q", name)

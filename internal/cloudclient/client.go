@@ -93,9 +93,24 @@ type Barkpark struct {
 	Version      string `json:"version"`
 	GitCommit    string `json:"git_commit"`
 	LastSeenAt   string `json:"last_seen_at"`
-	TeamID       string `json:"team_id"`
-	Team         *Team  `json:"team,omitempty"`
-	InsertedAt   string `json:"inserted_at"`
+
+	// GitCommitFirstSeenAt (dr-w22-bl) — when the control plane first saw this
+	// box report the sha in GitCommit (RFC3339). The plane stamps it on the beat
+	// where the reported sha DIFFERS from the one on the row; a steady box
+	// beating the same sha every 60 s never re-stamps it.
+	//
+	// EMPTY IS UNMEASURED, NEVER "just now", and it is not rare: every row read
+	// empty the day the column shipped, and a box that has not changed sha since
+	// still does. A box whose stored sha was empty when a sha first arrived also
+	// reads empty on purpose — that commit may have been running long before the
+	// first beat carrying it reached us. Render the empty string as UNMETERED
+	// (the word this package already uses for commit_distance) and never sort it
+	// as fresh; an older control plane omits the key entirely and it decodes to
+	// the same empty string, tolerantly.
+	GitCommitFirstSeenAt string `json:"git_commit_first_seen_at"`
+	TeamID               string `json:"team_id"`
+	Team                 *Team  `json:"team,omitempty"`
+	InsertedAt           string `json:"inserted_at"`
 
 	// Provider is the cloud the box runs on (hetzner/azure). The control plane
 	// stamps it on every row (migration default 'hetzner', Decision 9); it is
