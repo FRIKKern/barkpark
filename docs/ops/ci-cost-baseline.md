@@ -109,10 +109,16 @@ Reproduce with `bash scripts/ci-measure.sh --census --since <d> --until <d>`.
 queued, with an empty `steps` array. They cost no compute and produced no signal; they are pure
 waste, and on 2026-09-02 they were 71 of 131 jobs.
 
-**2. Queue dwarfs compute, and the gap is widening, not closing.** On 2026-09-02 the sample shows
-**651 queue minutes against 51 compute minutes** — roughly 13 to 1. Cutting which checks run
-attacks the 51. The fleet-versus-ceiling problem owns the 651. A diet that halves compute and
-leaves the queue untouched will not visibly move merge throughput.
+**2. Queue dwarfs compute.** On 2026-09-02 the sample shows **651 queue minutes against 51 compute
+minutes** — roughly 13 to 1.
+
+It is tempting to conclude that deciding which checks run only attacks the 51 and that the queue is
+somebody else's problem. That is wrong, and it matters because it would steer the work. **Queue
+minutes are jobs submitted divided by capacity over time**, so every job we stop submitting is a job
+that neither waits nor makes the next one wait. A PR touching three `cloud/` files fired 13 workflow
+runs and 55 jobs; at 4 runs and 15 jobs the 651 falls along with the 51, and it falls without buying
+anything. The inventory and the per-job `if:` work are the queue fix as much as the compute fix.
+Raising the ceiling is the other half, and that is what buying Pro does.
 
 ## Per-workflow, from the sample
 
@@ -215,3 +221,13 @@ open — and they are where the policy work should start.
 A per-workflow figure from six runs is thin for anything that skips often, which is most of these.
 The census counts above are exact; these compute figures are not, and the difference is why they
 are in separate tables.
+
+## Note on the selftest's venue
+
+`scripts/ci-measure.sh --selftest` is deliberately NOT wired into `shell-harnesses.yml` by this
+change, even though that workflow exists precisely for harnesses no other lane runs. A per-job
+dispatcher is being added to that file under `task-3a3e1182fadeef11` — on one measured three-file
+PR, 28 of 55 check runs were that single workflow running every harness for one matched path — and
+two edits to the same file that merge clean textually can still both be wrong. The wiring follows
+that PR rather than racing it. This is a declared gap, not an oversight: a selftest nothing runs is
+the defect `task-1360445b9cf32243` was filed against, and it is owed here.

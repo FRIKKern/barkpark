@@ -116,7 +116,6 @@ on:
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
       - "scripts/main-run-concurrency-check.sh"
-      - "scripts/ci-measure.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -320,7 +319,6 @@ on:
       - "scripts/deploy-concurrency-check.sh"
       - "scripts/deploy-concurrency-check.test.sh"
       - "scripts/main-run-concurrency-check.sh"
-      - "scripts/ci-measure.sh"
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
@@ -773,22 +771,6 @@ jobs:
         run: bash scripts/main-run-concurrency-check.sh --selftest
       - name: every main-triggered workflow keeps one group per main sha
         run: bash scripts/main-run-concurrency-check.sh
-      # CI MEASUREMENT HARNESS (task-ee3fc32d1615bd58). It is wired here for the
-      # reason this whole workflow exists: the row next to it in the goal is
-      # "design/mirror-fence.test.mjs is executed by no workflow", and landing a
-      # selftest nothing runs would be the same defect, filed and committed in
-      # the same hour.
-      #
-      # What its arms defend: ci-measure.sh reports CI cost, and the first diet
-      # table built from GitHub's job wall-clock ranked candidates on minutes
-      # they never spent — 63% of measured job-minutes belonged to jobs cancelled
-      # while still queued, with an EMPTY steps array. Arm a1 pins that a
-      # zero-step job contributes ZERO compute; a5 is the non-vacuity arm, and it
-      # already caught a false pass in this harness's own first run (a heredoc ate
-      # stdin, the analyzer parsed nothing, and "0.0" passed a test that only
-      # asserted "not the wrong answer"). No network, no token: fixtures only.
-      - name: the CI cost meter cannot count queue time as compute
-        run: bash scripts/ci-measure.sh --selftest
 
   console-path-ratchet:
     name: console-path-escape-check.sh classification matrix
