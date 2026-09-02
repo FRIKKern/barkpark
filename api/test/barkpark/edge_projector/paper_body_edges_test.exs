@@ -238,6 +238,166 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       assert edges |> Enum.map(&{&1.to_id, &1.kind}) |> Enum.sort() ==
                [{"kpi-1", "valueref"}]
     end
+
+    # #13916 — an internal paper link authored as an ABSOLUTE url on this
+    # instance's own public host minted NO edge: `href_target/1` matched only
+    # the root-relative "/papers/" prefix, so 60 (source, target) pairs across
+    # the live corpus dropped silently and 14 linked papers reported zero
+    # backlinks. Every one of them was the same block shape — `type: "action"`,
+    # the bp-button, which stores whatever URL the author pasted out of the
+    # browser — so that is the shape pinned here.
+    test "an absolute url on the OWN public host mints the same edge as the root-relative form; a foreign host mints none" do
+      own = URI.parse(BarkparkWeb.Endpoint.url()).host
+
+      doc = %{
+        "doc_id" => "paper-abs-src",
+        "content" => %{
+          "blocks" => [
+            # the picker's shape — the one that already worked
+            %{
+              "id" => "b1",
+              "type" => "paragraph",
+              "content" => [
+                %{"type" => "link", "href" => "/papers/rel-target", "children" => []}
+              ]
+            },
+            # the corpus shape: an action/bp-button carrying an absolute url
+            %{
+              "id" => "b2",
+              "type" => "action",
+              "href" => "https://#{own}/papers/abs-target",
+              "label" => "Read the keystone"
+            },
+            # same instance, explicit port + http scheme — a proxy fronts the
+            # app, so neither the scheme nor the port need match PHX_SCHEME /
+            # the url port
+            %{
+              "id" => "b3",
+              "type" => "action",
+              "href" => "http://#{own}:4002/papers/abs-port-target"
+            },
+            # host comparison is case-insensitive, and query/fragment are
+            # trimmed exactly as in the relative form
+            %{
+              "id" => "b4",
+              "type" => "action",
+              "href" => "https://#{String.upcase(own)}/papers/abs-case-target?utm=x#sec"
+            },
+            # protocol-relative, still our host
+            %{"id" => "b5", "type" => "action", "href" => "//#{own}/papers/abs-scheme-less"},
+            # ── everything below must mint NOTHING ──
+            # another Barkpark: its slug must not collide with a local paper
+            %{
+              "id" => "b6",
+              "type" => "action",
+              "href" => "https://other-instance.example/papers/foreign-target"
+            },
+            # userinfo smuggling — the real host is evil.example
+            %{
+              "id" => "b7",
+              "type" => "action",
+              "href" => "https://#{own}@evil.example/papers/smuggled-target"
+            },
+            # own host, but not a paper path
+            %{"id" => "b8", "type" => "action", "href" => "https://#{own}/tasks/not-a-paper"},
+            # own host, empty slug
+            %{"id" => "b9", "type" => "action", "href" => "https://#{own}/papers/"}
+          ]
+        }
+      }
+
+      pairs = doc |> Bulldocs.extract_edges(%{}) |> Enum.map(&{&1.to_id, &1.kind})
+
+      assert Enum.sort(pairs) ==
+               Enum.sort([
+                 {"rel-target", "references"},
+                 {"abs-target", "references"},
+                 {"abs-port-target", "references"},
+                 {"abs-case-target", "references"},
+                 {"abs-scheme-less", "references"}
+               ])
+
+      # exactly one edge per shape — not a duplicate, not zero
+      assert Enum.count(pairs, &(&1 == {"rel-target", "references"})) == 1
+      assert Enum.count(pairs, &(&1 == {"abs-target", "references"})) == 1
+
+      for foreign <- ~w(foreign-target smuggled-target not-a-paper) do
+        refute Enum.any?(pairs, fn {to, _} -> to == foreign end),
+               "a url off this instance's own host must not mint a local edge to #{foreign}"
+      end
+    end
+
+    test "both shapes of the SAME target yield the same slug, and together coalesce to ONE edge" do
+      own = URI.parse(BarkparkWeb.Endpoint.url()).host
+
+      # The live repro: perfect-plan-readiness-ledger renders an action block
+      # pointing at https://<own-host>/papers/workspace-bundle-keystone, and
+      # `bp doc backlinks workspace-bundle-keystone` answered count 0.
+      relative_block = %{
+        "id" => "b1",
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "link", "href" => "/papers/workspace-bundle-keystone", "children" => []}
+        ]
+      }
+
+      absolute_block = %{
+        "id" => "b2",
+        "type" => "action",
+        "href" => "https://#{own}/papers/workspace-bundle-keystone"
+      }
+
+      pairs = fn blocks ->
+        %{"doc_id" => "perfect-plan-readiness-ledger", "content" => %{"blocks" => blocks}}
+        |> Bulldocs.extract_edges(%{})
+        |> Enum.map(&{&1.to_id, &1.kind})
+      end
+
+      # Each shape ON ITS OWN — the absolute form is asserted independently of
+      # the relative one, so dedup cannot mask a still-broken absolute clause.
+      assert pairs.([relative_block]) == [{"workspace-bundle-keystone", "references"}]
+      assert pairs.([absolute_block]) == [{"workspace-bundle-keystone", "references"}]
+      assert pairs.([absolute_block]) == pairs.([relative_block])
+
+      # ...and the two together are ONE edge, not two.
+      assert pairs.([relative_block, absolute_block]) ==
+               [{"workspace-bundle-keystone", "references"}]
+    end
+
+    # The fix walks NODES and reads the "href" field. It must not become a text
+    # grep: ~50 papers name a bare /papers/<slug> path inside running prose with
+    # no link node at all, and those are not owed an edge.
+    test "a /papers/<slug> occurrence in PROSE text mints no edge (in either shape)" do
+      own = URI.parse(BarkparkWeb.Endpoint.url()).host
+
+      doc = %{
+        "doc_id" => "bp-chat-tui-wave",
+        "content" => %{
+          "blocks" => [
+            %{
+              "id" => "b1",
+              "type" => "paragraph",
+              "content" => [
+                %{
+                  "type" => "text",
+                  "value" =>
+                    "report tokens + per-phase split + grade to " <>
+                      "/papers/epic-cycle-research-program-abcde, and mirror it at " <>
+                      "https://#{own}/papers/prose-absolute-mention"
+                }
+              ]
+            },
+            %{
+              "id" => "b2",
+              "type" => "paragraph",
+              "text" => "See https://#{own}/papers/prose-plain-text-block for the ledger."
+            }
+          ]
+        }
+      }
+
+      assert Bulldocs.extract_edges(doc, %{}) == []
+    end
   end
 
   # ── 2. The three writers enqueue reprojection ─────────────────────────────

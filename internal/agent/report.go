@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -750,7 +751,7 @@ var execRunnerTimeout = 5 * time.Minute
 // gitProbe.git above) are untouched, so a hung approved command surfaces as an
 // honest "timed out after ..." error instead of wedging the agent.
 func (ExecRunner) Run(name string, args ...string) (string, error) {
-	return runBounded(execRunnerTimeout, name, args...)
+	return runBounded(execRunnerTimeout, nil, name, args...)
 }
 
 // runBounded is the one place a shell-out gets its lifetime. EVERY caller picks
@@ -766,10 +767,18 @@ func (ExecRunner) Run(name string, args ...string) (string, error) {
 // from the output shape alone is how a timeout gets partially landed.
 var errProbeTimedOut = errors.New("timed out")
 
-func runBounded(timeout time.Duration, name string, args ...string) (string, error) {
+// env is the SECOND thing a shell-out needs from this one place, and it exists
+// for exactly one reason: a secret handed to a child in argv is world-readable
+// for the child's whole lifetime (/proc/<pid>/cmdline, a plain `ps`), while the
+// same secret handed to it in the environment is readable only by the process
+// owner. nil means "inherit the agent's own environment" — every probe but the
+// Postgres pair passes nil, because they carry no credential at all.
+func runBounded(timeout time.Duration, env []string, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = env // nil = inherit, which is exec's own default
+	out, err := cmd.CombinedOutput()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return string(out), fmt.Errorf("%w after %s: %s %s", errProbeTimedOut, timeout, name, strings.Join(args, " "))
 	}
@@ -1190,14 +1199,19 @@ const pgTopRelationsSQL = "SET statement_timeout = '" + pgStatementTimeout + "';
 // is ever edited without the parser being told.
 const pgTopRelationsLimit = 10
 
-// probeRunner is the shell-out seam the Postgres probes use. Production passes
-// a runBounded closure carrying pgProbeTimeout; tests pass a fake so the psql
-// contract (argv, parsing, failure paths) is provable without a live database.
-type probeRunner func(name string, args ...string) (string, error)
+// probeRunner is the shell-out seam every on-box probe uses. Production passes
+// a runBounded closure carrying that probe's timeout; tests pass a fake so the
+// contract (env, argv, parsing, failure paths) is provable without a live box.
+//
+// env is the first parameter and not an option BECAUSE it is the credential
+// channel: making every call site spell out `nil` is what makes the two that
+// pass a real environment (the Postgres pair) visible at a glance, and it is
+// why there is ONE runner rather than a second credential-carrying fork.
+type probeRunner func(env []string, name string, args ...string) (string, error)
 
 // boundedPGRunner is the production probeRunner: psql under pgProbeTimeout.
-func boundedPGRunner(name string, args ...string) (string, error) {
-	return runBounded(pgProbeTimeout, name, args...)
+func boundedPGRunner(env []string, name string, args ...string) (string, error) {
+	return runBounded(pgProbeTimeout, env, name, args...)
 }
 
 // pgDatabaseURL reads DATABASE_URL out of <checkout>/.env and returns it in a
@@ -1244,8 +1258,115 @@ func pgDatabaseURL(checkout string) (string, error) {
 // psqlArgs builds the argv for a single-shot, machine-readable psql query:
 // -A unaligned, -t tuples only, -q quiet, -F| explicit field separator, and
 // ON_ERROR_STOP so a failed SET does not silently yield a partial answer.
-func psqlArgs(url, sql string) []string {
-	return []string{url, "-v", "ON_ERROR_STOP=1", "-A", "-t", "-q", "-F", "|", "-c", sql}
+//
+// It carries NO connection string. argv is world-readable — every local process
+// can read /proc/<pid>/cmdline or run a plain `ps` — so a DATABASE_URL placed
+// here publishes the database password to every user on the box for the whole
+// lifetime of the child, twice per beat. The connection travels in the child's
+// ENVIRONMENT instead (pgConnEnv), which only the process owner can read.
+func psqlArgs(sql string) []string {
+	return []string{"-v", "ON_ERROR_STOP=1", "-A", "-t", "-q", "-F", "|", "-c", sql}
+}
+
+// psqlEnvKey maps a libpq URI query parameter to the environment variable libpq
+// reads for the same connection keyword. The whitelist is closed on purpose: an
+// unrecognised parameter is an ERROR, exactly as it is for libpq itself
+// ("invalid URI query parameter"), because the alternative is silently DROPPING
+// it — and a dropped `sslmode=require` is a plaintext connection nobody asked
+// for. Failing keeps the field at its -1 sentinel, which is the honest answer.
+var psqlEnvKey = map[string]string{
+	"host":                 "PGHOST",
+	"port":                 "PGPORT",
+	"dbname":               "PGDATABASE",
+	"user":                 "PGUSER",
+	"password":             "PGPASSWORD",
+	"sslmode":              "PGSSLMODE",
+	"sslrootcert":          "PGSSLROOTCERT",
+	"sslcert":              "PGSSLCERT",
+	"sslkey":               "PGSSLKEY",
+	"connect_timeout":      "PGCONNECT_TIMEOUT",
+	"application_name":     "PGAPPNAME",
+	"options":              "PGOPTIONS",
+	"target_session_attrs": "PGTARGETSESSIONATTRS",
+}
+
+// pgConnEnv turns the checkout's DATABASE_URL into the ENVIRONMENT the psql
+// child connects with, so the password never appears in argv.
+//
+// Two properties are load-bearing:
+//
+//   - It is COMPLETE or it is an error. Host, user and database must all be
+//     present; a URL missing any of them would leave libpq to fall back on its
+//     own defaults (the OS user, a unix socket, a database named after the
+//     user) and the probe would then report a real, plausible number measured
+//     against the WRONG database. That is worse than -1, so it returns an error
+//     and the field keeps its sentinel — the same contract pgDatabaseURL holds.
+//   - It is EXCLUSIVE. Every inherited PG* variable is dropped from the child's
+//     environment first, so an ambient PGHOST/PGDATABASE in the agent's own
+//     environment cannot redirect the probe at another server. PG* is entirely
+//     libpq's connection namespace; psql needs nothing else out of it.
+func pgConnEnv(rawURL string) ([]string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// The error is NOT wrapped: url.Error prints the url it failed on, and
+		// that url is the credential this whole function exists to contain.
+		return nil, errors.New("pg: unparseable DATABASE_URL")
+	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return nil, fmt.Errorf("pg: DATABASE_URL scheme %q is not postgres://", u.Scheme)
+	}
+	conn := map[string]string{}
+	if h := u.Hostname(); h != "" {
+		conn["PGHOST"] = h
+	}
+	if port := u.Port(); port != "" {
+		conn["PGPORT"] = port
+	}
+	if db := strings.TrimPrefix(u.Path, "/"); db != "" {
+		conn["PGDATABASE"] = db
+	}
+	if u.User != nil {
+		if name := u.User.Username(); name != "" {
+			conn["PGUSER"] = name
+		}
+		if pw, ok := u.User.Password(); ok {
+			conn["PGPASSWORD"] = pw
+		}
+	}
+	params, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		// Unwrapped for the same reason: the parse error quotes the input.
+		return nil, errors.New("pg: unparseable DATABASE_URL parameters")
+	}
+	for name, vals := range params {
+		key, ok := psqlEnvKey[name]
+		if !ok {
+			return nil, fmt.Errorf("pg: DATABASE_URL carries unsupported parameter %q", name)
+		}
+		conn[key] = vals[len(vals)-1]
+	}
+	for _, required := range []string{"PGHOST", "PGUSER", "PGDATABASE"} {
+		if conn[required] == "" {
+			return nil, fmt.Errorf("pg: DATABASE_URL has no %s — a default connection would measure the WRONG database", required)
+		}
+	}
+
+	env := make([]string, 0, len(conn)+16)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "PG") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	keys := make([]string, 0, len(conn))
+	for k := range conn {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		env = append(env, k+"="+conn[k])
+	}
+	return env, nil
 }
 
 // NewPGSizeProbe builds the production PGSizeProbe: psql against the checkout's
@@ -1263,11 +1384,15 @@ func newPGSizeProbeWith(run probeRunner, checkout string) func() (int64, error) 
 		return nil
 	}
 	return func() (int64, error) {
-		url, err := pgDatabaseURL(checkout)
+		dbURL, err := pgDatabaseURL(checkout)
 		if err != nil {
 			return -1, err
 		}
-		out, err := run("psql", psqlArgs(url, pgSizeSQL)...)
+		env, err := pgConnEnv(dbURL)
+		if err != nil {
+			return -1, err
+		}
+		out, err := run(env, "psql", psqlArgs(pgSizeSQL)...)
 		if err != nil {
 			return -1, fmt.Errorf("pg size: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1304,11 +1429,15 @@ func newPGTopRelationsProbeWith(run probeRunner, checkout string) func() ([]Rela
 		return nil
 	}
 	return func() ([]RelationSize, error) {
-		url, err := pgDatabaseURL(checkout)
+		dbURL, err := pgDatabaseURL(checkout)
 		if err != nil {
 			return nil, err
 		}
-		out, err := run("psql", psqlArgs(url, pgTopRelationsSQL)...)
+		env, err := pgConnEnv(dbURL)
+		if err != nil {
+			return nil, err
+		}
+		out, err := run(env, "psql", psqlArgs(pgTopRelationsSQL)...)
 		if err != nil {
 			return nil, fmt.Errorf("pg top relations: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1830,8 +1959,8 @@ var DefaultConsumerRoots = []string{
 // goes through one — a probe that can run forever is the runaway-diagnostic
 // incident again, one layer down.
 func boundedSpaceRunner(timeout time.Duration) probeRunner {
-	return func(name string, args ...string) (string, error) {
-		return runBounded(timeout, name, args...)
+	return func(env []string, name string, args ...string) (string, error) {
+		return runBounded(timeout, env, name, args...)
 	}
 }
 
@@ -1849,7 +1978,7 @@ func NewRootSpaceProbe() func() (int64, int64, error) {
 
 func newRootSpaceProbeWith(run probeRunner) func() (int64, int64, error) {
 	return func() (int64, int64, error) {
-		out, err := run("df", dfRootArgs()...)
+		out, err := run(nil, "df", dfRootArgs()...)
 		if err != nil {
 			return -1, -1, fmt.Errorf("df: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -1893,7 +2022,7 @@ func NewJournalSpaceProbe() func() (int64, error) {
 
 func newJournalSpaceProbeWith(run probeRunner) func() (int64, error) {
 	return func() (int64, error) {
-		out, err := run("journalctl", journalArgs()...)
+		out, err := run(nil, "journalctl", journalArgs()...)
 		if err != nil {
 			return -1, fmt.Errorf("journalctl: %w: %s", err, strings.TrimSpace(out))
 		}
@@ -2002,7 +2131,7 @@ func newSitesSpaceProbeWith(run probeRunner, dir string) func() (int64, []SiteSi
 	}
 	return func() (int64, []SiteSize, error) {
 		args, unit := duTreeArgs(dir)
-		out, err := run("nice", args...)
+		out, err := run(nil, "nice", args...)
 		if err != nil {
 			// DISCARD, never partially land. A du killed at its deadline prints
 			// the rows it had already finished — 5 site rows, then rc=137 — and
@@ -2065,7 +2194,7 @@ func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, [
 			return -1, nil, nil, errors.New("du: empty root")
 		}
 		args, unit := duTreeArgs(dir)
-		out, runErr := run("nice", args...)
+		out, runErr := run(nil, "nice", args...)
 		total, rows, degraded, parseErr := parseDuTree(out, dir, unit)
 
 		if runErr != nil {
@@ -2355,7 +2484,7 @@ func NewRunawayProbe() func() ([]RunawayProc, error) {
 
 func newRunawayProbeWith(run probeRunner) func() ([]RunawayProc, error) {
 	return func() ([]RunawayProc, error) {
-		out, err := run("ps", psRunawayArgs()...)
+		out, err := run(nil, "ps", psRunawayArgs()...)
 		if err != nil {
 			return nil, fmt.Errorf("ps: %w: %s", err, truncate(strings.TrimSpace(out), 120))
 		}
@@ -2570,7 +2699,7 @@ func NewSlotUnitsProbe() func() ([]SlotUnit, int, error) {
 func newSlotUnitsProbeWith(run probeRunner) func() ([]SlotUnit, int, error) {
 	return func() ([]SlotUnit, int, error) {
 		args := append([]string{"show", "-p", slotUnitProps}, slotUnitNames...)
-		out, err := run("systemctl", args...)
+		out, err := run(nil, "systemctl", args...)
 		if err != nil {
 			return nil, -1, fmt.Errorf("systemctl show: %w: %s", err, truncate(strings.TrimSpace(out), 120))
 		}
@@ -2595,7 +2724,7 @@ func newSlotUnitsProbeWith(run probeRunner) func() ([]SlotUnit, int, error) {
 			}
 			if len(names) > 0 {
 				sargs := append([]string{"show", "-p", slotUnitProps}, names...)
-				if sout, serr := run("systemctl", sargs...); serr == nil {
+				if sout, serr := run(nil, "systemctl", sargs...); serr == nil {
 					units = append(units, parseSystemctlShow(sout)...)
 				}
 			}
@@ -2608,7 +2737,7 @@ func newSlotUnitsProbeWith(run probeRunner) func() ([]SlotUnit, int, error) {
 // FAILED, in systemd's own order. `--plain --no-legend --no-pager` strips the
 // decorations so the first field of every line is a unit name and nothing else.
 func failedSiteUnitNames(run probeRunner) ([]string, error) {
-	out, err := run("systemctl", "list-units", siteUnitPattern,
+	out, err := run(nil, "systemctl", "list-units", siteUnitPattern,
 		"--all", "--state=failed", "--plain", "--no-legend", "--no-pager")
 	if err != nil {
 		return nil, err

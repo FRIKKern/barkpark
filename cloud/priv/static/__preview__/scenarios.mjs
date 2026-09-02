@@ -81,6 +81,11 @@ export const IDS = {
   suspendedInstance: "5b2c1e00-0000-4000-8000-0000000000a5",
   // cch-w61-s2: the box that answered our stored admin credential with a 401.
   refusedInstance: "5b2c1e00-0000-4000-8000-0000000000a6",
+  // cch-w45-bl: the box whose TEARDOWN failed. `deprovision_status:"failed"` is
+  // the ONLY state instanceLifecycle() folds to removeFailed, and it was null on
+  // every row in this file, so the header's whole removeFailed arm — the Retry
+  // removal CTA and the deprovision_error banner beside it — rendered nowhere.
+  removeFailedInstance: "5b2c1e00-0000-4000-8000-0000000000a7",
   // The single-instance provisioning / failed scenarios reuse their own ids.
   soloProvisioning: "5b2c1e00-0000-4000-8000-0000000000b1",
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
@@ -101,7 +106,39 @@ const T = new Date().toISOString();
 const tMinus = (secs) => new Date(Date.parse(T) - secs * 1000).toISOString();
 
 // ── shared row builders (keep every barkpark row envelope-complete) ──────────
-function bpBase(over) {
+// "Envelope-complete" is now a MEASURED claim, not a promise: __app.test.mjs's
+// "bpBase declares every key barkpark_json serializes" test parses the key list
+// straight out of `defp barkpark_json` in cloud/lib/barkpark_cloud/web/router.ex
+// (base map + every `|> merge_*` the pipeline applies) and diffs it against
+// Object.keys(bpBase({})). That is why this function is EXPORTED — the test
+// reads the real object, not a copy of this list. A field the server starts
+// serializing and this builder does not declare reds that test; a field no
+// fixture declares is a field no instrument can ever drive
+// (cch-backlog-bpbase-envelope-incomplete).
+//
+// TWO OF THE FOURTEEN KEYS THIS SLICE ADDED MOVE PIXELS, and that is the point,
+// not a regression — measured, named, and stated here so nobody "restores" the
+// old bytes later:
+//   • provider — the schema carries `default: "hetzner"`, so EVERY row the
+//     server has ever sent has it. The fleet row's provider chip therefore
+//     rendered in only the five scenarios that set it by hand; it now renders
+//     everywhere, as it does in production.
+//   • last_verified_at / verify_reachable — `fleetVerifyText` (`grep -n
+//     "function fleetVerifyText" cloud/priv/static/app.js`) branches on
+//     hasOwnProperty, and its own comment says the silent branch "is
+//     unreachable against any current server". The corpus was sitting in that
+//     unreachable branch; the mono line now ends "· never verified", which is
+//     what a real console paints for an unverified box.
+// Net effect on overflow-guard: four INFORMATIONAL cells move (#fleet
+// mixed-fleet heights at 900/1000, the panel-overview document height at
+// 320/390). Every ✓/✗ verdict and every exit code is unchanged.
+//
+// VALUES ARE THE SERVER'S OWN DEFAULTS, not invented ones — the Ecto schema's
+// (`cloud/lib/barkpark_cloud/registry/barkpark.ex`, `grep -n 'field :'`) for
+// column-backed keys, and the serializer's documented nil-means-UNMEASURED
+// contract for the rest. A wrong default is worse than a missing key: it
+// paints a determinate state the control plane never sent.
+export function bpBase(over) {
   return Object.assign(
     {
       id: null,
@@ -115,15 +152,46 @@ function bpBase(over) {
       version: null,
       git_commit: null,
       last_seen_at: null,
+      // cch-backlog-bpbase-envelope-incomplete. SINCE WHEN this box has served
+      // `git_commit` — the materialised column (dr-w22-bl). NULL is UNMEASURED,
+      // never "now": a box that has not changed sha since the column shipped
+      // reads null, so a renderer must paint it unmetered and must not sort it
+      // as fresh.
+      git_commit_first_seen_at: null,
+      // The reachability counters behind the health axis. The COLUMN DEFAULTS
+      // (registry/barkpark.ex: `default: 0` / `default: false`), never null —
+      // null is a third state the control plane has never serialized. A healthy
+      // box has missed zero windows and has no outage alert latched.
+      unreachable_count: 0,
+      unreachable_notification_sent: false,
       team_id: IDS.team,
+      // Provider-neutral hosting (charter Decision 9) — identity, never a status
+      // axis. `provider` carries the schema's `default: "hetzner"` and is
+      // therefore NON-NULL on every row the server has ever sent, including
+      // legacy ones; `region`/`server_type` are nullable LAUNCH PINS (the
+      // serializer's own words: "wrong or empty on adopted boxes"), so the
+      // envelope default is null and a fixture that wants a placement says so.
+      provider: "hetzner",
+      region: null,
+      server_type: null,
       suspended: false,
       suspended_reason: null,
+      // cch-w54-bl: SINCE WHEN the suspension holds. NULL means NOT SUSPENDED,
+      // never "suspended at an unknown time" — unsuspend clears all three
+      // columns together. Consumers must not substitute a billing date for it.
+      suspended_at: null,
       // cch-w21-s3: `barkpark_json` (web/router.ex:8371) serializes `custom_host`
       // on EVERY row — null until a team attaches a domain. It belongs in the
       // envelope because `publicUrl()` (`grep -n "function publicUrl" app.js`)
       // PREFERS it over `url`, so a row that merely OMITS the key is a row no
       // fixture can make cruel.
       custom_host: null,
+      // The custom domain's LAST VERIFICATION, serialized on every row beside
+      // custom_host above. Both null until a team attaches a domain and the
+      // verifier runs; `verify_reachable` is a three-valued boolean where null
+      // is NOT-YET-CHECKED, distinct from a checked-and-false.
+      last_verified_at: null,
+      verify_reachable: null,
       update_state: null,
       update_running_release: null,
       update_latest_release: null,
@@ -135,6 +203,15 @@ function bpBase(over) {
       // refused state cannot exist at all — the whole corpus rendered the Updates
       // panel in exactly ONE state before this row was added.
       update_unavailable_reason: null,
+      // dr-w24-s2 COMMIT DISTANCE — the control plane's own measurement of the
+      // commit each box serves, a DIFFERENT question from the release-tag grade
+      // above (prod carries rows reading distance 2493 / "behind" while
+      // update_state is "current"). NULL is UNMEASURED and never 0: an empty
+      // git_commit, a 404 on an unknown sha and a rate-limit refusal all land
+      // null, and a consumer must render unmetered and sort it to the TOP.
+      commit_distance: null,
+      commit_ancestry: null,
+      commit_distance_checked_at: null,
       // cch-w47-s2 (D529/D515): `barkpark_json` serializes the autoupdate policy
       // block on EVERY row, so a fixture that OMITS these keys makes
       // `hasAutoupdatePolicy` false for the whole corpus — the policy chip and
@@ -162,6 +239,38 @@ function bpBase(over) {
       fleet_role: null,
       fleet_parent_id: null,
       fleet_token_id: null,
+      // The age in seconds of the OLDEST `queued` container-site deployment on
+      // this box; null when none. A NUMBER, never a verdict — the SPA owns the
+      // 5-minute deploy_stalled threshold — and always present, so a consumer
+      // branches on the VALUE, not the key.
+      queued_deploy_age_seconds: null,
+      // The host's live resource pressure. Always present on the wire: when a
+      // box has never beaten, merge_pressure/2's fallback clause puts
+      // @unmetered_pressure — this ALL-NIL map, key for key. HONESTY LAW: an
+      // absent probe and the agent's -1 sentinel both read nil (UNMETERED) and
+      // never 0, so a box whose agent predates the vitals beat must read "we did
+      // not measure", never "measured, and it is fine".
+      pressure: {
+        cpu_percent: null,
+        cpu_cores: null,
+        mem_used_percent: null,
+        load1: null,
+        load15: null,
+        req_per_s: null,
+        p95_ms: null,
+        err_5xx_per_s: null,
+        disk_used_percent: null,
+        swap_used_percent: null,
+        swap_total_bytes: null,
+        beam_pss_bytes: null,
+        beam_swap_bytes: null,
+        beam_pid: null,
+        beam_slot: null,
+        runaway_procs: null,
+        slot_units: null,
+        slot_units_truncated: null,
+        reported_at: null,
+      },
     },
     over,
   );
@@ -334,6 +443,38 @@ const credentialRefusedInstance = bpBase({
   update_unavailable_reason: "identity_refused",
   update_checked_at: tMinus(45 * 60),
   provision_status: "succeeded",
+});
+
+// cch-w45-bl — THE BOX WHOSE TEARDOWN FAILED. `Registry.mark_deprovision_failed`
+// writes deprovision_status "failed" + the worker's verbatim deprovision_error,
+// and `barkpark_json` serializes both. instanceLifecycle() folds exactly that
+// pair to `removeFailed`, which is the ONE state that paints
+// `id="inst-remove-retry"` (DELETE /v1/barkparks/:id, `admin`) — and it was
+// unreachable from the committed corpus, so the guard on it was green by
+// construction.
+//
+// `host` stays SET on purpose: a teardown that failed is a teardown that left
+// the server standing, and removeFailed wins over every other fold in
+// instanceLifecycle regardless — a hostless row would render the same header and
+// hide that the box is still up. NOT `status:"remove_failed"`: measured, that
+// renders nothing at all; the fold reads deprovision_status and only that.
+const removeFailedInstance = bpBase({
+  id: IDS.removeFailedInstance,
+  name: "Retired",
+  slug: "retired",
+  url: "https://retired-5b2c1e.barkpark.cloud",
+  host: "retired-5b2c1e.barkpark.cloud",
+  health_status: "down",
+  agent_status: "offline",
+  version: "0.9.2",
+  last_seen_at: tMinus(3 * 3600),
+  update_state: "current",
+  update_running_release: "0.9.2",
+  update_latest_release: "0.9.2",
+  update_checked_at: tMinus(3 * 3600),
+  provision_status: "succeeded",
+  deprovision_status: "failed",
+  deprovision_error: "hcloud: server delete returned 409 (a volume is still attached)",
 });
 
 // ── sites (site_json) ────────────────────────────────────────────────────────
@@ -4618,6 +4759,60 @@ export const SCENARIOS = {
       instanceRollback: { status: 409, body: { ok: false, error: { code: "identity_refused" } } },
     },
   },
+  // ── cch-w45-bl: the three instance-lifecycle verbs no committed scenario
+  // could paint. Each one is a STATE the corpus never produced, not a control
+  // that was missing — so every guard over them was green by construction (the
+  // epic's own fourth clause). Measured on origin/main dea37e8d19 by booting all
+  // 116 scenarios through smoke.mjs's shim: `id="inst-update"` 0 hits,
+  // `id="inst-remove-retry"` 0 hits, `data-vf-reprovision` 0 hits.
+  //
+  // Every one carries the corpus's OWNER actor, because the affordance these
+  // scenarios exist to render is the LIVE one — the member arm of all seven
+  // verbs is already pinned in both directions by __app.test.mjs's cch-w38-s1
+  // eleven-offer table, and `panel-overview-member` pins the disable-and-explain
+  // bytes in the real DOM.
+  "instance-behind": {
+    label: "Instance header — a live box one release BEHIND: the one-click self-update CTA (#inst-update) beside Open Studio",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, behindInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "instance-remove-failed": {
+    label: "Instance header — a teardown that FAILED: the Retry removal CTA (#inst-remove-retry) and the server's verbatim deprovision_error",
+    authed: true,
+    deepLink: "#instance/" + IDS.removeFailedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, removeFailedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "verify-no-credentials": {
+    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEventsNoVerify },
+      // The 404 the control plane answers for an instance with no stored admin
+      // credential. Without it POST /verify is a blanket 200 in every scenario,
+      // so verifyNoteHtml("no_admin_token", …) — and the [data-vf-reprovision]
+      // mount inside it — was unreachable from this harness at all.
+      instanceVerify: { status: 404, body: { error: "no_admin_token" } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -5107,6 +5302,11 @@ export function route(name, method, path, state) {
   // C8: "Check now" — the synchronous verify suite answers a fresh all-pass
   // envelope so the preview's button exercises the full render path.
   if (method === "POST" && /^\/v1\/barkparks\/[^/]+\/verify$/.test(p)) {
+    // cch-w45-bl: a scenario overrides via d.instanceVerify to drive one of the
+    // two CODED refusals (409 not_live, 404 no_admin_token) — the instanceRollback
+    // seam, same shape. The default stays the all-pass 200 below, so every
+    // scenario written before this line is byte-identical through it.
+    if (d.instanceVerify) return d.instanceVerify;
     return {
       status: 200,
       body: {
