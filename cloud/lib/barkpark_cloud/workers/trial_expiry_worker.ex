@@ -1,7 +1,8 @@
 defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   @moduledoc """
   dwb-13 — the free-trial lifecycle worker. Runs hourly on the `:maintenance`
-  queue and, over every LIVE `trial` subscription (`Billing.active_trials/0`):
+  queue and, over every ACTIONABLE `trial` subscription (`Billing.active_trials/1`
+  — live, with a window closing inside the scan horizon):
 
     1. **Advance notices.** Sends a T-3-day and a T-1-day heads-up via the
        notifications system (`:trial_expiring`). Each threshold is claimed with
@@ -17,11 +18,28 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
        DEPROVISION job for each of the team's boxes through the EXISTING
        deprovision path (`Registry.enqueue_deprovision_job/1`) — no parallel
        teardown machinery. Idempotent: a still-pending teardown is deduped
-       (`:already_deprovisioning`), and once the boxes are gone the scan is a
-       no-op.
+       (`:already_deprovisioning`).
+
+    3. **Finalisation (cch-w50).** Once the teardown has actually HAPPENED — the
+       team has no boxes left — writes the terminal status on the subscription
+       row (`Billing.expire_trial/2` → `canceled`). Until cch-w50 this step did
+       not exist: the worker wrote NOTHING to `subscriptions`, so a lapsed trial
+       kept `plan "trial" / status "active"` forever, `active_trials/0` re-read
+       it hourly forever, and the console — which routes on the row, not on the
+       clock — kept serving the running-trial card to a team whose box was
+       already gone. Fifteen such rows were live on 2026-08-07, the oldest three
+       weeks old.
+
+       THE ORDER IS LOAD-BEARING. Finalising is gated on the boxes being GONE,
+       not on the teardown being ENQUEUED, and that gate is what keeps the
+       convert-just-after-expiry race closed: while a box still exists the row
+       stays `trial`/`active`, so a checkout landing in that window still takes
+       `activate_from_session/4`'s in-place trial arm — the one that cancels the
+       pending deprovision. A team with no boxes at all is finalised on the first
+       pass, which is exactly the shape all fifteen ghosts carry.
 
   MONEY-PATH SAFETY (adversarial): a CONVERTED team's live row is a PAID plan, so
-  `active_trials/0` never returns it — this worker only ever sees `plan ==
+  `active_trials/1` never returns it — this worker only ever sees `plan ==
   "trial"` rows and thus can NEVER tear down a subscribed team's box or spam it
   with expiry notices. The trial→paid conversion additionally cancels any
   in-flight teardown (`Registry.cancel_pending_deprovision_jobs/1`), closing the
@@ -53,19 +71,24 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
 
   @doc """
   Scan the live trials once against `now`. Returns a summary map
-  `%{noticed_3d, noticed_1d, expired, teardowns}`. Public so tests can drive it
-  deterministically (the `perform/1` entry passes `DateTime.utc_now/0`).
+  `%{noticed_3d, noticed_1d, expired, teardowns, finalized}`. Public so tests can
+  drive it deterministically (the `perform/1` entry passes `DateTime.utc_now/0`).
+
+  `now` is handed to `Billing.active_trials/1` as well, so the working set and
+  the per-row arithmetic are read off ONE instant.
   """
   @spec run(DateTime.t()) :: %{
           noticed_3d: non_neg_integer(),
           noticed_1d: non_neg_integer(),
           expired: non_neg_integer(),
-          teardowns: non_neg_integer()
+          teardowns: non_neg_integer(),
+          finalized: non_neg_integer()
         }
   def run(now) do
-    zero = %{noticed_3d: 0, noticed_1d: 0, expired: 0, teardowns: 0}
+    zero = %{noticed_3d: 0, noticed_1d: 0, expired: 0, teardowns: 0, finalized: 0}
 
-    Billing.active_trials()
+    now
+    |> Billing.active_trials()
     |> Enum.reduce(zero, fn sub, acc ->
       case Repo.get(Team, sub.team_id) do
         nil -> acc
@@ -75,15 +98,47 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   end
 
   # A trial with no window is malformed — skip it (never entitled anyway).
+  # `active_trials/1` already filters these out in SQL; the clause stays as the
+  # local statement of the rule, not as the only place it is enforced.
   defp handle_trial(acc, _team, %Subscription{current_period_end: nil}, _now), do: acc
 
   defp handle_trial(acc, team, %Subscription{current_period_end: ends} = sub, now) do
     if DateTime.compare(ends, now) != :gt do
-      # Window closed and this is still a `trial` row (unconverted) → tear down.
-      n = teardown(team)
-      %{acc | expired: acc.expired + 1, teardowns: acc.teardowns + n}
+      # Window closed and this is still a `trial` row (unconverted) → tear down,
+      # and finalise the money row once there is nothing left to tear down.
+      #
+      # The box list is read ONCE, BEFORE the enqueue, and both decisions come
+      # off that single read: enqueue a deprovision for every box, and finalise
+      # only if there were none. Re-reading after the enqueue would answer the
+      # same (an enqueue deletes nothing), but reading twice invites a future
+      # edit to finalise a team whose teardown this very pass just started —
+      # which is the race the ordering exists to prevent.
+      boxes = Registry.list_barkparks(team)
+      n = teardown(boxes)
+      f = finalize(sub, boxes, now)
+
+      %{
+        acc
+        | expired: acc.expired + 1,
+          teardowns: acc.teardowns + n,
+          finalized: acc.finalized + f
+      }
     else
       maybe_notice(acc, team, sub, DateTime.diff(ends, now, :second), now)
+    end
+  end
+
+  # cch-w50 — the terminal write, gated on the teardown having COMPLETED. A team
+  # that still has a box keeps its live `trial` row (see handle_trial/4 and the
+  # `Billing.expire_trial/2` doc for why that gate is the race guard). Returns
+  # how many rows this call finalised: 1 or 0, never a raise — a lost changeset
+  # race just means the next hourly pass tries again.
+  defp finalize(_sub, [_ | _], _now), do: 0
+
+  defp finalize(sub, [], now) do
+    case Billing.expire_trial(sub, now) do
+      {:ok, _sub} -> 1
+      _ -> 0
     end
   end
 
@@ -164,11 +219,11 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   end
 
   # Enqueue a deprovision through the EXISTING path for each of the team's boxes.
-  # Deduped + idempotent; returns how many fresh teardowns were enqueued.
-  defp teardown(team) do
-    team
-    |> Registry.list_barkparks()
-    |> Enum.reduce(0, fn bp, n ->
+  # Deduped + idempotent; returns how many fresh teardowns were enqueued. Takes
+  # the ALREADY-READ box list (see handle_trial/4) so the finalisation gate and
+  # the enqueue can never disagree about what the team owned this pass.
+  defp teardown(boxes) do
+    Enum.reduce(boxes, 0, fn bp, n ->
       case Registry.enqueue_deprovision_job(bp) do
         {:ok, _job} -> n + 1
         _ -> n

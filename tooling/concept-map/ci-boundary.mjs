@@ -34,6 +34,9 @@
 //   node tooling/concept-map/ci-boundary.mjs                  run the gate
 //   node tooling/concept-map/ci-boundary.mjs --json           gate + JSON report
 //   node tooling/concept-map/ci-boundary.mjs --skip-build     don't rebuild graph
+//   node tooling/concept-map/ci-boundary.mjs --allow-cold-index
+//        run without the warm mix-xref index. The verdict is then HEURISTIC and
+//        may disagree with CI's. See "the fresh-tree preflight" below.
 //   node tooling/concept-map/ci-boundary.mjs --write-baseline rewrite the baseline
 //        from the current graph (intentional debt re-baseline; prints to stdout
 //        unless --out is given). NEVER run this to silence a real regression.
@@ -56,6 +59,16 @@ const BOUNDARY = join(HERE, "boundary.mjs");
 const GRADE = join(HERE, "grade.mjs");
 const BASELINE_PATH = join(HERE, "boundary-baseline.json");
 
+// The two build artefacts this gate READS but never builds. Both are gitignored,
+// so a freshly created worktree has NEITHER of them. See "the fresh-tree
+// preflight" below.
+const INDEX_REL = "tooling/blast-radius/index.json";
+const SYMBOLS_REL = "tooling/symbol-graph/symbols.json";
+const INDEX_PATH = join(REPO_ROOT, "tooling", "blast-radius", "index.json");
+const SYMBOLS_PATH = join(REPO_ROOT, "tooling", "symbol-graph", "symbols.json");
+const BUILD_INDEX_CMD = "node tooling/blast-radius/build-index.mjs";
+const BUILD_SYMBOLS_CMD = "node tooling/symbol-graph/build-symbols.mjs";
+
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const optVal = (name) => {
@@ -66,6 +79,7 @@ const optVal = (name) => {
 const AS_JSON = flag("--json");
 const SKIP_BUILD = flag("--skip-build");
 const WRITE_BASELINE = flag("--write-baseline");
+const ALLOW_COLD = flag("--allow-cold-index");
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -173,6 +187,101 @@ function deriveMetrics(boundary) {
     },
     featureCyclePairs: [...cyclePairs].sort(),
   };
+}
+
+// ── the fresh-tree preflight ────────────────────────────────────────────────
+//
+// WHAT A FRESH WORKTREE ACTUALLY DID, measured on origin/main 7af839d56a with
+// node v22.22.0, in a worktree created seconds earlier:
+//
+//   node tooling/concept-map/ci-boundary.mjs --json
+//     -> ran to completion and printed a VERDICT: 11 regressions, exit 1.
+//        Its own build step confessed on stderr, one line up:
+//          "[elixir] no mix-xref graph in index.json — EXACT module edges
+//           unavailable (run build-index.mjs to warm)."
+//        So the number was heuristic edges judged against an EXACT-edge
+//        baseline. Not a crash — WORSE than a crash: a confident verdict that
+//        CI, which warms the graph first, does not produce for the same tree.
+//
+//   node tooling/concept-map/ci-boundary.mjs --skip-build --json
+//     -> TWO uncaught stack traces (grade.mjs "symbol graph not found", then
+//        execFileSync "Command failed") and exit 1 — and 1 is this gate's
+//        REGRESSION code, so a tree that could not be READ was indistinguishable
+//        from a tree carrying new architectural debt.
+//
+// Both are the same missing precondition wearing two faces: this script READS
+// two gitignored build artefacts and builds NEITHER of them. architecture.yml
+// builds the index (the "Warm the mix-xref module graph" step) and then REFUSES
+// to gate without it (the "Assert the warm graph is present" step, exit 2). A
+// local run had no equivalent, so the local instrument and the CI instrument
+// answered differently on the same commit.
+//
+// WHY REFUSE RATHER THAN AUTO-BUILD. build-index.mjs shells out to `mix compile`
+// + `mix xref graph` and `go list -deps`; on a fresh worktree that needs
+// `mix deps.get` first (architecture.yml spends a whole step on it) and is
+// minutes, not seconds. Worse, build-index.mjs is BEST-EFFORT BY DESIGN: it
+// catches a failed mix and writes an index with no elixir graph, exiting 0. An
+// auto-build would therefore be slow AND could hand back exactly the cold index
+// this preflight exists to reject, with the gate now believing it had fixed it.
+// So: name the command, exit 2, one line, no stack trace.
+//
+// EXIT 2, NEVER 1 — same reason architecture.yml's assert step uses 2: 1 is the
+// REGRESSION code, and an instrument that cannot be warmed has found no debt.
+
+// Is tooling/blast-radius/index.json present AND carrying the exact mix-xref
+// module graph? Returns null when warm, else the reason, in one clause.
+// Named against the fixed repo-relative path because that is the only file this
+// check is ever pointed at.
+export function coldIndexReason(indexPath) {
+  if (!existsSync(indexPath)) return `no blast-radius index at ${INDEX_REL} (this tree was never warmed)`;
+  let raw;
+  try {
+    raw = readFileSync(indexPath, "utf8");
+  } catch (err) {
+    return `${INDEX_REL} could not be read (${err.code || err.message})`;
+  }
+  if (!raw.trim()) return `${INDEX_REL} is empty`;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return `${INDEX_REL} is not parseable JSON`;
+  }
+  const forward = parsed && parsed.elixir && parsed.elixir.forward;
+  if (!forward || typeof forward !== "object")
+    return `${INDEX_REL} carries no elixir.forward graph (mix compile or mix xref did not run)`;
+  if (Object.keys(forward).length === 0) return `${INDEX_REL} has an EMPTY elixir.forward graph`;
+  return null;
+}
+
+// The whole preflight, as a pure function over paths so ci-boundary.test.mjs can
+// plant a tree without the index and drive it with no symbol graph, no mix and
+// no network. Returns null when the tree can produce CI's verdict, else THE ONE
+// LINE to print before exiting 2. One line is a contract, not a style note: a
+// gate that answers a missing precondition with a stack trace teaches every
+// reader to ignore its output.
+export function preflightRefusal({ indexPath, symbolsPath, skipBuild = false, allowCold = false }) {
+  if (!allowCold) {
+    const cold = coldIndexReason(indexPath);
+    if (cold) {
+      return (
+        `ci-boundary: REFUSING to gate an unwarmed tree — ${cold}; build it first: ${BUILD_INDEX_CMD} ` +
+        `(a cold run compares HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; ` +
+        `pass --allow-cold-index to override)`
+      );
+    }
+  }
+  // --skip-build reuses a symbol graph this script did not build. Without one,
+  // grade.mjs throws and execFileSync rethrows, two stack traces deep.
+  // `allowCold` deliberately does NOT waive this: it is about index WARMTH, not
+  // about reading a file that is not there.
+  if (skipBuild && !existsSync(symbolsPath)) {
+    return (
+      `ci-boundary: REFUSING — --skip-build reuses a symbol graph that is not in this tree (${SYMBOLS_REL}); ` +
+      `build it first: ${BUILD_SYMBOLS_CMD} (or drop --skip-build and let this script build it)`
+    );
+  }
+  return null;
 }
 
 // ── pipeline ──────────────────────────────────────────────────────────────
@@ -396,6 +505,22 @@ export function compare(current, baseline) {
 // ── main ────────────────────────────────────────────────────────────────────
 
 function main() {
+  // FIRST, before the graph rebuild and before anything is read: can this tree
+  // produce the verdict CI produces? If not, say so in one line and stop.
+  const refusal = preflightRefusal({
+    indexPath: INDEX_PATH,
+    symbolsPath: SYMBOLS_PATH,
+    skipBuild: SKIP_BUILD,
+    allowCold: ALLOW_COLD,
+  });
+  if (refusal) {
+    note(refusal);
+    throw new GateFault(); // exit 2 — a FAULT, never 1 (that is REGRESSION).
+  }
+  if (ALLOW_COLD) {
+    note("ci-boundary: --allow-cold-index → preflight waived; this verdict may DISAGREE with CI's.");
+  }
+
   rebuildGraph();
 
   if (WRITE_BASELINE) {

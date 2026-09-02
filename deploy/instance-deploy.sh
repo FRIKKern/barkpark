@@ -48,6 +48,14 @@
 #                         only on green, rewrite deploy STATE. Unhealthy = fail
 #                         closed (slot re-disabled, Caddy untouched, checkout
 #                         reset back, exit 24).
+#
+# SITE-DEPLOY PREFLIGHT (D593) — read-only, lock-free, typed:
+#   --site-deploy-preflight  can this box HONOUR a site-deploy consent? Prints
+#                         SITE_DEPLOY_CONSENT= and one SITE_DEPLOY_PREREQ_*=
+#                         line per prerequisite; exits 0 (all met) / 31 npm not
+#                         on the BEAM's PATH / 32 no flock(1) / 33 no python3 or
+#                         caddy / 34 under 2G available RAM. See the block above
+#                         MODE= for why each one is load-bearing.
 set -uo pipefail
 
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
@@ -120,13 +128,160 @@ with_caddy_lock() { # <fn> [args…] — run a whole Caddyfile read-modify-write
   return "$rc"
 }
 
+# ---- SITE-DEPLOY CONSENT + THE FOUR PER-BOX PREREQUISITES (D593) ----------
+# A site build is NOT the same act as a self-update. It runs `npm ci` + `npm run
+# build` over the SITE's own dependency tree, which executes third-party
+# postinstall code on this box — api/config/runtime.exs gates it separately in
+# exactly those words. `BARKPARK_SITE_DEPLOY_APPLY=1` in `.slots/%i.env` is the
+# box owner's recorded CONSENT to that execution, which is why write_slot_env()
+# below PRESERVES it and never SETS it (D38), and why a SPAWNED box arrives with
+# site deploys off and 503s on its first one. That is the design, not a gap:
+# nothing in a provisioning path may consent on a box owner's behalf, so this
+# script does not, and neither does the spawner.
+#
+# What WAS prose and is now EXECUTABLE is the other half — the four things that
+# must be true before a box can actually HONOUR its consent. Every one of them
+# has a named failure already sitting in this tree:
+#
+#   npm on the BEAM's PATH  barkpark-slot@.service sets no PATH=, so the BEAM
+#                           gets systemd's default plus whatever api/start.sh
+#                           exports. An asdf node whose `npm` was never reshimmed
+#                           is INVISIBLE there and the site BUILD dies on its
+#                           first command. Derived by REPLAYING start.sh's own
+#                           export line, so a change there moves this check too.
+#   flock(1)                deploy/lib/site-deploy-common.sh:374-377 makes the
+#                           fleet build admission gate FAIL OPEN without it — two
+#                           builds compile at once on a one-slot box, and it says
+#                           so only in a WARN nobody reads.
+#   python3 or caddy        deploy/site-deploy.sh:311-318 — with neither, the
+#                           throwaway HEALTH server cannot start, the gate cannot
+#                           run AT ALL, and every site deploy fails at HEALTH.
+#   >= 2G available RAM     one build slot at MemoryMax=1500M on a box with less
+#                           headroom swap-thrashes; that is the shape that
+#                           produced the DBConnection 500s.
+#
+# `--site-deploy-preflight` is read-only, takes NO lock (a running deploy must
+# never hide the answer) and exits typed: 0 all met, 31 npm, 32 flock, 33 health
+# server, 34 memory. It prints one machine-parsable line per prerequisite either
+# way, so the operator sees all four even when the exit names the first.
+SITE_PREREQ_MEMINFO="${BARKPARK_MEMINFO:-/proc/meminfo}"
+SITE_PREREQ_MIN_AVAIL_KB="${BARKPARK_SITE_PREREQ_MIN_AVAIL_KB:-2097152}"   # 2 GiB
+# systemd's documented fallback PATH for a unit that sets none (systemd.exec(5)).
+SITE_PREREQ_BASE_PATH="${BARKPARK_BEAM_BASE_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+
+beam_path() { # the PATH the slot BEAM actually boots with, on stdout
+  local base="$SITE_PREREQ_BASE_PATH" f p line
+  # An EnvironmentFile PATH= would win over the unit's inherited environment.
+  for f in "$APP/.slots/blue.env" "$APP/.slots/green.env"; do
+    [ -f "$f" ] || continue
+    p="$(sed -n 's/^PATH=//p' "$f" 2>/dev/null | tail -1)"
+    [ -n "$p" ] && base="$p"
+  done
+  # REPLAY api/start.sh's own export (it IS the unit's ExecStart) instead of
+  # re-typing it here — the same discipline instance-deploy_test.sh uses for the
+  # name-encoding guard. A start.sh that stops prepending the shims must make
+  # this check say so, not keep asserting a path nobody exports any more.
+  line="$(grep -m1 '^export PATH=' "$APP/api/start.sh" 2>/dev/null || true)"
+  if [ -n "$line" ]; then
+    # The base PATH is set INSIDE the replay shell, never as a `PATH=… bash -c`
+    # prefix: that prefix is used to find `bash` itself, so a base without a
+    # shell on it (the harness fixture, or a slot env that pins a narrow PATH)
+    # makes the replay exit 127 and silently degrade to the un-replayed base —
+    # a check that stops reading start.sh without ever saying so.
+    local replayed
+    replayed="$(BP_BASE_PATH="$base" bash -c 'PATH="$BP_BASE_PATH"
+'"$line"'
+printf %s "$PATH"' 2>/dev/null || true)"
+    printf '%s' "${replayed:-$base}"
+  else
+    printf '%s' "$base"
+  fi
+}
+
+path_has() { # <cmd> <colon-path> — 0 if an executable <cmd> sits on <colon-path>
+  local d rc=1
+  local IFS=:
+  # shellcheck disable=SC2086  # deliberate word-split of the colon path
+  for d in $2; do
+    [ -n "$d" ] && [ -x "$d/$1" ] && { rc=0; break; }
+  done
+  return "$rc"
+}
+
+site_deploy_consent() { # 0 = this box has recorded consent somewhere it is read
+  local f
+  for f in "$APP/.slots/blue.env" "$APP/.slots/green.env" "$APP/.env"; do
+    [ -f "$f" ] && grep -qE '^BARKPARK_SITE_DEPLOY_APPLY=1[[:space:]]*$' "$f" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+site_deploy_prereqs() { # prints 4 lines; 0 all met, else the LOWEST failing code
+  local rc=0 bp avail
+  bp="$(beam_path)"
+
+  if path_has npm "$bp"; then
+    echo "SITE_DEPLOY_PREREQ_NPM=ok"
+  else
+    echo "SITE_DEPLOY_PREREQ_NPM=MISSING no executable 'npm' on the BEAM's PATH ($bp) — an asdf node installed without a reshimmed npm is invisible to the slot unit and the site BUILD dies on its first command"
+    [ "$rc" = 0 ] && rc=31
+  fi
+
+  if command -v flock >/dev/null 2>&1; then
+    echo "SITE_DEPLOY_PREREQ_FLOCK=ok"
+  else
+    echo "SITE_DEPLOY_PREREQ_FLOCK=MISSING no flock(1) — the fleet build admission gate FAILS OPEN (site-deploy-common.sh:374-377), so two site builds can compile at once on a one-slot box; install util-linux"
+    [ "$rc" = 0 ] && rc=32
+  fi
+
+  if command -v python3 >/dev/null 2>&1 || command -v caddy >/dev/null 2>&1; then
+    echo "SITE_DEPLOY_PREREQ_HEALTH_SERVER=ok"
+  else
+    echo "SITE_DEPLOY_PREREQ_HEALTH_SERVER=MISSING neither python3 nor caddy — the throwaway HEALTH server cannot start, so site-deploy.sh cannot gate AT ALL and every site deploy fails at HEALTH"
+    [ "$rc" = 0 ] && rc=33
+  fi
+
+  avail="$(awk '/^MemAvailable:/ { print $2; exit }' "$SITE_PREREQ_MEMINFO" 2>/dev/null || true)"
+  case "$avail" in
+    ''|*[!0-9]*)
+      # A prerequisite that cannot be MEASURED is not met. Refusing to answer is
+      # the one thing a preflight may never do quietly.
+      echo "SITE_DEPLOY_PREREQ_MEMORY=UNKNOWN no MemAvailable in $SITE_PREREQ_MEMINFO — this box's build headroom cannot be measured, so it is not proven"
+      [ "$rc" = 0 ] && rc=34 ;;
+    *)
+      if [ "$avail" -ge "$SITE_PREREQ_MIN_AVAIL_KB" ]; then
+        echo "SITE_DEPLOY_PREREQ_MEMORY=ok ${avail}kB available (want >= ${SITE_PREREQ_MIN_AVAIL_KB}kB)"
+      else
+        echo "SITE_DEPLOY_PREREQ_MEMORY=LOW ${avail}kB available, want >= ${SITE_PREREQ_MIN_AVAIL_KB}kB — one build slot peaks at MemoryMax=1500M and a box with less headroom swap-thrashes into DBConnection 500s"
+        [ "$rc" = 0 ] && rc=34
+      fi ;;
+  esac
+  return "$rc"
+}
+
 MODE=deploy
 case "${1:-}" in
-  --rollback)           MODE=rollback ;;
-  --rollback-preflight) MODE=preflight ;;
+  --rollback)            MODE=rollback ;;
+  --rollback-preflight)  MODE=preflight ;;
+  --site-deploy-preflight) MODE=site-preflight ;;
   "") ;;
-  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight)"; exit 2 ;;
+  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight, --site-deploy-preflight)"; exit 2 ;;
 esac
+
+# Read-only and LOCK-FREE on purpose: this answers a question about the box, not
+# about a deploy, and an operator deciding whether to consent must not be told
+# "already_running" because CD happens to be mid-run.
+if [ "$MODE" = "site-preflight" ]; then
+  if site_deploy_consent; then
+    echo "SITE_DEPLOY_CONSENT=granted"
+  else
+    echo "SITE_DEPLOY_CONSENT=absent this box has not opted in to running third-party site build code; the site-deploy door answers 503 until its owner decides otherwise"
+  fi
+  site_deploy_prereqs
+  site_prereq_rc=$?
+  if [ "$site_prereq_rc" = 0 ]; then echo "SITE_DEPLOY_PREREQ=ok"; else echo "SITE_DEPLOY_PREREQ=unmet"; fi
+  exit "$site_prereq_rc"
+fi
 
 # ---- Serialize: overlapping runs (back-to-back merges, manual + CD) queue
 # here. Each run pulls AFTER taking the lock, so a queued run deploys the
@@ -687,6 +842,26 @@ write_slot_env() { # $1=slot  $2=port  $3=build_root
 }
 write_slot_env blue  "$BLUE_PORT"  "$APP/api/_build_blue"
 write_slot_env green "$GREEN_PORT" "$APP/api/_build_green"
+# Consent stays the box owner's (see the D593 block at the top of this script).
+# What a deploy owes a box that HAS consented is a check that it can still
+# HONOUR that consent — a prerequisite silently rots the moment an image is
+# rebuilt without util-linux or python3. ADVISORY: a CONTENT deploy never dies
+# because a SITE prerequisite is missing. A box with no consent recorded gets one
+# line and no checks — there is nothing yet to be able to honour.
+if site_deploy_consent; then
+  log "site deploys: consent RECORDED on this box — checking the four per-box prerequisites"
+  prereq_out="$(site_deploy_prereqs)"; prereq_rc=$?
+  while IFS= read -r prereq_line; do
+    [ -n "$prereq_line" ] && log "site-deploy prereq: $prereq_line"
+  done <<PREREQ
+$prereq_out
+PREREQ
+  if [ "$prereq_rc" != 0 ]; then
+    log "WARN: this box has CONSENTED to site deploys but a prerequisite is unmet (typed exit $prereq_rc) — its next site deploy will fail; re-run 'deploy/instance-deploy.sh --site-deploy-preflight' after fixing"
+  fi
+else
+  log "site deploys: consent ABSENT — this box has not opted in to running third-party site build code, so the site-deploy door stays fail-closed (D38/D593); 'deploy/instance-deploy.sh --site-deploy-preflight' reports what it would need"
+fi
 # Per-slot version stamp (W6 D12): record what THIS deploy puts into the target
 # slot, so --rollback knows what the idle slot holds after the next flip. STATE
 # is one global sha and the env files carry only port+build-root — without the
@@ -719,7 +894,14 @@ if ! build deps.compile --force; then log "deps.compile failed"; git -C "$APP" r
 if ! build compile;              then log "compile failed";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
 if [ ! -d "_build_$TARGET/prod" ]; then log "build produced no _build_$TARGET/prod — abort, live slot untouched"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
 log "migrate (new code, active slot still serving)"
-if ! build ecto.migrate;         then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
+# BARKPARK_DB_STATEMENT_TIMEOUT=0 — `mix ecto.migrate` boots the repo with the
+# runtime config, so every migration connection would otherwise inherit the
+# per-statement wall config/runtime.exs sets for request traffic (30 s, #15005;
+# 60 s on the role). A backfill or a CREATE INDEX CONCURRENTLY on a big table
+# is an operator-supervised, offline-shaped step and must be allowed to run to
+# completion; the per-migration guard in Barkpark.Release is the seatbelt, this
+# is the belt-and-braces (lead-cli-2's handoff, task-e2f5ecca0be9a6d1).
+if ! BARKPARK_DB_STATEMENT_TIMEOUT=0 build ecto.migrate; then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
 
 # ---- Boot the idle slot and gate on it. The active slot is never touched;
 # every failure path from here on is zero-downtime.
@@ -925,7 +1107,22 @@ if command -v go >/dev/null 2>&1; then
     # restart (not just enable --now): an already-running unit must pick up the
     # freshly-installed binary.
     if systemctl enable barkpark-mcp >/dev/null 2>&1 && systemctl restart barkpark-mcp; then
-      log "barkpark-mcp enabled (https://$HEALTH_HOST/mcp -> 127.0.0.1:$MCP_PORT)"
+      # `systemctl restart` of a Type=simple unit returns the moment the process
+      # is forked — it says NOTHING about whether the serve survived its startup
+      # manifest fetch. task-1a641b21d19595d3: this line read "enabled" on
+      # guerrilla while the unit crash-looped 2,464 times (anonymous manifest,
+      # no task noun, default --tools tasks fails fast). Settle, then read the
+      # unit's OWN state and say what it is; a dead endpoint is named in the
+      # deploy log, still non-fatal (the app slot is already live).
+      sleep "${MCP_SETTLE_SECS:-15}"
+      MCP_STATE="$(systemctl is-active barkpark-mcp 2>/dev/null || true)"
+      MCP_RESTARTS="$(systemctl show barkpark-mcp -p NRestarts --value 2>/dev/null || true)"
+      if [ "$MCP_STATE" = "active" ]; then
+        log "barkpark-mcp active after ${MCP_SETTLE_SECS:-15}s (restarts=${MCP_RESTARTS:-?}; https://$HEALTH_HOST/mcp -> 127.0.0.1:$MCP_PORT)"
+      else
+        log "WARN: barkpark-mcp is NOT active after ${MCP_SETTLE_SECS:-15}s (state=${MCP_STATE:-unknown} restarts=${MCP_RESTARTS:-?}) — remote MCP /mcp is DOWN; journal tail:"
+        journalctl -u barkpark-mcp -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || true
+      fi
     else
       log "WARN: barkpark-mcp enable/restart failed — remote MCP down until next deploy"
     fi
@@ -1143,6 +1340,34 @@ install_sandbox_runner() { # returns non-zero (LOUD) on any failure; caller stay
   return 0
 }
 install_sandbox_runner || true
+
+# ---- Post-deploy LIVE reachability smoke for the public /mcp matrix
+# (connectors-mcp-live-reachability-smoke). ADVISORY, NEVER A GATE.
+#
+# WHAT IT ADDS. The auth fail-closed contract and the Caddy arming are already
+# proven hermetically (internal/cli/mcp_http_test.go, instance-deploy_test.sh).
+# Neither can prove the four PUBLIC paths answer correctly on a real box — a CI
+# runner reaches no host and holds no bearer — so that proof lives here, on the
+# box, after every unit above has been refreshed. Four legs, each printing the
+# code it saw: POST /mcp initialize (200 + serverInfo.name=barkpark-tasks),
+# GET /mcp (405), GET /connectors/mcp (404 by design), GET /connectors/health (200).
+#
+# WHY THE EXIT CODE IS SWALLOWED. We are past the flip: the app slot is live and
+# Caddy already points at it. A stopped barkpark-mcp or a silent bridge is a real
+# problem, but failing HERE would mark a healthy app deploy as failed and invite a
+# rollback of code that is serving fine. The WARN + the per-leg lines above it are
+# the signal; the deploy log is where an operator reads them.
+#
+# Against the STABLE public front ($HEALTH_HOST), never a slot port — the blue/green
+# flip would strand a pinned port (the cp-deploy control-url precedent), and a slot
+# port would bypass Caddy, which is exactly the hop these legs exist to prove.
+MCP_SMOKE="$APP/deploy/mcp-reachability-smoke.sh"
+if [ -f "$MCP_SMOKE" ]; then
+  log "post-deploy /mcp reachability smoke -> https://$HEALTH_HOST (advisory, non-fatal)"
+  bash "$MCP_SMOKE" "$HEALTH_HOST" || log "WARN: /mcp reachability smoke has RED leg(s) (advisory — the app deploy stands); read the mcp-smoke LEG lines above for the code each leg saw"
+else
+  log "WARN: no $MCP_SMOKE in this checkout — /mcp reachability smoke skipped"
+fi
 
 echo "$NEW" > "$STATE"
 log "HEALTHY — slot $TARGET live at $(git rev-parse --short HEAD)"

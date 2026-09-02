@@ -28,6 +28,16 @@ Description=Barkpark remote MCP endpoint (bp mcp serve --http)
 Documentation=file:///opt/barkpark/deploy/systemd/README.md
 After=network-online.target
 Wants=network-online.target
+# START LIMIT (task-1a641b21d19595d3): a serve that fails on EVERY start — the
+# measured case is the anonymous startup manifest carrying no task noun, so the
+# default --tools tasks fails fast — must stop after a burst, not restart every
+# 10 s forever (guerrilla: 2,285 restarts in 6.7 h, each one an anonymous
+# GET /v1/capabilities against a box under load). 5 starts in 10 min, then the
+# unit sits `failed` where `systemctl list-units --failed` and the deploy step
+# below can SEE it; `systemctl restart` from instance-deploy.sh resets the
+# counter, so the next deploy re-arms it.
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple

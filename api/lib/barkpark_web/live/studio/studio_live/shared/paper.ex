@@ -168,7 +168,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # loaded doc), matching `LiveScope.write_target/3`'s `:error -> halt`.
   @outside_grant_notice "That action is outside your access grant's scope"
 
-  defp grant_target_denied?(socket, type, doc_id) do
+  @doc """
+  Is this socket's write of `type`/`doc_id` outside every ACTIVE grant it holds?
+
+  The TARGET-aware companion to `write_denied?/1`, and the second question every
+  hook-invisible write seam must ask. PUBLIC for the same reason `write_denied?/1`
+  is: `Shared.do_autosave/2` — the `{:autosave_form, …}` `handle_info`, a third
+  hook-invisible door — must ask it too, and must ask THIS copy. Do not
+  re-derive it; a fork here is a fork in the authorization answer.
+
+  Inert (`false`, no query) unless `grant_graded?/1`; fail-closed on an
+  unresolvable target for a socket that IS grant-graded.
+  """
+  def grant_target_denied?(socket, type, doc_id) do
     grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)
   end
 
@@ -230,7 +242,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
-  defp refuse_outside_grant(socket) do
+  @doc """
+  The refusal a grant-graded seam returns when the TARGET is outside its grant:
+  the containment flash plus the same honest `save_status` the write-denied
+  refusal uses. Shared, so every door speaks one vocabulary.
+  """
+  def refuse_outside_grant(socket) do
     socket
     |> put_flash(:error, @outside_grant_notice)
     |> assign(save_status: "Read-only")

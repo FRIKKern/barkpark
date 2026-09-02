@@ -75,8 +75,8 @@ defmodule Barkpark.Search.Synonyms do
             # Tenant guard: a workspace-scoped caller may delete ONLY its own row
             # or a legacy/global (NULL-workspace) row — never a sibling
             # workspace's row sharing the dataset slug. A nil workspace_id
-            # (anonymous / unscoped / pre-tenancy) keeps the legacy behaviour
-            # (surface+scope match is sufficient).
+            # (anonymous / unscoped / pre-tenancy) is fail-CLOSED: it reaches the
+            # legacy/global NULL-workspace layer alone, never a tenant's row.
             if workspace_deletable?(row, workspace_id) do
               # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500);
               # stale_error_field turns the race into a changeset error → :not_found.
@@ -500,12 +500,30 @@ defmodule Barkpark.Search.Synonyms do
   defp scope_rollup_to_workspace(query, workspace_id),
     do: Scope.scope_to_workspace(query, workspace_id || :shared_only)
 
-  # Delete tenant guard — a workspace-scoped caller may remove its own row or a
-  # legacy/global (NULL-workspace) row, but not a sibling workspace's. Mirrors
-  # the read visibility in scope_to_workspace/2. A nil workspace_id keeps the
-  # pre-tenancy behaviour (surface+scope match is authorization enough).
-  defp workspace_deletable?(_row, nil), do: true
-  defp workspace_deletable?(%Synonym{workspace_id: nil}, ws) when is_binary(ws), do: true
+  # Delete tenant guard — the WRITE-side twin of `scope_to_workspace/2` above,
+  # and it now agrees with that function on what `nil` MEANS.
+  #
+  # Clause 1: a legacy/global (NULL-workspace) row is the deliberately SHARED
+  # layer — every caller reads it, so every caller may remove it. That is what
+  # keeps a single-tenant / pre-tenancy instance, whose rows ALL carry a NULL
+  # workspace_id, able to delete exactly what it wrote (including an unscoped
+  # `nil` caller).
+  #
+  # Clause 2 is the fix. It used to read `defp workspace_deletable?(_row, nil),
+  # do: true` — a nil workspace_id (an anonymous / unresolved-tenant caller)
+  # authorized deleting ANY row matching (surface, scope), INCLUDING a sibling
+  # workspace's. That is the exact write-side twin of the read fail-open
+  # `defp scope_to_workspace(query, _), do: query` closed one function up, and it
+  # was inert ONLY because the D58/D71 `token_workspace_id(conn)` guard in
+  # `SearchController.delete_search_synonym/2` and
+  # `V1.MediaController.delete_search_synonym/2` refuses a nil-workspace token
+  # BEFORE `delete/4` runs — a guard in another module, one refactor away from
+  # moving. Fail-closed here: `nil` may delete the shared layer ALONE, never a
+  # tenant's row, matching the `:shared_only` nil semantics the read side uses.
+  # Pinned (both halves, with the mutation proof) by
+  # `test/barkpark_web/controllers/synonyms_delete_nil_workspace_test.exs`.
+  defp workspace_deletable?(%Synonym{workspace_id: nil}, _ws), do: true
+  defp workspace_deletable?(%Synonym{}, nil), do: false
   defp workspace_deletable?(%Synonym{workspace_id: wid}, ws), do: wid == ws
 
   defp maybe_workspace(opts, workspace_id) when is_binary(workspace_id),
