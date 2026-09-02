@@ -1,0 +1,14 @@
+{
+ "ok": true,
+ "doc": {
+  "doc_id": "task-a4ad081d07a2e203",
+  "rev": "fixture-2026-09-01T2000Z",
+  "title": "listen() escalates consecutive malformed SSE frames",
+  "lifecycle_status": "done",
+  "content": {
+   "assignee": "l5-thin",
+   "lifecycle_status": "done",
+   "kind": "task"
+  }
+ }
+}

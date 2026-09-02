@@ -271,6 +271,21 @@ on:
       - "scripts/branch-owner.test.sh"
       - "scripts/pr-overlap.sh"
       - "scripts/pr-overlap.test.sh"
+      # ── LANDED MARK (task-2e16f1390ffc064f) ─────────────────────────────────
+      # Per file, never a directory glob — D26 — with two exceptions, both
+      # INPUTS rather than neighbours. scripts/pr-task-gate.sh OWNS the `Task:`
+      # trailer grammar; landed-mark.sh delegates to it rather than carrying a
+      # second regex, so a change to that grammar can break this harness without
+      # touching either landed-mark file — and until now nothing in this list
+      # named pr-task-gate.sh at all, which is the same D26 finding a second
+      # time. The fixture tree is a glob for the reason the .workflow.js glob
+      # gives above: the PR that adds a SIXTH captured commit is exactly the PR
+      # that can break the instrument's reproduction of the 2026-09-01 finding.
+      - "scripts/landed-mark.sh"
+      - "scripts/landed-mark.test.sh"
+      - "scripts/fixtures/landed-mark/**"
+      - "scripts/pr-task-gate.sh"
+      - ".github/workflows/landed-mark.yml"
   push:
     branches: [main]
     paths:
@@ -424,6 +439,14 @@ on:
       - "scripts/branch-owner.test.sh"
       - "scripts/pr-overlap.sh"
       - "scripts/pr-overlap.test.sh"
+      # ── LANDED MARK (task-2e16f1390ffc064f) — mirrors the pull_request list
+      # above, globs included. A lane wired on PRs only goes dark the moment a
+      # merge lands, and landed-mark.sh's whole subject IS the merge.
+      - "scripts/landed-mark.sh"
+      - "scripts/landed-mark.test.sh"
+      - "scripts/fixtures/landed-mark/**"
+      - "scripts/pr-task-gate.sh"
+      - ".github/workflows/landed-mark.yml"
 
 permissions:
   contents: read
@@ -1033,6 +1056,64 @@ jobs:
         # LIVE arm and needs the credential.
         run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
 
+  landed-mark:
+    name: landed-mark.sh selftest + idempotency mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # DEFAULT depth is enough and is deliberate: every git repo the selftest
+        # walks is built with `git init` under mktemp. Nothing here reads this
+        # repo's history, so a shallow checkout cannot make it lie.
+      - name: python3 is present (the row reader and patch builder are python3)
+        # The script turns a missing python3 into exit 2 CANNOT MEASURE —
+        # correctly refusing rather than skipping, but illegibly so. Resolve it
+        # by NAME here, matching this file's idiom for jq and PyYAML.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — landed-mark's row reader needs it" >&2
+            exit 1
+          }
+          python3 --version
+      - name: landed-mark.sh + harness syntax check
+        run: |
+          bash -n scripts/landed-mark.sh
+          bash -n scripts/landed-mark.test.sh
+      - name: the selftest is green, then its idempotency arm is DISARMED and reds
+        # The harness runs the 41-assertion selftest armed, then replaces the
+        # MUT-IDEMPOTENT condition with an unconditional false in a scratch copy
+        # and requires exactly the three re-run assertions to go red while three
+        # unrelated arms stay green. It asserts the anchor matched EXACTLY ONCE
+        # and that the copy really differs before executing the mutant — a
+        # mutation that did not apply is not a catch.
+        #
+        # Hermetic: mktemp git repos, mktemp fixture ledgers, no network, no
+        # token, no bp. There is no live arm to skip into.
+        run: bash scripts/landed-mark.test.sh
+      - name: the instrument reproduces the 2026-09-01 finding from its fixture
+        # Criterion 1 of task-2e16f1390ffc064f. The three rows lead-reconcile
+        # named were sealed BY HAND hours after the measurement, so a live read
+        # correctly returns nothing and would be misread as "no defect". The
+        # frozen capture is the only way to re-run the original measurement;
+        # scripts/fixtures/landed-mark/2026-09-01T2000Z/PROVENANCE.txt records
+        # exactly which bytes are captured and which are reconstructed.
+        run: |
+          set -uo pipefail
+          out="$(bash scripts/landed-mark.sh --list-open \
+            --fixture scripts/fixtures/landed-mark/2026-09-01T2000Z)"
+          echo "$out"
+          for want in task-b68092d5bac508e0 task-9009e2e4f0e5b5b6 task-076ca42e29836029; do
+            grep -q "$want" <<<"$out" || { echo "the fixture no longer reproduces $want" >&2; exit 1; }
+          done
+          # The negative direction. A listing that only ever lists is not a
+          # measurement: this row was sealed and must be WITHHELD.
+          if grep -q task-a4ad081d07a2e203 <<<"$out"; then
+            echo "a SEALED row was listed — the instrument stopped discriminating" >&2
+            exit 1
+          fi
+          grep -q "scanned 5 commit(s); 3 row(s)" <<<"$out" || {
+            echo "the scan count moved — the fixture and the instrument disagree" >&2; exit 1; }
+
   doc-gates-paths-parity:
     name: doc-gates.yml push.paths == pull_request.paths
     runs-on: ubuntu-latest
@@ -1063,7 +1144,7 @@ jobs:
       - name: the parity guard can still LOSE, then the live doc-gates.yml passes
         # doc-gates.yml hosts ~14 guards behind a hand-enumerated `paths:`
         # filter, and behind it TWICE — push and pull_request each carry their
-        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 15-case
+        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 22-case
         # selftest proves BOTH directions (a matched pair passes, a one-sided
         # pair reds), the fail-closed arm (a zero-entry or unparseable block is
         # exit 2 HARNESS-UNAVAILABLE, never a pass — `[] == []` is the vacuous
