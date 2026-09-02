@@ -160,6 +160,14 @@ defmodule Barkpark.Sharing.Links do
   for docs; optional `:label`, `:ttl` (seconds — omit / nil for no expiry).
   Returns `{:ok, {raw_token, %ShareLink{}}}`. The raw token is ALSO persisted on
   the row (see the moduledoc), so this is not a show-once secret.
+
+  `:workspace_id` and `:project_id` are REQUIRED and a nil is a 422-shaped
+  `{:error, changeset}`, not a persisted row (`task-2da739b78e938be0`). This is
+  the THIRD invariant this context owns on behalf of both doors, and it is
+  enforced in `ShareLink.changeset/2` for the same reason as the `drafts.` clamp
+  above: patching only the door that happens to be leaking is what let the last
+  two of these ship half-applied. A row bound to no project is revocable by
+  NOTHING — see `revoke_scope/3`.
   """
   @spec create(map()) :: {:ok, {binary(), ShareLink.t()}} | {:error, Ecto.Changeset.t()}
   def create(attrs) do
@@ -197,9 +205,19 @@ defmodule Barkpark.Sharing.Links do
   end
 
   @doc """
-  Resolve a raw token to its ACTIVE link (not revoked, not expired). Returns
-  `{:ok, %ShareLink{}}` or `{:error, :not_found}` — no existence leak between
-  missing / revoked / expired.
+  Resolve a raw token to its ACTIVE link (not revoked, not expired, and BOUND to
+  a tenant scope). Returns `{:ok, %ShareLink{}}` or `{:error, :not_found}` — no
+  existence leak between missing / revoked / expired / unbound.
+
+  THE UNBOUND-ROW CLAMP (`task-2da739b78e938be0`): a row with a nil
+  `workspace_id` or a nil `project_id` matches no `(workspace, project, dataset)`
+  triple, so `revoke_scope/3` can never reach it — withdrawing the section share
+  it was minted under leaves it serving, and the operator has no affordance that
+  kills it. `ShareLink.changeset/2` now REFUSES to persist such a row, but a
+  changeset only governs writes: rows already in the table predate it. Refusing
+  them HERE makes those rows inert on the read path immediately, with no data
+  migration and nothing to un-migrate — the fail-closed default. It costs
+  nothing reachable, because every row a mint can produce today carries both ids.
   """
   @spec resolve(term()) :: {:ok, ShareLink.t()} | {:error, :not_found}
   def resolve(raw) when is_binary(raw) and raw != "" do
@@ -208,6 +226,7 @@ defmodule Barkpark.Sharing.Links do
 
     ShareLink
     |> where([l], l.token_hash == ^hash)
+    |> where([l], not is_nil(l.workspace_id) and not is_nil(l.project_id))
     |> where([l], is_nil(l.revoked_at))
     |> where([l], is_nil(l.expires_at) or l.expires_at > ^now)
     |> Repo.one()
@@ -238,6 +257,17 @@ defmodule Barkpark.Sharing.Links do
   unresolvable workspace or project revokes nothing (`{:ok, 0}`) — both mint
   doors resolve real ids, so no link can be bound to a tenant that is not there.
   Already-revoked rows keep their original `revoked_at`. Never raises.
+
+  THE EXACT MATCH IS ONLY SAFE BECAUSE EVERY ROW IS BOUND (`task-2da739b78e938be0`).
+  An `l.project_id == ^proj_id` comparison is NULL-valued, never true, for a row
+  with a nil `project_id` — so an unbound row is not a sibling-scope survivor
+  this cascade deliberately spares, it is a row NO scope can name and NO
+  revocation can reach. That is closed at the write side rather than by widening
+  the predicate here: `ShareLink.changeset/2` requires `workspace_id` and
+  `project_id`, so no such row can be minted. Widening this `where` to
+  `is_nil(l.project_id)` was rejected as the remedy — "the nil-project rows in
+  this workspace+dataset" is a GUESS about which project they belonged to, and a
+  cascade must not guess.
   """
   @spec revoke_scope(term(), term(), term()) :: {:ok, non_neg_integer()}
   def revoke_scope(ws_slug, proj_slug, dataset)
