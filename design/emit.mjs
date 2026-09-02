@@ -732,10 +732,18 @@ function paperBlock(themes = loadThemes()) {
   // the source and emitted NOWHERE until pe-w1-reader-editorial-typography — the
   // `--bp-*-tracking` vars were hand-authored beside a token that claimed to own
   // them, so the single source was single in name only.
+  //
+  // `weight` is the same idiom (device 3, charter D29): a step that declares its
+  // own weight emits `--tok-reading-<step>-weight`, and a step that does not
+  // emits nothing — it keeps reading the SHARED `--tok-reading-heading-weight`
+  // through the surface's `--bp-heading-weight` bridge. The shared scalar is
+  // pinned at 600 by validate.mjs; this per-step channel is the only legal way
+  // for one level to take a different voice.
   const step = (name, s) => [
     `--tok-reading-${name}-size: ${s.size}px;`,
     `--tok-reading-${name}-lh: ${s.lineHeight};`,
     ...(s.letterSpacing == null ? [] : [`--tok-reading-${name}-tracking: ${s.letterSpacing}em;`]),
+    ...(s.weight == null ? [] : [`--tok-reading-${name}-weight: ${s.weight};`]),
   ];
   // The AIR scale (space.air): the beat an EVIDENCE block opens with. Emitted as
   // a ratio of `--tok-air-beat` rather than a resolved pixel, so the LAW ("evidence

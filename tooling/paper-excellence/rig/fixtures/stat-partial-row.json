@@ -1,0 +1,179 @@
+{
+  "_id": "stat-partial-row",
+  "_source": "AUTHORED, not fetched. No published paper stands behind this slug, so fetch-fixtures.sh must never be pointed at it. It exists for ONE geometry the six real papers never hit: a `.bp-stats` strip whose cell count is NOT a multiple of its track count, so the last row is PARTIAL. Eleven cells: 8+3 at 1280 and 9+2 at 1920 on the current evidence band (4+4+3 at 768, 2x5+1 at 360) — eleven is prime, so no plausible track count divides it and the partial row survives a band retune. Before task-0098ba55d2642545 the hairline grid was a rule-tinted CONTAINER ground showing through 1px gaps, and that ground painted the empty remainder as a solid slab — which no committed fixture could show, because every published strip happened to fill its rows. The rig measures the remainder per strip as `statRemainder` (tracks, cells, empty tracks, and what the probe at the first empty track hits and its background) and REDS when the hit is not a transparent container. Two strips: one bare, one with a `sourceDefault` so the kilde stamp rides under the partial row too.",
+  "slug": "stat-partial-row",
+  "style": "article",
+  "title": "Eleven stats, eight tracks: the partial last row",
+  "blocks": [
+    {
+      "id": "spr-eyebrow",
+      "text": "RIG FIXTURE · AUTHORED · STAT-GRID GEOMETRY",
+      "type": "eyebrow"
+    },
+    {
+      "id": "spr-h1",
+      "level": 1,
+      "text": "Eleven stats, eight tracks: the partial last row",
+      "type": "heading"
+    },
+    {
+      "id": "spr-p1",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "A stat strip is an auto-fit grid: it takes as many 140px-floor tracks as the evidence band allows and reflows the cells into rows. Nothing about that reflow guarantees the last row is full. Eight of eleven cells fill the first row at 1280, nine at 1920, and the rest sit in a second row beside empty tracks that the grid still lays out — auto-fit only collapses a track that is empty in every row, never the remainder of a row under a full one. Eleven is prime: whatever the band resolves to, the last row stays partial."
+        }
+      ]
+    },
+    {
+      "id": "spr-h2-bare",
+      "level": 2,
+      "text": "The bare strip",
+      "type": "heading"
+    },
+    {
+      "id": "spr-p2",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The first strip carries no source, so the kilde stamp is absent and the partial row is the last thing in the grid. Whatever paints the empty tracks here is what a reader of an eleven-figure dashboard would see under their numbers: page ground bounded by the hairlines the neighbouring cells drew, or a slab of rule tint the container leaked through the gaps."
+        }
+      ]
+    },
+    {
+      "id": "spr-stats-bare",
+      "type": "stats",
+      "items": [
+        {
+          "label": "cells in the strip — prime, so no track count divides it",
+          "value": "11"
+        },
+        {
+          "label": "tracks the band resolves at 1280",
+          "value": "8"
+        },
+        {
+          "label": "tracks the band resolves at 1920",
+          "value": "9"
+        },
+        {
+          "label": "cells left in the partial row at 1280",
+          "value": "3"
+        },
+        {
+          "label": "cells left in the partial row at 1920",
+          "value": "2"
+        },
+        {
+          "label": "empty tracks behind them at 1280",
+          "value": "5"
+        },
+        {
+          "label": "empty tracks behind them at 1920",
+          "value": "7"
+        },
+        {
+          "label": "tracks at 768 — 4+4+3, still partial",
+          "value": "4"
+        },
+        {
+          "label": "tracks at 360 — 2x5+1, still partial",
+          "value": "2"
+        },
+        {
+          "label": "gap between cells, the seam the cells draw",
+          "value": "1 px"
+        },
+        {
+          "label": "container ground under the remainder",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "id": "spr-h2-kilde",
+      "level": 2,
+      "text": "The strip with a kilde stamp under the partial row",
+      "type": "heading"
+    },
+    {
+      "id": "spr-p3",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The second strip is the same eleven figures with a default source, so a full-width kilde row spans the grid under the partial row. The seam above the stamp is drawn by the cells that exist; under the empty tracks the stamp sits on open ground, because a seam that spanned the whole width would paint over the one the cells already drew and double its tint."
+        }
+      ]
+    },
+    {
+      "id": "spr-stats-kilde",
+      "type": "stats",
+      "sourceDefault": "task:task-0098ba55d2642545",
+      "items": [
+        {
+          "label": "cells in the strip — prime, so no track count divides it",
+          "value": "11"
+        },
+        {
+          "label": "tracks the band resolves at 1280",
+          "value": "8"
+        },
+        {
+          "label": "tracks the band resolves at 1920",
+          "value": "9"
+        },
+        {
+          "label": "cells left in the partial row at 1280",
+          "value": "3"
+        },
+        {
+          "label": "cells left in the partial row at 1920",
+          "value": "2"
+        },
+        {
+          "label": "empty tracks behind them at 1280",
+          "value": "5"
+        },
+        {
+          "label": "empty tracks behind them at 1920",
+          "value": "7"
+        },
+        {
+          "label": "tracks at 768 — 4+4+3, still partial",
+          "value": "4"
+        },
+        {
+          "label": "tracks at 360 — 2x5+1, still partial",
+          "value": "2"
+        },
+        {
+          "label": "gap between cells, the seam the cells draw",
+          "value": "1 px"
+        },
+        {
+          "label": "container ground under the remainder",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "id": "spr-h2-close",
+      "level": 2,
+      "text": "What the report records",
+      "type": "heading"
+    },
+    {
+      "id": "spr-p4",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Per cell and per strip the report carries the resolved track count, the item count, the number of empty tracks in the last row, and what an element probe at the centre of the first empty track hits together with that element's computed background. The assertion is on the hit: it must be the strip's own container and its background must be transparent. A tinted container is the slab, and the run goes red before a screenshot is written."
+        }
+      ]
+    }
+  ]
+}

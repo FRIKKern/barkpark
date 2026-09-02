@@ -1,5 +1,5 @@
 {
-  "label": "heggemsnes-act",
+  "label": "stat-partial-row",
   "deviceScaleFactor": 2,
   "fullPage": true,
   "format": "jpeg",
@@ -16,17 +16,17 @@
   ],
   "shots": [
     {
-      "cell": "heggemsnes-act__light__1280",
-      "file": "heggemsnes-act__light__1280.jpeg",
+      "cell": "stat-partial-row__light__1280",
+      "file": "stat-partial-row__light__1280.jpeg",
       "scale": 2,
-      "bytes": 1147865,
+      "bytes": 508457,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "The bare strip",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -34,7 +34,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "The strip with a kilde stamp under the parti",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -42,23 +42,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Remedies executed under this Act",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Scope and force",
+          "head": "What the report records",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -70,8 +54,8 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 72.6,
+      "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1180,
@@ -84,16 +68,23 @@
           "right": 1230,
           "inkWidth": 1180,
           "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
+          "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
-          "color": "rgb(45, 94, 143)",
-          "background": "rgb(233, 239, 247)",
-          "accent": "rgb(45, 94, 143)"
+          "absent": "not in this fixture"
         },
         ".bp-callout--success": {
           "absent": "not in this fixture"
@@ -122,32 +113,46 @@
         "fontWeight": "400"
       },
       "statTracks": [
+        8,
         8
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
           "tracks": 8,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
+          "cells": 11,
+          "emptyTracks": 5,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
+        },
+        {
+          "tracks": 8,
+          "cells": 11,
+          "emptyTracks": 5,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 6,
-        "heavy": 5,
-        "structuralHeavy": 5,
+        "total": 3,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 1,
-          "2": 5
+          "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 926,
+            "y": 564.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -157,7 +162,7 @@
           },
           {
             "px": 2,
-            "y": 1701.3,
+            "y": 1154,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -167,27 +172,7 @@
           },
           {
             "px": 2,
-            "y": 2230.2,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3632.9,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3884.2,
+            "y": 1809.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -200,17 +185,17 @@
       "blockedRequests": 3
     },
     {
-      "cell": "heggemsnes-act__light__1920",
-      "file": "heggemsnes-act__light__1920.jpeg",
+      "cell": "stat-partial-row__light__1920",
+      "file": "stat-partial-row__light__1920.jpeg",
       "scale": 2,
-      "bytes": 1236354,
+      "bytes": 553898,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "The bare strip",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -218,7 +203,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "The strip with a kilde stamp under the parti",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -226,23 +211,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Remedies executed under this Act",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Scope and force",
+          "head": "What the report records",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -254,8 +223,8 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 72.6,
+      "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1360,
@@ -268,16 +237,23 @@
           "right": 1640,
           "inkWidth": 1360,
           "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
-          "color": "rgb(45, 94, 143)",
-          "background": "rgb(233, 239, 247)",
-          "accent": "rgb(45, 94, 143)"
+          "absent": "not in this fixture"
         },
         ".bp-callout--success": {
           "absent": "not in this fixture"
@@ -306,32 +282,46 @@
         "fontWeight": "400"
       },
       "statTracks": [
+        9,
         9
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
           "tracks": 9,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
+          "cells": 11,
+          "emptyTracks": 7,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
+        },
+        {
+          "tracks": 9,
+          "cells": 11,
+          "emptyTracks": 7,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 6,
-        "heavy": 5,
-        "structuralHeavy": 5,
+        "total": 3,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 1,
-          "2": 5
+          "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 907.5,
+            "y": 564.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -341,7 +331,7 @@
           },
           {
             "px": 2,
-            "y": 1682.8,
+            "y": 1154,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -351,27 +341,7 @@
           },
           {
             "px": 2,
-            "y": 2211.7,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3614.5,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3865.8,
+            "y": 1809.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -384,17 +354,17 @@
       "blockedRequests": 3
     },
     {
-      "cell": "heggemsnes-act__dark__1280",
-      "file": "heggemsnes-act__dark__1280.jpeg",
+      "cell": "stat-partial-row__dark__1280",
+      "file": "stat-partial-row__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 1144954,
+      "bytes": 508439,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "The bare strip",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -402,7 +372,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "The strip with a kilde stamp under the parti",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -410,23 +380,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Remedies executed under this Act",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Scope and force",
+          "head": "What the report records",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -438,8 +392,8 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 72.6,
+      "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1180,
@@ -452,16 +406,23 @@
           "right": 1230,
           "inkWidth": 1180,
           "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1180,
+          "offCentre": 0,
+          "left": 50,
+          "right": 1230,
+          "inkWidth": 1180,
+          "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
-          "color": "rgb(157, 184, 255)",
-          "background": "rgb(23, 32, 50)",
-          "accent": "rgb(157, 184, 255)"
+          "absent": "not in this fixture"
         },
         ".bp-callout--success": {
           "absent": "not in this fixture"
@@ -490,32 +451,46 @@
         "fontWeight": "400"
       },
       "statTracks": [
+        8,
         8
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
           "tracks": 8,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
+          "cells": 11,
+          "emptyTracks": 5,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
+        },
+        {
+          "tracks": 8,
+          "cells": 11,
+          "emptyTracks": 5,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 6,
-        "heavy": 5,
-        "structuralHeavy": 5,
+        "total": 3,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 1,
-          "2": 5
+          "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 926,
+            "y": 564.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -525,7 +500,7 @@
           },
           {
             "px": 2,
-            "y": 1701.3,
+            "y": 1154,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -535,27 +510,7 @@
           },
           {
             "px": 2,
-            "y": 2230.2,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3632.9,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3884.2,
+            "y": 1809.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -568,17 +523,17 @@
       "blockedRequests": 3
     },
     {
-      "cell": "heggemsnes-act__dark__1920",
-      "file": "heggemsnes-act__dark__1920.jpeg",
+      "cell": "stat-partial-row__dark__1920",
+      "file": "stat-partial-row__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 1234106,
+      "bytes": 553294,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
-      "paragraphs": 16,
+      "paragraphs": 6,
       "sectionBeats": [
         {
           "kind": "heading",
-          "head": "The case, in full",
+          "head": "The bare strip",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -586,7 +541,7 @@
         },
         {
           "kind": "heading",
-          "head": "What we hold",
+          "head": "The strip with a kilde stamp under the parti",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -594,23 +549,7 @@
         },
         {
           "kind": "heading",
-          "head": "The Articles",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Remedies executed under this Act",
-          "gap": 92,
-          "rule": 2,
-          "ruleGap": 16,
-          "skippedEmpty": 0
-        },
-        {
-          "kind": "heading",
-          "head": "Scope and force",
+          "head": "What the report records",
           "gap": 92,
           "rule": 2,
           "ruleGap": 16,
@@ -622,8 +561,8 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 67.7,
-      "proseCplSamples": 14,
+      "proseCpl": 72.6,
+      "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
       "evidenceBand": 1360,
@@ -636,16 +575,23 @@
           "right": 1640,
           "inkWidth": 1360,
           "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1360,
+          "offCentre": 0,
+          "left": 280,
+          "right": 1640,
+          "inkWidth": 1360,
+          "inkOffCentre": 0
         }
       ],
-      "ingressPresent": true,
-      "ingressRatio": 0.783,
-      "ingressNote": null,
+      "ingressPresent": false,
+      "ingressRatio": null,
+      "ingressNote": "no .bp-role-ingress in this fixture",
       "toneSamples": {
         ".bp-callout--info": {
-          "color": "rgb(157, 184, 255)",
-          "background": "rgb(23, 32, 50)",
-          "accent": "rgb(157, 184, 255)"
+          "absent": "not in this fixture"
         },
         ".bp-callout--success": {
           "absent": "not in this fixture"
@@ -674,32 +620,46 @@
         "fontWeight": "400"
       },
       "statTracks": [
+        9,
         9
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
           "tracks": 9,
-          "cells": 4,
-          "emptyTracks": 0,
-          "probe": null
+          "cells": 11,
+          "emptyTracks": 7,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
+        },
+        {
+          "tracks": 9,
+          "cells": 11,
+          "emptyTracks": 7,
+          "probe": {
+            "hit": "div.bp-stats",
+            "hitIsStrip": true,
+            "hitBackground": "rgba(0, 0, 0, 0)"
+          }
         }
       ],
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 6,
-        "heavy": 5,
-        "structuralHeavy": 5,
+        "total": 3,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 1,
-          "2": 5
+          "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 907.5,
+            "y": 564.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -709,7 +669,7 @@
           },
           {
             "px": 2,
-            "y": 1682.8,
+            "y": 1154,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -719,27 +679,7 @@
           },
           {
             "px": 2,
-            "y": 2211.7,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3614.5,
-            "width": 580,
-            "parts": 1,
-            "structural": true,
-            "owners": [
-              "h2"
-            ]
-          },
-          {
-            "px": 2,
-            "y": 3865.8,
+            "y": 1809.9,
             "width": 580,
             "parts": 1,
             "structural": true,

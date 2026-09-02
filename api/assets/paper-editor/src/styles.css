@@ -50,6 +50,7 @@
   --bp-h2-size: var(--tok-reading-h2-size);
   --bp-h2-lh: var(--tok-reading-h2-lh);
   --bp-h2-tracking: var(--tok-reading-h2-tracking);
+  --bp-h2-weight: var(--tok-reading-h2-weight);
   --bp-h3-size: var(--tok-reading-h3-size);
   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
@@ -114,9 +115,10 @@
   --tok-reading-h1-size: 40px;
   --tok-reading-h1-lh: 1.05;
   --tok-reading-h1-tracking: -0.02em;
-  --tok-reading-h2-size: 27px;
-  --tok-reading-h2-lh: 1.2;
-  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h2-size: 36px;
+  --tok-reading-h2-lh: 1.15;
+  --tok-reading-h2-tracking: -0.015em;
+  --tok-reading-h2-weight: 400;
   --tok-reading-h3-size: 21px;
   --tok-reading-h3-lh: 1.3;
   --tok-air-beat: 22px;
@@ -510,7 +512,11 @@
  * returns. Heading margins are TOP-only vertical rhythm (h1 1.2em, h2 1.9em,
  * h3 1.5em), byte-mirrored with the reader's .bp-paper-surface hN rules. */
 .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; overflow-wrap: break-word; }
-.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; overflow-wrap: break-word; }
+/* h2 takes the DISPLAY VOICE (device 3): the per-step `--bp-h2-weight`, not the
+ * shared `--bp-heading-weight`, plus `text-wrap: balance` — byte-identical with
+ * paper-surface.css `.bp-paper-surface h2` (which carries the reasoning) and the
+ * root.html.heex copy; view_edit_parity_test.exs §2/§5 pin both declarations. */
+.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; overflow-wrap: break-word; }
 .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; overflow-wrap: break-word; }
 /* THE SECTION HEAD — the EDIT twin of the reader's
  * `.bp-paper-surface > #paper-body > h2` (+ its keyed-stream leg) in
@@ -577,7 +583,14 @@
  * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
  * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
  * copy. */
-.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; overflow: hidden; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+/* The stat grid's seams are drawn per CELL, not by a container ground (the
+ * partial-last-row slab, task-0098ba55d2642545 — paper-surface.css carries the
+ * reasoning). Cell rules are parity-INVISIBLE (`.bp-stat` is not a parity
+ * element); mirrored here for visual parity, byte-identical with the reader's
+ * `.bp-paper-surface .bp-stats .bp-stat` and the root.html.heex copy. */
+.bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; box-shadow: 1px 0 0 0 var(--paper-rule), 0 1px 0 0 var(--paper-rule); }
+.bp-paper-editor-body .bp-stats .bp-stat::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 1px; height: 1px; background: var(--paper-rule); }
 .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
