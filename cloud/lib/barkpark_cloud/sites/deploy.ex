@@ -2134,8 +2134,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   kind-scoped away from them, so a requeued static row would sit `queued` forever —
   the eternal spinner in a new costume.
 
-  A row is an orphan (not a fresh mint) when it has been claimed before
-  (`claim_epoch > 0`). Fresh rows are driven by the deploy route itself.
+  A row is an orphan (not a fresh mint) in either of TWO ways, and the second was
+  invisible until task-c4c9a54cd073e011: it has been claimed before
+  (`claim_epoch > 0`), OR it was NEVER claimed and is older than the lease
+  horizon — the shape a row is left in when its very first driver spawn was
+  REFUSED (`TaskStarter.start/1` answering `{:error, ...}` because the supervisor
+  would not take the child). That row is `queued` at `claim_epoch == 0` with a
+  nil `claimed_at`, which is outside every `claimed_at`-gated reaper pass, so
+  nothing swept it and nothing re-drove it. Genuinely fresh rows are driven by
+  the deploy route itself and are kept out by the age gate — see
+  `Registry.list_orphaned_static_deployments/0`, which owns the scope.
+
+  A re-attempt here is not a guarantee: a spawn that keeps being refused leaves
+  the row `queued` at epoch 0 for the next sweep, and pass (0c) of
+  `Registry.reap_stale_deployments/0` terminates it once those re-attempts have
+  burned the claim budget.
 
   Returns the number of rows ACTUALLY RE-DRIVEN — not the number found. This
   counts because the value IS the reaper's recovery metric:
