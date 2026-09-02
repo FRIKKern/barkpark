@@ -1143,6 +1143,12 @@ test('NO client-side markdown parser exists anywhere in the chat screen’s stac
       './wire',
       '../api/chat',
       '../api/instance',
+      // The connection identity band (chat-local-cloud-context-w3): the
+      // component and the pure resolver behind it. Neither parses anything —
+      // `context.ts` reads wire facts and config strings and returns typed
+      // fields, which is why the forbidden-parser sweep above stays green.
+      '../chat/ContextBand',
+      '../chat/context',
       '../chat/PickerSheet',
       '../chat/StreamSkeleton',
       '../chat/followScroll',

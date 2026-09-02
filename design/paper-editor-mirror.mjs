@@ -18,6 +18,17 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+// The attribution fence helpers, imported from their ONE owner (design/emit.mjs)
+// rather than re-implemented here — see the CLI block at the bottom. emit.mjs
+// imports `evaluateMirror` from this module, so the two form an ES-module cycle;
+// that is safe because NEITHER touches the other's bindings during module
+// evaluation (emit.mjs calls evaluateMirror only inside run(), and the helpers
+// below are reached only from this file's CLI branch). A `await import()` here
+// would NOT be safe: a top-level await inside a cycle deadlocks (node exits 13).
+import {
+  readManifest, writeManifest, attribute, lostLines, regionDigest, regionKey,
+  MANIFEST_PATH,
+} from "./emit.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..");
@@ -345,17 +356,96 @@ export function evaluateMirror(root = repoRoot) {
 }
 
 // ── CLI (parity with scripts/paper-editor-mirror-check.sh part 3) ─────────────
-//   node design/paper-editor-mirror.mjs            # check (byte-compare)
-//   node design/paper-editor-mirror.mjs --write    # regenerate the marked region
+//   node design/paper-editor-mirror.mjs                    # check (byte-compare)
+//   node design/paper-editor-mirror.mjs --write            # FENCED regenerate
+//   node design/paper-editor-mirror.mjs --write --force    # regenerate anyway
+//   node design/paper-editor-mirror.mjs --adopt            # bless what is on disk
+//
+// THE FENCE. This CLI writes the SAME generated region design/emit.mjs writes
+// (`api/assets/paper-editor/src/styles.css#paper-editor mirror`), so it must obey
+// the SAME attribution rule: never replace a region whose SHA-256 does not match
+// design/emit-manifest.json, and name every line the replacement would drop.
+// Before this block existed, `--write` here (and its shell wrapper) was a side
+// door around the emit.mjs fence — hand-written CSS placed inside the BEGIN/END
+// GENERATED: paper-surface marker was deleted in silence, which is exactly the
+// loss commit 1d928b3bf caused and the fence was built to stop.
+//
+// The helpers are IMPORTED from design/emit.mjs (readManifest / attribute /
+// lostLines / regionDigest / writeManifest / regionKey), never re-implemented: a
+// second copy of the rule is a second thing to drift (see the import note at the
+// top for why the cycle with emit.mjs is safe).
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const adopt = process.argv.includes("--adopt");
   const write = process.argv.includes("--write");
+  const force = process.argv.includes("--force");
   const r = evaluateMirror(repoRoot);
   if (r.error) {
     console.error(`paper-editor-mirror: FAILED — ${r.error}`);
     process.exit(1);
   }
+  // The unit shape emit.mjs' fence helpers read: attribution is a property of the
+  // GENERATED REGION (the marker interior), never the whole file — everything
+  // outside the marker in styles.css is legitimately hand-written.
+  const unit = { ...r, currentRegion: r.currentBlock, expectedRegion: r.generatedBlock };
+  const regions = readManifest() ?? {};
+  const key = regionKey(unit);
+  const attribution = attribute(unit, regions);
   const drift = r.current !== r.expected;
+
+  if (adopt) {
+    const next = { ...regions, [key]: regionDigest(r.currentBlock) };
+    writeManifest(next);
+    console.log(
+      `paper-editor-mirror --adopt: blessed the region on disk in ${MANIFEST_PATH} ` +
+        `(${key}). Nothing was rewritten.`
+    );
+    process.exit(0);
+  }
+
   if (write) {
+    // Only a write that REPLACES bytes can destroy them: a region already equal to
+    // what we would emit is not at risk, whatever the ledger says about it.
+    const blocked = drift && attribution !== "attributed";
+    if (blocked && !force) {
+      console.error(
+        `paper-editor-mirror --write: REFUSED — the generated region in ${r.path} ` +
+          `holds content this transform cannot attribute to a prior generation.\n`
+      );
+      console.error(`  REFUSED ${r.name} (${r.path})`);
+      console.error(
+        `    ${attribution === "unknown"
+          ? `no entry in ${MANIFEST_PATH} — there is no record of ever generating this region`
+          : `the region on disk does not match what was last written there`}.`
+      );
+      const lost = lostLines(r.currentBlock, r.generatedBlock);
+      if (lost.length === 0) {
+        console.error(`    A --write would rewrite it, dropping no whole line — but the bytes are still unattributed.`);
+      } else {
+        console.error(`    A --write would DELETE ${lost.length} line(s) that do not appear in the regenerated output:`);
+        for (const l of lost.slice(0, 12)) console.error(`      - ${l}`);
+        if (lost.length > 12) console.error(`      … and ${lost.length - 12} more`);
+      }
+      console.error(`
+  Nothing was written. Pick one:
+
+    • Hand-written content?  MOVE it outside the BEGIN/END GENERATED: paper-surface
+      marker in ${r.path}, then re-run. That is the durable fix.
+    • Legitimately generated, just unrecorded (a merge that left ${MANIFEST_PATH}
+      behind)?  node design/paper-editor-mirror.mjs --adopt  (or node design/emit.mjs --adopt)
+    • Certain the listed lines are expendable?  node design/paper-editor-mirror.mjs --write --force
+`);
+      process.exit(1);
+    }
+    if (blocked && force) {
+      console.error(
+        `paper-editor-mirror --write --force: OVERRIDING the fence — the lines below are being DELETED.\n`
+      );
+      console.error(`  DELETING ${r.name} (${r.path})`);
+      const lost = lostLines(r.currentBlock, r.generatedBlock);
+      for (const l of lost.slice(0, 12)) console.error(`      - ${l}`);
+      if (lost.length > 12) console.error(`      … and ${lost.length - 12} more`);
+      console.error("");
+    }
     if (drift) {
       writeFileSync(r.abs, r.expected);
       console.log(
@@ -365,9 +455,26 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     } else {
       console.log("paper-editor-mirror: up to date — nothing to write.");
     }
+    // A successful write is this writer's own generation: record it in the SHARED
+    // ledger, so a later `node design/check.mjs` / `node design/emit.mjs` reads the
+    // region as ATTRIBUTED without an --adopt.
+    const digest = regionDigest(r.generatedBlock);
+    if (regions[key] !== digest) {
+      writeManifest({ ...regions, [key]: digest });
+      console.log(`paper-editor-mirror: ${MANIFEST_PATH} updated (${key}).`);
+    }
     process.exit(0);
   }
+
   if (!drift) {
+    if (attribution !== "attributed") {
+      console.error(
+        `paper-editor-mirror: FAILED — the generated region in ${r.path} matches ` +
+          `paper-surface.css, but ${MANIFEST_PATH} has no matching record ` +
+          `(UNATTRIBUTED).\n  Fix: node design/emit.mjs --adopt`
+      );
+      process.exit(1);
+    }
     console.log(
       `paper-editor-mirror: PASS — ${r.tokenCount} generated paper-surface tokens ` +
         `in ${r.path} match paper-surface.css.`
