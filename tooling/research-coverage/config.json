@@ -7,8 +7,12 @@
   "excludeGlobs": [
     "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.ico",
     "**/*.woff", "**/*.woff2", "**/*.ttf", "**/*.eot", "**/*.beam",
-    "**/*.lock", "**/package-lock.json", "**/pnpm-lock.yaml", "**/go.sum"
+    "**/*.lock", "**/package-lock.json", "**/pnpm-lock.yaml", "**/go.sum",
+
+    "**/research-coverage/research-ledger.jsonl",
+    "**/research-coverage/research-ledger.json"
   ],
+  "_ledger_self_exclusion": "The ledger is excluded from its own coverage on purpose, and this is load-bearing now that research-ledger.jsonl is COMMITTED (and therefore enumerable). Every `record` rewrites it, which changes its hash, which would classify it stale again the instant it was recorded — full coverage would be unreachable by construction and one entry would churn forever. The pretty .json cache is listed too so a checkout that has not yet gitignored it does not count a derived file as source.",
 
   "batchSize": 10,
 

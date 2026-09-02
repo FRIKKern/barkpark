@@ -372,7 +372,17 @@ if (isMain) {
   // FIRST ACT (D78) — before a single verdict is printed, say which tree is
   // doing the adjudicating. STDERR only; stdout carries the verdicts.
   emitProvenance();
-  process.exit(main(process.argv));
+  // NO process.exit HERE (charter D92, the ruling ledger.mjs's entry guard
+  // already applies). main() writes the HELP screen and every adjudication
+  // verdict to stdout, and Node writes a PIPE asynchronously: process.exit()
+  // throws away whatever has not yet reached the kernel, so `grip facts.json |
+  // less` can hand back a report that stops mid-verdict while the same run
+  // redirected to a file is whole — and a truncated verdict list reads like a
+  // shorter adjudication, not like a failure. exitCode leaves the STATUS
+  // identical in every arm (EXIT.OK, EXIT.USAGE, whatever adjudicateFile or
+  // selftest returns) and lets the event loop drain stdout on the natural exit.
+  // exit-race.test.mjs is the pin.
+  process.exitCode = main(process.argv);
 }
 
 // Exported so this module is USABLE by an importer, which is the whole point of

@@ -20,7 +20,7 @@ import (
 // sorts — so entries may accrete at the head.
 var usageBuiltins = []string{
 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
-	"doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
+	"dev", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
 	"make", "mcp", "migrate", "onramp", "paper", "provider", "register", "scaffy", "seed", "server",
 	"servers", "setup", "signup", "sites", "style", "subscribe", "task", "tasks", "team", "teams",
 	"tinker", "uninstall", "upgrade", "use", "vercel", "version", "whoami",
@@ -247,6 +247,15 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("")
 		out.errf("pagination: --limit <n> · --offset <n> · --all")
 	}
+
+	// `--match` is honoured entirely client-side (see tasks_match.go), so the
+	// manifest cannot declare it and the flags block above cannot show it. A
+	// flag nobody can discover is a flag nobody uses — and this one exists
+	// precisely because the reader who needs it is following a hint.
+	if cmd.ID == taskLsCommandID {
+		out.errf("")
+		out.errf("search: --match <substring>  case-insensitive over doc_id and title, walks every page")
+	}
 	if cmd.Writes {
 		out.errf("")
 		out.errf("write globals: --dry-run (print the request, don't send) · --yes (skip the prod confirmation)")
@@ -350,15 +359,54 @@ func authTierLabel(tier string) string {
 // This is the single classification point wired into every unknown-noun site in
 // cli.go's dispatch (help <noun>, bare noun, and noun+token), so the three paths
 // can never drift on how they treat a tier-hidden command.
-func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string) int {
+// THE REFUSAL NAMES THE CREDENTIAL IT USED (task-06d3d67167306406). "tier=none,
+// run barkpark login" is true and useless when the caller ALREADY has a working
+// login and a stale BARKPARK_TOKEN in the shell outranked it: the advice is to
+// redo the thing that already works, and nothing on screen says which credential
+// produced the tier. prov (resolveContextProv) supplies the missing noun — the
+// source label, plus, in the shadow case, the one-line remedy that actually
+// restores the command. Anonymous/default callers still see the login advice,
+// which for them is correct.
+func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, prov tokenProvenance) int {
 	if authHiddenNoun(tree, tier, typed) {
 		label := authTierLabel(tier)
+		cred := prov.describe()
+		shadow := prov.shadowsSaved()
 		return usageErrHintf(out, func() {
 			out.errf("`barkpark %s` is a real command, but it is not available at your current auth tier (tier=%s).", typed, label)
+			out.errf("credential in use: %s", cred)
+			if shadow {
+				out.errf("%s", prov.shadowWarning(shadowReasonTierNone))
+				out.errf("%s", prov.shadowFix())
+				return
+			}
 			out.errf("run `barkpark login` — or pass `--token <tok>` — with a credential that grants it, then retry.")
-		}, "barkpark login", "command %q exists but is hidden at your auth tier (tier=%s); run `barkpark login` (or pass --token <tok>) with a credential that grants it", typed, label)
+		}, tierHiddenHint(prov), tierHiddenMsg(prov), typed, label, cred)
 	}
 	return usageErrHintf(out, func() { usageSuggestNouns(out, tree, typed) }, nounHint(tree, typed), "unknown command %q", typed)
+}
+
+// tierHiddenMsg is the machine-readable refusal for a tier-hidden noun. The
+// %q/%s/%s slots are (typed, tier label, credential source) — the credential is
+// the field this row added, and it is in BOTH shapes so a JSON consumer and a
+// human read the same fact.
+func tierHiddenMsg(prov tokenProvenance) string {
+	if prov.shadowsSaved() {
+		return "command %q exists but is hidden at your auth tier (tier=%s); the credential in use came from %s — " +
+			prov.EnvVar + " is set in your shell and shadows the " + prov.Alt +
+			" credential for this server, so `unset " + prov.EnvVar + "` and retry before logging in again"
+	}
+	return "command %q exists but is hidden at your auth tier (tier=%s); the credential in use came from %s — run `barkpark login` (or pass --token <tok>) with a credential that grants it"
+}
+
+// tierHiddenHint is the copy-pasteable fix. In the shadow case the fix is NOT
+// `barkpark login` — the login already exists; it is unsetting the env var that
+// buried it.
+func tierHiddenHint(prov tokenProvenance) string {
+	if prov.shadowsSaved() {
+		return "unset " + prov.EnvVar
+	}
+	return "barkpark login"
 }
 
 // usageSuggestVerb prints a "did you mean?" hint for the closest verb under a

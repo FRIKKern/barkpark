@@ -483,11 +483,34 @@ const CHECKS = [
   },
 ];
 
+/**
+ * A NAMED NON-ZERO OUTCOME, thrown rather than exited (charter D92).
+ *
+ * Every failing arm in this file used to `console.error(...)` and then call
+ * `process.exit(N)` on the next line. Node writes stdout to a PIPE
+ * asynchronously, so process.exit() discards whatever the kernel has not taken
+ * yet — and verify() prints its whole check table and its selftest table to
+ * stdout BEFORE deciding the status, so `harvest.mjs --verify | tee` could come
+ * back missing the very lines that say which check failed while the same run
+ * redirected to a file was whole. Throwing carries the status up to the one
+ * handler at the bottom, which sets process.exitCode and lets the loop drain.
+ *
+ * The STATUS and the stderr TEXT are unchanged in every arm: 2 for a missing
+ * fixture or a bad mode, 1 for a failed check, 3 for a control that did not
+ * behave as a control, 2 for an unexpected throw.
+ */
+class Fatal extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "Fatal";
+    this.code = code;
+  }
+}
+
 function loadFixtures() {
   for (const [label, p] of [["evidence-corpus.json", CORPUS], ["level-skip-specimens.json", SPECIMENS]]) {
     if (!existsSync(p)) {
-      console.error(`FAIL  missing fixture ${label} — run: node tooling/grip/harvest.mjs --harvest`);
-      process.exit(2);
+      throw new Fatal(2, `FAIL  missing fixture ${label} — run: node tooling/grip/harvest.mjs --harvest`);
     }
   }
   const corpusRaw = readFileSync(CORPUS);
@@ -566,12 +589,10 @@ function verify() {
 
   console.log("");
   if (inert > 0) {
-    console.error(`CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted} plants did not trip their check.`);
-    process.exit(3);
+    throw new Fatal(3, `CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted} plants did not trip their check.`);
   }
   if (failed > 0) {
-    console.error(`FAIL: ${failed}/${CHECKS.length} checks failed.`);
-    process.exit(1);
+    throw new Fatal(1, `FAIL: ${failed}/${CHECKS.length} checks failed.`);
   }
   console.log(`PASS: ${CHECKS.length} checks green, ${planted} controls proven able to fail.`);
 }
@@ -603,16 +624,24 @@ try {
     const f = loadFixtures();
     const { inert, planted } = runSelftest(f);
     if (inert > 0) {
-      console.error(`CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted}`);
-      process.exit(3);
+      throw new Fatal(3, `CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted}`);
     }
     console.log(`PASS: ${planted} controls proven able to fail.`);
   } else if (mode === "--stats") stats();
   else {
-    console.error(`usage: node tooling/grip/harvest.mjs [--harvest|--verify|--selftest|--stats]`);
-    process.exit(2);
+    throw new Fatal(2, `usage: node tooling/grip/harvest.mjs [--harvest|--verify|--selftest|--stats]`);
   }
 } catch (e) {
-  console.error(`ERROR: ${e?.message || e}`);
-  process.exit(2);
+  // ONE handler, and it keeps the two shapes apart: a Fatal already carries the
+  // message its arm wrote and the status that arm chose, while anything else is
+  // an unexpected throw that still reports 2 under the same ERROR prefix as
+  // before. No process.exit in either branch (D92) — exit-race.test.mjs is the
+  // pin, and the statuses are byte-identical to the exits they replace.
+  if (e instanceof Fatal) {
+    console.error(e.message);
+    process.exitCode = e.code;
+  } else {
+    console.error(`ERROR: ${e?.message || e}`);
+    process.exitCode = 2;
+  }
 }
