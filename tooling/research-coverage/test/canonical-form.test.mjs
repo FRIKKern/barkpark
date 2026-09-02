@@ -213,10 +213,17 @@ test("a checkout holding ONLY the old pretty cache reads the same ledger", () =>
   const r = makeRepo(20);
   r.results("batch-000.json", [{ path: "src/f1.txt", role: "r", description: "d", score: 1 }]);
   r.mustRun("record");
-  const fromBoth = r.mustRun("scan");
 
+  // coverage-report.json is itself an untracked file in this throwaway repo, so
+  // the FIRST scan enumerates a repo the SECOND one no longer sees. Clear it
+  // before each run, or the comparison measures the harness instead of the
+  // fallback.
+  const report = join(r.cd, "coverage-report.json");
+  const scan = () => { rmSync(report, { force: true }); return r.mustRun("scan"); };
+
+  const fromBoth = scan();
   rmSync(r.canonical);
-  const fromCacheOnly = r.mustRun("scan");
+  const fromCacheOnly = scan();
   assert.equal(fromCacheOnly, fromBoth, "the cache fallback disagreed with the committed form");
   r.cleanup();
 });
@@ -272,8 +279,12 @@ test("nothing tracked under research-coverage carries a coverage percentage", ()
   // The corpus rule: the only durable fact about coverage is the command that
   // re-derives it. coverage-report.json holds the number and is gitignored;
   // this asserts no COMMITTED file in the directory states one.
+  // From the repo ROOT, not from SRC: `git ls-files <pathspec>` resolves the
+  // pathspec against the cwd, so running this from inside the directory it names
+  // matches nothing and the census would pass by finding zero files.
+  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: SRC, encoding: "utf8" }).trim();
   const tracked = execFileSync("git", ["ls-files", "tooling/research-coverage/"],
-    { cwd: SRC, encoding: "utf8" }).split("\n").filter(Boolean);
+    { cwd: root, encoding: "utf8" }).split("\n").filter(Boolean);
   assert.ok(tracked.length >= 6, `expected the tracked set, got ${tracked.length} file(s)`);
   assert.ok(tracked.includes("tooling/research-coverage/research-ledger.jsonl"),
     "the canonical ledger is not tracked — the whole point is that a clean checkout has it");
@@ -282,7 +293,6 @@ test("nothing tracked under research-coverage carries a coverage percentage", ()
   assert.equal(tracked.includes("tooling/research-coverage/coverage-report.json"), false,
     "coverage-report.json holds the percentage and must stay gitignored");
 
-  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: SRC, encoding: "utf8" }).trim();
   const found = [];
   for (const f of tracked) {
     if (f.endsWith("research-ledger.jsonl")) continue;   // data: hashes and scores, no figure
