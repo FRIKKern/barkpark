@@ -524,6 +524,9 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/landed", BarkparkWeb.TasksController, :landed, auth: :token_root},
+      # The NON-HOLDER lease extension: CI buys grace for a row its open PR
+      # names, without holding (or disturbing) the claim. See Tasks.Renew.
+      {:post, "/tasks/:doc_id/renew", BarkparkWeb.TasksController, :renew, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
@@ -1337,6 +1340,48 @@ defmodule Barkpark.Plugins.Tasks do
             type: "int",
             summary:
               "Optional acceptance_criteria index this pulse is working on (boards spin that lock)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.renew",
+        noun: "task",
+        verb: "renew",
+        summary:
+          "Buy a claimed row grace while an OPEN pull request names it: stamps a bounded, self-expiring content.claim.lease_extension the TTL sweeper honours. NON-HOLDER — no worker_id, no epoch, and the epoch is NOT bumped, so a lead's stamp/close CAS is undisturbed. Requires a live in_progress claim (409 not_claimed otherwise) and is capped from the first grant (409 extension_cap_reached). --state closed|merged clears the grace it bought.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/renew"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id whose lease is extended."
+          }
+        ],
+        flags: [
+          %{
+            name: "pr",
+            type: "int",
+            summary:
+              "The pull request buying the grace (required). The clear is pr-matched, so closing PR #2 cannot cancel PR #1's extension."
+          },
+          %{
+            name: "state",
+            type: "string",
+            summary:
+              "open (default) renews; closed or merged clears the extension this pr bought."
+          },
+          %{
+            name: "reason",
+            type: "string",
+            summary: "Free-text label stored on the record; defaults to open_pr."
           }
         ],
         writes: true,
