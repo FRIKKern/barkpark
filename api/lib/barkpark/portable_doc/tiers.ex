@@ -83,6 +83,9 @@ defmodule Barkpark.PortableDoc.Tiers do
     "byline",
     "ingress",
     "pullquote",
+    # reader-synthesised, never stored: the grandfather badge PreGateRegister
+    # inserts under the byline of a pre-gate Paper (compose.ex `pre-gate-badge`)
+    "pre-gate-badge",
     # schema-bound field atoms
     "field-string",
     "field-slug",
