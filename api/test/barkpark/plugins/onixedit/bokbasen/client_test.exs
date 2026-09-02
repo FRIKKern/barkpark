@@ -6,10 +6,12 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.ClientTest do
   import ExUnit.CaptureLog
 
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Auth
+  alias Barkpark.TestSupport.BlackHole
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Client
 
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Errors.{
     AuthError,
+    HTTPError,
     NetworkError,
     RateLimitError,
     SchemaRejectionError
@@ -277,6 +279,95 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.ClientTest do
 
       assert {:ok, %{submission_id: "r-1"}} =
                Client.stage(@onix_xml, base_url: base, max_retries: 3, retry_delay_ms: 10)
+
+      assert Agent.get(counter, & &1) == 2
+    end
+  end
+
+  # The defect this guards: the client retried the WHOLE request on a transport
+  # `:timeout`, which is the ONE failure where the remote may already have
+  # accepted the write and only the response was lost. A slow Bokbasen therefore
+  # minted up to 3 ONIX submissions for one document. `PublishWorker`'s
+  # `submission_id` guard cannot see this — it happens inside ONE `stage/2`
+  # call, before any `submission_id` exists.
+  describe "retry safety — a timed-out-but-ACCEPTED write is not replayed" do
+    test "stage POST reaches the server exactly ONCE when the response times out",
+         %{bypass: bypass} do
+      stub_token(bypass)
+      # Warm the token against Bypass; the black hole below answers nothing,
+      # so the client must not need it for the OAuth leg.
+      assert {:ok, _} = Auth.token()
+
+      {acceptor, base, hits} = BlackHole.start()
+      on_exit(fn -> BlackHole.stop(acceptor) end)
+
+      assert {:error, %NetworkError{reason: :timeout}} =
+               Client.stage(@onix_xml,
+                 base_url: base,
+                 max_retries: 3,
+                 retry_delay_ms: 5,
+                 timeout: 300
+               )
+
+      # RED-BEFORE (guard reverted): 4. Bokbasen would hold four submissions
+      # of one document, each with its own submission_id, for one publish.
+      assert hits.() == 1
+    end
+
+    test "poll GET IS still replayed on the same timeout — the guard is method-scoped",
+         %{bypass: bypass} do
+      stub_token(bypass)
+      assert {:ok, _} = Auth.token()
+
+      {acceptor, base, hits} = BlackHole.start()
+      on_exit(fn -> BlackHole.stop(acceptor) end)
+
+      assert {:error, %NetworkError{reason: :timeout}} =
+               Client.poll("sub-1",
+                 base_url: base,
+                 max_retries: 2,
+                 retry_delay_ms: 5,
+                 timeout: 300
+               )
+
+      # Non-vacuity: the black hole really does drive the retry loop, so the
+      # `== 1` above is the guard refusing — not the stub failing to retry.
+      assert hits.() == 3
+    end
+
+    test "a 502 (gateway may already have forwarded the POST) is not replayed either",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/metadata/import/onix/v2", fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Plug.Conn.resp(conn, 502, "bad gateway")
+      end)
+
+      assert {:error, %HTTPError{status: 502}} =
+               Client.stage(@onix_xml, base_url: base, max_retries: 3, retry_delay_ms: 5)
+
+      assert Agent.get(counter, & &1) == 1
+    end
+
+    test "a 503 (origin-authored, did not process) still retries the POST",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/metadata/import/onix/v2", fn conn ->
+        n = Agent.get_and_update(counter, fn x -> {x, x + 1} end)
+
+        if n == 0 do
+          Plug.Conn.resp(conn, 503, "{}")
+        else
+          Plug.Conn.resp(conn, 201, Jason.encode!(%{"submission_id" => "ok", "poll_url" => "u"}))
+        end
+      end)
+
+      assert {:ok, %{submission_id: "ok"}} =
+               Client.stage(@onix_xml, base_url: base, max_retries: 3, retry_delay_ms: 5)
 
       assert Agent.get(counter, & &1) == 2
     end

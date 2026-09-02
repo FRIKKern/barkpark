@@ -43,6 +43,7 @@ defmodule Barkpark.Plugins.Github.Client do
     * any other non-2xx → `%NetworkError{reason: {:http, s}}`
   """
 
+  alias Barkpark.Net.RetrySafety
   alias Barkpark.Plugins.Github.Auth
 
   alias Barkpark.Plugins.Github.Errors.{
@@ -304,7 +305,10 @@ defmodule Barkpark.Plugins.Github.Client do
        when status >= 500 and status < 600 do
     max = max_retries(opts)
 
-    if attempt < max do
+    # A 502/504 is authored by an intermediary about an ALREADY-FORWARDED
+    # request, so a replay can duplicate a POST the origin already accepted.
+    # `RetrySafety` lets 500/503 (origin-authored) keep retrying for any method.
+    if attempt < max and RetrySafety.retry_after_status?(method, status, opts) do
       Process.sleep(retry_delay(attempt, opts))
       do_request(method, url, body, opts, attempt + 1, ar)
     else
@@ -320,7 +324,12 @@ defmodule Barkpark.Plugins.Github.Client do
     reason = exception_reason(exception)
     max = max_retries(opts)
 
-    if attempt < max and transient_reason?(reason) do
+    # `:timeout` is the one reason under which the request may ALREADY have
+    # been accepted — only the response was lost. Replaying a POST there mints
+    # a second GitHub issue for one task. `RetrySafety` allows the replay only
+    # for an idempotent method or a reason that proves nothing was ever sent.
+    if attempt < max and transient_reason?(reason) and
+         RetrySafety.retry_after_transport_error?(method, reason, opts) do
       Process.sleep(retry_delay(attempt, opts))
       do_request(method, url, body, opts, attempt + 1, ar)
     else
