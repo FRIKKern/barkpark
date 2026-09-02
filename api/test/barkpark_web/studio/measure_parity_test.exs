@@ -828,6 +828,8 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
                  "allowance. It must read `var(--paper-gutter)`, or the band's edge " <>
                  "and the prose's edge drift apart the moment the ladder moves."
       end
+    end
+  end
 
   # ── the page ground — View and Edit stand on ONE token (task-ddb1e0ab09a62466) ──
   #
