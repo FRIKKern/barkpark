@@ -1,0 +1,1 @@
+Any new self-test arms live inside --selftest so they inherit gate authority with NO workflow edit (path-escape's last step already runs --selftest first and the measurement second in the same step). Quote the full self-test output.

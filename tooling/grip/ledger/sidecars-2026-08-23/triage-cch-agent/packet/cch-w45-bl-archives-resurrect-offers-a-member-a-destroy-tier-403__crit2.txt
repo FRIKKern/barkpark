@@ -1,0 +1,1 @@
+A plain-member scenario renders the archives panel WITHOUT a live Resurrect control, asserted on the emitted markup.

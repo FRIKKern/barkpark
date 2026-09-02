@@ -1035,6 +1035,36 @@ defmodule Barkpark.BindTransferBlindSpot do
 end
 BIND_PINNED
 
+  # THE INSERT-ABOVE MUTATION, which is NOT the transfer above. The transfer
+  # fixtures move the annotation DOWN onto a different def; here the annotation
+  # never moves a byte — a brand-new `def` is inserted BETWEEN the comment and
+  # the def it was written for. That is the shape of the real incident (a def
+  # defined between a comment block and its def) and the shape a reviewer sees
+  # in a diff as "I only added a function". Both halves of the damage are in
+  # this one fixture: `alpha` silently LOSES the waiver its author wrote, and
+  # `intruder` silently GAINS one nobody weighed.
+  binding_fixture "$b" bind_insert_above_pinned <<'BIND_INS_PINNED'
+defmodule Barkpark.InsertAbove do
+  # sobelow_skip ["Traversal.FileModule"]
+  def alpha(path) do
+    File.read!(path)
+  end
+end
+BIND_INS_PINNED
+
+  binding_fixture "$b" bind_insert_above_mutated <<'BIND_INS_MUTATED'
+defmodule Barkpark.InsertAbove do
+  # sobelow_skip ["Traversal.FileModule"]
+  def intruder(x) do
+    x
+  end
+
+  def alpha(path) do
+    File.read!(path)
+  end
+end
+BIND_INS_MUTATED
+
   binding_fixture "$b" bind_none <<'BIND_NONE'
 defmodule Barkpark.BindNone do
   def read_it(path) do
@@ -1094,6 +1124,44 @@ BIND_NONE
       "$xrc" "$xout" >&2
     failures=1
   fi
+  # INSERT-ABOVE, both directions. The four predicates wave this through for
+  # the same reason they wave the transfer through — a def is there, the indent
+  # matches, no clause group relates them — so only the pin can speak. Asserted
+  # in BOTH directions because a checker that only reds is as useless as one
+  # that only greens: the mutated tree must red naming `intruder`, and the
+  # pinned tree must stay green under its own pin.
+  local ipin
+  ipin="$b/insert_above.pin"
+  "${BASH_SOURCE[0]}" --regen-bindings-pin --lib "$b/bind_insert_above_pinned/lib" \
+    --bindings-pin "$ipin" >/dev/null 2>&1 || true
+  if [[ ! -s $ipin ]]; then
+    printf 'SELFTEST FAIL: could not pin the pre-insertion fixture\n' >&2
+    failures=1
+  fi
+
+  local irc=0 iout
+  iout=$("${BASH_SOURCE[0]}" --binding --lib "$b/bind_insert_above_mutated/lib" \
+    --bindings-pin "$ipin" 2>&1) || irc=$?
+  case "$irc:$iout" in
+    1:*"DIFFERENT def"*intruder*)
+      printf '  ok  %-40s exit %d\n' "PIN — def inserted ABOVE waiver REDs" "$irc" ;;
+    *)
+      printf 'SELFTEST FAIL: pin did not red on the inserted def — expected exit 1 + "DIFFERENT def" naming `intruder`, got %d\n%s\n' \
+        "$irc" "$iout" >&2
+      failures=1 ;;
+  esac
+
+  irc=0
+  iout=$("${BASH_SOURCE[0]}" --binding --lib "$b/bind_insert_above_pinned/lib" \
+    --bindings-pin "$ipin" 2>&1) || irc=$?
+  if [[ $irc -eq 0 ]]; then
+    printf '  ok  %-40s exit %d\n' "PIN — waiver did NOT move: stays green" "$irc"
+  else
+    printf 'SELFTEST FAIL: pin reddened the un-inserted tree — expected exit 0, got %d\n%s\n' \
+      "$irc" "$iout" >&2
+    failures=1
+  fi
+
   expect_binding "zero annotations fails closed" 2 "ZERO binding" \
     "$b/bind_none/lib" || failures=1
 

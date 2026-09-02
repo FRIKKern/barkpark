@@ -1,0 +1,1 @@
+mix format --check-formatted exits 0 from a clean worktree off origin/main; the evidence quotes the command and its exit status or empty output

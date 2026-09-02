@@ -1,0 +1,1 @@
+The PHX_REF_SRC second-press no-op is exercised as its own probe and its observable signature recorded.

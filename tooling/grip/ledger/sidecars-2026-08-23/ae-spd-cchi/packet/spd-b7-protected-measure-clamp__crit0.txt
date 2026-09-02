@@ -1,0 +1,1 @@
+A clamped measure (lower AND upper bound) is live on .editor-panel .bp-paper-surface, with the bare .bp-paper-surface rule block untouched (git diff proof)

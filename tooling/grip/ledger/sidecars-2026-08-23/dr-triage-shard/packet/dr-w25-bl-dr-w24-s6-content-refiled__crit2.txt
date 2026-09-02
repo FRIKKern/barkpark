@@ -1,0 +1,1 @@
+A check or an advisory that reports a zero-byte PR is either filed or ruled unnecessary with a reason.

@@ -1,0 +1,1 @@
+The survivor carries the corrected integers (attention <=8, in-flight 9-10, healthy 11), the ONE-COMMIT rule, and the sizing correction that app.js must first read the pressure block.

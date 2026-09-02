@@ -1,0 +1,1 @@
+A test asserts the ruling either way, so the next refactor cannot silently re-drop the attr

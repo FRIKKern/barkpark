@@ -1,0 +1,1 @@
+A written decision states whether the worker principal will ever read /v1/deliveries directly, or whether the credential path (CROWN_API_TOKEN) is canonical forever. Evidence: the charter D number.

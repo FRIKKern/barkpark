@@ -1,0 +1,1 @@
+Wave 28's un-executed reclaim list (dr-w28-bl-reclaim-20-column-a-closes-and-three-draft-twins) is merged into this act rather than left behind, and that task is closed by the same pass.

@@ -1,0 +1,1 @@
+bpBase emits the five autoupdate keys with the server's own defaults, and the values are justified from the schema/migrations (NOT NULL with those defaults), not guessed. Evidence: the diff plus the schema lines.

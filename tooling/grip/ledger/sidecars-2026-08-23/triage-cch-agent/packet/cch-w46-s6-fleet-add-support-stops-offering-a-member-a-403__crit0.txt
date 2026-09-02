@@ -1,0 +1,1 @@
+REPRODUCTION FIRST: a check that reads the rendered BYTES of #instance-body (not a registry lookup — getElementById auto-creates) shows both mounts offered ENABLED to panel-overview-member on unfixed code. Evidence: the rendered opening tags, pasted.

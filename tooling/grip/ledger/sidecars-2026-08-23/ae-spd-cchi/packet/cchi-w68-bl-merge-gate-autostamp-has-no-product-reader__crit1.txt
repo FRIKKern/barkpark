@@ -1,0 +1,1 @@
+MERGE-GATED (the lead closes this): the PR is merged and `gh api repos/:owner/:repo/compare/<merge-sha>...main --jq .status` returns `ahead` (or `identical` when the merge commit IS main's tip), with all four required contexts green ON THE HEAD SHA read at ?per_page=100.

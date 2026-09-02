@@ -1,0 +1,1 @@
+NON-VACUITY: a passing run no longer leaks a capture file, proven by counting the temp-dir files before and after N runs and quoting both counts.

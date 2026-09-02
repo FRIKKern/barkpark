@@ -1,0 +1,1 @@
+membersContext() stops stating 'No team yet / Your account isn't part of a team' as a FACT after a FAILED read: it returns null only for a LOADED response with no team, and the unknown case renders three-valued. Carry that it is also the input to memberAssignableRoles — i.e. to which roles you may grant — so a wrong answer there is not only copy.

@@ -1,0 +1,1 @@
+TrialExpiryWorker exposes a public threshold accessor and the console's reminder sentence is pinned against it BY RUNNING — no source-text scan anywhere in the guard.

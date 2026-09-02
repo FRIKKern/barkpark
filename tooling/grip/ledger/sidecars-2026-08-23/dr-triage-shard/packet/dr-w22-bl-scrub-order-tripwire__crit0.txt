@@ -1,0 +1,1 @@
+A committed check fails when any .ex outside failure_copy.ex orders scrub before strip_ansi, or calls a bare FailureCopy.scrub on a rendered boundary

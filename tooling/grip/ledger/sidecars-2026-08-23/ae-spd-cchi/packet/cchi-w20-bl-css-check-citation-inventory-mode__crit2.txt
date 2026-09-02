@@ -1,0 +1,1 @@
+cch-w16-s7's criterion 3 is amended in the same sitting: 'imports' becomes 'invokes' (spawnSync of this mode), and the hardcoded '19 / 15 drifted / 4 accurate' sentence is replaced with 'whatever the recipe emits in this commit, pasted verbatim'. The PR body records that the inventory read 20 at amendment time and that the shipped E11 regex finds ZERO hits.

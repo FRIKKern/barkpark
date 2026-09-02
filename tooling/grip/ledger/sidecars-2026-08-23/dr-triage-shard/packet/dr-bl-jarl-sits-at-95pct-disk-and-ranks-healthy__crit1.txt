@@ -1,0 +1,1 @@
+If a state ships, it moves on both surfaces in one diff with the fixture, per charter D57, and jarl's live case is the test.

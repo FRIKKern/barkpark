@@ -1,0 +1,1 @@
+The w25 incumbent is unpublished or retitled BEFORE the corrected packet is published, and the corrected packet is PUBLISHED (bp task get returns it with status published).

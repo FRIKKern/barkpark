@@ -1,0 +1,1 @@
+The remaining coverage split is re-stated after the change: name which of __app.test.mjs, failure_copy_test.exs and the preview smoke can now catch a false remedy in server-owned gap copy, with a run per instrument rather than an assertion.

@@ -1,0 +1,1 @@
+The PR body states whether the runtime class can now be called CLOSED or remains NARROWED, and names what would still be needed for the stronger claim.

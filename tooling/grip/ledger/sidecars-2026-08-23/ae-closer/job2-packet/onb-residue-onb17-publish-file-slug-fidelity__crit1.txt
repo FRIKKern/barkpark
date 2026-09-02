@@ -1,0 +1,1 @@
+If real: publishing with --file and an explicit slug lands the doc under that slug, and a test proves it red-without-fix

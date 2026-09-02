@@ -1,0 +1,1 @@
+The root cause is named: whether the first click collapses rather than opens, and whether the retry loop can distinguish collapsed-by-us from never-opened.

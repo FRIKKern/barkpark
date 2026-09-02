@@ -1,0 +1,1 @@
+The ratchet reads the ledger without bp, following pr-task-gate.sh's curl + bounded-retry + exit-2-is-red shape

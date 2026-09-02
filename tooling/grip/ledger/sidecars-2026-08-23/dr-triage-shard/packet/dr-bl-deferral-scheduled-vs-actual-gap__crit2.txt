@@ -1,0 +1,1 @@
+The 61.6 s p50 / 2,262-deferral / 55-75 s band figures are re-derivable from the recorded fields by one command quoted in the task, with no hand SQL.

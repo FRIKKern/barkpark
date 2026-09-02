@@ -1,0 +1,1 @@
+If unchanged, a harness case pins the N+ truncation disclosure under a filled MIXED page so the floor can never go silent.

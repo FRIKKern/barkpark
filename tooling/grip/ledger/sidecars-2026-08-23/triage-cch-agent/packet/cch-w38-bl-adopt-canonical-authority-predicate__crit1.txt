@@ -1,0 +1,1 @@
+The providers and notifications repaint seams exist in loadMe SUCCESS arm only, and test 900 (loadMe FAILURE arm carries its own repaint seams) still passes. Evidence: the diff plus the named test result.

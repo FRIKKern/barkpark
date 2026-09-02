@@ -1,0 +1,1 @@
+GATE GREEN: `cd cloud && CC=clang mix test test/barkpark_cloud/notifications/` passes. Evidence: pasted tail output.

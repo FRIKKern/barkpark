@@ -1,0 +1,1 @@
+Inventory the 13 ahead commits and every dirty/untracked path; record owner, remote/PR disposition, and preservation plan for each before any destructive action.

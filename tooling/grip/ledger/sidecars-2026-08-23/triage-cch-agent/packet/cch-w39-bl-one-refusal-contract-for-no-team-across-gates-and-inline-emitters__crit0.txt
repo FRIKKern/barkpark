@@ -1,0 +1,1 @@
+SEQUENCING GATE, with SHAs: #9917, #9918 and #9956 are all merged before this is taken — the row is dead by construction while three PRs contend for auth.ex and router.ex — and the inline-emitter census is RE-DERIVED against that tree. The count of fifteen is from the wave-39 survey and will have moved; quote the fresh number.

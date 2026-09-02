@@ -1,0 +1,1 @@
+A definition of 'blocking-shaped job name' is written down and defended, and it reproduces the published recipe's numbers at the baseline commit it was derived from.

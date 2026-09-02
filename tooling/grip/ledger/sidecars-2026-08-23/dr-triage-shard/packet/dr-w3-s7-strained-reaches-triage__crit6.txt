@@ -1,0 +1,1 @@
+THE TONE HOLE IS CLOSED: cloud_status_cmd_test.go's vocabulary guard checks Tone non-empty alongside Glyph and Label, proved by a mutation showing a tone:"" ninth state now REDS where it previously passed green.

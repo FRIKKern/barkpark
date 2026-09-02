@@ -1,0 +1,1 @@
+A BOUND IS CHOSEN AND DEFENDED IN WRITING at exactly one layer (changeset, JSON boundary, or render), with the reason it belongs there rather than at the other two.

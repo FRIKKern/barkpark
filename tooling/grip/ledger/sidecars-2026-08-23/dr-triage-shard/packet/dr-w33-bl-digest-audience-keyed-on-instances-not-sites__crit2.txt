@@ -1,0 +1,1 @@
+No team is dropped by the change — teams owning instances but no sites still receive their digest with the no-sites line. Evidence: the test covering that case.

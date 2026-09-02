@@ -1,0 +1,1 @@
+Every scenario in platform_deliveries.json carries a non-empty synthetic field, asserted from Go, and the assertion reds when one is removed (mutation-proven).

@@ -1,0 +1,1 @@
+The 720px view/edit parity contract still holds: view_edit_parity_test.exs green and the measure-parity pin from spd-s7 green

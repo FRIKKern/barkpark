@@ -1,0 +1,1 @@
+A named non-admin human surface renders the scheduled-vs-actual ratio over a pinned window, and a test reads its RENDERED BYTES.

@@ -1,0 +1,1 @@
+`labeled` and `unlabeled` are in .github/workflows/pr-task-gate.yml's types, so the lane engages WITHOUT a push - proven by adding the label to a throwaway PR and observing the gate re-fire. Evidence: the run id and conclusion.

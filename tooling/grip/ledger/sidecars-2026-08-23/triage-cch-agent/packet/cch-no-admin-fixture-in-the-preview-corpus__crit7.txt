@@ -1,0 +1,1 @@
+__app.test.mjs, __binding_census.mjs and __me_envelope_census.mjs are byte-unchanged and their outputs unmoved — a fixture add cannot move the binding census EXPECT (D497). Evidence: git diff --stat plus the three run outputs.

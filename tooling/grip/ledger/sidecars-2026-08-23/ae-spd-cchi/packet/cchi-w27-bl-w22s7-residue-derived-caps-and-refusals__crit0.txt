@@ -1,0 +1,1 @@
+The ledger table is name-keyed and every row carries cap{value, from, effective}, not a prose string. Today `cap` is a prose citation at overflow-guard.mjs:3800/3815/3849.

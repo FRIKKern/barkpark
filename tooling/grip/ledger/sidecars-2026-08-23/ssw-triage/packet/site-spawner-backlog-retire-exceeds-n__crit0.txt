@@ -1,0 +1,1 @@
+State the exact upper bound in README and stage output—newest N plus which protected pointer exceptions—and define behavior when protected targets are already among the newest N.

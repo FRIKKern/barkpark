@@ -1,0 +1,1 @@
+/studio/rest and /studio/plugins are confirmed to answer 200 for an authenticated session, so the census is not recording the nil-icon crash as a dead row.

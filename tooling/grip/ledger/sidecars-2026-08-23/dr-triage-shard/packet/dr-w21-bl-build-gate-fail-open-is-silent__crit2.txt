@@ -1,0 +1,1 @@
+If the incidence is still zero, this row CLOSES as a refusal with the number and the window quoted — not silently, and not by building an alarm over an empty set.

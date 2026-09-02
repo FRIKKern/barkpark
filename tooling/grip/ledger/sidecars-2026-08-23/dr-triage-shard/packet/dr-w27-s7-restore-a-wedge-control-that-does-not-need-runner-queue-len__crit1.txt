@@ -1,0 +1,1 @@
+The route answers 200 inside a bounded time UNDER that proven wedge, and the test fails when a GenServer.call is introduced into show/2 — prove it by MUTATION, not by reading. Paste the red.

@@ -1,0 +1,1 @@
+A duplicate bare `.editor-panel` rule placed AFTER the canonical one carrying a banned property FAILS — proven by planting one and pasting the failure

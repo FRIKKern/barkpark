@@ -1,0 +1,1 @@
+BEFORE writing code, re-derive which keys #10014 already emits on main and state the residue explicitly in the PR body — the slice scope is defined by what is already there, not by the wave-12 task text

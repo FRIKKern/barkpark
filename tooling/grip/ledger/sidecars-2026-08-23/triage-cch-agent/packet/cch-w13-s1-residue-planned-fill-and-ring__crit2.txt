@@ -1,0 +1,1 @@
+Gate green: node --check app.js && node --test __app.test.mjs && node __preview__/smoke.mjs, counts pasted.

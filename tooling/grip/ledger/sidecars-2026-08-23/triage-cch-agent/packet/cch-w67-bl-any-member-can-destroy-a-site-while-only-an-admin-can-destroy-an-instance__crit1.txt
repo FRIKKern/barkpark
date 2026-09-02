@@ -1,0 +1,1 @@
+If the tier changes, a router ability-matrix test reds on the pre-fix bytes for a plain member, and the console's __binding_census PIN row moves elevated:false -> true with EXPECT.elevated bumped in the same commit.

@@ -1,0 +1,1 @@
+No plain-member absence assertion elsewhere in smoke.mjs was broken: all 108 scenarios still render, rc 0. Evidence: smoke's tail.

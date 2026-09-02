@@ -1,0 +1,1 @@
+The hazard is REPRODUCED: a server rooted in a different tree is started on the default port and an unmodified run passes the byte-compare against it. Evidence: the run's `served bytes == disk bytes` line beside `lsof`/`ps` showing the foreign cwd.

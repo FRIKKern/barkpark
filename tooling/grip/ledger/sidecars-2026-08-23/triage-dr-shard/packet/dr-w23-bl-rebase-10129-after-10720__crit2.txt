@@ -1,0 +1,1 @@
+Its task trailer is re-claimed before the push so the required task gate can pass, and gh pr checks output is pasted.

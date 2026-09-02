@@ -1,0 +1,37 @@
+CLOSE PACKET — site-spawner family (ssw8/9/10/11-* + site-*), 65 open 0-met rows, triaged 2026-08-23 against origin/main (fetched).
+Criterion files: <row>__crit<N>.txt hold the EXACT stored text (indices zero-based); byte counts + sha256 in the triage log.
+ALL criteria on every packet row are unmet (met=false) — every index N in 0..total-1 has a file.
+
+ROW: ssw8-bl-public-read-test-pins-a-refusal-prod-skips  [ALREADY-DONE]  crits 0,1,2
+  Proof: api/test/barkpark_web/plugs/public_read_test.exs:154-158 states the listen//v1/schemas hand-built-conn cases were MOVED to routed requests in BarkparkWeb.Integration.PublicReadEnforcementTest. Landed: 0511125689 (#7870, the clamp itself); scoped listen arm 722e5abfe9 (#11696, 23 tests + mutation proof); reindex POST pin dd96a76d76 (#12953). Crit 0's "fail on today's main" red is moot — the clamp merged in the same commit that moved the tests.
+
+ROW: ssw11-bl-mint-side-ability-reconcile  [ALREADY-DONE]  crits 0,1,2,3,4
+  Proof: PR #7747 MERGED as 5ed99d9ef5 (trailer task-e7eb548d59bf0979); implies table 68cb7afcda (#7866). Decision is shipped copy: cloud/lib/barkpark_cloud/web/router.ex PATCH /v1/sites/:id 403 deploy_ability_required detail — "the mint collapses [write, deploy] to [deploy] ... no PAT can hold both. Turning it OFF needs only write" (crit 0 + crit 1: session/root is the stated CI story). Crit 2: the ability check is a fork WITH the justifying comment the criterion allows ("Read the resolved credential the same way Auth.require_ability/2 does"). Crit 3 moot post-merge. Crit 4: merged.
+
+ROW: site-spawner-backlog-token-revoke  [REFUTED]  crits 0,1,2
+  Proof (positive contradiction): api/lib/barkpark_web/router.ex:995-1009 now carries DELETE /v1/auth/app-tokens/current, /app-tokens/:id, /app-tokens (mob-w2-app-token-revoke + jf-backlog-apptoken-revoke-upstream); Barkpark.Auth.revoke_token/1 at api/lib/barkpark/auth.ex:200,227 revokes ApiToken rows. Live-proven in 722e5abfe9's message: a POST /w/default/p/default/v1/tokens-minted public-read token revoked via DELETE /v1/auth/app-tokens -> 200, verified dead (401). Residual (site-delete revoke + rotate) is owned by ssw8-bl-site-read-token-revoke-on-delete (stays open, REAL WORK).
+
+ROW: site-spawner-backlog-retire-exceeds-n  [SUPERSEDED — successor: ssw8-bare-path-and-retire-order]
+  Proof: 351f757535 (#6630) derived and DOCUMENTED the bound — deploy/README.md:154-157 names N+3 (node) and the static line names its +2: the protected current/.previous pair consuming slots is the documented invariant, not a defect. ssw8-bare-path-and-retire-order's own description records "The filed N+2 overcount does NOT reproduce (a simulation over the real functions pins the static count at 5)" and owns the REAL retire defect (dist-mtime sort key + tied-mtime fixtures) as its Part B, crit 3. Flag only — do not cancel without the lead's ruling.
+
+ROW: site-spawner-backlog-astro-readme-drift  [STRANDED-PREDECESSOR]  crits 0,1,2
+  Proof: crit 0's fix landed under ANOTHER row's PR — 351f757535 (#6630): "templates/astro-starter documented FOUR bp-* markers ... Base.astro emits FIVE (bp-site-base at :41). Both the starter README and Base.astro's own header comment now list all five." Verified on origin/main: templates/astro-starter/README.md:26-30 lists all five incl. bp-site-base. No PR carries this row's trailer, so it reads 0/3 forever. Residue: crit 1 (a drift contract test) was never built — lead decides close-vs-rebrief.
+
+CHAIN (report the chain, not the rows): the GUERRILLA LIVE-PROOF CHAIN.
+  ssw11-bl-guerrilla-build-lacks-prebuilt-beam (box BEAM predates PrebuiltArtifact; needs SSH + make rebuild)
+    -> gates ssw10-prebuilt-journey-live-run (the wave crown, prio 0; its code dependency ssw10-packer-extractor-format-seam DID merge as ed2d9758e4 #8079, so ONLY the box gates it)
+    -> which is the live half of: ssw10-bl-prebuilt-rollback-defects (live transcript), site-spawner-backlog-node-deployment-slot-surfacing crit 1, ssw11-bl-static-miss-503-not-404 crits 0-1 (real Caddy), ssw11-bl-contained-symlink-dereference crit 2, ssw8-bl-guerrilla-orphan-sweep, ssw8-bl-basepath-ssr-latency.
+  ONE human motion (guerrilla SSH: make rebuild + one live-walk session) unblocks the live criterion of ~8 rows.
+
+DUPLICATE FLAGS (flag only, never cancel):
+  ssw9-prebuilt-tree-finalize-sweep <-> ssw10-bl-prebuilt-tree-and-log-hygiene (crit 0 identical: drop staged prebuilt tree at run finalize; premise re-verified — deploy_runner.ex:2336 rm_rf still fires ONLY inside prune_run_state_dir gated on @max_tracked_runs=32).
+  site-spawner-backlog-core-list-404-swallow <-> site-spawner-backlog-empty-result-hardening (same docs.ts no-catch 404 decision; latter adds BARKPARK_DOC_ID plumb).
+
+BLOCKED-HUMAN (name the box/credential):
+  site-builder-worker-unclaimed-queue — muscle-1 (46.224.19.120, agent offline) / builder-host ops.
+  ssw11-bl-guerrilla-build-lacks-prebuilt-beam — guerrilla SSH (157.180.90.121), make rebuild.
+  ssw10-prebuilt-journey-live-run — guerrilla SSH + perfect-proof live walk (code deps all merged).
+  ssw8-bl-guerrilla-orphan-sweep — guerrilla SSH (1.06 GB sweep, before/after df).
+  ssw8-bl-basepath-ssr-latency — guerrilla SSH (on-box slot-port timing).
+  site-spawner-backlog-subdomain-urls — Hetzner DNS token (wildcard record) + first live on_demand_tls issuance.
+  ssw11-bl-reindex-casualty-prod-read — CMS box (89.167.28.206) credential reconcile is the ONLY open half: crits 1+2 ALREADY LANDED under dd96a76d76 (#12953: router comment fixed, reindex POST pinned in the clamp table); crit 0's decision is embodied by that pin.

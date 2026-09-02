@@ -1,0 +1,1 @@
+The check named "CSSOM parity (authored CSS vs browser)" is listed in main branch-protection required status checks; proven by gh api repos/:owner/:repo/branches/main/protection returning it rather than 404.

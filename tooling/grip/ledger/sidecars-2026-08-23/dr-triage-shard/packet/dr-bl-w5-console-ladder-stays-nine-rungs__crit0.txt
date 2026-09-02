@@ -1,0 +1,1 @@
+The bilateral cession is RE-BLESSED against cloud-console-hardening's CURRENT wave in writing (their charter's `In fence: cloud/` covers all three SPA files, and D31's named anchors `app.js:11637`/`:10763` are STALE -- the real functions are at `:12186`/`:11278`).

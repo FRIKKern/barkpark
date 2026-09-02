@@ -1,0 +1,1 @@
+The refusal vocabulary is fixed first: a defect and a refusal exit with distinguishable codes, mutation-proven in both directions.

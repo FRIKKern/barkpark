@@ -1,0 +1,1 @@
+If it does not reach step 5, the cause is diagnosed and named rather than retried blind. Evidence: the failing step and its deciding output.

@@ -1,0 +1,1 @@
+The full cloud suite is green and `mix format --check-formatted` returns rc=0, pasted with the REAL exit code. `git diff --stat` shows `router.ex` touched in the `/v1/barkparks` envelope region only.

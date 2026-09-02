@@ -1,0 +1,1 @@
+NEGATIVE ARM: a normally-migrated install (Default workspace seeded) is byte-identical — the flat media route still serves Default rows and grants nobody new reach.

@@ -66,7 +66,7 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		cachedM, cachedETag, haveCacheHit = cache.Load(key)
 	}
 
-	res, err := client.GetConditional(url, cachedETag)
+	res, err := client.GetConditionalCallerOwnsBackpressure(url, cachedETag)
 
 	// ONE retry on 429, and only when the server named a wait we are willing to
 	// serve (see retryAfterDelay). The row that filed this measured the server
@@ -82,7 +82,7 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 			// server already told us something specific, and reporting a
 			// dial error instead would lose the diagnosis. Either way the
 			// cache fallback below still applies.
-			if retried, rerr := client.GetConditional(url, cachedETag); rerr == nil {
+			if retried, rerr := client.GetConditionalCallerOwnsBackpressure(url, cachedETag); rerr == nil {
 				res = retried
 			}
 		}

@@ -1,0 +1,1 @@
+AFTER spd-w17-desk-operable merges. Pending state is a SOCKET ASSIGN per in-flight control; git diff shows no reliance on phx-disable-with for the asserted behaviour

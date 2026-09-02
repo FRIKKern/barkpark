@@ -1,0 +1,1 @@
+`make cli-install` either builds from `origin/main` (or the named branch) rather than the local checkout, or it REFUSES with a named error when the checkout is behind -- so the documented remedy cannot install a still-blind binary.

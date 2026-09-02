@@ -1,0 +1,1 @@
+Both colour gates move by zero (scripts/studio-literal-check.sh and node design/check.mjs), with before and after output pasted

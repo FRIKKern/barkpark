@@ -1,0 +1,1 @@
+The writer's scope and the reader's scope agree, proven by a test that drives a REAL successful send and then reads the surface the console reads. Evidence: the test and the row count it observed on both sides.

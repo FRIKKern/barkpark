@@ -1,0 +1,1 @@
+The 409 payload carries the blocking slug and distinguishes a foreign holder from a peer build

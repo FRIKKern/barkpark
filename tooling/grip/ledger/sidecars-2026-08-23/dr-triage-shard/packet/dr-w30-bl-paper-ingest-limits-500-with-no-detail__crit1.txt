@@ -1,0 +1,1 @@
+The render-budget refusal returns a 4xx naming the budget and the payload's size, not a 500. Evidence: the response body from an over-budget payload.

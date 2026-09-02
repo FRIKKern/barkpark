@@ -1,0 +1,1 @@
+`bp scaffy run` on both console commands exits 0 on a host whose default node is NOT the declared one, via a resolving runner; and the runner LOSES correctly (a wrong NODE_BIN reds through the self-check; no matching node exits non-zero with a named refusal).

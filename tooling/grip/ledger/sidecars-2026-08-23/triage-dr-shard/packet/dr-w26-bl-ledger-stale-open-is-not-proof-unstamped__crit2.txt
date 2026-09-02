@@ -1,0 +1,1 @@
+dr-w24-bl-emit-commit-distance-on-the-fleet-row's criterion 3 is REWRITTEN (its target @schema_allowlist does not exist) or the row is blocked on dr-w24-s4 — it is NOT closed at 1/3.

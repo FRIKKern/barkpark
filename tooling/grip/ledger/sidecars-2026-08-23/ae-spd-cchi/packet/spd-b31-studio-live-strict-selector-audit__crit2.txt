@@ -1,0 +1,1 @@
+A regression check or shared selector helper prevents future presentation-only attributes from breaking behavior tests while retaining intentional accessibility/contract pins.

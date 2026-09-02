@@ -1,0 +1,1 @@
+Roots are verified disjoint AND same-st_dev as /; any root failing is EXCLUDED and NAMED in the payload. A test feeds an overlapping/cross-mount root set and asserts the exclusion is reported.

@@ -1,0 +1,1 @@
+The panel no longer asserts that a check produced an answer when it did not: either the verb changes (e.g. Asked / Last attempt) on the unknown arm, or the row is paired with the cause such that no reading of the pair claims an answer was obtained. Quote the before and after strings.

@@ -1,0 +1,1 @@
+`DeployLedger.census/3` carries a door term computed on `failure_reason LIKE '%409%box_at_capacity%'` across ALL statuses, and an ExUnit test seeds one `failed` 409 row with a NULL cause and asserts the term counts it while the cause-keyed row does not.

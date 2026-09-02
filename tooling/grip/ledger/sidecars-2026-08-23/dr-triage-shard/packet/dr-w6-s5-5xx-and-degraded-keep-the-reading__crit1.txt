@@ -1,0 +1,1 @@
+The ladder's RANKING is unchanged — only the detail attachment moved. Evidence: `git diff origin/main...HEAD -- internal/cli/cloud_status_cmd.go` showing no change to `attentionRankOrder`/`attentionRank`/`attentionBucket`, and `internal/cli/testdata/attention_order_cases.json` either unchanged or changed only to add a case (state which).

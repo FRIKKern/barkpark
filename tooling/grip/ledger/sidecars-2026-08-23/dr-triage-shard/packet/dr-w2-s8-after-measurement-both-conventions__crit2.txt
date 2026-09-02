@@ -1,0 +1,1 @@
+BOTH scoring conventions are printed side by side: deferrals-as-volume-only (the ledger's doctrine) AND deferrals-as-failures (BEFORE's own convention), with the split between real repair and definitional gift stated in words.

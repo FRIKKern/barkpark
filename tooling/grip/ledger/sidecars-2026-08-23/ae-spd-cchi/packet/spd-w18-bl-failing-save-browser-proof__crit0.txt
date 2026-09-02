@@ -1,0 +1,1 @@
+A real authenticated browser on the deployed build triggers a REFUSED paper save and the recorded text of [data-test-id=bp-paper-footer-save] is quoted verbatim.

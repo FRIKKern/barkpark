@@ -1,0 +1,1 @@
+A site_publish_waiting event exists and fires from the still-waiting cohort DeployLedger.delivery/3 returns, not from a second independently-written query — quote the call site

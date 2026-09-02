@@ -1,0 +1,1 @@
+The doc comments on RolloutStatus/RolloutHalt/RolloutResume in internal/cloudclient/client.go name require_worker (not 'Bearer, admin'), matching the correction made on the dr-w18-s1 review branch. Evidence: the quoted comment lines on origin/main.

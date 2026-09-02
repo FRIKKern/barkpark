@@ -1,0 +1,1 @@
+the deployments array and next_cursor are asserted unchanged by the node's presence

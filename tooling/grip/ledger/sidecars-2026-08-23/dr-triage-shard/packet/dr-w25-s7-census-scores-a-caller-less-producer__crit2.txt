@@ -1,0 +1,1 @@
+The router.ex exclusion is proven LOAD-BEARING, not decorative: a test asserts both prose sites naming the route exist AND that feeding the router body to the caller scan returns non-empty, i.e. including it would score the crown called off its own documentation. Paste the test.

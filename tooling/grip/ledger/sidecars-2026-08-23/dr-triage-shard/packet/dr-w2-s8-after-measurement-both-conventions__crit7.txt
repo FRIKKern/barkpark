@@ -1,0 +1,1 @@
+A tooling/grip/ledger/dr-w2-after-measurement-*.md is committed carrying every number and its exact rerun command, and a wave-log row is appended to the charter. Docs-only PR.

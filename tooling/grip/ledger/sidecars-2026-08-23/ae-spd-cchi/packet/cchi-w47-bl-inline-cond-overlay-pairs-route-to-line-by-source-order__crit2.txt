@@ -1,0 +1,1 @@
+The change adds NO new comparison and therefore cannot add a red: show the census output byte-identical on the clean tree before and after, so the only behavioural difference is under the reorder mutation.

@@ -1,0 +1,1 @@
+The PR body states the unmeasured cost: every future deploy.yml edit now runs the full Cloud suite plus Postgres, and the 60-day churn rate on that file was not measured. Quote it. It also carries a `HIGH-FLIP-RISK: the caller predicate's corpus` line.

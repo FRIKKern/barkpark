@@ -3031,6 +3031,26 @@ defmodule BarkparkWeb.Router do
   # are served HERE, never on the Default-pinned flat route). upload/delete
   # (writes) stay excluded. Without a matching :media share this is
   # byte-identical to a normal scoped request.
+  #
+  # NO `:media_public_cors` HERE — the recorded decision, not an oversight
+  # (jf-w1-scoped-media-cors-followup). The four FLAT media serve GETs took
+  # `access-control-allow-origin: *` in jf-w1-media-cors-upstream under a rule
+  # with three conditions: GET/HEAD only, never credentialed, and authorization
+  # BY URL rather than by an ambient browser credential. These four scoped GETs
+  # satisfy the first two and FAIL the third, permanently and by design:
+  # `:shared_media_api` opens with `:fetch_session` + `OptionalSessionToken`,
+  # which assigns `:api_token` from `session["api_token"]` AND `:current_user`
+  # from `session["user_session"]` — so `Media.Storage.Access.authenticated?/1`
+  # (hence the visibility clamp, hence the body) varies on the cookie. That
+  # mount is load-bearing: bare Studio `<img>` tags carry the cookie and can
+  # never attach a Bearer header, so it cannot be removed to earn the wildcard.
+  # A static `*` carries no `Vary`, over a body that varies by Cookie with no
+  # `Vary: Cookie` — a shared cache could hand a member's private listing to an
+  # anonymous cross-origin reader. Cross-origin here is served instead by
+  # `Plugs.DatasetCors` at the endpoint, which strips this `/w/_/p/_` prefix and
+  # reflects any allowlisted `Origin` on the dataset, with `Vary: Origin`: a
+  # per-tenant opt-in. Pinned (absence AND the reflector) by
+  # `test/barkpark_web/controllers/scoped_media_cors_test.exs`.
   scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
     pipe_through(:shared_media_api)
 

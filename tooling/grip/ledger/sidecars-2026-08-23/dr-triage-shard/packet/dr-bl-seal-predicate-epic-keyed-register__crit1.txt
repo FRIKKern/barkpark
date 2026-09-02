@@ -1,0 +1,1 @@
+An UNREGISTERED-EPIC refusal fires when --epic names an epic with no register entry, proved by a test that runs the refusal and reads its stdout.

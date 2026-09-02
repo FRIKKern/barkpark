@@ -1,0 +1,1 @@
+The row is DELETED in the same PR that makes census/3 emit the delivery key, and the no-longer-phantom arm is shown reding first without the deletion

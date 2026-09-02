@@ -1,0 +1,1 @@
+The negative fixtures are pinned too: 2026-08-01..08-04 must stay SILENT and the 11 attempts=1 zero-live hours must not fire

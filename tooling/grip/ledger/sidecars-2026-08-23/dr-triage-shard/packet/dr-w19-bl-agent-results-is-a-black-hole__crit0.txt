@@ -1,0 +1,1 @@
+The results body is either persisted/logged so a non-zero exit, a timeout and an allowlist rejection are each countable, OR the rail is explicitly documented as inert with a named successor row — and the PR body says which and why.

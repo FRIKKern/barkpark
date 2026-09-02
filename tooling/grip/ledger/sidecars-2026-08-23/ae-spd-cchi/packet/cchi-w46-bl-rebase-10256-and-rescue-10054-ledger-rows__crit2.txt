@@ -1,0 +1,1 @@
+The decision-table hunk is resolved as main's block then the branch's block — main added D492-D498, the branch added D499-D510, and the branch contains none of D492-D498, so there is NO number collision. State the post-rebase decision range and show it contiguous.

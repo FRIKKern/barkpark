@@ -1,0 +1,1 @@
+THE CORRECTED PREDICATE IS PROVEN BOTH WAYS BY MUTATION: a host that genuinely paints a cue is NOT flagged, and a host that genuinely hides text with no cue IS flagged. Quote both drives and their rc values.

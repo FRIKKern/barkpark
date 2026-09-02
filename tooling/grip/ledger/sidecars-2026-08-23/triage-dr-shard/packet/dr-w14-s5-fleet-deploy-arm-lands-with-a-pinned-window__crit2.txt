@@ -1,0 +1,1 @@
+unmetered is added to semrole.go's warn case arm and the PR body states plainly that this OVERRIDES the PR author's stated reasoning, with the forcing chain named: fixture tone warn -> statusRole delegates to semrole.For -> TestAttentionVocabularyMatchesFixture

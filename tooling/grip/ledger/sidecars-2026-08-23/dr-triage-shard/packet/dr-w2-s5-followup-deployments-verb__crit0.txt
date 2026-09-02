@@ -1,0 +1,1 @@
+A per-site deployments verb exists and PAGES: given a fake control plane that returns a non-null next_cursor on page one and null on page two, the verb issues TWO GETs and prints rows from both. Paste the test name and the recorded request count.

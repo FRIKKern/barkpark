@@ -1,0 +1,1 @@
+git status shows the shared checkout up to date with origin/main after make update, with the differing-class files preserved and the BEFORE pixels untouched — evidence quotes the status line and the re-derived class counts used

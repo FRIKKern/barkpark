@@ -1,0 +1,1 @@
+A test or a run proves the stale-binary path cannot report up_to_date: true when the server knows otherwise

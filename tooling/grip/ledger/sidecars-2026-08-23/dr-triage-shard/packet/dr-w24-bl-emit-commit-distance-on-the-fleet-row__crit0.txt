@@ -1,0 +1,1 @@
+barkpark_json/4 emits all three commit_* columns, NULL rendered as unmeasured and never 0

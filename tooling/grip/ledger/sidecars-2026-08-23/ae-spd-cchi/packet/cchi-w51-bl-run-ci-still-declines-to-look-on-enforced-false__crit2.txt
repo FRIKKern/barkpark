@@ -1,0 +1,1 @@
+PROOF SHAPE, matched to the existing one: a section-8b SIBLING drives --ci with the same three read-back fixtures (protected / GitHub's 404 body / missing file) plus the same sed mutation proof. Quote the red on the mutant and the green on the clean tree. This is the arm required-checks-drift.yml runs on every PR, so a false red here blocks the repo.

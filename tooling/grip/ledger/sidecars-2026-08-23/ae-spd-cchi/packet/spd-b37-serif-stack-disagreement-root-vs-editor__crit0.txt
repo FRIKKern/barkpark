@@ -1,0 +1,1 @@
+The two declarations agree on which face leads, with the choice justified — and the choice is stated as a design decision, not resolved by whichever sheet happens to win the cascade

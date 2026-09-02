@@ -1,0 +1,1 @@
+A LiveView test clicks [data-test-id=paper-unrenderable-start-body] on a fossil seeded with NO blocks key and asserts the persisted content gains a blocks LIST containing one paragraph.

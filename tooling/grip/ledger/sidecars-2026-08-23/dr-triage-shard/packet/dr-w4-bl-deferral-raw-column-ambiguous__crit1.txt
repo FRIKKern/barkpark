@@ -1,0 +1,1 @@
+A test proves a CODELESS envelope whose message is byte-for-byte box_at_capacity - <prose> no longer classifies as BOX_AT_CAPACITY_DEFERRED.

@@ -1,0 +1,1 @@
+deploy/site-deploy.sh reads and appends bp-corpus-status the way site-deploy-node.sh:492 does, so a static build records its upstream cause. Evidence: the diff plus a --self-test run.

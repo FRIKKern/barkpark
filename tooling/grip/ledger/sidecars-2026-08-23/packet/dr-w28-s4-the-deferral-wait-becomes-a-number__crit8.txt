@@ -1,0 +1,1 @@
+Every number in the PR body is re-derived at write time against cloud-db-1, with its read timestamp printed beside it — the deferred population moved five times during wave 28's own survey.

@@ -1,0 +1,1 @@
+Its trigger paths actually cover the files that carry the risk — .sh, .mjs and .js included, not only the doc-gates.yml set.

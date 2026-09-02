@@ -1,0 +1,1 @@
+Per-slot swap peaks are sampled and PERSISTED across unit restarts, so a census cannot silently lose a restarted slot. Evidence: the mechanism, plus a reading taken across an actual restart showing the pre-restart peak survives.

@@ -1,0 +1,1 @@
+census/3 emits a live_rate node with the same shape as rate/2 (pct, refused, min_sample, reason) that REFUSES below min_sample rather than reporting a percentage; a test drives a sub-threshold window and pins the refusal

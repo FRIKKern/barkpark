@@ -1,0 +1,1 @@
+No regression at the six sites cch-w30-s5 already fixed: the __app.test.mjs tests pinning the RENDERED sentence stay green, including the negative that a nested api/-style envelope falls back rather than lying.

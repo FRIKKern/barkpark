@@ -1,0 +1,1 @@
+`bp cloud status` distinguishes "serving, but half the blue/green pair is failed" from "healthy", without claiming the box is down when it is serving.

@@ -1,0 +1,1 @@
+The leak is re-proven live before the fix (fail-before): a freshly minted public-read token reads a PRIVATE-visibility document through the scoped search door, with the request and the count pasted. The inherited 200/count-1256 canary is re-derived, not quoted.

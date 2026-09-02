@@ -1,0 +1,1 @@
+Each check.mjs part reports its own pass/fail independently; mutation proof that a failing part cannot print ok

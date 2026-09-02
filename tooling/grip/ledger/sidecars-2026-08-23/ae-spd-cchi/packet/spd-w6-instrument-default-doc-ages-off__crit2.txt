@@ -1,0 +1,1 @@
+A missing or ambiguous target fails with a named diagnostic instead of silently measuring another Paper.

@@ -7,11 +7,14 @@ defmodule Barkpark.Tasks.Release do
   #
   # Semantics (mirrors the sweeper's write, with one deliberate divergence):
   #
-  #   * HOLDER-ONLY: unlike `close/3` (which fences on epoch alone — the
-  #     board guards holder identity in `restage_plan/4`), release checks the
-  #     holder IN the primitive: a voluntary walk-away by anyone but the
-  #     lease holder is `{:error, :not_holder}`, so the fence can never be
-  #     epoch-guessed by a bystander.
+  #   * HOLDER-ONLY on a LIVE lease: unlike `close/3` (which fences on epoch
+  #     alone — the board guards holder identity in `restage_plan/4`), release
+  #     checks the holder IN the primitive: a voluntary walk-away by anyone but
+  #     the lease holder is `{:error, :not_holder}`, so the fence can never be
+  #     epoch-guessed by a bystander. The ONE exception is a STRANDED row
+  #     (lifecycle `open` while `claim.worker` is still set — see
+  #     `check_releasable/1`): there is no live lease to guard, so any caller
+  #     may free it and `released_by` names the ACTOR.
   #   * epoch fence: `observed_epoch` must match `claim.epoch` or
   #     `{:error, :fenced_off}` — the same dead-lease guard close uses.
   #   * lifecycle flips `in_progress → "open"` (never "blocked" — the ready
@@ -55,8 +58,8 @@ defmodule Barkpark.Tasks.Release do
             {:error, :not_found}
 
           %Document{} = doc ->
-            with :ok <- check_in_progress(doc),
-                 :ok <- check_holder(doc, worker_id),
+            with {:ok, mode} <- check_releasable(doc),
+                 :ok <- check_holder_for_mode(mode, doc, worker_id),
                  :ok <- check_fencing(doc, observed_epoch),
                  {:ok, updated} <- apply_release_update(doc, worker_id) do
               ev =
@@ -67,7 +70,13 @@ defmodule Barkpark.Tasks.Release do
                   "api",
                   %{
                     "released" => %{
-                      "previous_worker" => worker_id,
+                      # The STORED holder, not the actor. For a live lease the
+                      # two are identical (holder-only). For a STRANDED row they
+                      # differ, and that difference is the whole point: the
+                      # ledger now records who was freed AND who freed them.
+                      "previous_worker" => holder_of(doc) || worker_id,
+                      "released_by" => worker_id,
+                      "stranded_open" => mode == :stranded,
                       "released_epoch" => observed_epoch,
                       "new_epoch" => observed_epoch + 1
                     }
@@ -92,13 +101,68 @@ defmodule Barkpark.Tasks.Release do
     end
   end
 
-  # Only an in-flight task has a lease to release. An open/ready task is a
-  # no-op target; a done/cancelled/blocked one must reopen through its own
-  # (future) primitive, never through a lease walk-away.
-  defp check_in_progress(%Document{content: content}) do
-    case Map.get(content || %{}, "lifecycle_status") do
-      "in_progress" -> :ok
-      other -> {:error, {:not_in_progress, other}}
+  # TWO releasable shapes (ledger/claim-deadlock, task-f07ead0c1f8025bb —
+  # REMEDY (A) of the three the row named):
+  #
+  #   `:live`      — the classic in-flight lease. HOLDER-ONLY, unchanged.
+  #   `:stranded`  — lifecycle `open` while `claim.worker` is still SET. This
+  #                  state is REACHABLE and legal to produce: `Tasks.Stage`
+  #                  legally moves `in_progress → open` (Transitions D7) and
+  #                  DELIBERATELY never touches `content.claim` (stage.ex:
+  #                  "do_stage never touches content.claim", which the
+  #                  false-done reopen recipe depends on). Before this change
+  #                  the resulting row was a DEADLOCK: `claim` refused it
+  #                  `:not_ready` (foreign_claimed), `stamp` refused it
+  #                  `not_in_progress:open`, and `release` refused it here with
+  #                  the same token — three verbs, no exit. The only escape was
+  #                  to re-claim under the DEAD holder's worker id, which made
+  #                  `released_by` name them instead of the actor.
+  #
+  # WHY (A) AND NOT (B) "make the state unreachable": the ONLY known path to it
+  # is `stage`, and stage's claim-blindness is a protected invariant, not a bug
+  # (see the acceptance criterion "bp task stage must still leave content.claim
+  # untouched"). Closing that door would trade this deadlock for a regression in
+  # the reopen recipe. (C) — a real `expired_at` on every claim — stays
+  # complementary and unshipped here: a lease TTL would eventually reap a LIVE
+  # claim, not this one, because a stranded row is no longer `in_progress` and
+  # the TtlSweeper only reaps `in_progress`.
+  #
+  # A stranded row is NOT holder-gated: nobody legitimately holds a lease on a
+  # row the board already calls `open`, and requiring the dead holder's identity
+  # is exactly the impersonation this fix exists to remove. The epoch fence
+  # (`check_fencing/2`) still applies, so the caller must have READ the row.
+  #
+  # Everything else is unchanged: an `open` row with NO holder is still
+  # `{:not_in_progress, "open"}` (a no-op target), and done/cancelled/blocked
+  # still reopen through their own verbs, never through a lease walk-away.
+  defp check_releasable(%Document{content: content}) do
+    c = content || %{}
+
+    case Map.get(c, "lifecycle_status") do
+      "in_progress" ->
+        {:ok, :live}
+
+      "open" = other ->
+        if holder_present?(c), do: {:ok, :stranded}, else: {:error, {:not_in_progress, other}}
+
+      other ->
+        {:error, {:not_in_progress, other}}
+    end
+  end
+
+  defp check_holder_for_mode(:live, %Document{} = doc, worker_id),
+    do: check_holder(doc, worker_id)
+
+  defp check_holder_for_mode(:stranded, _doc, _worker_id), do: :ok
+
+  defp holder_present?(content), do: not is_nil(holder_in(content))
+
+  defp holder_of(%Document{content: content}), do: holder_in(content || %{})
+
+  defp holder_in(content) do
+    case get_in(content, ["claim", "worker"]) do
+      worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
+      _ -> nil
     end
   end
 

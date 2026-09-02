@@ -1,0 +1,1 @@
+REACHABLE, NOT JUST BUILT: paste a run through the route or the CLI that PRINTS the boundary and the gauge, PLUS the corrected rename witness (rename the new public's def AND @spec, `CC=/usr/bin/clang MIX_ENV=dev mix compile --force --warnings-as-errors`) showing the pristine control at RC=0 and the mutated tree at RC=1 naming the call site

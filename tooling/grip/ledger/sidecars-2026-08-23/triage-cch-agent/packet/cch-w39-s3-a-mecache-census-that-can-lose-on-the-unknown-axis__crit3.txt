@@ -1,0 +1,1 @@
+Every POLICY exemption row states WHY in prose, and every DEBT row names a REAL live bp task id (verified by bp task get, not invented). List the rows and their owners.

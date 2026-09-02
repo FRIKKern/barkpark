@@ -1,0 +1,1 @@
+Both colour gates exit 0 with Part E root.html.heex delta 0, baselines and post-change runs pasted

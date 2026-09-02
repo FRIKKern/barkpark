@@ -407,13 +407,70 @@ class Refusal extends Error {
 // nor the `request_id` it had just parsed and thrown away, which is the whole diagnosis a
 // reader needs. `-w` appends the status on its own trailing line so the status is read
 // from curl itself rather than guessed from the body's shape.
-function q(params) {
-  const a = ['-sG', `${SERVER}/v1/data/query/production/task`, '-w', '\n%{http_code}'];
-  for (const [k, v] of params) a.push('--data-urlencode', `${k}=${v}`);
-  a.push('-H', `Authorization: Bearer ${TOKEN}`);
+// ---------------------------------------------------------------------------
+// BACKPRESSURE IS NOT AN INFRA FAULT.
+//
+// MEASURED 2026-09-01 17:02Z: under this campaign's own load — 18 agent lanes, each
+// with a pulse loop and its own queries — the ledger answered `bp task ready` with
+// HTTP 429 and `retry_after=1`. Every reader below turned that into an exit-2 INFRA
+// FAULT, because the status gate was `!/^2\d\d$/` and a 429 is not a 2xx.
+//
+// That gate is right about every OTHER non-2xx and wrong about exactly this one. A
+// 401 is a refusal, a 500 is a fault, a 404 is an absence — none of them change by being
+// asked again. A 429 is the server saying "ask me again in one second", and it is the
+// only non-2xx that carries its own remedy in its body. Reporting a one-second wait
+// as a broken machine taught this fleet to read its own healthy backpressure as an
+// incident, and an instrument that cries outage over a throttle is an instrument
+// nobody will believe the next time it is right.
+//
+// SO: 429 IS RETRIED, PACED BY THE SERVER'S OWN NUMBER, AND BOUNDED.
+//
+//   * The wait comes from `error.details.retry_after` (what
+//     `Errors.to_envelope({:error, :rate_limited, %{retry_after: s}})` puts there).
+//     `curl -w '%{http_code}'` shows this program no headers, so the body IS the
+//     channel — which is why the envelope is read before the status is judged.
+//   * A wait longer than RATE_LIMIT_MAX_WAIT_S is NOT slept out. The pulse plugin
+//     answers `Retry-After: 3600` on a spent daily cap; honoring that literally would
+//     hang this predicate for an hour and be indistinguishable from a wedged process.
+//     A big number is a real "go away", and the operator must see it.
+//   * The total wait across one call is bounded by RATE_LIMIT_MAX_TOTAL_WAIT_S.
+//
+// AND IT STAYS DISTINGUISHABLE WHEN IT FINALLY GIVES UP. A throttle that outlives the
+// backoff is still "nothing was measured" — exit 2 is correct, and this program must
+// never certify a roster it could not read. What changes is the CODE on the token
+// line: `LEDGER-RATE-LIMITED`, not `LEDGER-UNREADABLE`. That distinction is the whole
+// point of the machine-readable `code` this file already carries: "the ledger is
+// down" and "the ledger is busy and we are the ones making it busy" are different
+// operator problems with different remedies, and one undifferentiated exit 2 hides
+// which one you have.
+const RATE_LIMIT_ATTEMPTS = 4;          // total tries, the first included
+const RATE_LIMIT_DEFAULT_WAIT_S = 1;    // the measured value, and the plugs' floor
+const RATE_LIMIT_MAX_WAIT_S = 5;        // a longer ask is a quota, not a blip
+const RATE_LIMIT_MAX_TOTAL_WAIT_S = 10; // one call never pauses longer than this
+
+// A synchronous sleep, because every reader here is execFileSync. Atomics.wait on a
+// SharedArrayBuffer nobody else holds blocks this thread and nothing else.
+function sleepSync(seconds) {
+  if (!(seconds > 0)) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+}
+
+// Read `error.details.retry_after` out of a parsed envelope. Absent, unparseable, or
+// negative all mean "the server named no wait", and the caller uses its default —
+// never zero, which would be a busy loop against a limiter.
+function retryAfterSeconds(parsed) {
+  const d = parsed && parsed.error && parsed.error.details;
+  if (!d) return null;
+  const n = typeof d.retry_after === 'string' ? Number(d.retry_after) : d.retry_after;
+  return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null;
+}
+
+// ONE curl, split into { status, body, parsed }. Every reader below shares it so the
+// trailing-whitespace handling and the status/body split have exactly one owner.
+function curlOnce(args, unreachable) {
   let raw;
-  try { raw = execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
-  catch (e) { throw new Infra(`curl failed: ${String(e.message).slice(0, 90)}`, 'LEDGER-UNREACHABLE'); }
+  try { raw = execFileSync('curl', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  catch (e) { throw new Infra(unreachable(String(e.message).slice(0, 90)), 'LEDGER-UNREACHABLE'); }
   // TRAILING WHITESPACE FIRST. `-w '\n%{http_code}'` emits no newline after the code, but
   // a `lastIndexOf('\n')` over bytes that DO end in one reads the status as the empty
   // string and then reports `HTTP ` — a diagnosis with a hole exactly where the number
@@ -424,7 +481,64 @@ function q(params) {
   const body = cut === -1 ? trimmed : trimmed.slice(0, cut);
   let parsed = null;
   try { parsed = JSON.parse(body); } catch { parsed = null; }
+  return { status, body, parsed };
+}
+
+// curlOnce plus the bounded 429 backoff. Returns the FIRST response that is not a
+// throttle; a throttle that outlives the budget is returned too, so the caller's own
+// non-2xx branch renders it — with `rateLimited` set, so the caller can pick the
+// distinguishing code instead of calling a busy ledger an unreadable one.
+function curlWithBackpressure(args, unreachable, what) {
+  let waited = 0;
+  for (let attempt = 1; ; attempt++) {
+    const r = curlOnce(args, unreachable);
+    if (r.status !== '429') return r;
+    r.rateLimited = true;
+
+    const asked = retryAfterSeconds(r.parsed);
+    const wait = asked === null ? RATE_LIMIT_DEFAULT_WAIT_S : asked;
+
+    if (wait > RATE_LIMIT_MAX_WAIT_S) {
+      r.giveUp = `the server asked for ${wait}s, longer than this program will ever wait on your behalf (${RATE_LIMIT_MAX_WAIT_S}s), so the 429 is reported unslept`;
+      return r;
+    }
+    if (attempt >= RATE_LIMIT_ATTEMPTS) {
+      r.giveUp = `the attempt cap of ${RATE_LIMIT_ATTEMPTS} is spent (waited ${waited}s in total)`;
+      return r;
+    }
+    if (waited + wait > RATE_LIMIT_MAX_TOTAL_WAIT_S) {
+      r.giveUp = `a further ${wait}s would exceed the ${RATE_LIMIT_MAX_TOTAL_WAIT_S}s total-wait budget for one read (already waited ${waited}s)`;
+      return r;
+    }
+
+    // SAY IT, on stderr, every time. A predicate that quietly takes four seconds
+    // longer under load is a mystery, and a mystery gets "fixed" by someone deleting
+    // the backoff. stdout carries the VERDICT-TOKEN line and is never touched.
+    process.stderr.write(`seal-predicate: rate limited (429) on ${what} — BACKPRESSURE, not a fault; waiting ${wait}s (${asked === null ? 'no retry_after given, using our default' : 'the server asked for it'}) and retrying (attempt ${attempt} of ${RATE_LIMIT_ATTEMPTS})\n`);
+    sleepSync(wait);
+    waited += wait;
+  }
+}
+
+// The sentence a throttled read ends on, for both readers below. It names the
+// condition as backpressure and points at the remedy, which is not "restart the
+// ledger" but "ask it less often".
+const throttledMessage = (r, what) =>
+  `the ledger is RATE LIMITING this client on ${what} — HTTP 429${retryAfterSeconds(r.parsed) === null ? '' : ` retry_after=${retryAfterSeconds(r.parsed)}`}, and ${r.giveUp}. `
+  + 'This is BACKPRESSURE, not an outage: the ledger is healthy and this client (or the fleet it belongs to) is asking faster than the limiter allows. '
+  + 'Nothing about clause (a) or bucket (c) is asserted — a roster this program was throttled out of reading is not a roster it read and found clean — but the remedy is to reduce the request rate, not to treat the ledger as broken.';
+
+
+function q(params) {
+  const a = ['-sG', `${SERVER}/v1/data/query/production/task`, '-w', '\n%{http_code}'];
+  for (const [k, v] of params) a.push('--data-urlencode', `${k}=${v}`);
+  a.push('-H', `Authorization: Bearer ${TOKEN}`);
+  const { status, body, parsed, ...bp } = curlWithBackpressure(
+    a, (m) => `curl failed: ${m}`, 'the roster query');
   if (!/^2\d\d$/.test(status)) {
+    // A 429 that survived the backoff is BACKPRESSURE and gets its own code, so the
+    // token line tells "the ledger is busy" apart from "the ledger is unreadable".
+    if (bp.rateLimited) throw new Infra(throttledMessage({ parsed, ...bp }, 'the roster query'), 'LEDGER-RATE-LIMITED');
     const err = (parsed && (parsed.error || parsed)) || {};
     throw new Infra(
       `the ledger answered HTTP ${status} — error.code=${err.code || '(none named)'} request_id=${(parsed && (parsed.request_id || err.request_id)) || '(none returned)'} message=${String(err.message || '').slice(0, 90) || '(none)'}. `
@@ -448,16 +562,12 @@ function q(params) {
 function qTasks(id) {
   const a = ['-sG', `${SERVER}/v1/tasks/${encodeURIComponent(id)}`, '-w', '\n%{http_code}'];
   a.push('-H', `Authorization: Bearer ${TOKEN}`);
-  let raw;
-  try { raw = execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
-  catch (e) { throw new Infra(`curl failed reaching /v1/tasks/${id}: ${String(e.message).slice(0, 90)}`, 'LEDGER-UNREACHABLE'); }
-  const trimmed = raw.replace(/\s+$/, '');
-  const cut = trimmed.lastIndexOf('\n');
-  const status = cut === -1 ? '000' : trimmed.slice(cut + 1).trim();
-  const body = cut === -1 ? trimmed : trimmed.slice(0, cut);
-  let parsed = null;
-  try { parsed = JSON.parse(body); } catch { parsed = null; }
+  const { status, body, parsed, ...bp } = curlWithBackpressure(
+    a, (m) => `curl failed reaching /v1/tasks/${id}: ${m}`, `the draft cross-check of ${id}`);
   if (!/^2\d\d$/.test(status)) {
+    // Same distinction as q(): a throttled cross-check is a busy ledger, not an
+    // unreadable one, and the remedy differs.
+    if (bp.rateLimited) throw new Infra(throttledMessage({ parsed, ...bp }, `the draft cross-check of ${id}`), 'LEDGER-RATE-LIMITED');
     const err = (parsed && (parsed.error || parsed)) || {};
     throw new Infra(
       `the ledger answered HTTP ${status} for /v1/tasks/${id} — error.code=${err.code || '(none named)'} request_id=${(parsed && (parsed.request_id || err.request_id)) || '(none returned)'} message=${String(err.message || '').slice(0, 90) || '(none)'}. `

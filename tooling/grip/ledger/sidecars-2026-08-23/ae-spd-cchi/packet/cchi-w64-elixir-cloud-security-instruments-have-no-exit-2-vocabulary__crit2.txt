@@ -1,0 +1,1 @@
+A structural guard requires every exit-2-capable job to declare the channel, mutation-proved in both directions.

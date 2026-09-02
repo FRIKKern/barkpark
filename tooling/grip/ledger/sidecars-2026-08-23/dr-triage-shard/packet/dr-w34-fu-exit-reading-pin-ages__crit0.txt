@@ -1,0 +1,1 @@
+A second reading, taken with a later pinned --to by a binary whose commit is an ancestor of origin/main, is pasted BESIDE the 2026-08-09 block in scripts/deploy-reliability-exit-2026-08-10.md, with each block labelled by its instant and neither replacing the other.

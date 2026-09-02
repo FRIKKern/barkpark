@@ -1,0 +1,1 @@
+If #7747 merges, the CI/PAT story is stated: which single credential a GitHub Action holds to walk all four hops, or an explicit statement that a session is required.

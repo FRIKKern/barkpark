@@ -1,0 +1,1 @@
+Chrome bring-up retries with backoff before refusing, or the refusal is proven to be the correct terminal behaviour and the flake rate is measured rather than asserted.

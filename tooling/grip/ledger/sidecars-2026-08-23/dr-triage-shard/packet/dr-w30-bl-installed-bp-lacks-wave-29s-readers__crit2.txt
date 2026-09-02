@@ -1,0 +1,1 @@
+`bp cloud deploy census` produces an 'unknown verb' style error rather than a host-resolution error, or a written decision records why the host-resolution wording stays. Evidence: the output or the decision.

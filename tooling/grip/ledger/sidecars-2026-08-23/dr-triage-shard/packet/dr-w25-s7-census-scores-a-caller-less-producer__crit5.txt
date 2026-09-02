@@ -1,0 +1,1 @@
+The refusal message states that the route must be written as ONE literal string, and documents that a path split across shell variables produces a false red which must be fixed with a literal, never with a new allowlist row. Quote the message.

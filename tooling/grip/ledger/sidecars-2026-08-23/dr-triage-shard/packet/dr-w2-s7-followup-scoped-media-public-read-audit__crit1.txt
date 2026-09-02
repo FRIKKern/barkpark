@@ -1,0 +1,1 @@
+A test drives a public-read token against the scoped media surface for a PRIVATE-visibility media type, with an ADMIN CONTROL proving the seed is leak-observable. The result is recorded whether it leaks or not - a clean audit is a finding.

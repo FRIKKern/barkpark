@@ -1,0 +1,1 @@
+The relationship between queued_seconds and the three legs is DERIVED from the writer, not guessed — cite the code that sets each

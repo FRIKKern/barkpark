@@ -1,0 +1,1 @@
+Each of the 3 residue items has a verdict backed by current code reading: still-real (filed as a task under the nav-shell epic, id recorded) or obsolete (evidence)

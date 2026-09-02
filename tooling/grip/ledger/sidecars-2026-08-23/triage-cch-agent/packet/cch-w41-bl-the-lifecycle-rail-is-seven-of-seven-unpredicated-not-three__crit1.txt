@@ -1,0 +1,1 @@
+Every D428 verb that still renders to a plain member is bound, using disable-and-explain with FORBIDDEN_ROLE_COPY.admin verbatim (D428's authorized remedy for these seven only). Evidence: the rendered markup per verb.

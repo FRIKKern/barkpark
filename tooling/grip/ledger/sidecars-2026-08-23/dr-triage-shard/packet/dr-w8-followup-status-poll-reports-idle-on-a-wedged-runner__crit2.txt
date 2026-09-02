@@ -1,0 +1,1 @@
+The control plane poll loop is checked against the new shape and does not fail a build on it

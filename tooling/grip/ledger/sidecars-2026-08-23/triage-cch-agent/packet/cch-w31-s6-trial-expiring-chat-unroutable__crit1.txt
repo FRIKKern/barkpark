@@ -1,0 +1,1 @@
+trial_expiring is CHAT-ROUTABLE: a team with an enabled chat channel receives at least one enqueued chat job for it. Evidence: a test showing the enqueued-job count going from 0 to non-zero, with the job args quoted.

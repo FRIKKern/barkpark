@@ -1,0 +1,1 @@
+No regression to the paper/beta panes: view_edit_parity_test.exs and studio_components_pane_test.exs green

@@ -1,0 +1,1 @@
+--predicate is either deleted from seal-run.sh (usage block included) or made genuinely functional with PRED_REL derived from the flag.

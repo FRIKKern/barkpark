@@ -1,0 +1,1 @@
+The globally-muted arm is resolved: either the sentence is conditioned on the team's mute state, or the ruling that it stays unconditional is written down with its reason.

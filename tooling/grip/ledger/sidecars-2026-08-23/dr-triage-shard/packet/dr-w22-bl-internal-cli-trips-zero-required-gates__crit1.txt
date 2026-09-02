@@ -1,0 +1,1 @@
+internal/cli/cloud/** (or the specific reader files) is declared in a required gate's path set

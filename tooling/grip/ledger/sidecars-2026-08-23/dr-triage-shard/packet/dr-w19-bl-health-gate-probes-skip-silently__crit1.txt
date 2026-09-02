@@ -1,0 +1,1 @@
+MUTATION-PROVED: with python3 made unavailable to the probe, the gate reports the unchecked assertion instead of passing quietly — the before and after output are both pasted.

@@ -1,0 +1,1 @@
+The two sites are retired through the supported lifecycle path and the resulting fan-out is verified as 3, not 5, by re-reading the box webhook rows.

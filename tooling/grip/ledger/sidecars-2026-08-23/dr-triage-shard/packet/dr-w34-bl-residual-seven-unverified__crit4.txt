@@ -1,0 +1,1 @@
+An anti-vacuity control accompanies each count (a sanity total proving the query can return non-zero), per the standing rule that an all-zero result is a broken query until proven otherwise.

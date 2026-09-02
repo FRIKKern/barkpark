@@ -1,0 +1,1 @@
+Representative dense tables, navigation, forms, and narrow states retain readable wrapping, focus visibility, and no new horizontal overflow after any targeted repairs.

@@ -1,0 +1,1 @@
+If option (b) is chosen instead, the exit-code split is built with a probe in BOTH directions: a stale-head-only world exits 0 with the rows still printed and named in SUMMARY, and adding one ZOMBIED row to that same fixture flips it to exit 1

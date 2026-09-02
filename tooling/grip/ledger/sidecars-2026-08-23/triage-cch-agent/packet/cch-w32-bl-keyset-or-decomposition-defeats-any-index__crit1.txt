@@ -1,0 +1,1 @@
+The rewrite ships with no migration, and a test proves the stamp-only cursor arm (absent or non-UUID before_id) is behaviourally identical.
