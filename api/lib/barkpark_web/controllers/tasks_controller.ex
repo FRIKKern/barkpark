@@ -801,11 +801,16 @@ defmodule BarkparkWeb.TasksController do
             ok: false,
             reason: "doc_changed_since_claim",
             current_rev: current_rev,
-            changed_fields: changed_fields
+            changed_fields: changed_fields,
+            # pds-bl-close-409-hint-promises-absent-fields: the two VALUES were
+            # always here; the COMMAND that consumes them was not, so a caller
+            # read `current_rev` off the body and still went looking for the
+            # recovery. Naming it here is what makes the body self-sufficient.
+            message: Params.drift_hint(current_rev, changed_fields)
           })
 
         {:error, reason} ->
-          conflict(conn, reason, :close)
+          conflict(conn, reason, :close, fence_extras(conn, doc_id, reason))
       end
     else
       {:error, :missing, field} ->
@@ -1082,7 +1087,7 @@ defmodule BarkparkWeb.TasksController do
           # The criteria-grain conflicts ride an actionable `message` (D56): a
           # guard that refuses without saying what to type is a guard agents
           # route around.
-          conflict(conn, reason, :stamp)
+          conflict(conn, reason, :stamp, fence_extras(conn, doc_id, reason))
       end
     else
       {:error, :missing, field} ->
@@ -1143,11 +1148,15 @@ defmodule BarkparkWeb.TasksController do
   # 409 envelope: the reason token stays the machine-readable contract; a
   # criteria-grain reason ALSO carries a top-level `message` telling the caller
   # exactly what to pass next (the bp CLI prints it in place of the token).
-  defp conflict(conn, reason, surface) do
-    body = %{ok: false, reason: Params.reason_to_string(reason)}
+  defp conflict(conn, reason, surface, extra \\ %{}) do
+    body = Map.merge(%{ok: false, reason: Params.reason_to_string(reason)}, extra)
+
+    message =
+      Params.criteria_hint(reason, surface) ||
+        Params.fence_hint(reason, surface, Map.get(extra, :current_epoch))
 
     body =
-      case Params.criteria_hint(reason, surface) do
+      case message do
         nil -> body
         message -> Map.put(body, :message, message)
       end
@@ -1156,6 +1165,27 @@ defmodule BarkparkWeb.TasksController do
     |> put_status(:conflict)
     |> json(body)
   end
+
+  # dr-w14-bl-fenced-off-409-is-mute: `fenced_off` is the one close/stamp
+  # refusal whose remedy needs a number the caller CANNOT compute — the epoch
+  # the row carries now (a `bp task pulse` advances it, so the epoch handed out
+  # at claim time is stale after the first heartbeat). Read it back on the
+  # refusal path ONLY, so the 409 body names it (`current_epoch`) alongside the
+  # command that spends it, and the caller recovers without the re-read the bare
+  # token silently demanded. `fenced_off` always implies a live claim
+  # (`Tasks.Close.check_fencing/2` — no claim closes cleanly), so the lookup
+  # normally hits; a miss just degrades to the re-read sentence.
+  defp fence_extras(conn, doc_id, :fenced_off) do
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, %Document{content: %{"claim" => %{"epoch" => epoch}}}} when is_integer(epoch) ->
+        %{current_epoch: epoch}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp fence_extras(_conn, _doc_id, _reason), do: %{}
 
   # ─── POST /v1/tasks/:doc_id/pulse ───────────────────────────────────────
   # Now-line heartbeat + lease renewal in one atomic write (Tasks.Pulse; see

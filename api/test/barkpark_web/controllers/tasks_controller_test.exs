@@ -630,6 +630,218 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["reason"] == "fenced_off"
     end
 
+    # ── dr-w14-bl-fenced-off-409-is-mute ────────────────────────────────────
+    #
+    # The wrong-epoch 409 used to ship as a bare {"ok":false,"reason":
+    # "fenced_off"}: it told the caller its epoch was wrong and never which
+    # epoch is right, so recovery cost a re-read the refusal never asked for.
+    # The body must now NAME the current epoch and the command that spends it.
+    test "fenced_off names the CURRENT epoch and the re-run command",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("fenced-speaks"), scope, %{"acceptance_criteria" => []})
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+      assert is_integer(epoch)
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch + 998})
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+
+      # The machine-readable token is UNCHANGED — the bp CLI string-matches it.
+      assert payload["ok"] == false
+      assert payload["reason"] == "fenced_off"
+
+      # …and the body now carries the number recovery needs, plus the sentence.
+      assert payload["current_epoch"] == epoch
+
+      message = payload["message"]
+      assert is_binary(message) and message != "", "the wrong-epoch 409 is mute"
+      assert message =~ "epoch #{epoch}"
+      assert message =~ "bp task close <id> <worker> #{epoch}"
+      assert message =~ "Nothing was written"
+    end
+
+    test "fenced_off and not_holder are distinguishable by reason and BOTH teach a remedy",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("two-409s"), scope, %{"acceptance_criteria" => []})
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-A"}))
+
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      # Same endpoint, same task — the two refusals differ only in WHICH gate
+      # fired, so the reason token has to keep them apart and each message has
+      # to name its own way out.
+      fenced =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-A", observed_epoch: epoch + 42})
+        )
+
+      foreign =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-B", observed_epoch: epoch})
+        )
+
+      assert fenced.status == 409 and foreign.status == 409
+      fenced_payload = Jason.decode!(fenced.resp_body)
+      foreign_payload = Jason.decode!(foreign.resp_body)
+
+      assert fenced_payload["reason"] == "fenced_off"
+      assert foreign_payload["reason"] == "not_holder:worker-A"
+      refute fenced_payload["reason"] == foreign_payload["reason"]
+
+      for {label, payload, needle} <- [
+            {"fenced_off", fenced_payload, "bp task close"},
+            {"not_holder", foreign_payload, "holder_override"}
+          ] do
+        message = payload["message"]
+        assert is_binary(message) and message != "", "#{label} carries no remedy sentence"
+        assert message =~ needle, "#{label}'s remedy does not name what to type"
+      end
+    end
+
+    # ── pds-bl-close-409-hint-promises-absent-fields ────────────────────────
+    #
+    # The two VALUES were always on the wire; the COMMAND that spends them was
+    # not, so an operator read `current_rev` off the body and still had to go
+    # find the recovery. The body alone must now be enough.
+    test "doc_changed_since_claim body alone carries the whole recovery",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("drift-speaks"), scope, %{
+          "description" => "v1 brief",
+          "acceptance_criteria" => []
+        })
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/claim", Jason.encode!(%{worker_id: "worker-1"}))
+
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+
+      row = Repo.get_by!(Document, doc_id: task.doc_id)
+      new_content = Map.put(row.content, "description", "v2 brief")
+
+      {1, _} =
+        from(d in Document, where: d.id == ^row.id and d.rev == ^row.rev)
+        |> Repo.update_all(set: [content: new_content, rev: Internal.generate_rev()])
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+      current_rev = Repo.get_by!(Document, doc_id: task.doc_id).rev
+
+      assert payload["reason"] == "doc_changed_since_claim"
+      assert payload["current_rev"] == current_rev
+      assert payload["changed_fields"] == ["description"]
+
+      message = payload["message"]
+      assert is_binary(message) and message != ""
+      assert message =~ "description"
+      # The rev is SUBSTITUTED into the command — no second read to run it.
+      assert message =~ "--set observed_rev=#{current_rev}"
+    end
+
+    # ── the status-position refusal (measured live 2026-09-02) ──────────────
+    #
+    # `bp task close <id> <worker> <epoch> "<a whole sentence>"` parses the
+    # sentence as the LIFECYCLE STATUS. The gate is right to refuse it; the
+    # refusal was `invalid_lifecycle:<the whole sentence>` and nothing else.
+    test "a close REASON in the status position says so and prints the fix",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("status-position"), scope, %{"acceptance_criteria" => []})
+      sentence = "landed #14383 @ 63b89bef30, all four gates green"
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            observed_epoch: 1,
+            lifecycle_status: sentence
+          })
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+
+      # The gate does NOT widen: the token still reports the rejected value.
+      assert payload["reason"] == "invalid_lifecycle:#{sentence}"
+
+      message = payload["message"]
+      assert is_binary(message) and message != ""
+      # …names the mistake,
+      assert message =~ "STATUS position"
+      assert message =~ "the reason 5th"
+      # …names every status that IS allowed,
+      for status <- ~w(done cancelled blocked), do: assert(message =~ status)
+      # …and prints the corrected command.
+      assert message =~ ~s|bp task close <id> <worker> <epoch> done "<your reason>"|
+
+      reread = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      assert Jason.decode!(reread.resp_body)["doc"]["lifecycle_status"] == "open",
+             "the refusal wrote nothing"
+    end
+
+    test "a status-shaped typo is refused by NAMING the allowed statuses",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("status-typo"), scope, %{"acceptance_criteria" => []})
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "worker-1",
+            observed_epoch: 1,
+            lifecycle_status: "finished"
+          })
+        )
+
+      assert refused.status == 409
+      payload = Jason.decode!(refused.resp_body)
+      assert payload["reason"] == "invalid_lifecycle:finished"
+
+      message = payload["message"]
+      assert message =~ ~s|"finished" is not a close status|
+      for status <- ~w(done cancelled blocked), do: assert(message =~ status)
+      # A one-word typo is NOT a misplaced reason — it must not be told so.
+      refute message =~ "STATUS position"
+    end
+
     test "error path: 409 doc_changed_since_claim when the brief changed under the claim",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-changed")

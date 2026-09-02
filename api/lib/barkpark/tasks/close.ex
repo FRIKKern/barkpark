@@ -90,6 +90,18 @@ defmodule Barkpark.Tasks.Close do
   # land digest whose files overlap another in-progress task's claimed scope.
   @event_landed_under_you "task.landed_under_you"
 
+  @doc """
+  The three terminal lifecycle statuses a close may write.
+
+  Public because the refusal has to be able to NAME them: an
+  `{:error, {:invalid_lifecycle, s}}` that lists nothing leaves the caller
+  guessing, and a second hand-written copy of the list in the HTTP layer is a
+  copy that drifts (`BarkparkWeb.TasksController.Params.criteria_hint/2` reads
+  it from here).
+  """
+  @spec closed_lifecycle_statuses() :: [String.t()]
+  def closed_lifecycle_statuses, do: @closed_lifecycle_statuses
+
   # `close/3` keeps the contract every existing caller pattern-matches on:
   # `{:ok, %Document{}}`. `close_with_receipt/3` is the same call that also says
   # WHICH of the two success shapes happened — `:closed` for a write that landed
