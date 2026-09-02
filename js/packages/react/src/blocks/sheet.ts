@@ -28,7 +28,9 @@ const MERGE_AREA_CAP = 10_000
 // `Engine.error_values/0` by api/test/barkpark/sheets_parity_test.exs), so
 // neither side can drift alone. Exported for that test only — it is not part
 // of the package's public entry points.
-export const ERROR_VALUES = new Set(['#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!'])
+export const ERROR_VALUES = new Set([
+  '#CYCLE!', '#REF!', '#VALUE!', '#DIV/0!', '#N/A', '#NUM!', '#SPILL!', '#NAME?',
+])
 
 // A cell whose ENTIRE value is an http(s) URL renders as an anchor.
 const SHEET_URL_RE = /^https?:\/\/[^\s<>"']+$/i
