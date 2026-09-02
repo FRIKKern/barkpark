@@ -6386,7 +6386,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    overflow-wrap:normal, i.e. an unbreakable 158-glyph run with nothing to
    break it.
    WHAT A PERSON SEES — and it is NOT the page. Measured on pre-fix bytes with
-   the committed 158-char fixture (`account-modal-revoke`, Chrome
+   the committed 158-char fixture (`account-modal-cruel-identity` — it was
+   `account-modal-revoke` until cch-w23-bl-cruel-identity-own-scenario gave the
+   cruel identity a key of its own; the STRING is unchanged, so are these px —
+   Chrome
    150.0.7871.187, font pinned): `.am-name` scrollWidth 1276 against clientWidth
    172 @320 and 297 @1440 — the SAME 1276 at both ends, so it is a CONTENT
    defect, not a responsive one — and `.modal-root` 1374/320 @320, 1811/1440
