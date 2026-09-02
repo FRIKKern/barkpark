@@ -4,7 +4,8 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
   question-id allowlisted, size-capped, honeypotted. Every test posts
   anonymously — the whole point of the `:public_api` bucket.
   """
-  use BarkparkWeb.ConnCase, async: true
+  # sync: resets Barkpark.RateLimiter; :barkpark_rate_limiter is a :named_table — whole-node state
+  use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.RateLimiterSandbox
   import Barkpark.TenancyFixtures

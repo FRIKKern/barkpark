@@ -29,7 +29,8 @@ defmodule BarkparkWeb.MediaUnscopedConfinementTest do
   while breaking every legacy single-tenant install.
   """
 
-  use BarkparkWeb.ConnCase, async: true
+  # sync: deletes whole workspaces (Tenancy.delete_workspace cascade) — the wide locks cancel/deadlock concurrent peers
+  use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
