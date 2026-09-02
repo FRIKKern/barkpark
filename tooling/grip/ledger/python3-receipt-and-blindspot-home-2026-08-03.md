@@ -54,9 +54,23 @@ As recorded on 2026-08-03 the invocation carried `--selftest`:
 
     (cd /tmp/pdsx && PATH=/tmp/nopy3 bash scripts/pds-ledger-census.sh --selftest; echo rc=$?)
 
-`--selftest` is not an argument of `scripts/pds-ledger-census.sh`. Its usage block
-offers `--lens`, `--assert-round-done`, `--anchor-from-paper`, `--anchor`, `--json`,
-`--fixture-dir`, `--server` and `--token`, and nothing else. The census's selftest is
+`--selftest` is not an argument of `scripts/pds-ledger-census.sh`. Its argparse usage,
+printed verbatim by the third leg of the table below, is:
+
+    usage: pds-ledger-census.sh [-h] [--root ROOT] [--dataset DATASET]
+                                [--type DOCTYPE] [--page-limit PAGE_LIMIT]
+                                [--pace PACE] [--retries RETRIES]
+                                [--lens {closure,children}] [--assert-round-done]
+                                [--anchor-from-paper WAVE-PAPER-SLUG]
+                                [--anchor ISO-8601] [--anchor-unbound]
+                                [--no-anchor] [--assert-reason-artifacts]
+                                [--reason-sample REASON_SAMPLE]
+                                [--reason-sample-seed REASON_SAMPLE_SEED]
+                                [--reason-repo REASON_REPO] [--json]
+                                [--fixture-dir FIXTURE_DIR] [--server SERVER]
+                                [--token TOKEN]
+
+Seventeen options, and no `--selftest` among them. The census's selftest is
 the SEPARATE harness `scripts/pds-ledger-census_test.sh` — the one §4 and §5 below
 already invoke correctly, and the one `.github/workflows/shell-harnesses.yml` runs as
 the `pds-harnesses` job. That separation is deliberate (most gate scripts in this repo
