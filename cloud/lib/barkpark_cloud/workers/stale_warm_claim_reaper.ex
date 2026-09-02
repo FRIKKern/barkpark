@@ -6,9 +6,10 @@ defmodule BarkparkCloud.Workers.StaleWarmClaimReaper do
 
   `Registry.reap_stale_warm_claims/0` is correct and is the ONLY thing that
   recovers a leaked `warm_servers` claim, but until this worker existed its only
-  two production call sites were both INSIDE a claim transaction
-  (`claim_warm_server/1` and `claim_warm_server_for_refresh/2` in
-  cloud/lib/barkpark_cloud/registry.ex). So recovery was LAZY: it ran only when a
+  two production call sites were both INSIDE a claim transaction — `claim_warm/2`
+  (backing `claim_warm_server/1` and `claim_warm_server_for_retire/1`) and
+  `claim_warm_server_for_refresh/2`, both in
+  cloud/lib/barkpark_cloud/registry.ex. So recovery was LAZY: it ran only when a
   NEW claim arrived — exactly the disease `StaleProvisionJobReaper`'s moduledoc
   was written to kill.
 
@@ -34,9 +35,13 @@ defmodule BarkparkCloud.Workers.StaleWarmClaimReaper do
   uses (12 minutes by default — the Go worker's 8-minute provision timeout plus
   margin for the assign chain), so the scheduled path and the in-claim path can
   never disagree, and a claim NEWER than that window is untouched. A reaper that
-  ate live claims would be far worse than the leak it fixes: the `claimed_at <
-  stale_before` predicate inside `reap_stale_warm_claims/0` is what spares a
-  running assign.
+  ate live claims would be far worse than the leak it fixes: the STRICT
+  `w.claimed_at < ^stale_before` predicate inside `reap_stale_warm_claims_txn/1`,
+  where `stale_before = now - warm_stale_after_seconds()`, is the one thing that
+  spares a running assign — flip that comparison or collapse that window to zero
+  and this worker deletes claims out from under a live provisioner. Pinned by the
+  "safety under a live provisioner" tests in
+  test/barkpark_cloud/workers/stale_warm_claim_reaper_test.exs.
 
   Idempotent: a sweep that finds nothing returns `{:ok, %{recovered: 0}}` and
   never raises. The `unique` window (60s) collapses a slow sweep plus the next
