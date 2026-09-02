@@ -168,6 +168,34 @@ defmodule BarkparkCloud.Notifications.EventEmail do
        "Your Barkpark free trial ends #{trial_window(payload)}. #{name(payload)} is torn down " <>
          "automatically when the trial ends. Only the team owner can upgrade the plan."}
 
+  # cch-w52-bl — the TEARDOWN's own alert, and it is a different fact from the
+  # two arms above: `trial_expiring` is the advance notice (future tense, T-3 /
+  # T-1), this one fires from the worker's teardown arm and reports what has
+  # already been done. It NAMES the instances — `Render.teardown_clause/1` is the
+  # single formatter both rails use, so the inbox and Slack name the same
+  # instances the same way — because "your trial ended" without the names leaves
+  # a team guessing which of its boxes went.
+  #
+  # The role split is the same one `subscription_past_due` and `trial_expiring`
+  # carry, for the same reason: the one action left routes to
+  # `POST /v1/billing/checkout`, a `require_primary_team_owner` door that refuses
+  # a member AND a non-owner admin. The audience is untouched (every member is
+  # mailed — the reach of a teardown notice must be maximal); only the sentence
+  # changes. There is no "export your data" offer here: the deprovision has been
+  # enqueued for every box by the time this is dispatched, so an offer to export
+  # would be a promise the control plane cannot keep.
+  defp render(:trial_expired, payload, true),
+    do:
+      {"Your Barkpark free trial has ended",
+       "Your Barkpark free trial has ended and #{Render.teardown_clause(payload)}. " <>
+         "Subscribe to a paid plan to run Barkpark again."}
+
+  defp render(:trial_expired, payload, false),
+    do:
+      {"Your Barkpark free trial has ended",
+       "Your Barkpark free trial has ended and #{Render.teardown_clause(payload)}. " <>
+         "Only the team owner can subscribe to a paid plan."}
+
   defp render(event, payload, _owner?),
     do: {"Barkpark Cloud notification", "Event: #{event}.#{detail(payload)}"}
 

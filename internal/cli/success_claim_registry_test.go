@@ -891,7 +891,7 @@ func renderTaskCreatedClaim(out *writer, resp any) {
 		out.errf("task create: server returned no id")
 		return
 	}
-	renderTaskCreated(out, taskCreatedClaimDraftID, rec)
+	renderTaskCreated(out, taskCreatedClaimDraftID, rec, nil)
 }
 
 // requiredEnrollments is the FLOOR: deleting a row to make the gate green fails

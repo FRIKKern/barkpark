@@ -427,22 +427,38 @@ defmodule BarkparkWeb.ShareController do
   # membership in the foreign workspace), so swapping this call for authorize/3
   # turns it RED.
   #
-  # TOTALITY: `workspace_admin?/2` raises FunctionClauseError on a nil id and
-  # Ecto.Query.CastError on any non-UUID binary (including ""), so every id is
-  # routed through `Repo.uuid_or_nil/1` first and anything that does not cast is
-  # a DENIAL — a 500 here would trade a leak for a crash oracle.
-  defp workspace_admin?(conn, workspace_id) do
-    actor = conn.assigns[:api_token]
-
-    case {actor, Repo.uuid_or_nil(workspace_id)} do
-      {%ApiToken{}, ws_id} when is_binary(ws_id) -> TenancyAuth.workspace_admin?(actor, ws_id)
-      _ -> false
-    end
-  end
+  # TOTALITY IS THE CHOKEPOINT'S JOB — it is no longer re-done here. This helper
+  # used to hand-roll `case {actor, Repo.uuid_or_nil(workspace_id)}`, written
+  # when `Tenancy.Auth` raised FunctionClauseError on a nil id and
+  # Ecto.Query.CastError on any non-UUID binary. It does not any more:
+  # `Tenancy.Auth.membership/3` runs BOTH ids through `Repo.uuid_or_nil/1`
+  # (`@canonical capability:uuid-guarded-fetch`, repo.ex) and each arity carries
+  # a terminal `-> nil` clause, so a nil actor, a non-`%ApiToken{}` principal, a
+  # nil workspace id and an uncastable one all reach the SAME `false` they
+  # reached through the wrapper — a DENIAL, never a 500. Made total by #12616
+  # (c8cb3e35e9, the membership/2 fail-closed seam) and #12710 (7a42b45576,
+  # which moved the `Repo.uuid_or_nil/1` pair INTO membership/3 and gave that
+  # arity its own terminal denial); pinned by
+  # `test/barkpark_web/live/studio/caps_non_uuid_workspace_denies_test.exs` and,
+  # for this seam specifically, by the "the chokepoint denies a malformed
+  # workspace id" test in this controller's own suite. Re-adding a local uuid
+  # dance here would teach the next reader that every caller must remember it.
+  defp workspace_admin?(conn, workspace_id),
+    do: TenancyAuth.workspace_admin?(conn.assigns[:api_token], workspace_id)
 
   # A token id is revocable when its row exists AND the caller is a workspace
   # admin of the ROW's workspace. A row with no workspace_id is not revocable
   # through this surface (nil is a denial, never a pass).
+  #
+  # THE `Repo.uuid_or_nil/1` BELOW STAYS — it is NOT the redundant wrapper the
+  # sibling helper just shed, and it does not guard `Tenancy.Auth` at all. It
+  # guards the bare `Repo.get(ApiToken, id)` on the next line: that is Ecto's
+  # own fetch, NOT a Barkpark chokepoint, and binding a non-UUID string to a
+  # `:binary_id` column raises `Ecto.Query.CastError` → 500. There is no total
+  # by-id accessor for an `ApiToken` in `Barkpark.Auth` today, so this guard is
+  # the only thing standing between `DELETE /v1/shares/tokens/not-a-uuid` and a
+  # crash oracle. Delete it and `share_controller_test.exs`'s "a malformed
+  # (non-UUID) token id is a clean 404" test goes RED with a CastError.
   defp revocable_by?(conn, token_id) do
     with id when is_binary(id) <- Repo.uuid_or_nil(token_id),
          %ApiToken{workspace_id: ws_id} <- Repo.get(ApiToken, id) do

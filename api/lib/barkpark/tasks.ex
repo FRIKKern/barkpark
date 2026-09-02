@@ -87,6 +87,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.Fence
+  alias Barkpark.Tasks.Landed
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue, Release}
   alias Barkpark.Tasks.ClaimFence
   alias Barkpark.Tasks.Move
@@ -537,6 +538,28 @@ defmodule Barkpark.Tasks do
   `:invalid_criteria`. See `Barkpark.Tasks.Stamp`.
   """
   defdelegate stamp(task_id, worker_id, opts \\ []), to: Stamp
+
+  @doc """
+  Record a LANDING on a task without holding its claim — the `bp task landed`
+  verb behind `POST /v1/tasks/:doc_id/landed`.
+
+      Tasks.record_landing(task_uuid,
+        commit: "a1b2c3d", pr: "14993", note: "PR #14993 merged to main", criterion: 6)
+
+  There is NO `worker_id` and NO `observed_epoch` on purpose: the caller is a
+  push-to-main workflow that holds no claim and knows no epoch, which is exactly
+  why `stamp/3` (holder-gated, epoch-fenced) refuses it 409 `:not_holder`. What
+  is NOT relaxed is the blast radius — this writes `content.landed` (union-merged
+  through the same `Tasks.Internal.merge_landed/2` a close uses) and, with
+  `:criterion`, ONE acceptance criterion that is merge-shaped and not already
+  met. Nothing else. Emits `task.landed`.
+
+  Errors: `:not_found`, `:empty_landing`, `:invalid_criteria`, `:note_required`,
+  `:criteria_index_out_of_range`, `:criterion_already_met`,
+  `:criterion_not_merge_shaped`, `:criterion_text_required`, `:stale_claim`.
+  See `Barkpark.Tasks.Landed`.
+  """
+  defdelegate record_landing(task_id, opts \\ []), to: Landed, as: :record
 
   @doc """
   Pulse the task's now-line + renew its lease in ONE atomic write — the

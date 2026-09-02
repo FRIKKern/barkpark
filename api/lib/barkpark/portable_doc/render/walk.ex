@@ -75,7 +75,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # THIS mirror EQUALS that list, so the two are a CHECKED invariant, not a
   # silent fork. A cell whose plain string is in this set renders red/bold in
   # BOTH palettes.
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
 
   # @doc false accessor — exists ONLY so the drift-guard test can assert this
   # local mirror equals `Barkpark.Plugins.Sheets.Engine.error_values/0`.

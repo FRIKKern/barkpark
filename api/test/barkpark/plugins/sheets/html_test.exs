@@ -36,6 +36,27 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
     }
   end
 
+  describe "export/2 — error cells" do
+    # #NAME? is an error VALUE like every other `t: "e"` code — the html
+    # exporter renders a cell's "v" verbatim, so it must reach the page as the
+    # error string, not as an empty cell.
+    test "a #NAME? cell reaches the page as the error string" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Data",
+            "cells" => %{
+              "A1" => %{"v" => "Label"},
+              "A2" => %{"f" => "=FOO(1)", "v" => "#NAME?", "t" => "e"}
+            }
+          }
+        ]
+      }
+
+      assert Html.export(content, "T") =~ "#NAME?"
+    end
+  end
+
   describe "export/2 — page skeleton" do
     test "always emits a valid standalone HTML document" do
       html = Html.export(single_tab_content(), "Report")

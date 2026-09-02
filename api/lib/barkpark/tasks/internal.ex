@@ -190,8 +190,20 @@ defmodule Barkpark.Tasks.Internal do
 
   # ─── Acceptance-criteria merge (shared by Close and Stamp) ────────────────
   #
-  # Applies `[%{"index" => i, ...}]` updates onto content["acceptance_criteria"].
-  # Two update shapes, discriminated by the presence of an `"attempt"` key:
+  # Applies updates onto content["acceptance_criteria"]. An update names its row
+  # in one of TWO dialects, and a caller speaks exactly one of them per command
+  # (the mixed-array refusal lives one layer up, in `Params.parse_criteria/1`,
+  # where it costs no document read):
+  #
+  #   * INDEXED — `%{"index" => i, …}`, 0-based, with `"criterion"` as the
+  #     stored-text CAS. REQUIRED on any met-flip (D56, below).
+  #   * TEXT-KEYED — `%{"criterion" => "<the exact stored wording>", …}` with no
+  #     index: the AUTHORING rubric shape, resolved to an index here by exact
+  #     match (see `apply_criteria_update/2`'s text-keyed clause). It carries its
+  #     own guard by construction, so it can never flip a neighbour.
+  #
+  # Orthogonally, two update KINDS, discriminated by the presence of an
+  # `"attempt"` key:
   #
   #   * met/evidence (close + `stamp --met`): `met` defaults to true —
   #     CLOSE-TIME semantics, you are proving the expectation. Callers that
@@ -287,6 +299,35 @@ defmodule Barkpark.Tasks.Internal do
 
   def merge_criteria(_content, _other), do: {:error, :invalid_criteria}
 
+  # TEXT-KEYED ENTRIES (the AUTHORING rubric shape). An update with NO "index"
+  # but a non-empty "criterion" names its row the way `bp task get` prints it —
+  # `%{"criterion" => …, "met" => …, "evidence" => …}`, exactly the stored row —
+  # so an agent can flip the rubric it just read instead of reconstructing
+  # 0-based indices by hand (the ergonomic half of gh-2314).
+  #
+  # Resolution is EXACT string equality against the stored `criterion` text,
+  # performed HERE — inside the caller's transaction, against the list as the
+  # write sees it — never in the pure param parser, which has no document. The
+  # resolved index then falls through to the SAME indexed clause below, so a
+  # text-keyed update inherits every guard verbatim: the text it resolved by IS
+  # the `criterion` CAS, which means a met-flip is guarded by construction.
+  #
+  # AMBIGUITY IS REFUSED, NEVER GUESSED. Two stored rows may carry identical
+  # wording; picking the first would be the same silent-neighbour bug D56 closed
+  # for unguarded indices, wearing a different hat. Zero matches is equally
+  # loud. Both abort the whole write:
+  #
+  #   * `:criterion_not_found`  — no stored row has that exact wording (the text
+  #     was edited, or the caller retyped rather than copied).
+  #   * `:criterion_ambiguous`  — 2+ rows share it; pass `"index"` to say which.
+  defp apply_criteria_update(list, %{"criterion" => text} = update)
+       when is_binary(text) and text != "" and not is_map_key(update, "index") do
+    case resolve_criterion_index(list, text) do
+      {:ok, index} -> apply_criteria_update(list, Map.put(update, "index", index))
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp apply_criteria_update(list, %{"index" => index} = update)
        when is_integer(index) and index >= 0 do
     case Enum.at(list, index) do
@@ -328,6 +369,19 @@ defmodule Barkpark.Tasks.Internal do
   end
 
   defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
+
+  # Exact-match row lookup for a text-keyed update. Exactly one hit resolves;
+  # zero and many are both named refusals (see the clause above).
+  defp resolve_criterion_index(list, text) do
+    list
+    |> Enum.with_index()
+    |> Enum.filter(fn {entry, _i} -> is_map(entry) and Map.get(entry, "criterion") == text end)
+    |> case do
+      [{_entry, index}] -> {:ok, index}
+      [] -> {:error, :criterion_not_found}
+      _many -> {:error, :criterion_ambiguous}
+    end
+  end
 
   # A guard only guards when it has words: `nil` and `""` are no guard at all.
   # (An `""` that "matches" a text-less criterion row must not buy a free flip.)
@@ -400,6 +454,55 @@ defmodule Barkpark.Tasks.Internal do
     else
       {:error, :invalid_criteria}
     end
+  end
+
+  # ─── The land digest (ONE merge rule, shared) ─────────────────────────────
+  #
+  # UNION into any existing `content.landed` so a re-close, a CI backfill and a
+  # non-holder landing mark ACCUMULATE rather than clobber. A nil/empty/
+  # malformed payload leaves content untouched (never erases a prior digest).
+  #
+  # This lived as a `defp` on `Tasks.Close` until `Tasks.Landed` needed the SAME
+  # rule (task-59fe7b40b719b379): two verbs write one key, so they must not grow
+  # two subtly-different merges — the `merge_criteria` precedent, applied to the
+  # digest.
+  #
+  # `commits` and `notes` joined the key list with that move. They are the two
+  # halves of a landing SENTENCE ("this commit, and what it means") that only a
+  # landing mark carries; before, a caller that passed either got a 2xx and no
+  # persisted key. Widening a union can only persist MORE of what a caller
+  # actually sent — no existing close passes them, so close's stored shape is
+  # unchanged.
+  @landed_keys ~w(prs files capability_slugs commits notes)
+
+  def merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
+    existing =
+      case Map.get(content, "landed") do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    merged =
+      Enum.reduce(@landed_keys, existing, fn key, acc ->
+        case normalize_landed_list(Map.get(landed, key) || Map.get(landed, safe_atom(key))) do
+          [] -> acc
+          incoming -> Map.put(acc, key, Enum.uniq((Map.get(acc, key) || []) ++ incoming))
+        end
+      end)
+
+    if map_size(merged) == 0, do: content, else: Map.put(content, "landed", merged)
+  end
+
+  def merge_landed(content, _), do: content
+
+  def normalize_landed_list(nil), do: []
+  def normalize_landed_list(list) when is_list(list), do: Enum.reject(list, &is_nil/1)
+  def normalize_landed_list(scalar), do: [scalar]
+
+  def safe_atom(k) do
+    String.to_existing_atom(k)
+  rescue
+    ArgumentError -> :__missing__
   end
 
   # Mutation-events insert. The existing `mutation_events` schema (used by the

@@ -53,10 +53,18 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
     end
   end
 
+  # PDS-D291: one MET criterion keeps this file's `done` closes out of the
+  # close-artifact gate, which refuses a `done` close of a criteria-less
+  # kind:task row whose reason names no PR+sha and pastes no run. These tests
+  # measure the claim/close machinery, not the close reason.
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
       Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+        },
         content_extra
       )
 

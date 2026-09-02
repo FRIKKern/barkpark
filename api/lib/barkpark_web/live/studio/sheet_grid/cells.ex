@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # error_values/0` (@canonical engine-error-vocabulary); a drift-guard test
   # (sheets_parity_test) asserts THIS mirror EQUALS that list, so a new code
   # can't silently fork.
-  @engine_errors ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
+  @engine_errors ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
 
   # @doc false accessor — exists ONLY so the drift-guard test can assert this
   # local mirror equals `Barkpark.Plugins.Sheets.Engine.error_values/0`.
@@ -130,7 +130,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
         else: classes
 
     v = cell && Map.get(cell, "v")
-    classes = if is_binary(v) and v in @engine_errors, do: ["sheet-err" | classes], else: classes
+
+    # `sheet-err` has TWO sources. The obvious one is a computed error value.
+    # The second is a cell whose formula names a function the engine cannot
+    # evaluate but which KEPT its imported value (`stale_fn`, main's ruling
+    # 2026-09-02): that number is real — Excel computed it — so it keeps
+    # rendering, but a plausible number the engine did not produce must never
+    # hide behind the quiet stale dot. It is error-styled AND titled
+    # (`cell_title/1`) with the name it could not evaluate.
+    classes =
+      if (is_binary(v) and v in @engine_errors) or unsupported_fn(cell),
+        do: ["sheet-err" | classes],
+        else: classes
 
     classes =
       if cell && Map.get(cell, "stale") == true, do: ["sheet-stale" | classes], else: classes
@@ -153,6 +164,30 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
     Enum.join(classes, " ")
   end
+
+  # The `title` a `<td>` carries — hover/inspect text, `nil` for an ordinary
+  # cell so LiveView omits the attribute entirely. Today its ONE source is the
+  # unsupported-function marker the engine writes next to a kept import value
+  # (`"stale_fn" => "FOO"`): the value stays on screen, and this says why it is
+  # not live. Twin of the `sheet-err` arm in `cell_class/6` — the class is the
+  # loud style, this is the reason.
+  def cell_title(cell) do
+    case unsupported_fn(cell) do
+      nil -> nil
+      fname -> "not evaluated: " <> fname <> " is not supported"
+    end
+  end
+
+  # The engine's `"stale_fn"` stamp — the first function name a formula used
+  # that the engine does not implement — or nil for every other cell.
+  defp unsupported_fn(cell) when is_map(cell) do
+    case Map.get(cell, "stale_fn") do
+      fname when is_binary(fname) and fname != "" -> fname
+      _ -> nil
+    end
+  end
+
+  defp unsupported_fn(_cell), do: nil
 
   # A cell whose `"fmt"` is the display-only "checkbox" class — the grid renders
   # it as a toggleable glyph (see `display/1`) with a `role="checkbox"` span.

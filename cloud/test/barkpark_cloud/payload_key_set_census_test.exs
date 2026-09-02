@@ -2008,6 +2008,104 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
            """
   end
 
+  # ---------------------------------------------------------------------------
+  # THE PINS ARE MODULE ATTRIBUTES, AND MODULE ATTRIBUTES ARE LAST-WINS
+  # (found 2026-09-02 while rebasing #14940 onto the merged #14886)
+  #
+  # Every pin above is a committed literal held in a module attribute, and
+  # `@go_tag_pinned 313` followed twelve lines later by `@go_tag_pinned 322`
+  # COMPILES: Elixir keeps the LAST write, the census reads 322, and there is no
+  # warning, no red, and nothing anywhere in this file that can tell you it sets
+  # its own pin twice. That is not hypothetical. #14795 (space residual)
+  # re-emitted the line as 313, #14886 (slot_units) re-emitted it as 322, a
+  # rebase kept BOTH, and this census was GREEN over a file with two assignments
+  # to the same pin. Every arm above measures the TREE; not one of them can see
+  # the census's own source, so the one thing they all depend on was the one
+  # thing nothing checked.
+  #
+  # This arm reads the file the census is written in and refuses when a pin is
+  # assigned anything other than exactly once, naming the attribute and EVERY
+  # line it is set on. Deliberately whole-FILE rather than per-module: a pin name
+  # that turns up in two modules of this file is the same ambush wearing a
+  # different hat, and every pin here is uniquely named today.
+  #
+  # THE LIST IS DISCOVERED, NOT DECLARED, so it cannot rot behind a new pin: an
+  # `@name <integer>` line IS a pin by construction. The four the report named
+  # are then asserted present, so a discovery that quietly finds nothing reds
+  # instead of passing over an empty set.
+  @required_pins ~w(go_tag_pinned emitted_pinned barkpark_family_keys barkpark_family_keys_blind)a
+
+  test "SINGLE PIN: every pin is assigned EXACTLY ONCE in this file (last-wins is invisible)" do
+    path = __ENV__.file
+
+    assert File.exists?(path),
+           "the census cannot read its own source at #{path}; this arm is vacuous without it"
+
+    lines = path |> File.read!() |> String.split("\n")
+
+    discovered =
+      lines
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^\s*@([a-z_]+) -?\d+\s*$/, line) do
+          [_, name] -> [String.to_atom(name)]
+          nil -> []
+        end
+      end)
+      |> Enum.uniq()
+
+    for required <- @required_pins do
+      assert required in discovered,
+             "@#{required} is assigned to no integer literal anywhere in " <>
+               "#{Path.relative_to_cwd(path)} — the pin was renamed or deleted, and this " <>
+               "arm would have gone vacuous over it rather than red."
+    end
+
+    sites = Map.new(discovered, fn name -> {name, assignment_lines(lines, name)} end)
+
+    doubled = Enum.reject(sites, fn {_name, at} -> length(at) == 1 end)
+
+    assert doubled == [],
+           """
+           #{length(doubled)} of #{map_size(sites)} pin(s) are NOT assigned exactly once in
+           #{Path.relative_to_cwd(path)}:
+
+           #{Enum.map_join(doubled, "\n", fn {name, at} -> "               #{String.pad_trailing("@" <> Atom.to_string(name), 30)} assigned #{length(at)} time(s), at line(s) #{Enum.join(at, ", ")}" end)}
+
+           Elixir module attributes are LAST-WINS. Two assignments COMPILE, the
+           census silently reads the second, and every arm above stays green over
+           a file that sets its own pin twice — which is how a rebase that kept
+           both #14795's 313 and #14886's 322 shipped a green gate over a
+           double-set go-tag pin.
+
+           Delete the stale line; keep ONE. Do NOT sum the two values and do not
+           assume the surviving one is right: re-measure on the MERGED tree with
+           the 999-technique, or read the value the PIN CO-EDIT arm prints, and
+           write that.
+           """
+
+    # AND IT CAN LOSE. The counter is run against a source that sets one pin
+    # twice — the exact shape this arm exists for — so an edit that neuters the
+    # pattern reds here instead of going quietly blind over the real file.
+    assert assignment_lines(
+             ["  @go_tag_pinned 313", "  x = 1", "  @go_tag_pinned 322"],
+             :go_tag_pinned
+           ) == [1, 3]
+
+    # And a pin is not a PREFIX of its neighbour: the `_blind` line must not
+    # count toward `@barkpark_family_keys`, or the two pins would red as one.
+    assert assignment_lines(["  @barkpark_family_keys_blind 49"], :barkpark_family_keys) == []
+  end
+
+  # The line numbers (1-based) this file assigns `@name` on.
+  defp assignment_lines(lines, name) do
+    pattern = ~r/^\s*@#{name}\s/
+
+    lines
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _no} -> Regex.match?(pattern, line) end)
+    |> Enum.map(fn {_line, no} -> no end)
+  end
+
   test "UNRESOLVABLE KEYS RED rather than drop — proven against merge_job_status/4 itself" do
     # WITHOUT the call site's bindings, both keys are parameters and cannot be
     # resolved. They must be REFUSED by name and line, never silently dropped —

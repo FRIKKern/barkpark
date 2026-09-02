@@ -2401,7 +2401,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List executable, unblocked tasks (priority order by default).",
+        "summary": "List claimable tasks: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row — priority order by default.",
         "tags": [
           "task"
         ],
@@ -2765,6 +2765,63 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/chat/sessions/{id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "chat.get_attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one chat attachment back by its opaque id (base64 payload; never served through any media route).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/auth/app-tokens": {
@@ -5318,6 +5375,75 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/chat/sessions/{id}/answer": {
+      "post": {
+        "operationId": "chat.answer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: request_id, answers.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Answer an AskUserQuestion card with the option label(s) the human picked (question rows only).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/plugins/bulldocs/intents/{id}/processed": {
       "post": {
         "operationId": "bulldocs.intent-processed",
@@ -6244,6 +6370,75 @@
           "cycle"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/chat/sessions/{id}/attachments": {
+      "post": {
+        "operationId": "chat.upload_attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: data.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upload an image attachment to a chat session's chat-owned store (png|jpeg|gif|webp; base64 body).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay": {
@@ -9428,6 +9623,75 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/tasks/{doc_id}/landed": {
+      "post": {
+        "operationId": "task.landed",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so a second landing accumulates a second commit instead of replacing the first, and a close's own land digest is never clobbered (one merge rule, shared with close). --criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries \"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met (409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: not lifecycle_status, not the claim, not a second criterion.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/shares/tokens/{token_id}": {
@@ -15505,7 +15769,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Three honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), and a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override), and none of them discharges another; see the set flag.",
+        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Four honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted), and a done close of a kind:task row with ZERO acceptance criteria whose reason names no PR+sha and pastes no run (409 close_reason_needs_artifact) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override / close_reason_override), and none of them discharges another; see the set flag.",
         "tags": [
           "task"
         ],
@@ -16934,7 +17198,7 @@
       "name": "cycle"
     },
     {
-      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
+      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive, plus chat-owned attachment upload/read (never the media plugin). Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
       "name": "chat"
     },
     {

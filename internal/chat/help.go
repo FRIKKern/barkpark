@@ -77,6 +77,7 @@ var helpSections = []helpSection{
 		{"esc", "interrupt (mid-turn) · detach to herd (idle)"},
 		{"ctrl+a / ctrl+r", "allow / deny the focused pending card"},
 		{"tab", "cycle to the next pending card"},
+		{"ctrl+f", "expand/collapse the settled turn folds"},
 		{"ctrl+b", "back to the sessions herd"},
 		{"ctrl+p", "flip Plan ⇄ Autopilot mode"},
 		{"ctrl+u", "clear the composer"},

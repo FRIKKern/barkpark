@@ -3,7 +3,7 @@
 
 ## Identity
 
-Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour (OnixEdit, Bulldocs, Tasks, Media, Sheets, Frt) — with all plugins off, Barkpark still works. Prod runs on Hetzner ARM64.
+Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 11 today (Bulldocs, Frt, Github, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64.
 
 ## Golden Rules
 
@@ -49,7 +49,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 
 ## Quick commands
 
-`make update` (**local**: pull + diff-driven refresh of bp/deps/migrations + digest of what changed — use instead of bare `git pull`) · `make doctor` (**local**: read-only staleness report — behind? bp stale? migrations pending?) · `make dev` (local tmux: Phoenix + TUI) · `make deploy` (server: `git pull` — the `.githooks/post-merge` hook does the clean rebuild + restart) · `make rebuild` (nuke `_build/prod` + recompile + restart) · `make logs`. Local setup: `docs/setup/SETUP.md`.
+`make update` (**local**: pull + diff-driven refresh of bp/deps/migrations + digest — use instead of bare `git pull`) · `make doctor` (**local**: read-only staleness report — behind? bp stale? migrations pending?) · `make dev` (local tmux: Phoenix + TUI) · `make deploy` (server: `git pull` — the `.githooks/post-merge` hook does the clean rebuild + restart) · `make rebuild` (nuke `_build/prod` + recompile + restart) · `make logs`. Local setup: `docs/setup/SETUP.md`.
 
 Smoke test. A 200 proves the box ANSWERS, never that your merge shipped — ask which commit:
 
@@ -76,12 +76,7 @@ curl -s https://barkpark.cloud/health | jq -r .git_sha    # deploy.yml's check: 
 
 **Tasks are `type:task` documents in Barkpark's own Postgres**, driven through the `bp task` CLI (over `/v1/tasks`). Use `bp task` for ALL task tracking — do NOT use TodoWrite or markdown TODO lists. Full guide: `docs/setup/TASK-SYSTEM.md`.
 
-```bash
-bp task ready            # Find available work
-bp task show <id>        # View task details (carries children + child_count)
-bp task next <worker>    # Atomically claim the next ready task
-bp task close <id> <worker> <epoch>   # Complete work (CAS on the claim epoch)
-```
+`bp task ready` · `show <id>` (carries children) · `next <worker>` (atomic claim) · `close <id> <worker> <epoch>` (CAS on the claim epoch). Flags and criteria writes: the guide above.
 
 **When ending a work session, work is NOT complete until `git push` succeeds:**
 
@@ -96,6 +91,6 @@ NEVER stop before pushing — it strands work locally. NEVER say "ready to push 
 
 ## Doc contract
 
-Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (retired docs — never load; commands need a dated `HISTORICAL RECORD` banner). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per topic. A new durable fact goes into its owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` fails. Byte budgets are CI-enforced (`scripts/check-doc-budgets.sh`) — on overflow, split or retire; never raise the cap. Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.
+Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (retired docs — never load; commands need a dated `HISTORICAL RECORD` banner). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per topic. A new durable fact goes into its owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` reds. It and the byte budgets (`scripts/check-doc-budgets.sh`) run in CI as one job, `Doc budgets + anchors`, which is ADVISORY: it reds its own check run on every PR touching matching paths, and CANNOT block a merge — that context is an explicit S4 exclusion in `.github/required-checks.json`, whose required set is only `Cloud gate`/`Console gate`/`Elixir gate`/`PR references an active task`. On overflow, split or retire content; never raise the cap — policy held by review, not by the merge button (`docs/ops/merge-gates.md`). Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.
 
-**Canonical-impl markers (code-side `canonical-for`).** When a CAPABILITY has one true implementation that a cold agent would otherwise have to find among forks/decoys (e.g. similarly-named resolvers, or a jargon-named function `grep` misses), stamp ONE machine-parsed comment above its **public** entry point (host-language comment syntax): `@canonical capability:<kebab-slug> [aka:<grep,words>] [doc:<path>.md]`. The slug is unique repo-wide and `grep -rn '@canonical capability:'` IS the index (no new card — this dodges the 7-card cap by design). `aka:` lists the search vocabulary an agent types (so `grep backlink` lands on `reverse_referencers`); `doc:` optionally backlinks the owning card. `scripts/docs-anchors-check.sh` §8 gates both invariants — slug uniqueness (a copy-paste that keeps the marker fails, turning dedup into a tripwire) and that a public `def`/`func`/`export` follows within 6 lines (never a private `defp`); `doc-gates.yml` triggers on `.ex/.go/.exs/.ts` so a code rename re-checks. **Demand-driven, NOT universal**: tag only genuinely-forked or jargon-named capabilities — a well-named, unforked function (e.g. `publish_document`, which self-points) earns no marker, and a marker should be REMOVED once dedup eliminates its decoys. It certifies "one owner," not "bug-free." This complements the dedup lever — the AI-Score's one measured-positive navigation finding was naming/pointer governance, **not** tree-tidiness.
+**Canonical-impl markers (code-side `canonical-for`).** `@canonical capability:<slug> [aka:…] [doc:…]` above a capability's public entry point; `grep -rn '@canonical capability:'` IS the index. Demand-driven, not universal. Full contract — syntax, when to stamp, what §8/§8b enforce: `docs/contracts/canonical-impl-markers.md`.

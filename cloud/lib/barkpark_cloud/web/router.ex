@@ -6421,11 +6421,29 @@ defmodule BarkparkCloud.Web.Router do
             # the latter EVERY paid plan resolves to no price, so :plan_invalid is
             # misleading. Surface an operator-actionable error `bp subscribe` can
             # report instead of telling the user their plan choice was wrong.
-            if Billing.configured?() do
+            # cch-w50-bl: the enum, not the boolean. `configured?/0` is
+            # `capability == :available`, so once `:test_mode` split off it, a
+            # genuinely bad plan name on the (test-keyed) live plane would have
+            # started reading "billing_not_configured" — wrong, because there
+            # the prices DO resolve and the plan really is the problem. Both
+            # keyed states keep the plan-level answer; only the two states where
+            # no price resolves take the deploy-level one.
+            if Billing.checkout_capability() in [:available, :test_mode] do
               json(conn, 422, %{error: "plan_invalid"})
             else
               json(conn, 422, %{error: "billing_not_configured"})
             end
+
+          {:error, :billing_test_mode} ->
+            # cch-w50-bl: the plane is keyed `sk_test_…`. A REAL hosted session
+            # would open that no real card can pay, so `Billing.checkout/2`
+            # refuses BEFORE one is created and THE SERVER is the gate — the
+            # console's disabled button is the courtesy, not the enforcement.
+            # The reason is `Billing.test_mode_disclosure/0` verbatim, so a
+            # `bp` client or a hand-rolled POST reads the same sentence the
+            # money screen prints.
+            reason = Billing.test_mode_disclosure()
+            json(conn, 422, %{error: "billing_test_mode", reason: reason})
 
           {:error, :billing_not_configured} ->
             # D553: the plan IS priced, but the deploy could never honour the
@@ -6857,6 +6875,15 @@ defmodule BarkparkCloud.Web.Router do
       team_id = team_id_for_barkpark_of_job(conn.path_params["id"])
 
       case Registry.succeed_deprovision_job(conn.path_params["id"], claim_token_opts(conn)) do
+        # cch-w57: a real delete also stamped a `barkpark.deleted` audit row in
+        # the same transaction, so the console's audit pane is nudged too — the
+        # `:already_gone` arm deleted nothing and wrote nothing, so it must not
+        # claim a trail change.
+        {:ok, :deleted} ->
+          push_event(team_id, "fleet")
+          push_event(team_id, "audit")
+          json(conn, 200, %{ok: true})
+
         {:ok, _} ->
           push_event(team_id, "fleet")
           json(conn, 200, %{ok: true})

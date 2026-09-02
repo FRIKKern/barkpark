@@ -810,6 +810,11 @@ function deployment(over) {
       image_tag: null,
       build_log_url: null,
       failure_reason: null,
+      // dr-w1-s2: `deployment_json/1` carries `failure_class:
+      // DeployLedger.classify(d)` on EVERY row — null on a row that did not
+      // fail. The key is on the base shape so a fixture that forgets it is a
+      // missing key rather than a different wire.
+      failure_class: null,
       became_live_at: null,
       environment: "production",
       branch: null,
@@ -843,6 +848,10 @@ const depFailed = deployment({
   git_ref: "b23aa017c9d8e2f4a6b1305c8d9e0f1a2b3c4d5e",
   branch: "main",
   failure_reason: "npm run build exited 1",
+  // The class the LEDGER put this row in — `classify/2` reads the same reason
+  // prose and answers BUILD_FAILED. The console renders this string and never
+  // re-derives it from the sentence above.
+  failure_class: "BUILD_FAILED",
   inserted_at: tMinus(20000),
   updated_at: tMinus(19800),
   console: [
@@ -1052,6 +1061,58 @@ const depRailFailedKind = deployment({
     { stage: "BUILD", status: "done", detail: "npm ci && npm run build (astro static)", at: tMinus(40) },
     { stage: "STAGE", status: "done", detail: "", at: tMinus(30) },
     { stage: "HEALTH", status: "failed", detail: RAIL_FAIL_KIND_DETAIL, at: tMinus(8) },
+  ],
+});
+
+// ── cch-w29-bl-deploy-rail-live-site-open-still-nowrap: THE LIVE FOOTER ──────
+//
+// EVERY RAIL FIXTURE ABOVE IS A FAILURE FOOTER. `deployRailHtml` has two
+// footers and only one of them had ever rendered in this harness:
+// `.deploy-rail-fail` (cch-w25-s3, above) and `.deploy-rail-live` — the
+// copyable site URL the OTHER branch emits once every stage is done. So the
+// anchor inside the live footer was never measured at any width, and the base
+// `white-space: nowrap` it inherits from `.site-open` (app.css) went unseen:
+// #8743 dropped that nowrap for `.fleet-url .site-open` and the rail's twin
+// emit kept it. THE SCENARIO-AXIS GAP IS THE DEFECT'S HIDING PLACE, which is
+// why the fixture is the first half of the fix and not an extra.
+//
+// THE STATE IS THE SAME HONEST TRANSIENT WINDOW THE FAILED TWIN LIVES IN:
+// `deployIsActive` (app.js) gates the rail to queued/building/pushing, so the
+// rail is on screen while the control-plane row still reads `pushing` — and the
+// SSE narration can already carry all six stages done, because the last
+// stage-done frame arrives before the row settles to `live`. `deployRailStatus`
+// folds an all-`ok` row set to tone "live", and `deployRailHtml` then emits
+// `.deploy-rail-live` with `opts.url`.
+//
+// THE URL IS DERIVED, NEVER TYPED. `mountDeployRail` passes
+// `siteLiveUrl(site, bp)`, and this site carries no `url` column, so the string
+// is `liveInstance.url + "/sites/" + slug + "/"` — the product's own
+// construction. Nothing here is lengthened to make it overflow: the ordinary
+// 55-character live URL of the ordinary fixture site is what spills.
+//
+// THE HEAD'S `.fleet-url .site-open` IS THE IN-PAGE CONTROL, and that is why
+// this fixture uses `webSiteDeploys` rather than a bare `webSite`: it carries
+// `current_deployment_id`, so `siteHasEverDeployed` makes the detail head
+// render THE SAME STRING through the twin selector #8743 already paid. One
+// route, two anchors, one URL — the measured pair overflow-guard's
+// W29-deploy-rail-live-url-wrap leg reads is a comparison inside a single page,
+// not across two runs.
+const depRailLive = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d8",
+  site_id: IDS.siteWeb,
+  status: "pushing",
+  git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
+  branch: "main",
+  detail: "pushing",
+  inserted_at: tMinus(96),
+  updated_at: tMinus(2),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094118Z-9c1f2ab, blue → green", at: tMinus(96) },
+    { stage: "BUILD", status: "done", detail: "npm ci && npm run build (next standalone)", at: tMinus(58) },
+    { stage: "STAGE", status: "done", detail: "", at: tMinus(40) },
+    { stage: "HEALTH", status: "done", detail: "slot green on :8081 answered 200 at /healthz", at: tMinus(24) },
+    { stage: "SWITCH", status: "done", detail: "", at: tMinus(9) },
+    { stage: "RETIRE", status: "done", detail: "", at: tMinus(2) },
   ],
 });
 
@@ -1390,6 +1451,39 @@ function me(teamName, onb, role, actorId) {
     },
   };
 }
+// dr-w1-s2 DEPLOY LEDGER CENSUS fixtures — the PAYLOAD SHAPE `DeployLedger`
+// actually emits, not a convenience shape the console would like:
+//   * every rate is a NODE — {sample, pct, numerator, min_sample, refused,
+//     reason, basis} — so the denominator can never travel apart from the
+//     percentage, and `refused: true` carries `pct: null` plus the server's own
+//     sentence ("sample 74 below min_sample 200").
+//   * each `classes[]` row carries the class NAME, its LABEL and its own share
+//     NODE. The console renders all three verbatim; nothing here is a hint the
+//     client is expected to expand.
+// @min_sample is 200 (deploy_ledger.ex), which is why n=74 refuses.
+function censusRate(numerator, sample, basis) {
+  const enough = sample >= 200;
+  return {
+    sample,
+    pct: enough ? Math.round((numerator * 10000) / sample) / 100 : null,
+    numerator,
+    min_sample: 200,
+    refused: !enough,
+    reason: enough ? null : `sample ${sample} below min_sample ${200}`,
+    basis,
+  };
+}
+const CENSUS_ATTEMPTED_BASIS =
+  "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual " +
+  "(never-attempted tombstones excluded, D19)";
+const CENSUS_FAILED_BASIS = "settled failed rows in the window — the failure numerator";
+function censusClass(name, label, count, failed) {
+  return { class: name, label, agency: "box", count, share: censusRate(count, failed, CENSUS_FAILED_BASIS) };
+}
+function censusWindow(days) {
+  return { from: tMinus(days * 86400), to: tMinus(0) };
+}
+
 // GR39: the platform-operator envelope. The flag is NESTED under `user` (the
 // same read operatorVisible/operatorRouteAllowed make) — a flat one is not the
 // contract and must never open the console.
@@ -2514,15 +2608,22 @@ if (/[^a-z0-9]/.test(cruelAccountLocal)) {
   throw new Error("cruel identity: the local part carries a character a line breaker can use (- . _ + or whitespace) — BREAKABLE, so it would wrap on its own and certify a rule that never bounded it");
 }
 
-// The cruel identity rides an EXISTING account scenario rather than a new key,
-// and this is a fence, not a preference: a new SCENARIOS key is refused by three
-// instruments this slice is fenced out of — smoke.mjs's census guard (every
-// scenario needs an expectation, exit 1), breakpoint-sweep.mjs's committed
-// residue literal (exit 2, "UNLISTED scenario") and its test's census numbers.
-// `account-modal-revoke` is the account scenario with the smallest blast radius:
-// it is the only one of the five that modal-oracle.mjs does NOT drive, and
-// smoke's click oracle asserts sessions and ids, never the identity text.
-// FILED, not implied: cch-w23-bl-cruel-identity-own-scenario.
+// cch-w23-bl-cruel-identity-own-scenario — THE CRUEL IDENTITY NOW OWNS A KEY.
+// cch-w23-s2 hung this `me` on the EXISTING `account-modal-revoke` because a new
+// SCENARIOS key is refused by four instruments that slice was fenced out of —
+// smoke.mjs's census guard (exit 1, "NO expectation"), breakpoint-sweep.mjs's
+// committed residue literal (exit 2, "UNLISTED scenario"), that sweep's test
+// census numbers, and member-authority-sweep.mjs's PIN_TOTAL_SCENARIOS (exit 1).
+// It worked, and it lied twice: the cruelty hid inside a scenario whose NAME
+// says revoke, and the revoke CLICK ORACLE — four sessions, two DELETEs, a
+// danger-tier confirm — ran against a 158-character identity as a side effect,
+// on the fixture shoot.sh publishes as the revoke evidence. All four censuses
+// are taught in THIS commit, so the identity is now `account-modal-cruel-
+// identity` and `account-modal-revoke` is back on the production-dominant
+// `me("Guerrilla")` (`ada@acme.com`, three rendered glyphs). The scenario the
+// cruel `me` rides is asserted, not assumed: smoke.mjs's FIXTURE_SHAPE_PINS pin
+// `me.user.email.length` at 160 on the cruel key and 12 on the revoke key, so
+// putting this object back on the click oracle reds BEFORE any scenario boots.
 const cruelAccountMe = (function () {
   const m = me("Guerrilla");
   return Object.assign({}, m, { user: Object.assign({}, m.user, { email: cruelAccountEmail }) });
@@ -2756,6 +2857,17 @@ export const SCENARIOS = {
       sites: [webSiteDeploys, blogSite],
       audit: [],
       deployments: rollbackDeployments,
+      // cch-w2-revoke-oracle-round2 — the repo picker's list. openSiteGithub
+      // reads GET /v1/github/repos FIRST and paints one of five arms off the
+      // answer; with no fixture every scenario got the "Couldn't load your
+      // repositories" arm, so #github-disconnect-site — the door to
+      // DELETE /v1/sites/:id/github — had never been painted by any instrument.
+      // acme/web is webSite's own github_repo, so the select renders it
+      // `selected`, which is the state a connected site is actually in.
+      githubRepos: [
+        { full_name: "acme/web", private: false },
+        { full_name: "acme/internal-docs", private: true },
+      ],
     },
   },
   // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before
@@ -3260,6 +3372,27 @@ export const SCENARIOS = {
         [IDS.siteWeb]: [depRailFailedCruel, depCurrent, depPrior],
         [IDS.siteBlog]: [depRailFailedKind],
       },
+    },
+  },
+  // cch-w29-bl: THE DEPLOY RAIL, LIVE — the OTHER footer, and the first fixture
+  // in this harness to render `.deploy-rail-live` at all (see the ledger beside
+  // `depRailLive` in the fixtures above for why the state is honest and where
+  // the URL comes from). ONE site on purpose: the live footer's anchor and the
+  // detail head's `.fleet-url .site-open` carry the SAME derived URL on this
+  // one route, so the paid twin is the in-page control for the unpaid one.
+  // Driven by overflow-guard's W29-deploy-rail-live-url-wrap leg at 320/360/390
+  // in both themes, page AND anchor.
+  "site-deploy-rail-live": {
+    label: "Deploy rail — every stage done; the footer carries the copyable live URL",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys],
+      audit: [],
+      deployments: [depRailLive, depCurrent, depPrior],
     },
   },
   // ── bp-login-ux W3 (decision 40): the /activate device-login approve page ──
@@ -4223,6 +4356,21 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // cch-w2-revoke-oracle-round2 — THE SAME console-side fixture
+      // providers-member already carries (see its comment for why
+      // connected:true cannot come from the live control plane), moved onto the
+      // OWNER actor as well. It has to be here and not there: githubCardHtml
+      // paints #github-disconnect only `if (canWrite)`, so on the member
+      // scenario the DELETE has no door to come through, and
+      // DELETE /v1/github/installation had no click-driven oracle anywhere.
+      // install_url is carried so the POST-DISCONNECT repaint is the honest
+      // reconnect door ("Connect GitHub") rather than githubCardHtml's
+      // last-resort "aren't configured yet" arm, which would be a false claim
+      // about the deployment on a Barkpark that just disconnected.
+      github: {
+        connected: true, account_login: "acme-engineering", configured: true,
+        install_url: "https://github.com/apps/barkpark-cloud/installations/new",
+      },
     },
   },
   "providers-empty": {
@@ -4408,6 +4556,27 @@ export const SCENARIOS = {
       operatorWarmPool: { ready: 2 },
       // Prod truth today: zero fleet_digest rows have ever been written.
       operatorDeliveries: [],
+      // A census over a window big enough for `rate/2` to answer: 1,840
+      // attempted rows, so the percentage renders WITH its denominator and the
+      // class table carries each class's own share node.
+      operatorCensus: {
+        window: censusWindow(7),
+        volume: 1840,
+        failed: 312,
+        live: 1402,
+        in_flight: 21,
+        cancelled: 6,
+        residual: 0,
+        deferred_total: 99,
+        failure_rate: censusRate(312, 1840, CENSUS_ATTEMPTED_BASIS),
+        live_rate: censusRate(1402, 1840, CENSUS_ATTEMPTED_BASIS),
+        classes: [
+          censusClass("BUILD_FAILED", "the site build exited non-zero", 181, 312),
+          censusClass("BOX_UNREACHABLE", "the instance could not be reached at all", 74, 312),
+          censusClass("UNCLASSIFIED", "not yet named by the ledger", 57, 312),
+        ],
+        min_sample: 200,
+      },
     },
   },
   // The braked fleet: halted banner + Resume, the staging gate CLOSED, an empty
@@ -4435,6 +4604,29 @@ export const SCENARIOS = {
         { id: "dl1", status: "sent", kind: "email", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 1, inserted_at: tMinus(3600), last_error: null, http_status: null },
         { id: "dl2", status: "failed", kind: "email", event: "fleet_digest", channel: "email", recipient: "ops@barkpark.cloud", attempts: 3, inserted_at: tMinus(90000), last_error: "smtp: connection timed out", http_status: null },
       ],
+      // THE REFUSAL, and the whole reason this fixture exists: 74 attempted
+      // rows is below `DeployLedger.min_sample/0` (200), so `rate/2` answers
+      // `refused: true, pct: null` and the console must render the ledger's own
+      // "not enough data (n=74)" — never a percentage it computed itself off
+      // the counts sitting right beside it. The COUNTS stay (they are real
+      // rows); only the RATIO goes.
+      operatorCensus: {
+        window: censusWindow(1),
+        volume: 74,
+        failed: 12,
+        live: 58,
+        in_flight: 3,
+        cancelled: 1,
+        residual: 0,
+        deferred_total: 0,
+        failure_rate: censusRate(12, 74, CENSUS_ATTEMPTED_BASIS),
+        live_rate: censusRate(58, 74, CENSUS_ATTEMPTED_BASIS),
+        classes: [
+          censusClass("BUILD_FAILED", "the site build exited non-zero", 9, 12),
+          censusClass("BOX_500", "the box errored on the deploy (HTTP 500)", 3, 12),
+        ],
+        min_sample: 200,
+      },
     },
   },
   // The ZERO-STAGING console: nothing is registered on the staging channel and
@@ -4463,6 +4655,24 @@ export const SCENARIOS = {
       },
       operatorWarmPool: { ready: 0 },
       operatorDeliveries: [],
+      // THE EMPTY WINDOW. Zero attempted rows is not zero failures — it is
+      // NOTHING MEASURED, and a table of 0s beside a 0.0% rate would read as
+      // health. The card must say "no deployments in this window" and draw no
+      // table at all.
+      operatorCensus: {
+        window: censusWindow(1),
+        volume: 0,
+        failed: 0,
+        live: 0,
+        in_flight: 0,
+        cancelled: 0,
+        residual: 0,
+        deferred_total: 0,
+        failure_rate: censusRate(0, 0, CENSUS_ATTEMPTED_BASIS),
+        live_rate: censusRate(0, 0, CENSUS_ATTEMPTED_BASIS),
+        classes: [],
+        min_sample: 200,
+      },
     },
   },
   // FAIL-CLOSED (GR49): registering "operator" in VIEWS also made init()'s route
@@ -4587,17 +4797,49 @@ export const SCENARIOS = {
   // Revoke, then Sign-out-everywhere, and reads what the REAL code path paints.
   // Named with the `account-modal` prefix, which (as GR76 notes) auto-enrols it
   // in shoot.sh's screenshot set — intended, so the revoke state gets an eye too.
-  // cch-w23-s2: this scenario is ALSO the CRUEL IDENTITY twin. Its `me` carries
-  // an email whose local part sits at the derived 158-character cap (see the
-  // cruelAccountEmail ledger above `SCENARIOS`), so `.am-name` renders the
-  // longest name a person can actually own. Nothing this scenario already
-  // asserted reads the identity text — smoke's click oracle counts session rows
-  // and ids — and the KIND control is `account-modal` next door, still
-  // `ada@acme.com` (three glyphs), which is what makes a remedy that shreds an
-  // ordinary name red. Driven by overflow-guard's W23-account-modal-identity
-  // -bounded leg.
+  // cch-w23-bl-cruel-identity-own-scenario: this scenario is NO LONGER the cruel
+  // identity twin. cch-w23-s2 parked `cruelAccountMe` here because a new
+  // SCENARIOS key was fenced out of its slice; the consequence was that the one
+  // scenario in this file driven by REAL CLICKS — and the one shoot.sh publishes
+  // as the revoke evidence — ran its whole oracle against a 158-character
+  // address nobody in this corpus otherwise owns. The cruelty moved next door to
+  // `account-modal-cruel-identity`, and this fixture is back on the
+  // PRODUCTION-DOMINANT identity `me("Guerrilla")` (`ada@acme.com`), which is
+  // what the click oracle should measure a revoke against. That is PINNED, not
+  // hoped: smoke.mjs's FIXTURE_SHAPE_PINS carries `account-modal-revoke` ·
+  // `me.user.email.length` = 12, so a future edit that re-parks a cruel `me`
+  // here reds before any scenario boots.
   "account-modal-revoke": {
-    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count; ALSO the cruel-identity twin (a 158-char email local part, the derived cap)",
+    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
+    authed: true,
+    deepLink: "",
+    data: {
+      me: me("Guerrilla"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      accountSessions: accountSessionsRevoke,
+    },
+  },
+  // cch-w23-bl-cruel-identity-own-scenario — THE CRUEL IDENTITY, ON ITS OWN KEY.
+  // `.am-name` paints `email.split("@")[0]` (accountModel() — re-derive with
+  // `grep -n 'function accountModel' cloud/priv/static/app.js`), so the string a
+  // person can actually put on that element is capped by the SERVER's
+  // `validate_length(:email, max: 160)` and nothing else: 160 − "@" − one domain
+  // character = 158 unbroken characters (the full derivation, and why the filed
+  // 255 is INADMISSIBLE, is in the cruelAccountEmail ledger above `SCENARIOS`).
+  // Its KIND control is `account-modal` next door, still `ada@acme.com` (three
+  // rendered glyphs) — the pair is what makes a remedy that buys the cruel name
+  // by shredding an ordinary one red. Driven at 7 widths x 2 themes by
+  // overflow-guard's W23-account-modal-identity-bounded leg (AM_SCENS), asserted
+  // at rest by smoke.mjs's `account-modal-cruel-identity` expectation, and
+  // auto-enrolled in shoot.sh's screenshot set by the `account-modal` name
+  // prefix (GR76) with zero harness change. It carries the SHORT session list,
+  // not the revoke one: this scenario's axis is the identity, and a stateful
+  // revoke fixture here would give it a second axis nothing asserts.
+  "account-modal-cruel-identity": {
+    label: "Account modal — the CRUEL identity: a 158-character email local part, the longest name a person can actually own (validate_length(:email, max: 160))",
     authed: true,
     deepLink: "",
     data: {
@@ -4606,7 +4848,7 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: [],
-      accountSessions: accountSessionsRevoke,
+      accountSessions: accountSessions,
     },
   },
   "account-modal-2fa-badcode": {
@@ -4855,6 +5097,16 @@ function destroyFrom(list, state, pred) {
   if (i < 0) return { status: 404, body: { error: "not_found" } };
   if (state) list.splice(i, 1);
   return { status: 200, body: { ok: true } };
+}
+
+// The GitHub installation, as a MUTABLE per-boot singleton. Same contract as
+// listOf above (opt-in, per-boot copy, the GET reads through it) for a resource
+// that is one object rather than a list, so a disconnect is observable as a
+// state change instead of a 200 nobody can check.
+function githubOf(d, state) {
+  if (!state) return Object.assign({}, d.github || {});
+  if (!state.github) state.github = Object.assign({}, d.github || {});
+  return state.github;
 }
 
 // route(name, method, path, state) → { status, body } | null.
@@ -5150,7 +5402,11 @@ export function route(name, method, path, state) {
   if (method === "POST" && p === "/v1/billing/cancel") {
     return d.billingCancel || { status: 200, body: { status: "active", cancel_at_period_end: true } };
   }
-  if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
+  // cch-w2-revoke-oracle-round2: through the state bag, so a site-level mutation
+  // (today: DELETE /v1/sites/:id/github) is visible to the very next read. The
+  // no-state arm is the old `d.sites` verbatim, and listOf's per-boot copy makes
+  // the collection and the drill-down below answer the SAME objects.
+  if (p === "/v1/sites") return { status: 200, body: { sites: listOf(d, state, "sites") } };
 
   // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);
   // POST → mint (201 {token: <plaintext ONCE>, pat: pat_json}, overridable via
@@ -5266,7 +5522,21 @@ export function route(name, method, path, state) {
   // instance body under `data`, exactly like the real control-plane relay.
   const whColl = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks$/);
   if (whColl && method === "GET") {
-    return { status: 200, body: { data: { webhooks: d.webhooks || [] } } };
+    // cch-bl-webhook-delete-oracle: through listOf, so the endpoint DELETE below
+    // is visible to the next list read. The stateless arm is `d.webhooks`
+    // verbatim. NOTE the path arrives QUERY-STRIPPED (route() splits on "?"),
+    // so `?dataset=production` is already gone by the time these matchers run.
+    return { status: 200, body: { data: { webhooks: listOf(d, state, "webhooks") } } };
+  }
+  // cch-bl-webhook-delete-oracle — DELETE one endpoint, the TWELFTH destroy verb
+  // and the only list-shaped one cch-w10 could not reach. It was UNMODELLED: it
+  // fell through the terminal `/v1/` 200 {}, so `deleteWebhook` toasted its
+  // client-side constant ("Webhook deleted") against a fixture that still served
+  // both endpoints. Placed ABOVE the PUT matcher's siblings but sharing whOne's
+  // shape, so a wrong id 404s exactly as destroyFrom does everywhere else.
+  const whDelete = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/([^/]+)$/);
+  if (whDelete && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "webhooks"), state, (w) => String(w.id) === whDelete[1]);
   }
   const whOne = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/([^/]+)$/);
   if (whOne && method === "PUT") {
@@ -5325,8 +5595,32 @@ export function route(name, method, path, state) {
   // Single-site drill-down (best-effort, for shots that click a site row).
   const siteMatch = p.match(/^\/v1\/sites\/([^/]+)$/);
   if (siteMatch) {
-    const s = d.sites.filter((x) => String(x.id) === siteMatch[1])[0];
+    const s = listOf(d, state, "sites").filter((x) => String(x.id) === siteMatch[1])[0];
     return s ? { status: 200, body: { site: s } } : { status: 404, body: { error: "not_found" } };
+  }
+  // cch-w2-revoke-oracle-round2 — DELETE /v1/sites/:id/github, the repository
+  // UNLINK. It was UNMODELLED: it fell through the terminal `/v1/` 200 {}, so
+  // disconnectSiteGithub "succeeded" against a fixture that then re-served a
+  // site still carrying github_repo — the refetched header repainted the repo
+  // chip and the console looked like it had ignored the operator.
+  //   grep -n "function disconnectSiteGithub" cloud/priv/static/app.js
+  // is the handler; it reads `#github-disconnect-site`, which openSiteGithub
+  // paints only when the site's `github_webhook_configured` is true.
+  const siteGithub = p.match(/^\/v1\/sites\/([^/]+)\/github$/);
+  if (siteGithub && method === "DELETE") {
+    const s = listOf(d, state, "sites").filter((x) => String(x.id) === siteGithub[1])[0];
+    // 404 on a miss AND on an already-unlinked site — destroyFrom's rule: a
+    // no-op must never be indistinguishable from real work.
+    if (!s || !s.github_repo) return { status: 404, body: { error: "not_found" } };
+    if (state) { s.github_repo = null; s.github_branch = null; s.github_webhook_configured = false; }
+    return { status: 200, body: { ok: true } };
+  }
+  // The repo picker openSiteGithub reads before it can paint anything at all.
+  // Gated on the fixture so every scenario without one keeps falling through to
+  // the catch-all exactly as before (which renders the honest "Couldn't load
+  // your repositories" arm).
+  if (p === "/v1/github/repos" && method === "GET" && d.githubRepos) {
+    return { status: 200, body: { repos: d.githubRepos } };
   }
   // cch-w25-s3: PER-SITE deployment lists. The default stays the scenario-wide
   // `d.deployments` (every scenario written before this line is byte-identical
@@ -5511,6 +5805,14 @@ export function route(name, method, path, state) {
     if (p === "/v1/operator/deliveries") {
       return d.operatorDeliveries ? { status: 200, body: { deliveries: d.operatorDeliveries } } : forbidden;
     }
+    // dr-w1-s2: GET /v1/operator/deploy-ledger/census?from=&to=. The console
+    // pins its own window, so the fixture is matched on the PATH alone and the
+    // query is ignored here — the window bytes the browser sends are asserted
+    // in __app.test.mjs (operatorCensusPath), where they can be pinned against
+    // an injected clock instead of a wall clock.
+    if (p === "/v1/operator/deploy-ledger/census") {
+      return d.operatorCensus ? { status: 200, body: d.operatorCensus } : forbidden;
+    }
     return forbidden;
   }
 
@@ -5525,8 +5827,22 @@ export function route(name, method, path, state) {
   // Disconnect affordance has a wire to reach, not because a member may use it
   // (cch-w48-s3 owns that fence).
   if (p === "/v1/github/installation" && d.github) {
-    if (method === "DELETE") return { status: 200, body: { connected: false } };
-    if (method === "GET") return { status: 200, body: d.github };
+    // cch-w2-revoke-oracle-round2 — STATEFUL, on the sessionsOf/listOf pattern.
+    // It used to answer `{connected:false}` to the DELETE and then serve
+    // `d.github` — connected:true — to the refetch the success arm issues, so
+    // the card repainted CONNECTED after a successful disconnect and no oracle
+    // could tell the teardown from a no-op. A single object rather than a list
+    // (this endpoint is a singleton), but the three properties are the same:
+    // opt-in on `state`, copied per boot, and the GET reads through it.
+    const inst = githubOf(d, state);
+    if (method === "DELETE") {
+      // 404 on a miss, exactly as destroyFrom does: disconnecting nothing must
+      // be distinguishable from disconnecting something.
+      if (!inst.connected) return { status: 404, body: { error: "not_found" } };
+      if (state) { inst.connected = false; delete inst.account_login; }
+      return { status: 200, body: { connected: false } };
+    }
+    if (method === "GET") return { status: 200, body: inst };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

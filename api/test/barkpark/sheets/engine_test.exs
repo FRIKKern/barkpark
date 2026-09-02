@@ -2131,7 +2131,14 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
   describe "stale — unknown function names" do
     test "unknown function leaves v/t untouched and sets stale" do
       out = run(%{"A1" => %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n"}})
-      assert out["A1"] == %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n", "stale" => true}
+
+      assert out["A1"] == %{
+               "f" => "NPV(0.1,5)",
+               "v" => 42,
+               "t" => "n",
+               "stale" => true,
+               "stale_fn" => "NPV"
+             }
     end
 
     test "unknown function nested inside a known one is still stale" do
@@ -2161,20 +2168,125 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert out["B1"]["v"] == 84
     end
 
-    test "a stale cell with no cached value reads as blank downstream" do
+    # INVERTED by the unsupported-function ruling (2026-09-02). This used to
+    # assert the old posture — A1 kept NO value and B1 read it as blank, so a
+    # formula the engine could not evaluate silently became a 1. With nothing
+    # cached there is nothing honest to show: A1 is #NAME? and B1 propagates it.
+    test "a stale cell with no cached value is #NAME?, and dependents propagate" do
       out =
         run(%{
           "A1" => %{"f" => "NPV(0.1,5)"},
           "B1" => %{"f" => "A1+1"}
         })
 
-      assert out["B1"]["v"] == 1
-      refute Map.has_key?(out["A1"], "v")
+      assert out["A1"]["v"] == "#NAME?"
+      assert out["A1"]["t"] == "e"
+      assert out["B1"]["v"] == "#NAME?"
     end
 
     test "an invalid formula is decisive: #REF! lands and stale clears" do
       out = run(%{"A1" => %{"f" => "1+", "v" => 5, "stale" => true}})
       assert out["A1"] == %{"f" => "1+", "v" => "#REF!", "t" => "e"}
+    end
+  end
+
+  # ── #NAME? — the two arms of an unsupported function name ───────────────────
+  #
+  # An unknown function is NOT one case but two, and the engine must tell them
+  # apart (main's ruling 2026-09-02): with NO cached value there is nothing
+  # honest to render, so the cell becomes the error #NAME?; with an imported
+  # cached value (xlsx — Excel really computed that number) the value stays and
+  # the cell is marked LOUD instead. Import fidelity beats purity; the loud
+  # style is the honesty.
+
+  describe "#NAME? — an unknown function with nothing cached" do
+    test "a typed unknown function becomes #NAME?" do
+      out = run(%{"A1" => %{"f" => "FOO(1)"}})
+      assert out["A1"] == %{"f" => "FOO(1)", "v" => "#NAME?", "t" => "e"}
+    end
+
+    test "an unknown name nested inside a known one is #NAME? too" do
+      out = run(%{"A1" => %{"f" => "SUM(FOO(1),2)"}})
+      assert out["A1"]["v"] == "#NAME?"
+      assert out["A1"]["t"] == "e"
+    end
+
+    test "a formula edited from a known name to an unknown one drops its value" do
+      out = run(%{"A1" => %{"f" => "FOO(1)", "v" => "", "t" => "s"}})
+      assert out["A1"]["v"] == "#NAME?"
+      assert out["A1"]["t"] == "e"
+      refute Map.has_key?(out["A1"], "stale")
+    end
+
+    test "#NAME? is in the engine's error vocabulary" do
+      assert "#NAME?" in Engine.error_values()
+    end
+
+    test "dependents propagate #NAME? like any other error" do
+      out =
+        run(%{
+          "A1" => %{"f" => "FOO(1)"},
+          "B1" => %{"f" => "A1+1"},
+          "C1" => %{"f" => "SUM(A1:B1)"}
+        })
+
+      assert out["B1"] == %{"f" => "A1+1", "v" => "#NAME?", "t" => "e"}
+      assert out["C1"]["v"] == "#NAME?"
+    end
+
+    test "a known-good recompute clears BOTH the stale flag and the fn name" do
+      out = run(%{"A1" => %{"f" => "1+1", "v" => 99, "stale" => true, "stale_fn" => "FOO"}})
+      assert out["A1"] == %{"f" => "1+1", "v" => 2, "t" => "n"}
+    end
+
+    test "#NAME? crosses tabs like any other error" do
+      out =
+        %{
+          "tabs" => [
+            %{"name" => "One", "cells" => %{"A1" => %{"f" => "FOO(1)"}}},
+            %{"name" => "Two", "cells" => %{"A1" => %{"f" => "One!A1+1"}}}
+          ]
+        }
+        |> Engine.recompute()
+
+      assert get_in(out, ["tabs", Access.at(0), "cells", "A1", "v"]) == "#NAME?"
+      assert get_in(out, ["tabs", Access.at(1), "cells", "A1", "v"]) == "#NAME?"
+    end
+  end
+
+  describe "#NAME? — an imported cached value is kept, loudly" do
+    test "a cached value survives and names the function it could not evaluate" do
+      out = run(%{"A1" => %{"f" => "FOO(1)", "v" => 42, "t" => "n"}})
+
+      assert out["A1"] == %{
+               "f" => "FOO(1)",
+               "v" => 42,
+               "t" => "n",
+               "stale" => true,
+               "stale_fn" => "FOO"
+             }
+    end
+
+    test "the named function is the FIRST unsupported one, in formula order" do
+      out = run(%{"A1" => %{"f" => "FOO(BAR(1))", "v" => 7}})
+      assert out["A1"]["stale_fn"] == "FOO"
+    end
+
+    test "a nested unknown under a known name is still named" do
+      out = run(%{"A1" => %{"f" => "SUM(NPV(0.1,5),2)", "v" => 9}})
+      assert out["A1"]["stale_fn"] == "NPV"
+    end
+
+    test "dependents of a loud-stale cell still read the cached value" do
+      out =
+        run(%{
+          "A1" => %{"f" => "FOO(1)", "v" => 42},
+          "B1" => %{"f" => "A1*2"}
+        })
+
+      assert out["A1"]["v"] == 42
+      assert out["A1"]["stale"] == true
+      assert out["B1"]["v"] == 84
     end
   end
 
@@ -4794,10 +4906,11 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         assert n in names, "#{n} missing from function_names/0"
       end
 
-      # 123 after batch 3 + 17 batch-4 names + RAND/RANDBETWEEN. THE
-      # authoritative count.
+      # 123 after batch 3 + 17 batch-4 names + RAND/RANDBETWEEN = 142, then
+      # + TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK (the everyday batch) = 147.
+      # THE authoritative count.
       assert "RAND" in names and "RANDBETWEEN" in names
-      assert length(names) == 142
+      assert length(names) == 147
       assert names == Enum.sort(names)
       assert Enum.uniq(names) == names
     end
@@ -5166,6 +5279,363 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "a non-tabs content passes uses_cross_tab? without raising" do
       refute Engine.uses_cross_tab?(%{"locale" => "nb-NO"})
       refute Engine.uses_cross_tab?(nil)
+    end
+  end
+
+  # ── everyday-function batch (TRANSPOSE / CONCAT / SUBTOTAL / HSTACK / VSTACK)
+  #
+  # RED-before on the pre-change engine: none of these five names was in
+  # @functions, so `parse_formula` classified every formula below as :stale —
+  # the cell came back `%{"f" => "…", "stale" => true}` with NO "v" at all
+  # (NOT #REF! and NOT :invalid: an unknown function is the xlsx-import
+  # compatibility path, which keeps the cached value and flags it). Every
+  # `eval!/1` assertion here therefore read `nil` before this batch landed.
+  # SEQUENCE(rows, cols) is the odd one out — it already shipped with the full
+  # 1..4 arity, so its tests below are REGRESSION LOCKS, not RED-first.
+
+  # A1 B1     1 2      transposed    1 3
+  # A2 B2  =  3 4                    2 4
+  defp quad do
+    %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "A2" => %{"v" => 3}, "B2" => %{"v" => 4}}
+  end
+
+  defp trio, do: %{"A1" => %{"v" => 2}, "A2" => %{"v" => 4}, "A3" => %{"v" => 6}}
+
+  describe "TRANSPOSE" do
+    test "the name reaches function_names/0 (it was absent, so every formula was :stale)" do
+      assert "TRANSPOSE" in Engine.function_names()
+      refute cell!("TRANSPOSE(A1:B2)", quad())["stale"]
+    end
+
+    test "in a scalar position it intersects to the transposed top-left" do
+      # Top-left of the TRANSPOSED grid is still A1's value here (1), but the
+      # SECOND element proves the flip: SUM is order-insensitive, so use INDEX-
+      # free evidence — the spilled region below carries the real proof.
+      assert eval!("SUM(TRANSPOSE(A1:B2))", quad()) == 10
+      assert eval!("TEXTJOIN(\",\", 0, TRANSPOSE(A1:B2))", quad()) == "1,3,2,4"
+    end
+
+    test "a top-level TRANSPOSE spills the flipped rectangle" do
+      cells = run(Map.put(quad(), "A4", %{"f" => "TRANSPOSE(A1:B2)"}))
+
+      assert cells["A4"]["v"] == 1
+      assert cells["A4"]["spill_dims"] == [2, 2]
+      assert cells["B4"]["v"] == 3
+      assert cells["A5"]["v"] == 2
+      assert cells["B5"]["v"] == 4
+      # engine-owned cells: value + spill marker, never an `f`
+      refute Map.has_key?(cells["B4"], "f")
+      assert cells["B4"]["spill"] == "A4"
+    end
+
+    test "a non-square source flips its dimensions" do
+      cells =
+        run(%{
+          "A1" => %{"v" => 1},
+          "B1" => %{"v" => 2},
+          "C1" => %{"v" => 3},
+          "A3" => %{"f" => "TRANSPOSE(A1:C1)"}
+        })
+
+      assert cells["A3"]["spill_dims"] == [3, 1]
+      assert Enum.map(~w(A3 A4 A5), &cells[&1]["v"]) == [1, 2, 3]
+    end
+
+    test "an obstructed spill blocks WHOLE with #SPILL!" do
+      cells =
+        quad()
+        |> Map.put("A4", %{"f" => "TRANSPOSE(A1:B2)"})
+        |> Map.put("B5", %{"v" => "in the way"})
+        |> run()
+
+      assert cells["A4"]["v"] == "#SPILL!"
+      assert cells["A4"]["t"] == "e"
+      refute Map.has_key?(cells["A4"], "spill_dims")
+      # nothing else was written — the obstruction keeps its own value
+      assert cells["B5"]["v"] == "in the way"
+      refute Map.has_key?(cells, "B4")
+    end
+
+    test "an element error rides through IN PLACE, it does not collapse the array" do
+      cells =
+        quad()
+        |> Map.put("B1", %{"f" => "1/0"})
+        |> Map.put("A4", %{"f" => "TRANSPOSE(A1:B2)"})
+        |> run()
+
+      # transposed: [[1, 3], [#DIV/0!, 4]] — the error lands at A5, the rest survive
+      assert cells["A4"]["v"] == 1
+      assert cells["B4"]["v"] == 3
+      assert cells["A5"]["v"] == "#DIV/0!"
+      assert cells["A5"]["t"] == "e"
+      assert cells["B5"]["v"] == 4
+    end
+
+    test "an empty source is #VALUE!" do
+      assert eval!("TRANSPOSE(M50:N51)", quad()) == "#VALUE!"
+    end
+
+    test "wrong arity is #VALUE!" do
+      assert eval!("TRANSPOSE(A1:B2, 2)", quad()) == "#VALUE!"
+      assert eval!("TRANSPOSE()", quad()) == "#VALUE!"
+    end
+  end
+
+  describe "CONCAT" do
+    test "the name reaches function_names/0" do
+      assert "CONCAT" in Engine.function_names()
+      refute cell!("CONCAT(\"a\")")["stale"]
+    end
+
+    test "scalars concatenate exactly like CONCATENATE" do
+      assert eval!("CONCAT(\"a\", 1, TRUE)") == "a1TRUE"
+      assert eval!("CONCAT(\"a\", 1, TRUE)") == eval!("CONCATENATE(\"a\", 1, TRUE)")
+    end
+
+    test "a RANGE argument flattens row-major — the one thing CONCATENATE refuses" do
+      assert eval!("CONCAT(A1:B2)", quad()) == "1234"
+      # the legacy twin still rejects a range, which is why CONCAT exists
+      assert eval!("CONCATENATE(A1:B2)", quad()) == "#VALUE!"
+    end
+
+    test "a blank inside the range contributes \"\" rather than being skipped" do
+      cells = %{"A1" => %{"v" => "x"}, "B1" => %{"v" => "y"}, "A2" => %{"v" => "z"}}
+      # grid is [[x, y], [z, blank]] — the blank renders as nothing, not a gap
+      assert eval!("CONCAT(A1:B2)", cells) == "xyz"
+    end
+
+    test "an intermediate array argument flattens too" do
+      assert eval!("CONCAT(SORT(A1:B2, -1))", quad()) == "4321"
+      assert eval!("CONCAT(SEQUENCE(2, 2))", quad()) == "1234"
+    end
+
+    test "an error in the source propagates" do
+      cells = Map.put(quad(), "B2", %{"f" => "1/0"})
+      assert eval!("CONCAT(A1:B2)", cells) == "#DIV/0!"
+      assert eval!("CONCAT(\"a\", 1/0)") == "#DIV/0!"
+    end
+
+    test "a result past Excel's 32,767-char cell limit is #VALUE!" do
+      assert eval!("LEN(CONCAT(REPT(\"x\", 20000), REPT(\"y\", 12767)))") == 32_767
+      assert eval!("CONCAT(REPT(\"x\", 20000), REPT(\"y\", 12768))") == "#VALUE!"
+    end
+
+    test "zero arguments is #VALUE!" do
+      assert eval!("CONCAT()") == "#VALUE!"
+    end
+  end
+
+  describe "SUBTOTAL" do
+    test "the name reaches function_names/0" do
+      assert "SUBTOTAL" in Engine.function_names()
+      refute cell!("SUBTOTAL(9, A1:A3)", trio())["stale"]
+    end
+
+    test "each of the eleven codes selects its aggregate" do
+      c = Map.merge(trio(), %{"A4" => %{"v" => "text"}, "A5" => %{"v" => 8}})
+
+      assert eval!("SUBTOTAL(1, A1:A5)", c) == eval!("AVERAGE(A1:A5)", c)
+      assert eval!("SUBTOTAL(2, A1:A5)", c) == eval!("COUNT(A1:A5)", c)
+      assert eval!("SUBTOTAL(3, A1:A5)", c) == eval!("COUNTA(A1:A5)", c)
+      assert eval!("SUBTOTAL(4, A1:A5)", c) == eval!("MAX(A1:A5)", c)
+      assert eval!("SUBTOTAL(5, A1:A5)", c) == eval!("MIN(A1:A5)", c)
+      assert eval!("SUBTOTAL(6, A1:A3)", c) == eval!("PRODUCT(A1:A3)", c)
+      assert eval!("SUBTOTAL(7, A1:A3)", c) == eval!("STDEV(A1:A3)", c)
+      assert eval!("SUBTOTAL(8, A1:A3)", c) == eval!("STDEVP(A1:A3)", c)
+      assert eval!("SUBTOTAL(9, A1:A5)", c) == eval!("SUM(A1:A5)", c)
+      assert eval!("SUBTOTAL(10, A1:A3)", c) == eval!("VAR(A1:A3)", c)
+      assert eval!("SUBTOTAL(11, A1:A3)", c) == eval!("VARP(A1:A3)", c)
+
+      # the everyday one, spelled out
+      assert eval!("SUBTOTAL(9, A1:A3)", c) == 12
+      # COUNT sees the four numbers; COUNTA also sees the text cell.
+      assert eval!("SUBTOTAL(2, A1:A5)", c) == 4
+      assert eval!("SUBTOTAL(3, A1:A5)", c) == 5
+    end
+
+    test "DOCUMENTED GAP: 101-111 evaluate identically to 1-11 (no row-visibility input)" do
+      for {lo, hi} <- Enum.zip(1..11, 101..111) do
+        assert eval!("SUBTOTAL(#{lo}, A1:A3)", trio()) ==
+                 eval!("SUBTOTAL(#{hi}, A1:A3)", trio()),
+               "code #{hi} diverged from #{lo} — the hidden-row gap was closed " <>
+                 "without updating the moduledoc"
+      end
+    end
+
+    test "DOCUMENTED GAP: a nested SUBTOTAL inside the range IS double-counted" do
+      # Excel skips a nested SUBTOTAL so stacked totals don't compound.
+      # ctx.formulas carries coordinates, never formula TEXT, so this engine
+      # cannot see one. Pinned so a future fix reds here first.
+      cells = Map.put(trio(), "A4", %{"f" => "SUBTOTAL(9, A1:A3)"})
+      assert eval!("SUBTOTAL(9, A1:A4)", cells) == 24
+    end
+
+    test "several refs AND-combine like a plain aggregate" do
+      cells = Map.merge(trio(), %{"C1" => %{"v" => 10}, "C2" => %{"v" => 20}})
+      assert eval!("SUBTOTAL(9, A1:A3, C1:C2)", cells) == 42
+    end
+
+    test "an intermediate array is a legal ref" do
+      cells = %{"A1" => %{"v" => 5}, "A2" => %{"v" => 5}, "A3" => %{"v" => 7}}
+      assert eval!("SUBTOTAL(9, UNIQUE(A1:A3))", cells) == 12
+    end
+
+    test "a code outside 1-11 / 101-111 is #VALUE!" do
+      for code <- [0, 12, 100, 112, -1] do
+        assert eval!("SUBTOTAL(#{code}, A1:A3)", trio()) == "#VALUE!",
+               "code #{code} should be #VALUE!"
+      end
+
+      assert eval!("SUBTOTAL(\"nine\", A1:A3)", trio()) == "#VALUE!"
+    end
+
+    test "a code cell holding an error propagates; a missing ref is #VALUE!" do
+      cells = Map.put(trio(), "B1", %{"f" => "1/0"})
+      assert eval!("SUBTOTAL(B1, A1:A3)", cells) == "#DIV/0!"
+      assert eval!("SUBTOTAL(9)", trio()) == "#VALUE!"
+    end
+
+    test "a fractional code truncates, as Excel does" do
+      assert eval!("SUBTOTAL(9.7, A1:A3)", trio()) == 12
+    end
+  end
+
+  describe "VSTACK / HSTACK" do
+    test "the names reach function_names/0" do
+      assert "VSTACK" in Engine.function_names()
+      assert "HSTACK" in Engine.function_names()
+      refute cell!("VSTACK(A1:B1, A2:B2)", quad())["stale"]
+      refute cell!("HSTACK(A1:A2, B1:B2)", quad())["stale"]
+    end
+
+    test "VSTACK appends grids downward and spills" do
+      cells = run(Map.put(quad(), "A4", %{"f" => "VSTACK(A1:B1, A2:B2)"}))
+
+      assert cells["A4"]["spill_dims"] == [2, 2]
+      assert Enum.map(~w(A4 B4 A5 B5), &cells[&1]["v"]) == [1, 2, 3, 4]
+    end
+
+    test "HSTACK appends grids sideways and spills" do
+      # Two adjacent COLUMNS re-stacked sideways reproduce the source rectangle
+      # exactly — the identity that makes the axis unambiguous.
+      cells = run(Map.put(quad(), "A4", %{"f" => "HSTACK(A1:A2, B1:B2)"}))
+
+      assert cells["A4"]["spill_dims"] == [2, 2]
+      assert Enum.map(~w(A4 B4 A5 B5), &cells[&1]["v"]) == [1, 2, 3, 4]
+
+      # …and the axis really is horizontal: stacking the two ROWS sideways
+      # gives a 1x4 strip, where VSTACK of the same two rows gives 2x2.
+      wide = run(Map.put(quad(), "A4", %{"f" => "HSTACK(A1:B1, A2:B2)"}))
+      assert wide["A4"]["spill_dims"] == [1, 4]
+      assert Enum.map(~w(A4 B4 C4 D4), &wide[&1]["v"]) == [1, 2, 3, 4]
+    end
+
+    test "three arguments stack in order" do
+      cells =
+        run(%{
+          "A1" => %{"v" => 1},
+          "A2" => %{"v" => 2},
+          "A3" => %{"v" => 3},
+          "C1" => %{"f" => "VSTACK(A1, A2, A3)"}
+        })
+
+      assert cells["C1"]["spill_dims"] == [3, 1]
+      assert Enum.map(~w(C1 C2 C3), &cells[&1]["v"]) == [1, 2, 3]
+    end
+
+    test "VSTACK pads a short row with #N/A (Excel)" do
+      cells = run(Map.put(quad(), "A4", %{"f" => "VSTACK(A1:B1, A2)"}))
+
+      assert cells["A4"]["spill_dims"] == [2, 2]
+      assert Enum.map(~w(A4 B4 A5), &cells[&1]["v"]) == [1, 2, 3]
+      assert cells["B5"]["v"] == "#N/A"
+      assert cells["B5"]["t"] == "e"
+    end
+
+    test "HSTACK pads a short column with #N/A (Excel)" do
+      cells = run(Map.put(quad(), "A4", %{"f" => "HSTACK(A1:A2, B1)"}))
+
+      assert cells["A4"]["spill_dims"] == [2, 2]
+      assert Enum.map(~w(A4 B4 A5), &cells[&1]["v"]) == [1, 2, 3]
+      assert cells["B5"]["v"] == "#N/A"
+    end
+
+    test "a generated #N/A pad propagates to an outer aggregate" do
+      assert eval!("SUM(VSTACK(A1:B1, A2))", quad()) == "#N/A"
+      # the SQUARE stack has no pad, so the same aggregate answers a number
+      assert eval!("SUM(VSTACK(A1:B1, A2:B2))", quad()) == 10
+    end
+
+    test "a source error rides through in place, distinct from a pad" do
+      cells =
+        quad()
+        |> Map.put("A2", %{"f" => "1/0"})
+        |> Map.put("A4", %{"f" => "VSTACK(A1:B1, A2:B2)"})
+        |> run()
+
+      assert Enum.map(~w(A4 B4), &cells[&1]["v"]) == [1, 2]
+      assert cells["A5"]["v"] == "#DIV/0!"
+      assert cells["B5"]["v"] == 4
+    end
+
+    test "an argument that materialises to nothing contributes nothing" do
+      cells = run(Map.put(quad(), "A4", %{"f" => "VSTACK(A1:B1, M50:N51)"}))
+
+      assert cells["A4"]["spill_dims"] == [1, 2]
+      assert Enum.map(~w(A4 B4), &cells[&1]["v"]) == [1, 2]
+    end
+
+    test "all-empty is #VALUE!, zero arguments is #VALUE!" do
+      assert eval!("VSTACK(M50:N51)", quad()) == "#VALUE!"
+      assert eval!("HSTACK(M50:N51)", quad()) == "#VALUE!"
+      assert eval!("VSTACK()", quad()) == "#VALUE!"
+      assert eval!("HSTACK()", quad()) == "#VALUE!"
+    end
+
+    test "a result past the 100,000-cell array cap is #NUM!" do
+      assert eval!("VSTACK(SEQUENCE(60000), SEQUENCE(60000))") == "#NUM!"
+      assert eval!("HSTACK(SEQUENCE(1, 60000), SEQUENCE(1, 60000))") == "#NUM!"
+      # just under the cap still evaluates
+      assert eval!("SUM(VSTACK(SEQUENCE(50000), SEQUENCE(50000)))") == 2_500_050_000
+    end
+
+    test "stacks compose with TRANSPOSE" do
+      assert eval!("TEXTJOIN(\",\", 0, TRANSPOSE(VSTACK(A1:B1, A2:B2)))", quad()) == "1,3,2,4"
+    end
+  end
+
+  describe "SEQUENCE(rows, cols) — regression lock (this arity already shipped)" do
+    test "the two-dimensional form generates row-major and spills" do
+      cells = run(%{"A1" => %{"f" => "SEQUENCE(2, 3)"}})
+
+      assert cells["A1"]["spill_dims"] == [2, 3]
+      assert Enum.map(~w(A1 B1 C1 A2 B2 C2), &cells[&1]["v"]) == [1, 2, 3, 4, 5, 6]
+    end
+
+    test "start and step apply across the whole rectangle" do
+      cells = run(%{"A1" => %{"f" => "SEQUENCE(2, 3, 10, 5)"}})
+
+      assert Enum.map(~w(A1 B1 C1 A2 B2 C2), &cells[&1]["v"]) == [10, 15, 20, 25, 30, 35]
+    end
+
+    test "a non-positive dimension is #VALUE!, past the cap is #NUM!" do
+      assert eval!("SEQUENCE(2, 0)") == "#VALUE!"
+      assert eval!("SEQUENCE(0, 2)") == "#VALUE!"
+      assert eval!("SEQUENCE(1000, 1000)") == "#NUM!"
+    end
+  end
+
+  describe "the everyday batch is in function_names/0 and function_specs/0" do
+    test "all five new names carry a name, args and a doc" do
+      names = Engine.function_names()
+      specs = Map.new(Engine.function_specs(), &{&1.name, &1})
+
+      for n <- ~w(TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK) do
+        assert n in names, "#{n} missing from function_names/0"
+        assert %{args: args, doc: doc} = specs[n]
+        assert args != []
+        assert String.ends_with?(doc, ".")
+      end
     end
   end
 end

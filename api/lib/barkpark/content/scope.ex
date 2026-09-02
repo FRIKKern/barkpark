@@ -128,6 +128,37 @@ defmodule Barkpark.Content.Scope do
   # request can produce this value, which is what separates "no tenant resolved"
   # from "an internal caller wants everything" — two intents that an absent key
   # could not distinguish, with the permissive one winning for both.
+  #
+  # ── THE SIGN-FLIP: "missing sentinel" HAS NO FIXED DIRECTION ────────────────
+  #
+  # A reader who assumes "absent `:workspace_id` = wider" is backwards half the
+  # time, and so is the reader who assumes it is narrower. The direction is a
+  # property of WHICH HELPER the consumer lands in, not of the value:
+  #
+  #   scope_to_workspace_or_global(q, nil, _)          -> query UNTOUCHED
+  #                                                       = EVERY tenant  (WIDER)
+  #   scope_to_workspace_or_global(q, :shared_only, _) -> delegates below
+  #                                                       = workspace_id IS NULL
+  #                                                         (NARROWER than nil)
+  #   scope_to_workspace(q, nil, _)                    -> where(q, false)
+  #                                                       = ZERO rows   (NARROWER)
+  #   scope_to_workspace(q, :shared_only, _)           -> workspace_id IS NULL
+  #                                                       (WIDER than nil)
+  #
+  # So an absent workspace_id WIDENS through `scope_to_workspace_or_global/3` and
+  # NARROWS through `scope_to_workspace/3`, and adding the sentinel moves the two
+  # helpers in OPPOSITE directions. Trace the helper your consumer actually
+  # reaches — never assume the sign from the sentinel.
+  #
+  # This is not hypothetical. `Content.Query.base_query/4` reaches the PERMISSIVE
+  # `scope_to_workspace_or_global/3`, so `Content.list_documents` /
+  # `get_document` are on the WIDENING side; a comment in
+  # `Barkpark.Plugins.Tickets.Thread.operator_scope/1` named the fail-CLOSED
+  # `scope_to_workspace/3` for that same read and thereby inverted the sign of
+  # exactly this question (corrected in PR #14009). The transport flips it too:
+  # `BarkparkWeb.ScopeHelpers.scope_opts/1` emits `:shared_only` for a
+  # `%Plug.Conn{}` and OMITS the key for a socket, so the same read is narrow
+  # over HTTP and wide over a LiveView mount that resolved no workspace.
   def scope_to_workspace(query, :shared_only, _project_id),
     do: where(query, [x], is_nil(x.workspace_id))
 
@@ -280,6 +311,96 @@ defmodule Barkpark.Content.Scope do
       query
     end
   end
+
+  @doc """
+  Grant narrowing for the SCHEMA CATALOG — the `type`-rung projection of
+  `scope_to_grants/3` onto `schema_definitions` (task-8f8a3a2e05146984).
+
+  `scope_to_grants/3` cannot be reused verbatim here: its ladder ANDs
+  `project_id → dataset → type → doc_id` as `field(x, level)`, and a schema row
+  has no `type` column and no `doc_id` at all — schemas are keyed by `name`. So
+  the ladder binds to a schema query through exactly ONE rung, and this function
+  is the only place that binding lives.
+
+  Gate and failure mode are IDENTICAL to `maybe_scope_to_grants/2`: a no-op
+  unless `opts[:grant_scoped]` is true (members, tokens and anonymous reads carry
+  no flag and stay byte-identical — grants only ADD access), and fail-CLOSED
+  (`where: false`, zero rows) on a nil `caller_context`, an empty grant set, or
+  no grant covering `workspace_id` with READ. `covers_workspace_read?/2` — the
+  same live-grant + read-capability + live-grantor predicate the document path
+  uses — decides the covering set, so a revoked, expired, write-only, or
+  dead-grantor grant can never contribute a type name.
+
+  THE RUNG MAP, key by key, WITH THE SIGN of each:
+
+    * `type` — PROJECTED, and the whole point. A covering grant naming a type
+      admits the schema row of exactly that `name`. Grants OR together, so the
+      caller sees the union of their named types. A covering grant with
+      `type: nil` covers every type below it (Grant's null-covers-below
+      semantics, the same halt `grant_ladder_condition/1` performs), so it
+      WIDENS to the full catalog — correctly: that caller may read documents of
+      every type in the workspace anyway.
+
+    * `doc_id` — NOT PROJECTED, and the omission NARROWS nothing and WIDENS
+      nothing. It sits BELOW `type`, and a doc-level grant necessarily names the
+      doc's type on the rung above; the caller already knows that type name from
+      its own grant.
+
+    * `project_id` / `dataset` — NOT PROJECTED, deliberately. They sit ABOVE
+      `type`, so skipping them can only WIDEN — and the widening discloses
+      nothing the grant itself did not already tell the caller: the type name is
+      printed on the grant. Projecting them would instead break the desk, because
+      `Structure.build/2` reads workspace-global schemas (`include_global: true`,
+      `project_id` NULL, and `:project_id` deliberately dropped from the read);
+      an equality on a NULL column drops every shared type, blanking the desk of
+      a project-scoped grantee. The dataset is already fixed by the caller's own
+      `scope_schema_to_dataset/3`.
+
+  Net: a grant-admitted non-member reads back the names of the types its grants
+  name, and nothing else. What documents it may then READ of those types stays
+  governed by the full ladder on the document path — this narrows a CATALOG, it
+  is not a substitute for `maybe_scope_to_grants/2`.
+  """
+  @spec maybe_scope_schemas_to_grants(Ecto.Queryable.t(), keyword()) :: Ecto.Queryable.t()
+  def maybe_scope_schemas_to_grants(query, opts) do
+    if Keyword.get(opts, :grant_scoped, false) do
+      scope_schemas_to_grants(
+        query,
+        Keyword.get(opts, :caller_context),
+        Keyword.get(opts, :workspace_id)
+      )
+    else
+      query
+    end
+  end
+
+  @doc """
+  The unconditional schema-catalog narrowing behind `maybe_scope_schemas_to_grants/2`.
+  See that function for the rung map. Fails CLOSED on every shape it does not
+  recognise.
+  """
+  @spec scope_schemas_to_grants(Ecto.Queryable.t(), CallerContext.t() | nil, binary() | nil) ::
+          Ecto.Query.t()
+  def scope_schemas_to_grants(query, %CallerContext{grants: grants}, workspace_id)
+      when is_binary(workspace_id) and is_list(grants) do
+    case Enum.filter(grants, &covers_workspace_read?(&1, workspace_id)) do
+      [] ->
+        where(query, false)
+
+      covering ->
+        # A covering grant with no `type` rung covers every type below it — the
+        # catalog is not narrowed at all for that caller.
+        if Enum.any?(covering, &is_nil(&1.type)) do
+          query
+        else
+          names = covering |> Enum.map(& &1.type) |> Enum.uniq()
+          where(query, [s], s.name in ^names)
+        end
+    end
+  end
+
+  # Fail CLOSED: no caller_context, wrong shape, or nil workspace → zero rows.
+  def scope_schemas_to_grants(query, _caller_context, _workspace_id), do: where(query, false)
 
   # The READ-union covering set: a grant contributes its scope ladder to the
   # read narrowing ONLY when it (a) covers this workspace AND (b) actually

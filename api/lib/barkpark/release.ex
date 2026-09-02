@@ -7,7 +7,26 @@ defmodule Barkpark.Release do
     load_app()
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(
+          repo,
+          &Ecto.Migrator.run(&1, :up, all: true),
+          # `with_repo/3` starts the repo with the SAME config, so a migration
+          # connection would otherwise inherit prod's 30 s `statement_timeout`
+          # (config/runtime.exs) — and a backfill or a `CREATE INDEX
+          # CONCURRENTLY` that Postgres CANCELS at 30 s leaves an INVALID index
+          # behind. A migration is an operator-supervised, offline-shaped step:
+          # its bound is the deploy window, not a request budget. These opts are
+          # passed through to `repo.start_link/1`, where they REPLACE the
+          # `:parameters` from config (nothing else sets that key).
+          #
+          # NOTE, and it is the load-bearing half: `make deploy` migrates via
+          # `mix ecto.migrate` (Makefile), not through this function, so this
+          # override does not cover the live path. A long migration must still
+          # disable the wall itself — see `Barkpark.Repo`'s @moduledoc for the
+          # `repo().checkout` + `SET statement_timeout = 0` shape.
+          parameters: [statement_timeout: "0"]
+        )
     end
   end
 

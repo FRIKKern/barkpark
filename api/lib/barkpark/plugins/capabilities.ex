@@ -377,9 +377,18 @@ defmodule Barkpark.Plugins.Capabilities do
   gets by default. Commands WITHOUT this descriptor are full-only forever
   (task.get / `bp task show` intentionally omit it — they ARE the escape hatch).
 
-  Kept as a single source of truth so the tasks plugin (`task.ready`,
-  `task.prime`) and the core `search.query` command declare the byte-identical
-  shape; the contract test pins all three to this map.
+  Declared here for the CORE `search.query` command only. This is NOT a shared
+  source of truth: the tasks plugin declares its own copy
+  (`Barkpark.Plugins.Tasks`, `@agent_views`) for `task.ready` / `task.prime`,
+  because a plugin calling into this module bought a `tasks→capabilities`
+  architecture edge (the cqv8 boundary gate named it) for a four-key constant.
+
+  The guarantee that all three commands emit the byte-identical shape is the
+  WIRE-level contract test, not a shared call:
+  `test/barkpark_web/contract/capabilities_manifest_test.exs`, describe
+  "command-level `views` descriptor", `@frozen_views` — it asserts `task.ready`,
+  `task.prime` and `search.query` against a frozen literal over the real
+  `?views=1` response. Edit this map without editing that one and the test reds.
   """
   @spec agent_views_descriptor() :: map()
   def agent_views_descriptor do
@@ -470,7 +479,7 @@ defmodule Barkpark.Plugins.Capabilities do
   defp command_noun(%{"noun" => n}) when is_binary(n), do: n
   defp command_noun(_), do: nil
 
-  # Orthogonal chat side-branch (D36 / charter D16). The nine `chat.*` commands
+  # Orthogonal chat side-branch (D36 / charter D16). The eleven `chat.*` commands
   # DECLARE `auth_tier: "admin"` (unchanged — admin/ingest keep discovering them
   # through the rank ladder), but a caller holding the `chat` capability ALSO
   # discovers the `chat` noun. This is a capability grant, not a rank lift: it
@@ -675,7 +684,7 @@ defmodule Barkpark.Plugins.Capabilities do
       # Claude chat sessions (charter bp-chat-tui, D21). StudioChat is
       # CORE-embedded, NOT a Barkpark.Plugin — it never flows through
       # plugin_nouns/2, so the noun is hand-declared here so MCP/SDK codegen and
-      # any headless harness can DISCOVER chat. The nine non-streaming verbs are
+      # any headless harness can DISCOVER chat. The eleven non-streaming verbs are
       # registered below; the SSE `GET /v1/chat/sessions/:id/events` route is a
       # builtin carve-out (like `listen`) with no manifest verb — it is NAMED
       # here so a reading agent knows live streaming exists via `bp chat`.
@@ -683,7 +692,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "name" => "chat",
         "summary" =>
           "Claude chat sessions — create/list/read/update, send, interrupt, approve, " <>
-            "archive/unarchive. " <>
+            "archive/unarchive, plus chat-owned attachment upload/read " <>
+            "(never the media plugin). " <>
             "Live token streaming rides the `bp chat` SSE events channel " <>
             "(a builtin carve-out, not a manifest verb).",
         "plugin" => nil
@@ -3146,12 +3156,28 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
-      # The nine non-streaming verbs behind the `/v1/chat` scope, which is
-      # `pipe_through [:api, :require_admin]` — every route needs a data-plane
-      # bearer with the global `admin` permission (D21: instance-global scope,
-      # NO tenant/workspace/project/dataset column, so NO scoped_prefix). All
-      # `auth_tier: "admin"` so the existence-hiding projection hides `chat.*`
-      # from anon/lower-tier callers exactly like the other admin nouns. The
+      # The eleven non-streaming verbs behind the `/v1/chat` scope.
+      #
+      # STALE CLAIM CORRECTED (ct-bl-chat-attachments). This comment used to say
+      # the scope is `pipe_through [:api, :require_admin]` and that "every route
+      # needs a data-plane bearer with the global `admin` permission (D21)".
+      # That stopped being true on 2026-07-13: `dbfc3d826e` (#2958) moved the
+      # whole scope onto `[:api, :require_chat_access]`, and the charter itself
+      # now records D21 as historically inaccurate post-connectors. The gate
+      # ADMITS two classes and denies everything else — a global-`admin` token
+      # (`chat_scope: :global`, instance-wide authority unchanged) and a
+      # workspace-BOUND token carrying `chat` (`{:workspace, ws}`, confined by
+      # the controller's `fetch_scoped` tenant oracle to sessions its own tenant
+      # owns). A plain `read`/`write` data-plane token, and a `chat` token with
+      # no workspace binding, are both 403'd at the pipeline. There is still NO
+      # scoped_prefix, because the PATH carries no tenant segment — the tenancy
+      # rides the token, not the URL.
+      #
+      # The declared `auth_tier: "admin"` below is UNCHANGED and is a different
+      # axis: it is the manifest's existence-hiding rank, which keeps `chat.*`
+      # out of an anon/lower-tier caller's manifest exactly like the other admin
+      # nouns. A `chat`-capability holder additionally discovers the noun through
+      # the capability grant in `command_noun/1` above. The
       # SSE route — `GET /v1/chat/sessions/:id/events` — is a builtin
       # streaming carve-out with no manifest verb (like `listen`); it is named
       # in the `chat` noun summary. `writes: true` on every non-GET verb here
@@ -3298,6 +3324,32 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "chat.answer",
+        "chat",
+        "answer",
+        "Answer an AskUserQuestion card with the option label(s) the human picked (question rows only).",
+        "POST",
+        "/v1/chat/sessions/:id/answer",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg(
+            "request_id",
+            true,
+            "string",
+            "The question ask's request id (≤256 UTF-8 bytes)."
+          ),
+          arg(
+            "answers",
+            true,
+            "object",
+            "Question string → the chosen option label (or a list of labels for a multiSelect question). Every key and value is validated against the ask the server persisted; updatedInput is rebuilt server-side, never sent by the caller."
+          )
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
         "chat.archive",
         "chat",
         "archive",
@@ -3320,6 +3372,48 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Chat session id.")],
         writes: true,
         default_output: "minimal"
+      ),
+      # Chat-owned attachments (charter D16, `ct-bl-chat-attachments`). These two
+      # ride the SAME `[:api, :require_chat_access]` scope and the SAME
+      # `fetch_scoped` tenant oracle as every other `/sessions/:id` route —
+      # deliberately NOT the media plugin, whose `GET /media/files/*` is
+      # any-token-public. Both bodies are JSON (base64 in, base64 out) rather
+      # than raw bytes, so they are ordinary manifest verbs, not a streaming
+      # builtin carve-out like the SSE `events` route.
+      core_cmd(
+        "chat.upload_attachment",
+        "chat",
+        "upload-attachment",
+        "Upload an image attachment to a chat session's chat-owned store (png|jpeg|gif|webp; base64 body).",
+        "POST",
+        "/v1/chat/sessions/:id/attachments",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg("data", true, "string", "Base64-encoded image bytes (≤3 MB decoded).")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "chat.get_attachment",
+        "chat",
+        "get-attachment",
+        "Read one chat attachment back by its opaque id (base64 payload; never served through any media route).",
+        "GET",
+        "/v1/chat/sessions/:id/attachments/:attachment_id",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg(
+            "attachment_id",
+            true,
+            "string",
+            "Opaque attachment id (the content address returned by upload-attachment)."
+          )
+        ],
+        writes: false,
+        default_output: "json"
       ),
       # ── Mobile app-token exchange (task wb-api-capabilities-undeclared-verbs)
       # Mounted at `/v1/auth/app-tokens` behind `[:api, :require_token]` — the

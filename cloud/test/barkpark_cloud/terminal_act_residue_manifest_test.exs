@@ -567,7 +567,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   ## ── ROW 5: THE LIVE TEARDOWN, END TO END, IN-PROCESS ─────────────────────
 
-  test "ROW 5 — the LIVE teardown DESTROYS the row and all six children, and writes NO audit event at all" do
+  test "ROW 5 — the LIVE teardown DESTROYS the row and all six children, and SAYS SO on the trail" do
     {_user, team, token} = logged_in()
     bp = barkpark_fixture(team, %{name: "Live", host: "10.0.0.1"})
     :ok = seed_children!(bp)
@@ -589,18 +589,41 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
     assert Repo.get(Barkpark, bp.id) == nil
     assert child_counts(bp) == all_zeroes()
 
-    # THE RESIDUE THAT ISN'T THERE. The entire live path — the only path a box
-    # that actually RAN can take — writes no audit event whatsoever. The tree
-    # already pins this as expected at
-    # test/barkpark_cloud/web/router_audit_test.exs:344 ("a live box (deprovision
-    # path) writes NO barkpark.deleted event"); this row drives it all the way to
-    # the deletion so the silence is shown to survive the act, not just precede
-    # it. app.js renders "barkpark.deleted" as "removed a Barkpark" inside a
-    # surface the console calls an append-only audit list, so that list shows the
-    # removal of every box that never ran and is silent about every box that did.
-    assert Accounts.list_audit_events(team) == [],
-           "the live teardown now writes an audit event — good news, and this row's sentence must " <>
-             "be rewritten to say so"
+    # TOLD: the team, on the trail, by the transaction that did it (cch-w57).
+    #
+    # THIS ROW USED TO READ THE OTHER WAY. Wave 57 drove the live path to the
+    # deletion and found it wrote no audit event whatsoever — and the tree pinned
+    # that silence as EXPECTED in web/router_audit_test.exs. Since the live
+    # deprovision is the only path a box that actually RAN can take, the console's
+    # append-only audit list showed the removal of every box that never ran and
+    # was silent about every box that did. The register said so; this is the
+    # register being answered, not edited.
+    #
+    # `Registry.succeed_deprovision_job/2` now stamps `barkpark.deleted` INSIDE
+    # the transaction that deletes the row, so the fact cannot outlive a rolled-
+    # back act and the act cannot outrun the fact. The actor is nil because the
+    # WORKER performs the deletion; `provision_jobs` carries no actor column, and
+    # a guessed actor would be worse than a declared absence.
+    events = Accounts.list_audit_events(team)
+
+    # NOT `assert [ev] = ..., "msg"` — a match with a custom message raises
+    # MatchError before assert/2 ever runs, and the sentence below would be dead
+    # text on the one failure it exists to explain.
+    assert length(events) == 1,
+           "the live teardown wrote #{length(events)} audit events, not one — it has gone back " <>
+             "to being silent about every box that actually ran, or it is now double-stamping"
+
+    [ev] = events
+
+    assert ev.action == "barkpark.deleted"
+    assert ev.target_type == "barkpark"
+    assert ev.target_id == bp.id
+    assert ev.actor_user_id == nil
+    assert ev.metadata["via"] == "deprovision"
+
+    # SURVIVES: the trail row, and nothing it points at. ROW 6 drives WHY that is
+    # possible (`target_id` is a bare string with no FK).
+    assert Repo.get(Barkpark, ev.target_id) == nil
   end
 
   ## ── ROW 6: THE AUDIT SURVIVOR / POSITIVE CONTROL ─────────────────────────

@@ -145,6 +145,53 @@ defmodule BarkparkWeb.ScopeHelpers do
   # full-suite failures, chiefly Studio array-ops losing sight of the very
   # document being edited. Widening to sockets is its own change with its own
   # proof, not a free ride on this one.
+  #
+  # ── WHY THE SOCKET ARM IS EXCLUDED — the real reason (task-816bafcfbfc2f912) ─
+  #
+  # This arm is the FOURTH instance of the fail-open empty-scope class: an
+  # unresolved tenant scope reaching `Content.Scope.scope_to_workspace_or_global/3`
+  # as `nil`, whose nil arm is `scope_to_workspace_global/1` — "returns the query
+  # untouched", i.e. every tenant's rows. Its three siblings were CLOSED:
+  #
+  #   * PR #12826 — 15 flat routes
+  #   * PR #12827 — blob write
+  #   * task-2e4a3692adf5c565 — flat media surface (anonymous cross-tenant read)
+  #
+  # The exclusion above is CORRECT. Two of the reasons the paragraph above gives
+  # for it are NOT what makes it correct, and an unstated reason is how an
+  # exclusion gets re-litigated — so, on the record:
+  #
+  #   * NOT because `ScopeResolver` makes a socket safe. All three of its arms
+  #     terminate in `Tenancy.get_default_workspace()` (studio/scope_resolver.ex),
+  #     the same nil this whole class is about, and it takes a CONN, so it does
+  #     not cover live navigation at all.
+  #   * NOT because a test asserts the omission. NOTHING in the suite asserts the
+  #     socket omission in either direction. The canonical spec
+  #     `test/barkpark_web/empty_scope_shared_layer_test.exs` has no socket arm,
+  #     and the 13-of-19 reds cited above are FIXTURE artifacts:
+  #     `test/barkpark_web/live/studio/studio_live_array_op_test.exs` builds its
+  #     subject as a bare `%Phoenix.LiveView.Socket{assigns: %{…}}` literal — no
+  #     mount, no LiveScope, no StudioChrome — a socket shape production cannot
+  #     produce, over a fixture doc created with no `workspace_id`.
+  #
+  # THE ACTUAL REASON: widening buys nothing, because every socket that can reach
+  # `scope_opts/1` unresolved today sits behind a gate whose holder ALREADY has
+  # the access. Of the plugin `{:live, …}` routes, only
+  # `Barkpark.Plugins.Tickets.InboxLive` imports this module, and it is
+  # `auth: :admin` → `live_session :plugin_admin`, whose only reachable principal
+  # in the leaking state is a GLOBAL-admin token (LiveAuth's account arm itself
+  # requires `get_default_workspace()` to return a workspace, so it halts in
+  # exactly that state). A global-admin token already reads instance-wide, so the
+  # fall-through moves NO capability.
+  #
+  # That reason is a statement about who occupies the seat, not about the seat.
+  # `live_session :plugin_public` / `:plugin_ops` mount StudioChrome with NO
+  # tenant resolver, so a FUTURE plugin LiveView taking that seat would break it —
+  # anonymously, on `:plugin_public`. The seat is now GUARDED STRUCTURALLY rather
+  # than argued in prose:
+  # `test/barkpark_web/plugin_live_session_scope_opts_guard_test.exs` reads the
+  # router's live_sessions and each LiveView's BEAM imports chunk, and fails
+  # naming any module in those two sessions that calls `scope_opts/1`.
   defp put_workspace_scope(opts, _unresolved, :sentinel),
     do: Keyword.put(opts, :workspace_id, :shared_only)
 

@@ -82,13 +82,13 @@ defmodule Barkpark.Plugins.Sheets.GoldenParityFixtureTest do
     assert expected["D2"] == "TRUE"
   end
 
-  test "error coverage: all six engine error codes are pinned (error_refs = 6)" do
+  test "error coverage: all seven pinned engine error codes (error_refs = 7)" do
     fixture = decode!(@api_path)
 
-    assert Enum.sort(fixture["error_refs"]) == ["A11", "A6", "A9", "B11", "B9", "C11"]
+    assert Enum.sort(fixture["error_refs"]) == ["A11", "A6", "A9", "B11", "B19", "B9", "C11"]
 
-    assert Map.take(fixture["expected"], ["A11", "B11", "C11"]) ==
-             %{"A11" => "#NUM!", "B11" => "#REF!", "C11" => "#CYCLE!"}
+    assert Map.take(fixture["expected"], ["A11", "B11", "C11", "B19"]) ==
+             %{"A11" => "#NUM!", "B11" => "#REF!", "C11" => "#CYCLE!", "B19" => "#NAME?"}
   end
 
   test "long-cell probe: A12 carries the 60-char string verbatim" do

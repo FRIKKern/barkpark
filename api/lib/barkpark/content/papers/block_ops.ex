@@ -1520,6 +1520,78 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def normalize_render_shapes(other), do: other
 
   @doc """
+  Reject a block list holding an ELEMENT that is not an object, at any nesting
+  level the render walk descends.
+
+  ## Why this exists next to `validate_render_shapes/1`
+
+  `validate_render_shapes/1` is the PAPER publish gate: it is deliberately
+  strict (list items, table rows/cells, legacy list dialects) and only runs for
+  `@paper_type`. This one is the TYPE floor every document write needs, and it
+  refuses exactly ONE shape — a non-map element — because that shape is the only
+  one that CRASHES:
+
+      Render.render_blocks/2   # `when is_list(blocks)` — the LIST is guarded
+      |> Enum.map(&render_block(&1, opts))
+      # render_block/2 is `when is_map(block)` — the ELEMENT is not
+
+  so `["notamap"]` clears the list guard and then raises `FunctionClauseError`
+  inside the write projection (`Content.Writer` → `Projection.project/4` →
+  `Projection.project_body/2` → `Render.render_blocks/2`), which reaches the
+  client as an uncaught 500 with an HTML body instead of the v1 JSON envelope.
+  Every OTHER malformed shape the corpus produces already renders to `""`
+  (`Compose.block_to_html/2` and `Compose.figure_html/3` both carry a non-map
+  catch-all), so widening this beyond the element type would REJECT writes that
+  are accepted today.
+
+  ## Descent
+
+  `"blocks"` and `"children"` — the same two container keys
+  `normalize_render_shapes/1` and `render_shape_errors/2` descend, so the three
+  walkers agree on what a nested block list is. A nested non-map is not itself a
+  crash (the compose bridge renders it as `""`), but it is silent content LOSS
+  behind a 200, so it is refused at the same door.
+
+  Returns `:ok`, or `{:error, {:malformed_blocks, %{"blocks" => [path, …]}}}`,
+  which `Barkpark.Content.Errors` renders as a 400 `malformed` envelope.
+  """
+  @spec validate_block_elements(term(), String.t()) ::
+          :ok | {:error, {:malformed_blocks, map()}}
+  def validate_block_elements(blocks, path \\ "blocks")
+
+  def validate_block_elements(blocks, path) when is_list(blocks) and is_binary(path) do
+    case block_element_errors(blocks, path) do
+      [] -> :ok
+      errors -> {:error, {:malformed_blocks, %{"blocks" => errors}}}
+    end
+  end
+
+  # A non-list block root never reaches `render_blocks/2` (its `is_list` guard
+  # holds) — the scaffold falls back to an empty paragraph and the projection
+  # skips it. Nothing to refuse.
+  def validate_block_elements(_blocks, _path), do: :ok
+
+  defp block_element_errors(blocks, path) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {block, index} when is_map(block) ->
+        Enum.flat_map(["blocks", "children"], fn key ->
+          case Map.get(block, key) do
+            children when is_list(children) ->
+              block_element_errors(children, "#{path}[#{index}].#{key}")
+
+            _ ->
+              []
+          end
+        end)
+
+      {_block, index} ->
+        ["#{path}[#{index}] must be an object"]
+    end)
+  end
+
+  @doc """
   Reject a Paper block tree that still contains a reader-incompatible shape
   after normalization. Metadata-bearing wrappers are accepted when every
   reader has a lossless fallback for their content field.
@@ -1528,7 +1600,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def validate_render_shapes(blocks) when is_list(blocks) do
     case render_shape_errors(blocks, "blocks") do
       [] -> :ok
-      errors -> {:error, {:invalid_paper_structure, %{"blocks" => errors}}}
+      errors -> {:error, {:invalid_paper_structure, structure_refusal_details(blocks, errors)}}
     end
   end
 
@@ -1537,6 +1609,50 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error,
        {:invalid_paper_structure,
         %{"blocks" => ["must be an array when a Paper declares a block body"]}}}
+
+  # The refusal's registered hint tells the author to "Fix the listed block
+  # paths", and the `blocks` messages do carry a POSITIONAL one
+  # (`blocks[12].rows[0].cells[1] has no renderable inline content`). What they
+  # never carried is the authored block ID — the token an author greps their own
+  # document for, and the one the reporter of this wall had to BISECT a
+  # 105-block Paper to recover ("the first rejecting block was b12"). A
+  # positional index is only as good as the caller's copy of the list; the id
+  # survives an insert above it. `block_ids` names the offending blocks
+  # directly, deduplicated, in first-refusal order.
+  #
+  # Purely ADDITIVE: `blocks` stays byte-identical, and the key is OMITTED (not
+  # emitted empty) when no offending block carries an id, so a block list
+  # without ids refuses exactly as it always did.
+  defp structure_refusal_details(blocks, errors) do
+    ids =
+      errors
+      |> Enum.map(&leading_block_index/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(fn
+        nil ->
+          []
+
+        index ->
+          case Enum.at(blocks, index) do
+            %{"id" => id} when is_binary(id) and id != "" -> [id]
+            _ -> []
+          end
+      end)
+
+    case ids do
+      [] -> %{"blocks" => errors}
+      ids -> %{"blocks" => errors, "block_ids" => ids}
+    end
+  end
+
+  defp leading_block_index(message) when is_binary(message) do
+    case Regex.run(~r/^blocks\[(\d+)\]/, message) do
+      [_, index] -> String.to_integer(index)
+      _ -> nil
+    end
+  end
+
+  defp leading_block_index(_), do: nil
 
   defp render_shape_errors(blocks, prefix) do
     blocks
@@ -1705,7 +1821,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_render_block(%{"type" => "table"} = block) do
-    normalize_table_shape(block)
+    block
+    |> canonicalize_table_headers_key()
+    |> normalize_table_shape()
   end
 
   defp normalize_render_block(%{"type" => "callout", "text" => text} = block)
@@ -2208,6 +2326,33 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp record_table_text(nil), do: ""
   defp record_table_text(value), do: to_string(value)
+
+  # The `headers` (PLURAL) head spelling — the one dialect that reached exactly
+  # ONE reader. The Bulldocs BPML printer has always accepted it
+  # (`printer.ex` — `alias_get(b, ["head", "header", "headers", "columns"])`),
+  # so a BPML export printed the header row. Nothing else did: compose.ex
+  # resolves `head` / `header` / `columns` / a legacy header ROW and drops
+  # `headers` on the floor, so the authored header row rendered as NOTHING
+  # behind a 200; `render_block_errors/2` reads `head || header`, so its cells
+  # were never validated (an unrenderable one published clean, and the wall
+  # named no path because it never looked); and neither the inline-leaf rescue
+  # nor the bare-string cell rescue keys on it. That is what makes a `bp doc
+  # get` of a `headers`-keyed table un-round-trippable: the bytes come back and
+  # go back in, and the head is silently not there.
+  #
+  # Canonicalize the key ONCE, here at the write chokepoint, and all three
+  # surfaces inherit the dialect for free. Renaming only — cell bytes are
+  # untouched. A block that already declares a non-empty `head` keeps BOTH keys
+  # verbatim: `head` wins in every reader, and dropping the twin would delete
+  # authored content this function has no mandate to judge.
+  defp canonicalize_table_headers_key(block) do
+    with cells when is_list(cells) and cells != [] <- Map.get(block, "headers"),
+         head when head in [nil, []] <- Map.get(block, "head") do
+      block |> Map.delete("headers") |> Map.put("head", cells)
+    else
+      _ -> block
+    end
+  end
 
   defp table_head_or_header(block) do
     case Map.get(block, "head") do

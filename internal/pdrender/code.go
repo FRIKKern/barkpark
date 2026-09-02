@@ -87,8 +87,14 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	// block composes to nothing, not an empty box); before this guard the Go
 	// readers painted a lone "▌" where the web rendered nothing, a View/TUI
 	// parity break on the same block (task-841c27ea82903f48). Checked before
-	// the cache key so the empty case never occupies a slot.
-	if strings.TrimSpace(source) == "" {
+	// the cache key so the empty case never occupies a slot. Re-expressed
+	// through the shared blankAttr leaf reader (blank.go) when the four other
+	// media guards landed, exactly as compose.ex re-expressed
+	// `blank_code_source?/1` through `blank_field?/2` in #14991 — one definition
+	// of blank, applied to code's documented dual-read (`code`||`value`).
+	// Behaviour-identical for every string/nil case; a non-stringish (map) value
+	// now reads as blank, which is what compose.ex has always said.
+	if blankAttr(b.Attrs, "code") && blankAttr(b.Attrs, "value") {
 		return nil
 	}
 

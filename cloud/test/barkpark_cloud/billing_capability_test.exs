@@ -33,6 +33,15 @@ defmodule BarkparkCloud.BillingCapabilityTest do
   @opts Router.init([])
   @password "correct-horse-battery"
 
+  # The two key shapes the capability distinguishes. Neither is a credential:
+  # both are refused by Stripe on sight, and no test here reaches the network.
+  @live_key "sk_live_never_used"
+  @test_key "sk_test_never_used"
+
+  # A fully-wired state, so the ONLY variable in the test-mode block is the key.
+  @wired_prices %{"supporter" => "price_supporter"}
+  @wired_secret "whsec_test"
+
   # The FIVE config states, each a {prices, webhook_secret} pair driven against
   # the REAL StripeGateway (the StubGateway needs no config and is always
   # :available, so it could never express these states).
@@ -70,7 +79,20 @@ defmodule BarkparkCloud.BillingCapabilityTest do
   # Put the process into one of the five states. `secret_key` is always set so a
   # regression that reaches the gateway fails with a gateway error rather than a
   # raise — the mutant's answer stays legible.
+  #
+  # cch-w50-bl MOVED THIS KEY from `sk_test_never_used` to a LIVE-shaped one, and
+  # the move is the point rather than housekeeping. `checkout_capability/0` now
+  # reads the key's prefix: a `sk_test_…` key answers `:test_mode`, so under the
+  # old fixture every state below that used to read `:available` would read
+  # `:test_mode` and the five-state matrix would be asserting the new state
+  # everywhere instead of the ones it was written for. The states here mean
+  # "prices × webhook secret, key not in question"; the key axis gets its own
+  # states in the TEST-MODE describe block, driven BOTH ways.
   defp put_state(prices, webhook_secret) do
+    put_state(prices, webhook_secret, @live_key)
+  end
+
+  defp put_state(prices, webhook_secret, secret_key) do
     base = Application.get_env(:barkpark_cloud, Billing, [])
 
     Application.put_env(
@@ -80,7 +102,7 @@ defmodule BarkparkCloud.BillingCapabilityTest do
     )
 
     Application.put_env(:barkpark_cloud, StripeGateway,
-      secret_key: "sk_test_never_used",
+      secret_key: secret_key,
       webhook_secret: webhook_secret
     )
   end
@@ -110,6 +132,15 @@ defmodule BarkparkCloud.BillingCapabilityTest do
   end
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
+
+  # The declaration as the wire actually carries it, with the key axis explicit.
+  defp capability_payload_with_key(prices, secret, key) do
+    {_user, _team, token} = user_with_team()
+    put_state(prices, secret, key)
+    conn = call(:get, "/v1/subscription", nil, token)
+    assert conn.status == 200
+    json_body(conn)
+  end
 
   # The declaration as the wire actually carries it, for the given state.
   defp capability_payload(prices, secret) do
@@ -303,6 +334,92 @@ defmodule BarkparkCloud.BillingCapabilityTest do
       )
 
       assert {:ok, "https://checkout.stub/" <> _} = Billing.checkout(team, "supporter")
+    end
+  end
+
+  describe "TEST MODE — a sk_test_ key is not :available (cch-w50-bl)" do
+    # MEASURED, NOT HYPOTHETICAL. On the serving control plane
+    # (cloud-control_plane_green-1, re-read read-only 2026-09-02):
+    # STRIPE_SECRET_KEY begins `sk_test_`, STRIPE_PRICE_SUPPORTER is
+    # `price_1TnEHC…` and STRIPE_WEBHOOK_SECRET is `whsec_…`. That is exactly
+    # the state below: everything D553/D554 check is satisfied, and until this
+    # slice `checkout_capability/0` answered :available on it — so the console
+    # rendered a live Subscribe that opened a REAL hosted Checkout Session no
+    # real card can pay.
+    #
+    # THE MUTATION THIS BLOCK EXISTS FOR: delete the `test_mode_key?() ->
+    # :test_mode` arm from `checkout_capability/0` (collapse it into
+    # :available) and every test here reds BY NAME.
+
+    test "the SAME wiring answers :test_mode on a test key and :available on a live key" do
+      # Both directions in one test, because a one-way assertion cannot tell a
+      # working distinction from a function that answers :test_mode always.
+      put_state(@wired_prices, @wired_secret, @test_key)
+      assert Billing.checkout_capability() == :test_mode
+      refute Billing.configured?(), "a plane that cannot take money is not configured?"
+
+      put_state(@wired_prices, @wired_secret, @live_key)
+      assert Billing.checkout_capability() == :available
+      assert Billing.configured?()
+    end
+
+    test "the two no-price / no-secret states OUTRANK the key — a test key never hides them" do
+      # Ordering matters: :unconfigured and :unverifiable name a MORE specific
+      # deploy fault than the key's mode, and both already refuse. A test key
+      # must not relabel them.
+      put_state(%{}, @wired_secret, @test_key)
+      assert Billing.checkout_capability() == :unconfigured
+
+      put_state(@wired_prices, nil, @test_key)
+      assert Billing.checkout_capability() == :unverifiable
+    end
+
+    test "Billing.checkout/2 refuses BEFORE the gateway is called, with its own reason" do
+      {_user, team, _token} = user_with_team()
+      put_state(@wired_prices, @wired_secret, @test_key)
+
+      # The price DOES resolve and the webhook secret IS wired — this is not a
+      # plan_invalid case and not the D553 hole. Nothing but the key refuses it.
+      assert Billing.price_id("supporter") == "price_supporter"
+      assert Billing.checkout(team, "supporter") == {:error, :billing_test_mode}
+    end
+
+    test "POST /v1/billing/checkout 422s billing_test_mode and states the reason" do
+      {_user, _team, token} = user_with_team()
+      put_state(@wired_prices, @wired_secret, @test_key)
+
+      conn = call(:post, "/v1/billing/checkout", %{plan: "supporter"}, token)
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "billing_test_mode"
+
+      assert body["reason"] == Billing.test_mode_disclosure(),
+             "the server's reason must BE the disclosure, not a paraphrase of it"
+
+      # The sentence itself: plain words, and no future tense anywhere in it.
+      assert body["reason"] =~ "test mode"
+      refute body["reason"] =~ ~r/\bwill\b/i
+    end
+
+    test "an UNPRICED plan still answers plan_invalid on a test-mode plane" do
+      # The BILL-2 arm reads the enum now, not `configured?/0`. Under :test_mode
+      # the prices resolve, so a bad plan name really is the caller's problem
+      # and must not be relabelled a deploy fault.
+      {_user, _team, token} = user_with_team()
+      put_state(@wired_prices, @wired_secret, @test_key)
+
+      conn = call(:post, "/v1/billing/checkout", %{plan: "support_plus"}, token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "plan_invalid"
+    end
+
+    test "the declaration on the wire carries test_mode — the console can read it before the click" do
+      body = capability_payload_with_key(@wired_prices, @wired_secret, @test_key)
+
+      assert body["billing_capability"]["checkout"] == "test_mode"
+      assert body["billing_capability"]["plans"] == ["supporter"]
     end
   end
 end
