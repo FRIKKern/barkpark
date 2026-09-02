@@ -122,6 +122,10 @@
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
+# shellcheck disable=SC2034  # consumed by log() in lib/site-deploy-common.sh, sourced
+# three lines below through a $(dirname "$SELF") path; shellcheck cannot follow a
+# dynamic source without -x, so it sees a write with no read. `shellcheck -x` on
+# this file is rc 0 — this directive silences the ONE finding a bare run reports.
 BP_LOG_TAG="site-deploy-node"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
@@ -1988,6 +1992,210 @@ FAKEMV
   check "MUTANT: --rollback reports the target GONE"              sh -c "[ \"\$(cat '$RBM/rbrc')\" = 21 ] && grep -q \"previous release 'rb1' is gone\" '$RBM/rb.log'"
   echo "  mutation proof: with the one line back to 'rm -rf \"\$RELDIR\" \"\$RELDIR.partial\"', the SAME fixture (rb1 warm-previous + health-failed, re-deployed, staging cp fails at exit 13) leaves releases/rb1 DELETED and --rollback saying the previous release is gone; with the guard, rb1 keeps its original bytes and the refusal is the honest one (marked health-failed)"
 
+  # =========================================================================
+  # …AND ON ALL FOUR EXIT-13 ARMS, not just the standalone copy.
+  # The arm above arms its fake cp on the DESTINATION (`*.partial/`).  Only ONE
+  # of STAGE's three copies has a destination that ends there — the standalone
+  # one.  The other two land in `<id>.partial/.next/static/` and
+  # `<id>.partial/public/`, and the fourth exit-13 arm is not a copy at all but
+  # the `.partial` -> release rename, for which there was no shim.  So three of
+  # the four arms could never be induced to fail, and a regression that put the
+  # up-front delete back on the public/ arm alone would have sailed through
+  # green.  (Credit: lead-platform-2's builder found the gap and wrote the
+  # four-arm harness this block is ported from.)
+  #
+  # The fix is to arm on the SOURCE — argument 2, where `*/.next/standalone/.`,
+  # `*/.next/static/.` and `*/public/.` are cleanly distinguishable — plus an mv
+  # armed on a `.partial` FIRST ARGUMENT, which is the rename and NOT the
+  # move-aside (whose first argument is the release dir itself).  Getting that
+  # predicate wrong relocates the proof to a different, already-correct call
+  # site and produces a green that means nothing, so every arm asserts WHICH
+  # call site the shim fired on, and that it fired exactly once.
+  #
+  # Each arm restores a byte-identical snapshot and runs it through BOTH the
+  # mutant (pre-fix line) and this engine, so the four arms and the two engines
+  # are the same experiment.
+  # =========================================================================
+  echo "[selftest] e2e: MUTATION — all FOUR exit-13 arms of STAGE, mutant vs fixed"
+  SWP="$TD/swpstage"; mkdir -p "$SWP"
+  SWPSRC="$SWP/src"; mkdir -p "$SWPSRC"
+  printf '{"name":"selftest-swpstage","private":true}\n' > "$SWPSRC/package.json"
+
+  # The shims.  Both do REAL work (or none) and then fail, both are armed ONLY
+  # by BP_SWP_FAIL — so the fixture deploys that BUILD the rollback target use
+  # the real binaries — and both append the exact call site they intercepted to
+  # BP_SWP_LOG, which is what the per-arm assertions read.
+  SWPBIN="$SWP/bin"; mkdir -p "$SWPBIN"
+  cat > "$SWPBIN/cp" <<'SWPCP'
+#!/usr/bin/env bash
+real=/bin/cp; [ -x "$real" ] || real=/usr/bin/cp
+if [ -n "${BP_SWP_FAIL:-}" ] && [ "$#" -eq 3 ] && [ "$1" = "-a" ]; then
+  hit=""
+  case "$BP_SWP_FAIL:$2" in
+    standalone:*/.next/standalone/.) hit=1 ;;
+    static:*/.next/static/.)         hit=1 ;;
+    public:*/public/.)               hit=1 ;;
+  esac
+  if [ -n "$hit" ]; then
+    src="${2%/.}"
+    /bin/mkdir -p "$3" 2>/dev/null
+    # Land ONE real entry first, so the failure has the shape of an ENOSPC
+    # part-way through a copy rather than a copy that never started.
+    for f in "$src"/*; do [ -e "$f" ] && { "$real" -a "$f" "$3" 2>/dev/null; break; }; done
+    printf 'cp %s -> %s\n' "$2" "$3" >> "${BP_SWP_LOG:-/dev/null}"
+    exit 1
+  fi
+fi
+exec "$real" "$@"
+SWPCP
+  cat > "$SWPBIN/mv" <<'SWPMV'
+#!/usr/bin/env bash
+real=/bin/mv; [ -x "$real" ] || real=/usr/bin/mv
+# Fails ONLY the partial -> release rename.  The move-aside (`mv <rel>
+# <rel>.aside`) and the recovery (`mv <rel>.aside <rel>`) have a first argument
+# that is NOT the .partial, so they run for real — if this predicate matched
+# them the proof would silently move to a different call site.
+if [ "${BP_SWP_FAIL:-}" = mv ] && [ "$#" -eq 2 ]; then
+  case "$1" in
+    *.partial)
+      printf 'mv %s -> %s\n' "$1" "$2" >> "${BP_SWP_LOG:-/dev/null}"
+      exit 1 ;;
+  esac
+fi
+exec "$real" "$@"
+SWPMV
+  chmod +x "$SWPBIN/cp" "$SWPBIN/mv"
+
+  swp_deploy() { # <engine> <slug> <caddyfile> <pA> <pB> <build> [fail] [faillog] -> rc
+    env PATH="$SWPBIN:$FAKEBIN:$PATH" \
+      SITE_SLUG="$2" BUILD_ID="$6" CONTENT_REV=swp-rev SITE_SRC="$SWPSRC" \
+      SITE_PORT_A="$4" SITE_PORT_B="$5" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$3" \
+      BARKPARK_SITE_DEPLOY_LOCK="$SWP/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BP_SWP_FAIL="${7:-}" BP_SWP_LOG="${8:-/dev/null}" \
+      bash "$1" > "$SWP/out.log" 2>&1
+    echo $?
+  }
+  swp_rollback() { # <engine> <slug> <caddyfile> <pA> <pB> -> rc
+    env PATH="$SWPBIN:$FAKEBIN:$PATH" \
+      SITE_SLUG="$2" SITE_PORT_A="$4" SITE_PORT_B="$5" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$3" \
+      BARKPARK_SITE_DEPLOY_LOCK="$SWP/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" \
+      BARKPARK_SITE_NO_CAP=1 \
+      bash "$1" --rollback > "$SWP/rb.log" 2>&1
+    echo $?
+  }
+
+  # Build each engine's fixture ONCE, then snapshot it, so every arm below
+  # starts from identical bytes.  The setup deploys are ASSERTED to have
+  # succeeded: a fixture that silently failed (exit 14 on the health gate is the
+  # easy one) would hand every arm a "the release is gone" that proves nothing.
+  swp_fixture() { # <arm> <slug> <engine> <pA> <pB>
+    local arm="$1" slug="$2" eng="$3" pa="$4" pb="$5" d1 d2
+    local cf="$SWP/$arm.Caddyfile"
+    printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$cf"
+    d1="$(swp_deploy "$eng" "$slug" "$cf" "$pa" "$pb" n1)"
+    check "fixture ($arm): the n1 deploy LANDED (exit 0, not a silent failure)" [ "$d1" = 0 ]
+    d2="$(swp_deploy "$eng" "$slug" "$cf" "$pa" "$pb" n2)"
+    check "fixture ($arm): the n2 deploy LANDED (exit 0, not a silent failure)" [ "$d2" = 0 ]
+    # n1 is now the .previous rollback target on the still-warm slot a.  Poison
+    # it exactly as purge_failed_release_node does for a live/previous release —
+    # bytes KEPT, marker dropped — the state PLAN's health-failed arm sends back
+    # through BUILD + STAGE.
+    : > "$TD/sites/$slug/releases/n1/$HEALTH_FAIL_MARK"
+    printf 'SWP-ORIGINAL-n1\n' > "$TD/sites/$slug/releases/n1/.swp-origin"
+    rm -rf "$SWP/$arm-snap"; mkdir -p "$SWP/$arm-snap"
+    cp -a "$TD/sites/$slug" "$SWP/$arm-snap/site"
+    cp -a "$SENV/${slug}__a.env" "$SWP/$arm-snap/a.env"
+    cp -a "$SENV/${slug}__b.env" "$SWP/$arm-snap/b.env"
+    cp -a "$cf" "$SWP/$arm-snap/Caddyfile"
+  }
+  swp_restore() { # <arm> <slug>
+    rm -rf "$TD/sites/$2"
+    cp -a "$SWP/$1-snap/site" "$TD/sites/$2"
+    cp -a "$SWP/$1-snap/a.env" "$SENV/${2}__a.env"
+    cp -a "$SWP/$1-snap/b.env" "$SENV/${2}__b.env"
+    cp -a "$SWP/$1-snap/Caddyfile" "$SWP/$1.Caddyfile"
+  }
+
+  SWP_PA="$(free_port)"; SWP_PB="$(free_port)"   # the FIXED arm's two slots
+  SWP_PC="$(free_port)"; SWP_PD="$(free_port)"   # the MUTANT arm's two slots
+  swp_fixture fixed  swpfix "$SELF"   "$SWP_PA" "$SWP_PB"
+  swp_fixture mutant swpmut "$RBMUT"  "$SWP_PC" "$SWP_PD"
+  check "fixture (fixed):  .previous names n1 (n1 IS the rollback target)" \
+    sh -c "awk '{print \$3}' '$TD/sites/swpfix/.previous' | grep -qx n1"
+  check "fixture (mutant): .previous names n1 too (the same experiment)" \
+    sh -c "awk '{print \$3}' '$TD/sites/swpmut/.previous' | grep -qx n1"
+  check "fixture (fixed):  n1 carries the poison marker purge would have left" \
+    [ -f "$TD/sites/swpfix/releases/n1/$HEALTH_FAIL_MARK" ]
+
+  # One variant = one exit-13 arm.  <site-regex> pins WHICH call site the shim
+  # intercepted: a predicate that drifted onto the move-aside, or onto a
+  # different copy, reds here instead of passing for the wrong reason.
+  swp_variant() { # <BP_SWP_FAIL> <expected-call-site-regex>
+    local what="$1" site="$2"
+    local f_cf="$SWP/fixed.Caddyfile" m_cf="$SWP/mutant.Caddyfile"
+    local f_rel="$TD/sites/swpfix/releases/n1" m_rel="$TD/sites/swpmut/releases/n1"
+    local f_rc m_rc f_rb m_rb
+    swp_restore fixed swpfix; swp_restore mutant swpmut
+    : > "$SWP/fixed.log"; : > "$SWP/mutant.log"
+    m_rc="$(swp_deploy "$RBMUT" swpmut "$m_cf" "$SWP_PC" "$SWP_PD" n1 "$what" "$SWP/mutant.log")"
+    cp "$SWP/out.log" "$SWP/mutant.out"
+    f_rc="$(swp_deploy "$SELF"  swpfix "$f_cf" "$SWP_PA" "$SWP_PB" n1 "$what" "$SWP/fixed.log")"
+    cp "$SWP/out.log" "$SWP/fixed.out"
+    # THE SHIM FIRED, ONCE, ON THE CALL SITE THIS ARM IS ABOUT.
+    check "[$what] fixed:  the shim fired on the RIGHT call site" \
+      grep -qE "$site" "$SWP/fixed.log"
+    check "[$what] fixed:  …and on nothing else (exactly one interception)" \
+      [ "$(grep -c '' "$SWP/fixed.log")" = 1 ]
+    check "[$what] mutant: the shim fired on the RIGHT call site here too" \
+      grep -qE "$site" "$SWP/mutant.log"
+    check "[$what] mutant: …and on nothing else (exactly one interception)" \
+      [ "$(grep -c '' "$SWP/mutant.log")" = 1 ]
+    # BOTH engines REACHED the same failing line — else the outcomes below are
+    # not comparable.
+    check "[$what] mutant: the deploy exits 13 (STAGE failed)"     [ "$m_rc" = 13 ]
+    check "[$what] fixed:  the deploy exits 13 too (same failure)" [ "$f_rc" = 13 ]
+    check "[$what] mutant: STAGE failed on the machine channel" \
+      grep -q '^BPSTAGE name=STAGE status=failed build_id=n1' "$SWP/mutant.out"
+    check "[$what] fixed:  STAGE failed on the machine channel" \
+      grep -q '^BPSTAGE name=STAGE status=failed build_id=n1' "$SWP/fixed.out"
+    # THE DEFECT, reproduced on THIS arm.
+    check "[$what] MUTANT LOSES IT: releases/n1 is GONE" [ ! -d "$m_rel" ]
+    check "[$what] MUTANT LOSES IT: .previous still names the release it deleted" \
+      sh -c "awk '{print \$3}' '$TD/sites/swpmut/.previous' | grep -qx n1"
+    # THE FIX, on the identical fixture.
+    check "[$what] FIX KEEPS IT: releases/n1 survived"   [ -d "$f_rel" ]
+    check "[$what] FIX KEEPS IT: with its ORIGINAL bytes (fixture marker intact)" \
+      grep -qx 'SWP-ORIGINAL-n1' "$f_rel/.swp-origin"
+    check "[$what] FIX KEEPS IT: still bootable (server.js present)" [ -f "$f_rel/server.js" ]
+    check "[$what] FIX KEEPS IT: no .partial residue" [ ! -e "$f_rel.partial" ]
+    check "[$what] FIX KEEPS IT: no .aside residue"   [ ! -e "$f_rel.aside" ]
+    check "[$what] fixed: the exit-13 detail SAYS the release survived" \
+      grep -qE 'is UNTOUCHED, so any rollback target it held is still there|previously staged tree was restored' "$SWP/fixed.out"
+    # THE VERDICT — the same remediation on both engines, opposite answers.
+    # Clearing the poison marker is what a SUCCESSFUL restage would have done;
+    # on the mutant there is nothing left to clear.
+    rm -f "$m_rel/$HEALTH_FAIL_MARK" "$f_rel/$HEALTH_FAIL_MARK" 2>/dev/null
+    m_rb="$(swp_rollback "$RBMUT" swpmut "$m_cf" "$SWP_PC" "$SWP_PD")"
+    check "[$what] MUTANT LOSES IT: the rollback is now IMPOSSIBLE (21 no_previous)" [ "$m_rb" = 21 ]
+    check "[$what] MUTANT LOSES IT: and it says the previous release is gone" \
+      grep -q "previous release 'n1' is gone" "$SWP/rb.log"
+    f_rb="$(swp_rollback "$SELF" swpfix "$f_cf" "$SWP_PA" "$SWP_PB")"
+    check "[$what] FIX KEEPS IT: the rollback still WORKS (exit 0)" [ "$f_rb" = 0 ]
+    check "[$what] FIX KEEPS IT: and it lands on n1"  grep -qx 'TARGET_BUILD=n1' "$SWP/rb.log"
+  }
+
+  swp_variant standalone '^cp .*/\.next/standalone/\. -> .*/releases/n1\.partial/$'
+  swp_variant static     '^cp .*/\.next/static/\. -> .*/releases/n1\.partial/\.next/static/$'
+  swp_variant public     '^cp .*/public/\. -> .*/releases/n1\.partial/public/$'
+  swp_variant mv         '^mv .*/releases/n1\.partial -> .*/releases/n1$'
   echo "[selftest] the shipped unit template treats a SIGTERM exit (143) as a clean stop"
   UNIT_TMPL="$(cd "$(dirname "$SELF")" && pwd)/systemd/barkpark-site@.service"
   unit_ses_section() { awk '/^\[/{s=$0} /^SuccessExitStatus=/{print s; exit}' "$UNIT_TMPL"; }
