@@ -6744,7 +6744,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove a persisted share by scope (env shares are unaffected).",
+        "summary": "Remove a persisted share by scope — also revokes every item /s/ link and edit token under it (env shares are unaffected).",
         "tags": [
           "share"
         ],
