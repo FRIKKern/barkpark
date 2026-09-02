@@ -58,5 +58,10 @@ printf '%s\n' "$RUNS" | awk -F'\t' '$3=="failure"{print $1}' \
   | grep -viE 'advisory' | grep -vE "^($REQ)$" | sort -u \
   | sed 's/^/  RED non-required job (blocks the aggregate ONLY if it is in elixir.yml needs; security.yml reds do NOT): /'
 
+# ABSENT vs FAILED: a required context with NO check run on this head (its dispatcher was cancelled, or the run
+# was evicted) reads as "3/4" exactly like a failing one, and needs the OPPOSITE remedy (re-fire the dispatcher /
+# update-branch, not fix the code). Name the absent ones explicitly, before the verdict.
+ABSENT=$(printf '%s\n' "$REQ" | tr '|' '\n' | while read -r ctx; do printf '%s\n' "$RUNS" | grep -qF "$ctx	" || printf '%s; ' "$ctx"; done)
+[ -n "$ABSENT" ] && echo "  ABSENT required context (no check run on this head — re-fire with: gh api -X PUT repos/$REPO/pulls/$PR/update-branch): ${ABSENT%; }"
 printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | sort -t$'\t' -k1,1 -k4,4r | awk -F'\t' '!seen[$1]++' \
-  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge\n",substr(sha,1,10); else printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
+  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" -v absent="$ABSENT" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge\n",substr(sha,1,10); else if(ok<4 && absent!="") printf "NOT YET: %d/4 required green on %s (%d ABSENT — re-fire, do not debug)\n",ok,substr(sha,1,10),4-n; else printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
