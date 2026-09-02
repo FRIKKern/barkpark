@@ -393,7 +393,7 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
   # ── 5. THE SIBLING SEAM — reported, not remedied here ───────────────────────
 
   describe "Shared.do_autosave/2 — the OTHER handle_info write seam" do
-    test "its only gate is target-BLIND: write_denied?/1 allows the very socket whose target no grant admits",
+    test "write_denied?/1 is target-BLIND, so the TARGET arm (#15026) is what refuses the socket whose target no grant admits",
          %{conn: conn, ws: ws, proj: proj} do
       {user, conn, write_grant} = grantee_session(conn, ws, proj)
       view = open_paper!(conn, ws, proj, @other_slug)
@@ -425,23 +425,26 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
 
       out = Shared.do_autosave(socket, %{"title" => @escalated_title})
 
-      # WHATEVER THIS RUN FOUND IS WHAT IS RECORDED. `save_status` distinguishes
-      # the two outcomes exactly: "Saved" is `autosave_write/2` having reached
-      # `Content.upsert_draft`, "Read-only" is `refuse_write_denied/1`.
-      assert out.assigns.save_status == "Saved"
+      # HISTORY: this block landed (#14946) as a REPRODUCTION — it recorded
+      # `save_status: "Saved"` and the escalated title IN the store, proving
+      # `do_autosave/2` was the third hook-invisible write door. #15026 then gave
+      # `do_autosave/2` the TARGET arm (`Paper.grant_target_denied?/3` →
+      # `refuse_outside_grant/1`), and the two merged green apart, red together.
+      # The assertion now records the CLOSED state. `save_status` distinguishes
+      # the outcomes exactly: "Saved" is `autosave_write/2` having reached
+      # `Content.upsert_draft`, "Read-only" is a refusal arm.
+      assert out.assigns.save_status == "Read-only"
 
-      # …and the escalated title is in the STORE, under the doc the grant does
-      # not admit for write. This seam is NOT the one pds-w44 closed.
-      saved_id = out.assigns.editor_doc.doc_id
-
+      # …and the escalated title is NOT in the store: the doc the grant does not
+      # admit for write is byte-for-byte what it was before the autosave.
       {:ok, persisted} =
-        Content.get_document(saved_id, "paper", @dataset,
+        Content.get_document(doc.doc_id, "paper", @dataset,
           workspace_id: ws.id,
           project_id: proj.id
         )
 
-      assert {persisted.title, get_in(persisted.content, ["preview", "title"])} ==
-               {@escalated_title, @escalated_title}
+      refute persisted.title == @escalated_title
+      refute get_in(persisted.content, ["preview", "title"]) == @escalated_title
     end
   end
 end
