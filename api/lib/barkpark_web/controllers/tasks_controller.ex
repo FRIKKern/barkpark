@@ -917,7 +917,12 @@ defmodule BarkparkWeb.TasksController do
   # Body/query (the bp CLI rides flags as query params): worker_id +
   # observed_epoch (positional in bp), criterion=<index>, then EXACTLY one of
   #   met=true      + evidence=<non-empty> → flip the lock, evidence or nothing
-  #   miss=true     + note=<non-empty>     → honest attempt, met never flips
+  #   miss=true     + note=<non-empty>     → honest attempt, met never flips. On
+  #                                          a DONE/CANCELLED row this is the
+  #                                          ONE accepted verb (plus withdraw),
+  #                                          and it also needs
+  #                                          observed_rev=<the rev you read>;
+  #                                          met=true stays not_in_progress.
   #   withdraw=true + note=<non-empty>     → LOWER the lock (D745): met→false,
   #                                          evidence preserved, a signed
   #                                          withdrawals[] record appended. On a
