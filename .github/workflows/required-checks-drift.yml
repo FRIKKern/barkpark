@@ -9,7 +9,7 @@
 #
 #   `Required-check spec gate`          Hermetic: no network, no token, no
 #                                       writes. Runs the mutation suite with
-#                                       --hermetic (183 assertions, ~1min). The
+#                                       --hermetic (200 assertions, ~1min). The
 #                                       count is maintained by hand and was
 #                                       stale at 166 for several waves — if it
 #                                       disagrees with the suite's own tally
@@ -40,8 +40,8 @@
 # Until wave 53 this header labelled the spec-gate job BLOCKING. It is not, and
 # saying so here was the epic's own defect class in the epic's own workflow.
 # `.github/required-checks.json` holds the context out under `S7 EXCLUDED BY
-# DECISION` (replacement trigger: cch-w36-bl-register-spec-gate-after-census-
-# green), and docs/ops/merge-gates.md already states the truth this header now
+# DECISION` (replacement trigger: cch-w37-bl-register-spec-gate-human-gate),
+# and docs/ops/merge-gates.md already states the truth this header now
 # matches rather than inventing a third phrasing: the job "is in no required
 # aggregator's `needs:` and carries no required name, so it cannot block a
 # merge." Its red is a signal a human must read, not a stop.
