@@ -70,7 +70,10 @@ printed verbatim by the third leg of the table below, is:
                                 [--fixture-dir FIXTURE_DIR] [--server SERVER]
                                 [--token TOKEN]
 
-Seventeen options, and no `--selftest` among them. The census's selftest is
+Twenty long options (plus `-h`), and no `--selftest` among them. Re-derive the
+count rather than eyeballing it — piping that usage through
+`grep -oE '--[a-z0-9-]+' | sort -u | wc -l` yields 20, and `grep -c -- '--selftest'`
+over the same list yields 0. The census's selftest is
 the SEPARATE harness `scripts/pds-ledger-census_test.sh` — the one §4 and §5 below
 already invoke correctly, and the one `.github/workflows/shell-harnesses.yml` runs as
 the `pds-harnesses` job. That separation is deliberate (most gate scripts in this repo
