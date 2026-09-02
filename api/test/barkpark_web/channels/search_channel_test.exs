@@ -21,6 +21,7 @@ defmodule BarkparkWeb.SearchChannelTest do
 
   import Phoenix.ChannelTest
   import Barkpark.TenancyFixtures
+  import Barkpark.RateLimiterSandbox
 
   alias Barkpark.Auth
   alias Barkpark.Tenancy
@@ -45,6 +46,15 @@ defmodule BarkparkWeb.SearchChannelTest do
   # the topic's dataset leaf against the project — so the datasets this file
   # joins ("test" and "production") must exist as rows.
   # ---------------------------------------------------------------------------
+
+  # `:barkpark_rate_limiter` is a :named_table — WHOLE-NODE state the SQL sandbox
+  # does not roll back. This file exercises it for real: the connect budget below
+  # runs `RateLimiter.check/2` inside `UserSocket.connect/3`, so without the reset
+  # this file both inherits buckets earlier files spent and leaves its own spent
+  # for later ones, and every result here depends on the run order.
+  # `rate_limiter_async_isolation_test.exs` is the ratchet that requires it; this
+  # file is `async: false`, which is what makes clearing shared state safe.
+  setup :reset_rate_limiter!
 
   setup do
     ws = create_workspace!("search-ch-ws")
