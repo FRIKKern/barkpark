@@ -34,4 +34,36 @@ defmodule Barkpark.Media.Delivery.SearchParamsTest do
     assert "mimeType" in opts[:facets]
     refute "not_a_real_facet" in opts[:facets]
   end
+
+  describe "offset ceiling" do
+    # `Delivery.Search.paginate_ids/2` issues `LIMIT limit + offset + 20` with NO
+    # SQL OFFSET and drops `offset` rows IN THE BEAM, so an unclamped offset is a
+    # heap-materialization lever, not a slow query. The document route already
+    # clamps at `|> max(0) |> min(100_000)` (query_controller.ex, search_controller.ex).
+
+    test "an absurd offset is clamped to the ceiling, not passed through" do
+      opts = MediaSearchParams.parse(%{"offset" => "5000000"})
+
+      assert opts[:offset] == 100_000
+      assert opts[:offset] == MediaSearchParams.max_offset()
+    end
+
+    test "an offset BELOW the ceiling is untouched (the clamp is a ceiling, not a constant)" do
+      # Without this, a clamp written as `_ -> 100_000` would pass the test above.
+      assert MediaSearchParams.parse(%{"offset" => "120"})[:offset] == 120
+      assert MediaSearchParams.parse(%{})[:offset] == 0
+    end
+
+    test "the ceiling holds for an INTEGER offset too, not only the string form" do
+      # `parse_int/2` accepts a bare integer (Phoenix hands strings, but a
+      # server-side caller can hand an int), and that clause bypassed nothing
+      # before the clamp moved outside it.
+      assert MediaSearchParams.parse(%{"offset" => 9_999_999})[:offset] == 100_000
+    end
+
+    test "clamp_offset/1 floors at zero" do
+      assert MediaSearchParams.clamp_offset(-1) == 0
+      assert MediaSearchParams.clamp_offset(0) == 0
+    end
+  end
 end

@@ -37,7 +37,7 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
 
   THE ORACLE IS STORED BYTES. Every assertion reads the persisted document back
   from the store — never a flash, never a "no session started" predicate (the
-  shipped `sheets_reader_live_test.exs:451` uses `Session.whereis(...) == nil`,
+  shipped `sheets_reader_live_test.exs` uses `Session.whereis(...) == nil`,
   which is VACUOUS the moment a session exists).
 
   NON-VACUITY, BY SUBSTITUTION ON THE SHIPPED MODULE (pds-w45). This block once

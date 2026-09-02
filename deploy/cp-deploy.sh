@@ -62,7 +62,40 @@ docker tag cloud-control_plane:latest cloud-control_plane:rollback 2>/dev/null \
 
 git checkout -- . 2>/dev/null || true
 log "git pull"
-git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
+# protocol.version=0 IS LOAD-BEARING — do not delete it as cargo cult because you
+# cannot reproduce the failure from a modern box. THE OUTAGE IT ENDS (2026-09-02):
+# every control-plane deploy from ~15:22Z failed here, and barkpark-cp sat 49
+# commits behind (serving a5d8a53d; last good 12:33Z at fe8184d6) while the
+# CONTENT-INSTANCE job of the very same workflow run succeeded every time.
+#
+# THE SIGNATURE, verbatim from six consecutive runs' control-plane job:
+#     fatal: could not read Username for 'https://github.com': No such device or address
+#     fatal: expected flush after ref listing
+#
+# THE MEASUREMENT that names the culprit: barkpark-cp runs git 2.34.1 (Ubuntu
+# 22.04). From THAT box, with THAT remote and THOSE credentials (none — the repo
+# is public and this fetch is anonymous), protocol v2 fails as above while
+# protocol v0 AND v1 both succeed. Guerrilla runs git 2.43 and never failed,
+# which is exactly why the instance job stayed green through all six runs. So the
+# variable is the git version's protocol-v2 implementation, not the network, not
+# the token, and NOT repository visibility — the "could not read Username" line
+# reads like Past Mistake #9 (repo went private) and a sibling reader concluded
+# precisely that; the v0/v1-succeed-from-the-same-box measurement is what
+# separates the two. git 2.34.1's v2 ref-listing parse cannot survive GitHub's
+# current advertisement, and it misreports the parse failure as an auth prompt.
+#
+# v0 rather than v1: both were measured working, and v0 is git's own pre-2.26
+# default — the most-travelled server path there is, and the one value that
+# needs no version negotiation at all. v1 is v0 plus a version handshake that
+# exists mainly to exercise negotiation; it buys nothing here and takes the
+# rarer code path on both ends.
+#
+# The -c rides the pull the same way the hook-path pin above it does; git
+# exports it as GIT_CONFIG_PARAMETERS, so the `git fetch` that `git pull` forks
+# inherits it (measured: the fetch advertises v0, not `version 2`).
+# Remove this pin only once barkpark-cp's git is >= 2.43 AND you have re-run the
+# v2 fetch from the box and watched it succeed.
+git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main || { log "pull failed"; exit 11; }
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
 

@@ -23,9 +23,14 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/cp-deploy.sh"
 fails=0
+# checks_ran: how many assertions actually EXECUTED. A shell harness can print
+# ALL PASS having run ZERO checks — an early `exit 0`, an outermost skip, a
+# mis-set guard — and exit 0 is then indistinguishable from a real green. The
+# floor at the bottom of this file turns that vacuum into a red.
+checks_ran=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
-check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
+check() { checks_ran=$((checks_ran + 1)); if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
 echo "cp-deploy control-url pin (dwb-16)"
 
@@ -658,6 +663,47 @@ setup_flip localhost:4100
 rc="$(run_flip BARKPARK_EXPECT_DOCKER_MAJOR=29)"
 check "docker version: the expectation is overridable" "[ '$rc' = '0' ]"
 
+# ---- Case 19: the GIT WIRE PROTOCOL PIN on the pull (the 2026-09-02 outage).
+# barkpark-cp runs git 2.34.1, whose protocol-v2 ref-listing parse fails against
+# GitHub with "could not read Username" + "expected flush after ref listing";
+# v0 and v1 both succeed from the same box. Every control-plane deploy from
+# ~15:22Z died at this pull while the instance job (git 2.43) stayed green.
+# Nothing in CI can reach that box, so this is a STATIC assertion — which is
+# exactly why it must be anchored to the pull line itself and not to the file:
+# a file-wide `grep -q protocol.version` would stay green if the pin migrated
+# to a comment, or to some other git call, and the deploy would strand again.
+# shellcheck disable=SC2034  # read inside check's eval strings below, which shellcheck does not follow
+PULL_LINE="$(grep '^git .*pull --ff-only origin main' "$SCRIPT")"
+check "found the control-plane pull line" "[ -n \"\$PULL_LINE\" ]"
+one_pull_line() { [ "$(grep -c '^git .*pull --ff-only origin main' "$SCRIPT")" = 1 ]; }
+check "exactly one such pull line exists (this assertion hides no sibling)" "one_pull_line"
+check "the pull pins the wire protocol to v0 ON THE PULL ITSELF" \
+  "case \"\$PULL_LINE\" in *'-c protocol.version=0'*) true ;; *) false ;; esac"
+check "the pull still suppresses the post-merge hook (the pin did not displace it)" \
+  "case \"\$PULL_LINE\" in *'-c core.hooksPath=/dev/null'*) true ;; *) false ;; esac"
+check "the pull is still --ff-only (the pin did not weaken the fast-forward guard)" \
+  "case \"\$PULL_LINE\" in *'--ff-only'*) true ;; *) false ;; esac"
+# The signature is recorded NEXT TO the pin so a future reader who cannot
+# reproduce it from a modern box does not delete the pin as cargo cult.
+check "the failing signature is recorded in the script (the auth-prompt line)" \
+  "grep -q \"could not read Username for 'https://github.com'\" '$SCRIPT'"
+check "the failing signature is recorded in the script (the ref-listing line)" \
+  "grep -q 'expected flush after ref listing' '$SCRIPT'"
+check "the box's git version is recorded next to the pin" \
+  "grep -q 'git 2.34.1' '$SCRIPT'"
+
 echo
+# NON-VACUITY FLOOR. Asserted BEFORE the verdict: `fails -eq 0` is satisfied
+# just as well by a run that executed nothing at all. The floor is a lower
+# bound, never an exact total — checks are added over time and an exact count
+# would red on every addition, which trains people to bump the number instead
+# of reading it.
+MIN_CHECKS=100
+echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
+if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
+  echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"
+  fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"

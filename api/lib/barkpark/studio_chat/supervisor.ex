@@ -36,6 +36,19 @@ defmodule Barkpark.StudioChat.Supervisor do
       Barkpark.StudioChat.FleetHub
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    # WIDER than the OTP default 3/5s, which is the SAME budget
+    # `Barkpark.Supervisor` runs — with identical budgets the crash-loop this
+    # tier exists to contain exhausts both walls in the same window and
+    # escalates to the top, taking Repo, Oban and the Endpoint with it. The
+    # concrete path: `AgentStateSweeper`/`BlockedSweeper` wrap work in
+    # `safe_sweep`'s `rescue`, which does NOT catch a `GenServer.call` :exit out
+    # of a saturated Repo pool (config/runtime.exs records a measured
+    # pool-exhaustion incident), so four crashes inside five seconds is reachable.
+    # Matches `Barkpark.Plugins.Supervisor` and `Indx.Supervisor`.
+    Supervisor.init(children,
+      strategy: :one_for_one,
+      max_restarts: 5,
+      max_seconds: 10
+    )
   end
 end

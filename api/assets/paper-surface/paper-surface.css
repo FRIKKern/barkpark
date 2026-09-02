@@ -126,6 +126,7 @@ html[data-theme="dark"] .bp-paper-body {
      together, which is what parity means. */
   --bp-h1-size: clamp(28px, 8vw, var(--tok-reading-h1-size));   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);   --bp-h2-tracking: var(--tok-reading-h2-tracking);
+  --bp-h2-weight: var(--tok-reading-h2-weight);
   --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
@@ -296,15 +297,17 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-pre-radius: 4px;
   /* Code-BLOCK frame tokens (S9 code-interior). DISTINCT from --bp-pre-* (the
      generic 14px <pre>) and --bp-code-* (the inline-code chip): the article code
-     block is its own hardcoded terracotta-left-accent frame. These single-source
+     block is its own square-cornered --paper-bg-deep slab. These single-source
      the literals Figures.code_block_html/1 + the .bp-canvas-code editor frame both
-     paint, so View↔Edit move together. */
+     paint, so View↔Edit move together. The 3px --bp-codeblock-accent-w left bar
+     retired with task-ddb1e0ab09a62466: it existed because the reader body was
+     painted --paper-bg-deep and the slab was invisible; the body now stands on
+     --paper-bg and the slab is its own mark. */
   --bp-codeblock-size: 0.9rem;
   --bp-codeblock-lh: 1.5;
   --bp-codeblock-pad: 0.9rem 1.1rem;
   --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
-  --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
 }
@@ -381,7 +384,29 @@ html[data-theme="dark"] .bp-paper-body {
    source feeds both surfaces; the first heading is clamped to 0 by each surface's
    :first-child rule. */
 .bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
+/* ── THE DISPLAY VOICE (device 3, charter D29/D36) ────────────────────────────
+   A section head is the one place the paper speaks in its display voice, and
+   that voice is BIG AND LIGHT: ~2.0x the body (36px over 18px), weight 400, a
+   tight 1.15 leading and -0.015em tracking. Size does the work; weight steps
+   back so the head reads as an opening, not a shout — the h1 keeps the shared
+   600 and stays the loudest thing on the page by weight, the h3 keeps 600 and
+   stays the smallest by size, so hierarchy survives at every level.
+
+   `font-weight` reads `--bp-h2-weight` — the PER-STEP channel (tokens.json
+   type.reading.h2.weight → --tok-reading-h2-weight → the bridge above) — and
+   NOT the shared `--bp-heading-weight` the h1–h6 group rule binds. The shared
+   scalar is pinned at 600 by design/validate.mjs and never moves; a level that
+   wants its own voice declares its own weight. Declared on this element rule
+   (same specificity as the group rule, later in source) so it wins on h2 alone.
+
+   `text-wrap: balance` — a two-line head at 36px is a ragged block, and the
+   browser's greedy breaker leaves a lone word on line two more often than not;
+   balance splits the head into lines of roughly equal length so the head is
+   one shape, not a line and a stub. Headings are short (≤6 lines, the balance
+   ceiling in Chromium), so it always applies. Both editor twins carry the
+   identical declarations — view_edit_parity_test.exs §2/§5 pin font-weight
+   and text-wrap across all three files. */
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
 /* ── THE SECTION HEAD (space.section → the --bp-section-* bridge above) ───────
    A TOP-LEVEL level-2 heading is a section boundary, and gets both halves of the
@@ -830,9 +855,10 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-reading-h1-size: 40px;
   --tok-reading-h1-lh: 1.05;
   --tok-reading-h1-tracking: -0.02em;
-  --tok-reading-h2-size: 27px;
-  --tok-reading-h2-lh: 1.2;
-  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h2-size: 36px;
+  --tok-reading-h2-lh: 1.15;
+  --tok-reading-h2-tracking: -0.015em;
+  --tok-reading-h2-weight: 400;
   --tok-reading-h3-size: 21px;
   --tok-reading-h3-lh: 1.3;
   --tok-air-beat: 22px;
@@ -1509,9 +1535,41 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    the whole device: `auto-fit` + `minmax` means the grid does not merely get
    wider, it REFLOWS — 1040px fits 7 tiles across at the 140px floor, 1240px fits
    8. The component gains resolution with the screen instead of stacking tiles
-   the reader then has to scroll past. */
-.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
-.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; }
+   the reader then has to scroll past.
+
+   THE SEAMS ARE DRAWN BY THE CELLS, NOT THE GROUND (task-0098ba55d2642545,
+   charter D36). The hairline grid used to be a rule-tinted CONTAINER ground
+   showing through 1px gaps. That paints every empty grid area too: a strip whose
+   item count is not a multiple of the track count leaves the remainder of its
+   last row as a solid rule-tinted slab (auto-fit only collapses TRAILING tracks,
+   and 9 stats at 7 tracks is a full row plus two cells and five slabs). So the
+   container is transparent, `overflow: hidden` clips what the cells paint past
+   its edge, and each cell paints its own seams:
+
+     * `box-shadow: 1px 0` — the 1px gap column to its RIGHT, its own height;
+     * `box-shadow: 0 1px` — the 1px gap row BELOW it, its own width;
+     * `::after`, a 1x1 dot at its bottom-right corner — the crossing pixel
+       neither one-sided shadow reaches.
+
+   ONE-SIDED, never a ring. `--paper-rule` is translucent in the default light
+   skin (rgba(21, 33, 29, 0.09)), and a ring on every cell paints each seam
+   twice (both neighbours' rings land in the same gap), so the seam goes ~1.9x
+   darker there — chrome getting louder, which is exactly what the rule ladder
+   above forbids. Each gap pixel is painted by exactly one cell: the
+   right seam by the cell on its left, the bottom seam by the cell above, the
+   crossing by the cell up-left of it. The exterior edges (last column's right,
+   last row's bottom) fall outside the container and `overflow: hidden` drops
+   them — so a full row renders byte-for-byte as before, and a partial row's
+   remainder is page ground bounded by hairlines on its top and left, i.e. a
+   grid whose cells stop where the data stops. Measured by the rig as
+   `statRemainder` (the probe at the empty track must hit a transparent
+   container) with the committed `stat-partial-row` fixture — eleven cells,
+   prime, so the last row is partial at every band width (8+3 @1280, 9+2
+   @1920). Container and cell rules are mirrored on both editor twins
+   (`.bp-paper-editor-body .bp-stats` / `… .bp-stat`). */
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; overflow: hidden; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; box-shadow: 1px 0 0 0 var(--paper-rule), 0 1px 0 0 var(--paper-rule); }
+.bp-paper-surface .bp-stats .bp-stat::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 1px; height: 1px; background: var(--paper-rule); }
 
 .bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-gauge__t { font-weight: 700; margin-bottom: 8px; }
@@ -1612,12 +1670,15 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
 .bp-paper-surface .bp-kilde__ref { word-break: break-word; }
 .bp-paper-surface .bp-kilde__ref a { color: inherit; }
-/* Inside the hairline grid the kilde is a grid item over the rule-colored
-   ground — without its own fill the whole footer line paints as a tinted band
-   (synth-proven pe-w3-hairline-grid-ground). Page ground restores flushness:
-   the 1px row gap above reads as the seam between slab and stamp, the
-   padding-top gives the stamp its air below that seam. */
-.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; background: var(--paper-bg); padding-top: 8px; }
+/* Inside the hairline grid the kilde is a full-width grid item under the last
+   row. The seam above it is the last row's cells painting their bottom gap
+   (see `.bp-stats .bp-stat` above) — it needs no fill of its own now that the
+   container has no ground, and it draws no seam of its own either: one that
+   spanned the full width would double-paint the seam the cells already drew.
+   Under a partial last row the seam therefore stops where the cells stop and
+   the stamp sits on open ground — the grid ends where the data ends. The
+   padding-top gives the stamp its air below the seam. */
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; padding-top: 8px; }
 
 .bp-paper-surface .bp-duel { margin: 1.4rem 0; }
 /* jf-w1-engine-narrow-dark-fixes: self-contain horizontally, the same three

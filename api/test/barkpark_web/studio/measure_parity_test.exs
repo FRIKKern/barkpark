@@ -132,6 +132,16 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
   @bulldocs Path.expand("../../../lib/barkpark_web/layouts/bulldocs.html.heex", __DIR__)
   @reader_shell_selector ".bp-paper-shell.bp-paper-article"
 
+  # The PUBLIC reader's shell (bulldocs.html.heex) — the rule that paints the
+  # page under `.bp-paper-article`. It lives inside the GENERATED marker region
+  # (design/emit.mjs bulldocsBlock), so a change to it is made in the emitter and
+  # lands here through `node design/emit.mjs --write`.
+  @reader_ground_selector "body:has(.bp-paper-article)"
+  # The ONE page-ground token. `--paper-bg-deep` is the FILL tone (pre, inline
+  # code, .bp-stat, .bp-card, figure); a shell that paints it as the page makes
+  # every fill vanish (delta-L 0, measured 2026-09-02 on the live reader).
+  @page_ground "var(--paper-bg)"
+
   # The SIX `.editor-panel` roots, by the file that renders them. Counts, not
   # anchors — identities are pinned by editor_panel_containment_test.exs; what
   # this file cares about is that each rendered root carries `data-role`.
@@ -818,6 +828,56 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
                  "allowance. It must read `var(--paper-gutter)`, or the band's edge " <>
                  "and the prose's edge drift apart the moment the ladder moves."
       end
+    end
+  end
+
+  # ── the page ground — View and Edit stand on ONE token (task-ddb1e0ab09a62466) ──
+  #
+  # The element rules are byte-compared (view_edit_parity_test.exs), but the
+  # SHELL under them is not an element rule: Studio paints `.bp-paper-surface`
+  # in root.html.heex, the reader paints `body:has(.bp-paper-article)` in
+  # bulldocs.html.heex, and nothing compared the two. They drifted — Studio on
+  # `--paper-bg`, the reader on `--paper-bg-deep` — so Edit showed every fill
+  # that View hid (pre, inline code, stat tiles, cards, figures all paint
+  # `--paper-bg-deep`; on a `--paper-bg-deep` page that is delta-L 0). These
+  # pins hold the two shells to one var, and that var to the page token.
+  describe "the page ground — the Studio surface and the public reader stand on one token" do
+    defp studio_ground!, do: value!(blocks!(css(), @reader_selector), "background", @reader_selector)
+
+    defp reader_ground! do
+      value!(blocks!(File.read!(@bulldocs), @reader_ground_selector), "background", @reader_ground_selector)
+    end
+
+    test "both shells paint the SAME ground var (View↔Edit ground parity)" do
+      studio = studio_ground!()
+      reader = reader_ground!()
+
+      assert studio == reader,
+             """
+             GROUND DRIFT between the two shells:
+               Studio  #{@reader_selector} { background: #{studio} }   (root.html.heex)
+               Reader  #{@reader_ground_selector} { background: #{reader} }   (bulldocs.html.heex, GENERATED — edit design/emit.mjs)
+
+             Every component fill is --paper-bg-deep. Whichever shell paints the
+             page with the fill token shows NO fills — Edit and View then disagree
+             on whether a code block, a stat tile or a figure has a surface at all,
+             and the element byte-gate cannot see it because this is the shell.
+             """
+    end
+
+    test "and that var is --paper-bg, leaving --paper-bg-deep to be a FILL" do
+      assert studio_ground!() == @page_ground,
+             "Studio's #{@reader_selector} ground is #{studio_ground!()}, not #{@page_ground}"
+
+      assert reader_ground!() == @page_ground,
+             "the reader's #{@reader_ground_selector} ground is #{reader_ground!()}, not #{@page_ground} " <>
+               "— change design/emit.mjs (bulldocsBlock), then `node design/emit.mjs --write`"
+    end
+
+    test "the reader ground selector matches EXACTLY one rule (guard non-vacuity)" do
+      # blocks!/2 already refuses zero; this pins ONE, so a second `body:has(...)`
+      # rule cannot introduce a source-order-dependent winner the pins above miss.
+      assert length(blocks!(File.read!(@bulldocs), @reader_ground_selector)) == 1
     end
   end
 end

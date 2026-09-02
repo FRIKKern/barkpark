@@ -192,7 +192,21 @@ jobs:
             echo "instance=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed="$(git diff --name-only "$base" "${{ github.sha }}")"
+          # TWO-DOT ON PURPOSE — do not "fix" this to three-dot. This is a
+          # push-to-main workflow: $base is the last SUCCESSFUL deploy's head,
+          # already an ancestor of github.sha on main, so `base sha` IS the
+          # union of every push not yet shipped. A merge-base rewrite here would
+          # narrow the range and drop somebody else's un-deployed commits.
+          #
+          # The PRODUCER, though, carried the same two silent false-greens the
+          # wave-10 dispatchers closed, and here they decide whether PRODUCTION
+          # ROLLS: `--name-only` quotes a path containing `"`, and rename
+          # detection prints only the destination — so a `cloud/` file renamed
+          # out classifies cp=false and the control plane silently does not
+          # deploy, under a green run. -z + --no-renames + core.quotepath=false.
+          # scripts/check-deployyml-filters.sh drives this exact step body
+          # against both shapes and reds if this line regresses.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "$base" "${{ github.sha }}" | tr '\0' '\n')"
           echo "changed files:"; echo "$changed"
           # internal/ + cmd/ ride the control plane too: bp-provisioner is
           # cross-built from ./cmd/barkpark-provisioner (code under

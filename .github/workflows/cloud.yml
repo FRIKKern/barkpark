@@ -69,10 +69,39 @@ jobs:
           # ref: they must test the merged result, not the head in isolation.
           # `github.sha` is the fallback for `push` events, which have no PR.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Full history: the PR base sha must be resolvable locally for the
-          # three-dot diff below. A shallow checkout makes `git cat-file -e`
-          # miss it, which this step treats as a hard failure.
+          # FULL HISTORY, BLOBLESS. These two options are ORTHOGONAL and this
+          # job needs both — DEPTH and FILTER are different axes, and confusing
+          # them is exactly how this was first written and reverted (run
+          # 33691239048, three of four dispatchers red on `PR base <sha> and
+          # HEAD share NO common ancestor`).
+          #
+          # `fetch-depth: 0` — REQUIRED, do not drop it. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE; a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure rather
+          # than emit a verdict. Dropping this line does NOT leave "whatever the
+          # filter gives you": actions/checkout then applies its DEFAULT depth
+          # of 1, and a depth-1 clone — blobless or not — has no merge base.
+          # `fetch-depth: 2` does not rescue it either; that trick works on jobs
+          # sitting on `refs/pull/N/merge`, where HEAD^1 IS the base, and this
+          # job deliberately is not one of those (see the `ref:` note above).
+          #
+          # `filter: blob:none` — the actual saving, and it is NOT shallowness.
+          # A blobless partial clone fetches every commit and every tree and
+          # omits only blob CONTENTS. `git diff --name-only` reads trees, not
+          # blobs, so the commit graph, the merge base and the path set below
+          # are unchanged BY CONSTRUCTION rather than by benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways at FULL depth, compares the three-dot
+          # changed-path sets by SORTED CHECKSUM, and refuses to report a pass
+          # if a sample is empty on both sides (two empty sets match, which
+          # would be vacuous). Read 2026-09-03: full clone 138 s / .git 791 MB,
+          # blobless 34 s / .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
           fetch-depth: 0
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set
@@ -236,9 +265,15 @@ jobs:
           POSTGRES_DB: barkpark_cloud_test
         ports:
           - 5432:5432
+        # --health-interval 2s, not the 10s default: `Waiting for all services
+        # to be ready` was measured at 15.5 s (elixir Test) and 13.6 s (cloud
+        # test) while pg_isready answers in ~3 s — that wait is poll
+        # granularity, not postgres. Same health command, polled sooner.
+        # (Comments cannot live inside the folded `>-` block below: they would
+        # be passed to docker as literal arguments.)
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
           --health-retries 5
     env:
