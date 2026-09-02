@@ -583,5 +583,4 @@ defmodule BarkparkCloud.TelemetryTest do
       end
     end
   end
-
 end
