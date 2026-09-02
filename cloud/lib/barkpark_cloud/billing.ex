@@ -1326,19 +1326,22 @@ defmodule BarkparkCloud.Billing do
   """
   @spec expire_trial(Subscription.t(), DateTime.t()) ::
           {:ok, Subscription.t()} | {:error, Ecto.Changeset.t()} | :noop
-  def expire_trial(
-        %Subscription{plan: "trial", status: "active", current_period_end: %DateTime{} = pe} = sub,
-        %DateTime{} = now
-      ) do
-    if DateTime.compare(pe, now) != :gt do
-      sub
-      |> Subscription.changeset(%{
-        status: "canceled",
-        canceled_at: DateTime.truncate(now, :microsecond)
-      })
-      |> Repo.update()
-    else
-      :noop
+  def expire_trial(%Subscription{plan: "trial", status: "active"} = sub, %DateTime{} = now) do
+    case sub.current_period_end do
+      %DateTime{} = period_end ->
+        if DateTime.compare(period_end, now) != :gt do
+          sub
+          |> Subscription.changeset(%{
+            status: "canceled",
+            canceled_at: DateTime.truncate(now, :microsecond)
+          })
+          |> Repo.update()
+        else
+          :noop
+        end
+
+      _ ->
+        :noop
     end
   end
 
