@@ -141,6 +141,27 @@ is paying for waste.
 - Tell lanes to BATCH small same-file fixes. Every PR costs ~10 job slots whether it changes one
   line or fifty, so three one-line PRs cost three times a single PR that closes three rows.
 
+## 2e. Past the CI ceiling, convert builders into thinkers
+
+Once you have measured the ceiling (§2d), lanes beyond it produce queue, not merges. The fix is
+not fewer lanes — it is fewer BUILDERS per lane and more of everything that needs no runner:
+
+| CI-capped (≤2 workers/lane) | CI-free (spend the rest here) |
+|---|---|
+| writing a PR | verifying a filing's premise on origin/main |
+| rebasing, re-running | triaging the backlog to a verdict |
+| anything that opens a PR | auditing a fence for mirrors / producer-consumer drift |
+| | reviewing another lane's open PR by diff |
+| | designing a detector, then measuring its false-positive rate |
+
+Measured 2026-09-02: the day's most valuable outputs — a ten-defect craft audit, a
+producer/consumer detector with its noise rate, and a 419-row triage that found the "unknown
+backlog" was a keyword artefact — all came from workers that never touched CI. Meanwhile the
+Mac sat at load 52 with builders waiting on a 10-job pipe.
+
+Run ONE local build throttle, not two: a machine-wide `mix` wrapper on PATH queues every agent;
+a second per-lane wrapper on top of it just splits the queue and hides the contention.
+
 ## 3. Improve the system — a standing 1-of-5
 
 Every lead keeps one worker slot for **system improvement**: a trap the lane hit while
