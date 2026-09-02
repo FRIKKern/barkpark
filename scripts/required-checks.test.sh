@@ -4204,6 +4204,204 @@ else
   fi
 fi
 
+# ── 24 ───────────────────────────────────────────────────────────────────────
+# `S7 EXCLUDED BY DECISION` reasons are hand-maintained prose that lives in TWO
+# files at once: the `EXCLUDED_BY_DECISION_REASONS` constants in
+# scripts/required-checks-generate.sh, and the `.reason` of the matching row in
+# .github/required-checks.json. The emit unions the two ledgers as
+# `group_by(.context) | map(.[-1])` with the committed rows FIRST and the freshly
+# generated rows APPENDED, so the LAST row wins: the GENERATOR's copy silently
+# overwrites the file's on every regeneration, and §14b asserts that precedence
+# as intended.
+#
+# WHY THIS SECTION EXISTS, and it is a MEASURED near-miss rather than a worry.
+# The file's copy of the spec-gate reason was corrected BY HAND on 2026-08-06
+# (wave 36) to delete a re-evaluation trigger that could never fire. The
+# generator's copy was not. An offline regeneration on origin/main OVERWROTE
+# BOTH committed S7 rows — the dead trigger back in the highest-authority file
+# in the estate, and nothing in this suite noticing. The constants were realigned
+# in #14710; this section is the tripwire that keeps them aligned, and it
+# deliberately did NOT ship in that PR, because a guard co-merged with its own
+# fix has no red to point at and arrives with a vacuous fail arm.
+#
+# TWO FILE READS. No network, no `gh`, no credential, no fixture, no clock.
+#
+# THE COMPARISON IS ON BYTES, NOT CHARACTERS, and that distinction is not
+# pedantry: both reasons carry em dashes, so a character count reads 1999/990
+# where the byte count reads 2012/998 — a length check written in the wrong unit
+# would agree with itself while the text differed. The reasons also carry
+# backticks, apostrophes and double quotes that survive only if the constants are
+# read the way bash itself reads them, so the arrays are SOURCED out of the
+# generator rather than re-parsed with a regex (a regex would be testing this
+# section's own pattern, not the value the generator assigns) and compared with
+# `cmp`, which names the first differing byte offset instead of merely saying no.
+#
+# THE REVERSE DIRECTION, STATED SO IT IS NOT MISREAD. The committed spec holds
+# FOUR contexts under S7; the generator names only TWO. `Dispatch (compose-smoke
+# paths)` and `PR task gate self-test` have no generator constant BY DESIGN —
+# they survive a regeneration through the BASE half of that same union. So "every
+# S7 row in the spec has a generator constant" is FALSE on a healthy tree and is
+# not asserted here. What is asserted is the direction that can erase a
+# correction: every generator constant must have EXACTLY ONE committed row, and
+# that row must match it byte for byte.
+
+section "24. the generator's hand-maintained S7 reasons are byte-identical to the committed rows a regeneration would overwrite"
+
+# A pure function of (generator, spec) so the mutation twins below can re-run it
+# against a MUTATED COPY of either side and watch it red. It never exits
+# non-zero; the verdict is in the lines it prints, which is what lets one call
+# serve both the clean read and the four mutants.
+s7_report() {  # $1 = generator, $2 = spec, $3 = tag for temp files
+  local gen="$1" spec="$2" blk="$TMP/s7-consts-$3.sh"
+  # Only the two array literals, lifted verbatim. If either block is ever
+  # renamed the extraction comes back empty and the CHECKED line below reads 0,
+  # which is a red — never a silent skip.
+  sed -n '/^EXCLUDED_BY_DECISION_NAMES=(/,/^)/p
+          /^EXCLUDED_BY_DECISION_REASONS=(/,/^)/p' "$gen" > "$blk"
+  (
+    EXCLUDED_BY_DECISION_NAMES=()
+    EXCLUDED_BY_DECISION_REASONS=()
+    # shellcheck source=/dev/null
+    . "$blk"
+    i=0
+    printf 'CHECKED\t%s\t%s\n' \
+      "${#EXCLUDED_BY_DECISION_NAMES[@]}" "${#EXCLUDED_BY_DECISION_REASONS[@]}"
+    if [ "${#EXCLUDED_BY_DECISION_NAMES[@]}" -ne "${#EXCLUDED_BY_DECISION_REASONS[@]}" ]; then
+      # An off-by-one here does not merely lose an entry: it pairs every later
+      # name with the WRONG reason, and each of those still looks like prose.
+      printf 'ARITY\t%s\t%s\n' \
+        "${#EXCLUDED_BY_DECISION_NAMES[@]}" "${#EXCLUDED_BY_DECISION_REASONS[@]}"
+    fi
+    while [ "$i" -lt "${#EXCLUDED_BY_DECISION_NAMES[@]}" ]; do
+      n="${EXCLUDED_BY_DECISION_NAMES[$i]}"
+      case "${EXCLUDED_BY_DECISION_REASONS[$i]:-}" in
+        "S7 EXCLUDED BY DECISION"*) : ;;
+        *) printf 'SHAPE\t%s\n' "$n" ;;
+      esac
+      rows="$(jq --arg c "$n" '[.exclusions[] | select(.context == $c)] | length' "$spec")"
+      if [ "$rows" -eq 0 ]; then
+        printf 'MISSING\t%s\n' "$n"
+      elif [ "$rows" -ne 1 ]; then
+        # The union keeps `.[-1]` per context, so a duplicate row means the file
+        # already disagrees with itself and the comparison below is a coin flip.
+        printf 'DUP\t%s\t%s\n' "$n" "$rows"
+      else
+        printf '%s' "${EXCLUDED_BY_DECISION_REASONS[$i]}" > "$TMP/s7-gen-$3-$i.txt"
+        jq -rj --arg c "$n" 'first(.exclusions[] | select(.context == $c) | .reason)' \
+          "$spec" > "$TMP/s7-spec-$3-$i.txt"
+        if cmp -s "$TMP/s7-gen-$3-$i.txt" "$TMP/s7-spec-$3-$i.txt"; then
+          printf 'MATCH\t%s\t%s bytes\n' "$n" "$(wc -c < "$TMP/s7-spec-$3-$i.txt" | tr -d ' ')"
+        else
+          printf 'DRIFT\t%s\t%s\n' "$n" \
+            "$(cmp "$TMP/s7-gen-$3-$i.txt" "$TMP/s7-spec-$3-$i.txt" 2>&1 | sed 's/.*differ: //')"
+        fi
+      fi
+      i=$((i + 1))
+    done
+  )
+}
+
+RC24_CLEAN="$(s7_report "$GEN" "$SPEC" clean)"
+
+# NON-VACUITY FIRST. Every clause below is an ABSENCE claim over this report, and
+# an empty report satisfies all of them. So the report must first be shown to
+# have actually read something.
+RC24_NAMES="$(grep '^CHECKED	' <<<"$RC24_CLEAN" | cut -f2)"
+RC24_REASONS="$(grep '^CHECKED	' <<<"$RC24_CLEAN" | cut -f3)"
+if [ -n "$RC24_NAMES" ] && [ -n "$RC24_REASONS" ] \
+   && [ "$RC24_NAMES" -ge 2 ] 2>/dev/null && [ "$RC24_REASONS" -ge 2 ] 2>/dev/null; then
+  ok "the S7 constants are SOURCED out of the generator by bash itself — $RC24_NAMES names, $RC24_REASONS reasons, neither list empty"
+else
+  bad "the S7 array extraction came back empty or too short — every clause below would pass vacuously: $(grep '^CHECKED	' <<<"$RC24_CLEAN" | tr '\n' ' ' || echo '(no CHECKED line at all)')"
+fi
+
+RC24_MATCHES="$(grep -c '^MATCH	' <<<"$RC24_CLEAN" || true)"
+if [ "$RC24_MATCHES" = "$RC24_NAMES" ]; then
+  ok "every generator S7 constant matches its committed row byte for byte ($RC24_MATCHES of $RC24_NAMES: $(grep '^MATCH	' <<<"$RC24_CLEAN" | cut -f2,3 | tr '\n' ';' | sed 's/;$//'))"
+else
+  bad "a hand-maintained S7 reason has drifted from the row it will overwrite on the next regeneration: $(grep -v '^MATCH	' <<<"$RC24_CLEAN" | tr '\n' ' ')"
+fi
+
+# The pristine tree passing IS the byte-honesty proof: these reasons carry
+# backticks, apostrophes, double quotes and em dashes, and a comparison that
+# mangled any of them could not come back clean on an unmodified tree.
+if ! grep -qE '^(ARITY|MISSING|DUP|SHAPE)	' <<<"$RC24_CLEAN"; then
+  ok "…and the ledger is well-formed: paired arrays, one committed row per constant, every reason still an S7 hold"
+else
+  bad "the S7 ledger is malformed: $(grep -E '^(ARITY|MISSING|DUP|SHAPE)	' <<<"$RC24_CLEAN" | tr '\n' ' ')"
+fi
+
+# ── MUTATION TWIN 1: the generator drifts away from the file. ────────────────
+# This is the defect's own shape — the generator holding an older wording than
+# the row it overwrites — reproduced by changing ONE character.
+RC24_GEN_DRIFT="$TMP/rc24-gen-drift.sh"
+sed 's/green on main head 6e53d2782/green on main head 6e53d2783/' "$GEN" > "$RC24_GEN_DRIFT"
+if [ "$(grep -c '6e53d2783' "$RC24_GEN_DRIFT" || true)" = "1" ] \
+   && [ "$(grep -c '6e53d2782' "$RC24_GEN_DRIFT" || true)" = "0" ]; then
+  ok "the drift mutation applies: a COPY of the generator carries one changed character inside the \`Security gate\` reason"
+else
+  bad "the drift mutation did not apply — the anchor moved, so the clause below is vacuous"
+fi
+RC24_D="$(s7_report "$RC24_GEN_DRIFT" "$SPEC" gendrift)"
+if grep -q '^DRIFT	Security gate	' <<<"$RC24_D"; then
+  ok "…and the check REDS on it, naming the context and the first differing byte: $(grep '^DRIFT	Security gate	' <<<"$RC24_D" | cut -f3)"
+else
+  bad "one changed character in a generator S7 reason passed: $(tr '\n' ' ' <<<"$RC24_D")"
+fi
+
+# ── MUTATION TWIN 2: the file drifts away from the generator. ────────────────
+# The mirror direction, and it is not the same clause: a hand-edit to the
+# committed row that nobody carried back into the generator is exactly what
+# 2026-08-06 did, and it is the state this section was written to catch.
+RC24_SPEC_DRIFT="$TMP/rc24-spec-drift.json"
+jq '(.exclusions[] | select(.context == "Required-check spec gate") | .reason)
+    |= sub("wave 36"; "wave 37")' "$SPEC" > "$RC24_SPEC_DRIFT"
+if [ "$(jq '[.exclusions[] | select(.reason | contains("wave 37"))] | length' "$RC24_SPEC_DRIFT")" = "1" ]; then
+  ok "the spec-side mutation applies: a COPY of the committed file carries an edited \`Required-check spec gate\` reason"
+else
+  bad "the spec-side mutation did not apply — the anchor moved, so the clause below is vacuous"
+fi
+RC24_S="$(s7_report "$GEN" "$RC24_SPEC_DRIFT" specdrift)"
+if grep -q '^DRIFT	Required-check spec gate	' <<<"$RC24_S"; then
+  ok "…and the check REDS on that side too: $(grep '^DRIFT	Required-check spec gate	' <<<"$RC24_S" | cut -f3)"
+else
+  bad "a hand-edit to a committed S7 reason passed unnoticed: $(tr '\n' ' ' <<<"$RC24_S")"
+fi
+
+# ── MUTATION TWIN 3: the committed row disappears entirely. ──────────────────
+# A DRIFT clause alone cannot see this: with no row to compare against, a
+# comparison-only check has nothing to say and stays green while the hold is
+# gone from the file the merge oracle reads.
+RC24_SPEC_LOSS="$TMP/rc24-spec-loss.json"
+jq 'del(.exclusions[] | select(.context == "Security gate"))' "$SPEC" > "$RC24_SPEC_LOSS"
+if [ "$(jq '[.exclusions[] | select(.context == "Security gate")] | length' "$RC24_SPEC_LOSS")" = "0" ]; then
+  ok "the loss mutation applies: a COPY of the committed file no longer carries a \`Security gate\` exclusion row"
+else
+  bad "the loss mutation did not apply — the row survived the delete, so the clause below is vacuous"
+fi
+if grep -q '^MISSING	Security gate$' <<<"$(s7_report "$GEN" "$RC24_SPEC_LOSS" specloss)"; then
+  ok "…and the check REDS on the absence, not just on a difference"
+else
+  bad "a generator S7 constant with no committed row at all passed"
+fi
+
+# ── MUTATION TWIN 4: the two arrays fall out of step. ────────────────────────
+# The quietest failure of the four. Drop a NAME and every later name inherits
+# the wrong reason — each of which still reads as plausible S7 prose, so no
+# per-row text comparison can be trusted until the pairing is.
+RC24_GEN_ARITY="$TMP/rc24-gen-arity.sh"
+sed 's/^  "Security gate"$//' "$GEN" > "$RC24_GEN_ARITY"
+if [ "$(grep -c '^  "Security gate"$' "$RC24_GEN_ARITY" || true)" = "0" ]; then
+  ok "the arity mutation applies: a COPY of the generator names one fewer context than it carries reasons"
+else
+  bad "the arity mutation did not apply — the entry survived, so the clause below is vacuous"
+fi
+if grep -q '^ARITY	1	2$' <<<"$(s7_report "$RC24_GEN_ARITY" "$SPEC" genarity)"; then
+  ok "…and the check REDS on the unpaired lists before it compares a single reason"
+else
+  bad "the S7 name and reason arrays can fall out of step without a red — every pairing below the gap would be silently wrong"
+fi
+
 
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
