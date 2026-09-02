@@ -1,0 +1,51 @@
+# stale-verdict-watch.baseline — the PINNED known-red set.
+#
+# scripts/stale-verdict-watch.sh reds every 30 minutes for as long as a
+# CONFLICTING pull request keeps asserting a green required verdict main has
+# moved past. From 2026-08-08 to 2026-09-01 it did exactly that on run after
+# run, mostly about ONE pull request (#11766, four required contexts green at
+# 2026-08-17T10:0*Z, re-dispatching nothing after). A check that fails on every
+# run for three weeks cannot warn: the NEXT stale verdict changes the log by a
+# line and the conclusion by nothing.
+#
+# So this file pins the standing population, and the watch fails on the DELTA:
+#
+#   NOVEL   a reported pull request no line here covers   -> rc 1, the run FAILS
+#   KNOWN   a reported pull request a line here covers    -> printed, counted,
+#                                                            trended, NOT failed
+#   HEALED  a line here whose pull request stopped being
+#           reported (closed, rebased, or refreshed)      -> rc 8, the run FAILS
+#           until the line is DELETED
+#
+# THAT LAST ARM IS THE POINT. This file may only shrink on its own. Growing it
+# costs a commit, a review, and a written reason the parser refuses to accept
+# as blank — and the moment a pinned row heals, the watch reds until somebody
+# removes the line. An allowlist that grows quietly stops discriminating; this
+# one cannot grow quietly and cannot be left down.
+#
+# FORMAT — one entry per line, all four fields mandatory:
+#
+#   <pr-number> <head-oid-prefix, 7-40 lowercase hex> <YYYY-MM-DD> <reason>
+#
+# The head is part of the key on purpose. A pinned PR that gets a PUSH has a
+# new head and a freshly-dispatched verdict — a different fact about a
+# different tree — and it reds as NOVEL rather than inheriting this line's
+# cover. The reason must be at least 12 characters: say which pull request,
+# why it is standing debt, and what would let the line be deleted.
+#
+# Example (do not uncomment; it names no real pull request):
+#   99999 b93cbb768 2026-08-17 abandoned spike kept open for its review thread; delete when it is closed
+#
+# ── ENTRIES ──────────────────────────────────────────────────────────────────
+#
+# EMPTY, and measured so on 2026-09-01: #11766 — the pull request this watch
+# had been red about for fifteen days — was closed at 21:26Z, and a full local
+# run over the live population (75 open, 2 CONFLICTING: #14874 and #14825)
+# reported ZERO conflicted pull requests asserting a stale green. Nothing is
+# owed, so nothing is pinned.
+#
+# An empty file is not an inert file. With no entries, EVERY stale verdict is
+# NOVEL and the watch behaves exactly as it did before the ratchet existed —
+# which is why this change cannot launder anything today. The mechanism is
+# here for the next #11766, and the healed arm above is what will stop it from
+# being left switched on afterwards.

@@ -31,7 +31,7 @@ import { messageBlocks, type ChatMessage } from '../src/chat/wire'
 import { MermaidIsland, islandHtml } from '../src/papers/portabledoc/MermaidIsland'
 import { BLOCK_RENDERERS, DEGRADE_ONLY, renderBlockNative, type BlockCtx } from '../src/papers/portabledoc/blocks'
 import { dark, light, type Theme } from '../src/ui/theme'
-import { roles } from '../src/ui/typography'
+import { roles, scale } from '../src/ui/typography'
 
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 
@@ -93,6 +93,36 @@ function walk(node: ReactNode): Walk {
 
 function render(block: unknown, ctx: BlockCtx): ReactNode {
   return renderBlockNative(block, ctx, 0)
+}
+
+/** RN's ScrollView is the element type imported by the renderers; identify it
+ * structurally (a `contentContainerStyle` prop) so this does not depend on how
+ * the jest-expo preset mocks the native component. */
+function isScrollView(node: ReactNode): boolean {
+  return isElement(node) && 'contentContainerStyle' in (node.props as object)
+}
+
+function findScrollView(node: ReactNode): ReactNode | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findScrollView(child as ReactNode)
+      if (hit !== undefined) return hit
+    }
+    return undefined
+  }
+  if (!isElement(node)) return undefined
+  if (isScrollView(node)) return node
+  return findScrollView((node.props as { children?: ReactNode }).children)
+}
+
+function countHorizontalScrollers(node: ReactNode): number {
+  if (Array.isArray(node)) {
+    return node.reduce<number>((n, c) => n + countHorizontalScrollers(c as ReactNode), 0)
+  }
+  if (!isElement(node)) return 0
+  const props = node.props as { horizontal?: boolean; children?: ReactNode }
+  const self = isScrollView(node) && props.horizontal === true ? 1 : 0
+  return self + countHorizontalScrollers(props.children)
 }
 
 /* ── 1. the register default: undefined IS paper ────────────────────────────── */
@@ -221,6 +251,86 @@ describe('chat register', () => {
     const inner = walk(render(nested, chat)).styles.find((s) => s.lineHeight === 26)
     expect(inner).toBeDefined()
     expect(inner?.fontFamily).toBeUndefined() // sans, not the paper serif
+  })
+})
+
+/* ── 2a. the code block's language header (bl-frommarkdown-fence-language) ─── */
+
+// The converter now carries a fence's info string onto the block as `lang`
+// (FromMarkdown.code_block/2), so ```python finally arrives here as something
+// to show. Two laws, and the second is the one that keeps this additive:
+//
+//   1. WITH a lang, the label is DRAWN and it is not inside the scroller — a
+//      label that scrolls away with the code is not a label.
+//   2. WITHOUT a lang, the rendered tree is byte-identical to what it was
+//      before the header existed. Asserted as a JSON comparison against a
+//      literal-shaped expectation rather than by eyeballing the style, because
+//      a wrapper View added around the no-lang case changes `rootStyle`'s
+//      answer for every other code assertion in this file.
+
+describe("the code block's language header", () => {
+  for (const [name, ctx] of [
+    ['paper', paperDefault],
+    ['chat', chat],
+  ] as const) {
+    it(`${name}: a lang is drawn as a header above the code`, () => {
+      const w = walk(render({ type: 'code', value: 'print(1)', lang: 'python' }, ctx))
+      expect(w.text).toContain('python')
+      expect(w.text).toContain('print(1)')
+    })
+
+    it(`${name}: the header sits OUTSIDE the horizontal scroller`, () => {
+      const node = render({ type: 'code', value: 'print(1)', lang: 'python' }, ctx)
+      if (!isElement(node)) throw new Error('expected an element')
+
+      // The root is the frame-carrying WRAPPER, not the scroller itself —
+      // without this line the rest of the test passes vacuously on a renderer
+      // that never drew a header at all (the scroller would then BE the root
+      // and trivially hold only the code).
+      expect(isScrollView(node)).toBe(false)
+      expect(rootStyle(node).marginVertical).toBe(10)
+
+      // …and the label is a direct child of that wrapper, not a descendant of
+      // the ScrollView.
+      const scroller = findScrollView(node)
+      expect(scroller).toBeDefined()
+      expect(walk(scroller as ReactNode).text).toBe('print(1)')
+      expect(walk(scroller as ReactNode).text).not.toContain('python')
+
+      // …and still exactly ONE horizontal scroller (charter D50).
+      expect(countHorizontalScrollers(node)).toBe(1)
+    })
+
+    it(`${name}: no lang renders EXACTLY the pre-header tree`, () => {
+      const withoutKey = JSON.stringify(render({ type: 'code', value: 'print(1)' }, ctx))
+
+      // The frame lives on the ScrollView itself — the wrapper View that the
+      // lang case introduces must not appear here.
+      const node = render({ type: 'code', value: 'print(1)' }, ctx)
+      if (!isElement(node)) throw new Error('expected an element')
+      expect(isScrollView(node)).toBe(true)
+      expect((node.props as { horizontal?: boolean }).horizontal).toBe(true)
+      expect(rootStyle(node).marginVertical).toBe(10)
+      expect(walk(node).text).toBe('print(1)')
+
+      // A blank / whitespace-only / non-string lang is the SAME no-lang tree —
+      // put_if_present drops a blank lang on the write path, but a hand-authored
+      // block or an older row can still carry one.
+      for (const lang of ['', '   ', null, undefined, 42, {}]) {
+        expect(JSON.stringify(render({ type: 'code', value: 'print(1)', lang }, ctx))).toBe(
+          withoutKey,
+        )
+      }
+    })
+  }
+
+  it('the label is quiet chrome, not code — muted, smaller than the code text', () => {
+    const w = walk(render({ type: 'code', value: 'print(1)', lang: 'python' }, paperDefault))
+    const label = w.styles.find((s) => s.fontSize === scale.micro.fontSize)
+    expect(label).toBeDefined()
+    expect(label?.color).toBe(theme.textMuted)
+    expect(label?.lineHeight).toBe(scale.micro.lineHeight)
+    expect(label?.fontSize as number).toBeLessThan(roles.codeBlock.fontSize)
   })
 })
 

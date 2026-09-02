@@ -135,6 +135,9 @@
   --tok-evidence-fill: 0.65;
   --tok-evidence-gutter: 40px;
   --tok-evidence-caption: 50ch;
+  --dur-1: 0.15s;
+  --dur-2: 0.18s;
+  --dur-3: 0.28s;
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
   --danger-hsl: 0 68% 42%;

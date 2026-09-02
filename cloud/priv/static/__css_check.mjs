@@ -119,6 +119,17 @@
 //       DELIBERATELY NO CONSENT LIST, unlike E15's WH_DEL_BASE_TONES: the bare
 //       base is a distinct SHIPPED state here, so "falls through to the base" is
 //       never a treatment, it is an impersonation. Arm (d) pins that premise.
+//   E17 a COLLAPSED citation scan set: citationScanFiles() returned nothing, or
+//       lost a whole arm of its derivation (zero top-level members, zero
+//       __preview__/ members, or this file missing from its own set). E11's
+//       census is only as honest as the list it iterates, and an empty list
+//       yields `0 error(s)` — a green from a scan that read NOTHING, byte-
+//       identical to a green from a scan that read everything. The arms are
+//       STRUCTURAL, never a pinned file list (D5: ban the shape, do not
+//       enumerate). Print the derivation E17 guards with
+//       `node __css_check.mjs --citation-inventory`, which also crosses the set
+//       with the RULED alternation so the E11 widening's cost is a run, never a
+//       quoted number.
 //   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
 //
 //         A rule whose selector is WRAPPER-SCOPED onto the pill
@@ -946,15 +957,96 @@ export function bannedSourceCitationErrors(src, file) {
 // stylesheets. The fixtures are deliberately malformed CSS, but E11 is a
 // full-TEXT regex and never parses, so their content cannot destabilise it —
 // they are scanned for citations exactly like everything else. Re-derive the
-// membership with: ls cloud/priv/static/*.css cloud/priv/static/__preview__/
-function citationScanFiles() {
+// membership with `node __css_check.mjs --citation-inventory` — the mode below
+// PRINTS the set this function returns, where the `ls` recipe it replaced was a
+// second implementation of the filter that could drift from the real one
+// unseen.
+//
+// THE `root` PARAMETER EXISTS SO THE E17 REFUSALS BELOW CAN BE DRIVEN. The gate
+// always calls this with no argument, i.e. against this file's own directory;
+// --citation-inventory accepts an optional root so __app.test.mjs can point the
+// same derivation at a directory where the set legitimately collapses and watch
+// it refuse. A guard whose failure arm no test can reach is a guard nobody has
+// ever seen fire.
+function citationScanFiles(root = dir) {
   const out = [];
   const scanned = (f) => /\.(m?js|css)$/.test(f);
-  for (const f of fs.readdirSync(dir)) if (scanned(f)) out.push(f);
-  const pv = path.join(dir, "__preview__");
+  if (!fs.existsSync(root)) return out;
+  for (const f of fs.readdirSync(root)) if (scanned(f)) out.push(f);
+  const pv = path.join(root, "__preview__");
   if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
   return out.sort();
 }
+
+// E17 — THE SCAN SET IS A CLAIM, AND NOTHING CHECKED IT (charter D41 /
+// bp-honest-gates D5). citationScanFiles() derives its list from two readdir
+// calls and one extension filter, and ALL THREE can silently produce nothing: a
+// renamed or moved `__preview__/`, an extension pattern edited to a shape no
+// file matches, a scan rooted somewhere else. E11 then iterates an empty list
+// and the gate prints its clean census — a green from a scan that read NOTHING
+// is byte-identical to a green from a scan that read everything. That is the
+// vacuous-instrument shape this whole file exists to forbid, sitting inside the
+// file itself. E17 turns each collapse mode into a NAMED, non-zero failure.
+//
+// WHY STRUCTURAL ARMS AND NOT A PINNED FILE LIST. An inventory of expected
+// member names is exactly the enumerate-don't-ban shape D5 forbids: it rots the
+// day a new harness file lands, and each stale entry teaches the next reader to
+// widen the list rather than fix the derivation. These arms instead assert that
+// each ARM OF THE DERIVATION produced something, and that the gate's own file is
+// inside its own set — the comment above has CLAIMED "Scans this file too, so
+// its own citations cannot go stale unseen" since the widening landed, and
+// nothing asserted it. The self-membership arm applies only to the real root: it
+// is a claim about THIS tree and means nothing about a directory the inventory
+// mode was merely pointed at.
+function citationScanSetRefusals(files, root = dir) {
+  const out = [];
+  if (!files.length) {
+    return [
+      `E17 ${root}  citation scan set is EMPTY — E11 would have reported a clean census over ` +
+        `ZERO files. Either the scan root does not exist, or the extension filter in ` +
+        `citationScanFiles() now matches nothing. A green over an empty set is not a green.`,
+    ];
+  }
+  const PV = "__preview__" + path.sep;
+  if (!files.some((f) => !f.startsWith(PV)))
+    out.push(
+      `E17 ${root}  citation scan set has ZERO top-level members — the top-level readdir arm ` +
+        `of citationScanFiles() collapsed, so app.css / app.js / every top-level harness file ` +
+        `went unscanned while E11 still reported a count.`,
+    );
+  if (!files.some((f) => f.startsWith(PV)))
+    out.push(
+      `E17 ${root}  citation scan set has ZERO __preview__/ members — the preview-harness arm ` +
+        `of citationScanFiles() collapsed (a moved or renamed directory reads here exactly like ` +
+        `a clean one). Re-derive with: node __css_check.mjs --citation-inventory`,
+    );
+  const self = path.basename(fileURLToPath(import.meta.url));
+  if (root === dir && !files.includes(self))
+    out.push(
+      `E17 ${root}  citation scan set does not contain ${self} itself — the file's own claim ` +
+        `("Scans this file too, so its own citations cannot go stale unseen") is false, and ` +
+        `every citation in the gate's own comments is unmeasured.`,
+    );
+  return out;
+}
+
+// THE RULED ALTERNATION — the widened citation shape ruled by charter D201 and
+// carried by cch-w16-s7. IT IS DELIBERATELY NOT WHAT E11 ENFORCES TODAY: E11
+// bans `app.js:<line>` only (see bannedSourceCitationErrors above), and that
+// shape has ZERO live hits on this tree, so the SHIPPED gate currently catches
+// nothing. The ruled alternation is what E11 would ban AFTER the widening —
+// loose separator for the `app.js` branch (the form the shipped gate already
+// catches, and which the "prescribed" tight-everywhere regex would have
+// dropped), tight `(?::~?|\s~)` for every widened target so that prose like
+// "the app.css 273 raw px font-size lines" and the sidecar's `app.css <bytes> B`
+// records stay clean.
+//
+// IT LIVES HERE, NOT IN A TASK ROW, BECAUSE EVERY QUOTED FIGURE FOR IT HAS
+// ROTTED. The widening's cost has been recorded as 8, then 14, then 16/18, then
+// 19, then 20 — five numbers, each true the day it was written and false by the
+// next merge. --citation-inventory emits the figure as a RUN instead, so the
+// only way to cite it is to re-derive it.
+const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?:js|mjs|sh))(?::~?|\s~))\d{2,}(?:-\d{2,})?/g;
 
 // Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
 // ONLY the E9 parse-completeness guard against one file and exits non-zero if it
@@ -1007,6 +1099,63 @@ function citationScanFiles() {
         `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
     );
     process.exit(errs.length ? 1 : 0);
+  }
+}
+
+// Inventory mode: `node __css_check.mjs --citation-inventory [root]` prints the
+// citation scan set CROSSED WITH the ruled alternation — every file
+// citationScanFiles() actually reads, each one's SHIPPED-E11 hit count and its
+// RULED-alternation hit count, and the matched text with the line it sits on —
+// then exits. Symmetric with --swallow-check / --orphan-check /
+// --wrap-parity-check above, and placed here for the same structural reason
+// they are: it must run BEFORE the gate body.
+//
+// WHY A SUB-MODE AND NOT AN EXPORT. `citationScanFiles` was a bare unexported
+// function, and this file has no main guard of any kind — the gate runs during
+// MODULE EVALUATION and ends in process.exit(). So a consumer that `import`s
+// this module to derive the inventory (a) has the whole gate's stdout dumped
+// over its own output and (b) NEVER GETS CONTROL BACK when the gate is red —
+// which is precisely the moment the inventory is wanted, because the widening
+// commit reds the gate by construction. Exporting the function alone would have
+// been a trap that works only while the gate is green. The sub-mode is immune to
+// the gate's exit status by construction, and is spawnSync-able.
+//
+// WHAT THE TWO COLUMNS BUY. `ruled` is what E11 would flag after the widening;
+// `E11` is what it flags today. Their DIFFERENCE is the widening's real cost,
+// measured at the moment you ask rather than quoted from a row — and on this
+// tree the shipped column is ZERO everywhere, so the whole ruled figure is work
+// the widening creates, not a backlog it inherits.
+{
+  const i = process.argv.indexOf("--citation-inventory");
+  if (i !== -1) {
+    const next = process.argv[i + 1];
+    const root = next && !next.startsWith("--") ? path.resolve(next) : dir;
+    const files = citationScanFiles(root);
+    const refusals = citationScanSetRefusals(files, root);
+    const PV = "__preview__" + path.sep;
+    let shippedTotal = 0;
+    let ruledTotal = 0;
+    console.log(`__css_check --citation-inventory ${root}`);
+    for (const rel of files) {
+      const src = readOrRefuse(path.join(root, rel), rel);
+      const shipped = bannedSourceCitationErrors(src, rel).length;
+      const hits = [...src.matchAll(CITATION_RULED_ALTERNATION)];
+      shippedTotal += shipped;
+      ruledTotal += hits.length;
+      console.log(
+        `  ruled=${String(hits.length).padStart(3)}  E11=${String(shipped).padStart(3)}  ${rel}`,
+      );
+      for (const m of hits) console.log(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
+    }
+    for (const e of refusals) console.error("FAIL  " + e);
+    console.log(
+      `__css_check --citation-inventory ${root}: ${files.length} file(s) scanned ` +
+        `(${files.filter((f) => !f.startsWith(PV)).length} top-level, ` +
+        `${files.filter((f) => f.startsWith(PV)).length} __preview__/), ` +
+        `${shippedTotal} shipped-E11 hit(s), ${ruledTotal} ruled-alternation hit(s), ` +
+        `${refusals.length} E17 refusal(s)`,
+    );
+    process.exit(refusals.length ? 1 : 0);
   }
 }
 
@@ -1922,7 +2071,12 @@ for (const e of wrapParity.errors) errors.push(e);
 // banned outright; router.ex cross-language cites are OUT (see the boundary on
 // bannedSourceCitationErrors). Scans this file too, so its own citations cannot
 // go stale unseen.
-for (const rel of citationScanFiles()) {
+// E17 first: E11's census is only as honest as the set it iterates, and an
+// empty or half-collapsed set makes E11's `0 error(s)` a report about nothing.
+// Print the derivation with: node __css_check.mjs --citation-inventory
+const citationFiles = citationScanFiles();
+for (const e of citationScanSetRefusals(citationFiles)) errors.push(e);
+for (const rel of citationFiles) {
   for (const e of bannedSourceCitationErrors(read(rel), rel)) errors.push(e);
 }
 

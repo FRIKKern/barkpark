@@ -185,24 +185,23 @@ const SCREEN_EXPECTED = Object.freeze({
 // known gap stays visible in every report instead of decaying into folklore.
 //
 // Each entry must be paid off by a filed task, named here.
-const DECLARED_DIVERGENCES = Object.freeze({
-  5: {
-    labelled: "R3",
-    actually: "R1",
-    finding:
-      "Specimen 5 is labelled caught_by R3 ('no fact stored without a demonstration the " +
-      "method COULD have answered differently'). It IS caught — but by R1, on the level " +
-      "ceiling: the read is L5/L3 and the claim is L1, so LEVEL-SKIP fires before any R3 " +
-      "reasoning would. adjudicate.mjs implements NO R3 check at all; record.mjs has " +
-      "MISSING-SUBJECT, MISSING-CLAIM, BAD-DEPS, LEVEL-SKIP, PATHLESS-REF and " +
-      "INADMISSIBLE-CONTINUOUS, and none of them asks whether a control could have " +
-      "failed. The specimen is therefore SAFE (caught) but MISDIAGNOSED (wrong rule), " +
-      "which is the same safety-vs-diagnosis split test/wiring.test.mjs keeps apart. " +
-      "R3 remains enforced only by the injected `now`/`screen` bounds in ledger.mjs, " +
-      "which are a different seam and do not run on the fact path.",
-    filed_as: "tgw4-r3-has-no-adjudicator-check",
-  },
-});
+//
+// EMPTY IS THE HONEST STATE, AND IT IS NOT THE SAME AS DISARMED. The one entry
+// this table ever held was specimen 5's `labelled R3 / actually R1`. That is
+// paid off: the fixture's label now names the rule that actually fires
+// (LEVEL-SKIP, R1), the R3 content is kept there as an OBSERVATION rather than
+// as a catch, and the R3 gap it stood for is recorded in the fixture's own
+// `_meta.r3_has_no_check_on_the_fact_path` and given a standing negative
+// control in specimen 103 — an R3 violation with HONEST levels, which R1
+// structurally cannot reach and the adjudicator therefore ADMITS.
+//
+// So nothing is silenced here any more, and the silencer still bites: the
+// module-scope shape guard below is proven fatal against a SYNTHETIC entry
+// inserted into this empty table, and relabelling specimen 5 back to R3 now
+// fails the run under UNDECLARED-DIVERGENCE. Both are asserted in
+// test/acceptance.test.mjs. An empty escape hatch whose guard cannot be shown
+// to fire would be the vacuous control this module exists to refuse.
+const DECLARED_DIVERGENCES = Object.freeze({});
 
 // THE ESCAPE HATCH HAS TO COST SOMETHING (added in review).
 //
@@ -286,6 +285,40 @@ export function checkProbes() {
 }
 
 /**
+ * Model ONE specimen as the sinful fact the agent actually produced.
+ *
+ * Read level from the specimen's own "read at Lx" clause (via a PROBE command
+ * that derives Lx — never the specimen's `rerun`, which is the FIX; see the
+ * header), claimed level from its "claimed at Ly" clause.
+ *
+ * Exported because the fixture holds specimens `runAcceptance` deliberately
+ * does NOT judge — the UNRATIFIED negative controls, which are not in the
+ * ratified table and must never be counted as rows of it. Those still have to
+ * be modelled EXACTLY as a ratified one is, or a claim about what the
+ * adjudicator does to them is a claim about a different fact. One modelling,
+ * two consumers.
+ */
+export function factFromSpecimen(specimen) {
+  const parsed = parseLevelSkip(specimen.level_skip);
+  const { level: readLevel, remap } = resolveReadLevel(parsed.read);
+  const claimedLevel = parsed.claimed[0] ?? undefined;
+
+  // The SINFUL fact: the level the agent read at, quoted at the level it
+  // claimed. `wrong_evidence` is the claim the specimen records verbatim.
+  const fact = {
+    subject: specimen.title,
+    quantity: specimen.wrong_evidence,
+    claim: specimen.wrong_evidence,
+    evidence: specimen.wrong_evidence,
+    rerun: readLevel === null ? "" : READ_LEVEL_PROBES[readLevel],
+    level: claimedLevel,
+    observed_at: "2026-07-20T12:00:00Z",
+  };
+
+  return { fact, readLevel, claimedLevel, remap };
+}
+
+/**
  * Run every ratified specimen through the real adjudicator.
  *
  * @returns {{ok: boolean, probe_drift: [], results: [], findings: []}}
@@ -318,21 +351,7 @@ export function runAcceptance(fixturePath = FIXTURE) {
   }
 
   for (const specimen of specimens) {
-    const parsed = parseLevelSkip(specimen.level_skip);
-    const { level: readLevel, remap } = resolveReadLevel(parsed.read);
-    const claimedLevel = parsed.claimed[0] ?? undefined;
-
-    // The SINFUL fact: the level the agent read at, quoted at the level it
-    // claimed. `wrong_evidence` is the claim the specimen records verbatim.
-    const fact = {
-      subject: specimen.title,
-      quantity: specimen.wrong_evidence,
-      claim: specimen.wrong_evidence,
-      evidence: specimen.wrong_evidence,
-      rerun: readLevel === null ? "" : READ_LEVEL_PROBES[readLevel],
-      level: claimedLevel,
-      observed_at: "2026-07-20T12:00:00Z",
-    };
+    const { fact, readLevel, claimedLevel, remap } = factFromSpecimen(specimen);
 
     const ruling = adjudicate(fact, { execute: false });
     const reasons = [...ruling.reasons].sort();
@@ -508,7 +527,13 @@ if (isMain) {
   } else {
     console.log(report(outcome));
   }
-  process.exit(outcome.ok ? 0 : 1);
+  // NO process.exit HERE (charter D92). The report above is this epic's own
+  // evidence, and process.exit() drops any of it still queued for an
+  // asynchronous pipe — so `acceptance.mjs --json | jq` could hand back a
+  // JSON.parse error, and `| tee` a report ending mid-line, while the same run
+  // redirected to a file was whole. exitCode keeps the exit STATUS identical
+  // (0 on PASS, 1 on FAIL) and lets stdout drain on the natural exit.
+  process.exitCode = outcome.ok ? 0 : 1;
 }
 
 export { READ_LEVEL_PROBES, EXPECTED, SCREEN_EXPECTED, DECLARED_DIVERGENCES, FIXTURE, report };

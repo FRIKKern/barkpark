@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w41-bl-row-one",
+    "kind": "task",
+    "type": "task",
+    "title": "row one",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "a",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "MERGE-GATED.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}
