@@ -381,9 +381,18 @@ defmodule Barkpark.Plugins.Capabilities do
   gets by default. Commands WITHOUT this descriptor are full-only forever
   (task.get / `bp task show` intentionally omit it — they ARE the escape hatch).
 
-  Kept as a single source of truth so the tasks plugin (`task.ready`,
-  `task.prime`) and the core `search.query` command declare the byte-identical
-  shape; the contract test pins all three to this map.
+  Declared here for the CORE `search.query` command only. This is NOT a shared
+  source of truth: the tasks plugin declares its own copy
+  (`Barkpark.Plugins.Tasks`, `@agent_views`) for `task.ready` / `task.prime`,
+  because a plugin calling into this module bought a `tasks→capabilities`
+  architecture edge (the cqv8 boundary gate named it) for a four-key constant.
+
+  The guarantee that all three commands emit the byte-identical shape is the
+  WIRE-level contract test, not a shared call:
+  `test/barkpark_web/contract/capabilities_manifest_test.exs`, describe
+  "command-level `views` descriptor", `@frozen_views` — it asserts `task.ready`,
+  `task.prime` and `search.query` against a frozen literal over the real
+  `?views=1` response. Edit this map without editing that one and the test reds.
   """
   @spec agent_views_descriptor() :: map()
   def agent_views_descriptor do
