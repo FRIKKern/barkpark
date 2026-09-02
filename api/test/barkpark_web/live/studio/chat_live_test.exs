@@ -687,6 +687,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert File.exists?("priv/static/assets/bp-paper-mermaid.js")
     end
+
+    # Same three-part wiring for the turn clock (task-dd2dcc348335be2f). The
+    # server no longer ticks the elapsed label at all, so a dropped script tag
+    # or an unregistered hook does not degrade the label — it DELETES it.
+    test "root layout loads the turn-clock asset AND registers both its hooks" do
+      root = File.read!("lib/barkpark_web/layouts/root.html.heex")
+
+      assert root =~ "/assets/bp-chat-turn-clock.js",
+             "root.html.heex must load the turn-clock hook asset, else the elapsed label never ticks"
+
+      assert root =~ "Hooks.ChatElapsed",
+             "root.html.heex must register ChatElapsed in the LiveSocket Hooks map"
+
+      assert root =~ "Hooks.ChatSpinWord",
+             "root.html.heex must register ChatSpinWord in the LiveSocket Hooks map"
+
+      # Golden Rule 4: a chat asset is never a blocking <script> in <head>.
+      [head, _body] = String.split(root, "</head>", parts: 2)
+      refute head =~ "/assets/bp-chat-turn-clock.js"
+
+      asset = File.read!("priv/static/assets/bp-chat-turn-clock.js")
+      assert asset =~ "window.BarkparkChatElapsed"
+      assert asset =~ "window.BarkparkChatSpinWord"
+    end
   end
 
   describe "the args seam (build_args, charter D9)" do
@@ -3649,42 +3673,80 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "go"
     end
 
-    test "the turn clock ticks while working and the spinner shows", %{view: view} do
+    test "the elapsed label is a CLIENT clock: an empty span stamped with the turn's start",
+         %{view: view} do
       html = render(view)
       assert html =~ "bp-chat-spinner"
       assert spinner_word_shown?(html)
 
-      send(view.pid, :turn_tick)
-      send(view.pid, :turn_tick)
-      assert render(view) =~ "2s"
+      # The hook's contract: the element is mounted on Hooks.ChatElapsed, is
+      # left for the browser to write (phx-update="ignore"), and carries the
+      # turn's start as EPOCH MILLISECONDS — the only thing the server says
+      # about elapsed time, said exactly once.
+      assert html =~ ~s(id="chat-turn-elapsed")
+      assert html =~ ~s(phx-hook="ChatElapsed")
+
+      [_, stamp] = Regex.run(~r/id="chat-turn-elapsed"[^>]*data-started-at="(\d+)"/, html)
+      started = String.to_integer(stamp)
+      now = System.system_time(:millisecond)
+      assert started <= now and now - started < 60_000
+
+      # The server renders NO count into it — the span ships empty.
+      assert html =~ ~r/id="chat-turn-elapsed"[^>]*>\s*<\/span>/
+      assert Regex.run(~r/id="chat-turn-elapsed"[^>]*phx-update="ignore"/, html)
     end
 
-    test "the busy row's word rotates on the turn clock (never sticks)", %{view: view} do
-      before = shown_spinner_word(render(view))
-      assert before
+    # THE point of the client clock (T3 re-render hygiene #10): a running turn
+    # must cost the server nothing per second. Two proofs, because either alone
+    # can go vacuous: the message that used to drive the loop is now inert, AND
+    # nothing fires on its own inside a window the old 1 s loop always hit.
+    test "a running turn produces NO per-second render diff", %{view: view} do
+      # Scoped to #chat-transcript (the messages + the live busy row + the
+      # elapsed label) on purpose: the Studio chrome around it carries an
+      # os_mon host-metrics strip whose CPU/load numbers move on their own, and
+      # that has nothing to do with the turn.
+      transcript = fn -> view |> element("#chat-transcript") |> render() end
+      before = transcript.()
+      assert before =~ ~s(id="chat-turn-elapsed")
 
-      # 7 ticks = one rotation window; next_spinner_word excludes the current
-      # word, so the swap is guaranteed visible.
-      for _ <- 1..7, do: send(view.pid, :turn_tick)
-      after_rotation = shown_spinner_word(render(view))
-      assert after_rotation
-      assert after_rotation != before
+      # a simulated 3 s of the tick that used to exist
+      for _ <- 1..3, do: send(view.pid, :turn_tick)
+      assert transcript.() == before
+
+      # ...and 1.1 s of real time, the window the old Process.send_after loop
+      # could never sit through silently.
+      Process.sleep(1_100)
+      assert transcript.() == before
     end
 
     test "the busy row's word wears the shimmer, stopping… stays plain", %{view: view} do
       assert render(view) =~ "bp-chat-spin-word"
     end
 
-    test "the thinking pulse's word rotates on the turn clock too", %{view: view} do
+    test "the busy row's word rotates CLIENT-side: the span carries the vocabulary + dwell",
+         %{view: view} do
+      html = render(view)
+      assert html =~ ~s(id="chat-turn-word")
+      assert html =~ ~s(phx-hook="ChatSpinWord")
+      assert Regex.run(~r/id="chat-turn-word"[^>]*data-rotate-ms="7000"/, html)
+
+      # The park's one canonical vocabulary reaches the hook whole — the words
+      # never fork into a copy in the JS.
+      assert stamped_words(html, "chat-turn-word") ==
+               BarkparkWeb.Studio.ChatLive.spinner_words()
+    end
+
+    test "the thinking pulse's word wears the same client rotation", %{view: view} do
       # a live pulse hides the busy row, so the shown word IS the pulse's
       send(view.pid, {:claude_chat_event, thinking_tokens(64)})
-      before = shown_spinner_word(render(view))
-      assert before
+      html = render(view)
+      assert shown_spinner_word(html)
 
-      for _ <- 1..7, do: send(view.pid, :turn_tick)
-      after_rotation = shown_spinner_word(render(view))
-      assert after_rotation
-      assert after_rotation != before
+      assert html =~ ~s(id="chat-pulse-word")
+      assert Regex.run(~r/id="chat-pulse-word"[^>]*phx-hook="ChatSpinWord"/, html)
+
+      assert stamped_words(html, "chat-pulse-word") ==
+               BarkparkWeb.Studio.ChatLive.spinner_words()
     end
   end
 
@@ -7743,9 +7805,19 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     Enum.any?(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
   end
 
-  # WHICH park word is currently showing (nil if none) — for asserting the
-  # tick rotation actually swaps it.
+  # WHICH park word is currently showing (nil if none).
   defp shown_spinner_word(html) do
     Enum.find(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
+  end
+
+  # The vocabulary the server stamped on a spin-word span for the client-side
+  # rotation, decoded back out of the escaped `data-words` attribute.
+  defp stamped_words(html, id) do
+    [_, raw] = Regex.run(~r/id="#{id}"[^>]*data-words="([^"]*)"/, html)
+
+    raw
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&amp;", "&")
+    |> Jason.decode!()
   end
 end

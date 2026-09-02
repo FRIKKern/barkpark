@@ -95,10 +95,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @doc false
   def spinner_words, do: @spinner_words
 
-  # How many turn-clock ticks (seconds) a spinner word gets before the tick
-  # rotation swaps it for a fresh one. Long enough to read, short enough that
-  # no turn ever feels stuck on one word.
-  @spinner_rotate_s 7
+  # How long a spinner word wears before it is swapped for a fresh one. Long
+  # enough to read, short enough that no turn ever feels stuck on one word.
+  # The rotation is the BROWSER's (bp-chat-turn-clock.js, Hooks.ChatSpinWord):
+  # the server stamps the vocabulary and this dwell on the word span as static
+  # markup, and the hook picks the next word. Nothing about a running turn
+  # costs a LiveView diff on a timer any more.
+  @spinner_rotate_ms 7_000
+
+  # The vocabulary exactly as the hook reads it (data-words). Encoded once at
+  # compile time and rendered as STATIC markup, so it never enters a diff.
+  @spinner_words_json Jason.encode!(@spinner_words)
+
+  defp spinner_words_json, do: @spinner_words_json
+  defp spinner_rotate_ms, do: @spinner_rotate_ms
 
   # Per-socket transcript window (efficiency; task-9e21c3f285b3d7d0). A long
   # multi-hundred-turn agent session appends user/assistant/tool rows for its
@@ -265,8 +275,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          pending_echo_id: nil,
          interrupt_requested: false,
          pending_mode: nil,
-         turn_elapsed_s: 0,
-         turn_clock_armed: false,
+         # The turn's start as EPOCH MILLISECONDS, stamped once at the user
+         # message boundary and read by the ChatElapsed hook. nil = no turn we
+         # can date (a fresh mount, a reconnect mid-turn), and the label simply
+         # does not render — the same silence the old counter kept at 0.
+         turn_started_at_ms: nil,
          subscribed_topic: nil,
          # Per-tab AskUserQuestion answer state (charter D31/D35): request_id →
          # %{selections: %{qidx => [labels]}, custom: %{qidx => text}}. Chip picks
@@ -1980,26 +1993,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Every other document type on the dataset stream is not ours to render.
   def handle_info({:document_changed, _msg}, socket), do: {:noreply, socket}
 
-  def handle_info(:turn_tick, socket) do
-    if turn_active?(socket.assigns.status) do
-      Process.send_after(self(), :turn_tick, 1_000)
-      elapsed = socket.assigns.turn_elapsed_s + 1
-
-      socket = assign(socket, turn_elapsed_s: elapsed)
-
-      # The park never stands still: every @spinner_rotate_s the busy row AND
-      # the pulse wear a NEW word (next_spinner_word/1 excludes the current
-      # one, so the change is always visible). This is the liveness floor —
-      # send-path rolls only pick the opening word.
-      socket =
-        if rem(elapsed, @spinner_rotate_s) == 0, do: rotate_spinner_words(socket), else: socket
-
-      {:noreply, socket}
-    else
-      {:noreply, assign(socket, turn_clock_armed: false)}
-    end
-  end
-
   # A Recorder's live-activity ping (wave 5): overlay the sidebar card. On a
   # terminal transition (idle/offline) also re-read the list once — the stored
   # summary/status/pending-count is fresh again and the overlay yields to it.
@@ -3006,7 +2999,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span :if={@thinking_pulse.text in [nil, ""]}>
-              <span class="bp-chat-spin-word"><%= @thinking_pulse.word %>…</span> ~<%= @thinking_pulse.tokens %> tokens
+              <span
+                id="chat-pulse-word"
+                class="bp-chat-spin-word"
+                phx-hook="ChatSpinWord"
+                phx-update="ignore"
+                data-words={spinner_words_json()}
+                data-rotate-ms={spinner_rotate_ms()}
+              ><%= @thinking_pulse.word %>…</span> ~<%= @thinking_pulse.tokens %> tokens
             </span>
             <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;" data-gutter-text>{@thinking_pulse.text}</span>
           </div>
@@ -3054,10 +3054,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span>
               <span :if={@status == :interrupting}>stopping…</span>
-              <span :if={@status != :interrupting} class="bp-chat-spin-word">{@spinner_word}…</span>
-              <%= if @turn_elapsed_s > 0 do %>
-                <span style="opacity: 0.8;"><%= @turn_elapsed_s %>s</span>
-              <% end %>
+              <span
+                :if={@status != :interrupting}
+                id="chat-turn-word"
+                class="bp-chat-spin-word"
+                phx-hook="ChatSpinWord"
+                phx-update="ignore"
+                data-words={spinner_words_json()}
+                data-rotate-ms={spinner_rotate_ms()}
+              >{@spinner_word}…</span>
+              <%!-- The elapsed clock is the BROWSER's (bp-chat-turn-clock.js):
+                    the server stamps this turn's start ONCE and the hook mutates
+                    textContent on its own 1 s interval, so no viewer costs a
+                    per-second LiveView patch. `phx-update="ignore"` keeps the
+                    constant transcript patching from reverting the hook's text;
+                    every remount (this row hides behind each streaming frame)
+                    and every reconnect re-seeds from THIS server value. --%>
+              <span
+                :if={@turn_started_at_ms}
+                id="chat-turn-elapsed"
+                style="opacity: 0.8;"
+                phx-hook="ChatElapsed"
+                phx-update="ignore"
+                data-started-at={@turn_started_at_ms}
+              ></span>
               · Stop to interrupt
             </span>
           </div>
@@ -5668,24 +5688,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp blank_pulse, do: %{tokens: 0, text: "", word: Enum.random(@spinner_words)}
 
   # Roll the turn-level word (worn by the between-tools busy row). Called at
-  # every turn start; the tick rotation (rotate_spinner_words/1) takes over
-  # from there.
+  # every turn start; from there the ChatSpinWord hook rotates it in the
+  # browser (the park never stands still — the liveness floor is unchanged,
+  # only its clock moved off the server).
   defp roll_spinner_word(socket), do: assign(socket, spinner_word: Enum.random(@spinner_words))
-
-  # A new word, never the one currently showing — a rotation the eye can see.
-  defp next_spinner_word(current), do: Enum.random(@spinner_words -- [current])
-
-  # Tick-driven liveness: re-roll the busy row's word, and the pulse's too when
-  # a pulse is breathing. Both move together so a long thinking bout and a long
-  # tool run are equally alive.
-  defp rotate_spinner_words(socket) do
-    socket = assign(socket, spinner_word: next_spinner_word(socket.assigns[:spinner_word]))
-
-    case socket.assigns[:thinking_pulse] do
-      nil -> socket
-      pulse -> assign(socket, thinking_pulse: %{pulse | word: next_spinner_word(pulse.word)})
-    end
-  end
 
   defp thinking_label(n), do: "thought for ~#{n} tokens"
 
@@ -6734,17 +6740,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # is to cancel).
   defp turn_active?(status), do: status in [:thinking, :interrupting]
 
-  # The terminal's elapsed counter: one self-tick per second while a turn runs.
-  # Re-arms itself; falls silent (and disarms) the first tick after the turn
-  # ends, so an idle tab costs nothing.
-  defp start_turn_clock(socket) do
-    if socket.assigns[:turn_clock_armed] do
-      assign(socket, turn_elapsed_s: 0)
-    else
-      Process.send_after(self(), :turn_tick, 1_000)
-      assign(socket, turn_elapsed_s: 0, turn_clock_armed: true)
-    end
-  end
+  # The terminal's elapsed counter, T3 re-render hygiene #10: the server stamps
+  # the turn's start ONCE — epoch milliseconds at the user message boundary,
+  # the same boundary the transcript folds on — and the BROWSER ticks the label
+  # (bp-chat-turn-clock.js, Hooks.ChatElapsed). There is no `:turn_tick` any
+  # more: a running turn costs zero LiveView diffs per second per viewer, and an
+  # idle tab costs nothing because nothing is scheduled at all.
+  defp start_turn_clock(socket),
+    do: assign(socket, turn_started_at_ms: System.system_time(:millisecond))
 
   defp approval_outcome_label(:allowed), do: "✓ allowed"
   defp approval_outcome_label(:canceled), do: "✗ canceled"
