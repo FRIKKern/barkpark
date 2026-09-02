@@ -2530,8 +2530,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    whatever did not fit — measured at 77px of "rex@acme.com" gone at 390px,
    with no cue, on the row whose Remove button destroys that person's access.
    `anywhere` also lowers this column's min-content contribution, which is what
-   lets `min-width: 0` on `.set-row-main` above actually yield. Same idiom the
-   sibling `.set-row-key` below already uses. */
+   lets `min-width: 0` on `.set-row-main` above actually yield. (The sibling
+   `.set-row-key` that used the same idiom went with the team env-var page,
+   ruled 2026-09-02; `.set-row-note` below is the surviving twin.) */
 .set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
 /* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`.
