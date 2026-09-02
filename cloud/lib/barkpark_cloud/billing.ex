@@ -688,13 +688,67 @@ defmodule BarkparkCloud.Billing do
         case subscription_by_customer(cus) do
           %Subscription{status: "past_due"} = sub -> recover_subscription(sub)
           %Subscription{status: "active"} = sub -> sync_cancel_flag(sub, object)
-          _ -> activate_from_metadata(object)
+          _ -> reactivate_or_activate(cus, object)
         end
 
       _ ->
         {:ok, :ignored}
     end
   end
+
+  # HALF (a) — THE CANCELED-REACTIVATION SELF-HEAL.
+  #
+  # `subscription_by_customer/1` filters `status in ["active","past_due"]`, so a
+  # CANCELED row is invisible to it and this used to fall straight through to
+  # `activate_from_metadata/1`. A `customer.subscription.updated` object carries
+  # no `metadata.team_id`/`plan` (only a checkout SESSION does), so that returned
+  # `{:error, :missing_metadata}`: a customer who reactivated the SAME
+  # subscription Stripe-side kept a `canceled` row and — because
+  # `cancel_subscription/1` had already run `suspend_team_barkparks(.., "billing_lapsed")`
+  # over the whole fleet — every managed box stayed dark forever. Only a BRAND-NEW
+  # Checkout session reached the resume.
+  #
+  # The customer id is Stripe-SIGNED truth (the event passed `verify_webhook/2`),
+  # so a canceled row bearing it, on a team with no other live row, is the same
+  # subscription coming back. `recover_subscription/1` is the exact transition:
+  # status → active, `canceled_at` → nil, then the REASON-SCOPED
+  # `Registry.resume_billing_suspended/1`.
+  #
+  # THE LIVE-ROW GUARD IS LOAD-BEARING, not defensive noise. `subscriptions` has
+  # a one-LIVE-per-team partial unique index; if the team has since bought a fresh
+  # subscription under a DIFFERENT customer id, reviving the old row would raise
+  # on that index. So a team already holding a live row falls through to the
+  # pre-existing metadata path (which correctly reports `:missing_metadata` for a
+  # subscription.updated object) and nothing is written.
+  #
+  # Deliberately NOT reconciling the plan ceiling: the row's plan is unchanged, so
+  # the fleet the resume restores is the fleet that plan already bought. That is
+  # the same reasoning `recover_subscription/1` applies on the past_due path.
+  defp reactivate_or_activate(cus, object) do
+    case canceled_subscription_by_customer(cus) do
+      %Subscription{team_id: tid} = sub ->
+        if is_nil(live_subscription(tid)) do
+          recover_subscription(sub)
+        else
+          activate_from_metadata(object)
+        end
+
+      _ ->
+        activate_from_metadata(object)
+    end
+  end
+
+  # The most recently canceled subscription for a gateway customer id. Scoped to
+  # the ONE customer the signed event names — never a team-wide or global read.
+  defp canceled_subscription_by_customer(cus) when is_binary(cus) do
+    Subscription
+    |> where([s], s.gateway_customer_id == ^cus and s.status == "canceled")
+    |> order_by([s], desc: s.canceled_at, desc: s.id)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp canceled_subscription_by_customer(_), do: nil
 
   # An already-active row is not a no-op event: a Stripe Customer Portal
   # UN-CANCEL (or a re-cancel) arrives as exactly this — status unchanged at
@@ -970,6 +1024,98 @@ defmodule BarkparkCloud.Billing do
       {:ok, _count} = Registry.resume_billing_suspended(sub.team_id)
       {:ok, sub}
     end
+  end
+
+  @doc """
+  HALF (b) — THE OPERATOR LIFT. Clear a team's BILLING suspension, or refuse and
+  say what would clear it. The one function behind
+  `POST /v1/operator/teams/:team_id/billing-suspension/lift`.
+
+  ## Reason-scoped, by delegation
+
+  The write is `Registry.resume_billing_suspended/1` and nothing else — the
+  reason- AND mode-scoped resume whose `where` is
+  `suspended_reason in ["billing_lapsed", "billing_past_due"] and mode == "managed"`.
+  Those two are the ENTIRE reason vocabulary the billing axis writes
+  (`cancel_subscription/1` stamps the first, `maybe_enforce/1` the second). The
+  quota axis's `"quota_exceeded"` (`@quota_suspended_reason`, stamped one row at a
+  time by `reconcile_plan_limit/1`) is outside that set, so an operator lifting a
+  billing suspension can NEVER hand a downgraded team back the overflow boxes its
+  plan no longer buys. This deliberately does NOT call the reason-blind
+  `Registry.resume_team_barkparks/1` — cch-w55-s4 removed that exact hazard from
+  the webhook recovery path and re-introducing it behind a human button would be
+  strictly worse (a human would not see the over-grant it causes).
+
+  ## It refuses; it does not silently no-op
+
+  Returns `{:error, {:not_entitled, remedy}}` when `entitled?/1` is false — the
+  team is genuinely unpaid, and lifting would run boxes nobody is paying for. The
+  remedy string names the EXACT event or action that would clear it, so the 409 an
+  operator reads is actionable rather than a dead end. Success returns
+  `{:ok, count}`; a count of `0` is reported as such (an entitled team with
+  nothing billing-suspended), never dressed up as a lift.
+
+  ## What it is FOR
+
+  With half (a) in place a Stripe-side reactivation self-heals, so this is the
+  backstop for the strandings no webhook repairs: `unsuspend_one/2` swallowing a
+  changeset error, a resume that ran against a partially-written fleet, or events
+  processed out of order. Before this function the ONLY remedy at any auth level
+  was a hand-written `UPDATE` or an `iex` session on the box.
+  """
+  @spec lift_billing_suspension(Team.t() | binary()) ::
+          {:ok, non_neg_integer()} | {:error, {:not_entitled, String.t()}}
+  def lift_billing_suspension(team) do
+    tid = team_id(team)
+
+    if entitled?(tid) do
+      Registry.resume_billing_suspended(tid)
+    else
+      {:error, {:not_entitled, unpaid_remedy(tid)}}
+    end
+  end
+
+  # The remedy carried by a refusal — what would actually make this team payable
+  # again, named concretely. Every branch ends in an action a human can take.
+  defp unpaid_remedy(tid) do
+    case live_subscription(tid) do
+      %Subscription{plan: "trial"} ->
+        "the team's trial has expired. Remedy: the customer completes checkout " <>
+          "(the console's Subscribe button); the resulting checkout.session.completed " <>
+          "restores their fleet automatically."
+
+      %Subscription{status: "past_due", gateway_customer_id: cus} ->
+        "the team's subscription is past due and its grace window has elapsed. " <>
+          "Remedy: the customer pays the outstanding invoice — Stripe's invoice.paid " <>
+          "for customer #{cus || "(none recorded)"} recovers the subscription and " <>
+          "lifts this suspension automatically. Lifting it now would run unpaid boxes."
+
+      _ ->
+        case latest_canceled_subscription(tid) do
+          %Subscription{gateway_customer_id: cus} when is_binary(cus) ->
+            "the team has no live subscription; its most recent one (gateway customer " <>
+              "#{cus}) is canceled. Remedy: the customer resubscribes (a " <>
+              "checkout.session.completed reactivates and restores the fleet); or, if " <>
+              "they have ALREADY reactivated that same subscription in Stripe, replay " <>
+              "customer.subscription.updated with status \"active\" for #{cus} — the " <>
+              "control plane reactivates a canceled row from that event and lifts the " <>
+              "suspension itself."
+
+          _ ->
+            "the team has no subscription on record. Remedy: the customer subscribes " <>
+              "before their fleet can be restored."
+        end
+    end
+  end
+
+  # The team's most recently canceled subscription, or nil. Team-scoped — never
+  # crosses teams.
+  defp latest_canceled_subscription(tid) do
+    Subscription
+    |> where([s], s.team_id == ^tid and s.status == "canceled")
+    |> order_by([s], desc: s.canceled_at, desc: s.id)
+    |> limit(1)
+    |> Repo.one()
   end
 
   # past_due is entitled while inside the grace window; past it, the team's managed

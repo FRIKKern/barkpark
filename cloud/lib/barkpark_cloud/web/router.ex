@@ -106,6 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
+      POST    /v1/operator/teams/:team_id/billing-suspension/lift operator  lift a team's BILLING suspension (reason-scoped: billing_lapsed|billing_past_due only); 409 with the remedy when the team is genuinely unpaid
       GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
       PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
@@ -4623,6 +4624,75 @@ defmodule BarkparkCloud.Web.Router do
       conn
     else
       json(conn, 200, %{ready: Registry.count_ready_warm_servers()})
+    end
+  end
+
+  # POST /v1/operator/teams/:team_id/billing-suspension/lift → 200 {lifted: n} —
+  # THE OPERATOR ESCAPE HATCH for a billing suspension (task-75decf22069ee083).
+  #
+  # THE HOLE THIS CLOSES. Entry to `barkparks.suspended` on the billing axis is
+  # automatic and FLEET-WIDE: `Billing.cancel_subscription/1` runs
+  # `Registry.suspend_team_barkparks(team, "billing_lapsed")` and
+  # `Billing.maybe_enforce/1` runs it with `"billing_past_due"`, each one bulk
+  # `UPDATE`-ing every managed box the team owns. Until this route, EXIT existed
+  # only on the webhook path — grep the router for `resume_billing_suspended` /
+  # `resume_team_barkparks` / `unsuspend` before this commit and every hit is a
+  # READ (a 409 refusal or a projection). Not one route, at any tier
+  # (`require_team_admin`, `require_worker`, `require_platform_operator`), could
+  # lift one. The only remedy was a hand-written `UPDATE` or an `iex` session on
+  # the box.
+  #
+  # WHY `require_platform_operator` AND NOT `require_worker`. This is a HUMAN
+  # support action taken on one named customer's behalf, so it belongs to the
+  # human principal — exactly the ruling isu-backlog-operator-principal made for
+  # the fleet kill switch, whose `/v1/operator/autoupdate*` trio sits a few
+  # hundred lines above under this same guard while its `/v1/admin/autoupdate*`
+  # twin stays the faceless WORKER's. `WORKER_TOKEN` is a single shared off-box
+  # secret held by the Go provisioner and CI; putting a "restore this customer's
+  # fleet" lever behind it would make the action unattributable to a person and
+  # would widen a machine credential into customer-facing billing state. The
+  # operator allowlist (`Notifications.platform_admin_emails/0`) is the SAME one
+  # feeding `/v1/me`'s `platform_operator` boolean, so there is ONE definition of
+  # operator-ness and no new tier. Fails closed: no session → 401, a non-operator
+  # session → 403, before the team is ever loaded.
+  #
+  # WHY NOT `require_team_admin`. The lift decides whether a customer's boxes run
+  # while unpaid; that verdict cannot belong to the customer.
+  #
+  # REASON-SCOPED, and the scope is not this route's to widen: the handler calls
+  # `Billing.lift_billing_suspension/1`, whose only write is
+  # `Registry.resume_billing_suspended/1` —
+  # `suspended_reason in ["billing_lapsed","billing_past_due"] and mode == "managed"`.
+  # A `"quota_exceeded"` flag (the downgrade reconciler's, the billing axis never
+  # sets it) is outside that `where` and survives the lift untouched.
+  #
+  # AND IT REFUSES HONESTLY. A team with no live subscription, an expired trial,
+  # or a past_due one past grace gets 409 `not_entitled` with a `detail` naming
+  # the event or action that WOULD clear it — never a 200 over a no-op.
+  post "/v1/operator/teams/:team_id/billing-suspension/lift" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Accounts.get_team(conn.path_params["team_id"]) do
+        %Team{} = team ->
+          case Billing.lift_billing_suspension(team) do
+            {:ok, count} ->
+              json(conn, 200, %{
+                ok: true,
+                team_id: team.id,
+                lifted: count,
+                reasons_lifted: ["billing_lapsed", "billing_past_due"]
+              })
+
+            {:error, {:not_entitled, detail}} ->
+              json(conn, 409, %{error: "not_entitled", team_id: team.id, detail: detail})
+          end
+
+        _ ->
+          json(conn, 404, %{error: "not_found"})
+      end
     end
   end
 
