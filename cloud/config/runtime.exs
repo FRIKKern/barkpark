@@ -431,3 +431,32 @@ if peers = System.get_env("TRUSTED_PROXY_PEERS") do
            end
          end)
 end
+
+# gh-9531 residual (task-eeabfd9bf3ed8371) — the two DEPLOYMENT values this
+# control plane used to freeze at BUILD time in module attributes:
+#
+#   * PLATFORM_BASE_DOMAIN — the public zone every managed instance lives under
+#     (`BarkparkCloud.Registry.Barkpark.base_domain/0`). It names every
+#     provisioning subdomain, every site URL, and the zone split inside
+#     `custom_host_changeset/2` — so a self-hosted plane could neither issue
+#     URLs under its own zone NOR accept its operator's own domain shape.
+#     The off-box Go warm-pool worker carries its own base domain: set BOTH to
+#     the same zone, or the FQDN this plane shows and the one the worker stands
+#     up diverge.
+#   * TEMPLATES_REPO_URL — the repo the `/new?template=…` clone handoff points
+#     at (`BarkparkCloud.Templates.repo/0`). Running the plane against a FORK
+#     still handed users the upstream repo.
+#
+# Deliberately OUTSIDE the prod block: which zone this plane owns is a property
+# of the DEPLOYMENT, not of MIX_ENV. Unset keeps the historical literals, so an
+# existing deployment is unchanged. A present-but-malformed value is NOT
+# silently discarded — both readers raise, and
+# `BarkparkCloud.Application.start/2` calls them at boot, so the node REFUSES
+# rather than quietly serving ours.
+if base_domain = System.get_env("PLATFORM_BASE_DOMAIN") do
+  config :barkpark_cloud, :base_domain, base_domain
+end
+
+if templates_repo_url = System.get_env("TEMPLATES_REPO_URL") do
+  config :barkpark_cloud, :templates_repo_url, templates_repo_url
+end

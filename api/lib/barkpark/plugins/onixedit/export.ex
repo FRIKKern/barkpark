@@ -10,6 +10,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     * `export/2`         — top-level book → `{:ok, iodata}` | `{:error, reason}`
     * `to_xml/2`         — single-document serializer
     * `record_reference/2` — RecordReference helper per Boss Q1
+    * `dataset_host/0`   — the configured RecordReference host namespace
 
   Helper namespaces:
 
@@ -27,6 +28,24 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
     Validator
   }
 
+  # The RecordReference host NAMESPACE — the `host:` half of every
+  # `<RecordReference>` this exporter emits (Boss Q1,
+  # docs/contracts/onix-field-map.md §RecordReference).
+  #
+  # This is the DEFAULT, not the value. It used to be a compile-time module
+  # attribute that a release BUILD freezes, and NO call site passes
+  # `:dataset_host` — not the export controller, not the Bokbasen publish
+  # worker — so a self-hoster exporting to Bokbasen emitted THEIR OWN catalogue
+  # under `barkpark.cloud:<id>`. A RecordReference is a globally-unique
+  # identifier namespace a trading partner tracks a record by across updates, so
+  # that is wrong DATA, not merely wrong config (gh-9531 residual,
+  # task-eeabfd9bf3ed8371). `dataset_host/0` reads
+  # `config :barkpark, Barkpark.Plugins.OnixEdit` (`ONIX_DATASET_HOST`) at CALL
+  # time; the per-call `:dataset_host` opt still wins over both.
+  #
+  # CHANGING IT CHANGES IDENTIFIER SEMANTICS: every record a partner already
+  # holds under the old host is a DIFFERENT record under the new one. Set it
+  # once, before the first submission, to a domain the publisher owns.
   @default_dataset_host "barkpark.cloud"
 
   @doc """
@@ -73,12 +92,75 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
 
   @doc """
   Build the ONIX `<RecordReference>` value per Boss Q1: `host:published_id`.
-  Default host is `"barkpark.cloud"`. Pass an alternate host as the second argument.
+
+  The host defaults to `dataset_host/0` (configured, else `"barkpark.cloud"`),
+  resolved at CALL time. Pass an alternate host as the second argument.
   """
   @spec record_reference(String.t(), String.t()) :: String.t()
-  def record_reference(published_id, dataset_host \\ @default_dataset_host)
+  def record_reference(published_id, dataset_host \\ dataset_host())
       when is_binary(published_id) and is_binary(dataset_host) do
     dataset_host <> ":" <> strip_drafts_prefix(published_id)
+  end
+
+  @doc """
+  The RecordReference host namespace for this deployment.
+
+  Read at CALL time from `config :barkpark, Barkpark.Plugins.OnixEdit`
+  (`:dataset_host`, wired from `ONIX_DATASET_HOST` in `config/runtime.exs`),
+  defaulting to the historical `"barkpark.cloud"` — an unconfigured deployment
+  emits byte-identical XML. The per-export `:dataset_host` opt still wins.
+
+  FAILS CLOSED: a configured-but-malformed host raises rather than falling back
+  to ours. A silent fallback would submit a publisher's catalogue into OUR
+  identifier namespace while the operator believed theirs was set — and a
+  RecordReference is what the trading partner keys the record by, so the
+  mistake is only visible downstream, after ingestion.
+  `Barkpark.Application.start/2` resolves it once at boot.
+  """
+  @spec dataset_host() :: String.t()
+  def dataset_host do
+    :barkpark
+    |> Application.get_env(Barkpark.Plugins.OnixEdit, [])
+    |> Keyword.get(:dataset_host)
+    |> case do
+      nil -> @default_dataset_host
+      configured -> validate_dataset_host!(configured)
+    end
+  end
+
+  @doc "The compile-time fallback host — what \"unconfigured\" means, for tests."
+  @spec default_dataset_host() :: String.t()
+  def default_dataset_host, do: @default_dataset_host
+
+  # Two or more lowercase RFC-1035 labels, nothing else. A ":" is refused
+  # outright: it is the RecordReference separator, so a host carrying one would
+  # split the identifier a partner parses. Scheme, path, whitespace, uppercase
+  # and a trailing dot go with it — the value is an identifier namespace, not a
+  # URL.
+  @dataset_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+  defp validate_dataset_host!(value) when is_binary(value) do
+    if String.length(value) <= 253 and Regex.match?(@dataset_host_format, value) do
+      value
+    else
+      bad_dataset_host!(value)
+    end
+  end
+
+  defp validate_dataset_host!(other), do: bad_dataset_host!(other)
+
+  defp bad_dataset_host!(value) do
+    raise ArgumentError, """
+    invalid ONIX dataset host: #{inspect(value)}.
+
+    Expected a bare lowercase domain of two or more labels, e.g.
+    "gyldendal.no" — no scheme, no port, no path, no ":" (the RecordReference
+    separator), no trailing dot.
+
+    Set ONIX_DATASET_HOST to a domain the publisher owns, or leave it unset to
+    keep the #{@default_dataset_host} default. Changing it after records have
+    been submitted re-identifies every one of them.
+    """
   end
 
   # ---- WI3 + WI4 + WI5 stubs --------------------------------------------------
@@ -270,7 +352,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export do
   defp product(book_doc, opts) do
     published_id = Map.get(book_doc, "_publishedId") || Map.get(book_doc, :_publishedId) || ""
 
-    host = Keyword.get(opts, :dataset_host, @default_dataset_host)
+    host = Keyword.get(opts, :dataset_host) || dataset_host()
     notification_type = Map.get(book_doc, "notificationType") || "03"
 
     children =

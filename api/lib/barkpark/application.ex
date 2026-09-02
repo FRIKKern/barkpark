@@ -21,6 +21,19 @@ defmodule Barkpark.Application do
     # every deployment that has not opted in.
     _ = Barkpark.Mailer.from()
 
+    # Same FAIL-CLOSED contract, the gh-9531 RESIDUALS
+    # (task-eeabfd9bf3ed8371): two more deployment values that used to be
+    # compile-time module attributes. A malformed ANTHROPIC_API_URL would
+    # otherwise first surface as a judge/title call that quietly never runs
+    # (both paths swallow every error by design), and a malformed
+    # ONIX_DATASET_HOST as a trading partner ingesting a publisher's catalogue
+    # under the wrong identifier namespace — visible only downstream, after the
+    # records are already keyed by it. Unset env keeps the historical literals,
+    # so this is a no-op for every deployment that has not opted in.
+    _ = Barkpark.Tasks.Judge.endpoint()
+    _ = Barkpark.StudioChat.Titles.endpoint()
+    _ = Barkpark.Plugins.OnixEdit.Export.dataset_host()
+
     # Companion to the check above, and the other half of the same defect: the
     # From can be perfectly valid while there is no relay to hand the message
     # to. `config/config.exs` defaults `Barkpark.Mailer` to
