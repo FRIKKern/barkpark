@@ -307,14 +307,22 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
 
     # ── /api/workspaces/:workspace_slug/media ──
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path"} =>
-      {:tenant_bound, "TenancyAuth.member?",
-       "put_blob/2 resolves the workspace from the URL slug THEN Tenancy.Auth.member?/2, a " <>
-         "pure membership lookup with NO global-admin bypass; an unknown slug and a " <>
-         "non-member both fold into the same 404. NOTE the predicate is member?/2, not " <>
-         "workspace_admin?/2 — deliberately weaker than its two sibling routes on the same " <>
-         "workspace, so a `viewer` member of B may push blobs into B. That role-floor " <>
-         "asymmetry is a RULING, filed as task-62d9364937b538e5; this entry's guard symbol " <>
-         "must be re-pointed if that ruling swaps the predicate."},
+      {:tenant_bound, "TenancyAuth.workspace_admin?",
+       "put_blob/2 resolves the workspace from the URL slug THEN " <>
+         "Tenancy.Auth.workspace_admin?/2 (owner|admin), with NO global-admin bypass. " <>
+         "RE-POINTED from member?/2 by task-62d9364937b538e5, RULED CONFINE: the raw-byte " <>
+         "write is the RESTORE half of the same lifecycle as its two siblings on this slug " <>
+         "(DELETE /api/workspaces/:workspace_slug, GET .../export), which already demand " <>
+         "this predicate, so all three now agree on what \"admin of that workspace\" means. " <>
+         "member?/2 was never a role floor at all — `not is_nil(membership(...))`, a pure " <>
+         "presence test — so a plain `member` seat plus the global admin bit used to clear " <>
+         "it. THE TRIPWIRE BELOW PINS THIS SYMBOL, NOT THE PREDICATE'S STRENGTH: a later " <>
+         "harmonisation that copies a weaker predicate outward onto delete and export would " <>
+         "keep it green, which is exactly why the three were levelled UP rather than down. " <>
+         "DENIAL SHAPE IS UNCHANGED and deliberately flatter than the siblings': an unknown " <>
+         "slug, a non-member and a member below the floor all fold into the same 404 " <>
+         "`workspace not found`, never the 403 export/delete answer under the " <>
+         "path-addressed law — raising the floor must not lower the existence-hiding."},
 
     # ── /api workspace lifecycle ──
     {:delete, "/api/workspaces/:workspace_slug"} =>
