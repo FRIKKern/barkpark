@@ -119,6 +119,26 @@ jobs:
       - name: Prove the gate can fail (--selftest)
         run: bash scripts/committed-symlink-check.sh --selftest
 
+      # tooling/status's own tests ran NOWHERE on a pull request (task-ccb1e4f7e7439711):
+      # codebase-intel.yml invokes status.mjs on release/schedule/dispatch only, so the
+      # 12-test pin from #15059 (an absent coverage report renders N/A, never 0%) was
+      # re-earned by nobody — a future edit restoring the `{ pct: 0 }` default would
+      # have landed green. This job already runs on every pull request and owns no
+      # runner-heavy step, so the run rides here: ~1 s, no new run, no new name.
+      # node-test-floor.mjs (not bare `node --test`): a zero-match glob, a dropped
+      # path or a file that registers no tests is a red, and `--floor 1` pins the
+      # file count; the tally assert pins the 12 tests the pin was filed with.
+      - name: tooling/status tests (node-test-floor, 12-test tally)
+        run: |
+          set -euo pipefail
+          node scripts/node-test-floor.mjs --floor 1 'tooling/status/test/*.test.mjs' 2>&1 | tee /tmp/status-tests.txt
+          tally=$(sed -nE 's/^node-test floor: ran ([0-9]+) tests .*/\1/p' /tmp/status-tests.txt | tail -1)
+          if [ "${tally:-0}" -lt 12 ]; then
+            echo "::error::tooling/status: ran ${tally:-0} test(s), the pin was filed with 12 — a test file stopped being discovered or tests were deleted; lower the floor here deliberately or restore them"
+            exit 1
+          fi
+          echo "tooling/status: ${tally} tests, floor 12 — pin re-earned"
+
       - name: No symlink is committed to this repo
         run: bash scripts/committed-symlink-check.sh
 
