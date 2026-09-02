@@ -114,8 +114,17 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     test "an authored paragraph remains byte-faithful" do
       node = %{"kind" => "PdParagraph", "children" => ["Some prose"]}
 
+      # `:article` stays BARE — `.bp-paper-surface p` is the single source of
+      # body typography in both View and Edit.
       assert Walk.render_body(node, @width, @article) == "<p>Some prose</p>"
-      assert Walk.render_body(node, @width, @email) == "<p>Some prose</p>"
+
+      # `:email` carries the type INLINE (mail clients strip stylesheets), from
+      # the palette rather than a re-typed literal.
+      pal = Barkpark.PortableDoc.Render.Palettes.email_palette()
+
+      assert Walk.render_body(node, @width, @email) ==
+               ~s(<p style="margin:0 0 16px;font-family:#{pal.font_body};font-size:17px;) <>
+                 ~s(line-height:1.55;color:#{pal.text}">Some prose</p>)
     end
   end
 

@@ -65,7 +65,11 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
             "<h1 style=",
             "<h2 style=",
             "<h3 style=",
-            "<p>A plain body paragraph.</p>",
+            # Body copy carries its type INLINE (email clients strip
+            # stylesheets). A bare `<p>` here means the paragraph leg lost its
+            # stamp — see the "every body paragraph is typed" test below.
+            ~s(<p style="margin:0 0 16px;font-family:),
+            ">A plain body paragraph.</p>",
             # text marks (author DATA that stays inline in BOTH palettes)
             "font-weight:bold",
             "font-style:italic",
@@ -125,6 +129,64 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
         assert String.contains?(golden, needle),
                "golden is missing coverage for: #{inspect(needle)}"
       end
+    end
+  end
+
+  # ── every body paragraph carries inline type ────────────────────────────────
+  #
+  # The `:email` walk stamps every element kind inline BECAUSE mail clients strip
+  # stylesheets — headings via heading_style/2, lists via the list clause, roles
+  # via apply_text_role/4. The ordinary body `<p>` was the one leg that emitted
+  # NO style attribute, so it inherited the client default (~16px/normal, a
+  # system sans in Outlook) and read smaller than the 18px/1.55 ingress above it.
+  #
+  # This test is the named tripwire for that specific regression: if the
+  # paragraph stamp is ever reverted, the byte-lock above fails opaquely on a
+  # byte index, but THIS one fails saying "bare <p>".
+  describe ":email body paragraphs are typed" do
+    test "no bare <p> survives the walk — every one carries margin/font-size/line-height/color" do
+      html = Render.render_html(ParityFixture.tree(), ParityFixture.render_opts(:email))
+
+      # The ONLY permitted bare `<p>` is not walker output at all: it is the
+      # pre-rendered embed body the fixture splices in verbatim
+      # (ParityFixture @embeds => "<p>embedded body</p>"). Named exception.
+      bare = Regex.scan(~r{<p>(.*?)</p>}s, html) |> Enum.map(&Enum.at(&1, 1))
+
+      assert bare == ["embedded body"], """
+      A bare <p> reached the :email render.
+
+      Email clients strip stylesheets, so an unstyled <p> falls back to the
+      client default (~16px/normal, a system sans in Outlook) and reads SMALLER
+      than the 18px/1.55 ingress that introduces it. The paragraph leg must
+      stamp margin / font-family / font-size / line-height / color inline —
+      see Render.Walk body_type/2.
+
+      Bare <p> bodies found: #{inspect(bare)}
+      (the only allowed one is the fixture's pre-rendered embed, "embedded body")
+      """
+    end
+
+    test "the plain body paragraph's stamp is palette-sourced, not a fresh literal" do
+      html = Render.render_html(ParityFixture.tree(), ParityFixture.render_opts(:email))
+      pal = Barkpark.PortableDoc.Render.Palettes.email_palette()
+
+      stamp =
+        "margin:0 0 16px;font-family:#{pal.font_body};font-size:17px;line-height:1.55;color:#{pal.text}"
+
+      assert String.contains?(html, ~s(<p style="#{stamp}">A plain body paragraph.</p>)),
+             """
+             The plain body paragraph is not carrying the palette-sourced stamp.
+
+             expected: <p style="#{stamp}">A plain body paragraph.</p>
+             """
+    end
+
+    test ":article paragraphs stay BARE — the stylesheet owns their typography" do
+      # The stamp is email-only by construction. `.bp-paper-surface p` is the
+      # single source for article body type in both View and Edit; stamping
+      # inline there would fork it.
+      html = Render.render_html(ParityFixture.tree(), ParityFixture.render_opts(:article))
+      assert String.contains?(html, "<p>A plain body paragraph.</p>")
     end
   end
 
