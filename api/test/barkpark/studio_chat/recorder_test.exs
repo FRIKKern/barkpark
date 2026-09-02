@@ -464,6 +464,146 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # THE TURN FOLD's server truth (task-8f904a88b9bc3d59). The Recorder — the one
+  # seam alive for a whole turn — is the only place that can honestly answer
+  # "how long did this turn run and how did it end", so it stamps that ONCE, in
+  # the SAME UPDATE as `turn_settled`, onto every tool row of the turn. Both
+  # transcripts then FOLD off these bytes; neither re-derives them.
+  describe "the turn fold stamp at the terminal frame" do
+    defp fold_init_frame, do: {:claude_chat_event, %{"type" => "system", "subtype" => "init"}}
+
+    defp fold_result_frame(extra \\ %{}) do
+      {:claude_chat_event, Map.merge(%{"type" => "result", "subtype" => "success"}, extra)}
+    end
+
+    test "a settled turn stamps outcome + duration + both instants, exactly once",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f1", "Bash", %{"command" => "ls"}))
+      frame(recorder, settle_result_frame("toolu_f1", "a.txt", false))
+      frame(recorder, fold_result_frame())
+
+      meta = settle_row(sid, "toolu_f1").metadata
+      assert meta["turn_settled"] == true
+      assert meta["turn_outcome"] == "settled"
+      assert is_integer(meta["turn_duration_ms"]) and meta["turn_duration_ms"] >= 0
+      assert {:ok, _, _} = DateTime.from_iso8601(meta["turn_started_at"])
+      assert {:ok, _, _} = DateTime.from_iso8601(meta["turn_settled_at"])
+
+      # EXACTLY ONCE: a second terminal frame (a duplicate result, or the next
+      # turn's) must not relabel a row that already carries its turn's facts.
+      settled_at = meta["turn_settled_at"]
+      frame(recorder, fold_result_frame())
+      assert settle_row(sid, "toolu_f1").metadata["turn_settled_at"] == settled_at
+    end
+
+    test "every tool row of ONE turn shares ONE settled_at — that is the fold's group key",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f2a", "Bash", %{"command" => "ls"}))
+      frame(recorder, settle_tool_frame("toolu_f2b", "Bash", %{"command" => "pwd"}))
+      frame(recorder, fold_result_frame())
+
+      a = settle_row(sid, "toolu_f2a").metadata
+      b = settle_row(sid, "toolu_f2b").metadata
+      assert a["turn_settled_at"] == b["turn_settled_at"]
+      assert a["turn_settled_at"] != nil
+
+      # A LATER turn's rows carry a DIFFERENT key, or the two turns would fold
+      # into one header.
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f2c", "Bash", %{"command" => "id"}))
+      frame(recorder, fold_result_frame())
+
+      c = settle_row(sid, "toolu_f2c").metadata
+      assert c["turn_settled_at"] != a["turn_settled_at"]
+      # And the FIRST turn's rows kept their own facts.
+      assert settle_row(sid, "toolu_f2a").metadata["turn_settled_at"] == a["turn_settled_at"]
+    end
+
+    test "the runtime's own aborted_streaming terminus stamps interrupted",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f3", "Bash", %{"command" => "sleep 900"}))
+
+      frame(
+        recorder,
+        fold_result_frame(%{
+          "subtype" => "error_during_execution",
+          "terminal_reason" => "aborted_streaming"
+        })
+      )
+
+      assert settle_row(sid, "toolu_f3").metadata["turn_outcome"] == "interrupted"
+    end
+
+    test "a Stop reported by a surface stamps interrupted — the road the CLI does not tag",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f4", "Bash", %{"command" => "sleep 900"}))
+
+      Recorder.note_interrupt_requested(sid)
+      :sys.get_state(recorder)
+      # The CLI answers the interrupt with a plain error terminus, indistinguishable
+      # from a genuine failure — the Stop we reported is the only witness.
+      frame(recorder, fold_result_frame(%{"subtype" => "error_during_execution"}))
+
+      assert settle_row(sid, "toolu_f4").metadata["turn_outcome"] == "interrupted"
+    end
+
+    test "a Stop is TURN-scoped — the next turn settles clean", %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      Recorder.note_interrupt_requested(sid)
+      :sys.get_state(recorder)
+      frame(recorder, settle_tool_frame("toolu_f5a", "Bash", %{"command" => "sleep 900"}))
+      frame(recorder, fold_result_frame(%{"subtype" => "error_during_execution"}))
+
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f5b", "Bash", %{"command" => "ls"}))
+      frame(recorder, fold_result_frame())
+
+      assert settle_row(sid, "toolu_f5a").metadata["turn_outcome"] == "interrupted"
+      assert settle_row(sid, "toolu_f5b").metadata["turn_outcome"] == "settled"
+    end
+
+    test "a turn still in flight at TEARDOWN is stamped interrupted (the D18 road)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f6", "Bash", %{"command" => "sleep 900"}))
+
+      # The wedge timer force-closed the subprocess: no terminal `result` frame
+      # will EVER arrive, so the stamp has to land at teardown or this row folds
+      # under a blank header forever.
+      ref = Process.monitor(recorder)
+      send(recorder, {:claude_chat_exit, 143, nil})
+      assert_receive {:DOWN, ^ref, :process, _, _}, 2_000
+
+      meta = settle_row(sid, "toolu_f6").metadata
+      assert meta["turn_settled"] == true
+      assert meta["turn_outcome"] == "interrupted"
+      assert is_integer(meta["turn_duration_ms"])
+    end
+
+    test "an ALREADY-settled row is never restamped by a later teardown",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, fold_init_frame())
+      frame(recorder, settle_tool_frame("toolu_f7", "Bash", %{"command" => "ls"}))
+      frame(recorder, fold_result_frame())
+
+      settled = settle_row(sid, "toolu_f7").metadata
+      assert settled["turn_outcome"] == "settled"
+
+      ref = Process.monitor(recorder)
+      send(recorder, {:claude_chat_exit, 0, nil})
+      assert_receive {:DOWN, ^ref, :process, _, _}, 2_000
+
+      # The turn ended cleanly BEFORE the session died — a teardown must not
+      # rewrite history into "you stopped this".
+      assert settle_row(sid, "toolu_f7").metadata["turn_outcome"] == "settled"
+      assert settle_row(sid, "toolu_f7").metadata["turn_settled_at"] == settled["turn_settled_at"]
+    end
+  end
+
   # A TodoWrite-shaped assistant frame (dispatch on shape, not name — the cmux
   # binary lacks TodoWrite, so we synthesize the shape). Each call is a FRESH
   # tool_use id, exactly as the real binary emits per TodoWrite.

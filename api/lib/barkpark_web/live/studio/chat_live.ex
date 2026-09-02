@@ -38,9 +38,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Attachments
+  alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.Tasks
+  alias Barkpark.Tenancy
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
@@ -163,6 +165,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
          page_title: "chat",
          nav_section: :chat,
          dataset: default_dataset(),
+         # The dataset the URL SCOPE names, as distinct from the one above.
+         # No chat route carries a `:dataset` segment today, so this is nil and
+         # `dataset:` is a substitution nobody chose — the context band reports
+         # exactly that difference rather than printing the substitution as if
+         # it were a choice. Read from params (not hardcoded nil) so a future
+         # dataset-scoped chat route tells the truth without touching the band.
+         scope_dataset: params["dataset"],
+         # The transcript header's context identity (chat-local-cloud-context-w3).
+         # Rebuilt on session load, on the new-chat reset, and on a host report —
+         # never per render.
+         context_identity: nil,
          # current_path is owned by StudioChrome's :handle_params hook, which
          # also keeps it fresh across the /studio/chat/:session_id patches
          # (this static string used to freeze the active tab on reopen).
@@ -200,6 +213,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # runs and collapsed once terminal; a manual toggle always wins. Never
          # broadcast (a co-viewer's expand is their own), reset on session load.
          agent_expanded: %{},
+         # Per-tab expand override for TURN FOLDS (task-8f904a88b9bc3d59): the
+         # set of `turn_settled_at` keys the reader clicked open. Default is
+         # COLLAPSED (a settled turn is history — its header says how long it
+         # took), never broadcast (a co-viewer's expand is their own), reset on
+         # session load. A MapSet, not a map: a fold has one bit, and the absent
+         # key IS the default, so no stale `false` entries accumulate.
+         turn_folds_expanded: MapSet.new(),
          # The agents rail (charter D47): the task_id-keyed mission-control
          # snapshot rendered below the composer, Claude-Code-TUI style. `rail` is
          # the live map (hydrated from `rail_snapshot` on reopen, folded by the
@@ -330,6 +350,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
        |> refresh_sessions()
        |> subscribe_activity()
        |> subscribe_hand_tasks()
+       |> assign_context_identity()
        |> allow_upload(:attachments,
          # Charter D25: paste/drop images ride the SAME user turn as base64
          # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
@@ -613,6 +634,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       true ->
         Runtime.interrupt(socket.assigns.provider, socket.assigns.session)
 
+        # The Recorder — not this tab — owns the turn's outcome
+        # (task-8f904a88b9bc3d59). Telling it here is what lets a turn stopped
+        # from THIS tab read "You stopped after 42s" in every other tab and on
+        # every later reopen, including the D18 road where the wedge timer
+        # force-closes and no terminal `result` ever arrives.
+        Recorder.note_interrupt_requested(socket.assigns[:store_session_id])
+
         Process.send_after(
           self(),
           {:interrupt_timeout, socket.assigns[:store_session_id]},
@@ -830,6 +858,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # Expand/collapse ONE settled turn's fold (task-8f904a88b9bc3d59). Per-tab and
+  # ASSIGNS-ONLY: a fold is a reading preference, not a fact about the turn, so
+  # nothing is written to the store and nothing is broadcast to co-viewers. A
+  # `handle_event` deliberately — the pds-w42 census pins ChatLive's handle_info
+  # head count, and a reader's click has no business becoming a message.
+  #
+  # The key is the turn's `turn_settled_at`, so a stale click (the session
+  # switched under an in-flight click) simply toggles a key nothing renders and
+  # the next `assign_messages` drops it from view — no crash, no lookup needed.
+  def handle_event("toggle_turn_fold", %{"key" => key}, socket) do
+    expanded = socket.assigns.turn_folds_expanded
+
+    next =
+      if MapSet.member?(expanded, key),
+        do: MapSet.delete(expanded, key),
+        else: MapSet.put(expanded, key)
+
+    {:noreply, assign(socket, turn_folds_expanded: next)}
   end
 
   # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
@@ -1477,6 +1525,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
               # carrying `is_error` flips `tool_error`.
               turn_settled: false,
               tool_error: false,
+              # The fold facts (task-8f904a88b9bc3d59) are stamped by the SERVER
+              # at the terminal frame — a live row carries none, which is exactly
+              # what keeps a running turn unfoldable.
+              turn_settled_at: nil,
+              turn_duration_ms: nil,
+              turn_outcome: nil,
               tool: name,
               input: input,
               parent_tool_use_id: parent_id,
@@ -1503,19 +1557,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # here so the ✻ row is never lost (charter D41).
     socket = settle_thinking(socket)
 
-    # The TURN boundary is the settle gate: every tool row of this turn may now
-    # show its outcome glyph. A row whose tool_result never arrived stays
-    # neutral (the provenance gate lives in ChatToolRenderer.settle_state/1).
-    socket = settle_tool_rows(socket)
-
     # An interrupted turn arrives as `error_during_execution` too — the ONLY
     # way to tell it from a genuine error is that WE asked to stop
     # (`interrupt_requested`) or the CLI tagged the terminus
     # `aborted_streaming`. Classify honestly: an interrupt is a normal outcome,
     # not a failure, and the session stays live for a follow-up.
+    #
+    # This now runs BEFORE the settle: the same verdict that picks the system
+    # line also picks the fold label, so the two can never disagree.
     interrupted? =
       socket.assigns[:interrupt_requested] == true or
         ev["terminal_reason"] == "aborted_streaming"
+
+    # The TURN boundary is the settle gate: every tool row of this turn may now
+    # show its outcome glyph. A row whose tool_result never arrived stays
+    # neutral (the provenance gate lives in ChatToolRenderer.settle_state/1).
+    #
+    # The fold stamp rides along, built by the SAME server-owned builder the
+    # Recorder hands its durable write (task-8f904a88b9bc3d59) — the live mirror
+    # of one truth, never a second derivation. `duration_ms` is the runtime's own
+    # off this very frame (the `last_result` badge below reads the same field).
+    socket =
+      settle_tool_rows(
+        socket,
+        StudioChat.turn_settle_stamp(%{
+          duration_ms: ev["duration_ms"],
+          interrupted?: interrupted?
+        })
+      )
 
     socket =
       cond do
@@ -2054,6 +2123,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, readiness: readiness_for_hands(verdict))}
   end
 
+  # A registered host's authoritative state report (herd-s6) rides the activity
+  # topic this LiveView already joined, and it is also the only moment the
+  # server learns execution MOVED: a lease transfer becomes visible when the new
+  # host first speaks under its own fence. Rebuild the context band for the OPEN
+  # session so the header names who is running it now — in place, no reconnect,
+  # no browser reload. Reads only: the report's own write already happened
+  # server-side (ChatHosts.report_state/4), and this head touches no store.
+  def handle_info({:chat_reported_state, sid, _frame}, socket) do
+    if socket.assigns[:store_session_id] == sid do
+      {:noreply, assign_context_identity(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   # The async readiness probe landed (chat-task-hands, charter decision 4).
@@ -2394,6 +2478,62 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <span aria-hidden="true">✻</span> <%= @message.text %>
         </div>
     <% end %>
+    """
+  end
+
+  # ONE settled turn, folded (task-8f904a88b9bc3d59): a single header row reading
+  # "Worked for 3m 12s" — or "You stopped after 42s" when a Stop ended the turn —
+  # standing in for the turn's tool rows, which expand on click. The label is
+  # SERVER-stamped and formatted by the one shared formatter
+  # (`ChatToolRenderer.fold_label/1`), the same string `bp chat` prints.
+  #
+  # The whole header is the button: a fold is one affordance, and a reader
+  # reaching for "Worked for 3m 12s" should not have to find a separate chevron.
+  attr :fold_key, :string, required: true
+  attr :label, :string, required: true
+  attr :rows, :list, required: true
+  attr :expanded, :boolean, required: true
+  attr :plan_expanded, :any, required: true
+  attr :question_forms, :map, required: true
+
+  defp turn_fold(assigns) do
+    ~H"""
+    <div data-role="turn-fold" data-turn-fold={@fold_key} style="font-family: var(--font-mono);">
+      <button
+        type="button"
+        class="text-xs text-dim"
+        phx-click="toggle_turn_fold"
+        phx-value-key={@fold_key}
+        data-turn-fold-toggle={@fold_key}
+        aria-expanded={to_string(@expanded)}
+        style="display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit;"
+      >
+        <span aria-hidden="true" style="flex: none; color: var(--life-done);">
+          <%= if @expanded, do: "▾", else: "▸" %>
+        </span>
+        <span data-turn-fold-label style="font-weight: 650;"><%= @label %></span>
+        <span style="opacity: 0.7;">
+          · <%= length(@rows) %> <%= if length(@rows) == 1, do: "step", else: "steps" %>
+        </span>
+      </button>
+
+      <%!-- The turn's rows, byte-identical to the flat transcript they came
+            from — folding is a wrapper, never a second rendering of a row. --%>
+      <div :if={@expanded}>
+        <div
+          :for={message <- @rows}
+          data-role={message.role}
+          data-parent={message[:parent_tool_use_id]}
+          style={message[:parent_tool_use_id] && trace_child_style()}
+        >
+          <.message_body
+            message={message}
+            plan_expanded={@plan_expanded}
+            question_forms={@question_forms}
+          />
+        </div>
+      </div>
+    </div>
     """
   end
 
@@ -2943,6 +3083,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </span>
       </div>
 
+      <%!-- The context identity band (chat-local-cloud-context-w3, criterion 2;
+            the CLI half is internal/chat/context.go). WHICH execution host runs
+            this session, on WHICH Barkpark server, in WHICH workspace / project
+            / dataset, out of WHICH repository root. Every segment is a
+            PROJECTION of server truth — the session row, its live execution
+            lease and the host that last reported on it — never a config string.
+            A field whose two truths disagree leads with ⚠ and carries both
+            values; absence is typed ((not set) / (unknown) / (not a git repo) /
+            (server-local)) and never renders blank or as a plausible default. --%>
+      <div
+        :if={@context_identity}
+        data-test-id="chat-context-band"
+        class="text-xs text-dim"
+        style="display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 5px 16px; border-bottom: 1px solid var(--border-muted); flex: none;"
+      >
+        <span
+          :for={f <- @context_identity.fields}
+          data-test-id={"chat-context-#{f.name}"}
+          data-mismatch={to_string(f.mismatch?)}
+          style={f.mismatch? && "color: var(--warn);"}
+        >
+          <%= if f.mismatch?, do: "⚠ " %><%= f.name %> <%= ContextIdentity.Field.display(f) %>
+        </span>
+      </div>
+
       <div
         id="chat-transcript"
         style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; padding: 16px;"
@@ -2977,6 +3142,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       question_forms={@question_forms}
                     />
                   </div>
+                <% {:turn_fold, fold_key, label, rows} -> %>
+                  <.turn_fold
+                    fold_key={fold_key}
+                    label={label}
+                    rows={rows}
+                    expanded={turn_fold_open?(@turn_folds_expanded, fold_key)}
+                    plan_expanded={@plan_expanded}
+                    question_forms={@question_forms}
+                  />
                 <% {:agent, agent, kids} -> %>
                   <.agent_block
                     agent={agent}
@@ -4510,7 +4684,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: messages,
       # Grouped rows memoized at load time (task-9e21c3f285b3d7d0) — the template
       # reads `@grouped_rows`, so reopen does the grouping ONCE, not per render.
-      grouped_rows: group_agent_rows(messages),
+      grouped_rows: fold_settled_turns(group_agent_rows(messages)),
       # Sticky draft (charter D36c): restore the unsent words left behind when
       # this session was last switched away from (nil column → clean composer).
       # From the FULL struct — list_sessions omits `draft`.
@@ -4546,6 +4720,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Agent drill-down overrides reset on reopen (charter D46): a replayed
       # terminal agent starts collapsed to its report, a mid-run one open.
       agent_expanded: %{},
+      # Turn folds reset on reopen (task-8f904a88b9bc3d59): a replayed settled
+      # turn starts collapsed under its "Worked for …" header.
+      turn_folds_expanded: MapSet.new(),
       # Rail replay parity (charter D47): hydrate the mission-control rail from
       # the stored `rail_snapshot` so a reopened session shows its last-known
       # agents. `interrupt_running_tasks/1` already flipped any dead "running"
@@ -4579,6 +4756,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # off the ledger so a reopen shows in-flight task work immediately.
     |> assign(task_picker: nil)
     |> hydrate_hand_tasks()
+    |> assign_context_identity()
   end
 
   # A reopened session whose persisted mode is bypassPermissions (charter D55).
@@ -4668,6 +4846,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       open_menu_session: nil,
       plan_expanded: MapSet.new(),
       agent_expanded: %{},
+      # A new chat has no settled turns yet (task-8f904a88b9bc3d59).
+      turn_folds_expanded: MapSet.new(),
       # A new chat has no background agents yet (charter D47).
       rail: %{},
       rail_sig: [],
@@ -4677,6 +4857,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       pending_echo_id: nil,
       question_forms: %{}
     )
+    |> assign_context_identity()
   end
 
   # Is `title` for `session_id` ALREADY what the sidebar shows? The duplicate-
@@ -5387,6 +5568,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # the live tab drew, off the persisted envelope, with no re-derivation.
       turn_settled: Map.get(meta, "turn_settled") == true,
       tool_error: Map.get(meta, "tool_error") == true,
+      # The turn fold's facts (task-8f904a88b9bc3d59), read back VERBATIM off the
+      # same stamp `StudioChat.settle_tool_rows/2` wrote — the reopened
+      # transcript folds under the identical "Worked for …" header the live tab
+      # drew, with no clock and no classification on this side.
+      turn_settled_at: Map.get(meta, "turn_settled_at"),
+      turn_duration_ms: Map.get(meta, "turn_duration_ms"),
+      turn_outcome: Map.get(meta, "turn_outcome"),
       tool: name,
       input: input,
       tool_use_id: Map.get(meta, "tool_use_id"),
@@ -5792,74 +5980,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Project an approved plan into a Paper (charter D49). Gated on the matched
-  # row being a :plan card AND an allow decision; only then does a fire-and-forget
-  # Task publish + stamp + broadcast. The Task NEVER touches the socket — it talks
-  # to the session topic every tab (this one included) is subscribed to. A tab
-  # with no store session or no topic (a brand-new chat) has nothing to project.
+  # Project an approved plan into a Paper (charter D49) by DELEGATING to the one
+  # owner of that side effect, `PlanPapers.publish_approved_plan/3` — the same
+  # seam `POST /v1/chat/sessions/:id/approval` calls, so a plan approved from the
+  # TUI and one approved from this tab produce the identical Paper, stamp and
+  # broadcast (ct-bl-plan-paper-parity). The gates (allow-only, :plan-role-only,
+  # non-blank server-held markdown), the fire-and-forget task and the honest
+  # failure broadcast all live THERE, keyed on the row the Recorder persisted —
+  # never on this socket's in-memory copy. A tab with no store session (a
+  # brand-new chat) has nothing to project.
   defp maybe_publish_plan(socket, request_id, decision) do
-    with true <- plan_allow?(decision),
-         %{role: :plan} = m <- find_message_by_rid(socket, request_id),
-         sid when is_binary(sid) <- socket.assigns[:store_session_id],
-         topic when is_binary(topic) <- socket.assigns[:subscribed_topic] do
-      markdown = to_string(m[:plan_markdown] || "")
-
-      # Fire-and-forget under Barkpark.TaskSupervisor (same pattern as the AI
-      # title, D13) — supervised, `$callers`-scoped so the sandbox connection is
-      # inherited under test, and drained on test exit. The Task never touches
-      # the socket; it talks to the session topic.
-      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-        publish_plan_paper(sid, request_id, markdown, topic)
-      end)
+    with sid when is_binary(sid) <- socket.assigns[:store_session_id] do
+      PlanPapers.publish_approved_plan(sid, request_id, decision)
     end
 
     :ok
-  end
-
-  defp plan_allow?(:allow), do: true
-  defp plan_allow?({:allow, _}), do: true
-  defp plan_allow?(_), do: false
-
-  # The fire-and-forget body: publish the Paper, stamp its id/url onto the plan
-  # row's metadata (replay-durable, D49), and broadcast the outcome to the session
-  # topic so all tabs converge. A publish failure is honest, not silent, and never
-  # re-raises — the approve already succeeded.
-  defp publish_plan_paper(session_id, request_id, markdown, topic) do
-    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
-    # invariant) must degrade to the SAME honest failure broadcast as an
-    # `{:error, _}` return — a crashed fire-and-forget Task is silent, and the
-    # promised "couldn't publish" line would never appear. Scoped to the publish
-    # call only: a raise AFTER a successful publish must not lie "couldn't
-    # publish" about a Paper that exists.
-    result =
-      try do
-        PlanPapers.publish(session_id, request_id, markdown)
-      rescue
-        e -> {:error, e}
-      catch
-        kind, reason -> {:error, {kind, reason}}
-      end
-
-    case result do
-      {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
-        StudioChat.merge_approval_metadata(session_id, request_id, %{
-          "paper_id" => paper_id,
-          "paper_url" => paper_url
-        })
-
-        Phoenix.PubSub.broadcast(
-          Barkpark.PubSub,
-          topic,
-          {:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}
-        )
-
-      {:error, _reason} ->
-        Phoenix.PubSub.broadcast(
-          Barkpark.PubSub,
-          topic,
-          {:plan_paper_failed, request_id}
-        )
-    end
   end
 
   # Flip every card matching a request_id to a terminal status (idempotent over
@@ -6245,14 +6380,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `StudioChat.settle_tool_rows/1`, which replay reads back). Rows of earlier
   # turns are already settled, so this is idempotent — and the any?/guard keeps
   # a settled transcript from paying an O(n) reassign + regroup per result.
-  defp settle_tool_rows(socket) do
+  defp settle_tool_rows(socket, stamp) do
     messages = socket.assigns.messages
 
     if Enum.any?(messages, &(&1.role == :tool and Map.get(&1, :turn_settled) != true)) do
+      row_stamp = %{
+        turn_settled: true,
+        turn_started_at: Map.get(stamp, "turn_started_at"),
+        turn_settled_at: Map.get(stamp, "turn_settled_at"),
+        turn_duration_ms: Map.get(stamp, "turn_duration_ms"),
+        turn_outcome: Map.get(stamp, "turn_outcome")
+      }
+
       assign_messages(
         socket,
         Enum.map(messages, fn
-          %{role: :tool} = m -> Map.put(m, :turn_settled, true)
+          # An already-settled row belongs to an EARLIER turn and keeps its own
+          # facts — restamping it here would relabel last turn's fold with this
+          # turn's duration. The durable half fences the same rows in its WHERE.
+          %{role: :tool, turn_settled: true} = m -> m
+          %{role: :tool} = m -> Map.merge(m, row_stamp)
           m -> m
         end)
       )
@@ -6333,7 +6480,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # over the full transcript.
   defp assign_messages(socket, messages) do
     trimmed = trim_transcript(messages)
-    assign(socket, messages: trimmed, grouped_rows: group_agent_rows(trimmed))
+    assign(socket, messages: trimmed, grouped_rows: fold_settled_turns(group_agent_rows(trimmed)))
   end
 
   # Keep only the last `@transcript_window` rows. The drop count is floored at 0
@@ -6408,6 +6555,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
       end
     end)
   end
+
+  # Collapse each SETTLED turn's consecutive tool rows into ONE fold item
+  # (task-8f904a88b9bc3d59). Runs as a SECOND pass over `group_agent_rows/1`'s
+  # output rather than inside it: the D46 agent bucket is its own block with its
+  # own expand state, so an agent block ENDS a fold run instead of being swallowed
+  # by one — two folds either side of it, which is what the transcript reads like.
+  #
+  # The run key is `ChatToolRenderer.turn_fold_key/1` (the row's server-stamped
+  # `turn_settled_at`): rows of one turn share it, a live row has none and can
+  # never fold, and a row from a server too old to stamp it degrades to the flat
+  # transcript it has always been. Linear, called ONCE per write over the bounded
+  # window — the same budget `group_agent_rows/1` is held to.
+  @doc false
+  def fold_settled_turns(items) do
+    items
+    |> Enum.chunk_by(fn
+      {:row, m} -> ChatToolRenderer.turn_fold_key(m)
+      _ -> nil
+    end)
+    |> Enum.flat_map(fn
+      [{:row, first} | _] = chunk ->
+        case ChatToolRenderer.turn_fold_key(first) do
+          nil ->
+            chunk
+
+          key ->
+            rows = Enum.map(chunk, fn {:row, m} -> m end)
+            [{:turn_fold, key, ChatToolRenderer.fold_label(first), rows}]
+        end
+
+      chunk ->
+        chunk
+    end)
+  end
+
+  # Is this turn's fold open in THIS tab? Default collapsed — a settled turn is
+  # history, and its header already says how long it took.
+  defp turn_fold_open?(expanded, key), do: MapSet.member?(expanded, key)
 
   # The effective expand state of an agent block: a manual per-tab override wins;
   # otherwise the default is open while running (or status-unknown) and collapsed
@@ -7101,6 +7286,98 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp send_error_text(_reason),
     do:
       "That message didn't reach Claude — the session dropped. Your words were kept; send again."
+
+  # ── the transcript header's context identity (chat-local-cloud-context-w3) ──
+  #
+  # The GATHERING half only: which host runs this session, on which server, in
+  # which workspace / project / dataset, out of which repository root.
+  # `Barkpark.StudioChat.ContextIdentity` owns the two laws (a displayed value
+  # comes from the actual binding; absence is visible and typed) and every
+  # rendering decision — this reads the facts and hands them over.
+  #
+  # Called on mount, on session load, on the new-chat reset and on a host state
+  # report. NEVER per render: the band lives in an assign precisely so a
+  # streaming turn does not re-query the lease table sixty times a second.
+  defp assign_context_identity(socket) do
+    assign(socket, context_identity: build_context_identity(socket))
+  end
+
+  defp build_context_identity(socket) do
+    session = stored_session(socket)
+
+    hosts =
+      case session do
+        %{id: id} -> ChatHosts.session_execution_identity(id)
+        _ -> %{lease_host: nil, reporting_host: nil}
+      end
+
+    ContextIdentity.resolve(%{
+      lease_host: hosts.lease_host,
+      reporting_host: hosts.reporting_host,
+      endpoint: server_endpoint(),
+      viewer_workspace: viewer_workspace_slug(socket),
+      session_workspace: session_workspace_slug(session),
+      project: project_slug(socket),
+      scope_dataset: socket.assigns[:scope_dataset],
+      mount_dataset: socket.assigns[:dataset],
+      execution_target: session && session.execution_target,
+      cwd: session && session.cwd,
+      repo_probe: ContextIdentity.repo_probe()
+    })
+  end
+
+  # The STORED row (not the `@session` runtime pid): the band needs
+  # `owner_workspace_id`, `execution_target` and `cwd`, none of which live in
+  # assigns. `:global` because the tenancy clamp already ran at load time —
+  # `store_session_id` is only ever set by `load_stored_session/2`, which is
+  # reached through `get_session_in_tenancy/2`.
+  defp stored_session(socket) do
+    case socket.assigns[:store_session_id] do
+      id when is_binary(id) -> StudioChat.get_session(id, :global)
+      _ -> nil
+    end
+  end
+
+  # The server the browser is actually talking to, read at RUNTIME off the
+  # endpoint config. Never a compile-time literal — a baked-in URL that silently
+  # disagrees with the running endpoint is exactly the class of string this band
+  # exists to stop trusting.
+  defp server_endpoint do
+    BarkparkWeb.Endpoint.url()
+  rescue
+    _ -> nil
+  end
+
+  # The workspace the VIEWER is acting in: the URL scope on the scoped mount,
+  # the acting token's own workspace on the flat one (which carries no
+  # `current_workspace` — its live_session has no LiveScope hook). This is the
+  # CLAIM half of the workspace comparison; the session's own owner is the other.
+  defp viewer_workspace_slug(socket) do
+    case socket.assigns[:current_workspace] do
+      %{slug: slug} when is_binary(slug) ->
+        slug
+
+      _ ->
+        workspace_slug(principal_workspace_id(socket))
+    end
+  end
+
+  defp session_workspace_slug(%{owner_workspace_id: ws_id}), do: workspace_slug(ws_id)
+  defp session_workspace_slug(_), do: nil
+
+  defp workspace_slug(ws_id) do
+    case Tenancy.get_workspace_by_id(ws_id) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
+
+  defp project_slug(socket) do
+    case socket.assigns[:current_project] do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
 
   defp default_dataset do
     case Barkpark.Content.list_datasets() do

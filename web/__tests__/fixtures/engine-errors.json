@@ -5,5 +5,6 @@
   "#DIV/0!",
   "#N/A",
   "#NUM!",
-  "#SPILL!"
+  "#SPILL!",
+  "#NAME?"
 ]

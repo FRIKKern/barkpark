@@ -1309,6 +1309,32 @@ const EXPECTATIONS = {
       assert.equal(countMatches(rendered, 'class="session-row"'), 4, "the fixture's four sessions render");
       assert.equal(ctx.countCalls("GET", "/v1/account/sessions"), 1, "the list was fetched once on open");
 
+      // ─ 1b. cch-w23-bl-cruel-identity-own-scenario: THE IDENTITY THIS ORACLE
+      // IS DRIVEN THROUGH. From cch-w23-s2 until that row was paid, this
+      // scenario's `me` carried the 158-character CRUEL address — not because
+      // the revoke path needed it, but because a new SCENARIOS key was fenced
+      // out of that slice and this was the account scenario with the smallest
+      // blast radius. The consequence was invisible and real: the one oracle in
+      // this file driven by REAL CLICKS, and the fixture shoot.sh publishes as
+      // the revoke evidence, ran every assertion below against an identity
+      // nobody in this corpus owns. The cruelty has its own key now
+      // (`account-modal-cruel-identity`).
+      // READ OFF THE RENDER, NOT THE FIXTURE: `.am-name` is accountModel()'s
+      // `email.split("@")[0]` (`grep -n 'function accountModel'
+      // cloud/priv/static/app.js`), so this measures what openAccountModal
+      // actually painted. FIXTURE_SHAPE_PINS pins the same fact one layer up and
+      // refuses BEFORE any scenario boots; this line is the second, independent
+      // witness, and it is the one that would still red if the pin were deleted.
+      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name">([^<]*)</) || [])[1];
+      assert.ok(amName !== undefined,
+        "no `.am-name` in the account modal openAccountModal just painted — the identity of the person " +
+        "signing devices out is absent, and every assertion below is about a modal with no owner");
+      assert.equal(amName, SCENARIOS["account-modal"].data.me.user.email.split("@")[0],
+        "the click oracle is running against " + JSON.stringify(amName.slice(0, 24)) + "… (" + amName.length +
+        " characters), not the corpus's production-dominant identity. A revoke must be measured on the " +
+        "identity almost every real operator has; the 158-character cap is `account-modal-cruel-identity`'s " +
+        "whole job, and parking it here makes this scenario's NAME a lie about what it drives");
+
       // ─ 2/3/4. the PER-ROW revoke: wired, right URL, and it ACTS ────────────
       const revokes = box.querySelectorAll(".session-revoke");
       assert.equal(revokes.length, 3, "three revokable rows — the current device is never self-revokable");
@@ -1528,6 +1554,68 @@ const EXPECTATIONS = {
       assert.equal(ctx.localStorage.getItem("bpcloud.session"), null,
         "the local session survived the sign-out — clearSession() is the half that must happen even when the " +
         "revoke fails, and it did not happen at all");
+    },
+  },
+  // ── cch-w23-bl-cruel-identity-own-scenario: THE CRUEL IDENTITY, AT REST ────
+  // The GEOMETRY of this fixture is overflow-guard's
+  // W23-account-modal-identity-bounded leg (7 widths x 2 themes, scrollWidth
+  // against clientWidth on `.am-name` and `.modal-root`). This is the half that
+  // leg cannot own: the string reaching the element AT ALL, in the shim, with no
+  // browser. The two are complementary, and the split is deliberate — a leg that
+  // needs Chrome cannot be the thing that refuses a fixture which drifted kind,
+  // because console-harness runs this file on every push and the browser legs on
+  // far fewer.
+  // WHAT COULD LOSE HERE: (a) the fixture goes kind (the address is shortened,
+  // or the stem picks up a hyphen a line breaker could use) and every "clean"
+  // cell in the W23 leg becomes green-by-construction; (b) some renderer starts
+  // truncating the local part on its way to `.am-name`, which would hide the
+  // very overflow the leg exists to measure while looking like a fix; (c) the
+  // long name displaces the modal's own anatomy — the ids the lockout path
+  // depends on. All three are asserted below.
+  "account-modal-cruel-identity": {
+    what: "the CRUEL identity — a 158-character email local part (the derived server cap) reaches `.am-name` WHOLE, and the modal's lockout-bearing anatomy survives it",
+    check(reg, hooks) {
+      const fixture = SCENARIOS["account-modal-cruel-identity"].data.me;
+      const local = fixture.user.email.split("@")[0];
+      // ANTI-VACUITY FIRST: a fixture that drifted kind greens everything below.
+      // 158 = 160 (`validate_length(:email, max: 160)`, re-derive with
+      // `grep -n 'validate_length(:email' cloud/lib/barkpark_cloud/accounts/user.ex`)
+      // minus the "@" minus the one domain character @email_format demands.
+      assert.equal(fixture.user.email.length, 160,
+        "the cruel address is " + fixture.user.email.length + " characters, not the server's 160-character cap — " +
+        "either it went kind (and the W23 overflow leg is measuring nothing) or it went INADMISSIBLE (a string " +
+        "the server would reject, which is a defect nobody has)");
+      assert.equal(local.length, 158,
+        "`.am-name` paints the LOCAL PART, and it is " + local.length + " characters, not the derived 158");
+      assert.ok(!/[^a-z0-9]/.test(local),
+        "the local part carries a character a line breaker can use (- . _ + or whitespace) — BREAKABLE, so it " +
+        "would wrap on its own and certify a rule that never bounded it");
+      // …and the KIND control next door must stay ordinary, or the pair stops
+      // being able to see a remedy that shreds an ordinary name.
+      const kind = SCENARIOS["account-modal"].data.me.user.email.split("@")[0];
+      assert.ok(kind.length <= 40,
+        "the kind control `account-modal` renders a " + kind.length + "-character name — it has drifted cruel, " +
+        "and the W23 leg's control half can no longer answer \"did the remedy shred ordinary prose\"");
+
+      const model = hooks.accountModel({ team_id: "team_abc" }, fixture);
+      assert.equal(model.name, local,
+        "accountModel().name must be the email LOCAL PART — this is why the identity is capped by the EMAIL " +
+        "rule and not by a name rule (User has no :name field at all)");
+      hooks.openModal(hooks.accountModalHtml(model));
+      const html = reg.get("modal-body").innerHTML || "";
+      const painted = (html.match(/class="am-name">([^<]*)</) || [])[1];
+      assert.equal(painted, local,
+        "the 158-character local part did not reach `.am-name` whole; got " + JSON.stringify(String(painted).slice(0, 32)) +
+        "… (" + String(painted).length + " characters). A truncation on the way to the element hides the overflow " +
+        "the W23 leg measures and would read as a fix");
+      // (c) the anatomy the lockout path depends on, with the long name in it.
+      assert.ok(html.includes('class="am-identity"'), "the identity row must render");
+      for (const id of ["modal-title", "sessions-box", "sessions-revoke-all", "pw-form", "modal-logout"]) {
+        assert.ok(html.includes('id="' + id + '"'),
+          "the cruel identity displaced id=" + JSON.stringify(id) + " — a name is not allowed to cost the " +
+          "operator a door out of this modal");
+      }
+      assert.ok(html.includes(">Close<") && html.includes(">Log out<"), "the footer survives the long name");
     },
   },
   "account-modal-2fa-badcode": {
@@ -5121,6 +5209,29 @@ function assertCensus() {
 // no fixture edit can ever red it, and that is CORRECT for its actual job of
 // proving the RENDER drops a row. Pinning it would pin a tautology.
 const FIXTURE_SHAPE_PINS = [
+  // cch-w23-bl-cruel-identity-own-scenario — THE IDENTITY AXIS, PINNED IN BOTH
+  // DIRECTIONS. These two are one measurement in two halves: WHICH scenario
+  // carries the cruel address. cch-w23-s2 parked it on `account-modal-revoke`
+  // because a new SCENARIOS key was fenced out of that slice, and the cost was
+  // that the click oracle — four sessions, two DELETEs, a danger-tier confirm,
+  // and the fixture shoot.sh publishes as the revoke evidence — was driven
+  // through a 158-character identity as a side effect. Pinning only the cruel
+  // half would let it be COPIED back onto revoke and stay green; pinning only
+  // revoke would let the cruel fixture go kind and green the W23 overflow leg
+  // against a live defect. Both, and the refusal arrives before any scenario
+  // boots. `.length` is a plain property walk in the path grammar below.
+  {
+    scenario: "account-modal-cruel-identity",
+    path: "me.user.email.length",
+    expected: 160,
+    why: 'EXPECTATIONS["account-modal-cruel-identity"].check asserts the 158-char LOCAL PART reaches `.am-name` whole, and overflow-guard.mjs\'s W23-account-modal-identity-bounded leg refuses any cell whose rendered name is under the derived 158-char cap. A shortened address here does not red those loudly — it makes 28 overflow cells green by construction',
+  },
+  {
+    scenario: "account-modal-revoke",
+    path: "me.user.email.length",
+    expected: 12,
+    why: 'EXPECTATIONS["account-modal-revoke"].check is the CLICK ORACLE, and step 1b pins the painted `.am-name` to the corpus\'s production-dominant identity (ada@acme.com). A cruel `me` re-parked here silently moves the revoke path — and the published revoke screenshot — onto an identity nobody owns, which is the exact defect cch-w23-bl-cruel-identity-own-scenario was filed for',
+  },
   {
     scenario: "account-modal",
     path: "me.user.two_factor_enabled",

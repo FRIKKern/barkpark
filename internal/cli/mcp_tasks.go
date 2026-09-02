@@ -136,7 +136,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_ready",
 		Title:       "List ready tasks",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "List the READY tasks — executable, unblocked work available to claim. Priority order (priority 0 is highest) is the compatibility default; pass order=closure_nearest for fewest unmet criteria, then oldest, then logical task id. This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
+		Description: "List the READY tasks — claimable work: lifecycle open or blocked (blocked is claimable by design), dependencies and queue gate cleared, published or unpaired draft, twin-collapsed to the published row. Priority order (priority 0 is highest) is the compatibility default; pass order=closure_nearest for fewest unmet criteria, then oldest, then logical task id. This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,

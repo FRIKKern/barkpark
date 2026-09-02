@@ -996,9 +996,16 @@ defmodule BarkparkWeb.Router do
 
   # Anonymous, CORS-open JSON for the `:public_api` plugin bucket (Pulse /
   # Shared Storm). NO auth plug by design — safety is the plugin's caps
-  # (schema validation + rate limits), not identity. PublicCors is the ONLY
-  # place the API surface emits CORS headers; the core `/v1/data/*` surface
-  # stays browser-unreachable cross-origin on purpose.
+  # (schema validation + rate limits), not identity.
+  #
+  # CORS mounts in the ROUTER are exactly TWO, and this is one of them; the
+  # other is `:media_public_cors` on the public media SERVE scope
+  # (jf-w1-media-cors-upstream — grep `pipeline :media_public_cors`). Both
+  # reuse this same `PublicCors` plug and both carry the same no-credentials
+  # argument. The core `/v1/data/*` surface stays browser-unreachable
+  # cross-origin on purpose. (Separately, `Plugs.DatasetCors` runs at the
+  # ENDPOINT and reflects an ALLOWLISTED origin — never a wildcard — which is
+  # a different mechanism, not a router mount.)
   pipeline :public_api do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
@@ -2742,9 +2749,51 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireMediaProcessingCallbackToken)
   end
 
+  # CORS for the four PUBLIC media serve GETs, and for nothing else
+  # (jf-w1-media-cors-upstream). Serving here has been public by design since
+  # this scope was written — the change tells BROWSERS so, and widens no auth
+  # surface: `Access.allowed?/4` still refuses a `private` asset to an
+  # anonymous caller, and a `token`-visibility asset still needs its
+  # `SignedUrl` signature. Necessity is measured, not assumed: an
+  # asciinema-player on jarl.no fetching a cast from jarl.barkpark.cloud is
+  # blocked with "No Access-Control-Allow-Origin header", and ACAO was the sole
+  # deciding variable in a byte-exact replication.
+  #
+  # WHY `*` IS THE RIGHT ANSWER AND NOT A SHORTCUT (the ruling's premise, and
+  # the thing a reviewer must re-check if these pipelines ever change): CORS
+  # protects CREDENTIALED cross-origin reads. Neither `:api` nor
+  # `:strict_bearer_media_read` mounts `:fetch_session` or
+  # `OptionalSessionToken`, so `:current_user` is never assigned on these four
+  # routes and `Media.Storage.Access.account_member?/1` — the ONLY
+  # session-reading arm of `authenticated?/1` — is false by construction. Each
+  # route therefore authorizes by the URL alone: the server-generated blob path
+  # or the row id, the `?_=&exp=` `SignedUrl` signature, the path-derived
+  # `AssignDefaultScope` workspace pin, and the asset's own visibility tier. An
+  # `Authorization` bearer can widen the answer, but a browser never attaches
+  # one cross-origin and `PublicCors` sends NO
+  # `access-control-allow-credentials`, so no cookie can stand in for it. A
+  # hostile origin reads exactly what an anonymous `curl` reads.
+  # `test/barkpark_web/controllers/media_serve_cors_test.exs` pins that
+  # premise directly (same GET, with and without an ADMIN account session →
+  # byte-identical response), so adding a session plug to either pipeline reds
+  # a test instead of silently turning `*` into a credential leak.
+  #
+  # NO OPTIONS ROUTE, deliberately: these are SIMPLE cross-origin GETs, which
+  # browsers do not preflight. `methods: "GET, HEAD"` keeps the advertised verb
+  # list honest for the scope (the write scope below is untouched and gains no
+  # header).
+  #
+  # PIPED FIRST, deliberately: a response produced by a HALTING plug — the
+  # `strict_on_presented` 401, a `RateLimit` 429 — then still carries the
+  # header, so a browser reads the real status instead of an opaque CORS
+  # failure. Those responses carry nothing the 404 does not.
+  pipeline :media_public_cors do
+    plug(BarkparkWeb.Plugs.PublicCors, methods: "GET, HEAD")
+  end
+
   # ── Media — upload requires token, serving is public ────────────────────
   scope "/media", BarkparkWeb do
-    pipe_through([:api, :strict_bearer_media_read])
+    pipe_through([:media_public_cors, :api, :strict_bearer_media_read])
 
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
     get("/", MediaController, :index)

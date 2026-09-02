@@ -183,7 +183,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   records the op's INVERSE onto that user's undo stack (depth 100, oldest
   entries drop): `set_cell`/`clear_cell` store the prior cell map; `insert_*` store
   the matching `delete_*`; `delete_*` store the matching `insert_*` PLUS the
-  deleted span's captured cells; `set_col_width`/`set_row_height` store the
+  deleted span's captured cells AND the pre-rewrite cells of every formula the
+  shift rewrote — own tab and, keyed by tab index, every OTHER tab holding a
+  cross-tab ref to the mutated one (the `{:structural_restore, op, cells,
+  cross}` inverse; see "Lossless `delete_*` undo" below);
+  `set_col_width`/`set_row_height` store the
   prior px; `set_frozen` the prior bands; `rename_tab` the prior name — PLUS, when the
   rename rewrote cross-tab refs in other tabs, a multi-tab capture of their
   pre-rewrite cells so undo restores every rewritten ref losslessly (the
@@ -195,9 +199,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   moves both ways, loss-free);
   `merge_cells` a GRANULAR remove of just the range it added and `unmerge_cells`
   a granular re-add of just the ranges it dropped (skipping any a later op has
-  re-covered — a re-added merge may land at pre-shift coordinates, the same
-  lossy contract as `delete_*` undo), never a whole-list snapshot that would
-  clobber another user's merges. Undo/redo arrive as
+  re-covered — a re-added merge carries its ORIGINAL coordinates, so after an
+  intervening row/col shift it may land where the range used to be; merge
+  GEOMETRY, unlike formula text, is not captured), never a whole-list snapshot
+  that would clobber another user's merges. Undo/redo arrive as
   ops through the same mailbox:
 
     * `%{"op" => "undo", "user" => u}` — pops u's undo stack, applies the
@@ -209,8 +214,37 @@ defmodule Barkpark.Plugins.Sheets.Session do
   normal recompute + delta path, so every client re-renders. Undoing
   something another user already overwrote just applies the inverse —
   Google Sheets semantics: it may overwrite their newer value (documented;
-  LWW stands). Formula refs a `delete_*` rewrote to the literal `#REF!`
-  are NOT restored by its undo (the rewrite is lossy by design).
+  LWW stands).
+
+  ### Lossless `delete_*` undo (task-bb0b8faf5a9a2a37)
+
+  A `delete_rows`/`delete_cols` collapses every dead ref to the literal
+  `#REF!` and clips every partially covered range — in the mutated tab's own
+  formulas AND, through the cross-tab sweep, in every other tab that
+  referenced it by name (design §3.2). That rewrite is NOT invertible from the
+  resulting text, so the `{:structural_restore, …}` inverse CAPTURES the
+  pre-rewrite cell map (formula, computed value, style) of exactly the cells
+  the two passes touched: `cells` for the mutated tab, `cross`
+  (`%{tab_idx => %{ref => cell}}`) for the others. Undo re-inserts the span,
+  overlays both captures BEFORE the recompute, so every dependent settles from
+  the real formulas. Delete a column, watch three totals turn `#REF!`, press
+  undo — the totals come back, text and value.
+
+  The capture is proportional to the number of REWRITTEN formulas, never a tab
+  snapshot: a 1000-cell tab with three rewritten formulas captures three cells.
+
+  Remaining limits:
+
+    * A formula a LATER op rewrote before the undo runs is restored to its
+      pre-DELETE text, not to that later text — the standard LWW contract every
+      inverse here carries.
+    * Only the last 100 entries of a user's stack survive; a delete that has
+      fallen off the depth-100 window is unreachable, capture and all.
+    * The `insert_*` inverse (a plain `delete_*`) carries no capture: undoing an
+      INSERT deletes the inserted span, so a formula written to reference that
+      span in between rewrites to `#REF!` — Excel does the same.
+    * Merge geometry, unlike formula text, is still not captured (see the merge
+      bullet above).
 
   Every inverse entry pins an ABSOLUTE tab index, so a reorder (`move_tab`),
   an insert (`duplicate_tab` or a `tab_restore` undo), or a delete
@@ -319,8 +353,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Returns `{:ok, %{rev: n, applied: n, errors: [%{index:, code:, message:}]}}`,
   `{:error, :not_found}` when no sheet resolves for the slug,
   `{:error, :batch_too_large, n}` when `ops` exceeds `max_ops_per_call/0`,
-  or `{:error, :session_unavailable}` when the session died twice in a row
-  (see `call_session/4`).
+  `{:error, :session_unavailable}` when the session died twice in a row
+  (see `call_session/4`), or `{:error, :replay_unavailable}` when a
+  `request_id` was supplied and the replay ring cannot be read (fail-closed:
+  applying without the ring could double-apply — see `ReplayRing`'s
+  "Ownership" section).
 
   ## Exactly-once retry (`request_id`)
 
@@ -640,6 +677,24 @@ defmodule Barkpark.Plugins.Sheets.Session do
         # the cached reply verbatim (+ replayed: true) and apply NOTHING, so a
         # retried non-idempotent batch (insert_rows) never runs twice.
         {:reply, {:ok, Map.put(cached, :replayed, true)}, schedule_idle(state)}
+
+      :unavailable ->
+        # The ring cannot answer — there is no table to read. This is NOT a
+        # miss: "never applied" is a claim only a readable ring can make, and
+        # treating the two alike is exactly how a retry used to re-apply a
+        # non-idempotent batch in silence. Fail CLOSED. The ring has already
+        # logged at :error naming this key; the caller retries once the ring is
+        # back, and the batch is applied at most once either way.
+        #
+        # HTTP surface, named because it is a real residual: `OpsController`'s
+        # `apply_ops_error/4` has no clause for this reason, so it currently
+        # renders through the catch-all as 422 `session_start_failed`. The
+        # CORRECT surface is the transient 503 + `retry-after` that
+        # `:session_unavailable` already gets. Out of this change's fence
+        # (`ops_controller.ex`), and reachable only when the table is deleted
+        # outright — a ring CRASH no longer reaches here at all, because the
+        # heir keeps the table.
+        {:reply, {:error, :replay_unavailable}, schedule_idle(state)}
 
       _ ->
         {reply, state} = do_apply_ops(ops, state)

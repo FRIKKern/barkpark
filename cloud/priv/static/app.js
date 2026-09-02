@@ -175,6 +175,18 @@
     return TRANSPORT_COPY[transport] || ERRORS.network_error;
   }
 
+  // cch-w50-bl — THE TEST-MODE DISCLOSURE, said once and used twice.
+  //
+  // The live control plane runs a Stripe TEST secret key (`sk_test_…`) with real
+  // prices and a real webhook secret wired, so before this slice the money
+  // screen's Subscribe opened a REAL hosted Checkout Session that no real card
+  // could pay, and the console said nothing about it. This sentence is the
+  // disclosure, and it is BYTE-IDENTICAL to `BarkparkCloud.Billing`'s
+  // `@test_mode_disclosure` — the server refuses the POST with it in `reason`,
+  // the disabled tier button prints it, and the ERRORS arm below resolves it.
+  // Plain words, past/present tense: it never says a live key "will" arrive.
+  var TEST_MODE_DISCLOSURE = "Checkout runs in Stripe test mode — no real card can pay.";
+
   // ----------------------------------------------------------- error copy
   var ERRORS = {
     invalid_credentials: "Wrong email or password.",
@@ -212,6 +224,16 @@
     // honest live degradation while Stripe is unconfigured on a deploy (BILL-2).
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // cch-w50-bl — the 422 POST /v1/billing/checkout sends when the plane's
+    // Stripe key is a TEST key (Billing.checkout_capability() == :test_mode).
+    // BYTE-IDENTICAL to Billing.test_mode_disclosure/0, which is what the
+    // server puts in the envelope's `reason`; the tier card below prints the
+    // same sentence, so the disabled button and the toast never disagree. This
+    // arm is the fallback path — a page whose capability read is stale, a `bp`
+    // client, a hand-rolled POST — because the button is already disabled when
+    // the console knows. Past/present tense: it says what IS, and promises
+    // nothing about a live key arriving.
+    billing_test_mode: TEST_MODE_DISCLOSURE,
     // cch-w54-s1 — the 409 cch-w54-s2 introduces on a suspended instance. Inert
     // until that slice merges; without the entry a `suspended` code toasts the
     // bare word "suspended" through the key.replace fallback. It names the CP's
@@ -17758,8 +17780,18 @@
   // the action — no price and no instance ceiling, neither of which this screen
   // can support (see PLAN_CATALOG). A subscribed team changes plans in the
   // portal, self-serve.
-  function tierCardHtml(t, active, subscribed) {
+  //
+  // cch-w50-bl — `capability` is the plane's declared checkout capability
+  // (GET /v1/subscription's `billing_capability.checkout`). On "test_mode" the
+  // paid tiers render a LABELLED, DISABLED Subscribe carrying the disclosure
+  // sentence, because the session that button would open is real and no real
+  // card can pay it. The argument is optional: an unknown capability (a cold
+  // cache, an older payload) renders exactly what it rendered before, and the
+  // server still refuses the POST — this card is the disclosure, never the
+  // enforcement.
+  function tierCardHtml(t, active, subscribed, capability) {
     var isCurrent = t.plan === active;
+    var testMode = capability === "test_mode";
     var btn;
     if (isCurrent) {
       btn = '<button class="btn" disabled>Current plan</button>';
@@ -17771,9 +17803,21 @@
       // server 422s plan_invalid — and "doing nothing" IS how a trial lands on
       // Free, so the honest action here is no action at all.
       btn = '<button class="btn" disabled>Yours when the trial ends</button>';
+    } else if (testMode) {
+      // Labelled, disabled, and NOT wired: no data-plan attribute means
+      // renderTiers binds no click handler at all, so there is no path from
+      // this card to a checkout the plane would only refuse.
+      btn = '<button class="btn" disabled>Subscribe unavailable</button>';
     } else {
       btn = '<button class="btn btn-primary" data-plan="' + esc(t.plan) + '">Subscribe</button>';
     }
+    // The disclosure sits ABOVE the button on purpose: `.tier .btn` carries
+    // `margin-top: auto`, so the button must stay the card's LAST child or the
+    // grid's bottom-aligned button row breaks (the same geometry
+    // cch-tier-note-undefined-render measured for the optional note).
+    var disclosure = testMode && !isCurrent && !subscribed && !t.free
+      ? '<p class="tier-note">' + esc(TEST_MODE_DISCLOSURE) + "</p>"
+      : "";
     return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
       '<div class="tier-name">' + esc(t.name) + "</div>" +
       // cch-tier-note-undefined-render — a note is OPTIONAL prose, so a tier
@@ -17783,6 +17827,7 @@
       // carried by the button itself. Measured in a browser before and after —
       // dropping the <p> alone moved this card's button 36px up.
       (t.note ? '<p class="tier-note">' + esc(t.note) + "</p>" : "") +
+      disclosure +
       btn +
     "</div>";
   }
@@ -17793,7 +17838,8 @@
     // A `trial` team has NOT paid — the paid tiers must stay subscribable so it
     // can upgrade (dwb-13); only a real paid plan routes changes to the portal.
     var subscribed = active !== "free" && active !== "trial";
-    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed); }).join("");
+    var capability = checkoutCapability();
+    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability); }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
@@ -18218,6 +18264,23 @@
   // ({status, data, transport} — exactly faultCopy()'s arguments) and is cleared
   // in lockstep with subError everywhere it is reset.
   var subErrorFault = null;
+  // cch-w50-bl — the plane's PRE-HOC billing declaration (D554), which rides
+  // GET /v1/subscription as a TOP-LEVEL sibling and which the console has never
+  // read. `{checkout: "available"|"unconfigured"|"unverifiable"|"test_mode",
+  // plans: [...]}` — computed server-side by CALLING
+  // Billing.checkout_capability/0, never a constant. Cached on the same seam as
+  // subCache and, like it, LEFT UNTOUCHED on a failed read: an unknown
+  // capability must never read as a known one. Unknown renders the ordinary
+  // Subscribe button, which is safe because the SERVER is the gate — POST
+  // checkout refuses :test_mode itself (422 billing_test_mode).
+  var capCache = null;
+
+  // The declared checkout capability, or "" when the server has not told us.
+  // Pure over the cache so the tier renderer takes it as an argument and a node
+  // test can drive every state without a fetch.
+  function checkoutCapability() {
+    return capCache && typeof capCache.checkout === "string" ? capCache.checkout : "";
+  }
 
   function loadSubscription() {
     return api("GET", "/v1/subscription").then(function (r) {
@@ -18226,6 +18289,7 @@
         subError = false;
         subErrorFault = null;
         subCache = (r.data && r.data.subscription) || null;
+        capCache = (r.data && r.data.billing_capability) || null;
       } else {
         // Keep the prior cache untouched; surface a retry instead of a
         // free-looking null. `subLoaded` stays as-is (false on a cold first
@@ -24140,6 +24204,11 @@
       subLoaded = false;
       subError = false;
       subErrorFault = null;
+      // cch-w50-bl: the declaration is per-DEPLOY, not per-account, but it
+      // arrives on the same response as subCache and must never outlive the
+      // session that fetched it — a cold paint reads "" (unknown) and the
+      // server stays the gate until the next GET answers.
+      capCache = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared
@@ -26319,6 +26388,8 @@
       trialTagline: trialTagline,
       trialCardHtml: trialCardHtml,
       tierCardHtml: tierCardHtml,
+      checkoutCapability: checkoutCapability,
+      testModeDisclosure: TEST_MODE_DISCLOSURE,
       billingChipModel: billingChipModel,
       billingPortalFlag: billingPortalFlag,
       // gr-p2 launch theater (GR18): the price-before-charge fold — pure model

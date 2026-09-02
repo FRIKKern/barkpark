@@ -14858,6 +14858,65 @@ test("tierCardHtml: a trial team's Free card never offers a doomed checkout (rev
   assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
 });
 
+// ── cch-w50-bl · THE TEST-MODE DISCLOSURE ────────────────────────────────────
+//
+// The live control plane runs a Stripe TEST secret key with real prices and a
+// real webhook secret wired (measured read-only on cloud-control_plane_green-1,
+// 2026-09-02: STRIPE_SECRET_KEY begins sk_test_). Before this slice the money
+// screen offered a live Subscribe there, which opened a REAL hosted Checkout
+// Session no real card can pay, and disclosed nothing. The server now declares
+// `billing_capability.checkout == "test_mode"` on GET /v1/subscription and
+// refuses the POST itself; these pin the console half — the fourth argument
+// tierCardHtml takes, driven through the real renderer.
+//
+// The END-TO-END pair (server declaration → this renderer) lives in
+// cloud/test/barkpark_cloud/billing_test_mode_console_mirror_test.exs, so a
+// collapse of :test_mode into :available in billing.ex reds a rendered
+// assertion too, not only an Elixir one.
+
+test("tierCardHtml: a test-mode plane renders Subscribe DISABLED and states why", () => {
+  const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
+  const html = hooks.tierCardHtml(supporter, "free", false, "test_mode");
+
+  assert.ok(!html.includes('data-plan="supporter"'),
+    "no checkout wire — renderTiers binds click handlers off [data-plan], so the card must not carry one");
+  assert.ok(html.includes("disabled"), "the affordance is disabled, not hidden");
+  assert.ok(html.includes("Subscribe unavailable"), "the button is LABELLED, not a bare ghost");
+  assert.ok(html.includes("Checkout runs in Stripe test mode — no real card can pay."),
+    "the disclosure sentence renders verbatim");
+  // Past/present tense only: it says what IS, and promises no live key.
+  assert.ok(!/\bwill\b/i.test(html), "no future tense in the disclosure");
+  // The disclosure precedes the button — `.tier .btn { margin-top: auto }`
+  // bottom-aligns the grid's buttons only while the button is the last child.
+  assert.ok(html.indexOf("no real card can pay") < html.indexOf("<button"),
+    "the disclosure sits above the button, so the button stays the card's last child");
+});
+
+test("tierCardHtml: every OTHER capability renders exactly what it rendered before", () => {
+  // The disclosure is a state, not a permanent downgrade — and an UNKNOWN
+  // capability (cold cache, older payload, failed read) must not invent one.
+  // The server refuses :test_mode on its own, so the honest cold render is the
+  // ordinary button.
+  const supporter = hooks.planCatalog.filter((t) => t.plan === "supporter")[0];
+  const baseline = hooks.tierCardHtml(supporter, "free", false);
+  for (const cap of ["available", "unconfigured", "unverifiable", "", undefined, null]) {
+    assert.equal(hooks.tierCardHtml(supporter, "free", false, cap), baseline,
+      "capability " + String(cap) + " moved the card");
+  }
+  assert.ok(baseline.includes('data-plan="supporter"'), "the baseline really is the live Subscribe");
+  assert.ok(!baseline.includes("test mode"), "and it discloses nothing, because there is nothing to disclose");
+});
+
+test("checkoutCapability(): a declaration is only read when the server actually sent one", () => {
+  // Pure over the module cache; "" is the honest unknown. Pinned because the
+  // whole disclosure hangs off this string, and a helper that answered
+  // "test_mode" on a missing payload would disable the money screen for every
+  // deploy that has not shipped the declaration yet.
+  assert.equal(typeof hooks.checkoutCapability, "function");
+  assert.equal(hooks.checkoutCapability(), "", "no load has happened in this sandbox");
+  assert.equal(hooks.testModeDisclosure, "Checkout runs in Stripe test mode — no real card can pay.");
+});
+
 // ── cch-tier-note-undefined-render ───────────────────────────────────────────
 //
 // THE FILED ROW IS REFUTED ON ITS STATED HARM, and the refutation is the reason
@@ -21362,6 +21421,13 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     network_error: "Network error — is the control plane running?",
     limit_reached: "You're at your plan's instance limit.",
     billing_not_configured: "Billing isn't set up on this deployment yet.",
+    // cch-w50-bl — pinned in the same commit that registered it. The slug is the
+    // 422 POST /v1/billing/checkout sends on a test-keyed plane, and the copy is
+    // BYTE-IDENTICAL to Billing.test_mode_disclosure/0 (the server puts the same
+    // sentence in the envelope's `reason`). Deleting the ERRORS entry reds this
+    // sweep BY NAME — and would also red console_reader_census_test.exs, which
+    // refuses a minted code the console has no reader for.
+    billing_test_mode: "Checkout runs in Stripe test mode — no real card can pay.",
     forbidden: FORBIDDEN_GENERIC,
     // cch-w50-s2 — moved with the ERRORS map's own server_error entry in the
     // same commit (re-derive it with grep -n 'server_error:' app.js, inside the
@@ -21415,7 +21481,7 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     "validation_failed", "name_required", "no_active_subscription", "plan_invalid",
     "invalid_code", "rate_limited", "no_team", "invalid", "not_live",
     "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
-    "billing_not_configured", "forbidden", "server_error", "malformed_body",
+    "billing_not_configured", "billing_test_mode", "forbidden", "server_error", "malformed_body",
     "malformed_request", "unsupported_media_type", "request_too_large",
     // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
     // same commit that registered them; each must stay free of a support-channel.

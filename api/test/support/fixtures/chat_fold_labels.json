@@ -1,0 +1,24 @@
+{
+  "_note": [
+    "The turn-fold HEADER LABEL lock (task-8f904a88b9bc3d59). ONE fixture, read by",
+    "BOTH surfaces' tests: api/test/barkpark_web/live/studio/chat_fold_on_settle_test.exs",
+    "(BarkparkWeb.Studio.ChatToolRenderer.fold_label/2) and internal/chat/fold_test.go",
+    "(chat.foldLabel). A formatter change on one surface reds the other surface's",
+    "test, so the two transcripts cannot drift a single byte.",
+    "Add a case here BEFORE changing either formatter."
+  ],
+  "cases": [
+    {"duration_ms": 0, "outcome": "settled", "label": "Worked for 0s"},
+    {"duration_ms": 999, "outcome": "settled", "label": "Worked for 0s"},
+    {"duration_ms": 1000, "outcome": "settled", "label": "Worked for 1s"},
+    {"duration_ms": 42000, "outcome": "settled", "label": "Worked for 42s"},
+    {"duration_ms": 42000, "outcome": "interrupted", "label": "You stopped after 42s"},
+    {"duration_ms": 59999, "outcome": "settled", "label": "Worked for 59s"},
+    {"duration_ms": 60000, "outcome": "settled", "label": "Worked for 1m 0s"},
+    {"duration_ms": 192000, "outcome": "settled", "label": "Worked for 3m 12s"},
+    {"duration_ms": 192000, "outcome": "interrupted", "label": "You stopped after 3m 12s"},
+    {"duration_ms": 3600000, "outcome": "settled", "label": "Worked for 1h 0m 0s"},
+    {"duration_ms": 3845000, "outcome": "settled", "label": "Worked for 1h 4m 5s"},
+    {"duration_ms": 3845000, "outcome": "interrupted", "label": "You stopped after 1h 4m 5s"}
+  ]
+}
