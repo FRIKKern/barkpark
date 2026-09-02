@@ -174,18 +174,6 @@
       ]
     },
     {
-      "verb": "env_var.created",
-      "label": null,
-      "reason_code": "d582-copy-not-written",
-      "reason": "An environment variable was created on a site, through Accounts.audit/3 inside the router's transaction. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
-    },
-    {
-      "verb": "env_var.deleted",
-      "label": null,
-      "reason_code": "d582-copy-not-written",
-      "reason": "An environment variable was deleted; site.env_changed, the bulk-replace verb over the same data, IS labelled. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
-    },
-    {
       "verb": "provider.connected",
       "label": null,
       "reason_code": "d582-copy-not-written",

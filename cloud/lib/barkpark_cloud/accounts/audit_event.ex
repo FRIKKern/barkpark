@@ -39,9 +39,13 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # (including the OC24 instance-lifecycle triggers: retry / verify /
   # studio-link / site-url / self-update / rollback / autoupdate / domain /
   # vercel-deploy / resurrect);
-  # the env_var pair (router.ex, through the transactional Accounts.audit/3) and
-  # the twofa pair (the account 2FA confirm / disable routes) are PRODUCED —
-  # they were called "reserved" here long after their call-sites were wired.
+  # the twofa pair (the account 2FA confirm / disable routes) is PRODUCED —
+  # it was called "reserved" here long after its call-sites were wired.
+  # The `env_var.created` / `env_var.deleted` pair LEFT the vocabulary with the
+  # team env-var feature (ruled 2026-09-02, zero prod rows ever): its only
+  # producers were the three deleted `/v1/env-vars` routes, so leaving the verbs
+  # declared would have reddened the vocabulary census as a third zero-producer
+  # verb — a verb with no producer must leave the vocabulary too.
   # Only `oauth.linked` and `email.verified` are still declared without a
   # producer; both are named individually, with a MACHINE-CHECKED rationale
   # (an anchor that must resolve plus a blocker that must stay absent), in

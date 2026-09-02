@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  121 scenarios, 26 rendered, 95 in a COMMITTED residue literal.
+//   SCENARIO  118 scenarios, 24 rendered, 94 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -201,9 +201,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell (0.73s measured). The full render leg is
-//  27 cells x 2 themes x ONE height x 18 boundary widths = 972 renders: budget
+//  25 cells x 2 themes x ONE height x 18 boundary widths = 900 renders: budget
 //  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
-//  declared HEIGHTS make it 2916 renders (35.5 min), the number that decided
+//  declared HEIGHTS make it 2700 renders (32.9 min), the number that decided
 //  the default loop (HEIGHT_REASONS[800]). The width numeral here is
 //  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
 //  boundary widths"), not the 15 that this file's residue prose still repeats —
@@ -343,8 +343,6 @@ export const CELLS = [
   { name: "tokens-member", scen: "tokens-member", hash: "#settings/tokens", view: "view-tokens", sentinel: "#token-list .token-row" },
   { name: "members", scen: "members-populated", hash: "#settings/members", view: "view-members", sentinel: "#members-body .mem-row, #members-body .set-row" },
   { name: "members-member", scen: "members-member", hash: "#settings/members", view: "view-members", sentinel: "#members-body .mem-row, #members-body .set-row" },
-  { name: "env", scen: "env-populated", hash: "#settings/env", view: "view-env", sentinel: "#env-body .set-row" },
-  { name: "env-editor", scen: "env-editor", hash: "#settings/env", view: "view-env", sentinel: "#env-body .set-section" },
   { name: "operator", scen: "operator-console", hash: "#operator", view: "view-operator", sentinel: "#operator-body .set-section, #operator-body .op-row" },
   { name: "operator-halted", scen: "operator-halted", hash: "#operator", view: "view-operator", sentinel: "#operator-body .set-section, #operator-body .op-row" },
   { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", sentinel: ".detail-grid--instance" },
@@ -376,7 +374,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 27 cells x 2 themes x 1 height x 18 widths = 972 renders (11.9 min at the measured 0.73s/cell) to 2916 (35.5 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 18 widths = 900 renders (11.0 min at the measured 0.73s/cell) to 2700 (32.9 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -425,8 +423,8 @@ export function familyOf(scen) {
 export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 26 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
-  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 12 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 15 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
-  "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 10 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
+  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 13 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 15 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
+  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 8 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
@@ -524,8 +522,11 @@ export const RESIDUE_FAMILY_REASONS = {
 // cch-w29-bl-deploy-rail-live-site-open-still-nowrap moved it by ONE:
 // `site-deploy-rail-live` — the first fixture in this harness to render
 // `.deploy-rail-live`, the deploy rail's OTHER footer, so the first that can
-// measure the site URL inside it at any width — is the 120th scenario and the
-// 94th residue entry. Both halves refused first, by name: the sweep exited 2
+// measure the site URL inside it at any width — is the 117th scenario and the
+// 92nd residue entry (it landed as the 120th/94th; cch-w53-bl's env-var Option A
+// then deleted three scenarios and two residue entries beneath it, which is why
+// a chronicle ordinal is only ever a landing SLOT and the ceiling arm re-reads
+// the census). Both halves refused first, by name: the sweep exited 2
 // with `UNLISTED scenario "site-deploy-rail-live" (family hash:#site)` and
 // smoke on `CENSUS: 1 committed scenario(s) have NO expectation`. The numbers
 // here were RE-READ from `scenarioReport` after the entry landed, never carried
@@ -536,8 +537,11 @@ export const RESIDUE_FAMILY_REASONS = {
 // cch-w23-bl-cruel-identity-own-scenario moved it by ONE:
 // `account-modal-cruel-identity` — the 158-character email local part that used
 // to ride `account-modal-revoke` because THIS LITERAL was one of the four
-// censuses the wave-23 slice was fenced out of — is the 121st scenario and the
-// 95th residue entry. That fence is the whole reason the row existed: the
+// censuses the wave-23 slice was fenced out of — is the 118th scenario and the
+// 94th residue entry (it landed as the 121st/95th; cch-w53-bl's env-var Option A
+// then deleted three scenarios and one net residue entry beneath it, which is
+// why a chronicle ordinal is only ever a landing SLOT and the ceiling arm
+// re-reads the census). That fence is the whole reason the row existed: the
 // refusal below is cheap to pay and was instead paid by hiding a cruel identity
 // inside a scenario named for a click oracle. RESIDUE, not a cell, for the
 // family's standing reason (the account modal has no route of its own) and for
@@ -555,7 +559,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 121 / 27 / 26 / 95 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 118 / 25 / 24 / 94 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
@@ -632,7 +636,7 @@ export const SCENARIO_RESIDUE = {
   "overview-attention": "hash:#overview",
   "overview-never-reported": "hash:#overview",
   "overview-member-empty-fleet": "hash:#overview",
-  // hash:#site — 12
+  // hash:#site — 13
   "deploy-detail-cruel": "hash:#site",
   "promote-failure": "hash:#site",
   "promote-in-flight": "hash:#site",
@@ -645,12 +649,17 @@ export const SCENARIO_RESIDUE = {
   "site-binding-unknown": "hash:#site",
   "site-binding-mismatch": "hash:#site",
   "site-member": "hash:#site",
-  // hash:#settings — 10
+  // cch-w53-bl env-var Option A (ruled 2026-09-02): `env-editor` is the SITE
+  // env-blob editor (E-03), a different feature from the deleted team env-var
+  // page. Its cell drove it at `#settings/env` — the route that no longer
+  // exists — so the cell went with the page and the scenario lands here, in the
+  // family its own deepLink (`#site/<id>`) has always named. Its geometry is the
+  // .detail-grid the `rollback` and `states` cells already walk at all 18 widths.
+  "env-editor": "hash:#site",
+  // hash:#settings — 8
   "members-admin-actor": "hash:#settings",
   "members-peer-owner": "hash:#settings",
   "members-cruel-content": "hash:#settings",
-  "env-write-once-409": "hash:#settings",
-  "env-member": "hash:#settings",
   "tokens-empty": "hash:#settings",
   "tokens-revoke": "hash:#settings",
   "tokens-reveal": "hash:#settings",
@@ -1889,7 +1898,7 @@ async function legRender(rep) {
     const total = cells.length * themes.length * heights.length * widths.length;
     out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${heights.length} height${heights.length > 1 ? "s" : ""} [${heights.join(",")}] x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
     if (!heightFilter) {
-      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 27x2x1x18 = 972 renders (11.9 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2916 (35.5 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x18 = 900 renders (11.0 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2700 (32.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
     const bgSeen = new Map();

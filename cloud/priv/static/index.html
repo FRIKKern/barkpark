@@ -209,7 +209,6 @@
             <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
             <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
             <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
-            <a href="#settings/env" class="nav-link nav-sub" data-view="env">Environment variables</a>
           </details>
         </div>
 
@@ -469,22 +468,6 @@
           </header>
 
           <div id="members-body" class="fleet-body" aria-live="polite"></div>
-        </section>
-
-        <!-- ---------- ENVIRONMENT VARIABLES (G-06 — team env-vars, row model) ---------- -->
-        <section class="view" id="view-env" hidden>
-          <header class="view-head">
-            <div>
-              <h1>Environment variables</h1>
-              <!-- cch-w53-s1: this header renders BEFORE app.js paints and survives every
-                   panel error state, so it was a second, independent custody claim. It
-                   promised delivery to every instance; nothing on any instance consumes
-                   these values, so it now states storage only. -->
-              <p class="dim">Team-wide values, stored encrypted. They are not delivered to any instance yet — nothing running or newly provisioned reads them. Keys are visible; values are never shown again.</p>
-            </div>
-          </header>
-
-          <div id="env-body" aria-live="polite"></div>
         </section>
 
         <!-- ---------- OPERATOR CONSOLE (GR39 — platform operators only) ----------
