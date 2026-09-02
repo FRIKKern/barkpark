@@ -2131,7 +2131,14 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
   describe "stale — unknown function names" do
     test "unknown function leaves v/t untouched and sets stale" do
       out = run(%{"A1" => %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n"}})
-      assert out["A1"] == %{"f" => "NPV(0.1,5)", "v" => 42, "t" => "n", "stale" => true}
+
+      assert out["A1"] == %{
+               "f" => "NPV(0.1,5)",
+               "v" => 42,
+               "t" => "n",
+               "stale" => true,
+               "stale_fn" => "NPV"
+             }
     end
 
     test "unknown function nested inside a known one is still stale" do
@@ -2161,20 +2168,125 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert out["B1"]["v"] == 84
     end
 
-    test "a stale cell with no cached value reads as blank downstream" do
+    # INVERTED by the unsupported-function ruling (2026-09-02). This used to
+    # assert the old posture — A1 kept NO value and B1 read it as blank, so a
+    # formula the engine could not evaluate silently became a 1. With nothing
+    # cached there is nothing honest to show: A1 is #NAME? and B1 propagates it.
+    test "a stale cell with no cached value is #NAME?, and dependents propagate" do
       out =
         run(%{
           "A1" => %{"f" => "NPV(0.1,5)"},
           "B1" => %{"f" => "A1+1"}
         })
 
-      assert out["B1"]["v"] == 1
-      refute Map.has_key?(out["A1"], "v")
+      assert out["A1"]["v"] == "#NAME?"
+      assert out["A1"]["t"] == "e"
+      assert out["B1"]["v"] == "#NAME?"
     end
 
     test "an invalid formula is decisive: #REF! lands and stale clears" do
       out = run(%{"A1" => %{"f" => "1+", "v" => 5, "stale" => true}})
       assert out["A1"] == %{"f" => "1+", "v" => "#REF!", "t" => "e"}
+    end
+  end
+
+  # ── #NAME? — the two arms of an unsupported function name ───────────────────
+  #
+  # An unknown function is NOT one case but two, and the engine must tell them
+  # apart (main's ruling 2026-09-02): with NO cached value there is nothing
+  # honest to render, so the cell becomes the error #NAME?; with an imported
+  # cached value (xlsx — Excel really computed that number) the value stays and
+  # the cell is marked LOUD instead. Import fidelity beats purity; the loud
+  # style is the honesty.
+
+  describe "#NAME? — an unknown function with nothing cached" do
+    test "a typed unknown function becomes #NAME?" do
+      out = run(%{"A1" => %{"f" => "FOO(1)"}})
+      assert out["A1"] == %{"f" => "FOO(1)", "v" => "#NAME?", "t" => "e"}
+    end
+
+    test "an unknown name nested inside a known one is #NAME? too" do
+      out = run(%{"A1" => %{"f" => "SUM(FOO(1),2)"}})
+      assert out["A1"]["v"] == "#NAME?"
+      assert out["A1"]["t"] == "e"
+    end
+
+    test "a formula edited from a known name to an unknown one drops its value" do
+      out = run(%{"A1" => %{"f" => "FOO(1)", "v" => "", "t" => "s"}})
+      assert out["A1"]["v"] == "#NAME?"
+      assert out["A1"]["t"] == "e"
+      refute Map.has_key?(out["A1"], "stale")
+    end
+
+    test "#NAME? is in the engine's error vocabulary" do
+      assert "#NAME?" in Engine.error_values()
+    end
+
+    test "dependents propagate #NAME? like any other error" do
+      out =
+        run(%{
+          "A1" => %{"f" => "FOO(1)"},
+          "B1" => %{"f" => "A1+1"},
+          "C1" => %{"f" => "SUM(A1:B1)"}
+        })
+
+      assert out["B1"] == %{"f" => "A1+1", "v" => "#NAME?", "t" => "e"}
+      assert out["C1"]["v"] == "#NAME?"
+    end
+
+    test "a known-good recompute clears BOTH the stale flag and the fn name" do
+      out = run(%{"A1" => %{"f" => "1+1", "v" => 99, "stale" => true, "stale_fn" => "FOO"}})
+      assert out["A1"] == %{"f" => "1+1", "v" => 2, "t" => "n"}
+    end
+
+    test "#NAME? crosses tabs like any other error" do
+      out =
+        %{
+          "tabs" => [
+            %{"name" => "One", "cells" => %{"A1" => %{"f" => "FOO(1)"}}},
+            %{"name" => "Two", "cells" => %{"A1" => %{"f" => "One!A1+1"}}}
+          ]
+        }
+        |> Engine.recompute()
+
+      assert get_in(out, ["tabs", Access.at(0), "cells", "A1", "v"]) == "#NAME?"
+      assert get_in(out, ["tabs", Access.at(1), "cells", "A1", "v"]) == "#NAME?"
+    end
+  end
+
+  describe "#NAME? — an imported cached value is kept, loudly" do
+    test "a cached value survives and names the function it could not evaluate" do
+      out = run(%{"A1" => %{"f" => "FOO(1)", "v" => 42, "t" => "n"}})
+
+      assert out["A1"] == %{
+               "f" => "FOO(1)",
+               "v" => 42,
+               "t" => "n",
+               "stale" => true,
+               "stale_fn" => "FOO"
+             }
+    end
+
+    test "the named function is the FIRST unsupported one, in formula order" do
+      out = run(%{"A1" => %{"f" => "FOO(BAR(1))", "v" => 7}})
+      assert out["A1"]["stale_fn"] == "FOO"
+    end
+
+    test "a nested unknown under a known name is still named" do
+      out = run(%{"A1" => %{"f" => "SUM(NPV(0.1,5),2)", "v" => 9}})
+      assert out["A1"]["stale_fn"] == "NPV"
+    end
+
+    test "dependents of a loud-stale cell still read the cached value" do
+      out =
+        run(%{
+          "A1" => %{"f" => "FOO(1)", "v" => 42},
+          "B1" => %{"f" => "A1*2"}
+        })
+
+      assert out["A1"]["v"] == 42
+      assert out["A1"]["stale"] == true
+      assert out["B1"]["v"] == 84
     end
   end
 

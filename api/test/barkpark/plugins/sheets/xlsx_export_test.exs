@@ -83,6 +83,31 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       assert c1["v"] == 30
     end
 
+    # #NAME? is an error VALUE like every other `t: "e"` code — a LITERAL error
+    # cell is written verbatim, so it leaves Barkpark as the error string rather
+    # than as a silent blank. (A FORMULA cell's string cached value is the
+    # pre-existing documented drop — an xlsx formula cell carries a numeric <v>
+    # only — and #NAME? is not special there; see the "documented drops" suite
+    # in xlsx_roundtrip_test.)
+    test "a literal #NAME? cell survives the export -> import round trip verbatim" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Err",
+            "cells" => %{
+              "A1" => %{"v" => "Label"},
+              "B1" => %{"v" => "#NAME?", "t" => "e"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      b1 = get_in(import!(binary), ["tabs", Access.at(0), "cells", "B1"])
+
+      assert b1["v"] == "#NAME?"
+    end
+
     test "date cell encodes without error and the value survives as a date" do
       content = %{
         "tabs" => [

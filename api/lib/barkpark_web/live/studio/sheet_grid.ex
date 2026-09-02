@@ -3594,6 +3594,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <td
               id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell, @matches)}
+              title={Cells.cell_title(cell)}
               aria-selected={Cells.aria_selected(@sel, c, r)}
               aria-colindex={c + 1}
               data-ref={ref}

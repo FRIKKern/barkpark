@@ -216,8 +216,16 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
 
       recomputed = Engine.recompute(content)
 
+      # The kept-import arm of the unsupported-function ruling: the value Excel
+      # computed keeps rendering, and `stale_fn` names what could not be
+      # re-evaluated so the surfaces can say so out loud.
       assert get_in(recomputed, ["tabs", Access.at(0), "cells", "A1"]) ==
-               %{"f" => "NPV(0.1,A2:A9)", "v" => 123.45, "stale" => true}
+               %{
+                 "f" => "NPV(0.1,A2:A9)",
+                 "v" => 123.45,
+                 "stale" => true,
+                 "stale_fn" => "NPV"
+               }
     end
 
     test "a merge reaching past the data clips to the occupied bounds" do
@@ -600,9 +608,11 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       imported = binary |> import!() |> Engine.recompute()
 
       # The documented STRING-CACHED-VALUE drop: an xlsx formula cell only
-      # carries a NUMERIC cached <v>, so "cached" is not exported; on reimport
-      # the unknown-fn formula goes stale with no value left to preserve.
-      assert cell(imported, 0, "A1") == %{"f" => "FOO(1)", "stale" => true}
+      # carries a NUMERIC cached <v>, so "cached" is not exported. On reimport
+      # the unknown-fn formula has NO value left to preserve — and since the
+      # unsupported-function ruling (2026-09-02) a cell with nothing cached is
+      # not a quiet stale dot but the error itself: #NAME?.
+      assert cell(imported, 0, "A1") == %{"f" => "FOO(1)", "v" => "#NAME?", "t" => "e"}
     end
 
     test "an auto-fit row height (no customHeight) is dropped on import" do

@@ -308,7 +308,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   ## Errors, cycles, stale
 
-  Seven error values, written with `"t" => "e"`:
+  Eight error values, written with `"t" => "e"`:
 
     * `#CYCLE!` — every formula on a reference cycle, and every formula that
       (transitively) depends on one. Dependencies are collected from the full
@@ -327,16 +327,30 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     * `#SPILL!` — a dynamic-array formula whose spill rectangle is obstructed
       by existing content (or would fall off the grid); nothing but the anchor
       is written.
+    * `#NAME?` — a formula naming a function this engine does not implement,
+      in a cell with NOTHING cached to fall back on (see the stale rule below).
 
   Errors propagate through references: a formula reading a cell whose value
   is an error yields that error. A literal cell whose `"v"` is one of the
   six error strings (or whose `"t"` is `"e"`) propagates the same way.
 
-  A call to an UNKNOWN function never errors: the cell keeps its existing
-  `"v"`/`"t"` untouched and gains `"stale" => true` (xlsx-import
-  compatibility — the imported cached value keeps rendering). Dependents
-  read that cached value. Any decisive recompute — a computed value or a
-  computed error — clears the flag.
+  A call to an UNKNOWN function splits on whether the cell has anything
+  cached (main's ruling 2026-09-02 — import fidelity beats purity, and the
+  loud style is the honesty):
+
+    * NO cached `"v"` (a formula typed in the grid, or one edited to a name
+      the engine lacks) — there is nothing honest to show, so the cell
+      becomes `#NAME?` (`"t" => "e"`) and dependents propagate it like any
+      other error. A plausible-looking blank behind a quiet dot was the bug.
+    * A cached `"v"` (an xlsx import — Excel really computed that number)
+      keeps rendering: `"v"`/`"t"` stay untouched and the cell gains
+      `"stale" => true` PLUS `"stale_fn" => "FOO"`, the first unsupported
+      name in formula order. Dependents read that cached value. Surfaces
+      turn the pair into an ERROR-STYLED cell titled `not evaluated: FOO is
+      not supported` — never a quiet dot.
+
+  Any decisive recompute — a computed value or a computed error — clears both
+  flags.
 
   ## Values
 
@@ -477,7 +491,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 TRANSPOSE CONCAT SUBTOTAL HSTACK VSTACK)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?)
 
   # 2^1024 — the first magnitude past the float64 range (max double < 2^1024).
   # An integer this big or bigger cannot survive `/`/`*` coercion to float
@@ -1061,7 +1075,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   grid, PortableDoc's html render) read THIS single list instead of hand-
   copying it, so a new code (e.g. `#NUM!`) lights up every surface at once.
   """
-  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,spill,sheet-err,error_values
+  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,#NAME?,name-error,unknown-function,stale_fn,spill,sheet-err,error_values
   @spec error_values() :: [String.t()]
   def error_values, do: @error_values
 
@@ -1252,7 +1266,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {in_deg, out_edges} = build_graph_unified(node_asts, node_set)
 
       computed0 =
-        for {key, {_ti, _addr, :invalid}} <- parsed, into: %{}, do: {key, err(:ref)}
+        Enum.reduce(parsed, %{}, fn {key, {_ti, _addr, result}}, acc ->
+          case parse_error(result, Map.get(values, key)) do
+            nil -> acc
+            e -> Map.put(acc, key, e)
+          end
+        end)
 
       base = %{
         unified: true,
@@ -1431,9 +1450,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       # No spill this tab, ever — the legacy byte-identical unified write.
       new =
         Enum.reduce(entries, cells, fn {key, {_ti, addr, result}}, acc ->
-          case result do
-            :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
-            _decisive -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+          if kept_stale?(result, computed, key) do
+            Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+          else
+            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
           end
         end)
 
@@ -1445,9 +1465,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         entries
         |> Enum.reduce(strip_engine_spills(cells), fn {key, {_ti, addr, result}}, acc ->
           cond do
-            MapSet.member?(anchor_addrs, addr) -> acc
-            result == :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
-            true -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+            MapSet.member?(anchor_addrs, addr) ->
+              acc
+
+            kept_stale?(result, computed, key) ->
+              Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+
+            true ->
+              Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
           end
         end)
 
@@ -1491,7 +1516,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {in_deg, out_edges} = build_graph(node_asts, node_set)
 
       computed0 =
-        for {pos, {_addr, :invalid}} <- parsed, into: %{}, do: {pos, err(:ref)}
+        Enum.reduce(parsed, %{}, fn {pos, {_addr, result}}, acc ->
+          case parse_error(result, Map.get(values, pos)) do
+            nil -> acc
+            e -> Map.put(acc, pos, e)
+          end
+        end)
 
       # `formulas` carries every formula-cell coordinate (valid, invalid or
       # stale parse alike) — ISFORMULA's single read.
@@ -1665,12 +1695,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       new_cells
     else
       Enum.reduce(parsed, cells, fn {pos, {addr, result}}, acc ->
-        case result do
-          :stale ->
-            Map.update!(acc, addr, &Map.put(&1, "stale", true))
-
-          _decisive ->
-            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+        if kept_stale?(result, computed, pos) do
+          Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+        else
+          Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
         end
       end)
     end
@@ -1812,9 +1840,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       parsed
       |> Enum.reduce(strip_engine_spills(cells), fn {pos, {addr, result}}, acc ->
         cond do
-          MapSet.member?(anchor_addrs, addr) -> acc
-          result == :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
-          true -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+          MapSet.member?(anchor_addrs, addr) ->
+            acc
+
+          kept_stale?(result, computed, pos) ->
+            Map.update!(acc, addr, &mark_unsupported(&1, elem(result, 1)))
+
+          true ->
+            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
         end
       end)
 
@@ -1887,6 +1920,38 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     cell |> write_value(err(:spill)) |> Map.delete("spill") |> Map.delete("spill_dims")
   end
 
+  # A formula the engine cannot evaluate seeds the graph with its error BEFORE
+  # the topo pass, so every dependent propagates it like a computed error
+  # instead of reading around it:
+  #
+  #   :invalid                       → #REF!  (unparseable / unknown tab)
+  #   {:stale, fn} and nothing cached → #NAME? (nothing honest to render)
+  #   {:stale, fn} over a cached value → nil — the imported value stays
+  #     authoritative, dependents keep reading it, and `mark_unsupported/2`
+  #     makes the cell itself loud at write-back.
+  #
+  # `literal` is the cell's own pre-recompute value (`literal_value/1`);
+  # `:blank` is exactly "no `v`, or an empty one".
+  defp parse_error(:invalid, _literal), do: err(:ref)
+  defp parse_error({:stale, _fn}, :blank), do: err(:name)
+  defp parse_error(_result, _literal), do: nil
+
+  # True for the one result the write-back must NOT write a value for: an
+  # unsupported function over a cell that kept its cached value (so nothing was
+  # seeded into `computed`). A `{:stale, _}` cell WITH a seeded #NAME? falls
+  # through to the ordinary decisive write, which is what makes it an error
+  # cell.
+  defp kept_stale?({:stale, _fn}, computed, key), do: not is_map_key(computed, key)
+  defp kept_stale?(_result, _computed, _key), do: false
+
+  # The import-fidelity arm: keep `v`/`t` exactly as Excel computed them, but
+  # say so LOUDLY — `stale => true` plus the name the engine could not
+  # evaluate. Surfaces turn the pair into an error-styled cell titled
+  # "not evaluated: FOO is not supported" (never a quiet dot).
+  defp mark_unsupported(cell, fname) do
+    cell |> Map.put("stale", true) |> Map.put("stale_fn", fname)
+  end
+
   defp write_value(cell, value) do
     {v, t} = output(value)
 
@@ -1894,6 +1959,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     |> Map.put("v", v)
     |> Map.put("t", t)
     |> Map.delete("stale")
+    |> Map.delete("stale_fn")
   end
 
   # A top-level array result implicitly intersects to its top-left element.
@@ -1973,7 +2039,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # ── parsing ─────────────────────────────────────────────────────────────────
   #
-  # parse_formula/1 → {:ok, ast, points, ranges} | :stale | :invalid
+  # parse_formula/1 → {:ok, ast, points, ranges} | {:stale, fname} | :invalid
+  #
+  # `{:stale, fname}` carries the FIRST unsupported function name in formula
+  # order — the write-back layer needs it to name the function in the cell's
+  # "not evaluated" title, and the seeding layer needs the tag to tell an
+  # unsupported call apart from an unparseable one.
 
   # The fast path parses with an EMPTY name index: a formula with no `!` is
   # unchanged, and any `!` qualifier is unresolvable → :invalid → #REF! (the
@@ -1993,10 +2064,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
          {:ok, ast} <- resolve_tabs(ast0, name_index) do
       {points, ranges, fns} = walk(ast, {[], [], []})
 
-      if Enum.all?(fns, &(&1 in @functions)) do
-        {:ok, ast, points, ranges}
-      else
-        :stale
+      # `walk` prepends outermost-first, so reversing reads the formula
+      # left-to-right: `FOO(BAR(1))` names FOO, the one a human typed.
+      case Enum.find(Enum.reverse(fns), &(&1 not in @functions)) do
+        nil -> {:ok, ast, points, ranges}
+        unsupported -> {:stale, unsupported}
       end
     else
       _ -> :invalid
@@ -6366,4 +6438,5 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp err(:na), do: {:error, "#N/A"}
   defp err(:num), do: {:error, "#NUM!"}
   defp err(:spill), do: {:error, "#SPILL!"}
+  defp err(:name), do: {:error, "#NAME?"}
 end
