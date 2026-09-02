@@ -21,6 +21,14 @@
 # rather than by benchmark. This script is the benchmark anyway, because a
 # construction argument nobody can re-run is an anecdote.
 #
+# THE TRAP, PAID FOR ONCE (run 33691239048, three of four dispatchers red on
+# `PR base <sha> and HEAD share NO common ancestor`). DEPTH and FILTER are
+# ORTHOGONAL axes on actions/checkout. `filter: blob:none` does NOT "govern"
+# depth, and dropping `fetch-depth: 0` next to it does not leave a full-depth
+# blobless clone — it leaves actions/checkout's DEFAULT depth of 1, and a
+# depth-1 clone has no merge base whether or not it is blobless. The dispatcher
+# checkouts must carry BOTH lines. Selftest case 4 below is that lesson, frozen.
+#
 # WHAT IT REFUSES TO CALL A PASS:
 #   * any sampled PR whose changed-path set is EMPTY on both sides — two empty
 #     sets match, and a comparison of nothing against nothing is vacuous (exit 3);
@@ -167,6 +175,8 @@ live() {
 #   1. a real changed-path set is IDENTICAL across both clone shapes  -> exit 0
 #   2. an empty-on-both-sides sample is REFUSED as vacuous            -> exit 3
 #   3. an injected divergence is CAUGHT                               -> exit 1
+#   4. a DEPTH-1 blobless clone still has NO merge base — depth and filter are
+#      orthogonal, which is the mistake this change made once and paid for.
 # Case 3 is what keeps case 1 honest: a comparator that cannot red is not a proof.
 selftest() {
   local tmp; tmp="$(mktemp -d)"; TMPD="$tmp"
@@ -202,22 +212,33 @@ selftest() {
     else echo "  FAIL $3 (exit $1, expected $2)"; failn=$((failn+1)); fi
   }
 
-  echo "selftest 1/3 — identical sets across clone shapes (expect PASS, exit 0)"
+  echo "selftest 1/4 — identical sets across clone shapes (expect PASS, exit 0)"
   printf 'case1\t%s\t%s\n' "$base" "$head_sha" | compare_triples "$tmp/full" "$tmp/bn" | sed 's/^/    /'
   printf 'case1\t%s\t%s\n' "$base" "$head_sha" | compare_triples "$tmp/full" "$tmp/bn" >/dev/null; rc=$?
   check "$rc" 0 "identical path sets"
 
-  echo "selftest 2/3 — empty-on-both-sides is REFUSED as vacuous (expect exit 3)"
+  echo "selftest 2/4 — empty-on-both-sides is REFUSED as vacuous (expect exit 3)"
   printf 'case2\t%s\t%s\n' "$head_sha" "$head_sha" | compare_triples "$tmp/full" "$tmp/bn" >/dev/null; rc=$?
   check "$rc" 3 "vacuity guard fires on an empty set"
 
-  echo "selftest 3/3 — an injected divergence is CAUGHT (expect exit 1)"
+  echo "selftest 3/4 — an injected divergence is CAUGHT (expect exit 1)"
   printf 'case3\t%s\t%s\n' "$base" "$head_sha" | PROOF_INJECT_MISMATCH=1 compare_triples "$tmp/full" "$tmp/bn" >/dev/null; rc=$?
   check "$rc" 1 "mismatch detector is not blind"
 
+  # CASE 4 — DEPTH AND FILTER ARE ORTHOGONAL, and this is the one that cost a
+  # red CI run. A blobless clone at DEPTH 1 is still shallow, and shallow has no
+  # merge base. This asserts the failure exists, so nobody "simplifies" the
+  # dispatchers by dropping `fetch-depth: 0` on the theory that the filter
+  # covers it.
+  echo "selftest 4/4 — a DEPTH-1 blobless clone has NO merge base (the trap, frozen)"
+  git clone -q --depth 1 --filter=blob:none "file://$src" "$tmp/shallow" 2>/dev/null
+  git -C "$tmp/shallow" fetch --no-tags -q --depth 1 origin "$head_sha" "$base" 2>/dev/null
+  if git -C "$tmp/shallow" merge-base "$base" "$head_sha" >/dev/null 2>&1; then rc=1; else rc=0; fi
+  check "$rc" 0 "depth 1 + blob:none still cannot resolve a merge base"
+
   echo "----"
   if [ "$failn" -gt 0 ]; then echo "SELFTEST FAILED: $failn of $((pass+failn)) cases."; return 1; fi
-  echo "SELFTEST PASSED: $pass/$pass cases (identical / vacuity refusal / mismatch caught)."
+  echo "SELFTEST PASSED: $pass/$pass cases (identical / vacuity refusal / mismatch caught / depth-vs-filter)."
   return 0
 }
 
