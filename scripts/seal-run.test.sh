@@ -151,7 +151,45 @@ OUT="$(FAKE_EXIT=2 bash "$SEAL" --repo "$CLEAN" 2>&1)"; CODE=$?
 expect_code "clean checkout, predicate exit 2 (infra fault)" 2 "$CODE"
 
 # ---------------------------------------------------------------------------
-section "refusal 3 — a shallow --repo"
+# THE PREDICATE'S OWN REFUSAL (task-cfa85992568a4bdc). seal-predicate.mjs exits 3
+# when it throws a `Refusal` — EMPTY-ROSTER, NO-SUCCESSOR, … — i.e. when it scored
+# NOTHING. The tree here is perfectly quotable; there is simply no reading. Before
+# this arm existed the runner's `*)` fell through to "outside its documented 0/1/2
+# triad" and re-exited 2, laundering the predicate's honest refusal back into an
+# INFRA FAULT. The token the real predicate prints on that path carries `reason=`
+# and NO `head=` / `b-unavailable=` field, so the stand-in below reproduces exactly
+# that shape rather than the SEAL-shaped one.
+section "the predicate refused — exit 3 is forwarded as a refusal, never as a verdict"
+
+REFPRED="$TMP/refuse-predicate.mjs"
+cat >"$REFPRED" <<'EOF'
+const argv = process.argv.slice(2);
+const i = argv.indexOf('--repo');
+const repo = i === -1 ? process.cwd() : argv[i + 1];
+console.log('=== SEAL PREDICATE — epic fixture ===');
+console.log('REFUSED at 2026-09-02T00:00:00Z, roster: the roster is empty');
+console.log('VERDICT: NO SEAL — REFUSED');
+console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=EMPTY-ROSTER a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=fixture repo=${repo}`);
+process.exitCode = 3;
+EOF
+REFUSER="$TMP/refuser"
+mkdir -p "$REFUSER"
+cp -R "$CLEAN/." "$REFUSER/"
+cp "$REFPRED" "$REFUSER/cloud/priv/static/__preview__/seal-predicate.mjs"
+gitq "$REFUSER" add -A
+gitq "$REFUSER" commit -qm "the predicate refuses here"
+gitq "$REFUSER" update-ref refs/remotes/origin/main HEAD
+
+run_seal "$REFUSER"
+expect_code  "the predicate refused (its exit 3) -> the runner exits 3, not 2" 3 "$CODE"
+expect_has   "the runner says REFUSED and says nothing was measured" "seal-run: REFUSED — nothing was measured (predicate exit 3)"
+expect_has   "…and echoes the predicate's OWN refusal token verbatim" "EMPTY-ROSTER"
+expect_lacks "…it is NOT reported as a vouched NO SEAL" "VOUCHED — NO SEAL"
+expect_lacks "…and NOT as an infra fault" "INFRA FAULT"
+expect_lacks "…and the unmapped-exit arm did not fire" "outside its documented"
+
+# ---------------------------------------------------------------------------
+section "refusal 8 — a shallow --repo"
 
 if [ ! -d "$SHALLOW/.git" ]; then
   bad "the shallow fixture could not be built (git clone --depth 1 file:// failed)"
@@ -160,7 +198,7 @@ else
     && ok "the shallow fixture really is shallow" \
     || bad "the shallow fixture is not shallow — the probe below would be vacuous"
   run_seal "$SHALLOW"
-  expect_code "shallow checkout" 3 "$CODE"
+  expect_code "shallow checkout" 8 "$CODE"
   expect_has  "it names the condition" "is a SHALLOW repository"
   expect_has  "it names the remedy"    "fetch --unshallow"
   expect_lacks "the predicate was not executed at all" "SEAL PREDICATE — fixture stand-in"
@@ -303,10 +341,13 @@ C_SHALLOW=$(table_code "$SHALLOW" FAKE_EXIT=0)
 C_DRIFT=$(table_code "$DRIFT"  FAKE_EXIT=0)
 C_STALE=$(table_code "$STALE"  FAKE_EXIT=0)
 C_BUNAV=$(table_code "$CLEAN"  FAKE_BUNAVAIL=6/6)
-echo "     SEAL=$C_SEAL  NO-SEAL=$C_NOSEAL  shallow=$C_SHALLOW  drift=$C_DRIFT  stale-head=$C_STALE  b-unavailable=$C_BUNAV"
-UNIQ="$(printf '%s\n' "$C_SEAL" "$C_NOSEAL" "$C_SHALLOW" "$C_DRIFT" "$C_STALE" "$C_BUNAV" | sort -u | wc -l | tr -d ' ')"
-[ "$UNIQ" = "6" ] && ok "all six outcomes carry distinct exit codes" || bad "outcomes collide: only $UNIQ distinct exit codes"
-for c in "$C_SHALLOW" "$C_DRIFT" "$C_STALE" "$C_BUNAV"; do
+# The seventh outcome is the PREDICATE's own refusal, which reaches the table
+# through a fixture whose predicate exits 3 rather than through a FAKE_ env var.
+C_PREFUSE=$(table_code "$REFUSER" FAKE_EXIT=0)
+echo "     SEAL=$C_SEAL  NO-SEAL=$C_NOSEAL  pred-refused=$C_PREFUSE  shallow=$C_SHALLOW  drift=$C_DRIFT  stale-head=$C_STALE  b-unavailable=$C_BUNAV"
+UNIQ="$(printf '%s\n' "$C_SEAL" "$C_NOSEAL" "$C_PREFUSE" "$C_SHALLOW" "$C_DRIFT" "$C_STALE" "$C_BUNAV" | sort -u | wc -l | tr -d ' ')"
+[ "$UNIQ" = "7" ] && ok "all seven outcomes carry distinct exit codes" || bad "outcomes collide: only $UNIQ distinct exit codes"
+for c in "$C_PREFUSE" "$C_SHALLOW" "$C_DRIFT" "$C_STALE" "$C_BUNAV"; do
   [ "$c" != "$C_NOSEAL" ] || bad "a refusal shares the NO-SEAL exit code ($c)"
 done
 ok "no refusal shares the NO-SEAL exit code"
@@ -316,6 +357,32 @@ for repo_arg in "$SHALLOW" "$DRIFT" "$STALE"; do
   expect_has   "refusal over $(basename "$repo_arg") says no verdict was taken" "no seal verdict was taken"
   expect_lacks "refusal over $(basename "$repo_arg") reads as no finding" "NO-SEAL a=FAIL"
 done
+
+# THE HEADER TABLE IS PART OF THE CONTRACT. `deploy-reliability-exit-run.test.sh`
+# greps these very lines to prove the two runners share a taxonomy, and an
+# operator reads them before reading the code. A number that moved in the switch
+# and not in the table is the same defect this row was filed for, one layer up.
+for want in "#   3  REFUSED — the PREDICATE refused" "#   8  REFUSED — shallow repository"; do
+  if grep -qF "$want" "$SEAL"; then
+    ok "the header table documents '${want#\#   }'"
+  else
+    bad "the header table has drifted: no line matching '$want'"
+  fi
+done
+if grep -qF "3  SHALLOW REPOSITORY" "$SEAL"; then
+  bad "the header still calls 3 the SHALLOW refusal — it collides with the predicate's own exit 3"
+else
+  ok "no stale '3 SHALLOW REPOSITORY' line survives in the header"
+fi
+# The forwarding switch's OLD arm, matched literally. The needle stops before the
+# variable on purpose: `0|1|2) exit` occurs exactly once in the runner, and a
+# needle carrying a `$` would have to be quoted in a way shellcheck reads as a
+# mistake for no extra discrimination.
+if grep -qF '0|1|2) exit' "$SEAL"; then
+  bad "the forwarding switch still stops at 0|1|2 — a predicate refusal would be re-coded to 2"
+else
+  ok "the forwarding switch no longer stops at 0|1|2"
+fi
 
 # ---------------------------------------------------------------------------
 # THE MUTATION PROOFS. Each guard is neutralised by its `# MUT:` anchor and the
@@ -342,7 +409,7 @@ mutate_run() { # <anchor> <repo> [env…] -> sets OUT, CODE
 }
 
 mutate_run G-SHALLOW "$SHALLOW" FAKE_EXIT=0
-[ "$CODE" != "3" ] && ok "MUT:G-SHALLOW disabled -> the shallow refusal is gone (exit $CODE)" \
+[ "$CODE" != "8" ] && ok "MUT:G-SHALLOW disabled -> the shallow refusal is gone (exit $CODE)" \
                    || bad "MUT:G-SHALLOW disabled but the shallow refusal still fired — the proof is vacuous"
 
 mutate_run G-DRIFT "$DRIFT" FAKE_EXIT=0

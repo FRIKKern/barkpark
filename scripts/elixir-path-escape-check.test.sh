@@ -8,6 +8,15 @@
 #
 # The cases that matter are the ones that prove the ratchet can FAIL:
 #   * an uncovered repo-root read must red                  (case 3)
+#   * each CLOSED blind shape must red, and its door must be
+#     load-bearing under mutation      (cases 3b-3f, and 3g/3h/3i/3j for the
+#                                       four shapes the RESIDUE note last
+#                                       listed as STILL BLIND: concatenated
+#                                       literal, sigil literal, execution
+#                                       cwd, chained anchor)
+#   * a chained anchor must NOT red on the intermediate      (case 3j) — the
+#     one FALSE-RED in the set: a required gate that reds for the wrong
+#     reason costs more than one that misses
 #   * an uncovered read reached ONLY through the ROOT-ANCHOR
 #     idiom must red                                        (case 3b) — the
 #     newest measured false OK: `@repo_root Path.expand("../../../..",
@@ -740,6 +749,378 @@ if [ "$rc" -eq 0 ]; then
 else
   no "the multi-line fixture redded even with the opener scan disabled — case 3f proves nothing: $out"
 fi
+echo
+
+# ── case 3g: SHAPE 3 — a CONCATENATED literal is seen (tag test-rootconcat) ──
+# `Path.join(@root, "nowhere" <> "/concat.json")`. The `-root` grep stops at the
+# first closing quote, so before this door it saw `nowhere` and nothing else.
+# The fixture is built so that truncation is VISIBLE rather than silently
+# dropped by the existence filter: `nowhere` is a real directory here, so the
+# old behaviour reported a repo-root read of `nowhere` — the deep file's own
+# read never appearing at all. Both halves are asserted: the real path IS
+# named, and the truncated prefix is NOT.
+echo "case 3g: SHAPE 3 — a concatenated literal is seen, tagged test-rootconcat"
+FX_CONCAT="$TMPROOT/concat"
+make_fixture "$FX_CONCAT"
+mkdir -p "$FX_CONCAT/nowhere"
+: >"$FX_CONCAT/nowhere/concat.json"
+cat >"$FX_CONCAT/api/test/barkpark/concat_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.join(@repo_root, "nowhere" <> "/concat.json")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CONCAT" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a concatenated-literal uncovered read"
+else
+  no "PASSED with a concatenated-literal uncovered read — shape 3 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/concat.json"; then
+  ok "names the path the whole <> chain resolved to"
+else
+  no "did not name the concatenated path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/concat_test.exs"; then
+  ok "attributes the concatenated read to its file"
+else
+  no "did not attribute the concatenated read: $out"
+fi
+if has "$out" "idiom test-rootconcat: "; then
+  ok "reports test-rootconcat as its own idiom"
+else
+  no "the concatenated literal has no tag of its own: $out"
+fi
+# THE SUPPRESSION HALF: the `-root` door must NOT also report the truncated
+# prefix. Two rows for one read, one of them wrong, is the false RED this door
+# exists to remove — not a smaller version of the blindness.
+if has "$out" "UNCOVERED repo-root read: nowhere$"; then
+  no "the -root door ALSO reported the truncated prefix 'nowhere' — a false red: $out"
+else
+  ok "the truncated prefix 'nowhere' is suppressed on -root, so the site reds ONCE"
+fi
+# the door is LOAD-BEARING: disabling the `<>` grep must green the same read.
+MUT_CONCAT="$TMPROOT/mutant-no-concat.sh"
+python3 - "$SCRIPT" "$MUT_CONCAT" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if 'concats="$(grep -Eoh' in line:
+        target = i
+        break
+assert target is not None, "the shape-3 concat grep was not found — mutation would prove nothing"
+indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+lines[target] = indent + 'concats=""\n'
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_CONCAT" "$SCRIPT"; then
+  ok "the concat mutation applied (the <> grep really changed)"
+else
+  no "the concat mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CONCAT" bash "$MUT_CONCAT" 2>&1)" && rc=0 || rc=$?
+# NOT "the mutant greens": without this door the site still reds — on the
+# TRUNCATED PREFIX, which is exactly the pre-fix behaviour and exactly the
+# false red the suppression removes. The load-bearing proof is that the REAL
+# path stops being reported and the wrong one comes back.
+if has "$out" "UNCOVERED repo-root read: nowhere/concat.json"; then
+  no "the deep path was still reported with the <> grep disabled — case 3g proves nothing: $out"
+else
+  ok "without the <> grep the real path nowhere/concat.json is not reported — shape 3's door is load-bearing"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere$"; then
+  ok "…and the truncated prefix comes back, which is the pre-fix false red this door removes"
+else
+  no "the mutant reported neither path — the fixture is not exercising the -root door at all: $out"
+fi
+echo
+
+# ── case 3h: SHAPE 5 — SIGIL literals are seen (tags test-sigildir/-sigilcwd) ─
+# `~s(../x)`, `~S{…}`, `~c[…]`, `~C<…>`. Every literal grep in list_escapes
+# required a double quote, so only `~s"…"` was ever visible. Both resolution
+# bases are asserted, because the sigil form is tagged along the SAME base axis
+# as the quoted form and a fused tag could not see one base die.
+echo "case 3h: SHAPE 5 — sigil literals are seen, tagged test-sigildir/test-sigilcwd"
+FX_SIGIL="$TMPROOT/sigil"
+make_fixture "$FX_SIGIL"
+mkdir -p "$FX_SIGIL/nowhere"
+: >"$FX_SIGIL/nowhere/sigil.json"
+: >"$FX_SIGIL/nowhere/sigil2.json"
+: >"$FX_SIGIL/nowhere/sigil3.json"
+cat >"$FX_SIGIL/api/test/barkpark/sigil_test.exs" <<'EX'
+  @a Path.expand(~s(../../../nowhere/sigil.json), __DIR__)
+  @b Path.expand(~S{../../../nowhere/sigil2.json}, __DIR__)
+  @c Path.expand(~c[../../../nowhere/sigil3.json], __DIR__)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_SIGIL" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a sigil-literal uncovered read"
+else
+  no "PASSED with a sigil-literal uncovered read — shape 5 is blind: $out"
+fi
+for want in nowhere/sigil.json nowhere/sigil2.json nowhere/sigil3.json; do
+  if has "$out" "UNCOVERED repo-root read: $want"; then
+    ok "names the sigil read $want"
+  else
+    no "did not name the sigil read $want: $out"
+  fi
+done
+for tag in test-sigildir test-sigilcwd; do
+  if has "$out" "idiom $tag: "; then
+    ok "reports $tag as its own idiom"
+  else
+    no "the sigil form has no $tag tag — a fused count cannot see one base die: $out"
+  fi
+done
+# the door is LOAD-BEARING: dropping the sigil alternation must green it.
+MUT_SIGIL="$TMPROOT/mutant-no-sigil.sh"
+python3 - "$SCRIPT" "$MUT_SIGIL" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if 'lits="$(grep -Eoh' in line and '~[sScC]' in line:
+        target = i
+        break
+assert target is not None, "the shape-5 sigil alternation was not found — mutation would prove nothing"
+indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+lines[target] = indent + 'lits="$(grep -Eoh \'"\\.\\./[^"]*"\' "$REPO_ROOT/$f" || true)"\n'
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_SIGIL" "$SCRIPT"; then
+  ok "the sigil mutation applied (the literal grep really lost its sigil arms)"
+else
+  no "the sigil mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_SIGIL" bash "$MUT_SIGIL" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "without the sigil arms the same reads green — shape 5's door is load-bearing"
+else
+  no "the sigil fixture redded even with the sigil arms removed — case 3h proves nothing: $out"
+fi
+echo
+
+# ── case 3i: SHAPE 2 — EXECUTION CWD is seen (tag test-rootexec) ─────────────
+# `System.cmd(bin, [args], cd: @root)`. A separate CLASS, not a separate form:
+# the read never produces a path literal that anything resolves — the child
+# process resolves its arguments against the cwd it was handed. LIVE today at
+# api/test/barkpark/pds_door_census_test.exs and pds_elixir_census_test.exs,
+# both of which pass command AND arguments as variables, so this case proves
+# BOTH halves the way case 3f does: a literal argument is caught, and the two
+# real sites are SEEN without being wrongly resolved to a new read.
+echo "case 3i: SHAPE 2 — System.cmd(…, cd: anchor) is seen, tagged test-rootexec"
+FX_EXEC="$TMPROOT/execcwd"
+make_fixture "$FX_EXEC"
+mkdir -p "$FX_EXEC/nowhere"
+: >"$FX_EXEC/nowhere/exec.json"
+cat >"$FX_EXEC/api/test/barkpark/exec_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r do
+    System.cmd("cat", ["nowhere/exec.json"], cd: @repo_root)
+  end
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_EXEC" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on an execution-cwd uncovered read"
+else
+  no "PASSED with an execution-cwd uncovered read — shape 2 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/exec.json"; then
+  ok "names the path the child process would have read"
+else
+  no "did not name the execution-cwd path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/exec_test.exs"; then
+  ok "attributes the execution-cwd read to its file"
+else
+  no "did not attribute the execution-cwd read: $out"
+fi
+if has "$out" "idiom test-rootexec: "; then
+  ok "reports test-rootexec as its own idiom"
+else
+  no "the execution-cwd class has no tag of its own: $out"
+fi
+# the non-path arguments must NOT become reads: `"cat"` resolves to nothing on
+# disk, which is what the existence filter is for. A door that reported it
+# would red every System.cmd in the tree.
+if has "$out" "UNCOVERED repo-root read: cat"; then
+  no "the binary name 'cat' was reported as a repo-root read — the existence filter is not holding: $out"
+else
+  ok "the non-path argument 'cat' is not reported — the existence filter holds"
+fi
+# a DECLARED read through the execution-cwd form must stay green
+rm -f "$FX_EXEC/api/test/barkpark/exec_test.exs"
+cat >"$FX_EXEC/api/test/barkpark/exec_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r do
+    System.cmd("cat", ["internal/taskboard/tokens_gen.go"], cd: @repo_root)
+  end
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_EXEC" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a DECLARED read through the execution-cwd form stays green"
+else
+  no "a declared execution-cwd read redded — the door over-reports: $out"
+fi
+rm -f "$FX_EXEC/api/test/barkpark/exec_ok_test.exs"
+# sanity against the REAL tree: the live `cd:` sites the task names are seen by
+# this door's opener scan and contribute no census row (their command and args
+# are variables, not literals).
+for site in api/test/barkpark/pds_door_census_test.exs \
+  api/test/barkpark/pds_elixir_census_test.exs; do
+  if grep -qE 'cd:[[:space:]]*(@?[a-zA-Z_][a-zA-Z0-9_.]*)' "$REAL_ROOT/$site"; then
+    ok "the live execution-cwd site in $site still matches what shape 2 scans for"
+  else
+    no "the live execution-cwd site in $site no longer matches — the task's claim is stale"
+  fi
+done
+if has_line "$("$SCRIPT" --list-escapes | cut -f3 | sort -u)" "test-rootexec"; then
+  no "the real tree unexpectedly resolves an execution-cwd read — declare it or explain it here"
+else
+  ok "the real tree's cd: sites are seen but resolve to no new read (args are variables, not literals)"
+fi
+# the door is LOAD-BEARING: dropping the System.cmd arm of the opener grep
+# must green the synthetic fixture. That arm is SHARED with shape 6, so the
+# mutation removes only the alternation branch, never the whole grep.
+cat >"$FX_EXEC/api/test/barkpark/exec_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r do
+    System.cmd("cat", ["nowhere/exec.json"], cd: @repo_root)
+  end
+EX
+MUT_EXEC="$TMPROOT/mutant-no-exec.sh"
+python3 - "$SCRIPT" "$MUT_EXEC" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src).read()
+old = "|System\\.(cmd|shell)\\("
+assert text.count(old) == 1, "the shape-2 opener arm was not found exactly once — mutation would prove nothing"
+open(dst, "w").write(text.replace(old, "", 1))
+PY
+if ! cmp -s "$MUT_EXEC" "$SCRIPT"; then
+  ok "the execution-cwd mutation applied (the opener grep lost its System.cmd arm)"
+else
+  no "the execution-cwd mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_EXEC" bash "$MUT_EXEC" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "without the System.cmd arm the same read greens — shape 2's door is load-bearing"
+else
+  no "the exec fixture redded even with the System.cmd arm removed — case 3i proves nothing: $out"
+fi
+echo
+
+# ── case 3j: SHAPE 7 — the CHAINED anchor, a FALSE RED (tag test-rootchain) ──
+# `@sub Path.join(@root, "docs")` then `Path.join(@sub, "api-v1.md")`. Unlike
+# every other shape here this was a PRECISION fault, not a blindness: the
+# scanner resolved the INTERMEDIATE `docs` and emitted `::error:: UNCOVERED
+# repo-root read: docs` even though the real target `docs/api-v1.md` IS
+# declared in ELIXIR_TEST_ONLY_PATHS. A required gate that reds for the wrong
+# reason costs more than one that misses — so this case asserts the GREEN
+# direction first, and the census row that proves the chain was actually
+# resolved rather than merely ignored.
+echo "case 3j: SHAPE 7 — a chained anchor resolves to the real file, not the intermediate"
+FX_CHAIN="$TMPROOT/chain"
+make_fixture "$FX_CHAIN"
+mkdir -p "$FX_CHAIN/docs" "$FX_CHAIN/nowhere"
+: >"$FX_CHAIN/docs/api-v1.md"
+: >"$FX_CHAIN/nowhere/chain.json"
+cat >"$FX_CHAIN/api/test/barkpark/chain_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @sub Path.join(@repo_root, "docs")
+  @good Path.join(@sub, "api-v1.md")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CHAIN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a chained read landing on a DECLARED file stays green"
+else
+  no "a chained read on a declared file redded — the false RED shape 7 names is still live: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: docs"; then
+  no "still reports the intermediate 'docs' — the precision fault is not fixed: $out"
+else
+  ok "does not report the intermediate directory as a read"
+fi
+cens="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CHAIN" "$SCRIPT" --list-escapes)"
+if has "$cens" "^docs/api-v1\.md	api/test/barkpark/chain_ok_test\.exs	test-rootchain$"; then
+  ok "the census carries docs/api-v1.md tagged test-rootchain — the chain really resolved"
+else
+  no "no test-rootchain census row — green here would mean 'ignored', not 'resolved': $cens"
+fi
+# and the RED direction: a chain landing on an UNDECLARED file must still red,
+# naming the deep path rather than the intermediate.
+rm -f "$FX_CHAIN/api/test/barkpark/chain_ok_test.exs"
+cat >"$FX_CHAIN/api/test/barkpark/chain_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @sub Path.join(@repo_root, "nowhere")
+  @bad Path.join(@sub, "chain.json")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CHAIN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a chained uncovered read"
+else
+  no "PASSED with a chained uncovered read — the suppression turned a red into silence: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/chain.json"; then
+  ok "names the file the chain resolved to, not the directory"
+else
+  no "did not name the chained path: $out"
+fi
+if has "$out" "idiom test-rootchain: "; then
+  ok "reports test-rootchain as its own idiom"
+else
+  no "the chained anchor has no tag of its own: $out"
+fi
+# THE SUPPRESSION IS NARROW, and this is the half that keeps it from becoming a
+# laundered baseline: a binding with NOTHING chained off it is a real directory
+# read and must still red exactly as it does today.
+rm -f "$FX_CHAIN/api/test/barkpark/chain_test.exs"
+cat >"$FX_CHAIN/api/test/barkpark/unchained_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @dir Path.join(@repo_root, "nowhere")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CHAIN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if has "$out" "UNCOVERED repo-root read: nowhere"; then
+  ok "a binding nothing is chained off still reds as its own directory read"
+else
+  no "the suppression swallowed an UNCHAINED directory read — a false OK: $out"
+fi
+rm -f "$FX_CHAIN/api/test/barkpark/unchained_test.exs"
+# the door is LOAD-BEARING in the direction that matters: without the chain
+# grep the DECLARED case reds again (the intermediate 'docs' comes back).
+cat >"$FX_CHAIN/api/test/barkpark/chain_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @sub Path.join(@repo_root, "docs")
+  @good Path.join(@sub, "api-v1.md")
+EX
+MUT_CHAIN="$TMPROOT/mutant-no-chain.sh"
+python3 - "$SCRIPT" "$MUT_CHAIN" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if 'chains="$(grep -Eoh' in line:
+        target = i
+        break
+assert target is not None, "the shape-7 chain grep was not found — mutation would prove nothing"
+indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+lines[target] = indent + 'chains=""\n'
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_CHAIN" "$SCRIPT"; then
+  ok "the chain mutation applied (the chain grep really changed)"
+else
+  no "the chain mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_CHAIN" bash "$MUT_CHAIN" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: docs"; then
+  ok "without the chain door the declared read reds on the intermediate 'docs' — shape 7's door is load-bearing"
+else
+  no "the declared chained read stayed green with the chain door disabled — case 3j proves nothing (rc=$rc): $out"
+fi
+rm -f "$FX_CHAIN/api/test/barkpark/chain_ok_test.exs"
 echo
 
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────

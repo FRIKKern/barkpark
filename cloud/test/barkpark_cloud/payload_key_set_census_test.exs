@@ -1030,8 +1030,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
     {"site_deployment_json/3", :unread, "preview_url",
      "dr-w11-payload-divergence-close — the click-through target, same gap as preview_host."},
-    {"site_deployment_json/3", :phantom, "port",
-     "dr-w11-payload-divergence-close — declared on the deployment decoder; `port` is emitted on site_json (router.ex:10657), never on a deployment row. Decodes to 0 forever."},
+    {"site_deployment_json/3", :unread, "slot",
+     "site-spawner node slot truth — the PRODUCER half only. The blue/green slot the box MEASURED Caddy to be serving; `deploy/site-spawner-node-live-proof.sh:731,:803` reads it off the wire today, and `internal/cloudclient.SiteDeployment` declares no Slot at all. The Go reader is the CLI half of this split row (which also turns HealthExitCode into a *int); the producer half is PR #15095, whose body names the split and this remainder, and it is fenced out of internal/."},
+    {"site_deployment_json/3", :unread, "health_exit_code",
+     "site-spawner node slot truth — the PRODUCER half only. 0 (HEALTH passed) | 14 (failed) | null (never measured); `deploy/site-spawner-node-live-proof.sh:872` reads it. It MUST land in Go as a `*int` — a plain int decodes the null to 0, which is the SUCCESS code, and that is exactly the zero-value success this pair exists to forbid (the same reason SiteDeployment's DeferralDepth/Bound are pointers). CLI half of the same split row; the producer half is PR #15095, whose body names this remainder."},
+    # DELETED (site-spawner node slot truth): `{"site_deployment_json/3", :phantom,
+    # "port"}`. `SiteDeployment.Port` decoded to 0 forever because `deployments`
+    # had no `port` column at all — the one router.ex emitted was the SITE
+    # serializer's. The column now exists and `deployment_json/1` emits it, so
+    # the hole is CLOSED and the row must go: the "no longer phantom" arm reds on
+    # an allowlist row whose key is emitted.
     {"site_deployment_json/3", :phantom, "runtime_target",
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
@@ -1357,7 +1365,58 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `internal/cloudclient`, so `@go_tag_sites` does not move at all. MEASURED by
   # the PIN CO-EDIT arm's own expression on this tree ("159 -> 161"), never
   # derived from the diff.
-  @emitted_pinned 161
+  #
+  # 161 -> 162 (dr-w22-bl): `barkpark_json/5` gains `git_commit_first_seen_at` —
+  # SINCE WHEN the box has served the sha beside it — and `cloudclient.Barkpark`
+  # gains the matching json tag in the SAME commit, so no :unread row is needed
+  # and none is added.
+  #
+  # THIS NOTE HAS BEEN RE-MEASURED TWICE, and the two stale numbers it replaced
+  # are left on the record deliberately. It first read "159 -> 160"; the space
+  # residual (#14795) then merged and moved the Go-tag baseline under it, and the
+  # slot units (#14886) moved THIS pin 159 -> 161. Neither older number was ever
+  # added to — every value here comes from the PIN CO-EDIT arm on the tree that
+  # actually merges. That is not diligence for its own sake: this file's header
+  # says an `==` pin ships wrong when deltas are summed, and this branch is now
+  # the worked example, twice over.
+  #
+  # WHY THE TWO BARKPARK-FAMILY COUNTS MOVE TOGETHER FOR THIS KEY, where the slot
+  # units moved only one: `git_commit_first_seen_at` lands in the BASE MAP
+  # LITERAL, which BOTH walkers reach. `slot_units` lands in `merge_pressure/2`,
+  # whose `when is_map(payload)` clause is exactly what the blind walker drops.
+  # Same file, same run, opposite cases — which is the whole reason the pair is
+  # two attributes. The INVARIANT the arm checks (`seeing - blind == 14`) is
+  # untouched by either.
+  #
+  # WHY THE GO DELTA IS ONE: `Go.all_tags/1` is a file-GLOBAL union of tag NAMES,
+  # so a name already declared anywhere in `internal/cloudclient` rides free.
+  # `git_commit_first_seen_at` is new PACKAGE-WIDE — `grep -rn
+  # git_commit_first_seen_at internal/` was empty before this branch — at exactly
+  # one declaration site, so `@go_tag_sites` does not move.
+  #
+  # WHY @schema_unserialized_floor DOES NOT MOVE: the column is emitted in the
+  # SAME commit that declares it, so it is never a hole. A serializer-less
+  # version of this change would have moved that floor 24 -> 25, which is the arm
+  # doing its job.
+  #
+  # MERGE HAZARD, restated because it has already fired on this branch twice:
+  # these are `==` pins. Any PR that also moves them must RE-MEASURE after this
+  # one lands, never sum with it.
+  # 162 -> 165 (site-spawner node slot truth): `deployment_json/1` — which
+  # `site_deployment_json/3` pipes, so the walker follows it — gains `slot`,
+  # `port` and `health_exit_code`. `@go_tag_pinned` does NOT move, and the reason
+  # is structural rather than lucky: this slice writes no Go at all (the reader is
+  # the CLI half of a split row, fenced out of `internal/`), and `Go.all_tags/1`
+  # counts names in that SOURCE. The three keys land on the wire in three
+  # different states, which is why one of them deletes an allowlist row and two
+  # of them add one: `port` was already declared by `SiteDeployment.Port` and
+  # decoded to 0 forever (a PHANTOM — row deleted below), while `slot` and
+  # `health_exit_code` are declared nowhere in the package (`grep -rn 'json:"slot'
+  # internal/cloudclient` is empty) and are therefore new :unread rows.
+  # MEASURED by the PIN CO-EDIT arm on this branch, which printed `162 -> 165` after the rebase onto the slot_units pin above;
+  # that the arithmetic happens to agree is the coincidence the comment above
+  # warns about, not the method.
+  @emitted_pinned 165
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1473,7 +1532,30 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # disjoint. `@emitted_pinned` and both barkpark-family pins came back
   # UNCHANGED across the same rebase — the space residual added Go tags and no
   # emitted key, so its baseline moved only the one pin it said it moved.
-  @go_tag_pinned 322
+  #
+  # dr-w22-bl (git_commit_first_seen_at): 322 -> 323, and the site total
+  # 593 -> 594. On top of the slot units'
+  # baseline directly above (this branch rebased onto it, and onto the space
+  # residual before that). ONE new name in `internal/cloudclient`,
+  # `git_commit_first_seen_at` on `cloudclient.Barkpark`, at ONE declaration
+  # site, so `@go_tag_sites` does not move and the site total moves by one.
+  #
+  # THE NUMBER THIS BRANCH FIRST MEASURED WAS 304, AND IT WAS HONEST AND WRONG.
+  # It was measured against a base where this pin read 303; #14795 moved that to
+  # 313 and #14886 to 322 while this branch sat open. Each rebase re-ran the
+  # 999-technique rather than adding one to the newest baseline. The arithmetic
+  # happens to agree this time — one genuinely new name is one — but agreement is
+  # the measurement's ANSWER, not its premise: only the scanner can say whether a
+  # name is new package-wide, and the block above records `state_since` being
+  # renamed precisely because `since` would have ridden free.
+  #
+  # The refusals on THIS tree printed "323 json tag(s) found in
+  # internal/cloudclient" and "594 tag site(s) found", and the PIN CO-EDIT arm
+  # named four moved pins in one run. `@schema_field_floor` (104) and
+  # `@schema_unserialized_floor` (24) were NOT among them — neither #14795 nor
+  # #14886 adds a barkparks column, so this branch's schema deltas stand
+  # unchanged on top of both.
+  @go_tag_pinned 323
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1745,8 +1827,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # is the whole reason they are two attributes. `blind` tracking `seeing` here
   # would have destroyed the blind-spot measurement silently and in the green
   # direction — the pressure block is exactly what the blind walker cannot see.
-  @barkpark_family_keys 67
-  @barkpark_family_keys_blind 48
+  #
+  # 67 -> 68 and 48 -> 49 (dr-w22-bl): `git_commit_first_seen_at` lands in the
+  # BASE MAP LITERAL of `barkpark_json/5`, which BOTH walkers reach — so unlike
+  # `slot_units` directly above, this key moves the pair TOGETHER. The two cases
+  # now sit adjacent in this file, which is the clearest statement of what the
+  # pair measures: the gap between them is the guarded `merge_*` clauses and
+  # nothing else, and the arm's invariant (`seeing - blind == 14`) is unmoved by
+  # either key. `suspended_at` was the same shape as this one.
+  @barkpark_family_keys 68
+  @barkpark_family_keys_blind 49
 
   # ---------------------------------------------------------------------------
 
@@ -1788,15 +1878,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
     assert p.unresolvable == []
 
-    # The base literal is 40 keys (jpf-w1-queue-age-alarm added
-    # queued_deploy_age_seconds; cch-w54-bl added suspended_at) — what a regex
-    # would report. The pipeline adds the four job-status keys, the two list
-    # keys, and `pressure`: 40 + 7 = 47, and the SUM is the point. This arm
+    # The base literal is 42 keys (jpf-w1-queue-age-alarm added
+    # queued_deploy_age_seconds; cch-w54-bl added suspended_at; dr-w22-bl added
+    # git_commit_first_seen_at) — what a regex would report. The pipeline adds
+    # the four job-status keys, the two list keys, and `pressure`: 42 + 7 = 49,
+    # and the SUM is the point. This arm
     # exists to prove the extractor walks the pipeline rather than the literal,
     # so it must stay a literal number that moves when either side does — the
     # seven pipeline keys are re-listed by name below precisely so a base-literal
     # growth like this one cannot be mistaken for the pipeline being seen.
-    assert MapSet.size(p.top) == 48
+    assert MapSet.size(p.top) == 49
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure) do
@@ -2420,7 +2511,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #   * @schema_field_floor went 95 -> 103: eight columns joined the three
   #     censused schemas in the interval. It is measured, never derived — a bound
   #     computed from what it bounds can never red.
-  @schema_field_floor 103
+  # 104 -> 107 (site-spawner node slot truth): the `deployments` schema gains
+  # `slot`, `port` and `health_exit_code`. `@schema_unserialized_floor` does NOT
+  # move — all three are serialized in the same commit, which is the point.
+  # MEASURED: the SERIALIZER-SIDE arm's neutered-walker assertion printed
+  # `left: 106`, which IS the full schema population by construction.
+  @schema_field_floor 107
   @schema_unserialized_floor 24
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:

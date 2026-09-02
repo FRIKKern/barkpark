@@ -56,6 +56,13 @@
 # (emit() is shared via lib/site-deploy-common.sh):
 #   BPSTAGE name=<PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> status=<started|ok|skipped|noop|failed> build_id=<id> [detail="…"]
 #
+# Plus two REPORT-ONLY names this engine emits that are deliberately NOT in that
+# whitelist (DeployRunner's @stage_names), so they can never flip a verdict:
+#   BPSTAGE name=ROUTE  status=ok … detail="armed: …|already armed: …"
+#   BPSTAGE name=SERVED status=ok … detail="port=<n|none> slot=<a|b|none>"
+# SERVED is the slot Caddy is ACTUALLY serving after the flip — READ BACK from
+# the Caddyfile marker block, never TARGET_SLOT/TARGET_PORT (which are intent).
+#
 # --self-test  fixture releases + a FAKE systemctl (maps start/stop/is-active to
 #              throwaway python http.server processes) + fake caddy/flock/npm PROVE
 #              the marker-value HEALTH boot-in-place gate, the marker-anchored port
@@ -2251,6 +2258,28 @@ log "ROUTE: $ROUTE_DETAIL"
 emit ROUTE ok "$ROUTE_DETAIL"
 log "SWITCH: '$SITE_SLUG' Caddy upstream -> slot $TARGET_SLOT :$TARGET_PORT (build $BUILD_ID)"
 emit SWITCH ok "Caddy upstream -> slot $TARGET_SLOT :$TARGET_PORT"
+
+# THE SERVED SLOT, READ BACK FROM CADDY (site-spawner: node slot truth).
+# TARGET_SLOT/TARGET_PORT are what this run INTENDED to serve. What Caddy is
+# ACTUALLY proxying is one awk over the marker block away (active_caddy_port),
+# so intent is never what crosses the wire: the flip has committed and the
+# reload has happened, and this re-READS the result. That distinction is the
+# whole point — a slot field derived from intent reports intent while looking
+# like state, which is the failure three deploy-truth lanes closed (a smoke
+# exiting 0 over a box that never moved). It also catches the D345 prefix-
+# sibling case for free: when active_slot() matches NEITHER of this site's two
+# ports it prints nothing, and this says `slot=none` instead of the slot the
+# run wished for.
+#
+# It rides a BPSTAGE line so it lands in the durable .status fold, and the name
+# SERVED is deliberately OUTSIDE DeployRunner's @stage_names whitelist — exactly
+# like ROUTE above, so parse_stage_line/2 skips it and it can NEVER reach
+# stage_exit_code/1 or flip a verdict. Report, not verdict (charter D327).
+# The detail is key=value, never prose: the reader is a regex, and a reader that
+# has to parse an English sentence is one reworded clause from reading zero.
+SERVED_PORT="$(active_caddy_port)"
+SERVED_SLOT="$(active_slot)"
+emit SERVED ok "port=${SERVED_PORT:-none} slot=${SERVED_SLOT:-none}"
 
 # ---- RETIRE (D67) — keep current + 1 warm previous; prune old releases -------
 emit RETIRE started

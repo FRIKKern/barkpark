@@ -961,6 +961,24 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|fallback stays deliberately WIDE because a false refusal is loud and recoverable while a false | <>
         ~s|permit is silent — see Barkpark.Tasks.Criteria.merge_gated?/1.|
 
+  # THE WITHDRAWAL HINTS (D745). Both refusals are reachable by a lead doing
+  # exactly the right thing on a sealed row, so each has to name the next
+  # command rather than the rule it broke.
+  def criteria_hint(:observed_rev_required, :stamp),
+    do:
+      ~s|this row carries no live claim (it is closed, cancelled or released), so there is no epoch to fence | <>
+        ~s|a withdrawal against. Pin the rev you read instead: re-read with `bp task get <id> -o json`, take | <>
+        ~s|.doc.rev, and re-run the withdrawal with --observed-rev <rev>. Nothing was written. A withdrawal | <>
+        ~s|never touches the seal, the close_reason or the original evidence — it lowers the met flag and | <>
+        ~s|appends a signed record naming who withdrew it and why.|
+
+  def criteria_hint(:criterion_not_met, :stamp),
+    do:
+      ~s|this criterion is already met=false, so there is no stamped proof to withdraw and nothing was | <>
+        ~s|written — a withdrawal record on an already-honest row would only mislead the next reader. | <>
+        ~s|If you meant to record a failed attempt on it, that is --miss --note "…". Check the index: | <>
+        ~s|--criterion N is 0-BASED, so the first criterion is 0.|
+
   def criteria_hint(:criteria_mismatch, _surface),
     do:
       ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>
@@ -1133,7 +1151,10 @@ defmodule BarkparkWeb.TasksController.Params do
   # ─── Mid-claim criterion stamp (expressive-agent-loops D8) ───────────────
 
   # Parses the stamp body/query into `{:ok, index, {:met, evidence} | {:miss,
-  # note}, criterion_text}`. The bp CLI sends flags as query strings ("true",
+  # note} | {:withdraw, note}, criterion_text}`. `--withdraw` (D745) is the
+  # verb that LOWERS a met flag: it needs a non-empty --note and, like --met, a
+  # --criterion-text (enforced server-side, so lowering the wrong neighbour
+  # fails closed exactly as raising it does). The bp CLI sends flags as query strings ("true",
   # "0"); curl sends typed JSON — both shapes are accepted. Exactly one of
   # met/miss; --met REQUIRES non-empty evidence (evidence or nothing, D3);
   # --miss REQUIRES a non-empty note (an honest attempt has words).
@@ -1147,12 +1168,13 @@ defmodule BarkparkWeb.TasksController.Params do
   def parse_stamp(params) do
     met = stamp_flag?(Map.get(params, "met"))
     miss = stamp_flag?(Map.get(params, "miss"))
+    withdraw = stamp_flag?(Map.get(params, "withdraw"))
     criterion_text = stamp_criterion_text(params)
 
     with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
       cond do
-        met and miss ->
-          {:error, :invalid_stamp, "pass exactly one of --met / --miss, not both"}
+        Enum.count([met, miss, withdraw], & &1) > 1 ->
+          {:error, :invalid_stamp, "pass exactly one of --met / --miss / --withdraw, not two"}
 
         met ->
           case Map.get(params, "evidence") do
@@ -1166,8 +1188,24 @@ defmodule BarkparkWeb.TasksController.Params do
             _ -> {:error, :invalid_stamp, "--miss requires non-empty --note"}
           end
 
+        withdraw ->
+          case Map.get(params, "note") do
+            n when is_binary(n) and n != "" ->
+              {:ok, index, {:withdraw, n}, criterion_text}
+
+            _ ->
+              {:error, :invalid_stamp,
+               "--withdraw requires non-empty --note (why it was withdrawn)"}
+          end
+
+        # A body that carries `met=false` and nothing else names no verb at
+        # all. Say so with the withdrawal in the sentence, because "met: false"
+        # is precisely what a caller reaches for when they mean to withdraw.
         true ->
-          {:error, :invalid_stamp, "pass one of --met (with --evidence) or --miss (with --note)"}
+          {:error, :invalid_stamp,
+           "pass one of --met (with --evidence), --miss (with --note) or --withdraw (with --note). " <>
+             "A met:true -> met:false patch is NOT accepted here: --withdraw is the verb that lowers " <>
+             "a met flag, and it signs the correction instead of erasing the proof."}
       end
     end
   end
@@ -1182,6 +1220,21 @@ defmodule BarkparkWeb.TasksController.Params do
   @spec stamp_merge_gated(map()) :: boolean()
   def stamp_merge_gated(params) do
     stamp_flag?(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
+  end
+
+  @doc """
+  Reads the withdrawal's read-before-write fence (D745) off a stamp request,
+  from the kebab manifest flag (query key `observed-rev`) or the snake JSON
+  body key. `nil` when absent or blank — `Tasks.Stamp` then answers
+  `:observed_rev_required` for a withdrawal on a row with no claim, rather than
+  guessing a rev on the caller's behalf.
+  """
+  @spec stamp_observed_rev(map()) :: String.t() | nil
+  def stamp_observed_rev(params) do
+    case Map.get(params, "observed_rev") || Map.get(params, "observed-rev") do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
   end
 
   defp stamp_flag?(v), do: v in [true, "true", "1"]
