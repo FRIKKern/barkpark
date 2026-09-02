@@ -145,9 +145,60 @@ scripts/gate-announces-skips.test.sh'
 # in the repo's life), so the full-suite cost is rare and bounded.
 #   web/public/bp-paper-editor.bundle.js, web/public/assets/bp-paper-editor.css
 #       <- api/test/barkpark/paper_editor_vendor_drift_test.exs
+#
+# THE `cloud/test/**` ENTRY IS THE ONLY DECLARED READ THIS SCRIPT'S OWN CENSUS
+# CANNOT SEE, which is why it needs a paragraph here instead of a row in
+# --list-escapes. DERIVED FROM WHAT THE SCANNER READS, not from a hunch:
+#   scripts/async_env_seam_scan.exs:63-65
+#     def default_roots do
+#       [Path.join(repo_root(), "cloud/test"), Path.join(repo_root(), "api/test")]
+#     end
+#   ...and :77  `files = Path.wildcard(Path.join(root, "**/*_test.exs"))`.
+#   Called with those defaults by api/test/barkpark/async_global_seam_guard_test.exs,
+#   which asserts `count > 0` for BOTH roots and `offenders == []`. So a
+#   cloud/test file that gains `async: true` + `Application.put_env` REDS the
+#   api suite — a suite a cloud/test-only PR was skipping.
+#
+# WHY THE CENSUS MISSES IT — the blindness class, recorded so the next reader
+# does not go hunting for a scanner bug. Every door in list_escapes resolves
+# `"../…"` literals found IN api/lib + api/test. The path here is a runtime
+# `Path.join(repo_root(), "cloud/test")` inside a THIRD file that the api test
+# merely `Code.require_file`s; the only literal at the api-test site is
+# `"../../../scripts/async_env_seam_scan.exs"`, which the census DOES resolve
+# and which is declared below — the transitive read one hop further is
+# invisible. MEASURED on a clean tree before this entry existed:
+# `--list-escapes | cut -f1 | sort -u` printed 38 paths and `grep -c cloud/`
+# over them printed 0, while
+# `printf 'cloud/test/barkpark_cloud/accounts_test.exs' | … --match test`
+# printed `false` (and `--match compile` `false`). A gate that can RED on a
+# path it does not DISPATCH on, certified green by its own ratchet, is the
+# exact hole this file exists to catch — pointed at itself.
+#
+# THE CHOICE IS REAL AND IT IS MADE HERE, with its cost. The other direction
+# is to make the seam scanner scan only its OWN tree from each side, which
+# REMOVES the coupling instead of declaring it. Rejected: the api-side guard's
+# own moduledoc states why it covers both roots — "either tree's suite can be
+# run alone in CI, and a ratchet that only fires when somebody happens to run
+# the OTHER project is not a ratchet" — so narrowing it deletes live coverage
+# to buy CI minutes, and would need its own mutation proof on a
+# required-adjacent guard. Declaring pays the minutes instead, MEASURED rather
+# than waved at: 443 of this repo's 6937 commits touch cloud/test without
+# touching any other declared Elixir path, so ~6.4% of commits now
+# additionally run the full api suite, which this workflow prices at
+# 9m31s-16m29s. That is the most expensive entry in this list by frequency,
+# and it is the honest one.
+#
+# THE GLOB IS `cloud/test/**`, NOT the scanner's `cloud/test/**/*_test.exs`:
+# this file's grammar (`dir/**` or an exact path, nothing else) has no such
+# form, and the declared set must be a SUPERSET — over-triggering on
+# cloud/test/support/** is the correct direction to err, and narrowing it by
+# listing individual files would rot on the next cloud test added.
+#   cloud/test/**  <- scripts/async_env_seam_scan.exs default_roots/0
+#                     <- api/test/barkpark/async_global_seam_guard_test.exs
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
+cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh

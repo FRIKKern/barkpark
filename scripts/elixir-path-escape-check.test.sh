@@ -28,6 +28,14 @@
 #     ever exercised a TOTAL collapse, so it certified a floor that could not
 #     fire on the failure its own comment named.
 #   * a scanner door with no declared floor must red        (case 5c)
+#   * a read the census is STRUCTURALLY BLIND to must still be
+#     DISPATCHED on                                          (case 6) — the
+#     async-env-seam guard reaches cloud/test through a runtime
+#     `Path.join(repo_root(), "cloud/test")` in a third file, so no door in
+#     list_escapes can ever see it. Measured: 38 census paths, zero holding
+#     `cloud/`, and `--match test` FALSE for a path that reds the api suite.
+#     Declared entries have no census row to protect them, so the harness is
+#     the only guard a deletion has to get past.
 # A harness with only green cases is the defect, not the proof.
 
 set -euo pipefail
@@ -903,6 +911,58 @@ check_match "docs/api-v1.md" test true
 # exact-file entries must not match by prefix
 check_match "docs/openapi.json.bak" test false
 check_match "scripts/async_env_seam_scan.exs.orig" test false
+# ── the cloud/test coupling: DECLARED, because the census cannot see it ─────
+# The api suite's async-env-seam guard
+# (api/test/barkpark/async_global_seam_guard_test.exs) scans cloud/test at
+# RUNTIME, through a third file it `Code.require_file`s, so no `"../…"`
+# literal in api/test reveals the read and --list-escapes is STRUCTURALLY
+# blind to it — measured on origin/main: 38 census paths, zero containing
+# `cloud/`, while a cloud/test-only change dispatched `--match test -> false`
+# on a suite it is able to RED. Case 3/3b cannot cover this: they prove the
+# ratchet reds on a read the census SEES. These arms are therefore the only
+# thing standing between a deleted `cloud/test/**` entry and a silent return
+# to that hole.
+check_match "cloud/test/barkpark_cloud/accounts_test.exs" test true
+check_match "cloud/test/support/fixtures/account_fixtures.ex" test true
+# …and it is a TEST-only read, never a compile one: cloud/test compiles
+# nothing the api app links against.
+check_match "cloud/test/barkpark_cloud/accounts_test.exs" compile false
+# `cloud/` is not blanket-declared — only the root the scanner actually walks.
+check_match "cloud/lib/barkpark_cloud/accounts.ex" test false
+# THE DECLARATION STAYS DERIVED RATHER THAN DECORATIVE. Read the roots back
+# out of the scanner itself: every root it names outside api/ must be
+# dispatched on. Narrow `default_roots/0` and this loop stops producing that
+# root, retiring the arm together with the coupling — it can never certify a
+# root nobody scans. Deriving ZERO roots is itself a failure, or the loop
+# would pass vacuously the day the grep stops matching.
+seam_scan="$REAL_ROOT/scripts/async_env_seam_scan.exs"
+if [ ! -f "$seam_scan" ]; then
+  no "scripts/async_env_seam_scan.exs is missing — the cloud/test declaration cannot be re-derived"
+else
+  # `|| true` is LOAD-BEARING and was MEASURED, not defensive dressing. Under
+  # this harness's `set -euo pipefail` a grep that matches nothing exits 1, the
+  # command substitution inherits it, and the ASSIGNMENT kills the whole
+  # harness — the blinded-grep mutation below first produced a run that simply
+  # STOPPED after this case's fourth arm, printing no `FAIL` and no tally at
+  # all while exiting 1. A red for a reason foreign to what is being tested is
+  # the disease this file exists to refuse, and "it exited non-zero" would have
+  # been accepted as the mutation proof. Split across two substitutions so the
+  # `|| true` covers ONLY the grep and pipefail still governs the sed|sort.
+  seam_roots="$(grep -Eoh 'Path\.join\(repo_root\(\),[[:space:]]*"[^"]*"\)' "$seam_scan" || true)"
+  seam_roots="$(sed -e 's/.*"\(.*\)")$/\1/' <<<"$seam_roots" | LC_ALL=C sort -u)"
+  if [ -z "$seam_roots" ]; then
+    no "derived ZERO scan roots from async_env_seam_scan.exs — the derivation went blind and the arms below would pass vacuously"
+  else
+    ok "derived seam-scan roots from the scanner: $(tr '\n' ' ' <<<"$seam_roots")"
+    while IFS= read -r seam_root; do
+      [ -n "$seam_root" ] || continue
+      case "$seam_root" in api | api/*) continue ;; esac
+      check_match "$seam_root/probe_test.exs" test true
+    done <<EOF
+$seam_roots
+EOF
+  fi
+fi
 # Every compile path is also a test path. The invariant belongs to the SETS,
 # not to any `needs` edge between the jobs: compile ⊆ test must hold however
 # the graph is wired. elixir.yml's dispatcher asserts it at runtime and hard-
