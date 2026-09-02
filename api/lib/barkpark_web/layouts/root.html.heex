@@ -6271,6 +6271,12 @@
         globals exist before the Hooks registration + LiveSocket connect below
         — and here at the BOTTOM of <body>, never in <head>. --%>
   <script src="/assets/bp-chat-turn-clock.js"></script>
+  <%!-- The Studio Claude chat's keyboard navigation: Cmd/Ctrl+1..9 jumps to the
+        Nth sidebar session and Cmd/Ctrl+K opens the session palette, both
+        landing on the SAME push_patch the sidebar click uses. Non-defer so the
+        globals exist before the Hooks registration + LiveSocket connect below
+        — and here at the BOTTOM of <body>, never in <head> (Golden Rule 4). --%>
+  <script src="/assets/bp-chat-palette.js"></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -6315,6 +6321,13 @@
     // per-second render diff.
     if (window.BarkparkChatElapsed) Hooks.ChatElapsed = window.BarkparkChatElapsed;
     if (window.BarkparkChatSpinWord) Hooks.ChatSpinWord = window.BarkparkChatSpinWord;
+    // ChatKeys / ChatPalette — the chat's keyboard navigation (defined in
+    // /assets/bp-chat-palette.js, loaded non-defer above): ChatKeys is the key
+    // filter (Cmd/Ctrl+1..9 and Cmd/Ctrl+K, ignored while focus is in a field),
+    // ChatPalette owns the palette's fuzzy filter, its arrows/Enter, and its
+    // Escape — which it stops before the global interrupt listener sees it.
+    if (window.BarkparkChatKeys) Hooks.ChatKeys = window.BarkparkChatKeys;
+    if (window.BarkparkChatPalette) Hooks.ChatPalette = window.BarkparkChatPalette;
 
     Hooks.PresenceIdentity = {
       mounted() {
