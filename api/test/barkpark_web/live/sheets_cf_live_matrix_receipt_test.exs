@@ -346,7 +346,13 @@ defmodule BarkparkWeb.SheetsCfLiveMatrixReceiptTest do
 
   # ── the real web render (optional leg) ─────────────────────────────────────
 
-  @web_dir Path.expand("../../../../web", __DIR__)
+  # The EXACT subpaths this test touches, never the bare `web` tree: the
+  # Elixir path-escape ratchet resolves these literals, and elixir.yml
+  # dispatches the suite on precisely them (ELIXIR_TEST_ONLY_PATHS in
+  # scripts/elixir-path-escape-check.sh).
+  @web_components_dir Path.expand("../../../../web/components", __DIR__)
+  @web_lib_dir Path.expand("../../../../web/lib", __DIR__)
+  @web_node_modules_dir Path.expand("../../../../web/node_modules", __DIR__)
 
   # Transpile `components/sheet-grid.tsx` with the repo's own TypeScript, import
   # it, and `renderToStaticMarkup` `SheetSnapshot` over this document's
@@ -362,10 +368,10 @@ defmodule BarkparkWeb.SheetsCfLiveMatrixReceiptTest do
       is_nil(node) ->
         :unavailable
 
-      not File.dir?(Path.join([@web_dir, "node_modules", "react-dom"])) ->
+      not File.dir?(Path.join(@web_node_modules_dir, "react-dom")) ->
         :unavailable
 
-      not File.dir?(Path.join([@web_dir, "node_modules", "typescript"])) ->
+      not File.dir?(Path.join(@web_node_modules_dir, "typescript")) ->
         :unavailable
 
       true ->
@@ -375,14 +381,16 @@ defmodule BarkparkWeb.SheetsCfLiveMatrixReceiptTest do
 
   defp run_web_render(node, snapshot) do
     tag = System.unique_integer([:positive, :monotonic])
-    runner = Path.join([@web_dir, "components", ".cf-matrix-runner-#{tag}.mjs"])
+    runner = Path.join(@web_components_dir, ".cf-matrix-runner-#{tag}.mjs")
     snap_path = Path.join(System.tmp_dir!(), "cf-matrix-snapshot-#{tag}.json")
 
     File.write!(runner, web_runner_source())
     File.write!(snap_path, Jason.encode!(snapshot))
 
     try do
-      case System.cmd(node, [runner, @web_dir, snap_path], stderr_to_stdout: true, cd: @web_dir) do
+      args = [runner, @web_components_dir, @web_lib_dir, snap_path]
+
+      case System.cmd(node, args, stderr_to_stdout: true, cd: @web_components_dir) do
         {out, 0} ->
           {:ok, out}
 
@@ -408,10 +416,10 @@ defmodule BarkparkWeb.SheetsCfLiveMatrixReceiptTest do
     import { createElement } from "react";
     import { renderToStaticMarkup } from "react-dom/server";
 
-    const webDir = process.argv[2];
-    const snapPath = process.argv[3];
-    const componentsDir = path.join(webDir, "components");
-    const libUrl = pathToFileURL(path.join(webDir, "lib") + path.sep).href;
+    const componentsDir = process.argv[2];
+    const libDir = process.argv[3];
+    const snapPath = process.argv[4];
+    const libUrl = pathToFileURL(libDir + path.sep).href;
 
     const source = readFileSync(path.join(componentsDir, "sheet-grid.tsx"), "utf8");
     const transpiled = ts.transpileModule(source, {
@@ -493,8 +501,16 @@ defmodule BarkparkWeb.SheetsCfLiveMatrixReceiptTest do
   end
 
   defp published_content(slug) do
-    assert {:ok, doc} = Content.get_document(Content.published_id(slug), "sheet", @dataset),
-           "the sheet did not publish — no published row for #{slug}"
+    doc =
+      case Content.get_document(Content.published_id(slug), "sheet", @dataset) do
+        {:ok, doc} ->
+          doc
+
+        other ->
+          flunk(
+            "the sheet did not publish — no published row for #{slug}, got: #{inspect(other)}"
+          )
+      end
 
     assert doc.status == "published"
     doc.content
