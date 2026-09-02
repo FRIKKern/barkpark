@@ -437,6 +437,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("view-graph", _params, socket), do: Secondary.view_graph(socket)
 
+  # The graph hook pushes `node-clicked` on EVERY node click, unconditionally,
+  # and GraphView mounts it with no phx-target — so it lands here. Without this
+  # head the missing clause was a FunctionClauseError that killed the view on
+  # the first click (rationale + the fail-closed id resolution: Secondary.node_clicked/2).
+  def handle_event("node-clicked", params, socket), do: Secondary.node_clicked(params, socket)
+
   def handle_event("close-secondary-picker", _params, socket),
     do: Secondary.close_secondary_picker(socket)
 

@@ -256,10 +256,18 @@ main() {
   if [ "$total" -eq 0 ]; then
     say "  FAN-OUT (metered, not judged): dataset=(none) doc_type=(none) rows=0"
   else
+    # The group key separates on jq's \u0000 ESCAPE, never a literal NUL byte.
+    # A literal NUL cannot survive exec, so bash DROPS it while building this
+    # argv: jq then received `.dataset + "" + .doc_type` and metered two
+    # distinct pairs whose concatenations collide - ("ab","c") and ("a","bc")
+    # - as ONE group, printed under the first one label set. The escape also
+    # keeps this file plain text: a raw NUL makes every line-printing grep
+    # over scripts/ classify it BINARY and emit nothing but "Binary file ...
+    # matches", which is how a census concluded this script had no set line.
     jq -r '
       [ .[] | { dataset: ((.dataset // "(unset)") | tostring),
                 doc_type: ( (.types // []) | if length == 0 then "(MATCHES EVERYTHING)" else join("+") end ) } ]
-      | group_by(.dataset + " " + .doc_type)
+      | group_by(.dataset + "\u0000" + .doc_type)
       | .[]
       | "  FAN-OUT (metered, not judged): dataset=\(.[0].dataset) doc_type=\(.[0].doc_type) rows=\(length)"
     ' <<<"$pop"

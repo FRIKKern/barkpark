@@ -1189,6 +1189,101 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # The asset-less-image doctrine (rule 3) applied to `code`. Found authoring
+  # /papers/epic-cycle-session-card: a code block whose source never reached the
+  # `value` key composed to the FULL parchment/terracotta <pre> frame around ""
+  # — an empty box on the public reader that looks like a broken callout — while
+  # the email/default arm emitted a PdBox holding one empty <code> chip (a stray
+  # blank line). Blank source is scaffolding, not content: both style arms now
+  # compose to the empty `_raw` node and the block is SKIPPED.
+  describe "render_block/1 — sourceless code block composes to nothing" do
+    for {label, block} <- [
+          {"a missing value key", %{"id" => "c", "type" => "code"}},
+          {"an explicit nil value", %{"id" => "c", "type" => "code", "value" => nil}},
+          {"an empty-string value", %{"id" => "c", "type" => "code", "value" => ""}},
+          {"an ASCII-whitespace-only value",
+           %{"id" => "c", "type" => "code", "value" => "  \n\t \n"}},
+          # NBSP U+00A0 + EM SPACE U+2003 + IDEOGRAPHIC SPACE U+3000 — Unicode
+          # White_Space that a naive `== ""` check would wave through as content.
+          {"a Unicode-whitespace-only value",
+           %{"id" => "c", "type" => "code", "value" => "\u00A0\u2003\u3000"}},
+          {"a non-stringish (map) value", %{"id" => "c", "type" => "code", "value" => %{}}}
+        ] do
+      test "#{label} renders nothing in article mode" do
+        assert Render.render_block(unquote(Macro.escape(block)), %{style: :article}) == ""
+      end
+
+      test "#{label} renders nothing in email/default mode" do
+        assert Render.render_block(unquote(Macro.escape(block)), %{style: :email}) == ""
+        assert Render.render_block(unquote(Macro.escape(block))) == ""
+      end
+    end
+
+    test "a skipped code block does not break the walker — neighbours still render" do
+      blocks = [
+        %{"id" => "h", "type" => "heading", "text" => "A"},
+        %{"id" => "c", "type" => "code", "value" => "   "},
+        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "B"}]}
+      ]
+
+      html = Render.render_blocks(blocks, %{style: :article})
+      refute html =~ "<pre"
+      assert html =~ ">A</h2>"
+      assert html =~ "B"
+    end
+
+    # BYTE-IDENTITY: a code block with real source is unchanged by the guard —
+    # both arms pinned to their exact pre-guard bytes (escaping and all), so a
+    # future "simplification" of the blank check cannot quietly move a byte.
+    test "article: a nonempty code block is byte-identical to the pre-guard emitter" do
+      assert Render.render_block(@code, %{style: :article}) ==
+               ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;| <>
+                 ~s|border-radius:var(--bp-codeblock-radius, 0);| <>
+                 ~s|border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);| <>
+                 ~s|color:var(--paper-ink, #15211d);| <>
+                 ~s|padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+                 ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);| <>
+                 ~s|font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);| <>
+                 ~s|font-size:var(--bp-codeblock-size, 0.9rem);| <>
+                 ~s|line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre">| <>
+                 ~s|let x = 1\nif x &lt; 2 &amp; y &gt; 0:</pre>|
+    end
+
+    test "email/default: a nonempty code block is byte-identical to the pre-guard emitter" do
+      chip =
+        ~s|<code style="background:#eaf1ee;padding:1px 5px;border-radius:4px;| <>
+          ~s|font-family:ui-monospace,Menlo,monospace;font-size:0.88em">|
+
+      expected =
+        ~s|<div style="display:flex;flex-direction:column">| <>
+          ~s|<span>| <>
+          chip <>
+          ~s|let x = 1</code></span>| <>
+          ~s|<span>| <>
+          chip <>
+          ~s|if x &lt; 2 &amp; y &gt; 0:</code></span>| <>
+          ~s|</div>|
+
+      assert Render.render_block(@code, %{style: :email}) == expected
+      assert Render.render_block(@code) == expected
+    end
+
+    # A source that is only whitespace-PADDED still renders in full: the guard
+    # decides emptiness on the trimmed source but emits the UNTRIMMED bytes, so
+    # leading indentation is never eaten.
+    test "leading/trailing whitespace around real source is preserved verbatim" do
+      html = Render.render_block(%{"type" => "code", "value" => "  x\n"}, %{style: :article})
+      assert html =~ ~s(white-space:pre">  x\n</pre>)
+    end
+
+    # Zero-width characters are NOT Unicode White_Space — they are typed glyphs,
+    # so the block keeps its frame (the guard must not over-reach into content).
+    test "a zero-width-space source is content, not scaffolding" do
+      html = Render.render_block(%{"type" => "code", "value" => "\u200B"}, %{style: :article})
+      assert html =~ "<pre"
+    end
+  end
+
   describe "article fidelity — table header styling" do
     # Header-less table (the default emitted by upstream converters that
     # don't distinguish <th> from <td>). All rows are body rows; nothing is

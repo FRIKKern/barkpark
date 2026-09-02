@@ -61,6 +61,43 @@
 # REFUSALS (no --reason, no --task, or no matching open record ⇒ non-zero), not
 # in its write order; symmetry there would invert the safety.
 #
+# A STALE CHECKOUT IS THE ONE HOLE THIS ORDERING CANNOT SEE (wave 11)
+#
+# On 2026-07-31 a verifier ran `required-checks-apply.sh --disable --confirm`
+# from the PRIMARY checkout, 131 commits behind origin/main. That copy predates
+# b4ba2bdb1a (#6928): its whole --disable block was one --confirm check, an
+# echo, and a bare `gh api -X DELETE` — no --reason/--task refusal, no record,
+# no delegation to here. main's protection was down for ~74 seconds and
+# docs/ops/break-glass-log.md gained ZERO rows, so breakglass-watch.sh's
+# committed-log authority — the offline leg, trusted precisely because it needs
+# no API — saw nothing. Fixing the runbook sentence does not fix that; the tree
+# is what was wrong.
+#
+# So --open and --close now refuse from a checkout that does not carry the
+# record-first apply.sh, naming the commit and the remedy. Two legs, because
+# neither alone answers everywhere:
+#
+#   ANCESTRY  HEAD must contain b4ba2bdb1a. Decisive when the object is in the
+#             store; a `git merge-base --is-ancestor` that says NO is a refusal.
+#   CONTENT   the sibling scripts/required-checks-apply.sh must carry the
+#             record-first delegation. This leg is the one that answers in a
+#             SHALLOW clone (actions/checkout is depth 1, so the 2026-07-29
+#             object is simply absent and ancestry cannot be computed) and in a
+#             tarball with no git at all.
+#
+# --close is guarded too, and that is deliberate rather than paranoid: a
+# pre-#6928 tree's .github/required-checks.json is 131 commits stale, so closing
+# a TOTAL glass from it would PUT an outdated protection object onto main and
+# then write a close record saying it was restored — the same shape of lie the
+# scope read-back exists to refuse. The remedy costs seconds and needs no
+# network beyond a fetch, so refusing here never traps protection down.
+#
+# BOUNDED, and the bound is the incident itself: no repo-side script can guard a
+# copy of ITSELF that predates the guard. A checkout old enough to lack
+# breakglass.sh entirely (it landed in 557b5af40a, #6686) still reaches the API
+# with nothing to stop it. That residual is why the 2026-07-31 row in
+# docs/ops/break-glass-log.md is hand-written and says so.
+#
 # USAGE
 #   scripts/breakglass.sh --open  --reason "…" --task <task-id> [--total] [--dry-run]
 #   scripts/breakglass.sh --close --reason "…" --task <task-id> [--record BG-…]
@@ -214,6 +251,77 @@ write_record_and_ack() { # id event k=v...
   return 0
 }
 
+# ── the stale-checkout guard ─────────────────────────────────────────────────
+# Pinned by SHA, not by tag or by "recent": the property is "does THIS tree
+# contain the commit that made the total hammer record before it deletes", and
+# only the SHA states that.
+
+RECORD_FIRST_COMMIT="b4ba2bdb1a8548fb6a3e5a13a4dea718c1cb4721"
+RECORD_FIRST_REF="#6928 — fix(ops): the break-glass cannot be left open silently"
+
+# Prints one of: contains | behind | unanswerable
+head_contains_record_first() {
+  command -v git >/dev/null 2>&1 || { echo unanswerable; return 0; }
+  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || { echo unanswerable; return 0; }
+  # The object must actually be in the store. In a depth-1 CI clone it is not,
+  # and `--is-ancestor` against a missing commit exits non-zero — which reads
+  # exactly like "behind". Refusing every shallow checkout would ground the
+  # break-glass in CI, so absence is reported as UNANSWERABLE and the content
+  # leg decides.
+  git -C "$REPO_ROOT" cat-file -e "$RECORD_FIRST_COMMIT^{commit}" 2>/dev/null \
+    || { echo unanswerable; return 0; }
+  if git -C "$REPO_ROOT" merge-base --is-ancestor "$RECORD_FIRST_COMMIT" HEAD 2>/dev/null; then
+    echo contains
+  else
+    echo behind
+  fi
+}
+
+stale_remedy() {
+  printf '%s' "REMEDY: do not \`git pull\` this tree mid-incident — cut a fresh one and run from there:
+    git -C \"$REPO_ROOT\" fetch origin
+    git -C \"$REPO_ROOT\" worktree add /tmp/glass origin/main
+    bash /tmp/glass/scripts/breakglass.sh <the same arguments>"
+}
+
+# Runs BEFORE the actor read, before the pre-state read, before anything that
+# could mutate protection. A stale tree is refused, not argued with.
+require_record_first_checkout() {
+  local apply="$REPO_ROOT/scripts/required-checks-apply.sh"
+  local ancestry; ancestry="$(head_contains_record_first)"
+
+  if [ "$ancestry" = "behind" ]; then
+    fail "STALE CHECKOUT — $REPO_ROOT is at a commit that PREDATES the record-first break-glass.
+  HEAD ($(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')) does not contain $RECORD_FIRST_COMMIT
+  ($RECORD_FIRST_REF), the commit that made \`required-checks-apply.sh --disable\` refuse
+  without --reason/--task and write the record BEFORE the DELETE.
+  A tree this old took main's protection down for ~74 seconds on 2026-07-31 and left ZERO rows in
+  docs/ops/break-glass-log.md — the offline authority saw nothing. This is that refusal.
+  $(stale_remedy)"
+  fi
+
+  # CONTENT leg. Not a proxy for the ancestry leg — the thing the commit
+  # INSTALLED, checked in the tree that is about to be used.
+  [ -f "$apply" ] || fail "STALE OR PARTIAL CHECKOUT — there is no $apply next to this script.
+  A tree that cannot show the record-first apply.sh cannot be shown to contain $RECORD_FIRST_COMMIT
+  ($RECORD_FIRST_REF), and an unprovable tree does not get to touch main's protection.
+  $(stale_remedy)"
+
+  grep -q 'exec bash "$REPO_ROOT/scripts/breakglass.sh"' "$apply" \
+    && grep -q -- '--disable needs --reason' "$apply" \
+    || fail "STALE CHECKOUT — $apply is the PRE-$RECORD_FIRST_COMMIT shape: its --disable neither refuses
+  without --reason/--task nor delegates here, so it DELETEs main's protection with no record at all.
+  ($RECORD_FIRST_REF is the commit that installed both.)
+  That is the exact tree that opened an unrecorded 74-second glass on 2026-07-31.
+  $(stale_remedy)"
+
+  if [ "$ancestry" = "unanswerable" ]; then
+    # Said out loud rather than swallowed: an instrument that cannot run one of
+    # its two legs reports which leg carried the verdict.
+    echo "NOTE: $RECORD_FIRST_COMMIT is not in this checkout's object store (shallow clone, or no git) — the ancestry leg could not run and the content check of scripts/required-checks-apply.sh carried the verdict." >&2
+  fi
+}
+
 # ── modes ────────────────────────────────────────────────────────────────────
 
 require_reason_and_task() {
@@ -224,6 +332,7 @@ require_reason_and_task() {
 }
 
 do_open() {
+  require_record_first_checkout
   require_reason_and_task
 
   local repo branch
@@ -308,6 +417,7 @@ do_open() {
 }
 
 do_close() {
+  require_record_first_checkout
   require_reason_and_task
 
   local repo branch

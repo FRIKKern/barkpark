@@ -116,6 +116,46 @@ which means every row in it crossed `admitRecipe`. That is the population the
 D89 control asserts folds clean, and it grows automatically — every honestly
 written run attests itself.
 
+### The arming — every count names its reading path
+
+The same committed store used to report **two different row counts** depending on
+how you read it: `foldLedger()` called as a library returned 360 rows / 307
+subjects, while `node ledger.mjs fold` returned 354 / 302 over the same bytes.
+The CLI injected `screenCommand`; the library injected nothing, and a silently
+unscreened read is not a smaller answer — it is a **different** answer wearing
+the same field names.
+
+`screen` therefore **defaults on**. A library caller who passes nothing gets the
+same screen the CLI injects, so both paths agree. `now` does **not** default —
+this module owns no clock (D19), the CLI supplies `date -u`, and a library
+caller who wants the future bound passes one. Every fold reports which bounds
+were in force, in `arming`, top-level in the JSON and on the `[grip-fold]`
+stderr line:
+
+```json
+"arming": { "screen": "screen.mjs", "now": "2026-09-01T23:37:57Z" }
+```
+
+| `arming.screen` | what it means |
+|---|---|
+| `screen.mjs` | the default — the same predicate the `fold` CLI injects |
+| `caller` | a caller-supplied screen function |
+| `none` | the **explicit** opt-out, `foldLedger(dir, { screen: null })` — the unscreened population, said out loud |
+| `invalid` | the bound was neither: `admitRecipe` rejects every row `BAD-OPTION`. A broken read, never a population |
+
+`arming.now` is the instant in force or `null`. Two folds of one store that
+agree on `arming` agree on rows / subjects / unreadable; two that differ carry
+the reason in the same object as the counts.
+
+**Why the refusal count is not the row count.** On the store as it stands, the
+screened read reports 74 `REFUSED-COMMAND` entries but only **6** fewer rows and
+**5** fewer subjects than the unscreened one. Rejections accumulate: 68 of those
+74 rows were already rejected on other grounds (`UNKNOWN-FIELD`, `LEVEL-SKIP`,
+`VALUE-STORED`, `MALFORMED-ROW`), so the refusal costs them nothing they had not
+already lost. Of the 6 rows it does cost, 5 were the only recipe on their key
+and 1 shared a key with 21 siblings that survive — hence 6 rows but 5 subjects.
+**Never quote the refusal count as a row count.**
+
 **Why not a pinned file list.** Re-pointing the mint regression floor at
 `binding.test.mjs`'s three census files turns "307 of 631 rows moved" into
 "0 of 62" and passes: 9.8% of the rows carrying 0.0% of the drift, invisible
@@ -207,6 +247,39 @@ This is the epic's own disease inside the epic's own instrument, and it is kept
 here after the fix precisely because the fix is the least interesting part of
 it: one verifier read the empty result and concluded the census never screens at
 all — the exact opposite of the truth — and caught itself only by accident.
+
+## A missing binary is not a rotted recipe — read the census's tool header
+
+`census.mjs` used to map exit **127** (the shell's "command not found") to
+`PATH-GONE`, which sits in the **DECAYED** set. So the census scored the
+operator's own toolbox as decay *in the ledger*. Re-derived over one unchanged
+tree and one unchanged corpus, with nothing but `PATH` differing:
+
+| run | decisive | decayed | rate | PREDICTION 3 verdict |
+|---|---|---|---|---|
+| full `PATH` | 193 | 39 | 20.2% | **CONSISTENT** |
+| `PATH` without `bp`, `gh`, `go` | 197 | 61 | 31.0% | **CONTRARY** |
+
+37 of that second 61 were pure rc-127. The verdict flipped on which tools
+happened to be installed.
+
+Two things changed, and both are load-bearing:
+
+- **`TOOL-ABSENT`** is an outcome *outside* the DECAYED set. rc 127 lands there
+  and leaves **both** rates — the same rule `WRONG-CWD` and `REF-GONE` already
+  followed: a fault that measures **this host** never measures the ledger. A
+  genuinely gone *path* is still `PATH-GONE` and still decay.
+- **A tool-availability header** is printed on every run, naming which command
+  heads were **present** and which **ABSENT**, and **no rate is printed without
+  it** — the human banner, the rate block and the `--json` `decisive` figures are
+  all withheld when no probe ran. Availability is **probed** (a walk of the same
+  `PATH` the child shells inherit, plus the POSIX builtins) — it spawns nothing,
+  so the census's execution set stays exactly what `screenCommand` admitted.
+
+Post-fix the same three runs read 39/194 (20.1%), 24/160 (15.0%) and, with `npm`
+also stripped, 24/159 (15.1%) — all **CONSISTENT**, with `bp`, `gh`, `go` (then
+`npm`) named on the ABSENT line. **A decay rate from this census is conditional
+on that list: quote them together or not at all.**
 
 ## What this certifies — and what it does not
 

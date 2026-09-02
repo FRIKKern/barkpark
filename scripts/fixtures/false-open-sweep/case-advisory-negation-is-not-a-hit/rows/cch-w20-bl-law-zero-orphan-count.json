@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "doc_id": "cch-w20-bl-law-zero-orphan-count",
+    "kind": "task",
+    "type": "task",
+    "title": "law zero orphan count",
+    "lifecycle_status": "open",
+    "content": {
+      "kind": "task",
+      "acceptance_criteria": [
+        {
+          "criterion": "the counter exists.",
+          "evidence": "",
+          "met": true
+        },
+        {
+          "criterion": "MERGE-GATED: merged to main.",
+          "evidence": "",
+          "met": false,
+          "merge_gate": true
+        }
+      ]
+    }
+  }
+}

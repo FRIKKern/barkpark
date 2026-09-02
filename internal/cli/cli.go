@@ -103,8 +103,11 @@ func Execute(args []string) int {
 		return exitUsage
 	}
 
-	// Resolve the target context (flags > env > repo file > active > defaults).
-	ctx := resolveContext(g)
+	// Resolve the target context (flags > env > repo file > active > defaults),
+	// together with WHICH layer supplied the bearer token — the three places that
+	// have to explain a credential (whoami, the tier-hidden refusal, the
+	// onboarding doctor) all read prov rather than re-deriving the precedence.
+	ctx, prov := resolveContextProv(g)
 
 	// Built-ins are CLI-native and do not consult the manifest tree for
 	// dispatch (capabilities/version need no command; whoami composes /v1/meta
@@ -146,7 +149,7 @@ func Execute(args []string) int {
 	case "capabilities":
 		return runCapabilities(out, g, ctx)
 	case "whoami":
-		return runWhoami(out, g, ctx)
+		return runWhoami(out, g, ctx, prov)
 	case "listen":
 		// `bp listen [type[,type…]]` — stream the live change feed as JSON, one
 		// event per line, until Ctrl-C. A built-in because SSE is a streaming
@@ -433,7 +436,7 @@ func Execute(args []string) int {
 		// the onboarding receipt gets its OWN help text (it still honours -h via
 		// its own arg scan).
 		if doctorOnboardingRequested(rest[1:]) {
-			return runDoctorOnboarding(out, g, ctx, rest[1:])
+			return runDoctorOnboarding(out, g, ctx, rest[1:], prov)
 		}
 		if g.help {
 			printDoctorHelp(out)
@@ -454,6 +457,12 @@ func Execute(args []string) int {
 		// `bp uninstall [--local]` — remove bp's local state (config, optionally
 		// the local dev stack). Never the binary, never a remote server.
 		return runUninstall(out, g, rest[1:])
+	case "dev":
+		// `bp dev pull <source> <target> <ws>/<ds>` — the single-verb PDS pull.
+		// A built-in (not a manifest command) because, like migrate, it spans
+		// TWO servers and must resolve both from the saved-server config before
+		// any network call; it then composes the shipped bundle verbs.
+		return runDev(out, g, rest[1:])
 	case "migrate":
 		// `bp migrate <from> <to> [flags]` — server-to-server data copy. A
 		// built-in (not a manifest command) because it spans TWO servers and
@@ -527,7 +536,7 @@ func Execute(args []string) int {
 				usageNoun(out, tree, verb)
 				return exitOK
 			}
-			return suggestUnknownNoun(out, tree, m.AuthTier, verb)
+			return suggestUnknownNoun(out, tree, m.AuthTier, verb, prov)
 		}
 		usageTreeTop(out, m, tree)
 		return exitOK
@@ -536,7 +545,7 @@ func Execute(args []string) int {
 	if verb == "" || g.help {
 		// `barkpark <noun>` or `barkpark <noun> -h` → list the noun's verbs.
 		if _, ok := lookupNoun(tree, noun); !ok {
-			return suggestUnknownNoun(out, tree, m.AuthTier, noun)
+			return suggestUnknownNoun(out, tree, m.AuthTier, noun, prov)
 		}
 		// `barkpark <noun> <verb> -h` → that command's own arg/flag help
 		// (like git/gh/stripe), not the whole noun overview.
@@ -602,7 +611,7 @@ func Execute(args []string) int {
 				usageSuggestVerb(out, tree, noun, verb)
 			}, verbHint(tree, noun, verb), "%s", noVerbMsg(n, noun, verb))
 		}
-		return suggestUnknownNoun(out, tree, m.AuthTier, noun)
+		return suggestUnknownNoun(out, tree, m.AuthTier, noun, prov)
 	}
 
 	// `bp task stamp` — client-side ergonomic wrapper: echo the 0-based
@@ -655,6 +664,28 @@ func Execute(args []string) int {
 // config, exactly as documented. The TUI's apiclient.ConfigFromEnv contract is
 // untouched (this is a CLI-local read).
 func resolveContext(g globals) manifest.Context {
+	ctx, _ := resolveContextProv(g)
+	return ctx
+}
+
+// resolveContextProv is resolveContext plus the PROVENANCE of the bearer token
+// it picked (tokensource.go). Every caller that must explain a credential —
+// `bp whoami`, the tier-hidden refusal, `bp doctor --onboarding` — reads the
+// label from HERE, beside the fold that chose the value, rather than re-walking
+// the layers on its own and drifting from them.
+//
+// The layer→label translation is the only thing this adds: manifest.ResolveWithSources
+// reports which of flag/env/active/default won, and this function names it —
+// WHICH env var (TokenEnvNames order IS the precedence), and whether the active
+// layer's token came from the repo file's server entry or the saved config.
+//
+// It also computes the SHADOW fact: an env token sitting in front of a
+// different, non-empty saved/repo token FOR THE SAME RESOLVED SERVER. Same
+// server is required and compared by normalized URL — when the env also
+// redirects the server, the saved token is for somewhere else and no shadow is
+// claimed. Whether that shadow is a PROBLEM is decided by the caller, which
+// knows whether the server actually refused the env token.
+func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// Persisted config is the ActiveContext layer. A missing/empty config is a
 	// no-op (empty ActiveContext); a malformed one is non-fatal here — we fall
 	// back to the empty active layer rather than failing every command.
@@ -671,8 +702,21 @@ func resolveContext(g globals) manifest.Context {
 	// unloadable file is treated as ABSENT here — Execute has already refused to
 	// dispatch on one (the loud token/parse gate), so this lenient read can
 	// never silently honour a rejected file.
+	// activeTokenLayer records WHICH of the two active-layer sources supplied
+	// active.Token, since manifest.Resolve sees them folded into one layer. The
+	// repo file never carries a token of its own (parseRepoFile rejects one) —
+	// it contributes one only by naming a saved server whose entry has one, and
+	// that is exactly the case a bare "saved" label would misattribute.
+	activeTokenLayer := ""
+	if active.Token != "" {
+		activeTokenLayer = tokenSourceSaved
+	}
 	if repo, err := loadRepoFile(); err == nil {
+		before := active.Token
 		active = repo.overlayActive(cfg, active)
+		if active.Token != "" && active.Token != before {
+			activeTokenLayer = tokenSourceRepoFile
+		}
 	}
 
 	flags := map[string]string{}
@@ -701,11 +745,18 @@ func resolveContext(g globals) manifest.Context {
 	// so the resolved URL goes in as a flag (highest layer); the carried token/
 	// scope are injected as flags ONLY where the user did not set the matching
 	// flag, so they sit above env/active config exactly like the -s URL does.
+	// tokenFromSavedEntry: a `-s <name>` that resolved to a known entry injects
+	// that entry's token at FLAG precedence (below). The precedence is right, but
+	// the honest ANSWER to "where did this credential come from" is the saved
+	// server — not the flag, which only named which saved server to use. Only an
+	// explicit --token is labelled "flag".
+	tokenFromSavedEntry := false
 	if g.server != "" {
 		if entry, ok := cfg.FindServer(g.server); ok {
 			flags[manifest.FlagServer] = entry.Server
 			if _, set := flags[manifest.FlagToken]; !set && entry.Token != "" {
 				flags[manifest.FlagToken] = entry.Token
+				tokenFromSavedEntry = true
 			}
 			if _, set := flags[manifest.FlagWorkspace]; !set && entry.Workspace != "" {
 				flags[manifest.FlagWorkspace] = entry.Workspace
@@ -722,7 +773,48 @@ func resolveContext(g globals) manifest.Context {
 		}
 	}
 
-	return manifest.Resolve(flags, envContext(), active, bakedDefaults())
+	env := envContext()
+	ctx, srcs := manifest.ResolveWithSources(flags, env, active, bakedDefaults())
+
+	prov := tokenProvenance{Tail: tokenTail(ctx.Token)}
+	switch srcs.Token {
+	case manifest.LayerFlag:
+		prov.Source = tokenSourceFlag
+		if tokenFromSavedEntry {
+			prov.Source = tokenSourceSaved
+		}
+	case manifest.LayerEnv:
+		// firstEnvName reads the SAME ordered list envContext resolved through,
+		// so the name printed is the name that actually won.
+		prov.EnvVar = firstEnvName(TokenEnvNames...)
+		prov.Source = tokenEnvSource(prov.EnvVar)
+	case manifest.LayerActive:
+		prov.Source = activeTokenLayer
+		if prov.Source == "" {
+			prov.Source = tokenSourceSaved
+		}
+	default:
+		prov.Source = tokenSourceDefault
+	}
+	if ctx.Token == "" {
+		prov.Source = tokenSourceNone
+	}
+
+	// The shadow: an env token in front of a DIFFERENT saved/repo token for the
+	// same server. Identical values are not a shadow (nothing is hidden), and a
+	// mismatched server is not a shadow either — the saved credential would not
+	// have been used anyway.
+	if prov.fromEnv() && active.Token != "" && active.Token != ctx.Token &&
+		active.Server != "" && normalizeServerURL(active.Server) == normalizeServerURL(ctx.Server) {
+		prov.Alt = activeTokenLayer
+		if prov.Alt == "" {
+			prov.Alt = tokenSourceSaved
+		}
+		prov.AltTail = tokenTail(active.Token)
+		prov.AltServer = active.Server
+	}
+
+	return ctx, prov
 }
 
 // envContext reads ONLY the BARKPARK_* vars that are actually set, leaving every
@@ -775,6 +867,18 @@ func firstEnv(names ...string) string {
 	for _, n := range names {
 		if v := os.Getenv(n); v != "" {
 			return v
+		}
+	}
+	return ""
+}
+
+// firstEnvName returns the NAME of the first var set to a non-empty value — the
+// sibling of firstEnv, for the messages that must say which var won rather than
+// what it held. Empty when none is set.
+func firstEnvName(names ...string) string {
+	for _, n := range names {
+		if os.Getenv(n) != "" {
+			return n
 		}
 	}
 	return ""
