@@ -91,7 +91,7 @@ jobs:
     steps:
       # THE MERGE REF, deliberately, and `fetch-depth: 0`.
       #
-      # The merge ref is what committed-symlink-gate and run-level-reader-census
+      # That ref is what committed-symlink-gate and run-level-reader-census
       # documented themselves as wanting: on a pull_request the checked-out HEAD is
       # the MERGE commit, so a symlink or a run-level read arriving THROUGH the
       # merge is caught too, not just one the branch adds.
