@@ -610,15 +610,17 @@ const callout: Emit = (b) => {
 
 /* code / divider / image (figures.ex + walk.ex) */
 
-const READING_ACCENT = 'var(--paper-reading-accent, #a23925)'
 const MONO = 'ui-monospace,Menlo,monospace'
 
 // Shared with `codeTabs` (byte-identical to Figures.code_block_html/1) so a
-// code-tabs panel and a standalone `code` block render the same chrome.
+// code-tabs panel and a standalone `code` block render the same chrome. A bare
+// --paper-bg-deep slab on the --paper-bg page — no left bar: the 3px
+// reading-accent bar was retired with task-ddb1e0ab09a62466 once the reader
+// body stopped painting the fill token as the page.
 function codeBlockHtml(value: string): string {
   const escaped = escapeHtml(value)
   return (
-    `<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid ${READING_ACCENT};color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
+    `<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
     `margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ${MONO});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);` +
     `overflow-x:auto;white-space:pre">${escaped}</pre>`
   )
@@ -630,11 +632,12 @@ const code: Emit = (b) => codeBlockHtml(str(b.value))
 // same bytes figures.ex emits) — they are the handle the reader shell needs to
 // say something about a divider's POSITION, e.g. that one sitting directly in
 // front of a section head draws a boundary the head already draws. Kept here so
-// an SDK-rendered document is the same document the reader renders.
+// an SDK-rendered document is the same document the reader renders. The § mark
+// paints the PAGE token (--paper-bg): it masks the hairline, it is not a fill.
 const divider: Emit = () =>
   `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
   `<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
-  `background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
+  `background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
 
 const image: Emit = (b) => {
   const rawSrc = str(b.src).trim()

@@ -144,8 +144,14 @@
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
     }
+    /* GROUND (task-ddb1e0ab09a62466): the reader body stands on --paper-bg —
+       the SAME token the Studio editor paints on .bp-paper-surface
+       (root.html.heex) — so --paper-bg-deep is free to be the FILL tone under
+       pre / code / .bp-stat / .bp-card / figure. With both on bg-deep every
+       fill measured delta-L 0 against the page (2026-09-02 audit).
+       measure_parity_test.exs pins the two shells to one token. */
     body:has(.bp-paper-article) {
-      background: var(--paper-bg-deep);
+      background: var(--paper-bg);
       color: var(--paper-ink);
       /* THE READING SERIF, on the reader's <body>. This used to be a FOURTH
          hand-kept copy of the stack (paper-surface.css, root.html.heex and

@@ -44,13 +44,13 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
       html = Figures.code_block_html("hello world")
       assert html =~ "<pre style="
       assert html =~ "hello world"
-      # S8 (au-eg): the code-block bar is a reading-character cue (TUI twin
-      # ReadingAccent), so its left-accent now binds the terracotta
-      # `--paper-reading-accent` (color.reading-accent) rather than the evergreen
-      # chrome `--paper-accent`. Width stays token-bound (--bp-codeblock-accent-w)
-      # so View↔Edit share ONE source; the fallback hex is TokensGen-sourced.
-      assert html =~
-               "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925)"
+      # task-ddb1e0ab09a62466: the slab is the mark. The S8 terracotta left bar
+      # (`border-left:var(--bp-codeblock-accent-w, 3px) solid
+      # var(--paper-reading-accent, …)`) is gone — it only ever existed because
+      # the reader body painted --paper-bg-deep and the slab could not be seen.
+      assert html =~ "background:var(--paper-bg-deep, #eaf1ee);border:0;"
+      refute html =~ "border-left"
+      refute html =~ "--paper-reading-accent"
     end
 
     test "HTML-escapes the value inside the code block" do
@@ -81,6 +81,19 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
       assert html =~ ~s(class="bp-section-divider__mark" style="position:relative;)
       assert html =~ "border-top:1px solid var(--paper-rule"
       assert html =~ "margin:2.4rem 0"
+    end
+
+    # The § mask hides the hairline behind the glyph, so it must be the PAGE
+    # colour — `--paper-bg`, the token the reader body (bulldocs.html.heex, emitted
+    # by design/emit.mjs) and the Studio `.bp-paper-surface` both stand on. While
+    # the reader body was painted `--paper-bg-deep` the deep mask was invisible;
+    # with the body on `--paper-bg` (task-ddb1e0ab09a62466) a deep mask would
+    # render as a tile around the §.
+    test "the § mask paints the page token, not the fill token" do
+      html = Figures.section_divider_html()
+
+      assert html =~ "padding:0 0.8rem;background:var(--paper-bg, #f6faf9)"
+      refute html =~ "background:var(--paper-bg-deep"
     end
   end
 

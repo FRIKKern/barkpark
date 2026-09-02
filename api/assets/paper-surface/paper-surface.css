@@ -297,15 +297,17 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-pre-radius: 4px;
   /* Code-BLOCK frame tokens (S9 code-interior). DISTINCT from --bp-pre-* (the
      generic 14px <pre>) and --bp-code-* (the inline-code chip): the article code
-     block is its own hardcoded terracotta-left-accent frame. These single-source
+     block is its own square-cornered --paper-bg-deep slab. These single-source
      the literals Figures.code_block_html/1 + the .bp-canvas-code editor frame both
-     paint, so View↔Edit move together. */
+     paint, so View↔Edit move together. The 3px --bp-codeblock-accent-w left bar
+     retired with task-ddb1e0ab09a62466: it existed because the reader body was
+     painted --paper-bg-deep and the slab was invisible; the body now stands on
+     --paper-bg and the slab is its own mark. */
   --bp-codeblock-size: 0.9rem;
   --bp-codeblock-lh: 1.5;
   --bp-codeblock-pad: 0.9rem 1.1rem;
   --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
-  --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
 }
