@@ -1,5 +1,11 @@
 # Re-derivation recipes — block-registry-truth (jarl.no historiene wave, 2026-07-31)
 
+> **SUPERSEDED 2026-09-02 — this record is CORRECT ON ITS DATE and is left standing.**
+> The counts below have moved. Today's canonical numbers, their derivation commands, and the
+> full exclusions ledger live in `docs/decisions/0006-canonical-block-type-count.md`; the Elixir
+> count is pinned by a run-proven test in `api/test/barkpark/portable_doc/tiers_test.exs`.
+> Cite that, never a number from this page.
+
 Verifier lane: kill the "73 blokktyper" number before any figure ships it, prove the
 registry count is gate-enforced, and pin the EXACT upstream data shapes the dossier
 Paper would adopt (stat / stats / stat-grid / chart / bar-chart / figure), plus what the

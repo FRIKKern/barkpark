@@ -1,5 +1,11 @@
 # Re-derivation recipe — server canonical block-type census (2026-07-26)
 
+> **SUPERSEDED 2026-09-02 — this record is CORRECT ON ITS DATE and is left standing.**
+> The counts below have moved. Today's canonical numbers, their derivation commands, and the
+> full exclusions ledger live in `docs/decisions/0006-canonical-block-type-count.md`; the Elixir
+> count is pinned by a run-proven test in `api/test/barkpark/portable_doc/tiers_test.exs`.
+> Cite that, never a number from this page.
+
 Verifier lane `server-canonical-census`, mobile blocks wave. All commands read
 `origin/main` (not the worktree). Run from repo root with `export LC_ALL=C` — the
 set-diffs are collation-sensitive (`bulletList` vs `bullet_list` sort differently
