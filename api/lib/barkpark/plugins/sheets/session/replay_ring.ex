@@ -15,13 +15,18 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
 
   ## Contract
 
-  Keyed by `{dataset, published_id}` (the session's own `key/2` shape). Each
-  key holds a capped list of `{request_id, reply, monotonic_ms}` entries,
-  newest first. `lookup/2` returns `{:ok, reply}` for a known `request_id`
-  (the session replays it verbatim + `replayed: true` and applies nothing) or
-  `:miss`. `put/3` records a fresh reply after a real application. Per-key
-  writes are serialized by the unique `SessionRegistry` (one session per key,
-  its mailbox the serializer) so there is no same-key race on the list.
+  Keyed by `{dataset, workspace_id, published_id}` (the session's own `key/3`
+  shape — the tenant token joined the key in PR #15215; this line said
+  `{dataset, published_id}` until then). Each key holds a capped list of
+  `{request_id, reply, monotonic_ms}` entries, newest first. `lookup/2`
+  returns `{:ok, reply}` for a known `request_id` (the session replays it
+  verbatim + `replayed: true` and applies nothing) or `:miss`. `put/3` records
+  a fresh reply after a real application. Per-key writes are serialized by the
+  unique `SessionRegistry` (one session per key, its mailbox the serializer)
+  so there is no same-key race on the list — an INVARIANT, not a property of
+  this module, and one a refactor can remove silently. It is asserted, not
+  assumed: see the `put/3` comment and
+  `test/barkpark/plugins/sheets/replay_ring_single_writer_test.exs`.
 
   ## Bounds (accepted residuals — see the `Session` moduledoc)
 
@@ -66,7 +71,7 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
   # per-write prune that already runs on every `put/3`.
   @sweep_every_ms div(@ttl_ms, 4)
 
-  @type key :: {String.t(), String.t()}
+  @type key :: {String.t(), String.t() | nil, String.t()}
 
   @doc false
   def start_link(opts) do
@@ -97,6 +102,62 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
   1h TTL, drops any prior entry for the same `request_id`, prepends the fresh
   one and caps the list. A no-op (returns `:ok`) if the table is not started.
   """
+  # ── THE SINGLE-WRITER FENCE (read this before moving this call) ──────────
+  #
+  # The three lines below are a read-modify-write on a PUBLIC ETS table:
+  # `safe_lookup` (`:ets.lookup`) -> reject/prepend/take -> `safe_insert`
+  # (an unconditional `:ets.insert`). Nothing in ETS makes that atomic. It is
+  # correct today for a reason that lives in ANOTHER module, which is exactly
+  # why it is written down here:
+  #
+  #   the ONLY caller is `Session.handle_call({:apply_ops, ops, request_id}, ...)`,
+  #   and `Barkpark.Plugins.Sheets.SessionRegistry` is `keys: :unique`, so at
+  #   most ONE live process exists per `{dataset, workspace_id, published_id}`
+  #   — the same tuple as the ring key. That process's mailbox, not ETS, is
+  #   the serializer.
+  #
+  # Move this call into a `Task`, a `spawn`, a `handle_cast` that can overtake,
+  # or add any second writer to `:sheets_ops_replay`, and exactly-once breaks
+  # with a fully green suite. `replay_ring_single_writer_test.exs` is what
+  # stops that: it traces the actual `put/3` call and asserts the executing pid
+  # IS the pid `Registry.lookup/2` returns for the key, and it walks the AST of
+  # `api/lib` to assert there is exactly one call site and it is not nested in
+  # a spawn-like construct.
+  #
+  # THE MEASURED SHAPE, so a later reader does not re-run it blind: 32
+  # barrier-released writers on ONE key over 200 rounds lost entries in 200/200
+  # rounds (2249 total, up to 13 in a round), while 16 writers returned a clean
+  # green — the harness only sees the race above a threshold, so a quiet
+  # 16-writer run is NOT evidence of safety. The harness is KEPT, behind the
+  # `SHEETS_REPLAY_RING_RACE=1` compile gate in that same test file, so the
+  # measurement is re-runnable instead of folklore. It never runs in CI: it is a
+  # documented measurement, not a gate, and a load-sensitive one at that.
+  #
+  # REPLICATED 2026-09-02 on a 10-core Apple Silicon box, Elixir 1.19.5 / OTP 28,
+  # same harness: 32 writers -> 173/200 rounds lossy, 2123 lost, worst round 22.
+  # The lost-update behaviour reproduces. The "16 writers is clean" LEG DOES NOT:
+  # 16 writers lost on 74/200 rounds (290 entries, worst round 8) on this box.
+  # So the threshold is a property of the MACHINE AND ITS LOAD, not of the writer
+  # count — which sharpens the original point rather than softening it. A quiet
+  # run at any writer count is evidence about that box at that moment and nothing
+  # more; only the fence is evidence about correctness.
+  #
+  # A lost put is not cosmetic: the next retry of that `request_id` reads
+  # `:miss` and re-applies a non-idempotent `insert_rows` — the double-apply
+  # this module exists to stop.
+  #
+  # WHY THE FENCE CANNOT LEAK A SECOND WRITER (version-scoped, not eternal):
+  # the "registry restarts empty while old sessions live on unregistered"
+  # overlap is refuted by mechanism — `Registry` LINKS every registrant to its
+  # partition process, so a partition crash KILLS its registrants and the
+  # "alive but unregistered" state that would admit a second writer cannot
+  # occur. VERIFIED ON Elixir 1.19.5 / OTP 28 (the dev box this was written on)
+  # and on the repo's declared toolchain, root `.tool-versions`
+  # `elixir 1.18.4-otp-27` / CI `elixir.yml` test matrix `otp 27.0`,
+  # `elixir 1.18.1`. It is a Registry implementation property, NOT a documented
+  # guarantee, so the verdict flips if a future version stops linking — which
+  # is why the single-writer test re-derives it on every run under whatever
+  # toolchain runs it, instead of trusting this paragraph.
   @spec put(key(), String.t(), map()) :: :ok
   def put(key, request_id, reply) when is_binary(request_id) and is_map(reply) do
     now = System.monotonic_time(:millisecond)
