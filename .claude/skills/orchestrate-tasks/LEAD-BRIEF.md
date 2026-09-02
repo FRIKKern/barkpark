@@ -87,6 +87,11 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 
 ## Communication protocol
 
+- **Cadence is a hard rule.** ONE background loop pulses your held rows every 18 min (`sleep 1080`); ONE
+  monitor watches your PRs and prints only when `pr-required.sh` changes verdict; message `main` only on
+  a merge, a close, or a ruling — never an idle note. A lead whose loop fired every 40 s sent six idle
+  notes in three minutes and 39 pulses in ten minutes into a box on a diet (2026-09-02); it was stopped.
+
 - **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
   routing to `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append-only, a table per date). Inbox
   messages can lag behind a long turn; the file never does. A row you marked BLOCKED that appears
