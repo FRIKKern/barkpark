@@ -25,6 +25,13 @@
 #   8. @canonical capability:<slug> markers are unique repo-wide, sit on a
 #      PUBLIC entry point, and their optional doc: backlink resolves — checked
 #      only AFTER a planted fixture proves the scan can still find a defect.
+#  11. docs/auth.md's "## Plug pipelines (HTTP)" section agrees with
+#      api/lib/barkpark_web/router.ex, both directions: every pipeline whose
+#      body plugs RequireAdmin must be named there (the required set is DERIVED
+#      from the router, never hand-listed), and every pipeline the section names
+#      must still exist. Numbered 11 because 9 and 10 are reserved for two PRs
+#      in flight. Nothing read this page's CONTENT before: deleting the whole
+#      section left both doc gates at exit 0.
 #
 # WARN-only (never fails the gate):
 #   7. Duplication tripwires — prod IP literal, webhook signature literal,
@@ -310,6 +317,70 @@ CASED'
 git status
 ```
 CASEE'
+
+  # §11 docs/auth.md pipeline list vs router.ex. The fixture plants BOTH halves
+  # — a two-pipeline router and an auth page that documents them — because the
+  # real defect is a DISAGREEMENT between two files, which a one-file fixture
+  # cannot express. st_auth_fixture is a shell function, not a heredoc per arm,
+  # so five arms cannot drift apart from each other.
+  st_auth_fixture() {
+    mkdir -p "$1/api/lib/barkpark_web"
+    printf -- "%s\n" \
+      "defmodule Fixture.Router do" \
+      "  pipeline :api do" \
+      "    plug(:accepts)" \
+      "  end" \
+      "" \
+      "  pipeline :fixture_admin_api do" \
+      "    plug(BarkparkWeb.Plugs.RequireToken)" \
+      "    plug(BarkparkWeb.Plugs.RequireAdmin)" \
+      "  end" \
+      "end" > "$1/api/lib/barkpark_web/router.ex"
+    printf -- "%s\n" \
+      "<!-- doc-tier: agent | canonical-for: fixture-auth | budget: 100tok -->" \
+      "# Auth fixture" \
+      "" \
+      "## Plug pipelines (HTTP)" \
+      "" \
+      "\140:fixture_admin_api\140 replaces the :api pipeline." \
+      "" \
+      "## After" > "$1/docs/auth.md"
+  }
+
+  # The SILENT arm. Without it every arm below could be satisfied by a section
+  # that reds on everything, and the count proves the derivation actually ran.
+  st_case "auth pipeline pair agrees and is COUNTED" 0 "§11 derived 1 RequireAdmin pipeline(s)" '
+    st_auth_fixture "$FIX"'
+
+  # The row's own mutation: deleting the WHOLE section left both doc gates at
+  # exit 0. That is the defect; this is the arm that ends it.
+  st_case "deleting the whole pipelines section reds" 1 "docs/auth.md has lost its" '
+    st_auth_fixture "$FIX"
+    grep -v "^## Plug pipelines (HTTP)$" "$FIX/docs/auth.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/auth.md"'
+
+  # The :flat_admin_api shape: an admin pipeline the page stops naming.
+  st_case "undocumented RequireAdmin pipeline reds by name" 1 "router pipeline :fixture_admin_api plugs RequireAdmin but" '
+    st_auth_fixture "$FIX"
+    sed "s/:fixture_admin_api/the admin pipeline/" "$FIX/docs/auth.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/auth.md"'
+
+  # The other direction — prose that describes a pipeline the router dropped.
+  st_case "documented pipeline the router no longer has reds by name" 1 "documents pipeline :gone_pipeline, which" '
+    st_auth_fixture "$FIX"
+    sed "s/the :api pipeline/the :gone_pipeline pipeline/" "$FIX/docs/auth.md" > "$FIX/a.tmp" && mv "$FIX/a.tmp" "$FIX/docs/auth.md"'
+
+  # NON-VACUITY. A router that plugs no RequireAdmin makes the required set
+  # empty, and an empty required set would let every check above pass on
+  # nothing. It must red instead of printing ok.
+  st_case "zero derived admin pipelines reds instead of passing on nothing" 1 "derived ZERO RequireAdmin pipelines" '
+    st_auth_fixture "$FIX"
+    sed "s/RequireAdmin/RequireNothing/" "$FIX/api/lib/barkpark_web/router.ex" > "$FIX/r.tmp" && mv "$FIX/r.tmp" "$FIX/api/lib/barkpark_web/router.ex"'
+
+  # FAIL-CLOSED ON A RENAME. §11 skips a tree holding NEITHER file (every other
+  # fixture root); a tree holding exactly one is a rename that would otherwise
+  # disarm the section silently.
+  st_case "one half of the pair present reds rather than skipping" 1 "needs BOTH docs/auth.md and api/lib/barkpark_web/router.ex" '
+    st_auth_fixture "$FIX"
+    rm -f "$FIX/api/lib/barkpark_web/router.ex"'
 
   echo ""
   if [ "$ST_FAIL" -ne 0 ]; then
@@ -1052,6 +1123,110 @@ done
 # count is the non-vacuity signal — if it collapses toward zero while the ledger
 # keeps growing, the fence walker broke, not the corpus.
 echo "ok:   §12 scanned $COLD_N cold doc(s) carrying runnable commands; $(printf '%s' "$COLD_BAD" | wc -w | tr -d ' ') missing the HISTORICAL RECORD banner"
+
+# --- 11. docs/auth.md pipeline list vs the router ----------------------------
+#
+# NUMBERED 11 ON PURPOSE. §9 (roster-drift) and §10 (merge-gates anchors) are
+# reserved for two PRs in flight; taking the next free integer would have put
+# three sections in one region of this file and turned three independent doc
+# fixes into one merge conflict.
+#
+# THE HOLE THIS CLOSES. Nothing read the CONTENT of docs/auth.md. It was a
+# byte-cap row in check-doc-budgets.sh and a routing-table target here, and
+# that is all: PROVED BY MUTATION while landing task-3b0cadbbf7acf865 —
+# deleting the ENTIRE "## Plug pipelines (HTTP)" section left BOTH doc gates
+# at exit 0. That is how the `:flat_admin_api` omission survived; the page went
+# stale in the one way that reopens a P0 tenancy class and every gate stayed
+# green.
+#
+# WHAT IS DERIVED, AND WHY NOT THE WHOLE LIST. router.ex defines 43 pipelines.
+# Requiring all 43 in this section would be a cap-busting doc rewrite (auth.md
+# sits within a handful of bytes of its committed cap — measure it, never trust
+# a figure typed here) and would bury the two that carry the invariant. So the required set is DERIVED FROM THE ROUTER, not hand-listed:
+# every pipeline whose body plugs RequireAdmin. Two today, `:require_admin`
+# and `:flat_admin_api` — and a new admin pipeline added tomorrow enrols
+# itself, which a hand-maintained list could never do. That is the exact shape
+# `BarkparkWeb.FlatAdminTenancyTest` cannot cover: it pins the EXISTING flat
+# admin scopes by path and is structurally blind to a new one.
+#
+# BOTH DIRECTIONS. A pipeline the doc names must still EXIST in the router, so
+# the page cannot quietly describe a pipeline that was deleted or renamed.
+#
+# NON-VACUITY. If the derivation finds ZERO admin pipelines the section FAILS
+# rather than passing on an empty set — an awk that stops matching is exactly
+# how this check would go quiet while printing ok.
+echo "== §11 docs/auth.md pipeline list vs router.ex =="
+AUTH_DOC="docs/auth.md"
+AUTH_ROUTER="api/lib/barkpark_web/router.ex"
+AUTH_SECTION_HEADING='## Plug pipelines (HTTP)'
+if [ ! -f "$AUTH_DOC" ] && [ ! -f "$AUTH_ROUTER" ]; then
+  # Neither half present: a --selftest fixture root, not this repo. Skipping is
+  # safe ONLY because the two-of-two case below is fail-CLOSED — a rename that
+  # moves one of them reds instead of silently disarming the section.
+  echo "ok:   §11 skipped — neither $AUTH_DOC nor $AUTH_ROUTER in this tree"
+elif [ ! -f "$AUTH_DOC" ] || [ ! -f "$AUTH_ROUTER" ]; then
+  echo "FAIL: §11 needs BOTH $AUTH_DOC and $AUTH_ROUTER; one is missing." \
+       "A rename that leaves one behind would otherwise disarm this section silently."
+  FAIL=1
+else
+  AUTH_SECTION=$(awk -v h="$AUTH_SECTION_HEADING" '
+    $0 == h { inside = 1; next }
+    inside && /^## / { inside = 0 }
+    inside { print }' "$AUTH_DOC")
+  if ! grep -qxF "$AUTH_SECTION_HEADING" "$AUTH_DOC"; then
+    echo "FAIL: §11 $AUTH_DOC has lost its '$AUTH_SECTION_HEADING' section." \
+         "Deleting it used to leave both doc gates green; that is the defect this section exists for."
+    FAIL=1
+  else
+    # Router pipelines: every `pipeline :name do`, and the subset whose body
+    # plugs RequireAdmin. A pipeline body ends at the first `end` at or below
+    # its own indent, which is how this file is formatted throughout.
+    AUTH_ALL_PIPELINES=$(awk '
+      /^[[:space:]]*pipeline :/ {
+        name = $0; sub(/^[[:space:]]*pipeline :/, "", name); sub(/[^A-Za-z0-9_].*/, "", name)
+        print name
+      }' "$AUTH_ROUTER" | sort -u)
+    AUTH_ADMIN_PIPELINES=$(awk '
+      /^[[:space:]]*pipeline :/ {
+        name = $0; sub(/^[[:space:]]*pipeline :/, "", name); sub(/[^A-Za-z0-9_].*/, "", name)
+        inbody = 1; admin = 0; next
+      }
+      inbody && /RequireAdmin/ { admin = 1 }
+      inbody && /^[[:space:]]*end[[:space:]]*$/ {
+        if (admin) print name
+        inbody = 0
+      }' "$AUTH_ROUTER" | sort -u)
+    AUTH_ADMIN_N=$(printf '%s\n' "$AUTH_ADMIN_PIPELINES" | grep -c '[a-z]' || true)
+    if [ "$AUTH_ADMIN_N" -eq 0 ]; then
+      echo "FAIL: §11 derived ZERO RequireAdmin pipelines from $AUTH_ROUTER." \
+           "Either the router stopped plugging RequireAdmin, or the derivation stopped matching —" \
+           "and an empty required set would make every check below pass on nothing."
+      FAIL=1
+    else
+      for auth_p in $AUTH_ADMIN_PIPELINES; do
+        if printf '%s\n' "$AUTH_SECTION" | grep -qF ":$auth_p"; then
+          echo "ok:   §11 admin pipeline :$auth_p is documented"
+        else
+          echo "FAIL: §11 router pipeline :$auth_p plugs RequireAdmin but '$AUTH_SECTION_HEADING'" \
+               "in $AUTH_DOC never names it. An admin gate nobody documents is how the" \
+               ":flat_admin_api omission survived — document it there, do not delete this check."
+          FAIL=1
+        fi
+      done
+      echo "ok:   §11 derived $AUTH_ADMIN_N RequireAdmin pipeline(s) from $AUTH_ROUTER"
+      for auth_d in $(printf '%s\n' "$AUTH_SECTION" | grep -oE ':[a-z][a-z0-9_]*' | sed 's/^://' | sort -u); do
+        if printf '%s\n' "$AUTH_ALL_PIPELINES" | grep -qx "$auth_d"; then
+          echo "ok:   §11 documented :$auth_d still exists in the router"
+        else
+          echo "FAIL: §11 $AUTH_DOC documents pipeline :$auth_d, which $AUTH_ROUTER no longer defines." \
+               "Either it was renamed or deleted — update the section, or write the atom without a" \
+               "leading colon if it was never a pipeline."
+          FAIL=1
+        fi
+      done
+    fi
+  fi
+fi
 
 # --- summary ------------------------------------------------------------------
 echo ""

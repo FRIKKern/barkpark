@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   SCENARIOS, SCENARIO_NAMES, route,
+  IDS as SCEN_IDS,
   RAIL_FAIL_CRUEL_DETAIL as SCEN_RAIL_CRUEL_DETAIL,
   DEPLOY_DETAIL_CRUEL as SCEN_DEPLOY_DETAIL_CRUEL,
   DEPLOY_DETAIL_KIND as SCEN_DEPLOY_DETAIL_KIND,
@@ -74,12 +75,23 @@ const HIDDEN_IDS = (() => {
 //   (b) click() was a no-op,
 //   (c) querySelectorAll always answered [] because innerHTML was an opaque
 //       string, so a delegate loop over freshly-rendered rows wired nothing,
-//   (d) there was no `isConnected` at all — and app.js guards three async
-//       render paths with `if (!box.isConnected) return;` (:1072 loadSessions,
-//       :2256, :10561). Every one of them bailed before painting, so the
-//       account modal's session list had NEVER rendered through the real code
-//       path here (account-modal-tall regex-splices rows in by hand to work
-//       around exactly this).
+//   (d) there was no `isConnected` at all — and app.js guards ~15 async render
+//       paths with `if (!box.isConnected) return;` (`grep -n 'isConnected'
+//       cloud/priv/static/app.js`, loadSessions the first). Every one of them
+//       bailed before painting, so the account modal's session list had NEVER
+//       rendered through the real code path here (account-modal-tall
+//       regex-splices rows in by hand to work around exactly this).
+//
+// cch-bl-smoke-shim-fidelity — TWO MORE INCAPACITIES CLOSED, both of which had
+// been measured MANUFACTURING WRONG VERDICTS (charter D55, D56):
+//   (e) `isConnected` was true FOREVER, so a node the browser had destroyed
+//       kept answering questions about content that no longer existed — a
+//       false GREEN. It is now driven by declaration: see `declaredBy` in
+//       makeDom, and the full statement of what that does and does not buy in
+//       the account-modal-revoke header.
+//   (f) dispatchEvent delivered clicks to `disabled` elements, so a correct
+//       pending-state guard read as broken — a false RED. See
+//       `SUPPRESSED_WHEN_DISABLED`.
 //
 // What is modelled and what is NOT — read this before writing a new check:
 //   • innerHTML is a real accessor. Setting it re-parses; appendChild appends
@@ -156,6 +168,15 @@ const HIDDEN_IDS = (() => {
 // future scenario reaches it with #modal-root visible, its `root.contains(b)`
 // will THROW here (shim elements model no `contains`) — a loud red, never a
 // false green, which is the correct failure mode for an unmodelled path.
+// The event types a real browser refuses to deliver to a `disabled` form
+// control (HTML spec: "a form control that is disabled must prevent any
+// click events that are queued ... from being dispatched"; UAs extend the
+// same suppression to the other pointer/keyboard interaction events). Every
+// other type — "input", "change", "submit" — is still delivered, because the
+// browser does deliver those and app.js replays some of them programmatically.
+const SUPPRESSED_WHEN_DISABLED = new Set([
+  "click", "mousedown", "mouseup", "dblclick", "keydown", "keypress", "keyup",
+]);
 const PARSED_TAGS = "button|a";
 const TAG_RE = new RegExp("<(" + PARSED_TAGS + ")\\b([^>]*?)/?>", "gi");
 const ATTR_RE = /([\w:.-]+)(?:="([^"]*)")?/g;
@@ -228,11 +249,45 @@ function serializeEl(el) {
 function makeDom() {
   const registry = new Map();
 
+  // ── DETACHMENT, MODELLED BY DECLARATION (cch-bl-smoke-shim-fidelity) ───────
+  // The registry is flat: #sessions-box and #modal-body are siblings here even
+  // though the browser nests the first inside the second. What the shim CAN
+  // see is the markup, and markup names its own ids. So an element is treated
+  // as mounted while some other element's CURRENT innerHTML declares its id —
+  // and the instant that markup is replaced by markup that no longer names it,
+  // the browser has destroyed the node, so `isConnected` flips to false. That
+  // is the exact read app.js's async render guards make
+  // (`grep -n 'isConnected' cloud/priv/static/app.js` — loadSessions and ~15
+  // siblings bail on it), and it is what turns "the confirm sheet replaced the
+  // account screen and nothing re-rendered" from a silent green into a red.
+  //
+  // BOUNDED ON PURPOSE. Only ids a parent's markup DECLARED can ever detach:
+  // an id that lives in the shipped index.html shell and is never re-emitted
+  // by a render (#modal-body, #view-root, #toast-stack, …) was never declared
+  // here, so it keeps the old unconditional `isConnected: true` and no
+  // pre-existing scenario moves. Nesting resolves last-writer-wins: if two
+  // elements declare the same id, only the one that currently owns it can
+  // detach it.
+  const declaredBy = new Map();
+  // ids whose declaring markup has been torn out at least once, so a LATER
+  // getElementById cannot launder the detachment into a fresh connected stub.
+  const detached = new Set();
+  const ID_IN_MARKUP = /\sid="([\w:.-]+)"/g;
+  function declaredIds(markup) {
+    const out = new Set();
+    ID_IN_MARKUP.lastIndex = 0;
+    let m;
+    while ((m = ID_IN_MARKUP.exec(markup)) !== null) out.add(m[1]);
+    return out;
+  }
+
   function makeEl(id, tagName) {
     // Backing state for the innerHTML accessor: the serialized markup and the
     // flat child list parsed out of it (plus anything appendChild mounted).
     let html = "";
     let kids = [];
+    // The registry ids this element's CURRENT markup declares (see declaredBy).
+    let ownIds = new Set();
     const handlers = Object.create(null);
     const attrs = Object.create(null);
 
@@ -274,6 +329,15 @@ function makeDom() {
       // so a never-wired (or wrongly-typed) listener cannot pass as success.
       dispatchEvent(ev) {
         const type = (ev && ev.type) || "click";
+        // (e) THE DISABLED GATE (cch-bl-smoke-shim-fidelity). A real browser
+        // never delivers a click to a `disabled` control, so a CORRECTLY
+        // disabled button must report 0 handlers here too. Without this line a
+        // pending-state guard that works looks BROKEN under the obvious
+        // double-click test: the second click ran the handler and doubled the
+        // request count. Scoped to the interaction events the browser actually
+        // suppresses — a programmatic dispatch of a non-interaction event
+        // (e.g. the "input" a re-render replays) still reaches the node.
+        if (el.disabled && SUPPRESSED_WHEN_DISABLED.has(type)) return 0;
         const list = (handlers[type] || []).slice();
         const event = Object.assign({
           type,
@@ -363,6 +427,23 @@ function makeDom() {
       set(v) {
         html = String(v == null ? "" : v);
         kids = parseChildren(html, makeEl);
+        // Reconcile the declaration ledger: ids this markup drops are detached,
+        // ids it names are (re-)attached. See declaredBy above.
+        const next = declaredIds(html);
+        for (const gone of ownIds) {
+          if (next.has(gone) || declaredBy.get(gone) !== el) continue;
+          declaredBy.delete(gone);
+          detached.add(gone);
+          const node = registry.get(gone);
+          if (node) node.isConnected = false;
+        }
+        for (const here of next) {
+          declaredBy.set(here, el);
+          detached.delete(here);
+          const node = registry.get(here);
+          if (node) node.isConnected = true;
+        }
+        ownIds = next;
       },
       enumerable: true,
       configurable: true,
@@ -374,7 +455,14 @@ function makeDom() {
   // Registry lookup for a bare #id selector; everything else is inert.
   const ID_SEL = /^#[\w-]+$/;
   function byId(id) {
-    if (!registry.has(id)) registry.set(id, makeEl(id));
+    if (!registry.has(id)) {
+      const fresh = makeEl(id);
+      // A node first asked for AFTER its declaring markup was already torn out
+      // must not boot connected — otherwise a re-lookup laundered the
+      // detachment away. `declaredBy` remembers the tear-out.
+      if (!declaredBy.has(id) && detached.has(id)) fresh.isConnected = false;
+      registry.set(id, fresh);
+    }
     return registry.get(id);
   }
   function query(sel) {
@@ -998,24 +1086,40 @@ const EXPECTATIONS = {
   // are NOT covered by this scenario; they are click-reachable now that the
   // shim works, and that is follow-on work, filed — not silently implied.
   //
-  // WHAT THIS SHIM CANNOT PROVE — TWO LIMITS THAT MANUFACTURE WRONG VERDICTS
-  // HERE, both learned the hard way (D55, D56). State them before writing a new
-  // assertion in this scenario:
-  //   • IT DOES NOT MODEL DETACHMENT. Every #id lives in ONE FLAT registry and
-  //     reports isConnected: true forever. In the real DOM #sessions-box is a
-  //     DESCENDANT of #modal-body, so openModal's `bodyEl.innerHTML = html`
-  //     (app.js) DESTROYS it and closeModal() empties what remains — yet here
-  //     the node survives, keeps its rows, and answers every question about
-  //     them. Measured: a sign-out-everywhere onConfirm that never re-renders
-  //     leaves ALL 87 GREEN while #modal-body is "" and the operator, in a
-  //     browser, sees an empty dialog. ⇒ ANY assertion about what exists after
-  //     a modal swap must anchor on #modal-body's innerHTML, the node the
-  //     browser actually replaces — never on the descendant's own registry entry.
-  //   • IT DELIVERS CLICKS TO DISABLED ELEMENTS. dispatchEvent has no `disabled`
-  //     guard, so a correctly-disabled button still returns 1 from click() and
-  //     runs its handler. ⇒ NEVER prove a pending/disabled state with a second
-  //     click (it reports a working guard as broken, and doubles the DELETE
-  //     count); read `disabled` and `textContent` directly, as §2b does.
+  // WHAT THIS SHIM CAN AND CANNOT PROVE — REWRITTEN BY cch-bl-smoke-shim-fidelity,
+  // which BUILT the two capabilities D55 and D56 had to route around. A stale
+  // limits list is worse than none, so this states what the shim does TODAY:
+  //   • DETACHMENT IS MODELLED, BY DECLARATION. A registry id whose declaring
+  //     markup is overwritten out of its parent now reports isConnected: false
+  //     (makeDom's `declaredBy` ledger — `grep -n 'const declaredBy' ` in this
+  //     file). #sessions-box is authored into #modal-body by openAccountModal
+  //     (`grep -n 'id="sessions-box"' cloud/priv/static/app.js` — ONE hit, and
+  //     index.html ships no such id), so the confirm sheet's
+  //     `bodyEl.innerHTML = html` detaches it and the re-render re-attaches it,
+  //     both readable on the node itself (§5a′ and §5b assert BOTH directions).
+  //     The D55 discipline — anchor post-swap assertions on #modal-body — is no
+  //     longer the ONLY defence, and §5b keeps it as the second, independent
+  //     one. WHAT IS STILL NOT MODELLED: the tree. Detachment is inferred from
+  //     the id a parent's markup NAMES, so (i) an id that only ever lives in the
+  //     shipped index.html shell is never declared and therefore never detaches
+  //     (#modal-body, #view-root, #toast-stack — correct: the browser does not
+  //     destroy them either), (ii) detaching a node does NOT cascade to ids its
+  //     own markup declared, and (iii) two elements declaring the same id is
+  //     last-writer-wins. A real tree would fix (ii) and (iii); the PARSED_TAGS
+  //     note at the top of this file is the same missing tree.
+  //   • CLICKS ARE REFUSED BY DISABLED ELEMENTS. dispatchEvent returns 0 and
+  //     runs no handler when `el.disabled` and the type is one the browser
+  //     suppresses (`SUPPRESSED_WHEN_DISABLED` — click/mousedown/mouseup/
+  //     dblclick/key*). ⇒ A pending/disabled state may now be proven by the
+  //     SECOND CLICK, which is the read that measures the consequence (§2c);
+  //     reading `disabled`/`textContent` directly (§2b) still measures the
+  //     attribute, and both are worth keeping. NOT suppressed: "input",
+  //     "change", "submit" and every other non-interaction type, because the
+  //     browser delivers those to disabled nodes too and app.js replays some
+  //     programmatically.
+  //   • STILL TRUE, AND STILL THE FIRST THING TO CHECK: the parse is FLAT
+  //     (PARSED_TAGS is `button|a`), a parsed stub's own innerHTML is always "",
+  //     and `contains()` does not exist. See the shim contract at the top.
   "account-modal-revoke": {
     what: "THE CLICK ORACLE — real clicks drive revoke: rows render, a row revoke pends + toasts + shrinks the list, and sign-out-everywhere waits for its danger-tier confirm before reporting the SERVER's count",
     async check(reg, hooks, ctx) {
@@ -1056,16 +1160,30 @@ const EXPECTATIONS = {
       // called, so both are observable synchronously — before the settle that
       // repaints the list out from under this node.
       //
-      // ASSERTED BY STATE, NEVER BY A SECOND CLICK (D56). The shim's
-      // dispatchEvent has no `disabled` guard, so `revokes[0].click()` on a
-      // CORRECTLY disabled button still returns 1 and would red the DELETE-count
-      // assertion below. A double-click test here reports a working guard as
-      // broken; only reading `disabled`/`textContent` tells the truth.
+      // ASSERTED BY STATE. D56 wrote "NEVER BY A SECOND CLICK" here because the
+      // shim's dispatchEvent had no `disabled` guard, so `revokes[0].click()` on
+      // a CORRECTLY disabled button returned 1 and redded the DELETE-count
+      // assertion below. cch-bl-smoke-shim-fidelity built the guard, so the
+      // second click is now legal and §2c makes it — these two lines stay
+      // because the attribute and the consequence are different measurements.
       assert.equal(revokes[0].disabled, true,
         "the clicked Revoke must go disabled while its DELETE is in flight — an enabled button " +
         "during an unacknowledged destructive request invites the double-revoke");
       assert.equal(revokes[0].textContent, "Revoking…",
         "the label must confess the in-flight state, got " + JSON.stringify(revokes[0].textContent));
+
+      // ─ 2c. THE SECOND CLICK (cch-bl-smoke-shim-fidelity) ──────────────────
+      // D56 BANNED this line, and was right to: the shim delivered clicks to
+      // disabled elements, so the working guard returned 1 here and doubled
+      // the DELETE count asserted below — a correct fix read as broken. The
+      // shim now refuses interaction events on a disabled node (makeEl's
+      // dispatchEvent, `SUPPRESSED_WHEN_DISABLED`), so this is the assertion
+      // that actually measures what the pending state is FOR: an operator who
+      // double-clicks Revoke must not issue two DELETEs. The `disabled` read
+      // above proves the ATTRIBUTE; only this proves the CONSEQUENCE.
+      assert.equal(revokes[0].click(), 0,
+        "the disabled Revoke still ran its click handler — the pending state is decoration, " +
+        "and a double-click issues a second DELETE for a session that is already gone");
 
       await ctx.settle();
 
@@ -1107,6 +1225,22 @@ const EXPECTATIONS = {
       assert.ok(sheet.includes("btn-danger"),
         "GR41: a grave-but-reversible action wears the danger tier's weight");
 
+      // ─ 5a′. THE DETACHMENT, READ ON THE NODE ITSELF (cch-bl-smoke-shim-fidelity)
+      // #sessions-box was authored INTO #modal-body (app.js openAccountModal,
+      // `grep -n 'id="sessions-box"' cloud/priv/static/app.js` — one hit, and
+      // index.html ships no such id), so the confirm sheet's
+      // `bodyEl.innerHTML = …` destroyed it. Until this slice the shim's flat
+      // registry answered isConnected: true here forever and #sessions-box kept
+      // serving its stale rows to every assertion — the immortal node D55 had
+      // to route around. THIS PAIR IS THE DISCRIMINATOR: false while the sheet
+      // owns the body, true again below only if something re-rendered. Asserted
+      // in BOTH directions so a model that simply never detaches, and a model
+      // that never re-attaches, are each a red.
+      assert.equal(reg.get("sessions-box").isConnected, false,
+        "#sessions-box still reports isConnected: true while the confirm sheet owns #modal-body — " +
+        "the shim is not modelling detachment, so every assertion about the account screen " +
+        "below this point is reading a node the browser already destroyed");
+
       // D54, AS AMENDED BY cch-w10. The confirm click goes BETWEEN the trigger
       // and the settle. The tier is `danger`, NOT `destroy` — a destroy sheet
       // would additionally need #cm-typed's value set plus an "input" event
@@ -1140,14 +1274,25 @@ const EXPECTATIONS = {
       // In a real browser #sessions-box lives INSIDE #modal-body, so mounting
       // the confirm sheet destroyed it and closeModal() emptied what was left;
       // a post-success `loadSessions()` would bail at `if (!box) return` and
-      // the operator would be left with no account modal at all. This shim
-      // cannot see that: its #id registry is FLAT and every node reports
-      // isConnected: true, so #sessions-box is immortal here and every
-      // assertion below about it passes with #modal-body sitting at "".
-      // Anchor on the node the browser actually replaces. MUTATION-KILLED BOTH
-      // WAYS: green with onConfirm's openAccountModal() re-render, red
-      // (modal-body === "") without it — while the #sessions-box assertions
-      // below stay green in both and discriminate nothing.
+      // the operator would be left with no account modal at all. When D55 wrote
+      // this, the shim could not see it: the #id registry was FLAT and every
+      // node reported isConnected: true, so #sessions-box was immortal and this
+      // #modal-body anchor was the ONLY thing that could discriminate.
+      // cch-bl-smoke-shim-fidelity made the node itself honest (§5a′ above), so
+      // the anchor is now the SECOND, independent witness rather than the only
+      // one — kept deliberately: it reads the CONTENT the browser replaced,
+      // where §5a′ reads the connection. MUTATION-KILLED BOTH WAYS: green with
+      // onConfirm's openAccountModal() re-render, red without it.
+      // The same read, now the other way round: the re-render must put the node
+      // BACK. This is the assertion the #modal-body anchor below used to have
+      // to stand in for — it goes red on the very mutation D55 measured (drop
+      // onConfirm's openAccountModal() re-render) without reading #modal-body
+      // at all.
+      assert.equal(reg.get("sessions-box").isConnected, true,
+        "#sessions-box is still detached after the sign-out-everywhere success — the confirm sheet " +
+        "replaced the account screen and nothing re-rendered it, so the operator is left staring at " +
+        "an empty dialog. onConfirm must call openAccountModal() after ctl.succeed().");
+
       const reborn = reg.get("modal-body").innerHTML || "";
       assert.ok(reborn.includes('id="sessions-box"'),
         "#modal-body no longer contains the account modal — the confirm sheet replaced it and " +
@@ -1303,7 +1448,17 @@ const EXPECTATIONS = {
     container: "instance-body",
     // #1180 (9eff1fee) retired the bp-tl-step* classes: the failed row is now
     // new-step failed (the bp-tl-fail block itself survived) — expectation lagged.
-    includes: ["bp-tl-fail", "new-step failed", "Setup failed", "Retry setup", "Studio never came up"],
+    // cch-w45-bl: `"Retry setup"` alone is the LABEL, and the label is what the
+    // REFUSED arm renders too (`<button … disabled title="You need the admin
+    // role…">Retry setup</button>`), so this line passed on a member's dead
+    // control just as happily as on an admin's live one. retryInstance has TWO
+    // live mounts — this timeline one and the verify card's
+    // [data-vf-reprovision] (paid by `verify-no-credentials` below) — and one
+    // census row covers both, so a green over one is not a green over the verb.
+    // `data-tl-retry` is the attribute wireInstanceTimeline binds on and
+    // `bp-tl-retry` is the viewport dock the refused arm deliberately drops.
+    includes: ["bp-tl-fail", "new-step failed", "Setup failed", "Retry setup", "data-tl-retry", "bp-tl-retry",
+      "Studio never came up"],
   },
   // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
   // Current chip, the prior live row offers rollback, the failed row neither.
@@ -2220,6 +2375,20 @@ const EXPECTATIONS = {
       assert.ok(body.includes('aria-controls="inst-lifecycle-actions"'), "the disclosure points at the card slot");
       // D-03 Overview: one composed pass — updates card, Sites card, card rail.
       assert.ok(body.includes("update-panel"), "the updates card renders");
+      // cch-w45-bl — patchAutoupdate, ON THE GRANT ARM. cch-w47-s2 put the CP's
+      // real policy block on every bpBase row, which is what makes
+      // hasAutoupdatePolicy true and paints these four toggles at all; until
+      // then they rendered in ZERO committed scenarios. The only corpus-level
+      // assertion that block had was `panel-overview-member`'s count of five
+      // disable-and-explain wrappers — a NEGATIVE, so reverting the fixture
+      // moved a number rather than naming a verb. These name it, positively, on
+      // the actor who is actually offered it.
+      assert.ok(body.includes('<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>'),
+        "patchAutoupdate: the admin arm paints the live Pause toggle (PATCH /v1/barkparks/:id/autoupdate)");
+      assert.ok(body.includes('<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>'),
+        "patchAutoupdate: …and the live Pin toggle, its independent freeze");
+      assert.ok(body.includes('rail-row"><span class="k">Autoupdate</span>'),
+        "patchAutoupdate: the policy chip the toggles act on renders beside them");
       assert.ok(body.includes("inst-sites-card"), "the Sites card renders");
       assert.ok(body.includes("detail-rail--cards"), "the rail renders as cards");
       for (const label of ["Identity", "Runtime", "Platform", "Activity"]) {
@@ -4098,6 +4267,92 @@ const EXPECTATIONS = {
       confirm.dispatchEvent({ type: "click" });
       await ctx.settle();
       assert.equal(posts(), 1, "clicking the terminal recovery issues NO second POST");
+    },
+  },
+
+  // ── cch-w45-bl: the three rail verbs that rendered in NO committed scenario ─
+  // Measured on origin/main dea37e8d19 by booting all 116 committed scenarios
+  // through this shim (0 boot errors) and scanning every registry entry's bytes:
+  //   id="inst-update"        0 hits
+  //   id="inst-remove-retry"  0 hits
+  //   data-vf-reprovision     0 hits
+  // Each absence is a STATE the corpus never produced, not a control that was
+  // missing, so every guard over them was green by construction.
+  //
+  // WHY THE FIRST TWO ARE SCORED AT RENDER LEVEL AND NOT CLICKED. Both mounts
+  // are read with `$("#inst-update")` / `$("#inst-remove-retry")`, and this
+  // shim's byId AUTO-CREATES a registry entry for any id asked for — so a click
+  // oracle there would dispatch against a phantom node that exists because the
+  // app asked for it, and would keep passing with the control deleted. The
+  // verify-card mount below is read with `box.querySelector("[data-vf-…]")`
+  // over the mount's own parsed kids, which CAN answer null — so that one is
+  // clicked, and its handler count is asserted positive.
+  "instance-behind": {
+    what: "a live box one release BEHIND paints the self-update CTA — the first committed scenario in which #inst-update exists at all",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      // The LIVE mount hook, not the label: the refused arm renders the same
+      // words on a disabled button, so a label-only assertion cannot tell an
+      // offered verb from a withheld one.
+      assert.ok(body.includes('<button class="btn btn-primary btn-sm" type="button" id="inst-update">Update to v0.9.2</button>'),
+        "the admin arm must paint the live #inst-update control, labelled with the release it would install");
+      // …and it is the BEHIND state that produces it. A box on `current` renders
+      // no CTA at all, which is what every other instance scenario proves.
+      assert.ok(body.includes("Update available"), "the pill states the same fact the CTA acts on");
+      assert.ok(!body.includes("inst-life-disabled"),
+        "this scenario's actor is an owner — a disable-and-explain wrapper here would mean the fixture lost its authority");
+    },
+  },
+  "instance-remove-failed": {
+    what: "a teardown that FAILED paints Retry removal — the first committed scenario in which deprovision_status is non-null",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      assert.ok(body.includes('<button class="btn btn-primary btn-sm" type="button" id="inst-remove-retry">Retry removal</button>'),
+        "the admin arm must paint the live #inst-remove-retry control");
+      // The removeFailed fold owns the WHOLE actions strip: nothing else may be
+      // offered on a box whose teardown is half-done.
+      assert.ok(!body.includes('id="inst-open-studio"'), "a box mid-failed-teardown offers no Studio link");
+      assert.ok(!body.includes('id="inst-update"'), "…nor an update");
+      // The server's verbatim reason, on the banner beside it.
+      assert.ok(body.includes("<b>Removal failed.</b> hcloud: server delete returned 409 (a volume is still attached)"),
+        "the deprovision_error is rendered verbatim, never summarised");
+    },
+  },
+  "verify-no-credentials": {
+    what: "the golden-path card's 404 no_admin_token note offers its ONE recovery — [data-vf-reprovision] renders, is wired, and POSTs /retry once",
+    async check(reg, hooks, ctx) {
+      const box = reg.get("instance-verify");
+      assert.ok(box, "#instance-verify was never touched");
+      const before = box.innerHTML || "";
+      assert.ok(!before.includes("data-vf-reprovision"),
+        "the note is a RESULT: nothing offers a re-provision before the check has been run");
+
+      // The run control is read the way app.js reads it — a single attribute
+      // selector over the mount's own kids, which can answer [] — so the
+      // positive handler count below is a real measurement, not a formality.
+      const run = box.querySelectorAll("[data-vf-run]");
+      assert.equal(run.length, 1, "exactly one Run-first-check control renders");
+      const ranHandlers = run[0].dispatchEvent({ type: "click" });
+      assert.ok(ranHandlers > 0, "the run control dispatched " + ranHandlers + " handlers — an unwired button is a false green");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("POST", "/v1/barkparks/" + SCEN_IDS.liveInstance + "/verify"), 1,
+        "the click issued exactly one POST /verify");
+
+      const after = (reg.get("instance-verify") || {}).innerHTML || "";
+      assert.ok(after.includes("<b>No stored credentials.</b>"), "the 404 renders the coded note, not a toast");
+      assert.ok(after.includes('<button class="btn btn-sm" type="button" data-vf-reprovision>Re-provision</button>'),
+        "the ONE recovery action is the live re-provision control (D25) — this is retryInstance's SECOND live mount, " +
+        "and it had never rendered in any committed scenario");
+      // Wired, and it calls the primitive the note's own sentence promises.
+      const rp = reg.get("instance-verify").querySelectorAll("[data-vf-reprovision]");
+      assert.equal(rp.length, 1, "exactly one re-provision control");
+      const rpHandlers = rp[0].dispatchEvent({ type: "click" });
+      assert.ok(rpHandlers > 0, "the re-provision control dispatched " + rpHandlers + " handlers");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("POST", "/v1/barkparks/" + SCEN_IDS.liveInstance + "/retry"), 1,
+        "…and it POSTs /retry exactly once — the primitive the note names in words");
     },
   },
 };
