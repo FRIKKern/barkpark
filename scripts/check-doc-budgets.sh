@@ -776,7 +776,7 @@ fi
 # makes both sides zero and the check agrees with itself. So the number is
 # pinned here, by hand. Adding or removing a cap row is therefore a two-line
 # edit: the row, and this number. That is intended friction, not an oversight.
-CAPS_ROWS_EXPECTED=34
+CAPS_ROWS_EXPECTED=36
 CAPS_ROWS_WALKED=0
 CAPS_PATHS=""
 if [ "$SPAN_ONLY" != "1" ]; then
@@ -802,6 +802,8 @@ docs/contracts/tenancy.md 8300
 docs/contracts/task-claim-lifecycle.md 6000
 docs/contracts/close-packet.md 4400
 docs/contracts/cloud-object-authz.md 4800
+docs/contracts/canonical-impl-markers.md 3000
+docs/contracts/sheets-engine.md 2600
 README.md 7400
 docs/ops/PROD_OPS.md 6000
 docs/ops/merge-gates.md 64000
@@ -1138,6 +1140,51 @@ if [ "$CARD_COUNT" -ne 7 ]; then
 else
   echo "ok:   card count is exactly 7"
 fi
+
+# --- router headroom floor: the two surface routers keep room to be CORRECTED --
+# A cap-only gate is GREEN at 9998/10000. That is not a healthy doc, it is a
+# FROZEN one: root CLAUDE.md sat at 9998B and api/CLAUDE.md at 6499B on
+# origin/main, and in that state every subsequent correction — a plugin roster
+# that undercounted by five, a "CI-enforced" claim the required set denies — was
+# blocked on bytes rather than on judgment.
+#
+# THIS ARM IS AN EARLY WARNING FOR "CANNOT BE CORRECTED", NOT A SECOND GROWTH
+# CAP. The cap already governs growth; this says the file still has room for the
+# next fix, and it should fire only when that is genuinely in doubt. So the
+# floors are deliberately LOW — a few hundred bytes, roughly one corrected
+# sentence — rather than set just under whatever the file happens to measure
+# today. A floor tuned tight to the current size reds on the next honest edit
+# and teaches authors to route around the gate, which is worse than no gate:
+# these are the documents an owner rewrites in place (the Golden Rules are being
+# revised as this lands), and a warning that cries on every such edit stops being
+# read. Leave real slack between the floor and the file.
+#
+# These two files earn a floor and the other cap rows do not: they are the
+# surface routers every agent loads, so they are where a correction is most
+# urgent and least postponable. Raising a cap to buy floor is not a fix and the
+# doc contract forbids it outright — split content to its owning doc instead.
+check_headroom() {
+  # $1 = path, $2 = byte cap, $3 = minimum free bytes
+  local path="$1" cap="$2" floor="$3" size free
+  if [ ! -f "$path" ]; then
+    echo "FAIL: $path is missing (headroom-gated file must exist)"
+    FAIL=1
+    return
+  fi
+  size=$(wc -c < "$path" | tr -d ' ')
+  free=$((cap - size))
+  if [ "$free" -lt "$floor" ]; then
+    echo "FAIL: $path has ${free}B of headroom under its ${cap}B cap, floor is ${floor}B." \
+         "That is too full to absorb the next correction. Do NOT raise the cap — split" \
+         "the least load-bearing section to its owning doc and leave a one-line pointer."
+    FAIL=1
+  else
+    echo "ok:   $path headroom ${free}B >= ${floor}B (${size}B of ${cap}B)"
+  fi
+}
+
+check_headroom CLAUDE.md 10000 200
+check_headroom api/CLAUDE.md 6500 150
 
 if [ "$FAIL" -ne 0 ]; then
   echo ""

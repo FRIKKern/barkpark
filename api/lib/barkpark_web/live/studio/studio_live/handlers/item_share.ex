@@ -54,6 +54,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
       is_nil(item) or is_nil(socket.assigns[:current_workspace]) ->
         {:noreply, assign(socket, item_share_error: "No item / workspace in context.")}
 
+      # THE UNBOUND-MINT REFUSAL (task-2da739b78e938be0). `Shared.item_link_attrs/3`
+      # spells project_id as `socket.assigns[:current_project] && …`, so a socket
+      # with no project mints a link bound to no project — and a link bound to no
+      # project matches no `(workspace, project, dataset)` triple, so
+      # `Links.revoke_scope/3` (the cascade `Sharing.remove_share/3` fires) can
+      # never revoke it. The AUTHORITATIVE refusal is `ShareLink.changeset/2`,
+      # which requires both scope ids at the one changeset BOTH mint doors cross;
+      # this arm exists so the operator gets the REASON instead of the generic
+      # "Could not create the link." Deliberately NOT a fallback to a default
+      # project: which project the item belongs to is not this handler's to guess.
+      is_nil(socket.assigns[:current_project]) ->
+        {:noreply,
+         assign(socket,
+           item_share_error: "No project in context — open the desk under a project to share."
+         )}
+
       true ->
         case Barkpark.Sharing.Links.create(Shared.item_link_attrs(socket, item, access)) do
           {:ok, _} ->

@@ -93,12 +93,53 @@ defmodule Barkpark.Structure do
   def build(dataset \\ "production", opts \\ []) do
     # The desk lists a workspace's content TYPES, which are workspace-level —
     # NOT per-project. Scope by workspace + shared globals (`include_global`)
-    # and the dataset STRING; deliberately DROP `:project_id` so the read does
-    # not resolve a single project's `dataset_id` (a workspace can hold several
-    # same-named datasets across projects — that strictness wrongly hid types).
-    # Documents stay project-scoped downstream in PaneBuilder. Unscoped (no
-    # `:workspace_id`) this still reads every tenant's rows (the legacy desk).
-    schema_opts = [include_global: true] ++ Keyword.take(opts, [:workspace_id])
+    # and the dataset STRING. Documents stay project-scoped downstream in
+    # PaneBuilder. Unscoped (no `:workspace_id`) this still reads every tenant's
+    # rows (the legacy desk).
+    #
+    # Like `census_opts/1` below, this is a WHITELIST: every key it does not name
+    # is silently dropped, and a dropped key is only safe when its consumer
+    # defaults to the NARROW behaviour. This list is the SCHEMA half of the pair
+    # the census is the DOCUMENT half of — the two must name the same grant keys
+    # or the desk narrows one tier and not the others. Naming each key, with its
+    # sign (task-8f8a3a2e05146984; the same unnamed-drop defect as
+    # task-c6d2e34c64100678 one function down):
+    #
+    #   * `:include_global` — SET here, not forwarded. Workspace-shared schemas
+    #     (`workspace_id` NULL) belong on every workspace's desk.
+    #
+    #   * `:workspace_id` — FORWARDED. The tenancy floor the whole desk is built
+    #     on. Its absence WIDENS to every tenant (the legacy flat desk).
+    #
+    #   * `:grant_scoped` — FORWARDED. `Content.Scope.maybe_scope_schemas_to_grants/2`
+    #     is gated by `Keyword.get(opts, :grant_scoped, false)`, so DROPPING it
+    #     read as "do not narrow", not as "narrow to nothing". Absence WIDENS.
+    #     A grant-admitted non-member (LiveScope's grant arm) therefore read the
+    #     WHOLE workspace catalog, and every MAIN/Plugins tier node is built from
+    #     `schema_map` — so the desk named every content type outside the grant.
+    #     The census fix (#14079) closed only the …Rest tier, which is
+    #     census-driven; this closes the list beside it.
+    #
+    #   * `:caller_context` — FORWARDED, and load-bearing only because of the key
+    #     above: `scope_schemas_to_grants/3` fails CLOSED without it, so
+    #     forwarding the flag alone would BLANK a grantee's desk instead of
+    #     narrowing it. On its own this key's absence narrows, which is why it
+    #     was safe to drop before the flag arrived and is safe to forward now.
+    #
+    #   * `:project_id` — DROPPED, deliberately, and this drop WIDENS on purpose.
+    #     Forwarding it would resolve a single project's `dataset_id` (a
+    #     workspace can hold several same-named datasets across projects — that
+    #     strictness wrongly hid types). A project-scoped GRANT still confines the
+    #     caller's documents to its project; that is the grant ladder on the
+    #     document path, not this drop.
+    #
+    #   * `:gating` — DROPPED. A desk-composition concern (`build_desk_items/3`
+    #     reads it off `opts` directly); it selects which PLACED nodes render, and
+    #     means nothing to a catalog read. Its absence changes no row.
+    schema_opts =
+      [include_global: true] ++
+        Keyword.take(opts, [:workspace_id, :grant_scoped, :caller_context])
+
     schemas = Content.list_schemas(dataset, schema_opts)
     schema_map = Map.new(schemas, &{&1.name, &1})
 

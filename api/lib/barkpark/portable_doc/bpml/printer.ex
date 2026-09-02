@@ -52,7 +52,25 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "eyebrow"} = b, d), do: text_tag("eyebrow", b, d)
 
   defp block(%{"type" => "heading", "level" => l} = b, d) when l in 1..3,
-    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
+    do: heading_line(l, b, d)
+
+  # The stored corpus spells the heading level BOTH ways: 283 integer levels and
+  # 225 numeric STRINGS ("2" 119, "3" 102, "1" 9) across the 26 published papers
+  # that refuse on a KERNEL block type (census 2026-08-24, re-measured
+  # 2026-09-02). A string level matched no heading clause and fell through to
+  # the fail-honest catch-all, so `bp paper pull` answered 422 with
+  # `block type "heading" is outside the BPML kernel vocabulary` — a refusal on
+  # a type this module spells, over the SPELLING of one scalar.
+  #
+  # Coercing is not a guess. The RENDER side already collapses both spellings
+  # onto one outline level (`heading_level("2") -> 2`,
+  # render/compose.ex heading_level/1), so printing them identically spells the
+  # heading every reader already sees.
+  #
+  # DELIBERATELY NARROW — exactly "1" / "2" / "3". "01", " 2", "4" and every
+  # junk spelling keep falling through; see the note above the catch-all.
+  defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3),
+    do: heading_line(String.to_integer(l), b, d)
 
   defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d)
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
@@ -173,7 +191,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   end
 
   # The divider is a self-closing leaf — the kernel's one rule (<hr/>). Web
-  # (compose.ex :439 → PdHr) and TUI (pdrender.go) legs already ship; this is
+  # (render/compose.ex `compose_block` divider arm → PdHr) and TUI (pdrender.go) legs already ship; this is
   # the BPML leg that dominates the one-blocker-away set (82 of 93 papers).
   defp block(%{"type" => "divider"} = b, d), do: pad(d) <> "<hr#{attr_str(b, ["id"])}/>"
 
@@ -192,6 +210,24 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("expandable", attrs, children, d)
   end
 
+  # THE HEADING-LEVEL DECISION, recorded. A NIL/ABSENT level (20 blocks / 4
+  # papers: barkpark-cli-reliability-wave-2026-07-22,
+  # bp-cloud-build-doneset-audit-2026-08-18,
+  # enterprise-auth-done-set-audit-wave-2026-08-18, felix-pristine-wave-2026-08-18)
+  # and a JUNK level ("h2" 6, "w14-h2" 5, "h3" 5, "state", "live", … — 28 blocks
+  # / 4 papers) both KEEP REFUSING, by decision, through the catch-all below.
+  #
+  # The renderer's own fallback for both is `heading_level(_) -> 2`
+  # (render/compose.ex heading_level/1) and this printer deliberately does NOT
+  # borrow it. The renderer's default is a DISPLAY choice: the stored block
+  # keeps its real shape and an author can still state the level later. This
+  # printer's output is what `bp paper push` writes BACK, so defaulting here
+  # would persist an invented `<h2>` over the block — a pull/push the author
+  # never edited would silently restructure the document outline, and
+  # "w14-h2" is not an outline level in the first place. Charter D3: a shape
+  # the kernel cannot spell HONESTLY takes the typed refusal. Those 8 papers
+  # stay at 422 until an author states a level.
+  #
   # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
   # typed refusal (UnprintableError) so the read path can label it 422 and the
   # sync path can tell "unprintable paper" from "printer bug" — never a bare
@@ -251,69 +287,150 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   # ── inline ──────────────────────────────────────────────────────────────────
 
-  defp inline(nodes) when is_list(nodes), do: Enum.map_join(nodes, "", &inline_node/1)
+  # Inline content is emitted as a MARK TREE, not node by node: adjacent runs
+  # that share a leading mark are wrapped in it ONCE.
+  #
+  # WHY — the round trip was not a fixed point. A `%{"type" => "strong",
+  # "children" => [text "Phase ", code "Ping"]}` printed
+  # `<b>Phase <code>Ping</code></b>`. The parser then (correctly) distributes
+  # the mark over every run the element covers and returned two text nodes,
+  # `marks: ["strong"]` and `marks: ["strong", "code"]`; printing those one at
+  # a time re-emitted `<b>Phase </b><b><code>Ping</code></b>` — the same
+  # characters, different element boundaries. So `bp paper pull` followed by
+  # `bp paper push` with NO EDIT rewrote the stored paper and `bp paper diff`
+  # reported a change on an untouched file: 12 of the 570 printable published
+  # papers (census 2026-08-24, re-measured 2026-09-02 — the same 12).
+  #
+  # The fix belongs HERE and not in the parser: the parser's output should stay
+  # faithful to the markup it read (each run carries the marks that actually
+  # cover it), and this module's moduledoc already claims to be the one place
+  # that defines THE canonical spelling. Coalescing is that decision.
+  #
+  # TWO PASSES, because the corpus spells the same thing two ways and both must
+  # take part in the same run:
+  #
+  #   `expand/2`     every inline spelling → `{marks, body}` — the marks that
+  #                  cover a run of characters, and the rendered characters. A
+  #                  text node's `marks` list and the NODE-spelled `strong` /
+  #                  `em` / `code` inlines collapse onto the same
+  #                  representation, so `<b>a</b><b><code>b</code></b>` stored
+  #                  as three sibling `strong` nodes prints as one `<b>` too
+  #                  (2 papers churned on exactly that until this pass existed).
+  #   `inline_run/2` walks that flat list and opens each shared mark once.
+  defp inline(content), do: content |> expand([]) |> inline_run([])
+
+  # ── pass 1: every inline spelling → {marks, body} ───────────────────────────
+
+  defp expand(nodes, marks) when is_list(nodes),
+    do: Enum.flat_map(nodes, &expand_node(&1, marks))
+
   # A single inline node where a LIST belongs (census: 16 papers) — coerced
-  # through the node printer rather than crashed.
-  defp inline(%{} = node), do: inline_node(node)
+  # rather than crashed.
+  defp expand(%{} = node, marks), do: expand_node(node, marks)
   # A bare string where inline CONTENT belongs — a legacy string table cell /
   # list item. Escaped verbatim, not a crash.
-  defp inline(s) when is_binary(s), do: esc(s)
+  defp expand(s, marks) when is_binary(s), do: [{marks, esc(s)}]
   # Anything else (a number, nil, a boolean) is genuinely unspellable.
-  defp inline(_other), do: raise(UnprintableError.new(:inline, nil))
+  defp expand(_other, _marks), do: raise(UnprintableError.new(:inline, nil))
 
-  defp inline_node(%{"type" => "text"} = n) do
-    Map.get(n, "marks", [])
-    |> Enum.reverse()
-    |> Enum.reduce(text_value(Map.get(n, "value", "")), fn mark, acc ->
-      tag = mark_tag(mark)
-      "<#{tag}>#{acc}</#{tag}>"
-    end)
-  end
-
-  defp inline_node(%{"type" => "link"} = n),
-    do:
-      ~s(<a href="#{esc_attr(Map.get(n, "href", ""))}">) <>
-        inline(Map.get(n, "children", [])) <> "</a>"
+  defp expand_node(%{"type" => "text"} = n, marks),
+    do: [{marks ++ node_marks(n), text_value(Map.get(n, "value", ""))}]
 
   # Node-spelled inline marks — the corpus's real shapes (census: `code` 87
   # papers, `strong` 84, `em` 34). `code` carries its text in the VALUE key (a
   # scalar, no children); `strong`/`em` carry an inline-node LIST in `children`
-  # (no value). Each prints to the SAME mark spelling the parser round-trips
-  # into canonical text-node marks — so the SECOND print is byte-stable.
-  # Guarded: a node carrying its content in the OTHER key (a `code` smuggling
-  # `children`, a `strong`/`em` smuggling a `value`) would print empty — a
-  # silent loss. Those shapes refuse (fail-honest) rather than guess.
-  defp inline_node(%{"type" => "code"} = n) do
+  # (no value). Guarded: a node carrying its content in the OTHER key (a `code`
+  # smuggling `children`, a `strong`/`em` smuggling a `value`) would print
+  # empty — a silent loss. Those shapes refuse (fail-honest) rather than guess.
+  defp expand_node(%{"type" => "code"} = n, marks) do
     case Map.get(n, "children") || [] do
-      [] -> "<code>#{esc(Map.get(n, "value", ""))}</code>"
+      [] -> [{marks ++ ["code"], esc(Map.get(n, "value", ""))}]
       _children -> raise(UnprintableError.new(:inline, "code"))
     end
   end
 
-  defp inline_node(%{"type" => "strong"} = n), do: child_mark(n, "strong", "b")
-  defp inline_node(%{"type" => "em"} = n), do: child_mark(n, "em", "i")
+  defp expand_node(%{"type" => "strong"} = n, marks), do: expand_child_mark(n, "strong", marks)
+  defp expand_node(%{"type" => "em"} = n, marks), do: expand_child_mark(n, "em", marks)
+
+  # A link is opaque to the run: it spells its own element and its children are
+  # a fresh inline context (the parser refuses a link INSIDE a mark, so a link
+  # never carries an enclosing mark of its own).
+  defp expand_node(%{"type" => "link"} = n, marks),
+    do: [
+      {marks,
+       ~s(<a href="#{esc_attr(Map.get(n, "href", ""))}">) <>
+         inline(Map.get(n, "children", [])) <> "</a>"}
+    ]
 
   # A raw string where an inline node belongs (census: 18 papers) — a legacy
   # untyped text run. Escaped verbatim, not a crash.
-  defp inline_node(s) when is_binary(s), do: esc(s)
+  defp expand_node(s, marks) when is_binary(s), do: [{marks, esc(s)}]
 
   # Fail-honest catchalls. `valueref` (12 papers) and `paragraph` (20) STAY a
   # typed refusal (kind :inline): a valueref resolves against live data the
   # printer cannot reach, and a paragraph is a BLOCK, unspellable inline — both
   # are honest 422s, not a lossy guess. Every other unspelled inline node type
   # lands here too, so the read path can label it 422 rather than 500.
-  defp inline_node(%{"type" => type}), do: raise(UnprintableError.new(:inline, type))
-  defp inline_node(_other), do: raise(UnprintableError.new(:inline, nil))
+  defp expand_node(%{"type" => type}, _marks), do: raise(UnprintableError.new(:inline, type))
+  defp expand_node(_other, _marks), do: raise(UnprintableError.new(:inline, nil))
 
-  defp child_mark(n, type, tag) do
+  defp expand_child_mark(n, type, marks) do
     children = Map.get(n, "children") || []
     value = Map.get(n, "value")
 
     if children == [] and is_binary(value) and value != "" do
       raise(UnprintableError.new(:inline, type))
     else
-      "<#{tag}>#{inline(children)}</#{tag}>"
+      expand(children, marks ++ [type])
     end
+  end
+
+  # Only a TEXT node carries a `marks` list. A value that is not a list used to
+  # reach `Enum.reverse/1` and escape as a raw 500; it takes the ONE typed
+  # refusal instead.
+  defp node_marks(%{"marks" => marks}) when is_list(marks), do: marks
+  defp node_marks(%{"marks" => nil}), do: []
+  defp node_marks(%{"marks" => _other}), do: raise(UnprintableError.new(:mark, nil))
+  defp node_marks(_n), do: []
+
+  # ── pass 2: open each shared mark exactly once ──────────────────────────────
+
+  # `open` is the mark prefix already emitted around every run in the list; the
+  # entry point opens nothing. Every run carries `open` as a prefix of its own
+  # marks, which is what makes `Enum.at(marks, length(open))` the next mark to
+  # open. It terminates: a group always holds at least its head, so both
+  # recursive calls take a strictly shorter list.
+  defp inline_run([], _open), do: ""
+
+  defp inline_run([{marks, body} | rest] = runs, open) do
+    if marks == open do
+      body <> inline_run(rest, open)
+    else
+      mark = Enum.at(marks, length(open))
+      tag = mark_tag(mark)
+      prefix = open ++ [mark]
+
+      {group, tail} =
+        runs
+        |> Enum.split_while(fn {m, _} -> Enum.take(m, length(prefix)) == prefix end)
+        |> keep_sibling_boundary(marks)
+
+      "<#{tag}>" <> inline_run(group, prefix) <> "</#{tag}>" <> inline_run(tail, open)
+    end
+  end
+
+  # The ONE boundary that is not churn: two adjacent runs carrying EXACTLY the
+  # same marks were two elements, and the parser hands them back as two nodes.
+  # `<code>tr -d '</code><code>x</code>` is not `<code>tr -d 'x</code>`, so
+  # merging those would make the round trip churn in the other direction (it
+  # did, on 3 papers, before this clause). Only a boundary that SPLITS a mark
+  # shared by runs of DIFFERENT depth gets closed — that split is the defect.
+  defp keep_sibling_boundary({[single], tail}, _marks), do: {[single], tail}
+
+  defp keep_sibling_boundary({[first | rest] = group, tail}, marks) do
+    if Enum.all?(rest, fn {m, _} -> m == marks end),
+      do: {[first], rest ++ tail},
+      else: {group, tail}
   end
 
   defp mark_tag("strong"), do: "b"
@@ -402,12 +519,15 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # ctx-compression-handle-doctrine). A typed node now prints through the node
   # printer (lossless); any other non-binary takes the typed refusal.
   defp text_value(v) when is_binary(v), do: esc(v)
-  defp text_value(%{"type" => _} = node), do: inline_node(node)
+  defp text_value(%{"type" => _} = node), do: inline([node])
   defp text_value(v) when is_number(v) or is_boolean(v), do: esc(to_string(v))
   defp text_value(nil), do: ""
   defp text_value(_other), do: raise(UnprintableError.new(:inline, "text"))
 
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  defp heading_line(l, b, d),
+    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
 
   defp text_tag(tag, b, d),
     do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</#{tag}>"

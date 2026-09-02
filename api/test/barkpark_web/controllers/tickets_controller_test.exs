@@ -19,6 +19,7 @@ defmodule BarkparkWeb.TicketsControllerTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
+  alias Barkpark.Content.Document
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
   alias BarkparkWeb.TicketsController
@@ -219,6 +220,90 @@ defmodule BarkparkWeb.TicketsControllerTest do
       # the submitter, not the operator.
       answered_row = Enum.find(rows, &(&1["status"] == "answered"))
       assert answered_row["waiting_age_seconds"] == nil
+    end
+  end
+
+  # ── PDS w36 crit 2: render_ticket/3's receipt against the STORED ROW ─────
+  #
+  # `tickets_controller.ex:263` (`render_ticket/3`) is the ONE renderer every
+  # ticket receipt passes through — create's 201, show_own, reply, answer and
+  # close all end there. Every other test in this file reads that receipt and
+  # NOTHING else, so a create that renders a faithful ticket while persisting
+  # something different passes all of them. This is the differential: drive the
+  # action in this file's own direct-action style, then certify the printed
+  # ticket against the row read DIRECTLY through `Repo` — never through the
+  # list or show endpoint, which would share any bug the renderer has.
+  describe "render_ticket/3 receipt vs the stored row (PDS w36 crit 2)" do
+    test "the 201 ticket names a real row and reports that row's content faithfully",
+         %{key: key} do
+      conn =
+        TicketsController.create(submitter_conn(key), %{
+          "subject" => "Receipt must match the row",
+          "body" => "the printed thread has to be the stored thread"
+        })
+
+      receipt = json_response(conn, 201)
+      assert receipt["ok"] == true
+      rendered = receipt["ticket"]
+
+      # THE ID THE RECEIPT HANDED THE CALLER MUST NAME A ROW. Read by that id,
+      # through Repo, scoped to the single document this call created (never a
+      # whole-table read — many agents share this test database).
+      stored =
+        Repo.get_by!(Document,
+          doc_id: Content.draft_id(rendered["id"]),
+          type: "ticket",
+          dataset: @dataset
+        )
+
+      # THE POST-CONDITION: every field the receipt printed is the stored one.
+      assert stored.content["subject"] == rendered["subject"]
+      assert stored.content["status"] == rendered["status"]
+      assert stored.content["key_id"] == rendered["key_id"]
+      assert stored.content["key_name"] == rendered["key_name"]
+      assert stored.content["waiting_since"] == rendered["waiting_since"]
+      assert stored.content["submitter_seen_at"] == rendered["submitter_seen_at"]
+
+      assert [stored_msg] = stored.content["messages"]
+      assert [rendered_msg] = rendered["messages"]
+      assert stored_msg["author_kind"] == rendered_msg["author_kind"]
+      assert stored_msg["author_name"] == rendered_msg["author_name"]
+      assert stored_msg["body"] == rendered_msg["body"]
+
+      # AND THE STORED VALUES ARE THE CREDENTIAL'S, so a receipt that merely
+      # agrees with itself cannot pass: identity comes from the key, and the
+      # subject/body came from the request.
+      assert stored.content["key_name"] == key.name
+      assert stored.content["key_id"] == key.id
+      assert stored.content["subject"] == "Receipt must match the row"
+      assert stored_msg["body"] == "the printed thread has to be the stored thread"
+    end
+
+    test "an operator answer's receipt matches the row the answer wrote", %{ws: ws, key: key} do
+      id = file_ticket(key)
+
+      conn =
+        TicketsController.answer(operator_conn(ws, "Desk-9"), %{"id" => id, "body" => "fixed"})
+
+      rendered = json_response(conn, 200)["ticket"]
+
+      stored =
+        Repo.get_by!(Document,
+          doc_id: Content.draft_id(id),
+          type: "ticket",
+          dataset: @dataset
+        )
+
+      assert stored.content["status"] == rendered["status"]
+      assert stored.content["status"] == "answered"
+      assert length(stored.content["messages"]) == length(rendered["messages"])
+
+      stored_last = List.last(stored.content["messages"])
+      rendered_last = List.last(rendered["messages"])
+      assert stored_last["author_kind"] == rendered_last["author_kind"]
+      assert stored_last["author_name"] == rendered_last["author_name"]
+      assert stored_last["body"] == rendered_last["body"]
+      assert stored_last["author_name"] == "Desk-9"
     end
   end
 

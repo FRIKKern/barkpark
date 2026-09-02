@@ -2561,6 +2561,75 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
   end
 
+  # cch-w57 — THE OTHER DIRECTION OF THE LIVE TEARDOWN'S ATOMICITY. The delete
+  # now stamps a `barkpark.deleted` audit row in its own transaction, so the
+  # interesting arms are the ones that DELETE NOTHING: they must also write
+  # nothing, or the trail starts claiming removals that did not happen — the
+  # mirror of the silence this change closed. (The rollback direction, where the
+  # audit insert is refused and the box survives, is driven in
+  # test/barkpark_cloud/web/router_audit_test.exs, which is `async: false` and
+  # can therefore take the DDL lock the refusal needs.)
+  describe "the LIVE teardown's audit row (cch-w57)" do
+    test "a real delete writes exactly one barkpark.deleted, actor nil, via deprovision" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team, "deprovision")
+      bp_id = Repo.get(ProvisionJob, id).barkpark_id
+      name = Repo.get(Barkpark, bp_id).name
+
+      assert {:ok, :deleted} = Registry.succeed_deprovision_job(id, claim_token: "tok-B")
+
+      assert [ev] = Accounts.list_audit_events(team)
+      assert ev.action == "barkpark.deleted"
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp_id
+      assert ev.actor_user_id == nil
+      assert ev.metadata["name"] == name
+      assert ev.metadata["via"] == "deprovision"
+      assert ev.metadata["sites"] == []
+    end
+
+    test "a terminally FAILED job deletes nothing and therefore writes nothing" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team, "deprovision")
+      bp_id = Repo.get(ProvisionJob, id).barkpark_id
+
+      {:ok, _} = Registry.fail_job(id, "worker gave up", claim_token: "tok-B")
+
+      assert {:error, :conflict} = Registry.succeed_deprovision_job(id, claim_token: "tok-B")
+      assert Repo.get(Barkpark, bp_id)
+
+      assert Accounts.list_audit_events(team) == [],
+             "a refused teardown wrote a removal onto the trail"
+    end
+
+    test "a RETRIED succeed is :already_gone and does not write a second removal" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team, "deprovision")
+
+      assert {:ok, :deleted} = Registry.succeed_deprovision_job(id, claim_token: "tok-B")
+      assert [_one] = Accounts.list_audit_events(team)
+
+      # The job row went with the barkpark (FK cascade), so the retry reads as
+      # already-gone — the idempotent arm, and it must stay silent.
+      assert {:ok, :already_gone} = Registry.succeed_deprovision_job(id, claim_token: "tok-B")
+
+      # A match with a custom message would raise MatchError before assert/2 ran,
+      # killing the sentence — so this counts instead of destructuring.
+      assert length(Accounts.list_audit_events(team)) == 1,
+             "a duplicate worker succeed double-stamped the trail"
+    end
+
+    test "a STALE-token succeed deletes nothing and writes nothing" do
+      {_user, team} = user_with_team()
+      id = stale_reclaimed_job(team, "deprovision")
+      bp_id = Repo.get(ProvisionJob, id).barkpark_id
+
+      assert {:error, :stale_claim} = Registry.succeed_deprovision_job(id, claim_token: "tok-A")
+      assert Repo.get(Barkpark, bp_id)
+      assert Accounts.list_audit_events(team) == []
+    end
+  end
+
   # wave 13 S2. A provision failure is a REMOTE capture — ssh stderr, a provider
   # body — so it can carry a credential the control plane never chose to print.
   # Reading it takes nothing but team membership: GET /v1/barkparks is

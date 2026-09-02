@@ -416,10 +416,39 @@ html[data-theme="dark"] .bp-paper-body {
    selector: `.bp-paper-editor-body` is untouched, so the editable scaffold
    stays visible while composing (doctrine invariant 1). */
 .bp-paper-surface p:empty { display: none; }
+/* THE LINK AFFORDANCE — a real underline, not a hue. The at-rest treatment was
+   `text-decoration: none` + `border-bottom: 1px solid var(--paper-accent-soft)`,
+   and `--paper-accent-soft` is alpha 0.10 light / 0.16 dark: composited over the
+   reading ground it computes to 1.14–1.35:1 across the five bp themes — no line
+   at all, leaving COLOUR as the only signal that a word is a link (WCAG 1.4.1).
+   The underline is now the text decoration itself, tinted to 80% of the accent
+   so it reads as ink rather than as a rule. 80% is the measured floor with head-
+   room: the decoration clears 3:1 against `--paper-bg-deep` in all ten
+   theme×scheme pairs (min 3.25:1, ember light), where 75% only just reaches 3.00
+   and 45% peaks at 2.83. `skip-ink: auto` keeps descenders legible and the
+   offset lifts the line clear of the serif baseline.
+   Byte-identical in root.html.heex and assets/paper-editor/src/styles.css — `a`
+   and `a:focus-visible` are in view_edit_parity_test.exs's @parity_elements
+   (§2) and @mirror_elements (§5), so drift on any of the three copies reds.
+   walk.ex's `:email` link clause keeps its own INLINE `text-decoration:underline`
+   (frozen — Outlook has no stylesheet): a deliberate fourth site, not a mirror. */
 .bp-paper-surface a  {
-  color: var(--paper-accent); text-decoration: none;
-  border-bottom: 1px solid var(--paper-accent-soft);
+  color: var(--paper-accent); text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--paper-accent) 80%, transparent);
+  text-decoration-thickness: 1px; text-underline-offset: 0.18em;
+  text-decoration-skip-ink: auto;
 }
+/* Keyboard focus was UNAUTHORED on the prose surface: the only `:focus-visible`
+   rule in this file was the lightbox image's, so a reader tabbing through a
+   paper's links got the UA default ring drawn over accent-coloured type. An
+   accent ring, offset so it never sits on the glyphs. */
+.bp-paper-surface a:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 2px;
+}
+/* Selection was the UA system highlight — a blue that belongs to no theme and
+   fights every one of the five. Tint it with the theme's own soft accent and
+   leave the ink alone so selected prose stays as readable as unselected prose. */
+.bp-paper-surface ::selection { background: var(--paper-accent-soft); color: inherit; }
 /* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
 .bp-paper-surface ul, .bp-paper-surface ol { margin: 0 0 24px; padding-left: var(--bp-list-indent); }
 .bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }

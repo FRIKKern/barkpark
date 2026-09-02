@@ -832,6 +832,14 @@ install -m 0644 "$APP/deploy/systemd/barkpark-slot@.service" /etc/systemd/system
 [ -f "$APP/deploy/systemd/barkpark-site@.service" ] && \
   install -m 0644 "$APP/deploy/systemd/barkpark-site@.service" /etc/systemd/system/barkpark-site@.service
 mkdir -p "$APP/.slots"
+# Indx durable state lives OUTSIDE the build roots (task-527b519e47669559):
+# priv/indx_state is a per-version copy under a release and a source-tree
+# symlink under mix, so a version bump or a slot flip abandons every key_map.
+# config/runtime.exs points Barkpark.Plugins.Indx.Persistence here when
+# BARKPARK_INDX_STATE_DIR is set in .env or, in :prod, when this PARENT exists —
+# so creating it is what turns the persistent default on. Owner = the slot
+# unit's User (root; deploy/systemd/barkpark-slot@.service). Idempotent.
+install -d -m 0750 -o root -g root "${BARKPARK_INDX_STATE_DIR:-/var/lib/barkpark/indx-state}"
 write_slot_env() { # $1=slot  $2=port  $3=build_root
   local f="$APP/.slots/$1.env" apply=""
   [ -f "$f" ] && apply="$(grep -E '^BARKPARK_SITE_DEPLOY_APPLY=' "$f" 2>/dev/null | tail -1)"

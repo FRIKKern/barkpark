@@ -307,11 +307,18 @@ function chatStatusLabel(status: string): string {
 
 // The shared header row: a bold title and a right-aligned status word. Twin of
 // components.ex chat_card_header/2.
+//
+// NO INLINE `white-space: nowrap`. It used to sit on the status span, and being
+// INLINE it beat every paper-surface.css rule — a long status word forced one
+// unbreakable line and gave the whole reader page horizontal scroll at a 390px
+// viewport. `overflow-wrap: anywhere` is the guard a shrink-to-fit box needs
+// (only `anywhere` reduces the intrinsic width the box is sized from);
+// `min-width: 0` lets the flex item shrink below its content size at all.
 function chatCardHeader(title: string, status: string): string {
   return (
     `<div style="display: flex; gap: 6px; align-items: baseline;">` +
-    `<span style="font-weight: 600;">${escapeHtml(title)}</span>` +
-    `<span class="text-dim" style="margin-left: auto; white-space: nowrap;">` +
+    `<span style="font-weight: 600; min-width: 0; overflow-wrap: anywhere;">${escapeHtml(title)}</span>` +
+    `<span class="text-dim" style="margin-left: auto; min-width: 0; overflow-wrap: anywhere;">` +
     `${escapeHtml(chatStatusLabel(status))}</span></div>`
   )
 }

@@ -37,6 +37,7 @@ rate-limit-client-ip	client_ip
 scope-project-resolution	scope_project_id
 search-crystal-period-key	period_start_for
 secret-redaction	redact
+share-link-route-binding	binds_route_resource?
 share-scope-tenancy	declarable_scope?
 sheets-bg-sanitizer	sanitize_bg
 slug-resolve	resolve_doc

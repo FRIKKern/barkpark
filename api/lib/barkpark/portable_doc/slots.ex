@@ -402,11 +402,53 @@ defmodule Barkpark.PortableDoc.Slots do
   # element is present (a bare legacy item, or an empty optional slot), read the flat
   # field. The SAME plain string either encoding, so reader bytes never move.
   defp note_slot_text(block, slot_name, flat_key) do
-    case slot_elements(block, slot_name) do
-      [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
-      _ -> note_flat(block, flat_key)
+    primary =
+      case slot_elements(block, slot_name) do
+        [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
+        _ -> note_flat(block, flat_key)
+      end
+
+    # THE BODY'S LAST RESORT — a top-level `content` inline array. A note
+    # persisted the widget way (`{"type":"note","content":[…]}`, no flat `text`)
+    # read "" through every path above: the legacy synthesis wraps the ABSENT
+    # `text` field as an empty paragraph, which flattens to "" and blanked the
+    # note on the server-rendered reader (1 such block live on guerrilla, census
+    # 2026-07-25, task-993d136b0fbf2fd1) while `@barkpark/react` rendered it.
+    # This is the `callout_body_inline/1` law — content ⟂ text, content read
+    # FIRST — arriving at the note's BODY only: `label`/`lead` have no `content`
+    # spelling, and letting the block's body inline leak into them would print
+    # the body twice.
+    case {primary, slot_name} do
+      {"", "body"} -> note_content_text(block)
+      _ -> primary
     end
   end
+
+  # A note block's top-level `content` flattened to plain text. The guard is the
+  # SAME one `callout_body_inline/1` and `paragraph_inline/1` hold — a NON-EMPTY
+  # INLINE ARRAY — and it is load-bearing twice over:
+  #
+  #   * it is the shape the widget actually persists (`content:[…]` inline
+  #     nodes), the one `@barkpark/react` renders and this fallback exists for;
+  #   * a SCALAR `content` (a bare string) stays UNREAD, which is exactly what
+  #     the silent-content-loss write gate needs: `lossy_shape?/1` asks
+  #     `note_body_text/1` whether the reader shows anything, so consuming a
+  #     string here would quietly disarm the ratchet that REFUSES a note whose
+  #     prose was stranded under `content`
+  #     (`Barkpark.Content.Papers.NoteCardFieldLossTest`). Rendering an inline
+  #     array is a fix; swallowing a stranded string would be a regression
+  #     dressed as one.
+  #
+  # Never consulted while the body slot or the flat `text` carries anything, so
+  # both canonical encodings stay byte-identical.
+  defp note_content_text(block) when is_map(block) do
+    case Map.get(block, "content") do
+      list when is_list(list) and list != [] -> flatten_inline_text(list)
+      _ -> ""
+    end
+  end
+
+  defp note_content_text(_block), do: ""
 
   # ── stage widget accessor ────────────────────────────────────────────────────
 

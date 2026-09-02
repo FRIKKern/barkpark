@@ -86,9 +86,10 @@ defmodule BarkparkWeb.ListenController do
           # The replay path reads the STORED mutation_events.document — a frozen,
           # unredacted snapshot. Re-render from the CURRENT document so a privacy
           # change since write is honoured; fall back to redacting the snapshot
-          # only when the document is gone (a delete event). A `:drop` means the
-          # row exists but this caller is denied it by the owner-row ACL — skip
-          # the chunk entirely so a non-owner never replays another user's row.
+          # only when the document is gone (a delete event). A `:drop` means this
+          # caller is denied the row — by the owner-row ACL, or by her grant
+          # ladder (task-c9c962c3451fd831) — so skip the chunk entirely and
+          # never replay another user's or another grant's row.
           case redacted_result(ev, dataset, caller_context, scope) do
             :drop ->
               c
@@ -203,9 +204,10 @@ defmodule BarkparkWeb.ListenController do
           # Re-render the live document under THIS subscriber instead of
           # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
           # `private` / `owner_only` field never reaches a non-authorized caller.
-          # A `:drop` means the owner-row ACL denied this caller the live row
-          # (an owner_scoped doc owned by another user) — skip emitting so the
-          # frozen snapshot of that row never reaches a non-owner subscriber.
+          # A `:drop` means this caller is denied the live row — the owner-row
+          # ACL (an owner_scoped doc owned by another user) or her grant ladder
+          # (task-c9c962c3451fd831) — so skip emitting: the frozen snapshot of
+          # that row never reaches a subscriber who cannot read it.
           #
           # `live_result/4` short-circuits the per-event `Content.get_document`
           # round-trip for an ADMIN caller (both redaction gates are proven
@@ -405,6 +407,46 @@ defmodule BarkparkWeb.ListenController do
   #     a full render of that owner's row, so forwarding it would defeat the
   #     row-level isolation `owner_scoped` exists to provide; the live loop and
   #     replay both skip emitting on `:drop`.
+  #   * the caller is GRANT-DERIVED (`scope[:grant_scoped]`) and the read missed
+  #     → return `:drop` (task-c9c962c3451fd831). See the decision below.
+  #
+  # ## DROP, NEVER REDACT, ON A GRANT-NARROWED MISS (task-c9c962c3451fd831)
+  #
+  # `Content.get_document/4` threads `Content.Scope.maybe_scope_to_grants/2`, so
+  # for a grant-derived subscriber a row OUTSIDE her grant ladder comes back as
+  # `{:error, :not_found}` — indistinguishable, at this seam, from a delete. The
+  # fallback below then redacted and forwarded the FROZEN event-log snapshot, and
+  # `Envelope.redact/3` only strips `private`/`owner_only` FIELDS: the frame still
+  # shipped `documentId`, `_publishedId`, `_rev`, `_type`, `syncTags` and the
+  # document's own public fields to a caller who cannot read that row on any other
+  # surface. Both legs leaked it — replay and live — because `forward_event?/2`
+  # filters on workspace only, and the grant ladder is a boundary INSIDE a
+  # workspace.
+  #
+  # THE DECISION IS `:drop`, NOT A REDACTED FORWARD. A redacted frame is still an
+  # existence oracle: the grantee learns a document of that type, with that id and
+  # that rev, exists and just changed. The grant ladder is the whole of what she
+  # is allowed to know about this workspace, so the only honest answer is silence.
+  #
+  # HOW THE MISS IS DETECTED, AND WHY THAT IS HONEST. The signal is the
+  # conjunction of (a) `scope[:grant_scoped] == true` — the flag ONLY
+  # `ResolveWorkspace` / `AssignGrantScope` / `LiveScope` set, and only for a
+  # grant-derived caller, threaded here by `ScopeHelpers.scope_opts/1` — and (b)
+  # `get_document/4` returned no row for the scope we just passed. It does NOT
+  # re-derive the ladder here; there is no second copy of the grant gate. The two
+  # causes it deliberately conflates are both correctly dropped:
+  #
+  #   * out of grant → drop (the leak this closes); and
+  #   * genuinely DELETED → drop as well. A grantee has nothing to show for a row
+  #     that no longer exists, and the delete tombstone's payload is the same
+  #     frozen snapshot. Losing a delete frame narrows a grantee's cache to
+  #     "stale", never to "reads another tenant's row"; that is the correct side
+  #     to fail on.
+  #
+  # A MEMBER IS UNTOUCHED. Grants only ADD access, so a member's `scope` carries
+  # no `:grant_scoped` key at all (`ScopeHelpers.maybe_grant_scoped/2` sets it
+  # only on `grant_scoped_read: true`), the arm is opts-gated out, and her events
+  # resolve through the `{:ok, doc}` branch above — unchanged by this arm.
   #
   # Public (`@doc false`) so the row-ACL leak-guard can assert the drop directly
   # — same testing seam as `replay_since/3`, `format_event/2` and
@@ -416,13 +458,23 @@ defmodule BarkparkWeb.ListenController do
         Envelope.render(doc, fetch_schema(event.type, dataset, scope), ctx)
 
       _ ->
-        if owner_scoped_denied?(event, dataset, scope) do
+        if grant_scoped_miss?(scope) or owner_scoped_denied?(event, dataset, scope) do
           :drop
         else
           Envelope.redact(event.document, fetch_schema(event.type, dataset, scope), ctx)
         end
     end
   end
+
+  # True when the unreadable event belongs to a GRANT-DERIVED caller — the read
+  # we just ran carried `maybe_scope_to_grants/2`'s gate open, so the miss is a
+  # grant denial (or a delete, which drops identically; see the decision above).
+  # `scope` is a keyword list built by `ScopeHelpers.scope_opts/1`; the key is
+  # absent for every member, token and anonymous listener.
+  defp grant_scoped_miss?(scope) when is_list(scope),
+    do: Keyword.get(scope, :grant_scoped, false) == true
+
+  defp grant_scoped_miss?(_scope), do: false
 
   # True when the unreadable event is an owner-row ACL denial (not a delete):
   # the type is `owner_scoped` AND the row is still present — so `get_document`

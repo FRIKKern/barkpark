@@ -305,6 +305,96 @@ defmodule Barkpark.Plugins.Sheets.Structure do
     Enum.map(tabs, &rewrite_tab_formulas(&1, {:deltab, deleted_name}))
   end
 
+  @doc """
+  The cells of `tab` whose OWN (bare-ref) formula text the axis op `change`
+  rewrites — keyed by their PRE-op address, carrying the PRE-op cell map
+  (formula, computed value, style) VERBATIM.
+
+  This is the lossless delete-undo capture. `delete_rows`/`delete_cols`
+  collapses every dead ref to the literal `#REF!` and clips every partially
+  covered range, and that rewrite is NOT invertible from the resulting text —
+  the structural inverse has to carry the pre-rewrite cells or undo silently
+  keeps the `#REF!`s. Cells INSIDE a deleted span are EXCLUDED: they vanish
+  wholesale and the Session captures the span itself.
+
+  Pure and BOUNDED — one entry per REWRITTEN formula, never a tab snapshot (a
+  1000-cell tab with 3 rewritten formulas yields 3 entries). Cross-tab
+  qualifiers are NOT this function's business (the local pass leaves them
+  alone); `cross_tab_rewritten_cells/4` is their companion.
+  """
+  @spec rewritten_formula_cells(
+          map(),
+          :row | :col,
+          {:insert | :delete, pos_integer(), pos_integer()}
+        ) :: %{String.t() => map()}
+  def rewritten_formula_cells(tab, axis, {kind, _at, _count} = change)
+      when is_map(tab) and axis in [:row, :col] and kind in [:insert, :delete] do
+    for {addr, cell} <- tab_cells(tab),
+        is_map(cell),
+        is_binary(Map.get(cell, "f")),
+        {:ok, pos} <- [Sheets.parse_ref(addr)],
+        shift_index(axis_index(pos, axis), axis, change) != :dead,
+        rewrite_cell(cell, axis, change) != cell,
+        into: %{} do
+      {addr, cell}
+    end
+  end
+
+  @doc """
+  The cells whose CROSS-TAB refs `shift_cross_tab_refs/4` rewrites for the same
+  arguments, as `%{tab_index => %{ref => pre-rewrite cell}}`.
+
+  The companion capture to `rewritten_formula_cells/3`: a row/col delete on the
+  tab at `target_index` collapses qualified refs to it (`Sheet2!A1`,
+  `'My Tab'!A1:A9`) in EVERY tab's formulas — other tabs' and the mutated tab's
+  own SELF-qualified ones, which the local pass passes through untouched. Undo
+  cannot recover those from the text either.
+
+  Addresses are each tab's own keys. Only the MUTATED tab's cells shift under
+  the op, and the sweep keys on the tab NAME (address independent), so calling
+  this on the PRE-op tabs yields the mutated tab's entry in PRE-op address
+  space — the space the structural inverse restores into.
+
+  Bounded the same way — one entry per rewritten formula, tabs with none
+  omitted; `%{}` when the target tab has no usable name (nothing can reference
+  it).
+  """
+  @spec cross_tab_rewritten_cells(
+          [map()],
+          non_neg_integer(),
+          :row | :col,
+          {:insert | :delete, pos_integer(), pos_integer()}
+        ) :: %{non_neg_integer() => %{String.t() => map()}}
+  def cross_tab_rewritten_cells(tabs, target_index, axis, {kind, _at, _count} = change)
+      when is_list(tabs) and is_integer(target_index) and axis in [:row, :col] and
+             kind in [:insert, :delete] do
+    case tab_name(Enum.at(tabs, target_index)) do
+      name when is_binary(name) and name != "" ->
+        op = {:sweep, name, axis, change}
+
+        for {tab, idx} <- Enum.with_index(tabs),
+            is_map(tab),
+            cells = swept_formula_cells(tab, op),
+            map_size(cells) > 0,
+            into: %{} do
+          {idx, cells}
+        end
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp swept_formula_cells(tab, op) do
+    for {addr, cell} <- tab_cells(tab),
+        is_map(cell),
+        is_binary(Map.get(cell, "f")),
+        rewrite_cell_formula(cell, op) != cell,
+        into: %{} do
+      {addr, cell}
+    end
+  end
+
   defp tab_name(tab) when is_map(tab), do: Map.get(tab, "name")
   defp tab_name(_), do: nil
 

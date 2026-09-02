@@ -77,7 +77,7 @@ func TestAssistantEmptyBlocksFallBackToSource(t *testing.T) {
 func TestCardRolesRenderLabels(t *testing.T) {
 	for role, label := range cardRoles {
 		m := Message{Role: role, SourceMarkdown: "please approve running rm -rf"}
-		out := strings.Join(renderMessage(80, m, false, ""), "\n")
+		out := strings.Join(renderMessage(80, m, false, "", ""), "\n")
 		if !strings.Contains(out, label) {
 			t.Fatalf("%s row must carry its card label %q, got:\n%s", role, label, out)
 		}
@@ -106,7 +106,7 @@ func pendingCard(role string) Message {
 // keystroke acts on. Plan cards read approve/keep-planning; the others allow/deny.
 func TestPendingCardShowsAnswerAffordance(t *testing.T) {
 	for role := range cardRoles {
-		out := strings.Join(renderMessage(80, pendingCard(role), false, ""), "\n")
+		out := strings.Join(renderMessage(80, pendingCard(role), false, "", ""), "\n")
 		if !strings.Contains(out, "ctrl+a") || !strings.Contains(out, "ctrl+r") {
 			t.Fatalf("%s pending card must advertise the answer keys, got:\n%s", role, out)
 		}
@@ -118,13 +118,13 @@ func TestPendingCardShowsAnswerAffordance(t *testing.T) {
 			t.Fatalf("%s card must name its verbs %q/%q, got:\n%s", role, allow, deny, out)
 		}
 		// A focused card is visibly marked.
-		fout := strings.Join(renderMessage(80, pendingCard(role), true, ""), "\n")
+		fout := strings.Join(renderMessage(80, pendingCard(role), true, "", ""), "\n")
 		if !strings.Contains(fout, "focused") {
 			t.Fatalf("%s focused card must be marked focused, got:\n%s", role, fout)
 		}
 	}
 	// Plan cards specifically read approve / keep planning (charter D27).
-	plan := strings.Join(renderMessage(80, pendingCard("plan"), true, ""), "\n")
+	plan := strings.Join(renderMessage(80, pendingCard("plan"), true, "", ""), "\n")
 	if !strings.Contains(plan, "approve") || !strings.Contains(plan, "keep planning") {
 		t.Fatalf("plan card must read approve/keep-planning, got:\n%s", plan)
 	}
@@ -139,7 +139,7 @@ func TestResolvedCardShowsBadge(t *testing.T) {
 	for status, want := range cases {
 		m := pendingCard("approval")
 		m.Metadata["approval_status"] = status
-		out := strings.Join(renderMessage(80, m, false, ""), "\n")
+		out := strings.Join(renderMessage(80, m, false, "", ""), "\n")
 		if !strings.Contains(out, want) {
 			t.Fatalf("a %s card must show its resolution badge, got:\n%s", status, out)
 		}
@@ -153,7 +153,7 @@ func TestResolvedCardShowsBadge(t *testing.T) {
 // whose answer is POSTed but not yet confirmed reads "answering…" rather than the
 // affordance or a premature terminal badge.
 func TestInFlightCardShowsAnsweringState(t *testing.T) {
-	out := strings.Join(renderMessage(80, pendingCard("approval"), true, "allow"), "\n")
+	out := strings.Join(renderMessage(80, pendingCard("approval"), true, "allow", ""), "\n")
 	if !strings.Contains(out, "allowing") {
 		t.Fatalf("an in-flight allow must read 'allowing…', got:\n%s", out)
 	}
@@ -1881,7 +1881,7 @@ func TestToolRowKeepsItsBlockBelowTheGutter(t *testing.T) {
 		Metadata:       map[string]any{"turn_settled": true, "output": "ok"},
 	}
 
-	out := strings.Join(renderMessage(80, msg, false, ""), "\n")
+	out := strings.Join(renderMessage(80, msg, false, "", ""), "\n")
 	if !strings.Contains(out, "✓") {
 		t.Fatalf("a settled diff row must wear its ✓ gutter:\n%s", out)
 	}
@@ -1890,5 +1890,85 @@ func TestToolRowKeepsItsBlockBelowTheGutter(t *testing.T) {
 	}
 	if !strings.Contains(out, "lib/x.ex") {
 		t.Fatalf("the diff header path must survive:\n%s", out)
+	}
+}
+
+// ── live ledger transitions (tlv-bl-chat-live-transition-stream) ─────────────
+
+// TestTaskTransitionsRenderOneLineEach proves the terminal's decided treatment:
+// one dim line per transition, printing the SERVER's label verbatim (the same
+// string Studio's transcript row shows), and nothing at all when the session
+// touched no task — honest absence, never an empty band.
+func TestTaskTransitionsRenderOneLineEach(t *testing.T) {
+	if renderTaskTransitions(80, nil) != nil {
+		t.Fatal("no transitions must render no lines")
+	}
+
+	ts := []TaskTransition{
+		{EventID: "e1", TaskID: "task-a", Status: "in_progress", Verb: "claimed",
+			Label: "Mend the fence → in_progress (claimed)"},
+		{EventID: "e2", TaskID: "task-a", Status: "done", Verb: "closed",
+			Label: "Mend the fence → done (closed)"},
+	}
+	lines := renderTaskTransitions(100, ts)
+	if len(lines) != 2 {
+		t.Fatalf("want one line per transition, got %d: %v", len(lines), lines)
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(out, "in_progress (claimed)") || !strings.Contains(out, "done (closed)") {
+		t.Fatalf("each line must carry the server label, got:\n%s", out)
+	}
+	// Oldest first: the claim precedes the close, the order they arrived in.
+	if strings.Index(out, "(claimed)") > strings.Index(out, "(closed)") {
+		t.Fatalf("transitions must render in arrival order, got:\n%s", out)
+	}
+}
+
+// TestTaskTransitionsCapWithHonestOverflow: a long session accumulates rows, so
+// only the most recent handful paint — with a counted "+N earlier" header rather
+// than a silent truncation.
+func TestTaskTransitionsCapWithHonestOverflow(t *testing.T) {
+	var ts []TaskTransition
+	for i := 0; i < 9; i++ {
+		ts = append(ts, TaskTransition{
+			EventID: fmt.Sprintf("e%d", i),
+			TaskID:  fmt.Sprintf("task-%d", i),
+			Status:  "open",
+			Label:   fmt.Sprintf("Task %d → open (moved)", i),
+		})
+	}
+	out := strings.Join(renderTaskTransitions(100, ts), "\n")
+	if !strings.Contains(out, "+3 earlier task transitions") {
+		t.Fatalf("the overflow must be counted honestly, got:\n%s", out)
+	}
+	if strings.Contains(out, "Task 2 →") {
+		t.Fatalf("clipped rows must not paint, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Task 8 →") {
+		t.Fatalf("the newest transition must always paint, got:\n%s", out)
+	}
+}
+
+// TestTranscriptEndsWithTaskTransitions pins where the rows sit: after the
+// settled messages, the optimistic local sends, and the live tail — they are the
+// newest thing that happened and carry no seq to interleave by.
+func TestTranscriptEndsWithTaskTransitions(t *testing.T) {
+	m := Model{st: State{
+		Messages: []Message{{Seq: 1, Role: "user", SourceMarkdown: "hello"}},
+		Tail:     "streaming reply",
+		TaskTransitions: []TaskTransition{
+			{EventID: "e1", TaskID: "task-a", Status: "done", Label: "Mend the fence → done (closed)"},
+		},
+	}}
+	out := strings.Join(m.transcriptLines(80), "\n")
+	iHello := strings.Index(out, "hello")
+	iTail := strings.Index(out, "streaming reply")
+	iTrans := strings.Index(out, "done (closed)")
+	if iTrans < 0 {
+		t.Fatalf("the transition must render in the transcript, got:\n%s", out)
+	}
+	if !(iHello < iTail && iTail < iTrans) {
+		t.Fatalf("order must be settled → tail → transitions, got hello=%d tail=%d trans=%d\n%s",
+			iHello, iTail, iTrans, out)
 	}
 }

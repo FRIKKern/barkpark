@@ -93,12 +93,33 @@ const HIDDEN_IDS = (() => {
 //       pending-state guard read as broken — a false RED. See
 //       `SUPPRESSED_WHEN_DISABLED`.
 //
+// cch-w2-revoke-oracle-round2 — THE THIRD HALF OF (e), and the one that was
+// still manufacturing wrong numbers after it:
+//   (g) A DESTROYED NODE KEPT ITS LISTENERS. `declaredBy` already knew when a
+//       parent's markup stopped naming an id (destroyed) and when it named it
+//       again (a fresh node) — but the registry object survived both with its
+//       handler lists intact, so every re-render ADDED a listener. Measured
+//       before the fix: #modal-logout dispatched 2 handlers after openModal ran
+//       twice, and one click therefore issued TWO DELETE /v1/auth/logout — a
+//       number no browser can produce, and one that makes "exactly one request
+//       per click" unassertable for every control the app re-wires. Handlers
+//       are now cleared on BOTH transitions (`_resetHandlers` in makeEl, called
+//       from the innerHTML reconcile loops), which is what the browser does:
+//       the node is gone, and its listeners went with it. All 119 scenarios
+//       stayed green across this alone.
+//
 // What is modelled and what is NOT — read this before writing a new check:
 //   • innerHTML is a real accessor. Setting it re-parses; appendChild appends
 //     the child's serialization, so a mounted node is observable in innerHTML.
 //   • The parse is FLAT, not a tree: open tags become sibling stubs. Nesting,
 //     text nodes and closing-tag structure are not modelled — a parsed stub's
 //     own innerHTML is always "".
+//   • CONTAINERS ARE REACHABLE ONLY THROUGH THE CLASS ALLOWLIST. A card whose
+//     class is in `GROUPED_CLASSES` is materialised as a scoped VIEW over the
+//     leaves inside its span (see parseGroups) — that is how `.wh-card`
+//     resolves for findWhCard. PARSED_TAGS is NOT how it resolves, and the two
+//     must not be confused: the allowlist is per-class and reviewable, the tag
+//     list is blanket. Everything the next bullet forbids is still forbidden.
 //   • The whitelist is DELIBERATELY only `button` and `a` — the leaf controls a
 //     click oracle needs. It must NOT be widened to containers. app.js has
 //     paths shaped like `var box = panel.querySelector(".fleet-body") || panel;`
@@ -227,9 +248,121 @@ function parseChildren(html, makeEl) {
     // PRESENCE `[attr]` selectors and hasAttribute() ask about.
     while ((a = ATTR_RE.exec(raw)) !== null) el.setAttribute(a[1], a[2] === undefined ? "" : a[2]);
     el.disabled = /\bdisabled\b/.test(raw);
+    // Where this leaf sat in the markup. Used ONLY by parseGroups below, to
+    // decide which card a button belongs to; nothing app.js can see reads it.
+    el._at = m.index;
     out.push(el);
   }
   return out;
+}
+
+// The ONE selector arm every level of this shim goes through — element,
+// document sweep, and card group alike. Factored out of makeEl by
+// cch-bl-webhook-delete-oracle so a group cannot grow a second, drifting copy
+// of the grammar: a group differs from an element only in WHICH list it
+// searches, never in HOW it matches.
+function selectIn(list, sel) {
+  if (typeof sel !== "string") return [];
+  const hasClass = (k, want) => String(k.className || "").split(/\s+/).indexOf(want) >= 0;
+  if (CLASS_SEL.test(sel)) return list.filter((k) => hasClass(k, sel.slice(1)));
+  if (ID_SEL_SUB.test(sel)) return list.filter((k) => k.id === sel.slice(1));
+  const at = ATTR_SEL.exec(sel);
+  if (at) {
+    return list.filter((k) =>
+      k.hasAttribute(at[1]) && (at[2] === undefined || k.getAttribute(at[1]) === at[2]));
+  }
+  const cm = COMPOUND_SEL.exec(sel);
+  if (cm) {
+    return list.filter((k) =>
+      hasClass(k, cm[1]) &&
+      k.hasAttribute(cm[2]) && (cm[3] === undefined || k.getAttribute(cm[2]) === cm[3]));
+  }
+  return [];
+}
+
+// ── CARD GROUPS — THE WEBHOOK CARD, REACHED WITHOUT WIDENING PARSED_TAGS ─────
+// cch-bl-webhook-delete-oracle. `wireWebhookCard` (grep it in app.js) bails at
+// `findWhCard`, which needs `listBox.querySelectorAll(".wh-card")` to answer a
+// DIV — and PARSED_TAGS is `button|a` under a committed prohibition against
+// widening it to containers (the mountUsageTab detached-stub hazard, stated at
+// the top of this file). Both things stay true here. Nothing is added to
+// PARSED_TAGS; the flat leaf parse is untouched, byte for byte.
+//
+// THE MECHANISM, and why it cannot revive that hazard: groups are keyed on a
+// CLASS ALLOWLIST, not on a tag. `.wh-list` and `.fleet-body` — the two
+// container queries whose `|| root` fallbacks the prohibition protects — are
+// not on the list, so they still answer null and still fall back to the panel.
+// Only a container whose class is named below is materialised, and adding one
+// is a deliberate, reviewable act rather than a blanket widening.
+//
+// A group is a VIEW over the SAME leaf objects its parent already parsed, not a
+// second copy:
+//   • it is returned by the parent's `.wh-card` query (and by any other
+//     selector it matches — one grammar, `selectIn`, for every level);
+//   • its `querySelector` searches ONLY the leaves that sat inside ITS span, so
+//     card 2's Delete is card 2's. THAT is the wrong-target trap this row exists
+//     to disprove: an `|| listBox` fallback in app.js would wire BOTH cards'
+//     handlers to the FIRST button and look green;
+//   • the leaves are shared, so a handler attached through the card is the same
+//     handler a `panel.querySelectorAll("[data-wh-delete]")` sweep would find —
+//     one node, two ways to reach it, exactly like the DOM;
+//   • `parentNode` is the parent, and `parentNode.removeChild(card)` splices the
+//     card's own bytes out of the parent's innerHTML and drops its leaves. That
+//     is what makes "the row left the DOM" observable, which is the ONLY thing
+//     deleteWebhook's success arm does to the list (its toast is a constant).
+const GROUPED_CLASSES = ["wh-card"];
+const DIV_TOKEN_RE = /<div\b([^>]*)>|<\/div\s*>/gi;
+const GROUP_CLOSE = "</div>";
+
+function parseGroups(html, kids, makeEl, owner) {
+  const groups = [];
+  // Cheap bail: every scenario that renders no grouped class pays one indexOf.
+  if (!GROUPED_CLASSES.some((c) => html.indexOf(c) >= 0)) return groups;
+  DIV_TOKEN_RE.lastIndex = 0;
+  const stack = [];
+  let m;
+  while ((m = DIV_TOKEN_RE.exec(html)) !== null) {
+    if (m[1] === undefined) {
+      const open = stack.pop();
+      if (open && open.grouped) groups.push(makeGroup(html, open, m.index + m[0].length, kids, makeEl, owner));
+      continue;
+    }
+    const raw = m[1];
+    if (/\/\s*$/.test(raw)) continue; // a self-closed <div/> owns no span
+    const cls = /\bclass="([^"]*)"/.exec(raw);
+    const names = cls ? cls[1].split(/\s+/) : [];
+    stack.push({
+      raw,
+      grouped: names.some((n) => GROUPED_CLASSES.indexOf(n) >= 0),
+      outerStart: m.index,
+      innerStart: m.index + m[0].length,
+    });
+  }
+  return groups;
+}
+
+function makeGroup(html, open, outerEnd, kids, makeEl, owner) {
+  const el = makeEl("", "div");
+  ATTR_RE.lastIndex = 0;
+  let a;
+  while ((a = ATTR_RE.exec(open.raw)) !== null) el.setAttribute(a[1], a[2] === undefined ? "" : a[2]);
+  const leaves = kids.filter((k) => k._at >= open.innerStart && k._at < outerEnd);
+  el._groupOuter = html.slice(open.outerStart, outerEnd);
+  el._groupLeaves = leaves;
+  el.parentNode = owner;
+  el.querySelectorAll = (sel) => selectIn(leaves, sel);
+  el.querySelector = (sel) => selectIn(leaves, sel)[0] || null;
+  // The group's own bytes, read-only: a group is a VIEW, and a write through it
+  // would have to reconcile back into the parent's string. Nothing in app.js
+  // writes a card's innerHTML (it removes the whole card instead), so the honest
+  // move is to answer the bytes and refuse the write rather than to model half
+  // of it. A future writer gets a loud TypeError, never a silent no-op.
+  Object.defineProperty(el, "innerHTML", {
+    get() { return html.slice(open.innerStart, Math.max(open.innerStart, outerEnd - GROUP_CLOSE.length)); },
+    enumerable: true,
+    configurable: true,
+  });
+  return el;
 }
 
 // Serialize a mounted node back into its parent's innerHTML, so appendChild is
@@ -286,6 +419,9 @@ function makeDom() {
     // flat child list parsed out of it (plus anything appendChild mounted).
     let html = "";
     let kids = [];
+    // Card groups over the SAME kids (see parseGroups). Re-derived on every
+    // innerHTML write, exactly like kids.
+    let groups = [];
     // The registry ids this element's CURRENT markup declares (see declaredBy).
     let ownIds = new Set();
     const handlers = Object.create(null);
@@ -319,6 +455,7 @@ function makeDom() {
         if (typeof fn !== "function") return;
         (handlers[type] || (handlers[type] = [])).push(fn);
       },
+      _resetHandlers() { for (const k of Object.keys(handlers)) delete handlers[k]; },
       removeEventListener(type, fn) {
         const list = handlers[type];
         if (!list) return;
@@ -377,6 +514,23 @@ function makeDom() {
         return child;
       },
       removeChild(child) {
+        // A CARD GROUP: splice its own bytes out of this element's markup and
+        // drop the leaves that lived inside it. This is `deleteWebhook`'s
+        // success arm — `card.parentNode.removeChild(card)` — and it is the one
+        // observable that separates a delete that worked from one that did not.
+        if (child && child._groupOuter !== undefined) {
+          const at = html.indexOf(child._groupOuter);
+          if (at >= 0) html = html.slice(0, at) + html.slice(at + child._groupOuter.length);
+          for (const leaf of child._groupLeaves) {
+            const j = kids.indexOf(leaf);
+            if (j >= 0) kids.splice(j, 1);
+          }
+          const g = groups.indexOf(child);
+          if (g >= 0) groups.splice(g, 1);
+          child.parentNode = null;
+          child.isConnected = false;
+          return child;
+        }
         const i = kids.indexOf(child);
         if (i >= 0) kids.splice(i, 1);
         const s = serializeEl(child);
@@ -388,34 +542,9 @@ function makeDom() {
       insertAdjacentHTML(_pos, frag) { el.innerHTML = html + String(frag == null ? "" : frag); },
       // (c) Sub-tree lookup over the parsed children — the same objects across
       // calls, so a handler app.js attached to a row survives to the click.
-      querySelectorAll(sel) {
-        if (typeof sel !== "string") return [];
-        if (CLASS_SEL.test(sel)) {
-          const want = sel.slice(1);
-          return kids.filter((k) => String(k.className || "").split(/\s+/).indexOf(want) >= 0);
-        }
-        if (ID_SEL_SUB.test(sel)) {
-          const want = sel.slice(1);
-          return kids.filter((k) => k.id === want);
-        }
-        const at = ATTR_SEL.exec(sel);
-        if (at) {
-          const name = at[1];
-          const want = at[2];
-          return kids.filter((k) =>
-            k.hasAttribute(name) && (want === undefined || k.getAttribute(name) === want));
-        }
-        const cm = COMPOUND_SEL.exec(sel);
-        if (cm) {
-          const cls = cm[1];
-          const name = cm[2];
-          const want = cm[3];
-          return kids.filter((k) =>
-            String(k.className || "").split(/\s+/).indexOf(cls) >= 0 &&
-            k.hasAttribute(name) && (want === undefined || k.getAttribute(name) === want));
-        }
-        return [];
-      },
+      // Card groups (see parseGroups) are searched alongside the flat leaves,
+      // so `findWhCard`'s `.wh-card` resolves without any leaf moving.
+      querySelectorAll(sel) { return selectIn(kids.concat(groups), sel); },
       querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
       closest() { return null; },
       getClientRects() { return []; },
@@ -427,6 +556,7 @@ function makeDom() {
       set(v) {
         html = String(v == null ? "" : v);
         kids = parseChildren(html, makeEl);
+        groups = parseGroups(html, kids, makeEl, el);
         // Reconcile the declaration ledger: ids this markup drops are detached,
         // ids it names are (re-)attached. See declaredBy above.
         const next = declaredIds(html);
@@ -435,13 +565,20 @@ function makeDom() {
           declaredBy.delete(gone);
           detached.add(gone);
           const node = registry.get(gone);
-          if (node) node.isConnected = false;
+          if (node) {
+            node.isConnected = false;
+            if (node._resetHandlers) node._resetHandlers();
+          }
         }
         for (const here of next) {
+          const reDeclared = ownIds.has(here) && declaredBy.get(here) === el;
           declaredBy.set(here, el);
           detached.delete(here);
           const node = registry.get(here);
-          if (node) node.isConnected = true;
+          if (node) {
+            node.isConnected = true;
+            if (reDeclared && node._resetHandlers) node._resetHandlers();
+          }
         }
         ownIds = next;
       },
@@ -1076,15 +1213,33 @@ const EXPECTATIONS = {
   // in openAccountModal) — interpolates a server value into its toast, so it is
   // the only one where a missing fixture is visible AS TEXT
   // ("0 session(s) revoked."). This oracle covers it by TEXT. The per-row
-  // sibling (:1112) is covered by WIRE + STATE + its own success toast.
-  // The remaining six — /v1/auth/logout (:1050), /v1/github/installation
-  // (:2295), /v1/barkparks/:id (:5430, :5474), the webhook DELETE (:7381) and
-  // /v1/sites/:id/github (:9991) — toast client-side CONSTANTS ("Instance
-  // removed", "Webhook deleted"), so a generic 200 produces a message that is
-  // both indistinguishable from the real one and, in fact, honest. Their defect
-  // is not "prod says 0", it is "nothing here would catch a regression". They
-  // are NOT covered by this scenario; they are click-reachable now that the
-  // shim works, and that is follow-on work, filed — not silently implied.
+  // sibling is covered by WIRE + STATE + its own success toast.
+  //
+  // THE REMAINING SIX ARE NOW COVERED TOO — cch-w2-revoke-oracle-round2 and
+  // cch-bl-webhook-delete-oracle. Each toasts a client-side CONSTANT
+  // ("Instance removed", "Webhook deleted"), so a generic 200 produces a
+  // message that is both indistinguishable from the real one and, in fact,
+  // honest: their defect was never "prod says 0", it was "nothing here would
+  // catch a regression". So every one of them is a WIRE + STATE oracle and NOT
+  // a text one — no text observable was invented to make them resemble the
+  // sessions case. Where each one lives (by SCENARIO, because line numbers
+  // drift and this list has already rotted once):
+  //
+  //   /v1/auth/logout            → account-modal-revoke, this scenario's tail
+  //   /v1/github/installation    → providers-connected
+  //   /v1/barkparks/:id          → panel-overview (runDecommission) AND
+  //                                instance-remove-failed (removeInstance).
+  //                                TWO handlers, not one:
+  //                                grep -n 'api("DELETE", "/v1/barkparks/'
+  //                                cloud/priv/static/app.js  → two hits.
+  //   the webhook DELETE         → webhooks-panel
+  //   /v1/sites/:id/github       → rollback
+  //
+  // WHAT THIS LIST GOT WRONG WHEN IT WAS WRITTEN, recorded rather than quietly
+  // fixed: it counted the two /v1/barkparks/:id hits as "six remaining" while
+  // cch-w10's leg 5/5 had already covered ONE of them (panel-overview's typed
+  // Decommission). Five were open, not six. A boundary note is a measurement
+  // with a timestamp, and this is what its decay looked like.
   //
   // WHAT THIS SHIM CAN AND CANNOT PROVE — REWRITTEN BY cch-bl-smoke-shim-fidelity,
   // which BUILT the two capabilities D55 and D56 had to route around. A stale
@@ -1117,11 +1272,26 @@ const EXPECTATIONS = {
   //     "change", "submit" and every other non-interaction type, because the
   //     browser delivers those to disabled nodes too and app.js replays some
   //     programmatically.
+  //   • A RE-RENDER KILLS ITS LISTENERS (cch-w2-revoke-oracle-round2,
+  //     `_resetHandlers`). An id whose declaring markup is replaced — dropped
+  //     OR re-emitted — hands back a node with no handlers, because the browser
+  //     destroyed the old one. ⇒ A click count is now an EXACT number, not a
+  //     floor: `el.click() === 1` is assertable, and a 2 means either the app
+  //     double-wired or this model broke. Before it, listeners accumulated and
+  //     one click on a twice-rendered control issued two requests.
   //   • STILL TRUE, AND STILL THE FIRST THING TO CHECK: the parse is FLAT
-  //     (PARSED_TAGS is `button|a`), a parsed stub's own innerHTML is always "",
-  //     and `contains()` does not exist. See the shim contract at the top.
+  //     (PARSED_TAGS is `button|a`; containers arrive only through
+  //     `GROUPED_CLASSES`), a parsed stub's own innerHTML is always "", and
+  //     `contains()` does not exist. See the shim contract at the top.
+  //   • A REGISTRY NODE DOES NOT INHERIT ITS MARKUP'S BOOT ATTRIBUTES. Only
+  //     index.html's `hidden` is seeded (HIDDEN_IDS); app-RENDERED `disabled`
+  //     is not. So a sheet that ships `<button id="x" disabled>` answers
+  //     `reg.get("x").disabled === false` — read the disarmed state off the
+  //     PARSED node (`reg.get("modal-body").querySelector("#x")`) and the armed
+  //     state off the registry node the app writes. The webhook-delete leg does
+  //     exactly that, and says so.
   "account-modal-revoke": {
-    what: "THE CLICK ORACLE — real clicks drive revoke: rows render, a row revoke pends + toasts + shrinks the list, and sign-out-everywhere waits for its danger-tier confirm before reporting the SERVER's count",
+    what: "THE CLICK ORACLE — real clicks drive revoke: rows render, a row revoke pends + toasts + shrinks the list, sign-out-everywhere waits for its danger-tier confirm before reporting the SERVER's count, and Sign out issues exactly one DELETE /v1/auth/logout and clears the local session",
     async check(reg, hooks, ctx) {
       // ─ 1. the modal opens by CLICK, exactly as a user opens it ─────────────
       const acct = reg.get("acct-btn");
@@ -1138,6 +1308,32 @@ const EXPECTATIONS = {
         "which is the state this harness sat in for its whole existence");
       assert.equal(countMatches(rendered, 'class="session-row"'), 4, "the fixture's four sessions render");
       assert.equal(ctx.countCalls("GET", "/v1/account/sessions"), 1, "the list was fetched once on open");
+
+      // ─ 1b. cch-w23-bl-cruel-identity-own-scenario: THE IDENTITY THIS ORACLE
+      // IS DRIVEN THROUGH. From cch-w23-s2 until that row was paid, this
+      // scenario's `me` carried the 158-character CRUEL address — not because
+      // the revoke path needed it, but because a new SCENARIOS key was fenced
+      // out of that slice and this was the account scenario with the smallest
+      // blast radius. The consequence was invisible and real: the one oracle in
+      // this file driven by REAL CLICKS, and the fixture shoot.sh publishes as
+      // the revoke evidence, ran every assertion below against an identity
+      // nobody in this corpus owns. The cruelty has its own key now
+      // (`account-modal-cruel-identity`).
+      // READ OFF THE RENDER, NOT THE FIXTURE: `.am-name` is accountModel()'s
+      // `email.split("@")[0]` (`grep -n 'function accountModel'
+      // cloud/priv/static/app.js`), so this measures what openAccountModal
+      // actually painted. FIXTURE_SHAPE_PINS pins the same fact one layer up and
+      // refuses BEFORE any scenario boots; this line is the second, independent
+      // witness, and it is the one that would still red if the pin were deleted.
+      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name">([^<]*)</) || [])[1];
+      assert.ok(amName !== undefined,
+        "no `.am-name` in the account modal openAccountModal just painted — the identity of the person " +
+        "signing devices out is absent, and every assertion below is about a modal with no owner");
+      assert.equal(amName, SCENARIOS["account-modal"].data.me.user.email.split("@")[0],
+        "the click oracle is running against " + JSON.stringify(amName.slice(0, 24)) + "… (" + amName.length +
+        " characters), not the corpus's production-dominant identity. A revoke must be measured on the " +
+        "identity almost every real operator has; the 158-character cap is `account-modal-cruel-identity`'s " +
+        "whole job, and parking it here makes this scenario's NAME a lie about what it drives");
 
       // ─ 2/3/4. the PER-ROW revoke: wired, right URL, and it ACTS ────────────
       const revokes = box.querySelectorAll(".session-revoke");
@@ -1319,6 +1515,107 @@ const EXPECTATIONS = {
       const settled = reg.get("sessions-box").innerHTML || "";
       assert.equal(countMatches(settled, 'class="session-row"'), 1, "only the acting session survives");
       assert.ok(settled.includes("This device"), "and it is the current one");
+
+      // ── cch-w2-revoke-oracle-round2 · SIGN OUT — DELETE /v1/auth/logout ────
+      // The last leg of the modal, and it is last for a reason: its success arm
+      // calls clearSession() + render(), which tears the whole authed shell
+      // down. Everything above had to have happened already.
+      //
+      // WHY THIS ONE IS NOT A TEXT ASSERTION. The handler is
+      //   grep -n 'api("DELETE", "/v1/auth/logout")' cloud/priv/static/app.js
+      // — one hit, inside openAccountModal's #modal-logout listener — and it
+      // .catch()es the request outright: "even a network failure must still
+      // drop the local session". So there is NO toast, no server value, and no
+      // rendered difference between a logout that reached the server and one
+      // that never left the browser. The only two honest observables are the
+      // WIRE (exactly one DELETE, right method, right path) and the LOCAL
+      // consequence (the session key is gone from storage), and this leg reads
+      // both — because either one alone passes on a broken half.
+      assert.ok(reborn.includes('id="modal-logout"'),
+        "this leg clicks the registry node, and byId auto-creates one for any id — so the RENDER half " +
+        "is what proves the control is on the page at all. #modal-body declares no #modal-logout.");
+      assert.ok(ctx.localStorage.getItem("bpcloud.session"),
+        "the scenario must still hold a session before the sign-out click, or 'the session was cleared' " +
+        "is vacuously true");
+      assert.equal(ctx.countCalls("DELETE", "/v1/auth/logout"), 0, "nothing signed out before the click");
+      const logout = reg.get("modal-logout");
+      // Exactly one: openAccountModal ran TWICE in this check (the open at §1
+      // and the post-success re-render at §5b), and each run re-declares
+      // #modal-logout in #modal-body's markup — which in a browser destroys the
+      // old node and its listener with it. `_resetHandlers` in makeDom models
+      // that; without it this reads 2 and the DELETE count below reads 2, which
+      // is the accumulated-listener artifact, not the app.
+      assert.equal(logout.click(), 1,
+        "Sign out dispatched no click handler — it is DEAD (a modal whose only exit is the browser's back button)");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/auth/logout"), 1,
+        "the sign-out click must revoke the calling token with exactly one DELETE /v1/auth/logout; got " +
+        ctx.countCalls("DELETE", "/v1/auth/logout"));
+      assert.equal(ctx.localStorage.getItem("bpcloud.session"), null,
+        "the local session survived the sign-out — clearSession() is the half that must happen even when the " +
+        "revoke fails, and it did not happen at all");
+    },
+  },
+  // ── cch-w23-bl-cruel-identity-own-scenario: THE CRUEL IDENTITY, AT REST ────
+  // The GEOMETRY of this fixture is overflow-guard's
+  // W23-account-modal-identity-bounded leg (7 widths x 2 themes, scrollWidth
+  // against clientWidth on `.am-name` and `.modal-root`). This is the half that
+  // leg cannot own: the string reaching the element AT ALL, in the shim, with no
+  // browser. The two are complementary, and the split is deliberate — a leg that
+  // needs Chrome cannot be the thing that refuses a fixture which drifted kind,
+  // because console-harness runs this file on every push and the browser legs on
+  // far fewer.
+  // WHAT COULD LOSE HERE: (a) the fixture goes kind (the address is shortened,
+  // or the stem picks up a hyphen a line breaker could use) and every "clean"
+  // cell in the W23 leg becomes green-by-construction; (b) some renderer starts
+  // truncating the local part on its way to `.am-name`, which would hide the
+  // very overflow the leg exists to measure while looking like a fix; (c) the
+  // long name displaces the modal's own anatomy — the ids the lockout path
+  // depends on. All three are asserted below.
+  "account-modal-cruel-identity": {
+    what: "the CRUEL identity — a 158-character email local part (the derived server cap) reaches `.am-name` WHOLE, and the modal's lockout-bearing anatomy survives it",
+    check(reg, hooks) {
+      const fixture = SCENARIOS["account-modal-cruel-identity"].data.me;
+      const local = fixture.user.email.split("@")[0];
+      // ANTI-VACUITY FIRST: a fixture that drifted kind greens everything below.
+      // 158 = 160 (`validate_length(:email, max: 160)`, re-derive with
+      // `grep -n 'validate_length(:email' cloud/lib/barkpark_cloud/accounts/user.ex`)
+      // minus the "@" minus the one domain character @email_format demands.
+      assert.equal(fixture.user.email.length, 160,
+        "the cruel address is " + fixture.user.email.length + " characters, not the server's 160-character cap — " +
+        "either it went kind (and the W23 overflow leg is measuring nothing) or it went INADMISSIBLE (a string " +
+        "the server would reject, which is a defect nobody has)");
+      assert.equal(local.length, 158,
+        "`.am-name` paints the LOCAL PART, and it is " + local.length + " characters, not the derived 158");
+      assert.ok(!/[^a-z0-9]/.test(local),
+        "the local part carries a character a line breaker can use (- . _ + or whitespace) — BREAKABLE, so it " +
+        "would wrap on its own and certify a rule that never bounded it");
+      // …and the KIND control next door must stay ordinary, or the pair stops
+      // being able to see a remedy that shreds an ordinary name.
+      const kind = SCENARIOS["account-modal"].data.me.user.email.split("@")[0];
+      assert.ok(kind.length <= 40,
+        "the kind control `account-modal` renders a " + kind.length + "-character name — it has drifted cruel, " +
+        "and the W23 leg's control half can no longer answer \"did the remedy shred ordinary prose\"");
+
+      const model = hooks.accountModel({ team_id: "team_abc" }, fixture);
+      assert.equal(model.name, local,
+        "accountModel().name must be the email LOCAL PART — this is why the identity is capped by the EMAIL " +
+        "rule and not by a name rule (User has no :name field at all)");
+      hooks.openModal(hooks.accountModalHtml(model));
+      const html = reg.get("modal-body").innerHTML || "";
+      const painted = (html.match(/class="am-name">([^<]*)</) || [])[1];
+      assert.equal(painted, local,
+        "the 158-character local part did not reach `.am-name` whole; got " + JSON.stringify(String(painted).slice(0, 32)) +
+        "… (" + String(painted).length + " characters). A truncation on the way to the element hides the overflow " +
+        "the W23 leg measures and would read as a fix");
+      // (c) the anatomy the lockout path depends on, with the long name in it.
+      assert.ok(html.includes('class="am-identity"'), "the identity row must render");
+      for (const id of ["modal-title", "sessions-box", "sessions-revoke-all", "pw-form", "modal-logout"]) {
+        assert.ok(html.includes('id="' + id + '"'),
+          "the cruel identity displaced id=" + JSON.stringify(id) + " — a name is not allowed to cost the " +
+          "operator a door out of this modal");
+      }
+      assert.ok(html.includes(">Close<") && html.includes(">Log out<"), "the footer survives the long name");
     },
   },
   "account-modal-2fa-badcode": {
@@ -1492,12 +1789,24 @@ const EXPECTATIONS = {
   // loadSite paints twice). The count that means DEAD is 0 — which is exactly
   // what deleting an addEventListener line produces here, measured.
   rollback: {
-    what: "deployment rows with Redeploy / Roll-back actions + the Current chip — and every control loadSite wires DISPATCHES",
-    check(reg) {
+    what: "deployment rows with Redeploy / Roll-back actions + the Current chip, every control loadSite wires DISPATCHES — and the repo UNLINK is clicked for real: one DELETE /v1/sites/:id/github, the server row loses its repo, the header repaints to the reconnect verb",
+    async check(reg, hooks, ctx) {
       const body = reg.get("site-body").innerHTML || "";
       for (const needle of ['data-kind="redeploy"', ">Redeploy<", ">Roll back to this<", "dep-current", "live since "]) {
         assert.ok(body.includes(needle), "#site-body missing " + JSON.stringify(needle));
       }
+
+      // dr-w1-s2 (criterion 1): the LEDGER'S CLASS, on the row, in a browser.
+      // `deployment_json/1` has carried `failure_class` since W1 S2 and nothing
+      // rendered it — the operator saw the humanized prose and had no way to
+      // name the class the census counts. Read OFF the payload: the fixture says
+      // BUILD_FAILED and the pill says BUILD_FAILED, with no map in between.
+      assert.ok(body.includes(">BUILD_FAILED<"),
+        "the failed row must carry its ledger class as a pill; got: " + body);
+      // And only the row that HAS one grows one — two live rows sit beside it
+      // with failure_class null, and neither may invent a class.
+      assert.equal((body.match(/>BUILD_FAILED</g) || []).length, 1,
+        "exactly one row carries a class — a null failure_class must render NO pill");
 
       // Every listener loadSite attaches on the success branch, with the event
       // type it was registered for — the shim dispatches PER TYPE, so a control
@@ -1526,6 +1835,68 @@ const EXPECTATIONS = {
       // have merged and the assertions above are reading the wrong screen.
       assert.equal(reg.get("site-load-retry"), undefined,
         "#site-load-retry must NOT exist on a successful site read — it is the failure branch's control");
+
+      // ── cch-w2-revoke-oracle-round2 · DELETE /v1/sites/:id/github ──────────
+      // The repository UNLINK — the last of the six destructive DELETEs the
+      // COVERAGE BOUNDARY note named as uncovered. Re-derive both halves by
+      // symbol, never by line:
+      //   grep -n "function disconnectSiteGithub" cloud/priv/static/app.js
+      //   grep -n "function openSiteGithub"       cloud/priv/static/app.js
+      // The door is TWO clicks deep and that is why it had no oracle: the
+      // control lives inside a modal openSiteGithub paints only AFTER
+      // GET /v1/github/repos answers with a repo list, and no scenario carried
+      // one — every boot got the "Couldn't load your repositories" arm, so
+      // #github-disconnect-site had never existed on any rendered surface.
+      // `githubRepos` on this scenario is that fixture.
+      //
+      // The WIRED sweep above already clicked #site-github once, and its
+      // in-flight repo read lands on this settle along with five other modal
+      // opens — last writer owns #modal-body, and it is not this one. So the
+      // sheet is opened AGAIN here, deliberately, rather than assuming the
+      // sweep left it standing.
+      await ctx.settle();
+      assert.equal(reg.get("site-github").click(), 1, "#site-github must still be wired after the sweep");
+      await ctx.settle();
+
+      const site = SCENARIOS.rollback.data.sites[0];
+      const ghPath = "/v1/sites/" + site.id + "/github";
+      const picker = (reg.get("github-connect-body") || {}).innerHTML || "";
+      assert.ok(picker.includes('id="github-repo"'),
+        "the repo picker never painted — openSiteGithub's GET /v1/github/repos took a failure arm, so the " +
+        "control this leg clicks does not exist and everything after it would be vacuous. Got: " + picker.slice(0, 200));
+      assert.ok(picker.includes('id="github-disconnect-site"'),
+        "the CONNECTED arm must paint the Disconnect control (site.github_webhook_configured is the discriminator); " +
+        "got: " + picker.slice(0, 400));
+      assert.equal(ctx.countCalls("DELETE", ghPath), 0, "opening the picker must not unlink anything");
+      assert.equal(reg.get("github-disconnect-site").click(), 1,
+        "the site Disconnect dispatched no click handler — it is DEAD");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", ghPath), 1,
+        "exactly one DELETE " + ghPath + " must reach the wire; got " + ctx.countCalls("DELETE", ghPath));
+
+      // THE STATE HALF, off the SERVER's own row. Until this wave the path fell
+      // through the terminal `/v1/` 200 {}, so the unlink "succeeded" and the
+      // refetch below re-served a site still carrying github_repo.
+      const served = route("rollback", "GET", "/v1/sites/" + site.id, ctx.state);
+      assert.equal(served.status, 200, "the site must still be readable after the unlink");
+      assert.equal(served.body.site.github_repo, null,
+        "the SERVER still links " + JSON.stringify(served.body.site.github_repo) +
+        " — the unlink hit a fixture that cannot lose");
+      assert.equal(served.body.site.github_webhook_configured, false,
+        "…and the push webhook must be gone with it, or the header still paints the connected arm");
+
+      // AND THE HEADER REPAINTS, because the success arm calls loadSite(). The
+      // chip and the verb are the SAME control (#site-github): connected paints
+      // the repo name in mono, unconnected paints the verb — so this pair is
+      // the whole before/after of the unlink on the screen the operator is on.
+      const headAfter = reg.get("site-body").innerHTML || "";
+      assert.ok(!headAfter.includes('id="site-github" type="button"><span class="mono">acme/web</span>'),
+        "the header still shows the repo chip for a repository that is no longer linked");
+      assert.ok(headAfter.includes('id="site-github" type="button">Connect GitHub repo<'),
+        "the unlinked header must offer the way back in; got the strip: " + headAfter.slice(0, 200));
+      const ghToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(ghToast.includes("Repository disconnected") && ghToast.includes("acme.com"),
+        "the unlink must report itself, naming the domain that stops deploying; got: " + ghToast.slice(0, 300));
     },
   },
   // The 409-failure twin boots to the same skeleton; the inline-failure morph
@@ -1654,6 +2025,56 @@ const EXPECTATIONS = {
         "the control must be the ORDINARY word-broken string — shorter, and breakable at spaces");
     },
   },
+  // cch-w29-bl: the deploy rail, LIVE — the fold behind `.deploy-rail-live`,
+  // the footer `deployRailHtml`'s OTHER branch emits and which no scenario in
+  // this harness had ever produced. Same seam limit as the FAILED twin above:
+  // the rail mounts through `scope.querySelector` into `#deploy-rail-slot`, a
+  // real-DOM seam this vm registry does not model, so the browser half of this
+  // proof is overflow-guard's W29-deploy-rail-live-url-wrap leg. What THIS half
+  // owns is that the fixture can reach the live branch AT ALL — an active row,
+  // six done stages, tone "live" — and that the URL in the footer is the SAME
+  // string the detail head's already-paid `.fleet-url .site-open` carries, from
+  // `siteLiveUrl`, so the browser leg's in-page control is a fact about the
+  // fixture rather than a hope.
+  "site-deploy-rail-live": {
+    what: "the deploy rail's LIVE fold — every stage done, and the footer carries the copyable site URL",
+    check(reg, hooks) {
+      const scen = SCENARIOS["site-deploy-rail-live"];
+      const site = scen.data.sites[0];
+      const bp = scen.data.barkparks[0];
+      // The rail tracks the deployment still IN FLIGHT. A fixture whose row went
+      // terminal renders no rail at all, so this is asserted, never assumed.
+      const dep = hooks.railDeployment(scen.data.deployments);
+      assert.ok(dep, "the fixture must carry an ACTIVE deployment or the rail never mounts");
+      const ledger = hooks.deployRailLedgerFromConsole(dep.console);
+      assert.equal(Object.keys(ledger).length, hooks.deployRailStages.length,
+        "every rail stage must survive the fold — a short ledger cannot reach the live branch");
+      const rows = hooks.deployRailRows(ledger);
+      assert.ok(rows.length > 0 && rows.every((r) => r.role === "ok"),
+        "all six rows must fold to ok — that is the ONLY input that makes deployRailStatus say live");
+      assert.equal(hooks.deployRailStatus(rows).tone, "live");
+      // THE URL IS DERIVED FROM THE FIXTURE, exactly as mountDeployRail derives
+      // it — a transcribed string here would keep passing after the fixture
+      // stopped producing one.
+      const url = hooks.siteLiveUrl(site, bp);
+      assert.ok(url && url.startsWith("https://"), "siteLiveUrl must yield an absolute live URL for this fixture");
+      const html = hooks.deployRailHtml(rows, { deploymentId: dep.id, url });
+      assert.ok(html.includes("deploy-rail-status--live"), "the pill must read the live tone");
+      assert.ok(html.includes('<div class="deploy-rail-live">'), "the LIVE footer must render — this is the branch no fixture reached before");
+      const foot = html.split('<div class="deploy-rail-live">')[1].split("</div>")[0];
+      assert.ok(foot.includes('class="site-open"'), "the footer's URL is a `.site-open` anchor — the class the base nowrap rule dresses");
+      assert.ok(foot.includes(">" + url + "&nbsp;"), "the WHOLE url is the anchor's text, not a label");
+      assert.ok(foot.includes('data-copy="' + url + '"'), "the copy button carries the same url");
+      // THE IN-PAGE CONTROL IS A PROPERTY OF THE FIXTURE, not of the browser
+      // run: the detail head renders `.fleet-url .site-open` only when
+      // siteHasEverDeployed, and the browser leg compares the two anchors.
+      assert.ok(site.current_deployment_id,
+        "the fixture's site must carry current_deployment_id or the head renders no `.fleet-url .site-open`, and the browser leg loses its paid-twin control");
+      // The unbreakable run the nowrap pinned: no space anywhere in the URL.
+      assert.ok(!/\s/.test(url) && url.length > 40,
+        "the live URL must be one long unbreakable run — a URL with a space in it could wrap without any remedy at all");
+    },
+  },
   // Invitation accept: each committed terminal renders its designed card with
   // exactly one [data-invite-act] action (esc() turns ' into &#39; in copy).
   "invite-joined": {
@@ -1727,8 +2148,8 @@ const EXPECTATIONS = {
   // #instance-tabpanel. The edit/create MODAL flows are click-driven (inert here)
   // and DOM-tested in __app.test.mjs.
   "webhooks-panel": {
-    what: "the Webhooks tab routes and fills the endpoint list with the Edit action",
-    check(reg) {
+    what: "the Webhooks tab fills the endpoint list — and the SECOND card's Delete is clicked for real: the typed gate, exactly one DELETE for wh-stale, the server list 2 → 1, and THAT card gone from the DOM",
+    async check(reg, hooks, ctx) {
       const body = (reg.get("instance-body") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#instance-body rendered empty");
       for (const needle of ["inst-tabs", '/webhooks" aria-current="page"', 'id="instance-tabpanel"', ">Webhooks<"]) {
@@ -1740,6 +2161,110 @@ const EXPECTATIONS = {
       assert.ok(panel.includes("data-wh-edit"), "each card must carry the w6 Edit action");
       assert.ok(panel.includes("Prod indexer"), "the fixture webhook name renders");
       assert.ok(panel.includes("data-wh-delete"), "the full action bar renders (delete present)");
+
+      // ── cch-bl-webhook-delete-oracle · THE WEBHOOK DELETE, CLICKED ─────────
+      // The twelfth destroy verb, and the one cch-w10 measured and DEFERRED.
+      // Two blockers were named; both are closed here, and neither by waving.
+      //
+      // BLOCKER 1 — the card is a DIV and PARSED_TAGS is `button|a`, under a
+      // committed prohibition against widening it. NOT widened: `findWhCard`
+      // (grep it in app.js) now resolves through CARD GROUPS — a class
+      // allowlist over container spans, documented at `GROUPED_CLASSES` in this
+      // file. `.wh-list` and `.fleet-body` are NOT on that list, so
+      // loadWebhooks' and mountUsageTab's `|| root` fallbacks still take the
+      // fallback and the detached-stub hazard is structurally unreachable.
+      //
+      // BLOCKER 2 — THE WRONG-TARGET TRAP, and it is disproven by EXECUTION,
+      // not avoided. The fixture carries TWO endpoints on purpose. The remedy
+      // cch-w10 sketched (an `|| listBox` fallback inside findWhCard) would
+      // hand BOTH cards the SAME listBox, so `card.querySelector(
+      // "[data-wh-delete]")` would answer the FIRST button for both and a
+      // green oracle would be asserting the wrong webhook was deleted. This leg
+      // clicks the SECOND card and pins the second endpoint's id at every step:
+      // the sheet's copy, the wire path, the survivor, and the row that leaves.
+      const panelEl = reg.get("instance-tabpanel");
+      const cards = panelEl.querySelectorAll(".wh-card");
+      assert.equal(cards.length, 2,
+        "this leg's whole point is TWO cards (the wrong-target trap needs a second one); got " + cards.length +
+        " — 0 means the card-group parse regressed and everything below would be vacuous");
+      assert.deepEqual(cards.map((c) => c.getAttribute("data-wh")), ["wh-prod", "wh-stale"],
+        "the cards must render in fixture order, so 'the SECOND card' names a known endpoint");
+      const victim = cards[1];
+      const survivor = cards[0];
+      const del = victim.querySelector("[data-wh-delete]");
+      assert.ok(del, "the second card carries no Delete — wireWebhookCard's `on()` had nothing to bind");
+      assert.notEqual(del, survivor.querySelector("[data-wh-delete]"),
+        "BOTH cards answered the SAME Delete button — this is the wrong-target trap itself, and an oracle " +
+        "built on it would happily assert that deleting card 2 deleted card 1");
+
+      const whPath = "/v1/barkparks/" + SCENARIOS["webhooks-panel"].data.barkparks[0].id + "/api/webhooks";
+      assert.equal(ctx.countCalls("DELETE", whPath + "/wh-stale"), 0, "nothing was deleted before the click");
+      assert.equal(del.click(), 1,
+        "the second card's Delete dispatched no click handler. Read this as the WRONG-TARGET trap first: " +
+        "if findWhCard resolves BOTH cards to the same node (the `|| listBox` fallback cch-w10 sketched, or a " +
+        "card-group span that swallowed its sibling), every handler lands on card ONE and card TWO's button is " +
+        "left dead. Mutation-verified: `return cards[i]` -> `return cards[0]` in findWhCard reds exactly here.");
+      await ctx.settle();
+
+      // THE SHEET IS THE SECOND ENDPOINT'S. Both fixture rows carry distinct
+      // names and urls, so this copy cannot be satisfied by the wrong card.
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes("legacy.acme.com/sync") && sheet.includes("Legacy sync"),
+        "the confirm sheet named the WRONG endpoint — it must describe wh-stale, the card that was clicked; got: " +
+        sheet.slice(0, 300));
+      assert.ok(!sheet.includes("hooks.acme.com/reindex"),
+        "…and it must not describe wh-prod, which nobody touched");
+      assert.equal(ctx.countCalls("DELETE", whPath + "/wh-stale"), 0,
+        "the card click fired the DELETE before the operator confirmed — the typed gate is gone");
+
+      // THE TYPED GATE, read where the shim can read it honestly. The button
+      // ships `disabled` in the sheet's MARKUP, and this shim does not seed a
+      // registry node's boot state from app-RENDERED markup (the same rule
+      // HIDDEN_IDS states for `hidden`) — so the disarmed state is read off the
+      // parsed markup node, and the ARM is read off the node app.js actually
+      // writes. Both are real; neither is the other's stand-in.
+      assert.equal(reg.get("modal-body").querySelector("#wh-del-go").disabled, true,
+        "the sheet must ship its Delete disabled — an armed-on-open destroy sheet has no gate at all");
+      const go = reg.get("wh-del-go");
+      const input = reg.get("wh-del-confirm");
+      input.value = "Prod indexer";
+      input.dispatchEvent({ type: "input" });
+      assert.equal(go.disabled, true, "the OTHER endpoint's name armed this sheet — the echo is matching the wrong row");
+      input.value = "Legacy sync";
+      input.dispatchEvent({ type: "input" });
+      assert.equal(go.disabled, false, "typing the endpoint's own name did not arm the sheet");
+
+      assert.equal(go.click(), 1, "the armed Delete dispatched no click handler");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", whPath + "/wh-stale"), 1,
+        "exactly one DELETE for the SECOND endpoint must reach the wire; got " +
+        ctx.countCalls("DELETE", whPath + "/wh-stale"));
+      assert.equal(ctx.countCalls("DELETE", whPath + "/wh-prod"), 0,
+        "THE WRONG-TARGET TRAP FIRED: deleting the second card put the FIRST endpoint on the wire");
+
+      // THE SHRINK, off the SERVER's own list — the assertion the old stateless
+      // `{data:{webhooks: d.webhooks}}` could not pass.
+      assert.equal(ctx.state.webhooks.length, 1,
+        "the server list must shrink by exactly one (2 → 1); got " + ctx.state.webhooks.length);
+      assert.deepEqual(ctx.state.webhooks.map((w) => w.id), ["wh-prod"], "and the SURVIVOR is the untouched endpoint");
+      const served = route("webhooks-panel", "GET", whPath + "?dataset=production", ctx.state);
+      assert.deepEqual(served.body.data.webhooks.map((w) => w.id), ["wh-prod"],
+        "a fresh list READ must agree — the shrink is served, not just spliced into a bag nobody reads");
+
+      // AND THE ROW LEAVES THE DOM. deleteWebhook does not refetch: its success
+      // arm removes the card node itself, so this is the ONLY on-screen
+      // consequence there is (its toast is a client-side constant, which is
+      // exactly why this row was a WIRE + STATE job and never a text one).
+      const after = panelEl.innerHTML || "";
+      assert.ok(!after.includes('data-wh="wh-stale"'),
+        "the deleted card is still in the list — findWhCard/removeChild never reached it");
+      assert.ok(after.includes('data-wh="wh-prod"'),
+        "the SURVIVING card left the list too — the removal took the wrong row, or the whole list");
+      assert.deepEqual(panelEl.querySelectorAll(".wh-card").map((c) => c.getAttribute("data-wh")), ["wh-prod"],
+        "the live card list must be the survivor alone");
+      const whToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(whToast.includes("Webhook deleted") && whToast.includes("legacy.acme.com/sync"),
+        "the delete must report itself, naming the endpoint it removed; got: " + whToast.slice(0, 300));
     },
   },
   // gr-p2 HOME TRIAGE (C-01): the v4 Overview folds the wave-3 fleet-usage strip
@@ -3185,6 +3710,64 @@ const EXPECTATIONS = {
       const provToast = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(provToast.includes("Hetzner Cloud disconnected"),
         "a successful disconnect must say so; toast stack: " + provToast.slice(0, 200));
+
+      // ── cch-w2-revoke-oracle-round2 · DELETE /v1/github/installation ───────
+      // The GitHub App installation, the OTHER destroy verb on this screen and
+      // the one no instrument had ever driven. Re-derive the handler, do not
+      // trust a line number:
+      //   grep -n "function disconnectGithub" cloud/priv/static/app.js
+      // — one hit; it is wired in renderGithub by `$("#github-disconnect")`,
+      // and githubCardHtml paints that button only `if (canWrite)`, which is
+      // why this leg lives on the OWNER scenario and not on providers-member
+      // (whose check deliberately asserts the card WITHOUT the control).
+      //
+      // NO CONFIRM GATE, deliberately not asserted as one: unlike the provider
+      // disconnect above, disconnectGithub fires straight off the click. That
+      // is the app's shape today; this oracle pins the WIRE, not a gate it does
+      // not have, and inventing an assertion for a sheet that never opens would
+      // be a claim about markup nothing renders.
+      const ghCard = reg.get("github-card");
+      // THE RENDER HALF, and it is load-bearing: this leg clicks the REGISTRY
+      // node (renderGithub wires it through `$()`), and byId auto-creates an
+      // entry for any id the app asks for — so without this line the click
+      // would keep passing against a phantom on a screen that paints no
+      // Disconnect at all. That is exactly what providers-connected did before
+      // this fixture: `$("#github-disconnect")` was wired on every render while
+      // the card showed "GitHub deploys aren't configured".
+      const ghBefore = ghCard.innerHTML || "";
+      assert.ok(ghBefore.includes('id="github-disconnect"'),
+        "the connected+admin arm must paint the live #github-disconnect control; got: " + ghBefore.slice(0, 300));
+      assert.ok(ghBefore.includes("acme-engineering") && ghBefore.includes("Connected"),
+        "…and it must be the CONNECTED arm that painted it");
+      assert.equal(ctx.countCalls("DELETE", "/v1/github/installation"), 0, "nothing was disconnected before the click");
+      const ghReadsBefore = ctx.countCalls("GET", "/v1/github/installation");
+      assert.ok(ghReadsBefore > 0, "the card was never fetched — this leg is asserting over a screen that never loaded");
+      assert.equal(reg.get("github-disconnect").click(), 1,
+        "the GitHub Disconnect dispatched no click handler — it is DEAD");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/github/installation"), 1,
+        "exactly one DELETE /v1/github/installation must reach the wire; got " +
+        ctx.countCalls("DELETE", "/v1/github/installation"));
+      // THE STATE HALF. The success arm only calls loadGithub() — it refetches
+      // and repaints, and against the old stateless fixture (which answered the
+      // DELETE with {connected:false} and then served d.github, connected:true,
+      // to the very next GET) the card came back CONNECTED and every assertion
+      // below would have held whether or not the teardown did anything.
+      assert.equal(ctx.state.github.connected, false,
+        "the SERVER still reports the installation connected — the DELETE hit a fixture that cannot lose");
+      assert.ok(ctx.countCalls("GET", "/v1/github/installation") > ghReadsBefore,
+        "the success arm never refetched, so the operator is left looking at a card that outlived its installation");
+      const ghAfter = ghCard.innerHTML || "";
+      assert.ok(!ghAfter.includes("acme-engineering"),
+        "the card still names the disconnected account; got: " + ghAfter.slice(0, 300));
+      assert.ok(!ghAfter.includes('id="github-disconnect"'),
+        "the card still offers Disconnect on an installation that is already gone");
+      assert.ok(ghAfter.includes("Connect GitHub"),
+        "a disconnected+configured deployment must offer the way back in, not a dead end; got: " + ghAfter.slice(0, 300));
+      assert.ok(!ghAfter.includes("aren&#39;t configured"),
+        "…and it must never answer a successful disconnect with a claim about the DEPLOYMENT's configuration");
+      assert.ok((reg.get("toast-stack") || {}).innerHTML.includes("GitHub disconnected"),
+        "the disconnect must report itself");
     },
   },
   "providers-empty": {
@@ -3808,7 +4391,7 @@ const EXPECTATIONS = {
     check(reg) {
       assert.equal(reg.get("view-operator").hidden, false, "the Operator view must be visible for an operator");
       const page = reg.get("operator-body").innerHTML || "";
-      for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest"])
+      for (const heading of ["Rollout brake", "Canary rollout", "Warm pool", "Fleet digest", "Deploy ledger"])
         assert.ok(page.includes(heading), "the page carries the " + heading + " card");
 
       // 1. BRAKE — the SHARED banner model, with the console's one action control.
@@ -3846,6 +4429,23 @@ const EXPECTATIONS = {
       assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty state renders");
       assert.ok(digest.includes("06:00 UTC"), "the one backed clock claim survives (config.exs:334)");
       assert.ok(!/Send (one )?now/i.test(page + digest), "no send-now button anywhere (GR40)");
+
+      // 5. DEPLOY LEDGER CENSUS (dr-w1-s2) — the READABLE arm: n=1840 clears
+      // @min_sample, so the rate answers and must arrive WITH its denominator.
+      // Sixteen waves computed this number and nothing rendered it; this is the
+      // first assertion in the repo that a human can SEE a failure class.
+      const census = reg.get("op-census-body").innerHTML || "";
+      assert.ok(census.includes("16.96%"), "the rate the server computed renders verbatim; got: " + census);
+      assert.ok(census.includes("312 of 1840"),
+        "a percentage NEVER travels without its numerator and denominator; got: " + census);
+      for (const cls of ["BUILD_FAILED", "BOX_UNREACHABLE", "UNCLASSIFIED"])
+        assert.ok(census.includes(cls), "the class table names " + cls);
+      assert.ok(census.includes("the site build exited non-zero"),
+        "the LABEL is DeployLedger.label/1's own string, rendered verbatim — the console owns no label map");
+      assert.ok(!census.includes("not enough data"), "a rate the ledger answered is not a refusal");
+      assert.ok(!census.includes("No deployments in this window"), "1840 rows is not an empty window");
+      assert.ok(census.includes("volume 1840") && census.includes("deferred 99"),
+        "every named state is a COUNT beside the rate, never folded into it");
     },
   },
   "operator-halted": {
@@ -3863,6 +4463,23 @@ const EXPECTATIONS = {
       const digest = reg.get("op-digest-body").innerHTML || "";
       assert.ok(digest.includes("smtp: connection timed out"), "the failed send carries its verbatim error");
       assert.ok(digest.includes("Sent") && digest.includes("Failed"), "both outcomes render");
+
+      // THE REFUSAL, RENDERED (dr-w1-s2). n=74 is below @min_sample 200, so
+      // `rate/2` answers `refused: true, pct: null`. The console must print the
+      // ledger's own refusal and NOT a percentage — and it must not compute one
+      // from the counts (12/74 = 16.22%) sitting right beside it either.
+      const census = reg.get("op-census-body").innerHTML || "";
+      assert.ok(census.includes("not enough data (n=74)"),
+        "the ledger's refusal renders with the SERVER's own n; got: " + census);
+      assert.ok(census.includes("sample 74 below min_sample 200"),
+        "and the server's reason rides along, so the threshold is legible");
+      assert.ok(!/\d+(\.\d+)?%\s*—/.test(census),
+        "NO percentage may be rendered for a refused rate; got: " + census);
+      assert.ok(!census.includes("16.22"), "and certainly not one computed client-side from 12/74");
+      // The COUNTS stay — D9's ruling is that counts stay while ratios go.
+      assert.ok(census.includes("volume 74") && census.includes("failed 12"),
+        "a refused RATIO does not delete the real rows behind it");
+      assert.ok(census.includes("BUILD_FAILED"), "the class table still renders under a refused rate");
     },
   },
   "operator-zero-staging": {
@@ -3888,6 +4505,16 @@ const EXPECTATIONS = {
       const digest = reg.get("op-digest-body").innerHTML || "";
       assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty digest renders");
       assert.ok(!digest.includes("platform-operator addresses"), "the audience is team members, not platform admins (dr-w19-s5)");
+
+      // THE EMPTY CENSUS WINDOW (dr-w1-s2). volume 0 is NOTHING MEASURED, not
+      // zero failures — a zeroed class table beside a 0.0% rate reads as health,
+      // which is the exact inversion this epic exists to refuse.
+      const census = reg.get("op-census-body").innerHTML || "";
+      assert.ok(census.includes("No deployments in this window"),
+        "an empty window says so in words; got: " + census);
+      assert.ok(!census.includes("set-row"), "and draws NO class table — a table of zeroes reads like health");
+      assert.ok(!/%/.test(census), "no rate, not even 0%, off a window with nothing in it");
+      assert.ok(!census.includes("unavailable"), "an empty window is a reading, never an error");
     },
   },
   "operator-denied": {
@@ -3920,12 +4547,13 @@ const EXPECTATIONS = {
       const canary = reg.get("op-canary-body").innerHTML || "";
       const warm = reg.get("op-warm-body").innerHTML || "";
       const digest = reg.get("op-digest-body").innerHTML || "";
+      const census = reg.get("op-census-body").innerHTML || "";
       // cch-w36-s4 — THIS SCENARIO IS A 403 ON ALL FOUR ROUTES, and a 403 is an
       // ANSWER: the control plane made a determination. The cards used to call
       // it "didn't answer / this card just couldn't read it" — a transport story
       // over an authority verdict — because operatorPaint's single ternary
       // destroyed the status before any renderer saw it. Four cards, ONE funnel.
-      for (const [name, html] of [["brake", brake], ["canary", canary], ["warm pool", warm], ["digest", digest]]) {
+      for (const [name, html] of [["brake", brake], ["canary", canary], ["warm pool", warm], ["digest", digest], ["census", census]]) {
         assert.ok(html.includes("refused this read (403)"), "the " + name + " names the refusal");
         assert.ok(html.includes("platform_operator"), "the " + name + " names the authority that refused");
         assert.ok(!html.includes("didn't answer"), "the " + name + " no longer calls a determination a silence");
@@ -3933,7 +4561,15 @@ const EXPECTATIONS = {
       }
       assert.ok(!brake.includes("data-fleet-au"), "a refused brake offers no button");
       assert.ok(!warm.includes("op-metric-v"), "no fake zero is drawn when the count was refused");
-      for (const html of [brake, canary, warm, digest])
+      // A REFUSED CENSUS IS NOT AN EMPTY WINDOW, and it is not a rate of zero.
+      // Both would be a determinate claim about the fleet's deploys off a read
+      // the control plane never performed.
+      assert.ok(!census.includes("No deployments in this window"),
+        "a refused read must NEVER be reported as a measured empty window");
+      assert.ok(!/%/.test(census), "and no percentage is drawn off a reading that was refused");
+      assert.ok(!census.includes("not enough data"),
+        "a 403 is an AUTHORITY verdict, never the ledger's sample-size refusal");
+      for (const html of [brake, canary, warm, digest, census])
         assert.ok(!html.includes("Loading"), "no card is left spinning after its request settles");
     },
   },
@@ -4066,7 +4702,7 @@ const EXPECTATIONS = {
       assert.ok(!after.includes("Checking operator access"),
         "the console must not be left on the spinner the retry painted while it waited; got: " + after);
       // THE SHELL ACTUALLY PAINTED — the four card slots the operator page owns.
-      for (const slot of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body"]) {
+      for (const slot of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body", "op-census-body"]) {
         assert.ok(after.includes(slot), "the operator shell did not mount #" + slot + "; got: " + after);
       }
       assert.equal(reg.get("nav-operator").hidden, false, "a proven operator gets the sidebar entry back");
@@ -4279,7 +4915,7 @@ const EXPECTATIONS = {
   // Each absence is a STATE the corpus never produced, not a control that was
   // missing, so every guard over them was green by construction.
   //
-  // WHY THE FIRST TWO ARE SCORED AT RENDER LEVEL AND NOT CLICKED. Both mounts
+  // WHY THE FIRST TWO WERE SCORED AT RENDER LEVEL AND NOT CLICKED. Both mounts
   // are read with `$("#inst-update")` / `$("#inst-remove-retry")`, and this
   // shim's byId AUTO-CREATES a registry entry for any id asked for — so a click
   // oracle there would dispatch against a phantom node that exists because the
@@ -4287,6 +4923,16 @@ const EXPECTATIONS = {
   // verify-card mount below is read with `box.querySelector("[data-vf-…]")`
   // over the mount's own parsed kids, which CAN answer null — so that one is
   // clicked, and its handler count is asserted positive.
+  //
+  // AMENDED BY cch-w2-revoke-oracle-round2, which now CLICKS #inst-remove-retry.
+  // The phantom hazard above is real and is NOT waved away — it is PAIRED OUT.
+  // A click alone IS a false green on a deleted control; a click PLUS the
+  // byte-exact render assertion already in that check is not, because the render
+  // half reds the instant the control stops being painted. Neither half is
+  // redundant: delete the markup and the render half reds; unwire the handler
+  // and the click half reds (0 handlers dispatched). #inst-update keeps its
+  // render-only score — no destructive verb sits behind it, so there is no wire
+  // worth this pairing.
   "instance-behind": {
     what: "a live box one release BEHIND paints the self-update CTA — the first committed scenario in which #inst-update exists at all",
     check(reg) {
@@ -4305,8 +4951,8 @@ const EXPECTATIONS = {
     },
   },
   "instance-remove-failed": {
-    what: "a teardown that FAILED paints Retry removal — the first committed scenario in which deprovision_status is non-null",
-    check(reg) {
+    what: "a teardown that FAILED paints Retry removal — and the retry is CLICKED: exactly one DELETE /v1/barkparks/:id on the wire and the SERVER fleet shrinks 2 → 1",
+    async check(reg, hooks, ctx) {
       const body = (reg.get("instance-body") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#instance-body rendered empty");
       assert.ok(body.includes('<button class="btn btn-primary btn-sm" type="button" id="inst-remove-retry">Retry removal</button>'),
@@ -4318,6 +4964,44 @@ const EXPECTATIONS = {
       // The server's verbatim reason, on the banner beside it.
       assert.ok(body.includes("<b>Removal failed.</b> hcloud: server delete returned 409 (a volume is still attached)"),
         "the deprovision_error is rendered verbatim, never summarised");
+
+      // ── cch-w2-revoke-oracle-round2 · THE SECOND /v1/barkparks/:id DELETE ──
+      // The COVERAGE BOUNDARY note in this file listed `/v1/barkparks/:id`
+      // TWICE for a reason: app.js issues it from two different handlers, and
+      // cch-w10 leg 5/5 covered only ONE of them. Re-derive, do not trust a
+      // line number:
+      //   grep -n 'api("DELETE", "/v1/barkparks/' cloud/priv/static/app.js
+      // returns exactly two hits — runDecommission (COVERED: panel-overview's
+      // typed Decommission) and removeInstance (THIS one, the Retry-removal
+      // handler for a box whose teardown FAILED). They are not the same leg:
+      // removeInstance has NO confirm sheet — the click IS the teardown — and
+      // its success arm sets location.hash = "#fleet" rather than refetching,
+      // so the only honest observable is the SERVER's own list.
+      const victim = SCENARIOS["instance-remove-failed"].data.barkparks[1];
+      assert.equal(ctx.state.barkparks.length, 2,
+        "this leg's arithmetic is 2 → 1; the fleet started at " + ctx.state.barkparks.length);
+      const bpPath = "/v1/barkparks/" + victim.id;
+      assert.equal(ctx.countCalls("DELETE", bpPath), 0, "nothing was torn down before the click");
+      const retry = reg.get("inst-remove-retry");
+      // EXACTLY one, not >0 (the positive-dispatch rule at the top of this file
+      // is the floor, not the ceiling): a re-render destroys the nodes its
+      // markup declares, so their handlers die with them — makeDom's
+      // `_resetHandlers`. A count above one would mean that model broke and
+      // this click is issuing more teardowns than a browser would.
+      assert.equal(retry.click(), 1, "Retry removal dispatched no click handler — it is DEAD");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", bpPath), 1,
+        "the retry must issue exactly one DELETE for THIS box's id; got " + ctx.countCalls("DELETE", bpPath));
+      assert.equal(ctx.state.barkparks.length, 1,
+        "the SERVER's fleet must shrink by exactly one (2 → 1); got " + ctx.state.barkparks.length +
+        " — an unchanged fleet means the teardown hit the catch-all and did nothing");
+      const fleetAfter = route("instance-remove-failed", "GET", "/v1/barkparks", ctx.state);
+      assert.equal(fleetAfter.body.barkparks.filter((b) => b.id === victim.id).length, 0,
+        "and a fresh fleet READ agrees — the box is gone from what the server serves, not just spliced " +
+        "into a bag nobody reads");
+      const removeToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(removeToast.includes("Instance removed"),
+        "the retry must report itself; got: " + removeToast.slice(0, 200));
     },
   },
   "verify-no-credentials": {
@@ -4412,7 +5096,7 @@ function armConfirmSheet(reg, resourceName) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry, hooks, calls, fixtureState } = bootScenario(name);
+  const { registry, hooks, calls, fixtureState, localStorage } = bootScenario(name);
   await flush();
 
   if (exp.check) {
@@ -4423,6 +5107,12 @@ async function runScenario(name) {
       calls,
       state: fixtureState,
       settle: flush,
+      // cch-w2-revoke-oracle-round2: the SESSION STORE, handed through so a
+      // check can read what the app WROTE and not merely what it painted.
+      // /v1/auth/logout is the one destructive DELETE whose whole point is a
+      // local consequence — clearSession() — and that consequence is invisible
+      // in every innerHTML in the registry.
+      localStorage,
       // How many times METHOD PATH was requested — the wire assertion.
       countCalls(method, path) {
         return calls.filter((c) => c.method === method && c.path === path).length;
@@ -4519,6 +5209,29 @@ function assertCensus() {
 // no fixture edit can ever red it, and that is CORRECT for its actual job of
 // proving the RENDER drops a row. Pinning it would pin a tautology.
 const FIXTURE_SHAPE_PINS = [
+  // cch-w23-bl-cruel-identity-own-scenario — THE IDENTITY AXIS, PINNED IN BOTH
+  // DIRECTIONS. These two are one measurement in two halves: WHICH scenario
+  // carries the cruel address. cch-w23-s2 parked it on `account-modal-revoke`
+  // because a new SCENARIOS key was fenced out of that slice, and the cost was
+  // that the click oracle — four sessions, two DELETEs, a danger-tier confirm,
+  // and the fixture shoot.sh publishes as the revoke evidence — was driven
+  // through a 158-character identity as a side effect. Pinning only the cruel
+  // half would let it be COPIED back onto revoke and stay green; pinning only
+  // revoke would let the cruel fixture go kind and green the W23 overflow leg
+  // against a live defect. Both, and the refusal arrives before any scenario
+  // boots. `.length` is a plain property walk in the path grammar below.
+  {
+    scenario: "account-modal-cruel-identity",
+    path: "me.user.email.length",
+    expected: 160,
+    why: 'EXPECTATIONS["account-modal-cruel-identity"].check asserts the 158-char LOCAL PART reaches `.am-name` whole, and overflow-guard.mjs\'s W23-account-modal-identity-bounded leg refuses any cell whose rendered name is under the derived 158-char cap. A shortened address here does not red those loudly — it makes 28 overflow cells green by construction',
+  },
+  {
+    scenario: "account-modal-revoke",
+    path: "me.user.email.length",
+    expected: 12,
+    why: 'EXPECTATIONS["account-modal-revoke"].check is the CLICK ORACLE, and step 1b pins the painted `.am-name` to the corpus\'s production-dominant identity (ada@acme.com). A cruel `me` re-parked here silently moves the revoke path — and the published revoke screenshot — onto an identity nobody owns, which is the exact defect cch-w23-bl-cruel-identity-own-scenario was filed for',
+  },
   {
     scenario: "account-modal",
     path: "me.user.two_factor_enabled",

@@ -480,6 +480,31 @@ end
 # compiled default, byte-identical to before. Applies in ALL envs (personal-local
 # boots :prod), so it lives OUTSIDE the prod guard — same idiom as the media
 # webhook/CDN blocks below.
+# Indx durable state (`Barkpark.Plugins.Indx.Persistence`, the per-index
+# key_maps). The compiled default is `priv/indx_state` — under an OTP release a
+# per-version copy that a version bump abandons, under `mix phx.server` a symlink
+# into the source tree — and NOTHING set the documented `:dir` override, so prod
+# ran on the dev/test default (task-527b519e47669559). BARKPARK_INDX_STATE_DIR
+# points it OUTSIDE the build. Unset in :prod ⇒ /var/lib/barkpark/indx-state
+# WHEN that parent exists (deploy/instance-deploy.sh creates it), so a
+# personal-local :prod boot without the directory keeps the compiled default
+# instead of logging :eacces on every save. dev/test: unchanged unless set.
+# Applies in ALL envs, same idiom as BARKPARK_MEDIA_DIR below.
+indx_state_dir =
+  case System.get_env("BARKPARK_INDX_STATE_DIR") do
+    dir when is_binary(dir) and dir != "" ->
+      Path.expand(dir)
+
+    _ ->
+      if config_env() == :prod and File.dir?("/var/lib/barkpark"),
+        do: "/var/lib/barkpark/indx-state",
+        else: nil
+  end
+
+if indx_state_dir do
+  config :barkpark, Barkpark.Plugins.Indx.Persistence, dir: indx_state_dir
+end
+
 case System.get_env("BARKPARK_MEDIA_DIR") do
   dir when is_binary(dir) and dir != "" ->
     config :barkpark, :media_upload_dir, Path.expand(dir)
@@ -845,10 +870,80 @@ if config_env() == :prod do
   # live) unblocks `jpf-bl-oban-pool-partition` (partition or cap Oban's pool share,
   # then size POOL_SIZE on the numbers — NOT on feel). Both are open and unclaimed
   # as of 2026-08-19; see also `mob-lm-guerrilla-pool-storm`.
+  # ── statement_timeout: the SERVER-SIDE bound on ONE statement ──────────────
+  #
+  # MEASURED on guerrilla 2026-09-01T21:43-21:46Z (task-e2f5ecca0be9a6d1):
+  # `statement_timeout` was 0, and SIX `postgres: barkpark barkpark_prod SELECT`
+  # backends sat at 4-7 MINUTES elapsed each, 10-14% CPU apiece, on a 2-vCPU
+  # box. Nothing stopped them. Every later request's token lookup queued behind
+  # them and the AUTH PLUGS raised first: 618 "connection not available and
+  # request was dropped from queue" in one hour, from auth.ex verify_token
+  # (218), optional_token.ex (186), assign_default_scope.ex (130). 532 `Sent
+  # 500` that hour, 0 in each of the four hours before the campaign started.
+  #
+  # WHY ECTO'S :timeout IS NOT THIS. Ecto's `:timeout` (default 15_000 ms, still
+  # unset in `repo_opts` below) is a CLIENT-side deadline: DBConnection stops
+  # waiting and raises, but the Postgres BACKEND KEEPS RUNNING — it goes on
+  # burning one of the two CPUs and holding its snapshot until it finishes on
+  # its own. `statement_timeout` is enforced INSIDE Postgres: it CANCELS the
+  # backend, which is the only thing that actually gives the resource back. The
+  # two are complementary; the incident is what the missing server-side half
+  # looks like.
+  #
+  # WHY 30s. Well above every healthy measured path on this data (the ready
+  # queue's worst measured plan is 13.7 s pre-index and 0.32 s post-index) and
+  # far below the 4-7 minutes that produced the incident. On a request-path pool
+  # a statement past 30 s is not "slow", it is a defect, and failing it loudly
+  # beats holding a pool member hostage. Postgrex sends `:parameters` as
+  # STARTUP parameters, so every connection in the pool carries it — HTTP and
+  # all 29 Oban queue slots alike. The orchestrator's live stopgap on 2026-09-01
+  # (`ALTER ROLE barkpark SET statement_timeout = '60s'`, applied by hand on the
+  # box) is superseded by this: same mechanism, in code, at a number chosen from
+  # the measurements rather than picked to be safe.
+  #
+  # THE OPT-OUT for a legitimately-long SINGLE statement is
+  # `Barkpark.Repo.set_local_statement_timeout!/1` / `with_statement_timeout/2`
+  # (SET LOCAL — dies with its transaction, never leaks back into the pool).
+  # The inventory of what needs it lives in that module's @moduledoc.
+  #
+  # NOT IN config/test.exs (the SQL sandbox owns the connection and every test
+  # would inherit a wall it did not ask for) and NOT in config/dev.exs: a local
+  # `mix ecto.migrate` running a backfill or a `CREATE INDEX CONCURRENTLY` past
+  # 30 s would be CANCELLED, which is a worse first experience than the pool
+  # contention dev does not have. Prod's migrations carry their own opt-out —
+  # see `Barkpark.Repo`'s @moduledoc and `Barkpark.Release.migrate/0`.
+  #
+  # BARKPARK_DB_STATEMENT_TIMEOUT overrides the value; "0" disables it outright
+  # (the incident escape hatch, so an operator can lift the wall without a
+  # deploy). A malformed value REFUSES BOOT rather than silently degrading the
+  # bound to nothing, matching how BARKPARK_TRUSTED_PROXIES is treated above.
+  statement_timeout =
+    case System.get_env("BARKPARK_DB_STATEMENT_TIMEOUT") do
+      nil ->
+        "30s"
+
+      raw ->
+        value = String.trim(raw)
+
+        if Regex.match?(~r/^\d+(us|ms|s|min|h|d)?$/, value) do
+          value
+        else
+          raise """
+          BARKPARK_DB_STATEMENT_TIMEOUT is #{inspect(raw)}, which Postgres cannot parse.
+          Expected a bare integer, which Postgres reads as MILLISECONDS (e.g. "30000"),
+          or an integer with a unit: us | ms | s | min | h | d (e.g. "30s").
+          "0" disables the statement timeout entirely.
+          Unset, the default is "30s" — see the comment above this raise for why.
+          """
+        end
+    end
+
   repo_opts = [
     # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    # The server-side wall (see the block above `statement_timeout =`).
+    parameters: [statement_timeout: statement_timeout],
     # For machines with several cores, consider starting multiple pools of `pool_size`
     # pool_count: 4,
     socket_options: maybe_ipv6

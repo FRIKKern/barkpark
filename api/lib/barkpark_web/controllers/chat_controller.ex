@@ -77,7 +77,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{FleetHub, Recorder, Runtime}
+  alias Barkpark.StudioChat.{Attachments, FleetHub, PlanPapers, QuestionAnswer, Recorder, Runtime}
   alias BarkparkWeb.ErrorResponse
 
   # Wire bounds (charter "Security, validation, and transport verification
@@ -88,6 +88,9 @@ defmodule BarkparkWeb.ChatController do
   @draft_max_bytes 65_536
   @title_max_bytes 256
   @request_id_max_bytes 256
+  # The `/answer` wire map ceiling — a question row the model authored is small,
+  # so this is a shape sanity fence, checked before any store call.
+  @answers_max_entries 32
   @since_max 9_223_372_036_854_775_807
 
   # Emergency per-connection heap cap (charter D24) — defaults to
@@ -329,6 +332,78 @@ defmodule BarkparkWeb.ChatController do
           {:ok, _message} -> :ok
           {:error, :not_found} -> :ok
         end
+
+        # studio-chat D49, adopted into this transport (ct-bl-plan-paper-parity):
+        # an ALLOWED plan row grows up into a published Paper. Before this, the
+        # projection was a Studio-LiveView-only defp, so a TUI-origin allow flipped
+        # the card on BOTH surfaces (update_approval_status is role-agnostic) but
+        # left the Paper — and its "→ published as Paper" link — un-created: a
+        # colleague watching in Studio saw the same approved plan with a different
+        # durable artifact depending on WHO clicked Allow. The seam is the ONE owner
+        # (the LiveView delegates to it too), it reads the server-held plan markdown
+        # itself, and it is idempotent by slug, so a re-allow updates one Paper and
+        # never mints a second. Fire-and-forget inside: the 204 below never waits on
+        # it and never fails because of it, and every non-plan / denied / blank-plan
+        # ask is a documented no-op.
+        PlanPapers.publish_approved_plan(id, request_id, decision)
+      end
+
+      send_resp(conn, :no_content, "")
+    else
+      nil -> not_found(conn)
+      {:error, message} -> bad_request(conn, message)
+    end
+  end
+
+  # ── POST /v1/chat/sessions/:id/answer ──────────────────────────────────────
+
+  @doc """
+  Answer an AskUserQuestion row with the option(s) the human actually picked →
+  204. Body `{request_id, answers}`, where `answers` maps a QUESTION STRING the
+  server persisted to a chosen option LABEL the server persisted (or, for a
+  `multiSelect` question, a list of them).
+
+  This is the D28 backlog closed (`ct-bl-question-updatedinput`), and it closes
+  it WITHOUT relaxing D22. The caller still never supplies `updatedInput`: it
+  supplies a selection among bytes the model itself offered, every key and value
+  is checked against the stored `metadata.input`, and the `updatedInput` handed
+  to the runtime is rebuilt HERE from that stored ask
+  (`QuestionAnswer.updated_input/2`). Nothing the caller sent becomes process
+  input.
+
+  Deliberately a SEPARATE route from `approval/2` rather than a widened body:
+  `/approval` stays the allow/deny hot path with no map-shaped surface at all, so
+  the question validation cannot become a hole in the tool-approval boundary.
+
+  The 404 leg is the whole authorization story and it is ONE oracle: a missing
+  session, another tenant's session (`fetch_scoped`), a request_id that names an
+  approval or plan row rather than a question, and a question already answered
+  (stale / double answer) are all indistinguishable `nil`s. A second POST
+  therefore cannot re-deliver a decision to the runtime — unlike `/approval`'s
+  idempotent 204, an `/answer` replay is honestly a 404, because "the answer you
+  are sending" is not the same request twice.
+  """
+  def answer(conn, %{"id" => id} = params) do
+    body = Map.drop(params, ["id"])
+
+    with {:ok, {request_id, raw_answers}} <- validate_answer(body),
+         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Message{} = row <- QuestionAnswer.fetch_pending_question(id, request_id),
+         server_input = (row.metadata || %{})["input"] || %{},
+         {:ok, answers} <- QuestionAnswer.validate_answers(server_input, raw_answers) do
+      updated = QuestionAnswer.updated_input(server_input, answers)
+
+      with recorder when is_pid(recorder) <- Recorder.whereis(id),
+           {:ok, session} <- Recorder.session_pid(recorder) do
+        # Soft-matched for the same reason approval/2 soft-matches (D32 seal): a
+        # non-:ok return means the ask is already gone upstream, which must not
+        # MatchError -> 500 where the claude cast path cleanly 204s.
+        _ = Runtime.answer_approval(stored.provider, session, request_id, {:allow, updated})
+      end
+
+      case StudioChat.update_approval_status(id, request_id, "allowed") do
+        {:ok, _message} -> :ok
+        {:error, :not_found} -> :ok
       end
 
       send_resp(conn, :no_content, "")
@@ -664,6 +739,16 @@ defmodule BarkparkWeb.ChatController do
         # re-GET the session at every turn boundary to notice one (charter D15).
         chunk_or_stop(conn, sse_title_frame(sid, title))
 
+      {:chat_task_transition, _sid, transition} ->
+        # A live ledger transition (tlv-bl-chat-live-transition-stream): the
+        # Recorder's scoped re-broadcast on the per-session topic. The sid is
+        # embedded in the topic the forwarder subscribed to, so it is
+        # authoritative — this clause ignores the tuple's sid, exactly like the
+        # workflow clause above. Secret-safe by construction (D23): the payload
+        # is a fixed set of ledger fields the Recorder built, never an inspect
+        # or a raw document.
+        chunk_or_stop(conn, sse_task_frame(transition))
+
       {:claude_chat_exit, status, _internal_tail} ->
         # DROP the internal tail (D23): sse_exit_frame/1 takes only the status,
         # so no stderr/path/token can reach the wire. The stream stays open — a
@@ -805,6 +890,16 @@ defmodule BarkparkWeb.ChatController do
   # stale the way a replayed frame can.
   def sse_title_frame(session_id, title),
     do: "event: title\ndata: #{Jason.encode!(%{session_id: session_id, title: title})}\n\n"
+
+  @doc false
+  # The live task-transition frame (tlv-bl-chat-live-transition-stream). ID-LESS
+  # and UNREPLAYABLE, exactly like `workflow`/`title`/`runtime`/`permission`
+  # (D5): a resuming client re-reads settled ledger truth, never a replayed
+  # transition. The payload carries its OWN `event_id` — the mutation_events row
+  # id — so the reducer dedupes a duplicate live delivery without that id ever
+  # becoming an SSE `Last-Event-ID` cursor for this stream.
+  def sse_task_frame(transition),
+    do: "event: task\ndata: #{Jason.encode!(transition)}\n\n"
 
   @doc false
   # The fixed public exit contract (D23): the reason enum, plus the numeric
@@ -1237,6 +1332,34 @@ defmodule BarkparkWeb.ChatController do
     end
   end
 
+  # `/answer`'s SHAPE gate — everything checkable without the store, so a
+  # malformed body 400s before any DB or runtime call (D22). The SEMANTIC gate
+  # (are these real questions and real labels?) necessarily runs after the row is
+  # read, and lives in QuestionAnswer.validate_answers/2.
+  defp validate_answer(params) do
+    with :ok <- reject_non_object(params),
+         :ok <- reject_unknown_keys(params, ["request_id", "answers"]),
+         {:ok, request_id} <- req_request_id(Map.get(params, "request_id")),
+         {:ok, answers} <- req_answers(Map.get(params, "answers")) do
+      {:ok, {request_id, answers}}
+    end
+  end
+
+  defp req_answers(value) when is_map(value) do
+    cond do
+      map_size(value) == 0 ->
+        {:error, "answers must not be empty"}
+
+      map_size(value) > @answers_max_entries ->
+        {:error, "answers exceeds #{@answers_max_entries} entries"}
+
+      true ->
+        {:ok, value}
+    end
+  end
+
+  defp req_answers(_), do: {:error, "answers must be a JSON object"}
+
   defp validate_approval(params) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, ["request_id", "decision"]),
@@ -1470,19 +1593,36 @@ defmodule BarkparkWeb.ChatController do
   without a live SSE loop.
   """
   def message_json(%StudioChat.Message{} = m) do
+    metadata = m.metadata || %{}
+
     base = %{
       seq: m.seq,
       role: m.role,
       source_markdown: m.source_markdown,
-      metadata: m.metadata || %{},
+      # `attachments` is LIFTED OUT of metadata and re-projected below — the
+      # persisted pointer carries the store `path` (`<session_id>/<sha256>`),
+      # and a filesystem path must never reach a client (ct-bl-chat-attachments).
+      # Dropping the key here makes that structural rather than a convention: the
+      # only attachment representation on the wire is the reference shape.
+      metadata: Map.delete(metadata, "attachments"),
       inserted_at: m.inserted_at
     }
 
-    case toolrow_blocks(m) do
-      nil -> base
-      blocks -> Map.put(base, :blocks, blocks)
-    end
+    base
+    |> put_attachments(Attachments.references(metadata, m.session_id))
+    |> put_blocks(toolrow_blocks(m))
   end
+
+  # The ONE wire attachment shape both surfaces speak: `{id, media_type,
+  # byte_size, url}` — an opaque content-addressed id and the chat-owned read
+  # URL, with no store path, no bearer token, and no bytes. Absent entirely when
+  # the row has none, so an attachment-free transcript is byte-identical to
+  # before.
+  defp put_attachments(json, nil), do: json
+  defp put_attachments(json, refs), do: Map.put(json, :attachments, refs)
+
+  defp put_blocks(json, nil), do: json
+  defp put_blocks(json, blocks), do: Map.put(json, :blocks, blocks)
 
   # The `blocks` a settled row projects, or nil (no blocks key). An assistant row
   # converts its markdown; the three chat rows emit ONE typed chat block each,

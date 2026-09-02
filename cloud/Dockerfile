@@ -43,11 +43,13 @@ COPY priv priv
 
 RUN mix compile
 
-# Pre-compressed siblings for the cold-boot static set (index.html 31,219 +
-# app.js 965,342 + app.css 198,954 = 1,195,515 bytes cold, down to 346,777 —
-# −71.0%). index.html is the SPA shell and therefore the FIRST request of every
-# cold boot: compressing the assets it pulls while shipping the shell itself
-# uncompressed would leave 23,359 bytes on the critical path. The router's
+# Pre-compressed siblings for the served static set. Re-measured off this tree
+# (gzip -9, not the wave-11 figures — app.js/app.css/index.html have been
+# rewritten since): index.html 33,912 -> 8,869, app.js 1,429,808 -> 451,848,
+# app.css 341,573 -> 107,320, styleguide.html 52,722 -> 12,097. index.html is
+# the SPA shell and therefore the FIRST request of every cold boot: compressing
+# the assets it pulls while shipping the shell itself uncompressed would leave
+# 25,043 bytes on the critical path. The router's
 # `at: "/"` Plug.Static carries `gzip: true`, which serves `<file>.gz` when the
 # request says `accept-encoding: gzip`; the edge in front of us compresses
 # nothing (measured: live responses have no `content-encoding` and no `vary`),
@@ -75,11 +77,15 @@ RUN mix compile
 # __app.test.mjs, __css_check.mjs and __fixtures__/ — none of which are in the
 # Plug.Static `only:` allowlist, so those .gz files would be pure image weight.
 # `-k` keeps the originals (identity requests still need them); `-9` is the
-# build-time-cost-is-free setting. styleguide.html is in the same allowlist and
-# compresses just as well, but it is not on the cold-boot path — it is tracked
-# as cch-cloud-static-gzip-html, not smuggled in here. scripts/cloud-static-gz-
-# guard.sh's GZ_ASSETS is the list this line must satisfy.
-RUN gzip -9 -k priv/static/index.html priv/static/app.js priv/static/app.css
+# build-time-cost-is-free setting. styleguide.html joined the line under
+# cch-cloud-static-gzip-html: it is in the same allowlist and the same
+# `gzip: true` plug serves its sibling the moment one exists, 52,722 -> 12,097
+# (−77.1%). It is deliberately NOT justified by the cold boot — a developer
+# opening the styleguide is the only request that pays — so it was landed on
+# its own row rather than smuggled in under the shell's urgency.
+# scripts/cloud-static-gz-guard.sh's GZ_ASSETS is the list this line must
+# satisfy; the two move in the same commit or the guard reds.
+RUN gzip -9 -k priv/static/index.html priv/static/styleguide.html priv/static/app.js priv/static/app.css
 
 RUN mix release
 

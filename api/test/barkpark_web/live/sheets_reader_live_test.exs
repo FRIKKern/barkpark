@@ -321,6 +321,69 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert render(view) =~ ~s(data-v="tab-two")
   end
 
+  # ── reader selection: CLIENT-ONLY (pds-w43-bl-sheetgrid-reader-half) ────────
+  #
+  # Main ruled on 2026-09-02 10:52Z: "(b): client-only selection + copy layer in
+  # bp-sheet-grid.js for :reader — paints its own class, pushes ZERO events,
+  # reads data-v already on reader tds. An anonymous principal never round-trips
+  # selection and gains no authority. […] (a) rejected: it widens the server
+  # surface for a purely local affordance."
+  #
+  # This test is the SERVER half of that ruling, and its job is as much to pin
+  # what did NOT change as what did: the reader gains one attribute
+  # (phx-hook="SheetReaderSelect") and not one server event, not one phx-click,
+  # not one selection class. The client half — the selection rect, the TSV, and
+  # the empty push list — is pinned in api/assets/sheet-grid/__hook.test.mjs.
+  test "the reader grid carries the client-only selection hook and NO new server surface",
+       %{conn: conn} do
+    create_draft!("rdr-sel-hook", one_tab(%{"A1" => %{"v" => "pick"}, "B2" => %{"v" => "me"}}))
+    publish!("rdr-sel-hook")
+
+    {:ok, _view, html} = live(conn, "/sheets/rdr-sel-hook")
+
+    # THE ONE ADDITION: the reader's own, much smaller hook.
+    assert html =~ ~s(phx-hook="SheetReaderSelect")
+    # The Studio hook is still absent — its events (cell-click / nav / select-all)
+    # are exactly the server round-trip the ruling refused.
+    refute html =~ ~s(phx-hook="SheetGrid")
+
+    # The layout has to register the hook and ship the file, or the attribute is
+    # inert. Both live in the reader's own root layout (sheets.html.heex).
+    assert html =~ ~s(src="/assets/bp-sheet-grid.js")
+    assert html =~ "Hooks.SheetReaderSelect = window.BarkparkSheetReaderSelect"
+    # …and the class it paints has a rule to paint WITH. `sheet-rsel`, never the
+    # Studio's `sheet-sel` — aliasing would make the grid harness's td.sheet-sel
+    # pins ambiguous about which grid produced the highlight.
+    assert html =~ ".sheet-cell.sheet-rsel"
+
+    # SERVER SURFACE UNCHANGED. No cell is clickable, no navigation/selection
+    # event name is reachable from the anonymous reader's markup, and no <td>
+    # carries a server-painted selection (grid_sel(_, _, :reader) is {0,0,0,0}).
+    refute Regex.match?(~r/<td[^>]*phx-click/, html)
+    refute html =~ ~s(phx-click="cell-click")
+    refute html =~ ~s(phx-click="head-click")
+    refute html =~ "nav-edge"
+    refute html =~ "nav-corner"
+    refute html =~ "select-all"
+    # td-SCOPED, not a whole-document refute: the reader layout's inline
+    # stylesheet is part of this html, and its comment names `sheet-sel` while
+    # explaining why the reader class is not it.
+    refute Regex.match?(~r/<td[^>]*\bsheet-sel\b/, html)
+    refute Regex.match?(~r/<td[^>]*aria-selected/, html)
+
+    # A11y contract held: role="application" stays edit-only (it muted AT
+    # table-navigation here — see "grid a11y semantics" above), and the server
+    # still stamps no aria-activedescendant. The hook sets that client-side.
+    refute html =~ ~s(role="application")
+    assert html =~ ~s(role="region")
+    assert html =~ ~s(aria-readonly="true")
+    refute html =~ "aria-activedescendant"
+
+    # The data the client layer copies from is the data already on the page.
+    assert html =~ ~s(data-v="pick")
+    assert html =~ ~s(data-v="me")
+  end
+
   test "an http(s) URL cell renders a safe anchor; a javascript: value stays plain text",
        %{conn: conn} do
     create_draft!(
@@ -593,6 +656,36 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
 
       # Dead-rule guard: nothing emits sheet-cap-notice anymore.
       refute css =~ ".sheet-cap-notice"
+    end
+
+    # The unsupported-function ruling (2026-09-02), end to end through the
+    # save-time recompute and the shared read-only grid render. BOTH arms:
+    # a typed =FOO(1) with nothing cached becomes #NAME? and reads as an error
+    # cell; an imported cell that KEPT its cached value keeps rendering that
+    # value but error-styled and titled — never a quiet orange dot.
+    test "an unsupported function reads as #NAME?, and a kept import reads loud",
+         %{conn: conn} do
+      create_draft!(
+        "rdr-name",
+        one_tab(%{
+          "A1" => %{"f" => "=FOO(1)"},
+          "B1" => %{"f" => "=A1+1"},
+          "C1" => %{"f" => "=FOO(1)", "v" => 42, "t" => "n"}
+        })
+      )
+
+      publish!("rdr-name")
+
+      {:ok, view, _html} = live(conn, "/sheets/rdr-name")
+      html = render(view)
+
+      # Arm 1 — nothing cached: the error VALUE is on screen and propagates.
+      assert html =~ "#NAME?"
+      assert html =~ "sheet-err"
+
+      # Arm 2 — the imported value survives, and says why it is not live.
+      assert html =~ "not evaluated: FOO is not supported"
+      assert html =~ "42"
     end
   end
 

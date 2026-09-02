@@ -424,7 +424,10 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
         swept = json_conn(bearer) |> get("/v1/auth/app-tokens")
         assert swept.status == 200
 
-        refute orphan.id in (swept |> json_response(200) |> Map.fetch!("tokens") |> Enum.map(& &1["id"])),
+        refute orphan.id in (swept
+                             |> json_response(200)
+                             |> Map.fetch!("tokens")
+                             |> Enum.map(& &1["id"])),
                "an unbound app token was swept up — the predicate is not fail-closed on the sweep"
       end
     end

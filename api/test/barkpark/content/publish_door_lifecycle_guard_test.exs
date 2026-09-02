@@ -45,9 +45,17 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
   # ── fixtures ─────────────────────────────────────────────────────────────
 
+  # PDS-D291: one MET criterion keeps `publish_claim_close!/3` out of the
+  # close-artifact gate, which refuses a `done` close of a criteria-less
+  # kind:task row whose reason names no PR+sha. This file measures the
+  # publish door, not the close reason.
   defp mk_task!(doc_id, scope, content_extra \\ %{}, title \\ nil) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
+      }
       # Unique description per call — keeps Tasks.Dedup AND the E4 publish
       # dedup wall quiet, so only the lifecycle shapes under test drive
       # outcomes.

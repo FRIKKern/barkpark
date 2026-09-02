@@ -22,6 +22,7 @@ defmodule Barkpark.Content.WriteScope do
   paths thread through, since they compose with scope stamping on every write.
   """
 
+  require Logger
   import Ecto.Query
 
   alias Barkpark.Content.Document
@@ -460,17 +461,71 @@ defmodule Barkpark.Content.WriteScope do
       _ = Barkpark.EdgeProjector.Lifecycle.enqueue_rebuild(after_payload)
     end
 
-    # E5 findability self-test (authoring-excellence D9/D29): after a
-    # walled-type (paper/task) PUBLISH, enqueue an async golden self-query that
-    # asserts the doc retrieves itself. This is the exact
-    # `EdgeProjector.Lifecycle.enqueue_rebuild` precedent — a post-commit,
-    # non-blocking Oban enqueue off the fire_after seam. `enqueue_after/2` is
-    # self-gated to `:after_publish` + walled types and is fully rescued, so it
-    # can never crash or delay the publish that just committed.
-    _ = Barkpark.Workers.FindabilityPosttest.enqueue_after(after_payload)
+    # The INVERTED after-write listener seam. The E5 findability self-test
+    # (authoring-excellence D9/D29 — after a walled-type PUBLISH, enqueue an
+    # async golden self-query that asserts the doc retrieves itself) used to be
+    # a DIRECT call into `Barkpark.Workers.FindabilityPosttest` from here. That
+    # is a kernel→feature edge (`content → workers`) the boundary gate
+    # (tooling/concept-map/boundary.mjs) reports as wrong-direction: the
+    # dependency gradient runs feature→kernel, and a kernel that imports a
+    # worker drags the worker into the substrate. So the arrow is turned
+    # around: `config :barkpark, :after_write_listeners` (config/config.exs —
+    # the composition root, which is allowed to know both sides) lists the
+    # listeners, and this module only reads the list. Content never names a
+    # worker module.
+    dispatch_after_write_listeners(after_payload)
 
     {:ok, doc}
   end
 
   def fire_after(other, _event, _payload), do: other
+
+  # ── The inverted after-write listener seam ─────────────────────────────────
+  # Every listener is called with the SAME after-payload `fire_after/3` hands
+  # `Plugins.Hooks.fire/2` (`%{event:, doc:, ctx:, …}`), post-commit, after the
+  # hooks and the projector — exactly where the direct call sat. Two
+  # installable shapes: a 1-arity fun, or a `{module, function}` pair (what
+  # config.exs can write without the app having booted). Listeners are
+  # ADVISORY: the write has already committed and its response is on the wire,
+  # so a raising or exiting listener is logged and dropped — it can never fail,
+  # roll back or delay the write that just committed. UNSET, `[]`, or a garbage
+  # entry → nothing happens (the fresh-install invariant: a host with no
+  # listeners still publishes).
+  @after_write_listeners_key :after_write_listeners
+
+  defp dispatch_after_write_listeners(payload) do
+    case Application.get_env(:barkpark, @after_write_listeners_key, []) do
+      listeners when is_list(listeners) ->
+        Enum.each(listeners, &call_after_write_listener(&1, payload))
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp call_after_write_listener(listener, payload) do
+    try do
+      case listener do
+        fun when is_function(fun, 1) -> fun.(payload)
+        {mod, fun} when is_atom(mod) and is_atom(fun) -> apply(mod, fun, [payload])
+        _ -> :ok
+      end
+    rescue
+      error ->
+        Logger.warning(
+          "[Content] after-write listener #{inspect(listener)} raised and was dropped " <>
+            "(the write already committed): #{Exception.message(error)}"
+        )
+
+        :ok
+    catch
+      kind, reason ->
+        Logger.warning(
+          "[Content] after-write listener #{inspect(listener)} #{kind}ed and was dropped " <>
+            "(the write already committed): #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
 end

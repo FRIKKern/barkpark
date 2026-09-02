@@ -265,4 +265,141 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
 
     assert after_replay.content == after_first.content
   end
+
+  # ── PDS w36 crit 3: the {:error, reason} 5xx arm, bought GENUINELY ────────
+  #
+  # `github_webhook_controller.ex:211-222` maps a merge-reconcile failure to a
+  # 500 `merge_reconcile_failed`. Every other webhook test reaches that arm by
+  # injecting `:github_webhook_merge_events_fun` and returning `{:error, _}` —
+  # a mapping assertion ("given a stub says error, the body says 500"), which
+  # proves nothing about whether the real path can produce that error or what
+  # the store looks like afterwards. This buys the arm with the race the
+  # controller comment actually names: a LOST rev-CAS.
+  #
+  # `Tasks.reconcile_merge_gate/3` opens a transaction, takes
+  # `pg_advisory_xact_lock`, reads the task BY PK, and only then CASes the stamp
+  # write on the rev it read (`Internal.fenced_content_write/4`, which answers
+  # `:stale` when the CAS matches zero rows). Nothing here is stubbed — the
+  # seams stay untouched and the REAL MergeEvents -> Tasks -> Postgres path
+  # runs; a repo-query observer bumps the row's rev in the window between that
+  # read and that write, on this test's own connection, so the CAS genuinely
+  # loses.
+  test "a LOST rev-CAS race → 500 merge_reconcile_failed and the gate stays UNMET", %{
+    scope: scope
+  } do
+    doc_id = "pds-w36-cas-#{System.unique_integer([:positive])}"
+    task = mk_gated_task!(scope, doc_id)
+    assert Enum.at(task.content["acceptance_criteria"], 1)["met"] == false
+
+    body = merged_pr_body(doc_id, 4623, "cafe0002")
+    sig = Signature.sign(body, @secret)
+
+    race_rev_after_reconcile_read(task.id)
+
+    conn = deliver(body, sig, "pull_request")
+
+    # THE RECEIPT — controller line 211-222's arm, verbatim shape.
+    assert %{"error" => %{"code" => "merge_reconcile_failed"}} = json_response(conn, 500)
+
+    # THE POST-CONDITION the 5xx implies: the reconcile wrote NOTHING. Read the
+    # row DIRECTLY by the id this test created (never a whole-table read — many
+    # agents share this database), never through a second endpoint.
+    reloaded = Repo.get!(Document, task.id)
+    gate = Enum.at(reloaded.content["acceptance_criteria"], 1)
+
+    assert gate["met"] == false,
+           "the 500 said the reconcile failed, but the stored merge_gate criterion is stamped"
+
+    refute Map.has_key?(gate, "evidence")
+
+    refute Map.has_key?(reloaded.content, "merge_gate_autostamp"),
+           "a failed reconcile left an autostamp provenance record behind"
+
+    assert reloaded.content["lifecycle_status"] == "open"
+  end
+
+  # ── PDS w36 crit 4: the no-write post-condition, on the WRITE path ────────
+  #
+  # The replay test above (`reconciled: already_stamped and NO second write`)
+  # already asserts `after_replay.rev == after_first.rev`. What wave 36 never
+  # exercised is a mutation that reds THAT assertion without also redding the
+  # receipt: its recorded mutation perturbed the CLASSIFIER, which flips the
+  # printed tag first, so the rev post-condition was carried by the receipt
+  # assert and never stood on its own. This case isolates it — it asserts ONLY
+  # the store, so a stray write inside `reconcile_merge_gate/3`'s transaction
+  # (the write path, not the classification) reds here and nowhere else.
+  test "a REDELIVERED merged pull_request writes NOTHING — store-only post-condition", %{
+    scope: scope
+  } do
+    doc_id = "pds-w36-nowrite-#{System.unique_integer([:positive])}"
+    task = mk_gated_task!(scope, doc_id)
+
+    body = merged_pr_body(doc_id, 4624, "beef0002")
+    sig = Signature.sign(body, @secret)
+
+    _ = deliver(body, sig, "pull_request")
+    after_first = Repo.get!(Document, task.id)
+
+    _ = deliver(body, sig, "pull_request")
+    after_replay = Repo.get!(Document, task.id)
+
+    # NO receipt is read in this case ON PURPOSE: the tag is the classifier's
+    # word for it, and this test exists to make the STORE say it independently.
+    assert after_replay.rev == after_first.rev,
+           "the replay claimed no write, but the rev moved"
+
+    assert after_replay.updated_at == after_first.updated_at,
+           "the replay claimed no write, but the row was touched"
+
+    assert after_replay.content == after_first.content
+  end
+
+  # Attach a one-shot repo-query observer that reproduces a GENUINE rev-CAS race
+  # INSIDE `Tasks.reconcile_merge_gate/3`'s own transaction.
+  #
+  # The reconcile's query order is: `pg_advisory_xact_lock` → the by-PK
+  # `documents` SELECT → the CAS UPDATE fenced on the rev that SELECT returned.
+  # Seeing the advisory lock ARMS the observer; the very next `documents` SELECT
+  # is that by-PK read, and the instant it completes we bump the row's rev on
+  # the SAME process (so the write lands inside the reconcile's transaction and
+  # its own CAS then matches zero rows). One-shot and pid-fenced, so it cannot
+  # reach another test's queries.
+  defp race_rev_after_reconcile_read(task_id) do
+    owner = self()
+    handler_id = {__MODULE__, :rev_race, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == owner do
+          query = to_string(meta[:query] || "")
+
+          cond do
+            query =~ "pg_advisory_xact_lock" ->
+              Process.put(handler_id, :armed)
+
+            Process.get(handler_id) == :armed and String.starts_with?(query, "SELECT") and
+                query =~ ~s("documents") ->
+              # Mark FIRST: this update re-enters the handler, and a second
+              # bump would be a different (and untrue) fixture.
+              Process.put(handler_id, :fired)
+
+              {1, _} =
+                Repo.update_all(
+                  from(d in Document, where: d.id == ^task_id),
+                  set: [rev: "raced-#{System.unique_integer([:positive])}"]
+                )
+
+            true ->
+              :ok
+          end
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+    :ok
+  end
 end

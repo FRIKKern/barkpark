@@ -26,6 +26,7 @@ package apiclient
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -111,6 +112,40 @@ type ChatMessage struct {
 	Blocks         json.RawMessage `json:"blocks,omitempty"`
 	Metadata       map[string]any  `json:"metadata,omitempty"`
 	InsertedAt     string          `json:"inserted_at,omitempty"`
+
+	// Attachments is the chat-owned attachment REFERENCE list
+	// (ct-bl-chat-attachments). It is a sibling of Metadata, not a key inside
+	// it, because the server LIFTS it out: the persisted jsonb pointer carries
+	// the server's store path and the wire projection drops that, so the only
+	// attachment shape a client ever sees is this one — an opaque id, the
+	// sniffed media type, the byte size, and the chat-owned read URL. No local
+	// path, no bearer token, no bytes.
+	Attachments []ChatAttachment `json:"attachments,omitempty"`
+}
+
+// ChatAttachment is the ONE attachment shape on the wire — the same JSON Studio
+// projects onto a transcript row and the same JSON the upload/read routes
+// answer with. Data is populated ONLY by GetChatAttachment (the read route);
+// on a transcript row it is empty, because raw bytes never ride a message
+// (charter D7/D25).
+//
+// URL is deliberately RELATIVE and token-free: the caller attaches its own
+// Authorization header, so a bearer can never be baked into a stored transcript.
+type ChatAttachment struct {
+	ID        string `json:"id"`
+	MediaType string `json:"media_type,omitempty"`
+	ByteSize  int    `json:"byte_size,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Data      string `json:"data,omitempty"`
+}
+
+// Bytes decodes the base64 payload a read returned. It is empty (with no error)
+// for a transcript-row reference, which never carries bytes.
+func (a ChatAttachment) Bytes() ([]byte, error) {
+	if a.Data == "" {
+		return nil, nil
+	}
+	return base64.StdEncoding.DecodeString(a.Data)
 }
 
 // metaString reads a string field off the row's raw metadata map — "" when the
@@ -145,6 +180,74 @@ func (m ChatMessage) Resolved() bool {
 		return true
 	}
 	return false
+}
+
+// ChatQuestion is ONE AskUserQuestion prompt off a question row's server-held
+// ask (metadata.input.questions). The TUI reads it to paint the option chips and
+// to name the answer it POSTs; the server re-validates every label against this
+// SAME stored ask (StudioChat.QuestionAnswer), so the terminal can only ever
+// select among options the model itself offered — it can never author input
+// (charter D22, ct-bl-question-updatedinput).
+type ChatQuestion struct {
+	// Question is the prompt string, and it is also the ANSWER KEY: the wire
+	// answers map is keyed by this exact string (the CLI keys internally by it).
+	Question string
+	// Header is the short label the card shows above the prompt ("" when absent).
+	Header string
+	// MultiSelect is true when the ask accepts several labels for this question.
+	MultiSelect bool
+	// Options are the offered labels, in the order the model listed them.
+	Options []string
+}
+
+// Questions decodes a question row's server-held ask into the option chips the
+// card renders. Nil for any other role, a malformed input, or a row with no
+// questions — the caller then keeps the plain allow/deny affordance, exactly as
+// before, so a legacy or mid-persist row never loses its answer path.
+//
+// The decode is deliberately TOLERANT in the same shape the Elixir parse is
+// (StudioChat.QuestionAnswer.parse_questions/1): options may be objects with a
+// "label" or bare strings, and anything else is skipped rather than fatal.
+func (m ChatMessage) Questions() []ChatQuestion {
+	input, ok := m.Metadata["input"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := input["questions"].([]any)
+	if !ok {
+		return nil
+	}
+	var out []ChatQuestion
+	for _, item := range raw {
+		q, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		prompt, _ := q["question"].(string)
+		if prompt == "" {
+			continue
+		}
+		entry := ChatQuestion{Question: prompt}
+		entry.Header, _ = q["header"].(string)
+		entry.MultiSelect, _ = q["multiSelect"].(bool)
+		if opts, ok := q["options"].([]any); ok {
+			for _, o := range opts {
+				switch v := o.(type) {
+				case string:
+					entry.Options = append(entry.Options, v)
+				case map[string]any:
+					if label, ok := v["label"].(string); ok {
+						entry.Options = append(entry.Options, label)
+					}
+				}
+			}
+		}
+		if len(entry.Options) == 0 {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // ChatSessionSummary is the sidebar shape from GET /v1/chat/sessions (the
@@ -456,6 +559,64 @@ func (c *Client) SendChatMessage(id, content string) error {
 	return err
 }
 
+// UploadChatAttachment stores one attachment in a session's CHAT-OWNED store
+// and returns its reference (charter D16, ct-bl-chat-attachments).
+//
+// It posts to /v1/chat/sessions/:id/attachments — never to /media/upload. That
+// is the whole point of the verb: `GET /media/files/*` is any-token-public, so
+// an attachment that rode the media plugin would be readable by a token class
+// that cannot reach the conversation. These bytes are gated by the same chat
+// tenant oracle as every other /v1/chat/sessions/:id call.
+//
+// The body is base64 JSON rather than multipart, and the server SNIFFS the media
+// type from the bytes themselves — a client-declared content type is not part of
+// the contract, so there is nothing here to spoof.
+func (c *Client) UploadChatAttachment(sessionID string, data []byte) (ChatAttachment, error) {
+	payload := map[string]string{"data": base64.StdEncoding.EncodeToString(data)}
+	body, err := c.chatSend(
+		http.MethodPost,
+		c.chatURL("/sessions/"+url.PathEscape(sessionID)+"/attachments"),
+		payload,
+		http.StatusCreated, http.StatusOK,
+	)
+	if err != nil {
+		return ChatAttachment{}, err
+	}
+	return decodeChatAttachment(body)
+}
+
+// GetChatAttachment reads one attachment back by its opaque id. The returned
+// ChatAttachment carries Data (base64); use Bytes() for the decoded payload.
+func (c *Client) GetChatAttachment(sessionID, attachmentID string) (ChatAttachment, error) {
+	body, err := c.chatSend(
+		http.MethodGet,
+		c.chatURL("/sessions/"+url.PathEscape(sessionID)+"/attachments/"+url.PathEscape(attachmentID)),
+		nil,
+		http.StatusOK,
+	)
+	if err != nil {
+		return ChatAttachment{}, err
+	}
+	return decodeChatAttachment(body)
+}
+
+// decodeChatAttachment unwraps the {"attachment": {...}} envelope both routes
+// answer with. A 2xx whose body carries no id is an error rather than a
+// zero-valued success — a silently empty reference would be indistinguishable
+// from a working upload at every later call site.
+func decodeChatAttachment(body []byte) (ChatAttachment, error) {
+	var wrapper struct {
+		Attachment ChatAttachment `json:"attachment"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		return ChatAttachment{}, err
+	}
+	if wrapper.Attachment.ID == "" {
+		return ChatAttachment{}, fmt.Errorf("chat attachment response carried no id")
+	}
+	return wrapper.Attachment, nil
+}
+
 // InterruptChat requests a mid-turn interrupt (202 {request_id}). The control
 // ack is semantically EMPTY (D11): the request_id is returned best-effort and a
 // missing/empty one is NOT an error — the true "interrupted" signal is the
@@ -519,6 +680,22 @@ func (c *Client) chatArchiveFlip(id, verb string) (ChatSession, error) {
 func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 	payload := map[string]string{"request_id": requestID, "decision": decision}
 	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/approval"), payload, http.StatusNoContent, http.StatusOK)
+	return err
+}
+
+// AnswerChatQuestion answers a pending AskUserQuestion card with the option
+// label(s) the operator picked (204) — POST /v1/chat/sessions/:id/answer.
+//
+// This is NOT a widened approval: `answers` is a CONSTRAINED map (question
+// string → a label, or a list of labels for a multiSelect question) and the
+// server validates every key and value against the ask it persisted, then
+// rebuilds `updatedInput` itself. A caller cannot smuggle process input through
+// it (charter D22 intact, ct-bl-question-updatedinput). A 404 means the question
+// is gone or already answered — an answer is never idempotent the way an
+// allow/deny is, so the caller must NOT retry it blindly.
+func (c *Client) AnswerChatQuestion(id, requestID string, answers map[string]any) error {
+	payload := map[string]any{"request_id": requestID, "answers": answers}
+	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/answer"), payload, http.StatusNoContent, http.StatusOK)
 	return err
 }
 

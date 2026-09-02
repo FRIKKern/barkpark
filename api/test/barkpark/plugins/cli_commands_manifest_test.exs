@@ -16,6 +16,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit, Tasks}
+  alias Barkpark.Tasks.Validation
 
   # The flat plugin paths these plugins actually register (Bulldocs +
   # OnixEdit `register_routes/1`), prefixed with the host's `/v1/plugins` mount.
@@ -57,6 +58,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/close",
                  "/v1/tasks/:doc_id/release",
                  "/v1/tasks/:doc_id/stamp",
+                 "/v1/tasks/:doc_id/landed",
                  "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/move",
                  "/v1/tasks/:doc_id/stage",
@@ -213,7 +215,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the thirteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
+    test "declares the fourteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -230,16 +232,18 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.next" in ids
       assert "task.move" in ids
       assert "task.stage" in ids
+      # task-59fe7b40b719b379: the non-holder landing mark, added ADDITIVELY.
+      assert "task.landed" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
       # #5627 (listener presence) added the two fleet verbs to this plugin —
-      # 13 task.* + fleet.roster/fleet.beat = 15.
+      # 14 task.* (13 + task.landed) + fleet.roster/fleet.beat = 16.
       assert "fleet.roster" in ids
       assert "fleet.beat" in ids
-      assert length(cmds) == 15
+      assert length(cmds) == 16
 
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 
@@ -383,6 +387,54 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       end
     end
 
+    test "task.ready's summary says what the query returns — claimable, draft-tolerant, twin-collapsed" do
+      # WORDING PIN (task tgw10-bl-drafts-in-ready-pool). The summary this
+      # manifest ships is the ONLY sentence most agents ever read about the
+      # ready queue — it flows to `bp task ready --help`, to docs/openapi.json,
+      # and (restated) to the MCP task_ready tool. It said "List executable,
+      # unblocked tasks", which was wrong on BOTH of the row's findings:
+      #
+      #   * lifecycle `blocked` rows ARE listed — Validation.claimable_statuses/0
+      #     is ~w(open blocked) by decision, and Tasks.Queue binds exactly that
+      #     list. "unblocked" told a reader the opposite.
+      #   * an UNPAIRED `drafts.<id>` row is listed as itself — Tasks.Queue
+      #     carries no `documents.status` predicate; only a draft with a
+      #     same-scope published twin is collapsed away.
+      #
+      # The ruling was to correct the SENTENCE, not the query (excluding drafts
+      # would hide every `bp task create` row from the queue). This test is what
+      # stops the sentence from silently regressing to the comfortable lie:
+      # reverting the summary reds it by name.
+      ready = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ready"))
+      summary = ready.summary
+
+      refute summary =~ "unblocked",
+             "task.ready's summary claims the queue is `unblocked`, but " <>
+               "Validation.claimable_statuses/0 is #{inspect(Validation.claimable_statuses())} " <>
+               "— lifecycle `blocked` rows are listed by design. Got: #{summary}"
+
+      assert summary =~ "claimable",
+             "task.ready's summary must name what the queue actually holds " <>
+               "(claimable rows), not a promise the query does not keep. Got: #{summary}"
+
+      assert summary =~ "blocked is claimable by design",
+             "task.ready's summary must state that lifecycle `blocked` is in the " <>
+               "queue on purpose (Validation @claimable_statuses). Got: #{summary}"
+
+      assert summary =~ "published or unpaired draft",
+             "task.ready's summary must state that an unpaired `drafts.` row is " <>
+               "listed — Tasks.Queue has no documents.status filter. Got: #{summary}"
+
+      assert summary =~ "twin-collapsed to the published row",
+             "task.ready's summary must state the twin-collapse rule, or a reader " <>
+               "cannot tell WHICH of a draft/published pair the queue yields. " <>
+               "Got: #{summary}"
+
+      # Non-vacuity: the two lifecycle words the sentence commits to are the two
+      # the code actually allows, so this pin cannot drift away from the query.
+      assert Validation.claimable_statuses() == ~w(open blocked)
+    end
+
     test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do
       # The capabilities controller stamps source "plugin:<plugin_name>" by mapping
       # a command's NOUN back to a plugin via that plugin's manifest "nouns"
@@ -460,17 +512,24 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end
 
     # Same defect class, second instance found in the same sweep: task.ls
-    # declared `default: 50` while the server's page default is 1000
-    # (tasks_controller do_index — Params.parse_limit(params["limit"], 1000,
-    # 1000), unchanged since before the manifest entry existed). The CLI uses
-    # this field to calibrate its truncation warning, so the wrong value made
-    # `bp task ls` warn "more may be available" on fully-returned pages. This
-    # pins the manifest to the controller's real default; if the controller's
-    # page size ever changes, change both.
+    # declared `default: 50` while the server's page default was 1000
+    # (tasks_controller do_index). The CLI uses this field to calibrate its
+    # truncation warning, so the wrong value made `bp task ls` warn "more may be
+    # available" on fully-returned pages. This pins the manifest to the
+    # controller's real default; if the controller's page size ever changes,
+    # change both.
+    #
+    # The pin moved 1000 -> 100 with task-e2f5ecca0be9a6d1, which shrank the
+    # index default (the cap stays 1000). The direction of the lie inverted with
+    # it and got more dangerous: at 50 the CLI cried truncation on complete
+    # pages (noisy, self-correcting — a reader who re-runs with --all learns
+    # nothing new); left at 1000 while the server pages at 100, the CLI would
+    # compare 100 rows against a believed limit of 1000 and stay SILENT on a
+    # page that really was cut. That is the failure this assertion now guards.
     test "task.ls declares the server's REAL default page size, not a wish" do
       ls = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ls"))
       limit = Enum.find(ls.flags, &(&1.name == "limit"))
-      assert limit.default == 1000
+      assert limit.default == 100
     end
 
     # Third and fourth instances from the same sweep: doc.ls and doc.query both

@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "_comment": "REAL published paper-links blocks, copied verbatim out of the live guerrilla corpus on 2026-09-02 (anonymous read of GET /v1/data/query/production/paper, paged to exhaustion: 1050 published papers, 151 paper-links blocks in 145 of them). Sources: the default-layout and chapters blocks from paper `barkpark-changelog-2026`, the timeline block from `barkpark-changelog-2026-08`. Public changelog copy only, no identifiers beyond the paper slugs the block already links. DO NOT hand-author entries here: this fixture's job is to prove the renderer against the shape production actually stores.",
+  "blocks": [
+    {
+      "description": "A few real Papers that add useful context to this edition.",
+      "id": "auto:related-papers",
+      "refs": [
+        {
+          "description": "The larger idea behind making Barkpark available wherever work already happens.",
+          "reason": "The larger idea behind making Barkpark available wherever work already happens.",
+          "slug": "viable-everywhere-strategy",
+          "title": "Viable Everywhere — reachable from every agent surface"
+        },
+        {
+          "description": "Real product screenshots showing how Barkpark’s working desk took shape.",
+          "reason": "Real product screenshots showing how Barkpark’s working desk took shape.",
+          "slug": "ssp-visual-addendum",
+          "title": "The tiered desk, seen"
+        },
+        {
+          "description": "A side-by-side look at where Paper reading and editing genuinely match.",
+          "reason": "A side-by-side look at where Paper reading and editing genuinely match.",
+          "slug": "view-vs-edit-parity",
+          "title": "View vs Edit — the real 1:1 parity test"
+        },
+        {
+          "description": "The principle behind keeping rich Papers useful in an ordinary terminal.",
+          "reason": "The principle behind keeping rich Papers useful in an ordinary terminal.",
+          "slug": "the-80-column-standard",
+          "title": "The 80-Column Standard"
+        }
+      ],
+      "title": "Worth opening next",
+      "type": "paper-links"
+    },
+    {
+      "description": "Open any month for its full story, visual evidence, and daily record.",
+      "id": "auto:archive-1",
+      "layout": "chapters",
+      "refs": [
+        {
+          "description": "Work focused on returning the full picture instead of something partial or misleading. People can trust that what they see is the whole story.",
+          "eyebrow": "April 2026 · 01 Apr–30 Apr",
+          "meta": "223 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-04",
+          "title": "Tasks return to view"
+        },
+        {
+          "description": "Missing or failed results now say what happened instead of dressing an error up as an empty or successful page.",
+          "eyebrow": "May 2026 · 01 May–31 May",
+          "meta": "419 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-05",
+          "title": "Failures now explain what happened"
+        },
+        {
+          "description": "Errors and awkward states were made easier to understand and recover from. Less guesswork when something needs attention.",
+          "eyebrow": "June 2026 · 01 Jun–30 Jun",
+          "meta": "782 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-06",
+          "title": "Mutate halt returns the canonical error envelope (not a bare string)"
+        },
+        {
+          "description": "Site health and release state became clearer, with awkward and refused actions leaving a useful explanation behind.",
+          "eyebrow": "July 2026 · 01 Jul–31 Jul",
+          "meta": "3,120 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-07",
+          "title": "Barkpark Cloud makes site status easier to understand"
+        },
+        {
+          "description": "Work focused on returning the full picture instead of something partial or misleading. People can trust that what they see is the whole story.",
+          "eyebrow": "August 2026 · 01 Aug–31 Aug",
+          "featured": true,
+          "meta": "1,669 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08",
+          "title": "A bare-string was spread character by character, so the page never revalidated"
+        }
+      ],
+      "title": "The year, month by month",
+      "type": "paper-links"
+    },
+    {
+      "description": "Every stop opens the live daily edition; the quieter days remain in the complete calendar below.",
+      "id": "auto:time-machine",
+      "layout": "timeline",
+      "refs": [
+        {
+          "description": "Failure screens and messages preserve the explanation a person can act on.",
+          "eyebrow": "02 Aug",
+          "meta": "74 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-02",
+          "title": "The cause stays visible"
+        },
+        {
+          "description": "Status follows the newest release instead of the most comforting state.",
+          "eyebrow": "06 Aug",
+          "meta": "44 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-06",
+          "title": "‘Live’ stops covering a failed release"
+        },
+        {
+          "description": "Cloud separates measured reasons that previously collapsed into one vague label.",
+          "eyebrow": "09 Aug",
+          "meta": "111 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-09",
+          "title": "Unknown gets nine useful names"
+        },
+        {
+          "description": "A real investigation brings screenshots, diagrams, and terminal replays into the quality bar.",
+          "eyebrow": "12 Aug",
+          "meta": "19 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-12",
+          "title": "Papers get a demanding benchmark"
+        },
+        {
+          "description": "Wide material steps out locally, then the reading line returns to normal.",
+          "eyebrow": "14 Aug",
+          "meta": "4 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-14",
+          "title": "Evidence gets room; prose does not stretch"
+        },
+        {
+          "description": "Working-copy, parity, and publish behavior turn one benchmark into a reusable system.",
+          "eyebrow": "17 Aug",
+          "meta": "172 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-17",
+          "title": "Paper creation becomes a product path"
+        },
+        {
+          "description": "Release checks reject empty runs instead of rewarding them with a green mark.",
+          "eyebrow": "24 Aug",
+          "meta": "194 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-24",
+          "title": "Nothing is no longer a passing result"
+        },
+        {
+          "description": "Chronicle gains visual evidence, live Paper links, and weekly chapters with distinct arguments.",
+          "eyebrow": "25 Aug",
+          "meta": "13 changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-08-25",
+          "title": "The release archive becomes navigable"
+        }
+      ],
+      "title": "Travel through the month",
+      "type": "paper-links"
+    }
+  ]
+}

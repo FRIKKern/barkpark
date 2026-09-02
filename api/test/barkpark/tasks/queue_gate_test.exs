@@ -115,7 +115,9 @@ defmodule Barkpark.Tasks.QueueGateTest do
     assert Tasks.execution_class(reopened, "worker-a") == "executable"
 
     # A persisted gate is still honoured once the dead claim stops shadowing it.
-    parked = put_in(reopened["queue_gate"], %{"version" => 1, "state" => "parked", "reason" => "later"})
+    parked =
+      put_in(reopened["queue_gate"], %{"version" => 1, "state" => "parked", "reason" => "later"})
+
     assert Tasks.execution_class(parked, "worker-b") == "parked"
     refute QueueGate.executable?(parked, "worker-b")
 
@@ -143,7 +145,9 @@ defmodule Barkpark.Tasks.QueueGateTest do
     assert QueueGate.executable?(live, "worker-a")
 
     for blank <- ["", "   "] do
-      blanked = update_in(live["claim"], &Map.merge(&1, %{"closed_at" => blank, "closed_by" => blank}))
+      blanked =
+        update_in(live["claim"], &Map.merge(&1, %{"closed_at" => blank, "closed_by" => blank}))
+
       assert Tasks.execution_class(blanked, "worker-b") == "foreign_claimed"
       refute QueueGate.executable?(blanked, "worker-b")
     end

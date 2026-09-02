@@ -37,11 +37,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Attachments
+  alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
+  alias Barkpark.StudioChat.QuestionAnswer
   alias Barkpark.Tasks
+  alias Barkpark.Tenancy
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
+  alias Barkpark.StudioChat.TaskTransition
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -92,10 +97,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @doc false
   def spinner_words, do: @spinner_words
 
-  # How many turn-clock ticks (seconds) a spinner word gets before the tick
-  # rotation swaps it for a fresh one. Long enough to read, short enough that
-  # no turn ever feels stuck on one word.
-  @spinner_rotate_s 7
+  # How long a spinner word wears before it is swapped for a fresh one. Long
+  # enough to read, short enough that no turn ever feels stuck on one word.
+  # The rotation is the BROWSER's (bp-chat-turn-clock.js, Hooks.ChatSpinWord):
+  # the server stamps the vocabulary and this dwell on the word span as static
+  # markup, and the hook picks the next word. Nothing about a running turn
+  # costs a LiveView diff on a timer any more.
+  @spinner_rotate_ms 7_000
+
+  # The vocabulary exactly as the hook reads it (data-words). Encoded once at
+  # compile time and rendered as STATIC markup, so it never enters a diff.
+  @spinner_words_json Jason.encode!(@spinner_words)
+
+  defp spinner_words_json, do: @spinner_words_json
+  defp spinner_rotate_ms, do: @spinner_rotate_ms
 
   # Per-socket transcript window (efficiency; task-9e21c3f285b3d7d0). A long
   # multi-hundred-turn agent session appends user/assistant/tool rows for its
@@ -150,6 +165,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
          page_title: "chat",
          nav_section: :chat,
          dataset: default_dataset(),
+         # The dataset the URL SCOPE names, as distinct from the one above.
+         # No chat route carries a `:dataset` segment today, so this is nil and
+         # `dataset:` is a substitution nobody chose — the context band reports
+         # exactly that difference rather than printing the substitution as if
+         # it were a choice. Read from params (not hardcoded nil) so a future
+         # dataset-scoped chat route tells the truth without touching the band.
+         scope_dataset: params["dataset"],
+         # The transcript header's context identity (chat-local-cloud-context-w3).
+         # Rebuilt on session load, on the new-chat reset, and on a host report —
+         # never per render.
+         context_identity: nil,
          # current_path is owned by StudioChrome's :handle_params hook, which
          # also keeps it fresh across the /studio/chat/:session_id patches
          # (this static string used to freeze the active tab on reopen).
@@ -187,6 +213,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # runs and collapsed once terminal; a manual toggle always wins. Never
          # broadcast (a co-viewer's expand is their own), reset on session load.
          agent_expanded: %{},
+         # Per-tab expand override for TURN FOLDS (task-8f904a88b9bc3d59): the
+         # set of `turn_settled_at` keys the reader clicked open. Default is
+         # COLLAPSED (a settled turn is history — its header says how long it
+         # took), never broadcast (a co-viewer's expand is their own), reset on
+         # session load. A MapSet, not a map: a fold has one bit, and the absent
+         # key IS the default, so no stale `false` entries accumulate.
+         turn_folds_expanded: MapSet.new(),
          # The agents rail (charter D47): the task_id-keyed mission-control
          # snapshot rendered below the composer, Claude-Code-TUI style. `rail` is
          # the live map (hydrated from `rail_snapshot` on reopen, folded by the
@@ -262,8 +295,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          pending_echo_id: nil,
          interrupt_requested: false,
          pending_mode: nil,
-         turn_elapsed_s: 0,
-         turn_clock_armed: false,
+         # The turn's start as EPOCH MILLISECONDS, stamped once at the user
+         # message boundary and read by the ChatElapsed hook. nil = no turn we
+         # can date (a fresh mount, a reconnect mid-turn), and the label simply
+         # does not render — the same silence the old counter kept at 0.
+         turn_started_at_ms: nil,
          subscribed_topic: nil,
          # Per-tab AskUserQuestion answer state (charter D31/D35): request_id →
          # %{selections: %{qidx => [labels]}, custom: %{qidx => text}}. Chip picks
@@ -288,6 +324,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
          hand_tasks: %{},
+         # Live task transitions (tlv-bl-chat-live-transition-stream). The
+         # STICKY set of published task ids this session has touched — grown
+         # from the session worker's claims (see StudioChat.TaskTransition's
+         # scoping rule) and seeded from its held claims on open — plus the
+         # idempotency set of already-rendered mutation_event ids, so a
+         # duplicate or Last-Event-ID-replayed lifecycle event renders once.
+         touched_tasks: MapSet.new(),
+         seen_task_events: MapSet.new(),
          # The ready-task picker: nil (closed) or the ready head as lean rows.
          # Loaded fresh on every open — never a cached queue.
          task_picker: nil,
@@ -306,6 +350,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
        |> refresh_sessions()
        |> subscribe_activity()
        |> subscribe_hand_tasks()
+       |> assign_context_identity()
        |> allow_upload(:attachments,
          # Charter D25: paste/drop images ride the SAME user turn as base64
          # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
@@ -589,6 +634,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       true ->
         Runtime.interrupt(socket.assigns.provider, socket.assigns.session)
 
+        # The Recorder — not this tab — owns the turn's outcome
+        # (task-8f904a88b9bc3d59). Telling it here is what lets a turn stopped
+        # from THIS tab read "You stopped after 42s" in every other tab and on
+        # every later reopen, including the D18 road where the wedge timer
+        # force-closes and no terminal `result` ever arrives.
+        Recorder.note_interrupt_requested(socket.assigns[:store_session_id])
+
         Process.send_after(
           self(),
           {:interrupt_timeout, socket.assigns[:store_session_id]},
@@ -806,6 +858,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # Expand/collapse ONE settled turn's fold (task-8f904a88b9bc3d59). Per-tab and
+  # ASSIGNS-ONLY: a fold is a reading preference, not a fact about the turn, so
+  # nothing is written to the store and nothing is broadcast to co-viewers. A
+  # `handle_event` deliberately — the pds-w42 census pins ChatLive's handle_info
+  # head count, and a reader's click has no business becoming a message.
+  #
+  # The key is the turn's `turn_settled_at`, so a stale click (the session
+  # switched under an in-flight click) simply toggles a key nothing renders and
+  # the next `assign_messages` drops it from view — no crash, no lookup needed.
+  def handle_event("toggle_turn_fold", %{"key" => key}, socket) do
+    expanded = socket.assigns.turn_folds_expanded
+
+    next =
+      if MapSet.member?(expanded, key),
+        do: MapSet.delete(expanded, key),
+        else: MapSet.put(expanded, key)
+
+    {:noreply, assign(socket, turn_folds_expanded: next)}
   end
 
   # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
@@ -1453,6 +1525,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
               # carrying `is_error` flips `tool_error`.
               turn_settled: false,
               tool_error: false,
+              # The fold facts (task-8f904a88b9bc3d59) are stamped by the SERVER
+              # at the terminal frame — a live row carries none, which is exactly
+              # what keeps a running turn unfoldable.
+              turn_settled_at: nil,
+              turn_duration_ms: nil,
+              turn_outcome: nil,
               tool: name,
               input: input,
               parent_tool_use_id: parent_id,
@@ -1479,19 +1557,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # here so the ✻ row is never lost (charter D41).
     socket = settle_thinking(socket)
 
-    # The TURN boundary is the settle gate: every tool row of this turn may now
-    # show its outcome glyph. A row whose tool_result never arrived stays
-    # neutral (the provenance gate lives in ChatToolRenderer.settle_state/1).
-    socket = settle_tool_rows(socket)
-
     # An interrupted turn arrives as `error_during_execution` too — the ONLY
     # way to tell it from a genuine error is that WE asked to stop
     # (`interrupt_requested`) or the CLI tagged the terminus
     # `aborted_streaming`. Classify honestly: an interrupt is a normal outcome,
     # not a failure, and the session stays live for a follow-up.
+    #
+    # This now runs BEFORE the settle: the same verdict that picks the system
+    # line also picks the fold label, so the two can never disagree.
     interrupted? =
       socket.assigns[:interrupt_requested] == true or
         ev["terminal_reason"] == "aborted_streaming"
+
+    # The TURN boundary is the settle gate: every tool row of this turn may now
+    # show its outcome glyph. A row whose tool_result never arrived stays
+    # neutral (the provenance gate lives in ChatToolRenderer.settle_state/1).
+    #
+    # The fold stamp rides along, built by the SAME server-owned builder the
+    # Recorder hands its durable write (task-8f904a88b9bc3d59) — the live mirror
+    # of one truth, never a second derivation. `duration_ms` is the runtime's own
+    # off this very frame (the `last_result` badge below reads the same field).
+    socket =
+      settle_tool_rows(
+        socket,
+        StudioChat.turn_settle_stamp(%{
+          duration_ms: ev["duration_ms"],
+          interrupted?: interrupted?
+        })
+      )
 
     socket =
       cond do
@@ -1959,32 +2052,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
           do: Map.put(socket.assigns.hand_tasks, id, hand_task_row(msg.doc.title, content)),
           else: Map.delete(socket.assigns.hand_tasks, id)
 
-      {:noreply, assign(socket, hand_tasks: hand_tasks)}
+      {:noreply,
+       socket
+       |> assign(hand_tasks: hand_tasks)
+       |> fold_task_transition(msg, worker)}
     end
   end
 
   # Every other document type on the dataset stream is not ours to render.
   def handle_info({:document_changed, _msg}, socket), do: {:noreply, socket}
-
-  def handle_info(:turn_tick, socket) do
-    if turn_active?(socket.assigns.status) do
-      Process.send_after(self(), :turn_tick, 1_000)
-      elapsed = socket.assigns.turn_elapsed_s + 1
-
-      socket = assign(socket, turn_elapsed_s: elapsed)
-
-      # The park never stands still: every @spinner_rotate_s the busy row AND
-      # the pulse wear a NEW word (next_spinner_word/1 excludes the current
-      # one, so the change is always visible). This is the liveness floor —
-      # send-path rolls only pick the opening word.
-      socket =
-        if rem(elapsed, @spinner_rotate_s) == 0, do: rotate_spinner_words(socket), else: socket
-
-      {:noreply, socket}
-    else
-      {:noreply, assign(socket, turn_clock_armed: false)}
-    end
-  end
 
   # A Recorder's live-activity ping (wave 5): overlay the sidebar card. On a
   # terminal transition (idle/offline) also re-read the list once — the stored
@@ -2035,6 +2111,32 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # explicitly ignored here so the tick is documented, not merely swallowed by
   # the catch-all below.
   def handle_info({:chat_heartbeat, _sid, _ts}, socket), do: {:noreply, socket}
+
+  # The session's task-credential verdict changed under us
+  # (task-cth-bl-token-renewal). A long conversation must never discover its
+  # lost hands as an unexplained 401: the Session renews on its own clock and
+  # pushes the outcome through the Recorder, so the onboarding card flips in
+  # place — no browser reload, no Re-check click, no reconnect. The frame
+  # carries a VERDICT ATOM only; the credential itself never reaches the
+  # LiveView, the assigns, or the DOM.
+  def handle_info({:claude_chat_task_hands, verdict}, socket) do
+    {:noreply, assign(socket, readiness: readiness_for_hands(verdict))}
+  end
+
+  # A registered host's authoritative state report (herd-s6) rides the activity
+  # topic this LiveView already joined, and it is also the only moment the
+  # server learns execution MOVED: a lease transfer becomes visible when the new
+  # host first speaks under its own fence. Rebuild the context band for the OPEN
+  # session so the header names who is running it now — in place, no reconnect,
+  # no browser reload. Reads only: the report's own write already happened
+  # server-side (ChatHosts.report_state/4), and this head touches no store.
+  def handle_info({:chat_reported_state, sid, _frame}, socket) do
+    if socket.assigns[:store_session_id] == sid do
+      {:noreply, assign_context_identity(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -2355,11 +2457,83 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span aria-hidden="true">✻</span> <%= @message.text %>
           </div>
         <% end %>
+      <% :task_transition -> %>
+        <%!-- A live ledger transition (tlv): one quiet mono row, tinted with the
+              row's `--life-*` lifecycle token so a chip and a transition agree on
+              what "done" or "blocked" looks like. Live-only chrome — never
+              persisted, so a replay of this conversation carries the settled
+              task_prime snapshot instead, unchanged. --%>
+        <div
+          class="text-xs text-dim"
+          style="font-family: var(--font-mono); display: flex; gap: 6px; align-items: baseline;"
+          data-task-transition={@message[:task_id]}
+          data-task-status={@message[:task_status]}
+          data-event-key={@message[:event_key]}
+        >
+          <span style={"color: #{@message[:task_color]}; flex: none;"} aria-hidden="true">◆</span>
+          <span style="min-width: 0; overflow-wrap: anywhere;"><%= @message.text %></span>
+        </div>
       <% _ -> %>
         <div class="text-xs text-dim" style="font-family: var(--font-mono);">
           <span aria-hidden="true">✻</span> <%= @message.text %>
         </div>
     <% end %>
+    """
+  end
+
+  # ONE settled turn, folded (task-8f904a88b9bc3d59): a single header row reading
+  # "Worked for 3m 12s" — or "You stopped after 42s" when a Stop ended the turn —
+  # standing in for the turn's tool rows, which expand on click. The label is
+  # SERVER-stamped and formatted by the one shared formatter
+  # (`ChatToolRenderer.fold_label/1`), the same string `bp chat` prints.
+  #
+  # The whole header is the button: a fold is one affordance, and a reader
+  # reaching for "Worked for 3m 12s" should not have to find a separate chevron.
+  attr :fold_key, :string, required: true
+  attr :label, :string, required: true
+  attr :rows, :list, required: true
+  attr :expanded, :boolean, required: true
+  attr :plan_expanded, :any, required: true
+  attr :question_forms, :map, required: true
+
+  defp turn_fold(assigns) do
+    ~H"""
+    <div data-role="turn-fold" data-turn-fold={@fold_key} style="font-family: var(--font-mono);">
+      <button
+        type="button"
+        class="text-xs text-dim"
+        phx-click="toggle_turn_fold"
+        phx-value-key={@fold_key}
+        data-turn-fold-toggle={@fold_key}
+        aria-expanded={to_string(@expanded)}
+        style="display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit;"
+      >
+        <span aria-hidden="true" style="flex: none; color: var(--life-done);">
+          <%= if @expanded, do: "▾", else: "▸" %>
+        </span>
+        <span data-turn-fold-label style="font-weight: 650;"><%= @label %></span>
+        <span style="opacity: 0.7;">
+          · <%= length(@rows) %> <%= if length(@rows) == 1, do: "step", else: "steps" %>
+        </span>
+      </button>
+
+      <%!-- The turn's rows, byte-identical to the flat transcript they came
+            from — folding is a wrapper, never a second rendering of a row. --%>
+      <div :if={@expanded}>
+        <div
+          :for={message <- @rows}
+          data-role={message.role}
+          data-parent={message[:parent_tool_use_id]}
+          style={message[:parent_tool_use_id] && trace_child_style()}
+        >
+          <.message_body
+            message={message}
+            plan_expanded={@plan_expanded}
+            question_forms={@question_forms}
+          />
+        </div>
+      </div>
+    </div>
     """
   end
 
@@ -2909,6 +3083,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </span>
       </div>
 
+      <%!-- The context identity band (chat-local-cloud-context-w3, criterion 2;
+            the CLI half is internal/chat/context.go). WHICH execution host runs
+            this session, on WHICH Barkpark server, in WHICH workspace / project
+            / dataset, out of WHICH repository root. Every segment is a
+            PROJECTION of server truth — the session row, its live execution
+            lease and the host that last reported on it — never a config string.
+            A field whose two truths disagree leads with ⚠ and carries both
+            values; absence is typed ((not set) / (unknown) / (not a git repo) /
+            (server-local)) and never renders blank or as a plausible default. --%>
+      <div
+        :if={@context_identity}
+        data-test-id="chat-context-band"
+        class="text-xs text-dim"
+        style="display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 5px 16px; border-bottom: 1px solid var(--border-muted); flex: none;"
+      >
+        <span
+          :for={f <- @context_identity.fields}
+          data-test-id={"chat-context-#{f.name}"}
+          data-mismatch={to_string(f.mismatch?)}
+          style={f.mismatch? && "color: var(--warn);"}
+        >
+          <%= if f.mismatch?, do: "⚠ " %><%= f.name %> <%= ContextIdentity.Field.display(f) %>
+        </span>
+      </div>
+
       <div
         id="chat-transcript"
         style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; padding: 16px;"
@@ -2943,6 +3142,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       question_forms={@question_forms}
                     />
                   </div>
+                <% {:turn_fold, fold_key, label, rows} -> %>
+                  <.turn_fold
+                    fold_key={fold_key}
+                    label={label}
+                    rows={rows}
+                    expanded={turn_fold_open?(@turn_folds_expanded, fold_key)}
+                    plan_expanded={@plan_expanded}
+                    question_forms={@question_forms}
+                  />
                 <% {:agent, agent, kids} -> %>
                   <.agent_block
                     agent={agent}
@@ -2965,7 +3173,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span :if={@thinking_pulse.text in [nil, ""]}>
-              <span class="bp-chat-spin-word"><%= @thinking_pulse.word %>…</span> ~<%= @thinking_pulse.tokens %> tokens
+              <span
+                id="chat-pulse-word"
+                class="bp-chat-spin-word"
+                phx-hook="ChatSpinWord"
+                phx-update="ignore"
+                data-words={spinner_words_json()}
+                data-rotate-ms={spinner_rotate_ms()}
+              ><%= @thinking_pulse.word %>…</span> ~<%= @thinking_pulse.tokens %> tokens
             </span>
             <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;" data-gutter-text>{@thinking_pulse.text}</span>
           </div>
@@ -3013,10 +3228,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span>
               <span :if={@status == :interrupting}>stopping…</span>
-              <span :if={@status != :interrupting} class="bp-chat-spin-word">{@spinner_word}…</span>
-              <%= if @turn_elapsed_s > 0 do %>
-                <span style="opacity: 0.8;"><%= @turn_elapsed_s %>s</span>
-              <% end %>
+              <span
+                :if={@status != :interrupting}
+                id="chat-turn-word"
+                class="bp-chat-spin-word"
+                phx-hook="ChatSpinWord"
+                phx-update="ignore"
+                data-words={spinner_words_json()}
+                data-rotate-ms={spinner_rotate_ms()}
+              >{@spinner_word}…</span>
+              <%!-- The elapsed clock is the BROWSER's (bp-chat-turn-clock.js):
+                    the server stamps this turn's start ONCE and the hook mutates
+                    textContent on its own 1 s interval, so no viewer costs a
+                    per-second LiveView patch. `phx-update="ignore"` keeps the
+                    constant transcript patching from reverting the hook's text;
+                    every remount (this row hides behind each streaming frame)
+                    and every reconnect re-seeds from THIS server value. --%>
+              <span
+                :if={@turn_started_at_ms}
+                id="chat-turn-elapsed"
+                style="opacity: 0.8;"
+                phx-hook="ChatElapsed"
+                phx-update="ignore"
+                data-started-at={@turn_started_at_ms}
+              ></span>
               · Stop to interrupt
             </span>
           </div>
@@ -3449,7 +3684,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
               named state + next step, never a silent Logger line). --%>
         <.chat_readiness_card
-          :if={@readiness in [:no_task_hands, :task_token_expired]}
+          :if={@readiness in [:no_task_hands, :task_token_expired, :task_token_rearmed]}
           readiness={@readiness}
           provider={@provider}
         />
@@ -3611,6 +3846,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp readiness_title(:task_token_expired, _provider),
     do: "The chat's task credential expired"
 
+  defp readiness_title(:task_token_rearmed, _provider),
+    do: "Task hands re-armed — restart to hand them over"
+
   defp readiness_title(_, _provider), do: "Checking readiness"
 
   # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
@@ -3638,13 +3876,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp readiness_body(:task_token_expired, _provider),
     do:
-      "This session's minted Barkpark task token has expired, so task tools stopped " <>
-        "working. Re-check, then your next send mints a fresh credential."
+      "This session's minted Barkpark task token has expired and Barkpark could not " <>
+        "mint a replacement, so its bp task tools are offline. The chat itself still " <>
+        "works. Start a new session to mint fresh task hands."
+
+  defp readiness_body(:task_token_rearmed, _provider),
+    do:
+      "This session's task credential was about to expire, so Barkpark minted a fresh " <>
+        "one and revoked the old. The new credential is already wired into this " <>
+        "session's MCP config; the running agent's shell still holds the retired one " <>
+        "until the session restarts — a live process's environment cannot be rewritten."
 
   defp readiness_body(_, provider), do: "Checking #{provider_name(provider)} readiness…"
 
   defp readiness_step(:not_logged_in, "claude"), do: "claude auth login"
   defp readiness_step(:not_logged_in, "codex"), do: "codex login"
+
+  # The named next step for a re-armed session: the MCP lane already has the
+  # fresh credential; the Bash lane is re-armed by the next spawn.
+  defp readiness_step(:task_token_rearmed, _provider), do: "Restart this session"
   defp readiness_step(_, _provider), do: nil
 
   defp provider_name("claude"), do: "Claude Code"
@@ -4250,6 +4500,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #   :not_logged_in      claude lane: CLI present, not authed  (locks composer)
   #   :no_task_hands      bp lane: the task-credential mint was refused
   #   :task_token_expired bp lane: the minted task credential expired
+  #   :task_token_rearmed bp lane: renewed — restart to re-arm the shell lane
   #   :ready              live composer
   #
   # The two claude-lane states REPLACE the composer (there is nothing to send
@@ -4299,16 +4550,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # moment. The default reads the spawn-env slice's queryable mint state
   # (provider `task_hands/1`: :minted | :mint_refused | :not_attempted |
   # :unknown); the config seam injects a verdict for deterministic tests.
-  # `:task_token_expired` is reachable only through the seam today —
-  # mid-session TTL expiry detection is backlogged (task-cth-bl-token-renewal);
-  # the card state is ready for it.
+  # `:expired` and `:rearmed` are now REAL provider verdicts, not seam-only
+  # placeholders (task-cth-bl-token-renewal): the session reads its own
+  # credential's clock, renews through the same mint before expiry, and reports
+  # `:rearmed` afterwards because a live child's environment still carries the
+  # retired value.
   defp hands_readiness(provider, session) do
-    case hands_state(provider, session) do
-      state when state in [:refused, :mint_refused] -> :no_task_hands
-      :expired -> :task_token_expired
-      _ -> :ready
-    end
+    readiness_for_hands(hands_state(provider, session))
   end
+
+  # One verdict->card mapping, shared by the probe path and the pushed
+  # `{:claude_chat_task_hands, verdict}` frame, so a renewal that lands
+  # mid-conversation and a Re-check can never disagree.
+  defp readiness_for_hands(state) when state in [:refused, :mint_refused], do: :no_task_hands
+  defp readiness_for_hands(:expired), do: :task_token_expired
+  defp readiness_for_hands(:rearmed), do: :task_token_rearmed
+  defp readiness_for_hands(_), do: :ready
 
   defp hands_state(_provider, nil), do: :ok
 
@@ -4427,7 +4684,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: messages,
       # Grouped rows memoized at load time (task-9e21c3f285b3d7d0) — the template
       # reads `@grouped_rows`, so reopen does the grouping ONCE, not per render.
-      grouped_rows: group_agent_rows(messages),
+      grouped_rows: fold_settled_turns(group_agent_rows(messages)),
       # Sticky draft (charter D36c): restore the unsent words left behind when
       # this session was last switched away from (nil column → clean composer).
       # From the FULL struct — list_sessions omits `draft`.
@@ -4463,6 +4720,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Agent drill-down overrides reset on reopen (charter D46): a replayed
       # terminal agent starts collapsed to its report, a mid-run one open.
       agent_expanded: %{},
+      # Turn folds reset on reopen (task-8f904a88b9bc3d59): a replayed settled
+      # turn starts collapsed under its "Worked for …" header.
+      turn_folds_expanded: MapSet.new(),
       # Rail replay parity (charter D47): hydrate the mission-control rail from
       # the stored `rail_snapshot` so a reopened session shows its last-known
       # agents. `interrupt_running_tasks/1` already flipped any dead "running"
@@ -4496,6 +4756,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # off the ledger so a reopen shows in-flight task work immediately.
     |> assign(task_picker: nil)
     |> hydrate_hand_tasks()
+    |> assign_context_identity()
   end
 
   # A reopened session whose persisted mode is bypassPermissions (charter D55).
@@ -4542,6 +4803,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: nil,
       # No session → no worker → no held claims; the picker is per-view UI.
       hand_tasks: %{},
+      # A new chat is a new conversation: it has touched no task and rendered
+      # no transition, so BOTH the scope set and the idempotency set reset.
+      touched_tasks: MapSet.new(),
+      seen_task_events: MapSet.new(),
       task_picker: nil,
       mode: "plan",
       provider: "claude",
@@ -4581,6 +4846,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       open_menu_session: nil,
       plan_expanded: MapSet.new(),
       agent_expanded: %{},
+      # A new chat has no settled turns yet (task-8f904a88b9bc3d59).
+      turn_folds_expanded: MapSet.new(),
       # A new chat has no background agents yet (charter D47).
       rail: %{},
       rail_sig: [],
@@ -4590,6 +4857,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       pending_echo_id: nil,
       question_forms: %{}
     )
+    |> assign_context_identity()
   end
 
   # Is `title` for `session_id` ALREADY what the sidebar shows? The duplicate-
@@ -5066,9 +5334,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
     store_id = socket.assigns.store_session_id
 
     attachments =
-      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
+      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, _entry ->
+        # (entry ignored: the media type comes from the BYTES, not client_type)
+        # `Attachments.put/2` is the ONE store seam both surfaces write through
+        # (ct-bl-chat-attachments): the Studio composer and the
+        # `POST /v1/chat/sessions/:id/attachments` transport route land in the
+        # SAME content-addressed store, so a Studio-pasted image is readable by
+        # `bp chat` through the chat-owned read route with no second store and no
+        # per-surface fork. It also sniffs the media type from the bytes instead
+        # of trusting `entry.client_type` — a client-declared type is caller
+        # input, and the type the store records is what is served back.
         with {:ok, bytes} <- File.read(tmp_path),
-             {:ok, pointer} <- StudioChat.store_attachment(store_id, bytes, entry.client_type) do
+             {:ok, pointer} <- Attachments.put(store_id, bytes) do
           {:ok, Map.put(pointer, :bytes, bytes)}
         else
           {:error, reason} ->
@@ -5111,15 +5388,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # The jsonb pointer for a stored attachment — path/media_type/sha256/byte_size
-  # ONLY, never the bytes.
-  defp attachment_pointer_json(a) do
-    %{
-      "path" => a.path,
-      "media_type" => a.media_type,
-      "sha256" => a.sha256,
-      "byte_size" => a.byte_size
-    }
-  end
+  # ONLY, never the bytes. Delegated to `Attachments.pointer_json/1` so the
+  # Studio composer and the transport persist the IDENTICAL pointer shape; the
+  # wire projection (`Attachments.reference/2`, which drops `path`) then reads
+  # one shape rather than guessing between two writers.
+  defp attachment_pointer_json(a), do: Attachments.pointer_json(a)
 
   defp data_uri(media_type, bytes),
     do: "data:#{media_type};base64,#{Base.encode64(bytes)}"
@@ -5295,6 +5568,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # the live tab drew, off the persisted envelope, with no re-derivation.
       turn_settled: Map.get(meta, "turn_settled") == true,
       tool_error: Map.get(meta, "tool_error") == true,
+      # The turn fold's facts (task-8f904a88b9bc3d59), read back VERBATIM off the
+      # same stamp `StudioChat.settle_tool_rows/2` wrote — the reopened
+      # transcript folds under the identical "Worked for …" header the live tab
+      # drew, with no clock and no classification on this side.
+      turn_settled_at: Map.get(meta, "turn_settled_at"),
+      turn_duration_ms: Map.get(meta, "turn_duration_ms"),
+      turn_outcome: Map.get(meta, "turn_outcome"),
       tool: name,
       input: input,
       tool_use_id: Map.get(meta, "tool_use_id"),
@@ -5477,6 +5757,50 @@ defmodule BarkparkWeb.Studio.ChatLive do
     [workspace_id: ws && ws.id, project_id: proj && proj.id]
   end
 
+  # ── live task transitions in the transcript (tlv) ─────────────────────────
+  #
+  # The Doing strip above shows WHAT this session holds; this shows WHEN it
+  # changed. A lifecycle mutation of a task this session has touched appends one
+  # tinted mono row to the transcript, so a claim, a stage, a close, a release,
+  # or a lead's kill lands in the conversation within PubSub latency instead of
+  # waiting for the agent's next MCP re-fetch.
+  #
+  # No new bus and no new subscription: this rides the SAME
+  # `documents:<dataset>` stream `subscribe_hand_tasks/1` already joined, and
+  # the SAME `{:document_changed, …}` message the Doing strip folds. The scope
+  # rule, the idempotency key, and the label all live in
+  # `StudioChat.TaskTransition` — the ONE derivation `Recorder` re-broadcasts to
+  # `bp chat` from, so the two surfaces cannot drift.
+  #
+  # Idempotency (criterion 3): the mutation_events row id is the key. A
+  # duplicate broadcast, or a Last-Event-ID replay of the same event, is
+  # dropped BEFORE the append — so it renders exactly once and the rows that
+  # came after it keep their positions. The transition row is live-only chrome:
+  # it is never persisted, so the separate `task_prime` snapshot contract (the
+  # MCP chip renderer) is untouched.
+  defp fold_task_transition(socket, msg, worker) do
+    case TaskTransition.project(msg, worker, socket.assigns.touched_tasks) do
+      {:ok, transition, touched} ->
+        socket = assign(socket, touched_tasks: touched)
+
+        if MapSet.member?(socket.assigns.seen_task_events, transition.key) do
+          socket
+        else
+          socket
+          |> update(:seen_task_events, &MapSet.put(&1, transition.key))
+          |> append_message(:task_transition, transition.label,
+            task_id: transition.task_id,
+            task_status: transition.status,
+            task_color: transition.color,
+            event_key: transition.key
+          )
+        end
+
+      {:skip, touched} ->
+        assign(socket, touched_tasks: touched)
+    end
+  end
+
   # Re-read the session worker's held claims off the ledger (reopen/mount).
   # No session → no worker → empty strip, no query.
   defp hydrate_hand_tasks(%{assigns: %{store_session_id: nil}} = socket),
@@ -5492,7 +5816,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
       end)
 
-    assign(socket, hand_tasks: rows)
+    # SEED the transition scope off the SAME read (tlv, no second query): every
+    # claim this worker already holds is a task this session has touched, so a
+    # release/reap/kill arriving AFTER the reopen — which carries no
+    # claim.worker to match on — still renders as a transition.
+    socket
+    |> assign(hand_tasks: rows)
+    |> update(:touched_tasks, fn set ->
+      Enum.reduce(Map.keys(rows), set, &MapSet.put(&2, &1))
+    end)
   end
 
   defp hand_task_row(title, content) when is_map(content) do
@@ -5544,24 +5876,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp blank_pulse, do: %{tokens: 0, text: "", word: Enum.random(@spinner_words)}
 
   # Roll the turn-level word (worn by the between-tools busy row). Called at
-  # every turn start; the tick rotation (rotate_spinner_words/1) takes over
-  # from there.
+  # every turn start; from there the ChatSpinWord hook rotates it in the
+  # browser (the park never stands still — the liveness floor is unchanged,
+  # only its clock moved off the server).
   defp roll_spinner_word(socket), do: assign(socket, spinner_word: Enum.random(@spinner_words))
-
-  # A new word, never the one currently showing — a rotation the eye can see.
-  defp next_spinner_word(current), do: Enum.random(@spinner_words -- [current])
-
-  # Tick-driven liveness: re-roll the busy row's word, and the pulse's too when
-  # a pulse is breathing. Both move together so a long thinking bout and a long
-  # tool run are equally alive.
-  defp rotate_spinner_words(socket) do
-    socket = assign(socket, spinner_word: next_spinner_word(socket.assigns[:spinner_word]))
-
-    case socket.assigns[:thinking_pulse] do
-      nil -> socket
-      pulse -> assign(socket, thinking_pulse: %{pulse | word: next_spinner_word(pulse.word)})
-    end
-  end
 
   defp thinking_label(n), do: "thought for ~#{n} tokens"
 
@@ -5662,74 +5980,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Project an approved plan into a Paper (charter D49). Gated on the matched
-  # row being a :plan card AND an allow decision; only then does a fire-and-forget
-  # Task publish + stamp + broadcast. The Task NEVER touches the socket — it talks
-  # to the session topic every tab (this one included) is subscribed to. A tab
-  # with no store session or no topic (a brand-new chat) has nothing to project.
+  # Project an approved plan into a Paper (charter D49) by DELEGATING to the one
+  # owner of that side effect, `PlanPapers.publish_approved_plan/3` — the same
+  # seam `POST /v1/chat/sessions/:id/approval` calls, so a plan approved from the
+  # TUI and one approved from this tab produce the identical Paper, stamp and
+  # broadcast (ct-bl-plan-paper-parity). The gates (allow-only, :plan-role-only,
+  # non-blank server-held markdown), the fire-and-forget task and the honest
+  # failure broadcast all live THERE, keyed on the row the Recorder persisted —
+  # never on this socket's in-memory copy. A tab with no store session (a
+  # brand-new chat) has nothing to project.
   defp maybe_publish_plan(socket, request_id, decision) do
-    with true <- plan_allow?(decision),
-         %{role: :plan} = m <- find_message_by_rid(socket, request_id),
-         sid when is_binary(sid) <- socket.assigns[:store_session_id],
-         topic when is_binary(topic) <- socket.assigns[:subscribed_topic] do
-      markdown = to_string(m[:plan_markdown] || "")
-
-      # Fire-and-forget under Barkpark.TaskSupervisor (same pattern as the AI
-      # title, D13) — supervised, `$callers`-scoped so the sandbox connection is
-      # inherited under test, and drained on test exit. The Task never touches
-      # the socket; it talks to the session topic.
-      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-        publish_plan_paper(sid, request_id, markdown, topic)
-      end)
+    with sid when is_binary(sid) <- socket.assigns[:store_session_id] do
+      PlanPapers.publish_approved_plan(sid, request_id, decision)
     end
 
     :ok
-  end
-
-  defp plan_allow?(:allow), do: true
-  defp plan_allow?({:allow, _}), do: true
-  defp plan_allow?(_), do: false
-
-  # The fire-and-forget body: publish the Paper, stamp its id/url onto the plan
-  # row's metadata (replay-durable, D49), and broadcast the outcome to the session
-  # topic so all tabs converge. A publish failure is honest, not silent, and never
-  # re-raises — the approve already succeeded.
-  defp publish_plan_paper(session_id, request_id, markdown, topic) do
-    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
-    # invariant) must degrade to the SAME honest failure broadcast as an
-    # `{:error, _}` return — a crashed fire-and-forget Task is silent, and the
-    # promised "couldn't publish" line would never appear. Scoped to the publish
-    # call only: a raise AFTER a successful publish must not lie "couldn't
-    # publish" about a Paper that exists.
-    result =
-      try do
-        PlanPapers.publish(session_id, request_id, markdown)
-      rescue
-        e -> {:error, e}
-      catch
-        kind, reason -> {:error, {kind, reason}}
-      end
-
-    case result do
-      {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
-        StudioChat.merge_approval_metadata(session_id, request_id, %{
-          "paper_id" => paper_id,
-          "paper_url" => paper_url
-        })
-
-        Phoenix.PubSub.broadcast(
-          Barkpark.PubSub,
-          topic,
-          {:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}
-        )
-
-      {:error, _reason} ->
-        Phoenix.PubSub.broadcast(
-          Barkpark.PubSub,
-          topic,
-          {:plan_paper_failed, request_id}
-        )
-    end
   end
 
   # Flip every card matching a request_id to a terminal status (idempotent over
@@ -5810,44 +6075,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
-  # Normalize the AskUserQuestion input into a render-ready question list. Each
-  # question: prompt string, optional header, multiSelect flag, and option chips
-  # (label + optional description). Tolerant of options given as bare strings.
-  defp parse_questions(%{"questions" => qs}) when is_list(qs) do
-    Enum.map(qs, fn q ->
-      %{
-        question: to_string(Map.get(q, "question", "")),
-        header: nonempty(Map.get(q, "header")),
-        multi: Map.get(q, "multiSelect", false) == true,
-        options: parse_options(Map.get(q, "options"))
-      }
-    end)
-  end
-
-  defp parse_questions(_), do: []
-
-  defp parse_options(opts) when is_list(opts) do
-    opts
-    |> Enum.map(fn
-      %{"label" => label} = o ->
-        %{label: to_string(label), description: nonempty(Map.get(o, "description"))}
-
-      label when is_binary(label) ->
-        %{label: label, description: nil}
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp parse_options(_), do: []
-
-  defp nonempty(s) when is_binary(s) do
-    if String.trim(s) == "", do: nil, else: s
-  end
-
-  defp nonempty(_), do: nil
+  # Normalize the AskUserQuestion input into a render-ready question list.
+  # Delegated to StudioChat.QuestionAnswer, which is the SAME parse the `/answer`
+  # transport validates against (ct-bl-question-updatedinput): what the human sees
+  # on this card and what the server will accept from the terminal cannot drift,
+  # because there is one parse.
+  defp parse_questions(input), do: QuestionAnswer.parse_questions(input)
 
   # Seed an empty answer form when a question card first arrives, so the render
   # never reads a missing map. Idempotent (put_new): a co-viewing replay never
@@ -5875,29 +6108,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # Collapse the form scratch state into the wire answer map (charter D32):
   # keyed by the QUESTION STRING; a non-empty custom field wins; multiSelect =
-  # comma-joined labels; unanswered questions are omitted.
-  defp build_answers(questions, form) do
-    questions
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {q, qidx}, acc ->
-      case answer_value(q, Map.get(form.selections, qidx, []), Map.get(form.custom, qidx)) do
-        nil -> acc
-        "" -> acc
-        value -> Map.put(acc, q.question, value)
-      end
-    end)
-  end
-
-  defp answer_value(q, selections, custom) do
-    trimmed = if is_binary(custom), do: String.trim(custom), else: ""
-
-    cond do
-      trimmed != "" -> trimmed
-      q.multi and selections != [] -> Enum.join(selections, ", ")
-      selections != [] -> List.first(selections)
-      true -> nil
-    end
-  end
+  # comma-joined labels; unanswered questions are omitted. Owned by
+  # StudioChat.QuestionAnswer so Studio and the `/answer` transport speak ONE
+  # answer dialect to the CLI (ct-bl-question-updatedinput).
+  defp build_answers(questions, form), do: QuestionAnswer.build_answers(questions, form)
 
   # Render helpers for the question form: is a chip selected, is a question
   # answered at all, and how many of N are answered (the N/M progress).
@@ -6166,14 +6380,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `StudioChat.settle_tool_rows/1`, which replay reads back). Rows of earlier
   # turns are already settled, so this is idempotent — and the any?/guard keeps
   # a settled transcript from paying an O(n) reassign + regroup per result.
-  defp settle_tool_rows(socket) do
+  defp settle_tool_rows(socket, stamp) do
     messages = socket.assigns.messages
 
     if Enum.any?(messages, &(&1.role == :tool and Map.get(&1, :turn_settled) != true)) do
+      row_stamp = %{
+        turn_settled: true,
+        turn_started_at: Map.get(stamp, "turn_started_at"),
+        turn_settled_at: Map.get(stamp, "turn_settled_at"),
+        turn_duration_ms: Map.get(stamp, "turn_duration_ms"),
+        turn_outcome: Map.get(stamp, "turn_outcome")
+      }
+
       assign_messages(
         socket,
         Enum.map(messages, fn
-          %{role: :tool} = m -> Map.put(m, :turn_settled, true)
+          # An already-settled row belongs to an EARLIER turn and keeps its own
+          # facts — restamping it here would relabel last turn's fold with this
+          # turn's duration. The durable half fences the same rows in its WHERE.
+          %{role: :tool, turn_settled: true} = m -> m
+          %{role: :tool} = m -> Map.merge(m, row_stamp)
           m -> m
         end)
       )
@@ -6254,7 +6480,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # over the full transcript.
   defp assign_messages(socket, messages) do
     trimmed = trim_transcript(messages)
-    assign(socket, messages: trimmed, grouped_rows: group_agent_rows(trimmed))
+    assign(socket, messages: trimmed, grouped_rows: fold_settled_turns(group_agent_rows(trimmed)))
   end
 
   # Keep only the last `@transcript_window` rows. The drop count is floored at 0
@@ -6329,6 +6555,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
       end
     end)
   end
+
+  # Collapse each SETTLED turn's consecutive tool rows into ONE fold item
+  # (task-8f904a88b9bc3d59). Runs as a SECOND pass over `group_agent_rows/1`'s
+  # output rather than inside it: the D46 agent bucket is its own block with its
+  # own expand state, so an agent block ENDS a fold run instead of being swallowed
+  # by one — two folds either side of it, which is what the transcript reads like.
+  #
+  # The run key is `ChatToolRenderer.turn_fold_key/1` (the row's server-stamped
+  # `turn_settled_at`): rows of one turn share it, a live row has none and can
+  # never fold, and a row from a server too old to stamp it degrades to the flat
+  # transcript it has always been. Linear, called ONCE per write over the bounded
+  # window — the same budget `group_agent_rows/1` is held to.
+  @doc false
+  def fold_settled_turns(items) do
+    items
+    |> Enum.chunk_by(fn
+      {:row, m} -> ChatToolRenderer.turn_fold_key(m)
+      _ -> nil
+    end)
+    |> Enum.flat_map(fn
+      [{:row, first} | _] = chunk ->
+        case ChatToolRenderer.turn_fold_key(first) do
+          nil ->
+            chunk
+
+          key ->
+            rows = Enum.map(chunk, fn {:row, m} -> m end)
+            [{:turn_fold, key, ChatToolRenderer.fold_label(first), rows}]
+        end
+
+      chunk ->
+        chunk
+    end)
+  end
+
+  # Is this turn's fold open in THIS tab? Default collapsed — a settled turn is
+  # history, and its header already says how long it took.
+  defp turn_fold_open?(expanded, key), do: MapSet.member?(expanded, key)
 
   # The effective expand state of an agent block: a manual per-tab override wins;
   # otherwise the default is open while running (or status-unknown) and collapsed
@@ -6540,9 +6804,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # The rail speaks the lifecycle palette (charter D60): a settled cycle is
   # --life-done, a live one --life-in_progress, an interrupted one --life-blocked.
+  #
+  # NOTE this rail colours the AGENT-WORKFLOW vocabulary (running / completed /
+  # interrupted), NOT the task lifecycle — the three cases below are exact and
+  # stay exact. What changed (TLV charter D14) is the DEFAULT: it used to be
+  # `--life-in_progress`, so ANY status this build has not heard of rendered as a
+  # bright live run — the worst possible direction for a wrong guess, since it
+  # reports work in flight that may not be. `running` is now its own explicit
+  # clause and the fall-through is neutral.
+  defp rail_status_color("running"), do: "var(--life-in_progress)"
   defp rail_status_color("completed"), do: "var(--life-done)"
   defp rail_status_color("interrupted"), do: "var(--life-blocked)"
-  defp rail_status_color(_), do: "var(--life-in_progress)"
+  defp rail_status_color(_), do: "var(--fg-dim)"
 
   # Phase-row glyph + color by journey status (charter D58/D60).
   defp rail_phase_glyph(:done), do: "✓"
@@ -6652,17 +6925,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # is to cancel).
   defp turn_active?(status), do: status in [:thinking, :interrupting]
 
-  # The terminal's elapsed counter: one self-tick per second while a turn runs.
-  # Re-arms itself; falls silent (and disarms) the first tick after the turn
-  # ends, so an idle tab costs nothing.
-  defp start_turn_clock(socket) do
-    if socket.assigns[:turn_clock_armed] do
-      assign(socket, turn_elapsed_s: 0)
-    else
-      Process.send_after(self(), :turn_tick, 1_000)
-      assign(socket, turn_elapsed_s: 0, turn_clock_armed: true)
-    end
-  end
+  # The terminal's elapsed counter, T3 re-render hygiene #10: the server stamps
+  # the turn's start ONCE — epoch milliseconds at the user message boundary,
+  # the same boundary the transcript folds on — and the BROWSER ticks the label
+  # (bp-chat-turn-clock.js, Hooks.ChatElapsed). There is no `:turn_tick` any
+  # more: a running turn costs zero LiveView diffs per second per viewer, and an
+  # idle tab costs nothing because nothing is scheduled at all.
+  defp start_turn_clock(socket),
+    do: assign(socket, turn_started_at_ms: System.system_time(:millisecond))
 
   defp approval_outcome_label(:allowed), do: "✓ allowed"
   defp approval_outcome_label(:canceled), do: "✗ canceled"
@@ -7016,6 +7286,98 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp send_error_text(_reason),
     do:
       "That message didn't reach Claude — the session dropped. Your words were kept; send again."
+
+  # ── the transcript header's context identity (chat-local-cloud-context-w3) ──
+  #
+  # The GATHERING half only: which host runs this session, on which server, in
+  # which workspace / project / dataset, out of which repository root.
+  # `Barkpark.StudioChat.ContextIdentity` owns the two laws (a displayed value
+  # comes from the actual binding; absence is visible and typed) and every
+  # rendering decision — this reads the facts and hands them over.
+  #
+  # Called on mount, on session load, on the new-chat reset and on a host state
+  # report. NEVER per render: the band lives in an assign precisely so a
+  # streaming turn does not re-query the lease table sixty times a second.
+  defp assign_context_identity(socket) do
+    assign(socket, context_identity: build_context_identity(socket))
+  end
+
+  defp build_context_identity(socket) do
+    session = stored_session(socket)
+
+    hosts =
+      case session do
+        %{id: id} -> ChatHosts.session_execution_identity(id)
+        _ -> %{lease_host: nil, reporting_host: nil}
+      end
+
+    ContextIdentity.resolve(%{
+      lease_host: hosts.lease_host,
+      reporting_host: hosts.reporting_host,
+      endpoint: server_endpoint(),
+      viewer_workspace: viewer_workspace_slug(socket),
+      session_workspace: session_workspace_slug(session),
+      project: project_slug(socket),
+      scope_dataset: socket.assigns[:scope_dataset],
+      mount_dataset: socket.assigns[:dataset],
+      execution_target: session && session.execution_target,
+      cwd: session && session.cwd,
+      repo_probe: ContextIdentity.repo_probe()
+    })
+  end
+
+  # The STORED row (not the `@session` runtime pid): the band needs
+  # `owner_workspace_id`, `execution_target` and `cwd`, none of which live in
+  # assigns. `:global` because the tenancy clamp already ran at load time —
+  # `store_session_id` is only ever set by `load_stored_session/2`, which is
+  # reached through `get_session_in_tenancy/2`.
+  defp stored_session(socket) do
+    case socket.assigns[:store_session_id] do
+      id when is_binary(id) -> StudioChat.get_session(id, :global)
+      _ -> nil
+    end
+  end
+
+  # The server the browser is actually talking to, read at RUNTIME off the
+  # endpoint config. Never a compile-time literal — a baked-in URL that silently
+  # disagrees with the running endpoint is exactly the class of string this band
+  # exists to stop trusting.
+  defp server_endpoint do
+    BarkparkWeb.Endpoint.url()
+  rescue
+    _ -> nil
+  end
+
+  # The workspace the VIEWER is acting in: the URL scope on the scoped mount,
+  # the acting token's own workspace on the flat one (which carries no
+  # `current_workspace` — its live_session has no LiveScope hook). This is the
+  # CLAIM half of the workspace comparison; the session's own owner is the other.
+  defp viewer_workspace_slug(socket) do
+    case socket.assigns[:current_workspace] do
+      %{slug: slug} when is_binary(slug) ->
+        slug
+
+      _ ->
+        workspace_slug(principal_workspace_id(socket))
+    end
+  end
+
+  defp session_workspace_slug(%{owner_workspace_id: ws_id}), do: workspace_slug(ws_id)
+  defp session_workspace_slug(_), do: nil
+
+  defp workspace_slug(ws_id) do
+    case Tenancy.get_workspace_by_id(ws_id) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
+
+  defp project_slug(socket) do
+    case socket.assigns[:current_project] do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> nil
+    end
+  end
 
   defp default_dataset do
     case Barkpark.Content.list_datasets() do

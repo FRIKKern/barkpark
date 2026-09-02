@@ -21,6 +21,7 @@ defmodule BarkparkWeb.SearchChannelTest do
 
   import Phoenix.ChannelTest
   import Barkpark.TenancyFixtures
+  import Barkpark.RateLimiterSandbox
 
   alias Barkpark.Auth
   alias Barkpark.Tenancy
@@ -45,6 +46,15 @@ defmodule BarkparkWeb.SearchChannelTest do
   # the topic's dataset leaf against the project — so the datasets this file
   # joins ("test" and "production") must exist as rows.
   # ---------------------------------------------------------------------------
+
+  # `:barkpark_rate_limiter` is a :named_table — WHOLE-NODE state the SQL sandbox
+  # does not roll back. This file exercises it for real: the connect budget below
+  # runs `RateLimiter.check/2` inside `UserSocket.connect/3`, so without the reset
+  # this file both inherits buckets earlier files spent and leaves its own spent
+  # for later ones, and every result here depends on the run order.
+  # `rate_limiter_async_isolation_test.exs` is the ratchet that requires it; this
+  # file is `async: false`, which is what makes clearing shared state safe.
+  setup :reset_rate_limiter!
 
   setup do
     ws = create_workspace!("search-ch-ws")
@@ -662,6 +672,499 @@ defmodule BarkparkWeb.SearchChannelTest do
       assert_reply ref, :ok, reply
       assert "ws-leak-session" in Enum.map(reply.documents, & &1["_id"])
       assert reply.count == 1
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The per-socket "query" throttle (row task-2d29572b9b46ec01)
+  #
+  # A "query" frame runs a full Content.search_documents against Postgres. The
+  # HTTP twin is capped at 300 reads/min by Plugs.RateLimit; a channel frame
+  # enters below the router and reaches NO plug. These tests pin the cap that
+  # replaces it, in the channel, per socket.
+  #
+  # The limits are read from config so the budget under test is a handful of
+  # frames rather than 30 — with a real Postgres search between frames, a
+  # 30-token bucket refilling at 300/min would need dozens of round-trips to
+  # deplete and the count at which it tips would be a function of machine load.
+  # `query_per_minute: 1` makes the refill (~0.017/s) negligible across the
+  # whole test, so "burst frames pass, the next is refused" is arithmetic, not
+  # a race.
+  # ---------------------------------------------------------------------------
+
+  describe ~s|the per-socket "query" throttle| do
+    setup %{ws: ws, proj: proj, socket: socket} do
+      prev = Application.get_env(:barkpark, :search_channel)
+      Application.put_env(:barkpark, :search_channel, query_per_minute: 1, query_burst: 3)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:barkpark, :search_channel)
+          cfg -> Application.put_env(:barkpark, :search_channel, cfg)
+        end
+      end)
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      %{joined: joined}
+    end
+
+    test "the frame past the budget is refused with a named reason; the ones inside it are answered",
+         %{joined: joined} do
+      # Burst = 3: three back-to-back frames are answered normally.
+      for seq <- 1..3 do
+        ref =
+          push(joined, "query", %{"q" => "throttleprobe", "seq" => seq, "engine" => "postgres"})
+
+        assert_reply ref, :ok, reply, @reply_timeout
+        assert reply.seq == seq
+      end
+
+      # The fourth has no credit left. On unmodified main it is answered like
+      # the three before it and this assertion is what goes red.
+      ref = push(joined, "query", %{"q" => "throttleprobe", "seq" => 4, "engine" => "postgres"})
+
+      assert_reply ref, :error, err, @reply_timeout
+      assert err.reason == "rate_limited"
+      assert err.seq == 4
+      # The client is told how long to wait, not just "no".
+      assert is_integer(err.retry_after_ms) and err.retry_after_ms > 0
+    end
+
+    test "the empty-query frame is NOT billed — it never touches Postgres", %{joined: joined} do
+      # Spend the whole burst on empty frames; a real query must still be
+      # answered afterwards. Rationing a frame that answers from a literal
+      # would spend a search's budget on nothing.
+      for seq <- 1..6 do
+        ref = push(joined, "query", %{"q" => "", "seq" => seq})
+        assert_reply ref, :ok, reply, @reply_timeout
+        assert reply.count == 0
+      end
+
+      ref = push(joined, "query", %{"q" => "throttleprobe", "seq" => 7, "engine" => "postgres"})
+      assert_reply ref, :ok, reply, @reply_timeout
+      assert reply.seq == 7
+    end
+
+    test "a refused frame does not poison the socket — credit keeps accruing", %{joined: joined} do
+      for seq <- 1..3 do
+        ref =
+          push(joined, "query", %{"q" => "throttleprobe", "seq" => seq, "engine" => "postgres"})
+
+        assert_reply ref, :ok, _reply, @reply_timeout
+      end
+
+      ref = push(joined, "query", %{"q" => "throttleprobe", "seq" => 4, "engine" => "postgres"})
+      assert_reply ref, :error, %{reason: "rate_limited"}, @reply_timeout
+
+      # Widen the budget and push again: the socket must serve the very next
+      # frame. If a refusal froze the socket's clock (the shape RateLimiter's
+      # own debit/4 warns about) or zeroed its allowance, this stays refused.
+      Application.put_env(:barkpark, :search_channel, query_per_minute: 6_000, query_burst: 3)
+
+      # 6_000/min is 0.1 credit per ms, so 50ms of real elapsed time buys 5 —
+      # bounded below, not a race: a slow box only sleeps longer. Reading the
+      # widened config without waiting for the clock to move is what fails,
+      # since the allowance is earned from the monotonic interval, not from
+      # the config change itself.
+      Process.sleep(50)
+
+      ref = push(joined, "query", %{"q" => "throttleprobe", "seq" => 5, "engine" => "postgres"})
+      assert_reply ref, :ok, reply, @reply_timeout
+      assert reply.seq == 5
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The flagship half of crit 6, as far as a ChannelCase can reach it: at the
+  # SHIPPED defaults (no config override), a normal search-as-you-type cadence
+  # is answered and still returns count>0. The other half — the same keystroke
+  # over a real WebSocket from a deployed search-starter site — is not provable
+  # from this suite and is reported as owed.
+  # ---------------------------------------------------------------------------
+
+  describe "the throttle does not dark normal typing (shipped defaults)" do
+    setup %{ws: ws, proj: proj, socket: socket} do
+      # No Application.put_env here ON PURPOSE: this test is only worth
+      # anything against the constants that actually ship.
+      refute Application.get_env(:barkpark, :search_channel),
+             "this test must run at the shipped defaults, with no config override in scope"
+
+      {:ok, _} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "cadence-doc", "title" => "Cadenceprobe live search hit"},
+          "test"
+        )
+
+      {:ok, _} =
+        Barkpark.Content.publish_document("cadence-doc", "post", "test",
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      %{joined: joined}
+    end
+
+    test "a keystroke-cadence run of frames all answer, and the hit still comes back",
+         %{joined: joined} do
+      # Ten frames — a word typed into the box. Every one must be answered and
+      # every one must still find the document.
+      for seq <- 1..10 do
+        ref =
+          push(joined, "query", %{
+            "q" => "cadenceprobe",
+            "seq" => seq,
+            "engine" => "postgres",
+            "types" => "post"
+          })
+
+        assert_reply ref, :ok, reply, @reply_timeout
+        assert reply.seq == seq
+
+        assert reply.count > 0,
+               "the throttle must not dark a normal keystroke: frame #{seq} returned count=0"
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The connect budget — SOCKETS, not frames (row crit 3)
+  #
+  # The per-socket throttle bounds one socket. Nothing bounded how many sockets
+  # one credential could open, so a caller opening a fresh socket per query
+  # walked around it. This exercises UserSocket.connect/3 for real (the rest of
+  # this file hand-assigns the token onto a test socket and never runs it).
+  # ---------------------------------------------------------------------------
+
+  describe "the per-token connect budget" do
+    setup %{ws: ws} do
+      prev = Application.get_env(:barkpark, :user_socket)
+      Application.put_env(:barkpark, :user_socket, connects_per_minute: 2)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:barkpark, :user_socket)
+          cfg -> Application.put_env(:barkpark, :user_socket, cfg)
+        end
+      end)
+
+      raw = "test-tok-connect-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "connect-budget", "test", ["read"], ws.id)
+      %{raw: raw}
+    end
+
+    test "a token past its socket budget cannot open another socket", %{raw: raw} do
+      assert {:ok, _s1} = connect(UserSocket, %{"token" => raw})
+      assert {:ok, _s2} = connect(UserSocket, %{"token" => raw})
+
+      # Third connect with the same (valid, unrevoked) token is refused. On
+      # unmodified main every one of these succeeds, without limit.
+      assert :error = connect(UserSocket, %{"token" => raw})
+    end
+
+    test "the budget is per token, not global — a second token still connects", %{
+      ws: ws,
+      raw: raw
+    } do
+      assert {:ok, _} = connect(UserSocket, %{"token" => raw})
+      assert {:ok, _} = connect(UserSocket, %{"token" => raw})
+      assert :error = connect(UserSocket, %{"token" => raw})
+
+      other_raw = "test-tok-connect-other-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(other_raw, "connect-budget-2", "test", ["read"], ws.id)
+
+      assert {:ok, _} = connect(UserSocket, %{"token" => other_raw})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Revocation + seat removal teardown (row task-d67f007715c96828)
+  #
+  # `UserSocket.connect/3` runs `Auth.verify_token/1` ONCE and `join/3` runs
+  # `TenancyAuth.authorize/3` ONCE. Both decisions used to outlive their inputs
+  # forever: a revoked token kept answering "query" frames and kept streaming a
+  # "results" push on every co-tenant write, and nothing could force the socket
+  # down because `id/1` returned nil.
+  #
+  # The expected topic is spelled out LITERALLY here rather than borrowed from
+  # `UserSocket.disconnect_topic/1`. Two reasons: asserting a function equals
+  # itself proves nothing, and this file must still COMPILE against unmodified
+  # main so the red-first run reports failures rather than a compile error.
+  # ---------------------------------------------------------------------------
+  # The connect budget's IP key rides the canonical client-ip resolver
+  #
+  # A bucket is only a limit if the client cannot choose its own key.
+  # `x-forwarded-for` is client-supplied text, and a caller reaching the box
+  # directly could otherwise mint a fresh key per connection and have no
+  # effective per-IP limit at all. `Barkpark.RateLimiter.client_ip/1`
+  # (@canonical capability:rate-limit-client-ip) owns that decision; these
+  # tests prove `UserSocket` actually rides it, in BOTH directions — a forged
+  # header from an untrusted peer must not move the key, AND a chain from a
+  # TRUSTED peer must still be honoured, because ignoring the header outright
+  # would also pass the first test while collapsing every visitor behind our
+  # own Caddy into one bucket in production.
+  #
+  # NON-VACUITY: every connect below uses a FRESH token. The token key would
+  # otherwise be the thing refusing, and these tests would pass no matter what
+  # the IP key did.
+  # ---------------------------------------------------------------------------
+
+  describe "the connect budget's IP key" do
+    setup %{ws: ws} do
+      prev = Application.get_env(:barkpark, :user_socket)
+      Application.put_env(:barkpark, :user_socket, connects_per_minute: 2)
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:barkpark, :user_socket)
+          cfg -> Application.put_env(:barkpark, :user_socket, cfg)
+        end
+      end)
+
+      # A fresh token per connect, so only the IP key can refuse.
+      mint = fn ->
+        raw = "test-tok-ip-#{System.unique_integer([:positive])}"
+        {:ok, _} = Auth.create_token(raw, "ip-budget", "test", ["read"], ws.id)
+        raw
+      end
+
+      %{mint: mint}
+    end
+
+    test "a forged x-forwarded-for from an UNTRUSTED peer does not move the bucket key", %{
+      mint: mint
+    } do
+      # 203.0.113.7 is not a trusted proxy, so the resolver must ignore the
+      # header entirely and key on the verified peer.
+      peer = fn xff ->
+        %{peer_data: %{address: {203, 0, 113, 7}}, x_headers: [{"x-forwarded-for", xff}]}
+      end
+
+      assert {:ok, _} = connect(UserSocket, %{"token" => mint.()}, connect_info: peer.("9.9.9.9"))
+      assert {:ok, _} = connect(UserSocket, %{"token" => mint.()}, connect_info: peer.("9.9.9.9"))
+
+      # Third connect ROTATES the forged header. If the header were believed,
+      # this would be a brand-new bucket with a full allowance — i.e. no per-IP
+      # limit at all. It must still be refused.
+      assert :error =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: peer.("8.8.8.8"))
+
+      # ...and a genuinely different PEER still connects, which proves the
+      # refusal above came from the IP bucket and not from something global.
+      other =
+        %{peer_data: %{address: {198, 51, 100, 4}}, x_headers: [{"x-forwarded-for", "9.9.9.9"}]}
+
+      assert {:ok, _} = connect(UserSocket, %{"token" => mint.()}, connect_info: other)
+    end
+
+    test "a chain from a TRUSTED peer IS honoured — the header is not merely ignored", %{
+      mint: mint
+    } do
+      # Loopback is trusted (Caddy runs on the box and dials localhost), so the
+      # forwarded hop is the real client and two different hops are two
+      # different buckets. Without this direction, "ignore x-forwarded-for
+      # always" would pass the test above and collapse the whole anonymous
+      # internet into one bucket behind our own front.
+      front = fn xff ->
+        %{peer_data: %{address: {127, 0, 0, 1}}, x_headers: [{"x-forwarded-for", xff}]}
+      end
+
+      assert {:ok, _} =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: front.("9.9.9.9"))
+
+      assert {:ok, _} =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: front.("9.9.9.9"))
+
+      assert :error = connect(UserSocket, %{"token" => mint.()}, connect_info: front.("9.9.9.9"))
+
+      # A different client behind the same front is a different bucket.
+      assert {:ok, _} =
+               connect(UserSocket, %{"token" => mint.()}, connect_info: front.("7.7.7.7"))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+
+  describe "revocation and seat-removal teardown" do
+    setup %{ws: ws, proj: proj} do
+      raw = "test-tok-revoke-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "revoke-ch", "test", ["read"], ws.id)
+      plain_socket = socket(UserSocket, "revoke-id", %{api_token: token})
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          plain_socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      # `Phoenix.ChannelTest.join/3` LINKS the channel to the test process. Every
+      # test in this block deliberately kills that channel with a non-normal
+      # reason ({:shutdown, :credential_revoked} / {:shutdown, :unauthorized}),
+      # and a linked exit would take the test down with it — the teardown
+      # working is what would fail the test. Unlink so the exit is observed
+      # through the monitor instead of suffered through the link.
+      Process.unlink(joined.channel_pid)
+
+      %{token: token, raw: raw, plain_socket: plain_socket, joined: joined}
+    end
+
+    test "UserSocket.id/1 is a real token-derived handle, not nil", %{
+      token: token,
+      plain_socket: plain_socket
+    } do
+      # A nil id is the ABSENCE of a disconnect handle: Phoenix subscribes the
+      # transport to the string this returns, so with nil there is no topic to
+      # broadcast to and revocation has nothing to grab.
+      assert UserSocket.id(plain_socket) == "user_socket:api_token:" <> token.id
+
+      # The row id, never the raw bearer or its hash — a topic is not a place
+      # to put a credential.
+      refute UserSocket.id(plain_socket) =~ token.token_hash
+
+      # No verified token on the socket: nothing to target, and nothing that
+      # could be serving reads either.
+      assert UserSocket.id(socket(UserSocket, "no-token", %{})) == nil
+    end
+
+    test "revoking the token broadcasts a disconnect on exactly that topic", %{token: token} do
+      topic = "user_socket:api_token:" <> token.id
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      # The two halves only meet if the broadcast lands on the SAME string
+      # `id/1` returns — which is what this pins.
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"},
+                     @reply_timeout
+    end
+
+    test "after revocation the channel is torn down and a query frame is not answered", %{
+      token: token,
+      joined: joined
+    } do
+      mon = Process.monitor(joined.channel_pid)
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      # Teardown is CAUSED by the revoke — the client is asked for nothing.
+      assert_receive {:DOWN, ^mon, :process, _pid, {:shutdown, :credential_revoked}},
+                     @reply_timeout
+
+      refute Process.alive?(joined.channel_pid)
+
+      # And the frame that used to be answered normally now gets nothing.
+      ref = push(joined, "query", %{"q" => "revokeprobe", "seq" => 1, "engine" => "postgres"})
+      refute_receive %Phoenix.Socket.Reply{ref: ^ref}, 300
+    end
+
+    test "after revocation a document mutation delivers NO live results push", %{
+      ws: ws,
+      proj: proj,
+      token: token,
+      joined: joined
+    } do
+      # Prime the cached query so the channel is armed for live pushes. This is
+      # the leg the query-frame test cannot see: it needs no client frame at
+      # all, so a holder who simply stops typing still gets a live feed of
+      # every mutation in the workspace.
+      ref =
+        push(joined, "query", %{
+          "q" => "revokeprobe",
+          "seq" => 9,
+          "engine" => "postgres",
+          "types" => "post"
+        })
+
+      assert_reply ref, :ok, _initial, @reply_timeout
+
+      mon = Process.monitor(joined.channel_pid)
+      {:ok, _revoked} = Auth.revoke_token(token)
+      assert_receive {:DOWN, ^mon, :process, _pid, _reason}, @reply_timeout
+
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "revoked-push-doc", "title" => "revokeprobe after the revoke"},
+          "test"
+        )
+
+      refute_push "results", _payload, 500
+    end
+
+    test "removing the workspace seat refuses the next query frame and stops the channel", %{
+      ws: ws,
+      token: token,
+      joined: joined
+    } do
+      # Authorized before the seat is removed — this frame proves the test is
+      # measuring the removal and not a channel that was already broken.
+      ref = push(joined, "query", %{"q" => "seatprobe", "seq" => 1, "engine" => "postgres"})
+      assert_reply ref, :ok, _before, @reply_timeout
+
+      # A roster operation, NOT a revoke: the token keeps existing and simply
+      # loses its membership. `authorize/3` read that row at join and never
+      # again.
+      {:ok, _removed} =
+        Barkpark.Tenancy.Members.remove_member(ws.id, %{type: :api_token, id: token.id})
+
+      mon = Process.monitor(joined.channel_pid)
+
+      ref2 = push(joined, "query", %{"q" => "seatprobe", "seq" => 2, "engine" => "postgres"})
+      assert_reply ref2, :error, err, @reply_timeout
+      assert err.reason == "unauthorized"
+      assert err.seq == 2
+
+      # Refused AND ended — a caller who lost access cannot just push again.
+      assert_receive {:DOWN, ^mon, :process, _pid, {:shutdown, :unauthorized}}, @reply_timeout
+    end
+
+    test "removing the workspace seat also closes the live push leg", %{
+      ws: ws,
+      proj: proj,
+      token: token,
+      joined: joined
+    } do
+      ref =
+        push(joined, "query", %{
+          "q" => "seatprobe",
+          "seq" => 3,
+          "engine" => "postgres",
+          "types" => "post"
+        })
+
+      assert_reply ref, :ok, _initial, @reply_timeout
+
+      {:ok, _removed} =
+        Barkpark.Tenancy.Members.remove_member(ws.id, %{type: :api_token, id: token.id})
+
+      {:ok, _doc} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "seat-removed-push-doc", "title" => "seatprobe after removal"},
+          "test"
+        )
+
+      refute_push "results", _payload, 500
     end
   end
 end

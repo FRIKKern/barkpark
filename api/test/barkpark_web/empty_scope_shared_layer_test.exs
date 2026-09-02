@@ -238,19 +238,20 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
                "every tenant-scoped flat read to the pre-tenancy rows"
     end
 
-    # search/:ds is DELIBERATELY ABSENT from this suite. It leaked in the census,
-    # but it is NOT this class: SearchController never routes the document read
-    # through `scope_opts/1`. It builds its own opts and takes the workspace from
-    # `params["workspace_id"]` verbatim (`maybe_put_opt/3`, :55), falling back to
-    # unscoped when the param is absent — a caller-supplied scope, not an
-    # unresolved one, so the sentinel cannot reach it.
+    # search/:ds is absent from THIS file, and the reason above it used to give
+    # was WRONG. It read `maybe_put_opt/3` at :55 — which belongs to
+    # `search_local/2`, the loopback-gated fast path behind `RequireLoopback` —
+    # and attributed it to `search/2`. The public `search/2` never reads
+    # `params["workspace_id"]` at all; it has always built its tenancy the shared
+    # way, `] ++ scope_opts(conn)`. So search WAS this class, the census that
+    # disagreed with that reading was the correct instrument, and the sentinel
+    # DID reach it — it was fixed here, silently and untested, by this very PR.
     #
-    # STATED HONESTLY: that reading and the census DISAGREE. A purely
-    # param-scoped read should have leaked whether or not the Default seat was
-    # occupied, and the census saw it leak only when vacant. Something else
-    # scopes it that I have not identified. Two instruments disagreeing is
-    # exactly when neither should be quoted, so search is filed for its own
-    # investigation rather than asserted either way here.
+    # The missing test now exists: `controllers/search_scope_shared_layer_test.exs`
+    # holds the seat-vacant arm (plus an instrument self-test and the separate
+    # caller-supplied-`?workspace_id=` arm). Reverting `put_workspace_scope/3`'s
+    # `:sentinel` clause reds 2 of its 3 tests. Kept THERE rather than moved
+    # here so the search read path is covered next to the controller it guards.
   end
 
   # ── the resolved negative: must STAY not-a-door ─────────────────────────────

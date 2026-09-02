@@ -225,6 +225,7 @@ func TestPaginatedArmKeepsTheStrictKeyTest(t *testing.T) {
 var objectReadCommands = map[string]string{
 	"access.show":                  "single grant object (access_controller.ex)",
 	"auth.me":                      "flat identity map, no row array (auth_controller.ex)",
+	"chat.get_attachment":          "single attachment object — id, media_type, byte_size, base64 data; never a row array (chat_attachment_controller.ex)",
 	"chat.get_session":             "single session object (chat_controller.ex)",
 	"cycle.show":                   "wave projection object; several values are arrays, none is 'the rows' (cycle_fleet_controller.ex)",
 	"data.counts":                  "`counts` is a type=>count MAP, not an array — `{}` is an honest fresh dataset (query_controller.ex)",

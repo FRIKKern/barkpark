@@ -6,7 +6,7 @@
     "tenancy"
   ],
   "counts": {
-    "sideways": 78,
+    "sideways": 68,
     "wrongDirection": 13,
     "featureCycles": 3
   },
@@ -15,16 +15,6 @@
       "api_test_runner>settings",
       "api_tester>api_test_runner",
       "api_tester>registry",
-      "application>indx",
-      "application>rate_limiter",
-      "application>registry",
-      "application>repo",
-      "application>run_status",
-      "application>schema_bootstrap",
-      "application>sharing",
-      "application>telemetry",
-      "application>validation",
-      "application>vault",
       "auth>repo",
       "auth>sharing",
       "bootstrap>registry",

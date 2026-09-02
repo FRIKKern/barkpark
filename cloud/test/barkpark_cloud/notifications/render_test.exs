@@ -393,6 +393,79 @@ defmodule BarkparkCloud.Notifications.RenderTest do
     end
   end
 
+  # ── cch-w52-bl: the TEARDOWN itself gets its own arm ───────────────────────
+  #
+  # `trial_expiring` above is the ADVANCE notice. The teardown that follows it
+  # dispatched nothing at all: the measured run over a closed trial window was
+  # `%{expired: 1, teardowns: 1}` with `delivery_rows_any_status = 0`. This arm
+  # is the missing half, and it is a DIFFERENT fact — past tense, and it names
+  # the instances, because "your trial ended" without the names leaves a team
+  # guessing which of its boxes went.
+  describe "trial_expired names what was torn down" do
+    test "one instance reads in the singular, at :warning" do
+      {title, body, severity} =
+        Render.render("trial_expired", %{"name" => "acme", "instances" => ["acme-prod"]})
+
+      assert title == "Trial ended"
+      assert severity == :warning
+
+      assert body ==
+               "Your free trial has ended and acme-prod has been torn down. " <>
+                 "Subscribe to a paid plan to run Barkpark again."
+    end
+
+    test "two and three instances read as a list, with the verb agreeing" do
+      {_t, two, _s} =
+        Render.render("trial_expired", %{"instances" => ["acme-prod", "acme-staging"]})
+
+      assert two =~ "acme-prod and acme-staging have been torn down"
+      refute two =~ "has been torn down"
+
+      {_t, three, _s} =
+        Render.render("trial_expired", %{"instances" => ["a", "b", "c"]})
+
+      assert three =~ "a, b and c have been torn down"
+    end
+
+    test "it is NOT the generic fallback (which would ship :info — Discord green)" do
+      # A teardown report arriving coloured like a success is the exact failure
+      # the wave-32 census exists to foreclose, and this event is the worst
+      # possible candidate for it: the boxes are already gone when it fires.
+      {title, body, severity} =
+        Render.render("trial_expired", %{"instances" => ["acme-prod"]})
+
+      refute title == "Barkpark Cloud"
+      refute body =~ "Event: trial_expired"
+      refute severity == :info
+    end
+
+    test "the copy is PAST tense — it reports, it never warns" do
+      {_t, body, _s} = Render.render("trial_expired", %{"instances" => ["acme-prod"]})
+
+      refute body =~ "will be"
+      refute body =~ "is torn down"
+      refute body =~ "ends in"
+    end
+
+    test "a payload with no usable names degrades, never to an empty subject" do
+      for payload <- [
+            %{"name" => "acme"},
+            %{"name" => "acme", "instances" => []},
+            %{"name" => "acme", "instances" => nil},
+            %{"name" => "acme", "instances" => ["", nil]}
+          ] do
+        {_t, body, severity} = Render.render("trial_expired", payload)
+        assert body =~ "your Barkpark instances have been torn down"
+        assert severity == :warning
+      end
+    end
+
+    test "atom keys work too — the chat rail reads an Oban args map, the email rail a struct-ish one" do
+      {_t, body, _s} = Render.render("trial_expired", %{instances: ["acme-prod"]})
+      assert body =~ "acme-prod has been torn down"
+    end
+  end
+
   # ── cch-w32-s1: the test message discloses a muted team ────────────────────
   #
   # `send_test_chat/2` deliberately fires while `alerts_enabled` is false — it is

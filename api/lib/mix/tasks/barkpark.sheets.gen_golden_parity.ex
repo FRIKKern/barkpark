@@ -43,9 +43,10 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   # error codes so the TUI's error rendering is pinned.
   #
   # Engine error vocabulary is `Engine.error_values/0`
-  #   = #CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!
-  # (#NUM! IS in the vocabulary as of #843 — the domain-error code; reconciled
-  # from engine.ex @error_values). Row 9 stores #N/A (A9, =NA()) and #VALUE! (B9).
+  #   = #CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME?
+  # (#NUM! IS in the vocabulary as of #843 — the domain-error code; #NAME? as of
+  # the unsupported-function ruling; reconciled from engine.ex @error_values).
+  # Row 9 stores #N/A (A9, =NA()) and #VALUE! (B9).
   # Row 10 stores a SPARKLINE cell (E10, t "s") — a unicode block-bar string that
   # every surface must render verbatim; it's the in-cell-sparkline parity lock.
   # The snapshot never validates a stored error string against this list — it just
@@ -64,6 +65,17 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   #   Row 11 the remaining error codes: A11 #NUM! (=SQRT(-1)), B11 #REF!,
   #       C11 #CYCLE! — error_refs grows 3 -> 6, all six engine codes now pinned.
   #   A12 a 60-char string — the long-cell width/truncation-interaction probe.
+  #   Row 19 the #NAME? arm of the unsupported-function ruling: B19 is a TYPED
+  #       formula naming a function the engine does not implement, with NOTHING
+  #       cached to fall back on, so the engine writes #NAME? (t "e"). Every
+  #       surface must render it as an error cell, not a blank behind a dot.
+  #       error_refs grows 6 -> 7 — the ONE case here that is a `t: "e"` cell,
+  #       so it moves the exactly-asserted error_refs lock. (The OTHER arm — an
+  #       import that KEEPS its cached value — is B6, already here.) ADDITIVE
+  #       only: columns A..E, no existing case touched, outside every
+  #       cond_format range. Row 19 and not 13: rows 13-15 are the
+  #       everyday-function batch (#15338) and rows 16-18 are reserved by the
+  #       open financial-functions PR (#15413).
   #
   # DO NOT add a hyperlink cell here — #882 owns the hyperlink parity lock and
   # will extend this generator itself.
@@ -166,7 +178,63 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           "B11" => %{"v" => "#REF!", "t" => "e"},
           "C11" => %{"v" => "#CYCLE!", "t" => "e"},
           # A 60-char string — long-cell probe (width math / truncation seams).
-          "A12" => %{"v" => "sixty-character-wide-cell-padding-parity-lock-XYZ-0123456789"}
+          "A12" => %{"v" => "sixty-character-wide-cell-padding-parity-lock-XYZ-0123456789"},
+          # Rows 13-15 — the everyday-function batch (TRANSPOSE / CONCAT /
+          # SUBTOTAL / HSTACK / VSTACK, plus SEQUENCE's 2-D arity). Each `v` is
+          # the REAL Engine output for its `f`, so every surface renders a value
+          # the engine can actually produce. Deliberate constraints, so the
+          # additions can never disturb a pre-existing case:
+          #   * columns A..E only — the grid stays 5 wide, so every existing
+          #     row array is byte-identical after the regen;
+          #   * NO cell of type "e" — `error_refs` is asserted EXACTLY (six
+          #     entries) in golden_parity_fixture_test.exs, so an error cell here
+          #     would red a lock that has nothing to do with this batch;
+          #   * rows 13+ sit outside every cond_format range (cf-gt B2:B10,
+          #     cf-overlap B2:C8, cf-compose A4, cf-head A1:D1), so the composed
+          #     `styles` map is unchanged.
+          # A13 is CONCAT over a RANGE — the single thing CONCATENATE refuses.
+          "A13" => %{"f" => "=CONCAT(B10:D10)", "v" => "159", "t" => "s"},
+          # B13/C13 pin the DOCUMENTED SUBTOTAL gap in the fixture itself: code
+          # 9 and code 109 must render the SAME 15, because this engine has no
+          # row-visibility input to make the 101-band skip hidden rows.
+          "B13" => %{"f" => "=SUBTOTAL(9, B10:D10)", "v" => 15, "t" => "n"},
+          "C13" => %{"f" => "=SUBTOTAL(109, B10:D10)", "v" => 15, "t" => "n"},
+          # D13 vs E13: TRANSPOSE really flips (1;3;2;4) where VSTACK of the same
+          # two rows preserves reading order (1;2;3;4) — the pair is the lock.
+          "D13" => %{
+            "f" => "=TEXTJOIN(\";\", 0, TRANSPOSE(A14:B15))",
+            "v" => "1;3;2;4",
+            "t" => "s"
+          },
+          "E13" => %{
+            "f" => "=TEXTJOIN(\";\", 0, VSTACK(A14:B14, A15:B15))",
+            "v" => "1;2;3;4",
+            "t" => "s"
+          },
+          # The 2x2 source the three array cases above and C14 below read.
+          "A14" => %{"v" => 1, "t" => "n"},
+          "B14" => %{"v" => 2, "t" => "n"},
+          "C14" => %{"f" => "=SUM(HSTACK(A14:A15, B14:B15))", "v" => 10, "t" => "n"},
+          "D14" => %{
+            "f" => "=TEXTJOIN(\";\", 0, SEQUENCE(2, 3))",
+            "v" => "1;2;3;4;5;6",
+            "t" => "s"
+          },
+          "A15" => %{"v" => 3, "t" => "n"},
+          "B15" => %{"v" => 4, "t" => "n"},
+          # Row 19 — the #NAME? lock (the unsupported-function ruling). A TYPED
+          # unknown function with NOTHING cached has nothing honest to show, so
+          # it IS an error cell, not a blank behind a quiet stale dot. Same
+          # additive constraints as rows 13-15 above (columns A..E, outside every
+          # cond_format range) with ONE deliberate difference: this case IS a
+          # `t: "e"` cell, and it bumps the exactly-asserted `error_refs` lock in
+          # golden_parity_fixture_test.exs from six entries to seven. Row 19
+          # because rows 13-15 are the everyday-function batch and rows 16-18 are
+          # reserved by the open financial-functions PR (#15413).
+          # (The OTHER arm of the ruling — an import that KEEPS its cached value
+          # — is B6, already here.)
+          "A19" => %{"v" => "Unsupported"},
+          "B19" => %{"f" => "=FOO(B10)", "v" => "#NAME?", "t" => "e"}
         }
       },
       %{"name" => "Extra", "cells" => %{"A1" => %{"v" => "tab2"}}}
@@ -176,7 +244,8 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   @comment "Generated by `mix barkpark.sheets.gen_golden_parity` — DO NOT hand-edit. " <>
              "Cross-surface golden parity lock (api tests + web SDK + internal/pdrender). " <>
              "Engine error vocabulary is Engine.error_values/0 = " <>
-             "#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! (#NUM! IS present as of #843)."
+             "#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL! #NAME? " <>
+             "(#NUM! IS present as of #843; #NAME? as of the unsupported-function ruling)."
 
   @api_path Path.expand("../../../test/support/fixtures/sheet-golden-parity.json", __DIR__)
   @web_path Path.expand("../../../../web/__tests__/fixtures/sheet-golden-parity.json", __DIR__)

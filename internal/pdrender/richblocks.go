@@ -352,17 +352,36 @@ func (fr figureRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	caption := attrStr(b.Attrs, "caption")
 
+	// The child is rendered FIRST, at the width it would really get, because the
+	// blank test is asked of its composed bytes and not of the `child` key (see
+	// blankFigure). Both legs below reuse these exact lines, so the guard costs
+	// no second render.
+	narrow := inner < MinWidth
 	var childLines []string
 	if b.Child != nil {
-		if inner < MinWidth {
-			// Narrow: render the child flat (no card) at full width + a caption.
+		if narrow {
 			childLines = fr.reg.Render(*b.Child, ctx.Deeper())
-			if line := fr.caption(caption, ctx, clampWidth(ctx.Width)); line != "" {
-				childLines = append(childLines, line)
-			}
-			return childLines
+		} else {
+			childLines = fr.reg.Render(*b.Child, ctx.Deeper().WithWidth(inner))
 		}
-		childLines = fr.reg.Render(*b.Child, ctx.Deeper().WithWidth(inner))
+	}
+
+	// EMPTY-CHROME INVARIANT (blank.go): a figure whose child contributes no
+	// bytes AND whose caption is blank renders nothing — not an empty rounded
+	// card, the terminal twin of the 183-byte empty <figure> the web reader
+	// stopped emitting in #14991. A caption with no child still renders (an
+	// author's prose is never deleted to tidy a border), and a real child with
+	// no caption is unchanged.
+	if blankFigure(b.Attrs, childLines) {
+		return nil
+	}
+
+	if b.Child != nil && narrow {
+		// Narrow: render the child flat (no card) at full width + a caption.
+		if line := fr.caption(caption, ctx, clampWidth(ctx.Width)); line != "" {
+			childLines = append(childLines, line)
+		}
+		return childLines
 	}
 
 	cardLines := childLines
@@ -428,6 +447,16 @@ func figureCaption(caption string, ctx RenderCtx) string {
 type actionRenderer struct{}
 
 func (actionRenderer) Render(b Block, ctx RenderCtx) []string {
+	// EMPTY-CHROME INVARIANT (blank.go): an action with NEITHER a label NOR an
+	// href renders nothing — not a two-space button chip that says nothing and
+	// goes nowhere. It is exactly what the Studio canvas seeds
+	// (`Blocks.default_block("action", id)` is `%{"href" => "", "label" => ""}`),
+	// which the web reader stopped painting in #14991. `priority` is a button
+	// skin, so a priority-only block is still blank.
+	if blankAction(b.Attrs) {
+		return nil
+	}
+
 	label := sanitizeDisplayText(attrStr(b.Attrs, "label"))
 	href := sanitizeURL(strings.TrimSpace(attrStr(b.Attrs, "href")))
 	priority := attrStr(b.Attrs, "priority")

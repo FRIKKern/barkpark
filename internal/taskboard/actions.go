@@ -52,6 +52,11 @@ type ActionResult struct {
 	// that runs in a later process — does not have to parse the sentence back
 	// apart. Zero on every failure and on verbs that write no epoch.
 	Epoch int
+	// Resync names the recoverable close fence a refusal hit, so the reducer can
+	// arm the matching recovery WITHOUT string-matching the human copy on
+	// Message. ResyncNone (the zero value) means "not a recoverable fence" — a
+	// success, a transport failure, or a refusal there is no keypress out of.
+	Resync ResyncKind
 	// Help is the server's help[] next-command templates the claim/close 2xx
 	// envelope carried (charter D18) — parity with the CLI's stderr help: lines so
 	// the board/hook no longer silently drops them. It rides the struct as
@@ -60,6 +65,28 @@ type ActionResult struct {
 	// CLI stderr path). Empty when the server sent none.
 	Help []string
 }
+
+// ResyncKind discriminates the two close-time fences a worker can recover from
+// under its OWN claim. It rides ActionResult so the strip copy and the reducer's
+// recovery wiring can never drift apart (the reducer used to have no signal at
+// all, and the copy told the user to do something that cannot work).
+type ResyncKind int
+
+const (
+	// ResyncNone: no recoverable fence (success, transport failure, or a refusal
+	// with no keypress out of it).
+	ResyncNone ResyncKind = iota
+	// ResyncRenewClaim: fenced_off — the lease moved (blocker/move/sweep). A
+	// re-claim under the same worker id renews it, so c then x again recovers.
+	ResyncRenewClaim
+	// ResyncObservedRev: doc_changed_since_claim — the BRIEF moved under the
+	// claim. A bare re-read does NOT recover: a same-worker re-read preserves the
+	// claim-time work_digest, so the next plain close repeats the same 409. The
+	// only close that lands is one pinned to observed_rev = the revision the
+	// worker just re-read (Tasks.close/3 short-circuits check_work_digest the
+	// moment observed_rev is non-nil, and CAS-guards on that exact rev instead).
+	ResyncObservedRev
+)
 
 // DoClaim claims docID for worker over POST /v1/tasks/:doc_id/claim. On success
 // the returned fencing epoch is echoed back so the caller can hold it for the
@@ -90,8 +117,8 @@ func DoCloseRev(c *apiclient.Client, docID, worker string, epoch int, observedRe
 	}
 	notices, help, err := c.TaskCloseRevN(docID, worker, epoch, observedRev)
 	if err != nil {
-		if msg, ok := resyncGuidance(err); ok {
-			return ActionResult{OK: false, Message: msg, Role: RoleDanger}
+		if msg, kind, ok := resyncGuidance(err); ok {
+			return ActionResult{OK: false, Message: msg, Role: RoleDanger, Resync: kind}
 		}
 		return ActionResult{OK: false, Message: "close rejected: " + humanizeReason(err)}
 	}
@@ -104,9 +131,11 @@ func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult 
 	if err != nil {
 		// The two recoverable fence reasons get actionable resync guidance instead
 		// of the bare humanised reason: they tell the worker the concrete next
-		// keypress (c to renew, or enter to re-read) rather than a dead-end refusal.
-		if msg, ok := resyncGuidance(err); ok {
-			return ActionResult{OK: false, Message: msg, Role: RoleDanger}
+		// keypress (c to renew, or a re-read then an observed_rev-pinned close)
+		// rather than a dead-end refusal — and carry the ResyncKind the reducer
+		// arms that recovery on.
+		if msg, kind, ok := resyncGuidance(err); ok {
+			return ActionResult{OK: false, Message: msg, Role: RoleDanger, Resync: kind}
 		}
 		return ActionResult{OK: false, Message: "close rejected: " + humanizeReason(err)}
 	}
@@ -175,20 +204,28 @@ func topNotice(notices []apiclient.TaskNotice) (apiclient.TaskNotice, bool) {
 	return apiclient.TaskNotice{}, false
 }
 
-// resyncGuidance maps the two close-time fence reasons a fresh re-read recovers
-// to actionable strip copy. fenced_off means the row changed under your claim (a
+// resyncGuidance maps the two close-time fence reasons a worker can recover from
+// to actionable strip copy PLUS the machine-readable ResyncKind the reducer arms
+// its recovery on. fenced_off means the row changed under your claim (a
 // blocker/move landed, or the lease was swept+reclaimed) — a re-claim under your
 // own worker id renews the lease (new epoch), so press c then x again.
-// doc_changed_since_claim means the brief itself changed — reopen to re-read it,
-// then close. Any other reason returns false and falls through to humanizeReason.
-func resyncGuidance(err error) (string, bool) {
+//
+// doc_changed_since_claim means the BRIEF itself changed. The copy used to say
+// "re-read, then close again", which is a dead end: a same-worker re-read
+// preserves the claim's work_digest, so the next plain close repeats the very
+// same 409 (docs/setup/TASK-SYSTEM.md; api/lib/barkpark/tasks/close.ex
+// check_work_digest). The one close that lands is pinned to observed_rev — the
+// revision you just re-read — so the copy LEADS with that, names the keys, and
+// says what the pinned close does. Any other reason returns false and falls
+// through to humanizeReason.
+func resyncGuidance(err error) (string, ResyncKind, bool) {
 	switch strings.TrimSpace(strings.ToLower(err.Error())) {
 	case "fenced_off":
-		return "fenced off — the task changed under you (blocker/move/sweep); press c to renew, then x again", true
+		return "fenced off — the task changed under you (blocker/move/sweep); press c to renew, then x again", ResyncRenewClaim, true
 	case "doc_changed_since_claim":
-		return "the brief changed since your claim — reopen the task (enter) to re-read, then close again", true
+		return "close now needs observed_rev: the brief changed under your claim — re-read it (enter), then x x closes pinned to the revision on screen; a bare re-read alone repeats this refusal", ResyncObservedRev, true
 	}
-	return "", false
+	return "", ResyncNone, false
 }
 
 // humanizeReason turns the server's contract reason string (surfaced verbatim by
