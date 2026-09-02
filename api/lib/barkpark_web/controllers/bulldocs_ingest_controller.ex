@@ -592,6 +592,53 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # "article" since this endpoint only ingests article-grammar docs;
   # an explicit `style` in the body overrides it.
   def ingest(conn, params) do
+    case refuse_unfenced_if_rev(conn, params) do
+      nil -> ingest_body(conn, params)
+      refusal -> refusal
+    end
+  end
+
+  # POST /papers is create-or-replace: it has NO optimistic-concurrency fence,
+  # and it never had one. It used to ACCEPT an `ifRev` / `if_rev` key in the
+  # body and drop it on the floor, answering 200 `ok` — so a hand-rolled curl
+  # or an SDK caller that assumed symmetry with the sibling
+  # `POST /papers/:slug/ops` (which DOES honour `ifRev` and answers 412 on a
+  # mismatch) got an UNFENCED write while believing it was fenced, with a
+  # receipt indistinguishable from the fenced one. The lost-update it was
+  # guarding against then happens silently.
+  #
+  # The honest answer is a refusal that names the route which actually carries
+  # the guard, not a plausible default: honouring the key here would mean
+  # inventing a rev fence on a whole-document replace, and ignoring it is the
+  # defect. Absent key → nil → unchanged behaviour for every existing caller
+  # (no CLI path sends it; `bp bulldocs publish` declares no --if-rev flag).
+  defp refuse_unfenced_if_rev(conn, params) when is_map(params) do
+    case Enum.find(["ifRev", "if_rev"], &Map.has_key?(params, &1)) do
+      nil ->
+        nil
+
+      key ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          error: %{
+            code: "malformed",
+            message:
+              "#{key} is not honoured on POST /v1/plugins/bulldocs/papers — this route is an " <>
+                "unfenced create-or-replace. The fenced path is " <>
+                "POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), " <>
+                "which rejects a stale rev with 412 precondition_failed. " <>
+                "Remove the key to publish unfenced.",
+            parameter: key,
+            fenced_route: "/v1/plugins/bulldocs/papers/:slug/ops"
+          }
+        })
+    end
+  end
+
+  defp refuse_unfenced_if_rev(_conn, _params), do: nil
+
+  defp ingest_body(conn, params) do
     case params do
       %{"slug" => slug, "blocks" => blocks} = accepted
       when is_binary(slug) and slug != "" and is_list(blocks) ->
