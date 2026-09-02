@@ -5310,7 +5310,41 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-top: 1px solid var(--border);
   font-size: 13px;
 }
-.deploy-rail-live .site-open { font-family: var(--mono); word-break: break-all; min-width: 0; }
+/* cch-w29-bl (pays cch-w14-bl-site-open-phone-overflow's SECOND emit): the rule
+   below was INERT in the half that matters. `.site-open` is one class dressing
+   two different contents, and W15-S5 dropped the base `white-space: nowrap` for
+   the site detail head's `.fleet-url` sub-line only. There are FOUR `.site-open`
+   emits (app.js): two are the 49px "Visit ↗" chip, where nowrap is correct, and
+   two carry the WHOLE URL as their own text — the head's `.fleet-url` line
+   (paid) and this one, the deploy rail's live footer. `word-break: break-all`
+   was already authored here ON PURPOSE — a mono URL is an opaque token and
+   breaking mid-token IS the reading aid — but `word-break` cannot act while
+   `white-space` computes to a non-wrapping value, so it declared an intention
+   the cascade never let it carry out.
+   MEASURED IN CHROME on the pre-fix bytes, at 320 in both themes, on the
+   fixture `site-deploy-rail-live` (the first in the harness to render this
+   footer at all): the anchor computed `white-space: nowrap`, its text sat on
+   ONE 417.63px line box whose right edge landed at 458.63 against a 320px
+   viewport, `.deploy-rail-live` reported scrollWidth 424 against clientWidth
+   250, and `document.body.scrollWidth` read 459 — 139px of the site screen
+   off-screen sideways, at rest, with no cue, while a person reads the address
+   their site just went live on. The identical string in `.fleet-url` on the
+   SAME page computed `normal` and fitted. It overhung every width up to and
+   including 430.
+   WHY `normal` AND NOT A SECOND `overflow-wrap`: the remedy here is to stop
+   suppressing the declaration this rule already makes, not to add another one.
+   The flex-squeeze D165 warns about (a lowered min-content shredding a flex
+   item into a one-character column) is not reachable here — `min-width: 0` on
+   the same line already gives the item its escape, and the footer's only other
+   child is the `flex: 0 0 auto` copy button.
+   THE SHAPE IS WRAP, NOT TRUNCATION, for the same reason cch-w14 took that
+   branch for the twin: this line's whole content is the address, and a person
+   reads it to learn WHERE the site now lives, so an ellipsis would trade a
+   scrollbar for a lie. overflow-guard's W29-deploy-rail-live-url-wrap leg
+   asserts both halves — the wrapping `white-space` AND more than one line box
+   whenever the footer is narrower than the URL's own measured one-line width —
+   so a `text-overflow` remedy reds instead of scoring clean. */
+.deploy-rail-live .site-open { font-family: var(--mono); white-space: normal; word-break: break-all; min-width: 0; }
 .deploy-rail-live .copy-btn { flex: 0 0 auto; }
 
 /* Failure footer: the observed→next hint — the danger-soft twin of .bp-tl-fail. */
