@@ -636,6 +636,15 @@ defmodule PDS.Census do
     {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate, :status_only_receipt},
     {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create, :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive, :status_only_receipt},
+    # THE CHAT-OWNED ATTACHMENT UPLOAD (ct-bl-chat-attachments). Same class, and
+    # for the same reason, as every sibling /v1/chat/sessions write above: the 201
+    # renders the STORED pointer projected through `Attachments.reference/2` — a
+    # real store-derived receipt — and simply does not spell the `ok: true` key
+    # this lens greps for, which is exactly what `status_only_receipt` names
+    # post-wave-40. The GET twin is not here because a read is not a ROUTED-WRITE
+    # member; only the POST is an arrival this table has to dispose.
+    {:post, "/v1/chat/sessions/:id/attachments", "BarkparkWeb.ChatAttachmentController", :create,
+     :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/state", "BarkparkWeb.ChatHostController", :report_state, :status_only_receipt},
     {:post, "/v1/chat/sessions/:id/unarchive", "BarkparkWeb.ChatController", :unarchive, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment, :status_only_receipt},
