@@ -500,9 +500,18 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     end
 
     # The contrast that proves `(s)` is not decoration: the SAME token on
-    # /v1/deliveries sits over a guard that genuinely does accept a PAT.
-    assert raw_route_guard("GET", "/v1/deliveries") == "require_user_or_pat"
-    assert documented_tier("GET", "/v1/deliveries") == "user(s)"
+    # /v1/deploy-ledger/census sits over a guard that genuinely does accept a PAT.
+    assert raw_route_guard("GET", "/v1/deploy-ledger/census") == "require_user_or_pat"
+    assert documented_tier("GET", "/v1/deploy-ledger/census") == "user(s)"
+
+    # …and the `(s)` SURVIVES a wider disjunction. GET /v1/deliveries now also
+    # admits the faceless worker that WRITES the row (task-e2acb66e9ed0da09), and
+    # the tier column says BOTH halves out loud. `user(s)+worker` and not
+    # `worker`: collapsing it would delete the D385/D412 PAT reachability from
+    # the contract a CLI author reads, which is the same class of lie the
+    # /v1/tokens rows above told in the other direction.
+    assert raw_route_guard("GET", "/v1/deliveries") == "require_user_or_pat_or_worker"
+    assert documented_tier("GET", "/v1/deliveries") == "user(s)+worker"
   end
 
   test "every moduledoc route-table row still maps to a declared route" do
