@@ -60,6 +60,11 @@ jobs:
         run: bash deploy/instance-deploy_test.sh
       - name: Control-plane deploy harness
         run: bash deploy/cp-deploy_test.sh
+      # The four-leg public /mcp matrix smoke (connectors-mcp-live-reachability-smoke,
+      # PR #15117): the script landed with that PR; this advisory workflow is where
+      # its harness runs on every deploy/** change (asked for by lead-deploy).
+      - name: MCP reachability smoke harness
+        run: bash deploy/mcp-reachability-smoke_test.sh
       # The site-spawner deploy engine ships its own offline proof (--self-test:
       # fixture release dirs in a tmpdir, no npm/caddy/systemd needed). It is
       # worthless unless it actually RUNS — an untested deploy engine is the

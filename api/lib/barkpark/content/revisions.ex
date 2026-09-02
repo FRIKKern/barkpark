@@ -16,6 +16,35 @@ defmodule Barkpark.Content.Revisions do
   legacy-string OR. Workspace scope rides the shared
   `Barkpark.Content.Scope.scope_to_workspace_or_global/3`. Published-id
   normalization rides the public `Barkpark.Content.published_id/1`.
+
+  ## Grant row narrowing (task-5fa8c834e1afa197)
+
+  Both READ entry points — `list_revisions/4` and `get_revision/3` — thread the
+  shared `Barkpark.Content.Scope.maybe_scope_to_grants/2` after the workspace
+  clause, exactly as `Content.Query.get_document/4` and the analytics aggregates
+  do. Without it these builders dropped `opts[:grant_scoped]`, and because the
+  gate DEFAULTS that flag to false the absent call meant "do not narrow", not
+  "narrow to nothing": a non-member admitted by `ResolveWorkspace`'s grant arm on
+  `/w/:ws/p/:proj/v1/data/history/:dataset/:type/:doc_id` and
+  `/w/:ws/p/:proj/v1/data/revision/:dataset/:id` read every revision of every
+  document in the dataset — the stored snapshot's title, status and content —
+  when her grant covered a single type.
+
+  NO JOIN IS NEEDED, and none is introduced. `Scope.scope_to_grants/3` binds the
+  ladder `project_id → dataset → type → doc_id` against the FIRST binding, and
+  `Barkpark.Content.Revision` carries all four columns natively (stamped from the
+  source document by `Broadcast.save_revision/5`, which also stamps
+  `workspace_id`). The one asymmetry with `documents` is deliberate and
+  tightening-only: `revisions.doc_id` is always the PUBLISHED id
+  (`DraftId.published_id/1` at write time), so a grant pinned to the `doc_id`
+  rung matches a revision by its published id — the same id `list_revisions/4`
+  already normalizes its own lookup to.
+
+  A MEMBER never carries the flag, so the gate is a provable no-op and both
+  reads are byte-identical for her (grants only ADD access). `restore_revision/4`
+  resolves through `get_revision/3` and so inherits the narrowing — a strict
+  tightening on a write path. Pinned by
+  `test/barkpark_web/integration/export_revision_grant_narrowing_test.exs`.
   """
 
   import Ecto.Query
@@ -24,7 +53,8 @@ defmodule Barkpark.Content.Revisions do
   alias Barkpark.Content
   alias Barkpark.Content.Revision
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope,
+    only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
 
   @doc "List revisions for a document, newest first."
   def list_revisions(doc_id, type, dataset, opts \\ []) do
@@ -36,6 +66,7 @@ defmodule Barkpark.Content.Revisions do
     |> where([r], r.doc_id == ^Content.published_id(doc_id) and r.type == ^type)
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_grants(opts)
     |> order_by([r], desc: r.inserted_at)
     |> limit(^limit)
     |> Repo.all()
@@ -50,6 +81,9 @@ defmodule Barkpark.Content.Revisions do
   URL. Workspace/project scoping additionally prevents cross-workspace reads of
   a guessed/leaked id. `scope_to_dataset` is NULL-tolerant (matches rows whose
   `dataset_id` is NULL but whose `dataset` STRING equals the requested one).
+  Grant narrowing (module doc) closes the same IDOR across a GRANT boundary: a
+  grant-admitted non-member could otherwise read any revision in the workspace
+  by UUID, whatever her grant's ladder.
   """
   def get_revision(id, dataset, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -67,6 +101,7 @@ defmodule Barkpark.Content.Revisions do
         |> where([r], r.id == ^uuid)
         |> scope_to_dataset(dataset, opts)
         |> scope_to_workspace_or_global(workspace_id, project_id)
+        |> maybe_scope_to_grants(opts)
         |> Repo.one()
         |> case do
           nil -> {:error, :not_found}

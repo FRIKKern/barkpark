@@ -126,6 +126,15 @@ export LC_ALL
 
 SELF="$(basename "$0")"
 
+# THE BLIND-SPOT SENTENCE, BY REFERENCE (PDS-D633) — `$PDS_BLIND_SPOT` and
+# `pds_blind_spot_note` come from ONE file, never a retyped copy;
+# scripts/pds-blind-spot-check.sh reds if a copy drifts. Fail-closed on purpose:
+# an instrument that cannot find the sentence it is obliged to print beside a
+# duration must refuse, not print the duration bare.
+# shellcheck source=scripts/pds-blind-spot.sh
+PDS_SELF_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
+. "$PDS_SELF_DIR/pds-blind-spot.sh"
+
 # ── source under measurement (names mirror the frozen harness) ───────────────
 
 SOURCE_BASE="${PDS_SOURCE_BASE:-https://guerrilla.barkpark.cloud}"
@@ -473,6 +482,16 @@ IDLE_BASELINE_SET_KB="$(oneshot_rss_set_kb)"
 info "t=0 baseline    ${IDLE_BASELINE_KB} kB — one-shot \`ps -o rss= -p $BEAM_PRIMARY\` taken BEFORE the window (PDS-D185)"
 info "                (diagnostic: max across all ${BEAM_N} slots at t=0 = ${IDLE_BASELINE_SET_KB} kB — see the header's asymmetry note)"
 
+# PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around the sampling window in
+# THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock, outside
+# every BEAM — and that is the ONLY placement available here, because the BEAM
+# being measured is on ANOTHER HOST at the far end of an ssh. The unit is
+# deliberately wall, not CPU: the figure exists to say how long the window that
+# produced the peak actually ran, so a reader can pair the control window with
+# the measured one. It is NOT a price and no CPU claim descends from it
+# (PDS-D605 forbids a wall-clock second standing in for one; wall swung 2.5x on
+# an unchanged census where user CPU moved 9%). Nothing here is a regression
+# ratchet; if one is ever built the unit is `Process.info(pid, :reductions)`.
 IDLE_T0="$(date +%s)"
 start_sampler "$IDLE_SECONDS" "$IDLE_LOG"
 IDLE_SAMPLER_PID="$SAMPLER_PID"
@@ -600,6 +619,9 @@ EXPORT_DELTA_KB=$((EXPORT_PEAK_KB - EXPORT_BASELINE_KB))
 BYTES="$(wc -c <"$BODY_FILE" 2>/dev/null | tr -d ' ' || echo 0)"
 
 info "acquisition     HTTP $HTTP_CODE · ${BYTES} bytes · ${EXPORT_WALL} s"
+pds_blind_spot_note \
+  "date +%s, WALL CLOCK around each sampling window in this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM measured is on another host over ssh, so no in-BEAM meter exists here. A WINDOW LENGTH, never a price (PDS-D605)" \
+  "the acquisition and control window lengths"
 
 # ── PDS-D220a: a window with no samples has no peak to subtract from ─────────
 #

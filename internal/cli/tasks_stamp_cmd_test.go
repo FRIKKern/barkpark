@@ -860,3 +860,103 @@ func TestRenderStampVerdict_UnnamedRowIsNotCalledADraft(t *testing.T) {
 		t.Fatalf("an unnamed row was treated as a draft (exit %d) — an absent field is unknown, not a verdict; output:\n%s", code, buf())
 	}
 }
+
+// ─── THE WITHDRAWAL (D745, wave 62) ────────────────────────────────────────
+//
+// `--withdraw` is the verb that LOWERS a met flag when review refutes the
+// proof. Its read-back verdict cannot be the same as `--met`'s: a withdrawal
+// "lands" only when the store shows met FALSE and carries the signed record.
+// A withdrawal whose lock stayed up is precisely the defect the verb exists to
+// end — twelve criteria on the live ledger read MET today with the correction
+// visible only as prose inside their own evidence.
+
+func TestParseStampArgsReadsWithdraw(t *testing.T) {
+	sa, forward := parseStampArgs([]string{
+		"t1", "w", "3", "--criterion", "0",
+		"--criterion-text", "gate passes", "--withdraw", "--note", "review refuted it",
+	}, true)
+	if !sa.withdraw {
+		t.Fatalf("--withdraw not parsed: %+v", sa)
+	}
+	if sa.met || sa.miss {
+		t.Fatalf("--withdraw must not read as met/miss: %+v", sa)
+	}
+	// Every token is forwarded, order preserved — the wrapper never re-indexes.
+	if len(forward) != 10 {
+		t.Fatalf("forward should carry every token, got %d: %v", len(forward), forward)
+	}
+}
+
+func TestStampEchoLineNamesTheLowering(t *testing.T) {
+	idx := 2
+	line := stampEchoLine(stampArgs{criterion: &idx, withdraw: true, criterionText: "gate passes"})
+	if !strings.Contains(line, "WITHDRAW") {
+		t.Fatalf("the echo must say the lock is going DOWN before the write: %q", line)
+	}
+	if !strings.Contains(line, "criterion #3") {
+		t.Fatalf("the 0→1 based translation must survive on the withdraw path: %q", line)
+	}
+}
+
+// The merge-gate legacy tripwire must NOT fire on a withdrawal: lowering a
+// gate's lock cannot fabricate a done before the PR exists, which is the only
+// harm that tripwire guards. If this ever reds, a reviewer has been blocked
+// from correcting a merge gate on an old server.
+func TestStampMergeGateFallbackIgnoresWithdrawals(t *testing.T) {
+	sa := stampArgs{withdraw: true, criterionText: "[MERGE-GATED — the lead closes this] PR merged"}
+	if stampMergeGateFallback(sa) {
+		t.Fatal("a withdrawal must never be refused by the merge-gate tripwire")
+	}
+}
+
+func TestStampMismatchesWithdrawVerdict(t *testing.T) {
+	req := stampRequest{index: 0, withdraw: true, note: "review: the gate ran on the wrong branch"}
+
+	landed := taskboard.CriterionItem{
+		Criterion: "gate passes",
+		Met:       false,
+		// The original proof is STILL THERE — that is the append-only guarantee,
+		// and the read-back must not treat its presence as a failure.
+		Evidence: "42 tests green",
+		Withdrawals: []taskboard.CriterionWithdrawal{{
+			Note:               "review: the gate ran on the wrong branch",
+			Worker:             "reviewer",
+			SupersededEvidence: "42 tests green",
+		}},
+	}
+	if got := stampMismatches(req, landed); len(got) != 0 {
+		t.Fatalf("a landed withdrawal must be clean, got %v", got)
+	}
+
+	// THE CASE THAT MATTERS: the reason was recorded but the lock stayed UP.
+	// That is the live defect — a board reading MET with the correction buried.
+	lockStillUp := landed
+	lockStillUp.Met = true
+	got := stampMismatches(req, lockStillUp)
+	if len(got) == 0 {
+		t.Fatal("a withdrawal that left met TRUE must NOT be reported as landed")
+	}
+	if !strings.Contains(strings.Join(got, " "), "still TRUE") {
+		t.Fatalf("the verdict must name the un-lowered lock, got %v", got)
+	}
+
+	// Lowered, but unsigned: no record says who withdrew it or why.
+	unsigned := taskboard.CriterionItem{Criterion: "gate passes", Met: false, Evidence: "42 tests green"}
+	if got := stampMismatches(req, unsigned); len(got) == 0 {
+		t.Fatal("a withdrawal with no recorded reason must not read as landed")
+	}
+}
+
+func TestStoredCriterionSummaryFlagsAWithdrawnRow(t *testing.T) {
+	s := storedCriterionSummary(taskboard.CriterionItem{
+		Criterion:   "gate passes",
+		Met:         false,
+		Evidence:    "42 tests green",
+		Withdrawals: []taskboard.CriterionWithdrawal{{Note: "refuted"}},
+	})
+	// The evidence on a withdrawn row is the SUPERSEDED proof. A receipt that
+	// printed it without saying so would read as a current claim.
+	if !strings.Contains(s, "WITHDRAWN") || !strings.Contains(s, "superseded") {
+		t.Fatalf("the receipt must mark a withdrawn row and re-frame its evidence: %q", s)
+	}
+}

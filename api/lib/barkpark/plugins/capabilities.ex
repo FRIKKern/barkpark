@@ -39,6 +39,26 @@ defmodule Barkpark.Plugins.Capabilities do
   * `ingest` — shared-secret ingest token (`RequireIngestToken`), a distinct
     credential from the api_tokens ladder. Treated as an admin-equivalent
     secret: visible only to an `admin` (or `ingest`) caller, never to anon.
+
+  ### Who OWNS the caller-tier derivation
+
+  This module RANKS tiers; it does not DERIVE them. Mapping a resolved token to
+  its global tier is `Barkpark.Tenancy.Auth.tier_of/1` — the single owner, next
+  to the `permits?/2` the request pipelines themselves call. `tier_for_token/1`
+  below is a one-line delegation and must stay one: the manifest is what every
+  bp/MCP/SDK client reads to decide which verbs it may call, so a tier this
+  module invents on its own is a client-side authorization decision drifting
+  away from the server-side one.
+
+  The equality each rung must hold — `tier_of/1`'s own doc names them, and
+  `BarkparkWeb.Contract.CapabilitiesTierParityTest` pins them against REAL
+  conns driven through the plugs:
+
+      manifest "admin"   ==  BarkparkWeb.Plugs.RequireAdmin              (pipeline :require_admin)
+      manifest "write"   ==  BarkparkWeb.Plugs.RequireWritePermission    (pipeline :require_write)
+      manifest "read"    ==  RequireToken + PublicRead + RequireWriteForMutation
+                                                                        (pipeline :require_token)
+      manifest "+chat"   ==  BarkparkWeb.Plugs.RequireChatAccess.chat_scope/1 -> {:workspace, _}
   """
 
   alias Barkpark.Plugins.Registry
@@ -161,46 +181,22 @@ defmodule Barkpark.Plugins.Capabilities do
   end
 
   @doc """
-  Resolve a caller's auth tier from a conn's resolved token assign. Used by
-  the capabilities controller. NOT pure (reads the token struct), kept out of
+  Resolve a caller's auth tier from a conn's resolved token assign. Used by the
+  capabilities controller. NOT pure (reads the token struct), kept out of
   `project/2`'s pure path.
 
-  An absent / nil token is `"none"`. A present token maps to the highest
-  global tier its permissions satisfy: `admin` > `write` > `read`.
+  DELEGATION, DELIBERATELY. The derivation itself is
+  `Barkpark.Tenancy.Auth.tier_of/1` — the single owner, next to the `permits?/2`
+  the request pipelines call — and that function's doc is where the ladder and
+  the pipeline authority each rung must equal are written. This module RANKS
+  tiers (`visible?/2`, `project/2`); it must not DERIVE them, because a tier
+  invented here is a client-side authorization decision drifting away from the
+  server-side one. Keep this a one-liner.
 
-  D36 (charter D16) — `chat` is an ORTHOGONAL capability, NOT a rank. A
-  workspace-bound token carrying the `chat` permission but no doc/task tier
-  may still DISCOVER the `chat` noun. That capability rides ALONGSIDE the base
-  tier as a `"<base>+chat"` suffix (e.g. `"none+chat"`, `"read+chat"`) so it
-  lifts nothing else: the base rank is unchanged, and `project/2` splits the
-  suffix off before ranking. This mirrors `RequireChatAccess.chat_scope/1`
-  (admin is already covered by the base tier; the added case is the non-admin,
-  workspace-bound `chat` token that the runtime authorizes at `{:workspace,_}`).
+  Pinned by `BarkparkWeb.Contract.CapabilitiesTierParityTest`.
   """
   @spec tier_for_token(struct() | nil) :: tier()
-  def tier_for_token(nil), do: "none"
-
-  def tier_for_token(token) do
-    alias Barkpark.Tenancy.Auth, as: TenancyAuth
-
-    base =
-      cond do
-        TenancyAuth.permits?(token, :admin) -> "admin"
-        TenancyAuth.permits?(token, :write) -> "write"
-        TenancyAuth.permits?(token, :read) -> "read"
-        true -> "none"
-      end
-
-    # A global-admin caller already discovers `chat` through the rank ladder;
-    # the suffix is only for the non-admin, workspace-bound `chat` token —
-    # exactly the principal RequireChatAccess authorizes at `{:workspace, ws}`.
-    if base != "admin" and Barkpark.Auth.has_permission?(token, "chat") and
-         not is_nil(Map.get(token, :workspace_id)) do
-      base <> "+chat"
-    else
-      base
-    end
-  end
+  defdelegate tier_for_token(token), to: Barkpark.Tenancy.Auth, as: :tier_of
 
   # The doc/task RANK carried by a (possibly `+chat`-suffixed) caller tier. The
   # orthogonal `chat` capability rides alongside the rank and never lifts it, so

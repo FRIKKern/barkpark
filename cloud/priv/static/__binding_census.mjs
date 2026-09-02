@@ -18,6 +18,16 @@
 // exactly the clause-4 vacuity D383 exists to prevent. The live population is
 // not disagreement, it is ABSENCE: elevated writes with no predicate at all.
 //
+// THAT SENTENCE IS NARROWED, and narrowing it is what arm (2k) below is for.
+// D409 measured LABEL agreement on the ACTOR axis, and on that axis the answer
+// still holds, 6 for 6. It could not see a predicate that agrees because it is
+// asking a COARSER question: both member writes were pinned `assignableRoles`,
+// arity 1 over the actor, in front of a server law that is a RELATION over
+// (actor, target). No agreement test on the actor axis can ever red on that,
+// which is why this arm compares RELATION ARITY instead of labels. So the
+// claim this file may make is "agreement, on the actor axis, where the gate is
+// actor-tier" — never a completeness this instrument does not have.
+//
 // It is also NOT a drift gate. Charter D421 defers that arm, and names why: the
 // only available oracle for a route's tier
 // (cloud/test/barkpark_cloud/web/router_moduledoc_table_test.exs's tier map) is
@@ -444,8 +454,8 @@ const PIN = [
 
   // ── team membership — every write behind assignableRoles(ctx.role)
   { fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
-  { fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "same fence; RANK-RELATIVE below it — the same admin is refused on a peer and allowed on a member" },
-  { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "same fence; RANK-RELATIVE below it, with an owner escape hatch the PATCH path lacks" },
+  { fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canChangeMemberRole", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "RANK-RELATIVE below the router — the same admin is refused on a peer and allowed on a member. RE-PINNED off assignableRoles by the (2k) arm below: the crown (cch-w42-s3) shipped canChangeMemberRole(actorRole, targetRole, isSelf), which mirrors update_member_role_as/4 including its self? bypass and its ABSENT owner escape hatch. The old pin named the tier question, arity 1 over the ACTOR, in front of a relation — and every other arm in this file scored that PREDICATED" },
+  { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canRemoveMember", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "RANK-RELATIVE below the router, with an owner escape hatch the PATCH path lacks. RE-PINNED off assignableRoles by the (2k) arm below: canRemoveMember(actorRole, targetRole, isSelf) mirrors remove_member_as/3, hatch included. A SEPARATE predicate from the PATCH row on purpose — the two laws disagree on owner-vs-owner, so one boolean cannot state both" },
   { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
   // ── env vars — elevated, and ONLY the inline cond says so
@@ -1159,7 +1169,8 @@ if (PIN.length !== EXPECT.total ||
 //      THE SECOND LIMIT. The two HEALED directions are proven by editing PIN
 //      JUDGEMENTS, not by putting a real client predicate in app.js, because
 //      this census cannot see one (charter D430) — `predicate` is a hand-written
-//      claim and (2g) only checks that the name it holds is declared somewhere.
+//      claim; (2g) only checks that the name it holds is declared somewhere and
+//      (2k) only checks the SHAPE of what it names, never that a fence exists.
 //      So the mutation evidence for this arm shows that the ceiling is FREE TO
 //      LOWER; it does not show that a fence landing in the console is detected.
 //      That is a different instrument (the unfiled DRIFT arm) and this one must
@@ -1484,6 +1495,387 @@ if (dupes.length) {
       "",
       ...undeclared,
     ]);
+  }
+}
+
+// (2k) RELATION ARITY. A PREDICATE CANNOT ANSWER A QUESTION IT NEVER RECEIVES.
+//
+//      THE CLASS, AND IT IS NOT DRIFT. (2g) above proves a pinned predicate
+//      NAMES something app.js declares. It never asks what that something is
+//      GIVEN. A gate whose authority is a RELATION over (actor, target) can
+//      therefore sit behind a console predicate that only ever receives the
+//      ACTOR — and on the actor axis the two genuinely AGREE, which is why
+//      charter D409's 6-for-6 label measurement was right and still could not
+//      see this. It is ARITY, not disagreement. Both member writes shipped for
+//      four waves pinned `assignableRoles`, a one-parameter question, in front
+//      of a server law that refuses the same admin on a peer and allows them on
+//      a member — and every other arm in this file scored them PREDICATED.
+//
+//      BOTH SIDES ARE DERIVED, AND THAT IS THE WHOLE DESIGN. No hand-written
+//      list of "the rank-relative routes" appears here and no pinned judgement
+//      field carries the verdict: charter D460 mutation-proved that shape ships
+//      rc 0 while announcing its own growth.
+//        · SERVER: walk every .ex/.exs under the cloud lib root, mask comments,
+//          strings, heredocs and sigils, find every CALL of the rank ladder's
+//          strict comparator (module-qualified, or bare inside the module that
+//          DEFINES it), resolve the ENCLOSING def/defp head and its arity by
+//          counting top-level commas in its parameter parens. TREE-WIDE on
+//          purpose — a future rank decision in a third module must not go
+//          silently green because this arm was only told about two files.
+//        · CONSOLE: resolve the row's pinned predicate to its `function`
+//          declaration in app.js and read its PARAMETER LIST and body.
+//
+//      THE JOIN RUNS BOTH WAYS. Forward: a PIN row whose context_fn names a
+//      derived rank-relative function must name a target-consulting predicate.
+//      Inverse: a derived rank-relative function that NO row's context_fn names
+//      is a FAILURE — otherwise DELETING a context_fn buys silence. That is the
+//      same hole (2e) already refuses to leave open for an unmapped module.
+//
+//      A ` + `-JOINED context_fn IS RANK-RELATIVE IF **ANY** PART MATCHES. The
+//      PATCH row reads `<update law> + <grant law>`, and the grant law does not
+//      call the comparator at all (zero mentions in the authz module). An
+//      all-parts rule would drop that row entirely — the louder half of the
+//      defect, since PATCH is the law with no owner escape hatch.
+//
+//      TWO PARAMETERS IS NOT ENOUGH: THE SECOND MUST BE READ IN THE BODY. A
+//      sham `f(actorRole, targetRole) { return assignableRoles(actorRole).length > 0 }`
+//      declares a target and is decoration. And two rows naming DIFFERENT
+//      derived server laws may not collapse onto ONE predicate: one boolean
+//      cannot state two different laws — the remove law has an owner escape
+//      hatch that the re-role law lacks, so they disagree on owner-vs-owner.
+//
+//      THE HONEST LIMIT, SAID HERE BECAUSE AN UNSTATED LIMIT IS THE SAME LIE.
+//      This proves the predicate's SHAPE, not that the affordance CALLS it with
+//      a target. A predicate correctly declared `(actorRole, targetRole)` but
+//      invoked as `f(ctx.role)` passes this arm. The renderer that emits these
+//      buttons cannot enter this census's population by construction — the
+//      extractor keys on `api("VERB", …)` write CALL SITES, and a pure renderer
+//      has none — so the call-side half is covered by the behavioural unit pin
+//      in the console unit suite, not here. Do NOT read this arm as covering
+//      the render path.
+{
+  const LADDER_FN = "outranks?";
+  const LIB_ROOT = path.join(here, "../../lib");
+  const rel = (f) => path.relative(LIB_ROOT, f);
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const exFiles = [];
+  (function walk(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of [...entries].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.exs?$/.test(e.name)) exFiles.push(p);
+    }
+  })(LIB_ROOT);
+  if (exFiles.length === 0) {
+    die2([
+      "FAIL(2k): no Elixir source found under the cloud lib root.",
+      "  This arm derives the rank-relative server set from that tree. An empty walk is a",
+      "  FOOTING failure, never an empty answer — read the root, not the verdict:",
+      "    " + LIB_ROOT,
+    ]);
+  }
+
+  // Blank out everything a `#`, a string, a heredoc or a sigil owns, keeping
+  // every offset and newline so a match index still points into the original.
+  // Without this the two prose mentions of the comparator that already live in
+  // this module's @doc heredoc and in a `#` comment would each derive a phantom
+  // rank-relative function, and the arm would red on its own reading.
+  const SIGIL_CLOSE = { "(": ")", "[": "]", "{": "}", "<": ">" };
+  const maskElixir = (s) => {
+    const out = s.split("");
+    const blank = (from, to) => {
+      for (let i = from; i < to && i < s.length; i++) if (out[i] !== "\n") out[i] = " ";
+    };
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      // `?#` / `?"` char literal. Only when `?` does not close an identifier —
+      // `outranks?(` must never be read as a character.
+      if (c === "?" && !/[A-Za-z0-9_]/.test(s[i - 1] || " ") && i + 1 < s.length && !/\s/.test(s[i + 1])) {
+        blank(i, i + 2); i++; continue;
+      }
+      if (c === "#") {
+        const nl = s.indexOf("\n", i);
+        const end = nl < 0 ? s.length : nl;
+        blank(i, end); i = end; continue;
+      }
+      if (s.startsWith('"""', i) || s.startsWith("'''", i)) {
+        const q = s.slice(i, i + 3);
+        const end = s.indexOf(q, i + 3);
+        const stop = end < 0 ? s.length : end + 3;
+        blank(i, stop); i = stop - 1; continue;
+      }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        for (; j < s.length; j++) {
+          if (s[j] === "\\") { j++; continue; }
+          if (s[j] === c || s[j] === "\n") break;
+        }
+        blank(i, j + 1); i = j; continue;
+      }
+      if (c === "~" && /[a-zA-Z]/.test(s[i + 1] || "")) {
+        let k = i + 1;
+        while (k < s.length && /[a-zA-Z]/.test(s[k])) k++;
+        const open = s[k];
+        if (open !== undefined && (SIGIL_CLOSE[open] || open === '"' || open === "'" || open === "/" || open === "|")) {
+          if (s.startsWith(open + open + open, k)) {
+            const end = s.indexOf(open + open + open, k + 3);
+            const stop = end < 0 ? s.length : end + 3;
+            blank(i, stop); i = stop - 1; continue;
+          }
+          const close = SIGIL_CLOSE[open] || open;
+          let j = k + 1;
+          for (; j < s.length; j++) {
+            if (s[j] === "\\") { j++; continue; }
+            if (s[j] === close) break;
+          }
+          blank(i, j + 1); i = j; continue;
+        }
+      }
+    }
+    return out.join("");
+  };
+
+  // Arity by TOP-LEVEL COMMAS in the parameter parens, bracket-aware, so that
+  // `%User{} = actor` is one parameter and a `when` guard on the next line is
+  // outside the count. No parens at all is arity 0.
+  const arityAt = (s, afterName) => {
+    let i = afterName;
+    while (i < s.length && /[ \t]/.test(s[i])) i++;
+    if (s[i] !== "(") return 0;
+    let depth = 0, commas = 0, seen = "";
+    for (; i < s.length; i++) {
+      const c = s[i];
+      if (c === "(" || c === "[" || c === "{") { depth++; if (depth === 1) continue; }
+      else if (c === ")" || c === "]" || c === "}") { depth--; if (depth === 0) break; }
+      else if (c === "," && depth === 1) { commas++; continue; }
+      if (depth >= 1) seen += c;
+    }
+    return seen.trim() === "" ? 0 : commas + 1;
+  };
+
+  const DEF_HEAD = new RegExp("^[ \\t]*(defp?)[ \\t]+([a-z_][A-Za-z0-9_]*[?!]?)", "gm");
+  const DEFMODULE = /^[ \t]*defmodule[ \t]+([A-Za-z0-9_.]+)/gm;
+  const CALL = new RegExp("(?:\\b[A-Z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*\\.)?\\b" + esc(LADDER_FN) + "[ \\t]*\\(", "g");
+  const LADDER_SHAPE = new RegExp(
+    "^[ \\t]*defp?[ \\t]+([a-z_][A-Za-z0-9_]*[?!]?)\\([^)\\n]*,[^)\\n]*\\)[ \\t]*,[ \\t]*do:[^\\n]*\\brank\\([^\\n]*[<>][^\\n]*\\brank\\(", "gm");
+
+  const derived = new Map();
+  const definesLadderIn = [];
+  const renameCandidates = [];
+  for (const file of exFiles) {
+    const masked = maskElixir(fs.readFileSync(file, "utf8"));
+    const heads = [];
+    DEF_HEAD.lastIndex = 0;
+    for (let d; (d = DEF_HEAD.exec(masked));) {
+      heads.push({ index: d.index, kind: d[1], name: d[2], after: d.index + d[0].length });
+    }
+    const mods = [];
+    DEFMODULE.lastIndex = 0;
+    for (let d; (d = DEFMODULE.exec(masked));) mods.push({ index: d.index, name: d[1] });
+    const definesLadder = heads.some((h) => h.name === LADDER_FN);
+    if (definesLadder) definesLadderIn.push(file);
+    LADDER_SHAPE.lastIndex = 0;
+    for (let d; (d = LADDER_SHAPE.exec(masked));) renameCandidates.push(`${rel(file)}  def ${d[1]}/2`);
+    CALL.lastIndex = 0;
+    for (let c; (c = CALL.exec(masked));) {
+      // A BARE call only counts inside the module that defines the comparator.
+      // Elsewhere a bare name is a different function that happens to share it.
+      if (!/\./.test(c[0]) && !definesLadder) continue;
+      const owner = heads.filter((h) => h.index < c.index).pop();
+      if (!owner) continue;
+      if (owner.name === LADDER_FN) continue; // the comparator's own body
+      const mod = mods.filter((x) => x.index < owner.index).pop();
+      const short = mod ? mod.name.split(".").pop() : "?";
+      const key = `${short}.${owner.name}/${arityAt(masked, owner.after)}`;
+      if (!derived.has(key)) derived.set(key, { file, kind: owner.kind, calls: 0 });
+      derived.get(key).calls++;
+    }
+  }
+  const derivedKeys = [...derived.keys()].sort();
+
+  // THE VACUITY FLOOR, FIRST. An empty derived set means zero rows to check and
+  // an arm with nothing to say — which is D383/D409's failure mode exactly, and
+  // it would re-open the very blindness this arm closes. It is never a green.
+  if (derivedKeys.length === 0) {
+    const stillThere = definesLadderIn.length > 0;
+    die2([
+      "FAIL(2k): the rank-relative server set derived EMPTY.",
+      stillThere
+        ? "  The ladder comparator is still DEFINED in the tree and NOTHING calls it — either the"
+        : "  The ladder comparator is GONE from the tree under the name this arm derives from — it",
+      stillThere
+        ? "  callers were renamed or removed, or this arm's call form stopped matching them."
+        : "  was almost certainly RENAMED, because a rank relation does not simply stop existing.",
+      "",
+      "  A silent empty set here is the D383/D409 failure mode: zero derived functions means",
+      "  zero rows to join, and the arm would pass by having nothing to say. Footing failure.",
+      "",
+      "  comparator this arm derives from : " + LADDER_FN,
+      "  lib root walked                  : " + LIB_ROOT + `  (${exFiles.length} .ex/.exs files)`,
+      ...definesLadderIn.map((f) => "  still defined in                 : " + rel(f)),
+      "",
+      "  LIKELY RENAME — every 2-parameter def in the tree whose one-line body compares two",
+      "  rank/1 reads with a strict inequality:",
+      ...(renameCandidates.length
+        ? [...new Set(renameCandidates)].map((c) => "    " + c)
+        : ["    (none matched that shape — find the strict rank relation by hand and re-point LADDER_FN)"]),
+    ]);
+  }
+
+  // THE DERIVED PRINT SITS BEHIND THE FLOOR AND IN FRONT OF THE JOINS, so a red
+  // below is read against the same list a green prints.
+  console.log("");
+  console.log(`relation arity (2k): rank-relative server authority DERIVED tree-wide over ${exFiles.length} .ex/.exs ` +
+    `file(s), from the enclosing defs of every ${LADDER_FN} caller:`);
+  for (const k of derivedKeys) {
+    const d = derived.get(k);
+    console.log(`  ${pad(k, 40)}${d.calls} call site(s) in ${rel(d.file)}`);
+  }
+
+  const declOf = (name) => {
+    const f = fns.find((x) => x.name === name);
+    if (!f) return null;
+    const open = src.indexOf("(", f.start);
+    if (open < 0) return null;
+    let depth = 0, close = -1;
+    for (let i = open; i < src.length; i++) {
+      const c = src[i];
+      if (c === "(") depth++;
+      else if (c === ")") { depth--; if (depth === 0) { close = i; break; } }
+    }
+    if (close < 0) return null;
+    const params = src.slice(open + 1, close).split(",").map((s) => s.trim()).filter(Boolean)
+      .map((s) => (/^[A-Za-z_$][\w$]*/.exec(s) || [s])[0]);
+    const bodyOpen = src.indexOf("{", close);
+    return { params, body: bodyOpen < 0 || bodyOpen >= f.end ? "" : src.slice(bodyOpen + 1, f.end) };
+  };
+  // Comment- and string-blind identifier read: a parameter named in a comment
+  // or inside a message string is not a parameter the predicate CONSULTS.
+  const stripJs = (s) => {
+    let out = "", inS = null, escd = false;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (inS) {
+        if (escd) { escd = false; out += " "; continue; }
+        if (c === "\\") { escd = true; out += " "; continue; }
+        if (c === inS) inS = null;
+        out += c === "\n" ? "\n" : " ";
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { inS = c; out += " "; continue; }
+      if (c === "/" && s[i + 1] === "/") {
+        const nl = s.indexOf("\n", i);
+        const stop = nl < 0 ? s.length : nl;
+        out += " ".repeat(stop - i); i = stop - 1; continue;
+      }
+      if (c === "/" && s[i + 1] === "*") {
+        const e = s.indexOf("*/", i);
+        const stop = e < 0 ? s.length : e + 2;
+        out += s.slice(i, stop).replace(/[^\n]/g, " "); i = stop - 1; continue;
+      }
+      out += c;
+    }
+    return out;
+  };
+  const reads = (body, ident) => new RegExp("\\b" + esc(ident) + "\\b").test(stripJs(body));
+
+  const lawsOf = (r) => (r.context_fn ? contextParts(r.context_fn) : []).filter((p) => derived.has(p));
+  const rankRows = PIN.filter((r) => lawsOf(r).length);
+  const problems = [];
+  const shown = new Map();
+
+  for (const r of rankRows) {
+    const key = keyOf(r);
+    const laws = lawsOf(r).join(" + ");
+    if (!r.predicate) {
+      problems.push(`  ${key}`, `      law ${laws} is RANK-RELATIVE and this row is pinned UNPREDICATED —`,
+        "      there is no console predicate at all, so none can consult the target.");
+      continue;
+    }
+    const decl = declOf(r.predicate);
+    if (!decl) {
+      problems.push(`  ${key}`,
+        `      predicate ${r.predicate} is not a \`function\` DECLARATION in app.js, so this arm cannot`,
+        "      read its parameter list. (2g) only proves the name resolves. Give the predicate a",
+        "      `function` declaration, or extend this arm to read the other binding form.");
+      continue;
+    }
+    shown.set(key, decl);
+    if (decl.params.length < 2) {
+      problems.push(`  ${key}`,
+        `      law ${laws} is a RELATION over (actor, target); predicate ` +
+        `${r.predicate}(${decl.params.join(", ")}) declares ${decl.params.length} parameter(s).`,
+        "      The target NEVER REACHES the predicate, so on the target axis the console cannot",
+        "      be answering the server's question — it is answering a coarser one and agreeing");
+      problems.push("      with the server only on the actor axis, which is why every other arm scores it green.");
+      continue;
+    }
+    if (!reads(decl.body, decl.params[1])) {
+      problems.push(`  ${key}`,
+        `      predicate ${r.predicate} declares ${decl.params[1]} and never reads it; the target`,
+        "      parameter is decoration. Arity alone is not consultation.");
+      continue;
+    }
+  }
+
+  // TWO ROWS, TWO DIFFERENT SERVER LAWS, ONE PREDICATE. One boolean cannot say
+  // both: the remove law carries an owner escape hatch the re-role law lacks,
+  // so they answer differently on owner-vs-owner. Collapsing them onto a single
+  // console sibling ships one of the two answers wrong, by construction.
+  const byPred = new Map();
+  for (const r of rankRows) {
+    if (!r.predicate) continue;
+    const laws = lawsOf(r).slice().sort().join(" + ");
+    if (!byPred.has(r.predicate)) byPred.set(r.predicate, []);
+    byPred.get(r.predicate).push({ key: keyOf(r), laws });
+  }
+  for (const [pred, rows] of byPred) {
+    const distinct = [...new Set(rows.map((x) => x.laws))];
+    if (distinct.length > 1) {
+      problems.push(`  PREDICATE COLLAPSE: ${pred} is pinned in front of ${distinct.length} DIFFERENT derived server laws:`);
+      for (const x of rows) problems.push(`      ${pad(x.key, 44)}${x.laws}`);
+      problems.push("      One boolean cannot state two different laws. Ship one console sibling per law.");
+    }
+  }
+
+  // THE INVERSE JOIN. Without it, DELETING a context_fn is how you buy silence:
+  // the row drops out of `rankRows` and the forward join has nothing to say.
+  const namedByPin = new Set(PIN.flatMap((r) => (r.context_fn ? contextParts(r.context_fn) : [])));
+  const orphans = derivedKeys.filter((k) => !namedByPin.has(k));
+  for (const k of orphans) {
+    problems.push(`  ORPHANED SERVER LAW: ${k} is rank-relative and NO pin row's context_fn names it.`,
+      `      ${derived.get(k).calls} call site(s) in ${rel(derived.get(k).file)}. Either the console has a write`,
+      "      call site in front of it that is not pinned with this context_fn, or a context_fn was",
+      "      deleted. (2e) already refuses to skip an unmapped module; this refuses to skip an",
+      "      unmapped LAW, for the same reason — a skip is where a claim would have been.");
+  }
+
+  if (problems.length) {
+    die2([
+      "FAIL(2k): a rank-relative server law is not matched by a target-consulting console predicate.",
+      "",
+      "  The server decides these against a strict rank ladder: whether THIS actor may act on",
+      "  THIS target. That is a RELATION. A console predicate that never receives the target",
+      "  cannot be evaluating it — and it will agree with the server on every actor-axis test",
+      "  you write, which is exactly how this class survived a 6-for-6 agreement measurement.",
+      "",
+      "  This arm proves the predicate's SHAPE, not that the affordance CALLS it with a target.",
+      "  Fixing the shape is necessary and not sufficient; the call side is the unit pin's.",
+      "",
+      ...problems,
+      "",
+      "  DERIVED server set (never a hand-written list):",
+      ...derivedKeys.map((k) => `    ${k}`),
+    ]);
+  }
+
+  console.log(`  ${rankRows.length} PIN row(s) sit in front of rank-relative authority; each names a target-consulting predicate.`);
+  for (const r of rankRows) {
+    const d = shown.get(keyOf(r));
+    console.log(`    ${pad(keyOf(r), 44)}${r.predicate}(${d ? d.params.join(", ") : "?"})  →  ${lawsOf(r).join(" + ")}`);
   }
 }
 

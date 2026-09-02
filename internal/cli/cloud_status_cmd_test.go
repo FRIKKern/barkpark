@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
@@ -1356,6 +1357,11 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		// dr-w5-followup: the 5xx tri-state node — ALWAYS present, and its
 		// state key is what keeps nil-as-unmeasured from collapsing into 0.
 		"err_5xx": true,
+		// dr-w22-bl: SINCE WHEN the box has served that sha. ALWAYS present and
+		// NOT a tri-state — empty is a real reading ("the plane never observed
+		// this box change sha"), and an absent key could not distinguish it from
+		// a CLI that never asked.
+		"git_commit_first_seen_at": true,
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
@@ -1697,4 +1703,82 @@ func TestRunCloudStatusJSONDeployRefusalShapes(t *testing.T) {
 			t.Fatalf("box = %v, want live 35 / volume 50 (counts stay; ratios go)", box)
 		}
 	})
+}
+
+// --- dr-w22-bl: SINCE WHEN the box has served that sha -----------------------
+//
+// The defect these pin: a 14-day `(sha, first_seen)` history existed in
+// `agent_events` all along (measured on prod 2026-09-01: 132,120 rows spanning
+// 2026-08-18T03:30:20Z -> 2026-09-01T23:19:22Z, and the AgentRetentionWorker
+// cron genuinely firing), and its ONLY reader was `GET /v1/barkparks/:id/events`
+// — `Auth.require_user`, 200 rows a page, about three hours of it. The control
+// plane now materialises the answer onto the row, and these are the CLI's half
+// of that: the key on the scriptable surface, and the suffix on the table.
+
+// TestStatusRowCarriesGitCommitFirstSeenAt is the projection, stated as a test.
+// MUTATION TARGET: delete the `"git_commit_first_seen_at"` line from
+// rankedBarkparkRow and this REDS.
+func TestStatusRowCarriesGitCommitFirstSeenAt(t *testing.T) {
+	const since = "2026-08-31T10:21:20Z"
+	bp := commitFleet()[0]
+	bp.GitCommitFirstSeenAt = since
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{bp})[0])
+	v, ok := row["git_commit_first_seen_at"]
+	if !ok {
+		t.Fatalf("`bp cloud status -o json` dropped git_commit_first_seen_at")
+	}
+	// VERBATIM, not reformatted: a script comparing this against a deploy log
+	// needs the plane's own RFC3339 bytes, and the relative rendering belongs to
+	// the table.
+	if v != since {
+		t.Fatalf("git_commit_first_seen_at = %v, want the plane's stamp %q untouched", v, since)
+	}
+}
+
+// TestStatusRowFirstSeenKeyPresentWhenUnmeasured is the honesty rule, and it is
+// the one that matters most for THIS column: empty is the NORMAL reading for a
+// healthy box that has not changed sha since the column shipped. If the key were
+// tri-stated (absent when empty) a consumer could not tell that ordinary case
+// from a CLI that never asked, and every such box would look like an older CP.
+func TestStatusRowFirstSeenKeyPresentWhenUnmeasured(t *testing.T) {
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])
+	v, ok := row["git_commit_first_seen_at"]
+	if !ok {
+		t.Fatalf("git_commit_first_seen_at must be PRESENT (empty) when unmeasured, not absent")
+	}
+	if v != "" {
+		t.Fatalf("git_commit_first_seen_at = %v, want the empty string — never a fabricated instant", v)
+	}
+}
+
+// TestCommitCellCarriesSinceWhenMeasured pins the table half. The suffix appears
+// ONLY when the plane measured a first appearance; the bare-sha render is
+// byte-identical to what an older control plane produces, which is why this is a
+// suffix and not a column of UNMETERED down a healthy fleet.
+func TestCommitCellCarriesSinceWhenMeasured(t *testing.T) {
+	const sha = "2673eb009f67e81f06e247e5a1504a83de699d97"
+
+	bare := commitCell(cloudclient.Barkpark{GitCommit: sha})
+	if bare != "2673eb009f67" {
+		t.Fatalf("an unmeasured first-appearance must render the bare sha, got %q", bare)
+	}
+
+	measured := commitCell(cloudclient.Barkpark{
+		GitCommit:            sha,
+		GitCommitFirstSeenAt: time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339),
+	})
+	if !strings.HasPrefix(measured, "2673eb009f67 (since ") {
+		t.Fatalf("commitCell = %q, want the sha followed by a `(since …)` suffix", measured)
+	}
+	if !strings.Contains(measured, "3d ago") {
+		t.Fatalf("commitCell = %q, want the 3-day age the stamp encodes", measured)
+	}
+
+	// The suffix must never manufacture a reading out of an absent sha: an
+	// unknown commit stays UNMETERED whatever the first-seen column says. A row
+	// in that shape should not exist, and if it ever does the sha is the fact
+	// that is missing.
+	if got := commitCell(cloudclient.Barkpark{GitCommitFirstSeenAt: "2026-08-31T10:21:20Z"}); got != "UNMETERED" {
+		t.Fatalf("commitCell = %q for an absent sha, want UNMETERED", got)
+	}
 }

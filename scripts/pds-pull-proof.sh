@@ -91,6 +91,14 @@ API_DIR="$REPO_ROOT/api"
 SCRATCH_SCRIPT="$SCRIPT_DIR/pds-scratch-target.sh"
 SCAN_SCRIPT="$SCRIPT_DIR/pds-secret-scan.sh"
 
+# THE BLIND-SPOT SENTENCE, BY REFERENCE (PDS-D633) — `$PDS_BLIND_SPOT` and
+# `pds_blind_spot_note` come from ONE file, never a retyped copy;
+# scripts/pds-blind-spot-check.sh reds if a copy drifts. Fail-closed on purpose:
+# an instrument that cannot find the sentence it is obliged to print beside a
+# duration must refuse, not print the duration bare.
+# shellcheck source=scripts/pds-blind-spot.sh
+. "$SCRIPT_DIR/pds-blind-spot.sh"
+
 # ── source under proof ───────────────────────────────────────────────────────
 
 SOURCE_BASE="${PDS_SOURCE_BASE:-https://guerrilla.barkpark.cloud}"
@@ -623,6 +631,16 @@ step_0a() {
   local bundle hdr t0 t1 bytes elapsed fname
   bundle="$ART_DIR/dev-$SOURCE_WS-$SOURCE_DS.tar"
   hdr="$(mktmp)"
+  # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around an HTTP/CLI call issued
+  # from THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock
+  # OUTSIDE every BEAM. It has to be: the BEAM doing the work is the SERVER, on
+  # another host, and there is no in-BEAM meter this instrument could reach even
+  # if it wanted one. The unit is wall by necessity and the figure is quoted as a
+  # LATENCY, never as a price: PDS-D605 forbids a wall-clock second standing in
+  # for CPU (wall swung 2.5x on an unchanged census where user CPU moved 9%), so
+  # nothing here may be read as what the export COST. A price for this instrument
+  # comes from `pds-door-census.sh --measure`; a regression ratchet would need
+  # `Process.info(pid, :reductions)`, which a shell has not got.
   t0="$(date +%s)"
   code="$(curl_src "/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=$SOURCE_DS" \
             -D "$hdr" -o "$bundle" -w '%{http_code}' 2>/dev/null || true)"; code="$(http_code "$code")"
@@ -631,6 +649,9 @@ step_0a() {
   bytes="$(first_int "$(wc -c <"$bundle" 2>/dev/null | tr -d ' ')")"
   fname="$(grep -i '^content-disposition:' "$hdr" | sed -n 's/.*filename=\"\{0,1\}\([^\";]*\).*/\1/p' | tr -d '\r' || true)"
   info "dev export      HTTP $code · $bytes bytes · ${elapsed}s · filename=${fname:-none}"
+  pds_blind_spot_note \
+    "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
+    "dev export"
 
   if [ "$code" != "200" ] || ! int_ok "$bytes" || [ "$bytes" -lt 1024 ]; then
     fail 0a "dev export returned HTTP $code / ${bytes:-unreadable} bytes — guerrilla is running older code than main (served sha ${DEPLOYED_SHA:-unresolved}, version $version)"
@@ -922,6 +943,16 @@ step_1() {
   ws_before="$(tgt_psql "SELECT id || ' ' || slug FROM workspaces ORDER BY inserted_at LIMIT 5" | tr '\n' ';' || true)"
 
   # ── export ────────────────────────────────────────────────────────────────
+  # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around an HTTP/CLI call issued
+  # from THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock
+  # OUTSIDE every BEAM. It has to be: the BEAM doing the work is the SERVER, on
+  # another host, and there is no in-BEAM meter this instrument could reach even
+  # if it wanted one. The unit is wall by necessity and the figure is quoted as a
+  # LATENCY, never as a price: PDS-D605 forbids a wall-clock second standing in
+  # for CPU (wall swung 2.5x on an unchanged census where user CPU moved 9%), so
+  # nothing here may be read as what the export COST. A price for this instrument
+  # comes from `pds-door-census.sh --measure`; a regression ratchet would need
+  # `Process.info(pid, :reductions)`, which a shell has not got.
   rc=0; t0="$(date +%s)"
   "$BP_BIN" -s "$SOURCE_BASE" --token "$SOURCE_TOKEN" \
     cloud workspace export "$SOURCE_WS" \
@@ -937,6 +968,9 @@ step_1() {
   blobs_dir="$tar.blobs"
   n_blobs="$(first_int "$(find "$blobs_dir" -type f 2>/dev/null | wc -l | tr -d ' ')")"
   info "export          exit 0 · $bytes bytes · $((t1 - t0))s · $n_blobs blob(s) in $blobs_dir"
+  pds_blind_spot_note \
+    "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
+    "export"
 
   # ── the GRAIN assertion, before a single byte is imported ──────────────────
   #
@@ -966,6 +1000,16 @@ step_1() {
   # Without --merge the CLI sends mode=clean, and clean against a POPULATED
   # target answers an opaque HTTP 500 whose real cause is 25P02
   # in_failed_sql_transaction at workspace_bundle.ex:233.
+  # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around an HTTP/CLI call issued
+  # from THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock
+  # OUTSIDE every BEAM. It has to be: the BEAM doing the work is the SERVER, on
+  # another host, and there is no in-BEAM meter this instrument could reach even
+  # if it wanted one. The unit is wall by necessity and the figure is quoted as a
+  # LATENCY, never as a price: PDS-D605 forbids a wall-clock second standing in
+  # for CPU (wall swung 2.5x on an unchanged census where user CPU moved 9%), so
+  # nothing here may be read as what the export COST. A price for this instrument
+  # comes from `pds-door-census.sh --measure`; a regression ratchet would need
+  # `Process.info(pid, :reductions)`, which a shell has not got.
   rc=0; t0="$(date +%s)"
   "$BP_BIN" -s "$TARGET_BASE" --token "$TARGET_TOKEN" \
     cloud workspace import "$SOURCE_WS" \
@@ -991,6 +1035,9 @@ step_1() {
   fi
 
   PULL_BUNDLE="$tar"
+  pds_blind_spot_note \
+    "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
+    "exit 0 in Ns"
   pass 1 "the pull ran through the front-door PAIR: export --profile dev --dataset $SOURCE_DS --with-blobs ($bytes bytes, $n_blobs blobs) then import --yes --merge --with-blobs into $TARGET_BASE, exit 0 in $((t1 - t0))s. Manifest grain ASSERTED dataset=$m_ds profile=$m_profile. Receipt: ${receipt:-<none printed>}"
 }
 
@@ -1484,6 +1531,16 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
   fi
 
   local t0 t1 code bytes
+  # PDS-BLIND-SPOT-METER: `date +%s`, WALL CLOCK around an HTTP/CLI call issued
+  # from THIS shell. Placement is (a) of PDS-D633's law — an OS-level clock
+  # OUTSIDE every BEAM. It has to be: the BEAM doing the work is the SERVER, on
+  # another host, and there is no in-BEAM meter this instrument could reach even
+  # if it wanted one. The unit is wall by necessity and the figure is quoted as a
+  # LATENCY, never as a price: PDS-D605 forbids a wall-clock second standing in
+  # for CPU (wall swung 2.5x on an unchanged census where user CPU moved 9%), so
+  # nothing here may be read as what the export COST. A price for this instrument
+  # comes from `pds-door-census.sh --measure`; a regression ratchet would need
+  # `Process.info(pid, :reductions)`, which a shell has not got.
   t0="$(date +%s)"
   code="$(http_code "$(curl_src "/api/workspaces/$SOURCE_WS/export" -o "$FULL_TAR" -w '%{http_code}' \
             --max-time "${PDS_FULL_EXPORT_TIMEOUT:-900}" 2>/dev/null || true)")"
@@ -1525,6 +1582,9 @@ run_id:         $RUN_ID
 EOF
 
   info "full bundle     HTTP 200 · $bytes bytes · $((t1 - t0))s · $FULL_RSS_LINE"
+  pds_blind_spot_note \
+    "date +%s, WALL CLOCK around an HTTP/CLI call issued from this shell — an OS clock outside every BEAM (PDS-D633 placement (a)); the BEAM doing the work is the remote SERVER, so no in-BEAM meter is reachable. A LATENCY, never a price (PDS-D605)" \
+    "full bundle"
   info "                parked at $FULL_TAR (+ .meta) — run-stable, so the NEXT run reuses it for 0 attempts"
   [ -n "$FULL_LOCK_OWNED" ] && rmdir "$FULL_LOCK" 2>/dev/null && FULL_LOCK_OWNED=""
   return 0

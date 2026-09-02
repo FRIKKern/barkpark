@@ -894,7 +894,14 @@ if ! build deps.compile --force; then log "deps.compile failed"; git -C "$APP" r
 if ! build compile;              then log "compile failed";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
 if [ ! -d "_build_$TARGET/prod" ]; then log "build produced no _build_$TARGET/prod — abort, live slot untouched"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
 log "migrate (new code, active slot still serving)"
-if ! build ecto.migrate;         then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
+# BARKPARK_DB_STATEMENT_TIMEOUT=0 — `mix ecto.migrate` boots the repo with the
+# runtime config, so every migration connection would otherwise inherit the
+# per-statement wall config/runtime.exs sets for request traffic (30 s, #15005;
+# 60 s on the role). A backfill or a CREATE INDEX CONCURRENTLY on a big table
+# is an operator-supervised, offline-shaped step and must be allowed to run to
+# completion; the per-migration guard in Barkpark.Release is the seatbelt, this
+# is the belt-and-braces (lead-cli-2's handoff, task-e2f5ecca0be9a6d1).
+if ! BARKPARK_DB_STATEMENT_TIMEOUT=0 build ecto.migrate; then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
 
 # ---- Boot the idle slot and gate on it. The active slot is never touched;
 # every failure path from here on is zero-downtime.
@@ -1333,6 +1340,34 @@ install_sandbox_runner() { # returns non-zero (LOUD) on any failure; caller stay
   return 0
 }
 install_sandbox_runner || true
+
+# ---- Post-deploy LIVE reachability smoke for the public /mcp matrix
+# (connectors-mcp-live-reachability-smoke). ADVISORY, NEVER A GATE.
+#
+# WHAT IT ADDS. The auth fail-closed contract and the Caddy arming are already
+# proven hermetically (internal/cli/mcp_http_test.go, instance-deploy_test.sh).
+# Neither can prove the four PUBLIC paths answer correctly on a real box — a CI
+# runner reaches no host and holds no bearer — so that proof lives here, on the
+# box, after every unit above has been refreshed. Four legs, each printing the
+# code it saw: POST /mcp initialize (200 + serverInfo.name=barkpark-tasks),
+# GET /mcp (405), GET /connectors/mcp (404 by design), GET /connectors/health (200).
+#
+# WHY THE EXIT CODE IS SWALLOWED. We are past the flip: the app slot is live and
+# Caddy already points at it. A stopped barkpark-mcp or a silent bridge is a real
+# problem, but failing HERE would mark a healthy app deploy as failed and invite a
+# rollback of code that is serving fine. The WARN + the per-leg lines above it are
+# the signal; the deploy log is where an operator reads them.
+#
+# Against the STABLE public front ($HEALTH_HOST), never a slot port — the blue/green
+# flip would strand a pinned port (the cp-deploy control-url precedent), and a slot
+# port would bypass Caddy, which is exactly the hop these legs exist to prove.
+MCP_SMOKE="$APP/deploy/mcp-reachability-smoke.sh"
+if [ -f "$MCP_SMOKE" ]; then
+  log "post-deploy /mcp reachability smoke -> https://$HEALTH_HOST (advisory, non-fatal)"
+  bash "$MCP_SMOKE" "$HEALTH_HOST" || log "WARN: /mcp reachability smoke has RED leg(s) (advisory — the app deploy stands); read the mcp-smoke LEG lines above for the code each leg saw"
+else
+  log "WARN: no $MCP_SMOKE in this checkout — /mcp reachability smoke skipped"
+fi
 
 echo "$NEW" > "$STATE"
 log "HEALTHY — slot $TARGET live at $(git rev-parse --short HEAD)"
