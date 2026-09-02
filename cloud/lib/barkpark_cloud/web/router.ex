@@ -13041,6 +13041,34 @@ defmodule BarkparkCloud.Web.Router do
       build_id: d.build_id,
       content_rev: d.content_rev,
       stage: d.stage,
+      # site-spawner (node slot truth): WHICH SLOT IS SERVING THIS BUILD, and
+      # WHETHER ITS HEALTH GATE ACTUALLY RAN. `deploy/site-spawner-node-live-proof.sh`
+      # reads all three off `bp cloud site deploy -o json`; before these columns
+      # existed this payload carried no slot, no port and no health key of any
+      # kind, so the proof's node assertions ran against empty strings.
+      #
+      #   * `slot` / `port` — the blue/green position the BOX MEASURED Caddy to be
+      #     proxying to after SWITCH, read back out of its own Caddyfile, plus the
+      #     loopback port. NEVER the slot the control plane intended: in a
+      #     blue/green deploy the Caddy upstream port IS the slot truth, and an
+      #     intent-derived slot reports intent while looking like state. `port`
+      #     can stand while `slot` is nil (a served port matching neither of the
+      #     site's two allocated slots) — that pair is a real signal, not a bug.
+      #
+      #   * `health_exit_code` — 0 (HEALTH ran and passed), 14 (ran and failed),
+      #     `nil` (never measured). THE NIL IS NEVER COERCED TO 0, and this is the
+      #     one field on this payload where the coercion would be actively
+      #     dangerous: 0 is the SUCCESS code, so a defaulted zero would render a
+      #     build that died in BUILD as health-certified. Same rule the three
+      #     `deferral_*` keys above state, for the same reason. The Go side reads
+      #     it as `*int` and renders nil as an explicit dash.
+      #
+      # All three are nil on every static row, on every container row, and on
+      # every row written before the 20260902091000 migration — honestly unknown,
+      # never backfilled.
+      slot: d.slot,
+      port: d.port,
+      health_exit_code: d.health_exit_code,
       inserted_at: d.inserted_at,
       updated_at: d.updated_at
     }

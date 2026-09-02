@@ -934,10 +934,19 @@ defmodule BarkparkCloud.Sites.Deploy do
         ctx = ctx |> forget_graced_refusals() |> apply_stages(report.stages)
 
         case report.state do
-          :succeeded -> settle_live(ctx, report)
-          :failed -> fail(ctx, report.failure_reason || stage_failure_copy(report))
+          :succeeded ->
+            settle_live(ctx, report)
+
+          # THE FAILED ROW CARRIES THE MEASUREMENTS TOO, and it is the row that
+          # needs them most: `health_exit_code: 14` on a build that died at
+          # HEALTH is how a reader tells "the gate caught it" from "it fell over
+          # somewhere else and nobody gated anything".
+          :failed ->
+            fail(ctx, report.failure_reason || stage_failure_copy(report), measured(ctx, report))
+
           # The box was reachable: spend one build beat and REFRESH the grace budget.
-          :running -> sleep_then_poll(ctx, build_id, left - 1, poll_grace())
+          :running ->
+            sleep_then_poll(ctx, build_id, left - 1, poll_grace())
         end
 
       # The box has not started reporting yet (a 404 on a build id it hasn't
@@ -1182,16 +1191,84 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   ## Terminal states.
 
+  # THE BOX'S MEASUREMENTS, AS ROW ATTRS (site-spawner: node slot truth).
+  #
+  # `port` is what the box read BACK out of its own Caddyfile after SWITCH — the
+  # upstream it is actually proxying, not the `target_port` this control plane
+  # asked for. `slot` is that port NAMED, and it is named HERE rather than taken
+  # from the box's own `a`/`b` because the control plane is the one that knows
+  # the mapping: charter D68 allocates `blue = port_base`, `green = port_base+1`,
+  # and `sites.port_base` is the durable source of it. A port matching NEITHER
+  # leaves `slot` nil with `port` intact — the D345 prefix-sibling shape, where
+  # the box's own read matched the wrong site's block, surfaces as an honest
+  # "which half is unknown" instead of a guess.
+  #
+  # Every key is OMITTED when the box did not measure it, so a pre-marker box (or
+  # a static deploy, which has no slot at all) never overwrites a column with a
+  # zero it never observed. That matters most for `health_exit_code`: 0 is the
+  # SUCCESS code, so writing a default would certify a health gate that never ran.
+  defp measured(ctx, report) do
+    %{}
+    |> maybe_put(:port, report.served_port)
+    |> maybe_put(:slot, slot_name(ctx.site, report.served_port, report.served_slot))
+    |> maybe_put(:health_exit_code, report.health_exit_code)
+  end
+
+  defp maybe_put(attrs, _key, nil), do: attrs
+  defp maybe_put(attrs, key, value), do: Map.put(attrs, key, value)
+
+  # NAMING THE SERVED SLOT. Two grounds, tried in that order, and BOTH are
+  # measurements of the upstream Caddy was found on — neither is this control
+  # plane's intent.
+  #
+  #   1. THE PORT, against this site's own allocation. charter D68:
+  #      blue = `port_base`, green = `port_base + 1`. Fully grounded — the port
+  #      came out of the box's Caddyfile and the base came out of Postgres.
+  #
+  #   2. THE BOX'S OWN SLOT TOKEN. `active_slot()` derives `a`/`b` by comparing
+  #      that same served port to the pair the box is running (`SITE_PORT_A` /
+  #      `SITE_PORT_B`, base first), so it is the SAME measurement expressed in
+  #      the engine's vocabulary; `a` is the base slot and `b` its odd
+  #      neighbour, exactly as blue/green are. It is needed because the pair the
+  #      box uses is not always the pair this control plane allocated: nothing
+  #      in `api/` reads the `target_port` key `deploy_payload/4` sends, and no
+  #      caller sets `SITE_PORT_A`/`SITE_PORT_B`, so the engine falls back to its
+  #      own deterministic per-slug pair in the 8300 window while
+  #      `sites.port_base` names one in [7002, 7998]. Until that plumbing lands,
+  #      arm 1 cannot fire on a real box and this arm is what keeps the field
+  #      from being permanently null.
+  #
+  # A served port the box could not place AT ALL (`slot=none` — the D345
+  # prefix-sibling shape, where the marker-anchored read landed in another
+  # site's block) satisfies neither arm and leaves `slot` nil with `port`
+  # standing. "We do not know which half" is not "we did not look", and it is
+  # certainly not "the half we meant to use".
+  defp slot_name(%Site{} = site, port, box_slot) do
+    slot_from_port(site, port) || slot_from_box_token(box_slot)
+  end
+
+  defp slot_from_port(%Site{port_base: base}, base) when is_integer(base), do: "blue"
+
+  defp slot_from_port(%Site{port_base: base}, port) when is_integer(base) and port == base + 1,
+    do: "green"
+
+  defp slot_from_port(_site, _port), do: nil
+
+  defp slot_from_box_token("a"), do: "blue"
+  defp slot_from_box_token("b"), do: "green"
+  defp slot_from_box_token(_other), do: nil
+
   # SWITCH has happened on the box: the release is serving. Flip the live pointer
   # and the deployment together, in ONE transaction — no window where the
   # deployment says `live` but the site still points at the previous build.
   defp settle_live(ctx, report) do
-    attrs = %{
-      status: "live",
-      stage: List.last(@stages),
-      became_live_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-      detail: "live at #{report.url || site_url(ctx.site, ctx.bp)}"
-    }
+    attrs =
+      Map.merge(measured(ctx, report), %{
+        status: "live",
+        stage: List.last(@stages),
+        became_live_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
+        detail: "live at #{report.url || site_url(ctx.site, ctx.bp)}"
+      })
 
     case Registry.transition_deployment_with_site_update(ctx.id, ctx.worker, ctx.epoch, attrs, %{
            current_deployment_id: ctx.id
@@ -2377,7 +2454,10 @@ defmodule BarkparkCloud.Sites.Deploy do
           state: :running | :succeeded | :failed,
           stages: [map()],
           url: String.t() | nil,
-          failure_reason: String.t() | nil
+          failure_reason: String.t() | nil,
+          served_port: pos_integer() | nil,
+          served_slot: String.t() | nil,
+          health_exit_code: non_neg_integer() | nil
         }
   def normalize_report(body) when is_map(body) do
     stages =
@@ -2399,11 +2479,48 @@ defmodule BarkparkCloud.Sites.Deploy do
       state: normalize_state(body, stages),
       stages: stages,
       url: nonblank(body["url"]),
-      failure_reason: nonblank(body["failure_reason"] || body["error"])
+      failure_reason: nonblank(body["failure_reason"] || body["error"]),
+      # site-spawner (node slot truth). Three MEASUREMENTS, each independently
+      # nullable and none of them invented:
+      #
+      #   * `served_port` / `served_slot` — what the box read BACK out of its own
+      #     Caddyfile after SWITCH committed. A box that predates the marker (or
+      #     a static deploy, which has no slot) sends neither key, and nil is the
+      #     honest answer for both.
+      #   * `health_exit_code` — read through `nonneg_int/1`, which answers nil
+      #     for a missing key, a JSON null, a blank string and an unparseable
+      #     value alike. NEVER `|| 0`: 0 IS SUCCESS, so a default would turn
+      #     "this box never measured health" into "its health gate passed".
+      served_port: nonneg_int(body["served_port"]),
+      served_slot: nonblank(body["served_slot"]),
+      health_exit_code: nonneg_int(body["health_exit_code"])
     }
   end
 
-  def normalize_report(_), do: %{state: :running, stages: [], url: nil, failure_reason: nil}
+  def normalize_report(_),
+    do: %{
+      state: :running,
+      stages: [],
+      url: nil,
+      failure_reason: nil,
+      served_port: nil,
+      served_slot: nil,
+      health_exit_code: nil
+    }
+
+  # An integer the box measured, or nil. A JSON `null`, a missing key, a blank
+  # string and a negative number are all "not measured" — never coerced to 0,
+  # which on `health_exit_code` is the SUCCESS code.
+  defp nonneg_int(n) when is_integer(n) and n >= 0, do: n
+
+  defp nonneg_int(s) when is_binary(s) do
+    case Integer.parse(String.trim(s)) do
+      {n, ""} when n >= 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp nonneg_int(_), do: nil
 
   defp normalize_stage(%{} = s) do
     name = s["name"] || s["stage"]
