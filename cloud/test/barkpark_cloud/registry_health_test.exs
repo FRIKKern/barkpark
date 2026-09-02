@@ -213,7 +213,10 @@ defmodule BarkparkCloud.RegistryHealthTest do
 
     test "the first beat carrying a DIFFERENT sha stamps the first-seen" do
       team = subscribed_team()
-      bp = barkpark_fixture(team, %{agent_status: "online", git_commit: String.duplicate("a", 40)})
+
+      bp =
+        barkpark_fixture(team, %{agent_status: "online", git_commit: String.duplicate("a", 40)})
+
       assert bp.git_commit_first_seen_at == nil
 
       before = DateTime.utc_now()
@@ -229,7 +232,9 @@ defmodule BarkparkCloud.RegistryHealthTest do
     test "a SAME-sha beat does NOT re-stamp — a re-stamp would be last_seen under a false name" do
       team = subscribed_team()
       sha = String.duplicate("c", 40)
-      bp = barkpark_fixture(team, %{agent_status: "online", git_commit: String.duplicate("d", 40)})
+
+      bp =
+        barkpark_fixture(team, %{agent_status: "online", git_commit: String.duplicate("d", 40)})
 
       assert {:ok, stamped} = beat(bp, sha)
       first = stamped.git_commit_first_seen_at

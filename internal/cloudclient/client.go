@@ -108,9 +108,9 @@ type Barkpark struct {
 	// as fresh; an older control plane omits the key entirely and it decodes to
 	// the same empty string, tolerantly.
 	GitCommitFirstSeenAt string `json:"git_commit_first_seen_at"`
-	TeamID       string `json:"team_id"`
-	Team         *Team  `json:"team,omitempty"`
-	InsertedAt   string `json:"inserted_at"`
+	TeamID               string `json:"team_id"`
+	Team                 *Team  `json:"team,omitempty"`
+	InsertedAt           string `json:"inserted_at"`
 
 	// Provider is the cloud the box runs on (hetzner/azure). The control plane
 	// stamps it on every row (migration default 'hetzner', Decision 9); it is
