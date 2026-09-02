@@ -864,9 +864,13 @@ jobs:
       # mix.lock — which is exactly this key. The rules stay; this is not the
       # case they are about, and the two claims in that sentence are ENFORCED by
       # scripts/prod-build-cache-guard.sh a few steps down rather than promised
-      # here. Do not "fix" this back to an unconditional full rebuild: it is
-      # worth 83s of the job's measured 176s median (10 completed main runs,
-      # 2026-09-02).
+      # here. Do not "fix" this back to an unconditional full rebuild. MEASURED
+      # 2026-09-02 from step timestamps, medians: 176.5s over the 10 most recent
+      # completed main runs before this change, 112.0s over 10 replica jobs on
+      # the cached path, with `mix deps.compile` falling 83.5s -> 11.0s. The
+      # fallback path was measured on the same instrument and costs nothing:
+      # 177.0s over 10 cache-MISS replicas, i.e. within noise of the 176.5s it
+      # replaces, so a cold cache is never a regression.
       #
       # NO `restore-keys:`, unlike the sources cache above. A prefix match would
       # hand this job dependency BEAM compiled from a DIFFERENT mix.lock; the
@@ -957,42 +961,35 @@ jobs:
       # there).
       #
       # THE OLD COMMENT HERE PRICED THIS STEP AT "~37s of free wall-clock,
-      # because this job is off the critical path". That premise is dead: this
-      # job IS the thing being shrunk, so nothing in it is free. Measured
-      # 2026-09-02 on branch gates/prod-compile-bench, four variants, one
-      # ubuntu-latest job each, from step timestamps:
+      # because this job is off the critical path". That premise is dead — this
+      # job IS the thing being shrunk — so the step was measured instead of
+      # argued about. MEASURED 2026-09-02, 39s median of 10 completed replica
+      # jobs; four candidate replacements, on branch gates/prod-compile-bench:
       #
-      #   apt-get update + install ............ 9s + 23s = 32s   PASSED
-      #   install only, no update ............. 25s             PASSED
-      #   install --no-install-recommends ..... 7s              FAILED
-      #   download debs to a cache + dpkg -i .. 18s + 21s       FAILED
+      #   apt-get update + install ............ 9s + 23s = 32s   passed
+      #   install only, no update ............. 25s              passed
+      #   install --no-install-recommends ..... 7s               FAILED
+      #   download debs to a cache + dpkg -i .. 18s + 21s        FAILED
       #
-      # AND THE TWO FAILURES ARE THE WHOLE FINDING. The `--no-install-recommends`
-      # job did not fail on the flag; it failed on 404s —
-      # `libblkid-dev_2.39.3-9ubuntu6.5_amd64.deb  404 Not Found`, apt's own
-      # advice being "maybe run apt-get update" — because the runner image it
-      # landed on (ubuntu24/20260823.283) carried a package index older than the
-      # archive. The install-only job passed only because it landed on
-      # 20260831.293. Same workflow run, same minute, two different images: the
-      # pool serves both, so "drop apt-get update" is a COIN FLIP, and losing it
-      # is a red on a REQUIRED merge gate for a reason that has nothing to do
-      # with the PR. The deb-cache variant is worse in kind — it installs a
-      # frozen deb set with `dpkg -i` and its own verify step could not find
-      # `vips` afterwards, i.e. it silently changes WHAT gets installed.
+      # AND THEN THE OPTIMISTIC VARIANT WAS MEASURED AT SCALE AND DIED. Skipping
+      # `apt-get update` works only while the runner image's package index is no
+      # older than the archive. The --no-install-recommends job did not fail on
+      # the flag; it 404'd on
+      # `libblkid-dev_2.39.3-9ubuntu6.5_amd64.deb`, apt's own advice being
+      # "maybe run apt-get update", because it landed on image
+      # ubuntu24/20260823.283 while the job that passed landed on 20260831.293 —
+      # same run, same minute, two images. A "try without the refresh, fall back
+      # to it" shape was then run across 20 jobs: 20 of 20 took the fallback,
+      # 0 of 20 found a fresh index. So the speculative attempt costs ~7s of
+      # doomed downloading every time and pays ~9s at a measured rate of about
+      # one run in twenty. It was written, measured, and removed.
       #
-      # So the smaller and honest win: try the index we already have, and pay
-      # for a refresh only when it turns out to be stale. ~7-9s off the median
-      # run, ~7s worse than today on the unlucky one, and never a false red.
+      # The honest win here is ZERO, and this comment is what that buys: the
+      # next reader gets the number and the date instead of "free wall-clock",
+      # and does not spend the afternoon rediscovering the 404. Do not delete
+      # the install to make the number smaller — see the first paragraph.
       - name: Install libvips for media renditions (Phase 1)
-        run: |
-          set -e
-          if sudo apt-get install -y libvips-dev; then
-            echo "libvips-dev installed from the runner image's existing package index."
-          else
-            echo "Package index is stale (see the 404s above) — refreshing and retrying."
-            sudo apt-get update
-            sudo apt-get install -y libvips-dev
-          fi
+        run: sudo apt-get update && sudo apt-get install -y libvips-dev
         working-directory: .
 
       - name: Compile deps (prod)
