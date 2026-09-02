@@ -244,6 +244,31 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdParagraph", "_role" => "byline", "children" => [text]}
   end
 
+  def compose_block(%{"type" => "pre-gate-badge"} = b, style) do
+    # READER-SYNTHESISED, NEVER STORED. `Content.Papers.PreGateRegister.annotate/3`
+    # inserts this block below the masthead byline of a grandfathered Paper
+    # (the 2026-09-02 ruling: published before the block gate, still refused by
+    # it) on the way into the reader / Studio block streams. It is one quiet
+    # `<p>` — eyebrow-weight caps-mono, one line, tone from the existing
+    # `--bp-tone-*` pair — with the register's `reader_behaviour` as the title
+    # so the mark explains itself on hover and in print stays a plain line.
+    # `_tone` is whitelisted here so a stray value can never mint a class;
+    # `_tucked` tells the walker the badge sits under a byline rule (the CSS
+    # pull-up applies only then, so it never fights a heading's margin).
+    tone = if Map.get(b, "tone") == "warning", do: "warning", else: "neutral"
+
+    _ = style
+
+    %{
+      "kind" => "PdParagraph",
+      "_role" => "pre-gate",
+      "_tone" => tone,
+      "_tucked" => Map.get(b, "anchor") == "byline",
+      "_title" => stringish(Map.get(b, "title", "")),
+      "children" => [stringish(Map.get(b, "label", ""))]
+    }
+  end
+
   def compose_block(%{"type" => "ingress"} = b, style) do
     # Lead paragraph — heavier weight + larger size in article mode.
     # EVERY style emits a real `<p>` (see the eyebrow clause — the email

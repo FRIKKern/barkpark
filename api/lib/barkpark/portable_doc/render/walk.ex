@@ -401,7 +401,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     style_attr = if out == [], do: "", else: ~s( style="#{Enum.join(out, ";")}")
     class_attr = if role_class, do: ~s( class="#{role_class}"), else: ""
-    "<p#{class_attr}#{style_attr}>#{inner}</p>"
+
+    # A composed hint, not author data: today only the pre-gate badge sets it
+    # (the register's reader_behaviour as the hover explanation).
+    title_attr =
+      case Map.get(n, "_title") do
+        title when is_binary(title) and title != "" -> ~s( title="#{escape_attr(title)}")
+        _ -> ""
+      end
+
+    "<p#{class_attr}#{title_attr}#{style_attr}>#{inner}</p>"
   end
 
   # Real semantic heading (the compose clause emits PdHeading exclusively under
@@ -459,6 +468,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       "byline" -> {out, inner, "bp-role-byline"}
       "ingress" -> {out, inner, "bp-role-ingress"}
       "pullquote" -> {out, inner, "bp-role-pullquote"}
+      "pre-gate" -> {out, inner, pre_gate_class(n)}
       _ -> {out, inner, nil}
     end
   end
@@ -502,9 +512,31 @@ defmodule Barkpark.PortableDoc.Render.Walk do
              "margin:22px 0"
            ], inner, nil}
 
+      # The pre-gate badge off-surface (a legacy non-article Paper streamed
+      # through the reader): the same quiet mark, inline.
+      "pre-gate" ->
+        {out ++
+           [
+             "font-family:ui-monospace,Menlo,monospace",
+             "font-size:11px",
+             "letter-spacing:0.08em",
+             "text-transform:uppercase",
+             "color:#{pal.muted}",
+             "margin:0 0 20px"
+           ], inner, nil}
+
       _ ->
         {out, inner, nil}
     end
+  end
+
+  # The pre-gate badge (compose.ex `pre-gate-badge`): family root `bp-pregate`,
+  # a tone modifier from the whitelisted `_tone`, and `--tucked` only when the
+  # badge sits directly under a byline rule (paper-surface.css owns the pull-up).
+  defp pre_gate_class(n) do
+    tone = if Map.get(n, "_tone") == "warning", do: "warning", else: "neutral"
+    tucked = if Map.get(n, "_tucked") == true, do: " bp-pregate--tucked", else: ""
+    "bp-pregate bp-pregate--#{tone}#{tucked}"
   end
 
   # Heading declarations by clamped level — the NON-ARTICLE fallback only

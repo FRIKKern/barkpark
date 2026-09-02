@@ -1,0 +1,583 @@
+{
+  "_id": "agent-flight-recorder-charter",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Goal charter · agent flight recorder",
+      "type": "eyebrow"
+    },
+    {
+      "id": "block-1",
+      "level": 1,
+      "text": "The agent flight recorder: primed, signed, recoverable",
+      "type": "heading"
+    },
+    {
+      "id": "block-2",
+      "items": [
+        "see how every agent was primed, start and finish",
+        "crash → return to initial state + review instruction",
+        "every action signed by a specific agent, not 'agents'"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "1."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " Every task claim stores a PRIMING MANIFEST (what exactly the agent started with — artifacts by hash); every close stores a self-written /compact of the session (~$0.10, measured). "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "2."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " A lapsed lease with no close = presumed crash; "
+        },
+        {
+          "type": "code",
+          "value": "bp task resume"
+        },
+        {
+          "type": "text",
+          "value": " rebuilds the initial loadout from the manifest + injects the crash brief (last pulse now-line, partial-work pointers, 'review before continuing'). "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "3."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " Every mutation carries a minted per-agent identity — history shows WHICH agent did what. All three ride existing seams; no new infrastructure."
+        }
+      ],
+      "id": "block-3",
+      "title": "TL;DR",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Pillar 1 — priming visibility (start + done)",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Moment",
+        "What is stored",
+        "Where",
+        "Cost (measured)"
+      ],
+      "id": "block-5",
+      "rows": [
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "claim"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "priming manifest: brief digest, primer artifacts by content-hash (atlas pages, doc-tier map, epic map), model+effort, worktree/branch/HEAD, memory files list, env dialect"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task doc field priming_start (~1-2 KB)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~free — assembled from what the spawner already knows"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "pulse"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "now-line + lease renew (exists today — task.pulse)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mutation_events"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "existing"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "close"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "context_compact: the agent's self-written session summary as its closing act (context already in-window → output tokens only) + final HEAD/PR refs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task doc field (~15 KB)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~$0.10 Opus / $0.06 Sonnet per close; 15 MB per 1,000 tasks"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Why hashes, not prose: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "the duel judges docked an error-free primer solely because its pages could not be verified against source. A manifest of content-hashes makes priming REPRODUCIBLE (rebuild the exact loadout) and AUDITABLE (prove what the agent saw). Caveat from the compact research: a /compact is editorial at ~52× — the tail is gone, not blurred — so the manifest points at artifacts; the compact narrates. Optionally archive the flattened transcript (800 KB, object storage, grep-able) as the lossless layer — pending the compact-vs-optical verdict."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "Pillar 2 — crash recovery",
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "type": "code",
+          "value": "claim ──▶ priming_start stored ──▶ work (pulse now-lines) ──▶ close: compact stored\n                                        │\n                                        ▼ lease lapses, no close/release\n                       ttl_sweeper: task.lease_expired  (exists today)\n                                        │\n                                        ▼\n        bp task resume <id> <worker>  (NEW)\n        ├─ rebuilds the initial loadout from priming_start (same artifacts, by hash)\n        ├─ injects the CRASH BRIEF: prior agent identity + epoch, its LAST PULSE\n        │  now-line ('what it was doing when it died'), worktree/branch/PR pointers\n        └─ instruction: REVIEW partial work first — continue or reset, never re-do blind"
+        }
+      ],
+      "id": "block-8",
+      "type": "terminal"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Detection is already built"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (lease_expired rows, ttl_sweeper). The new verbs: storing the manifest at claim, and "
+        },
+        {
+          "type": "code",
+          "value": "task resume"
+        },
+        {
+          "type": "text",
+          "value": " assembling manifest + crash brief. The crash-recovery memory from 2026-07-09 documents exactly this need — recovery today is manual archaeology."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Pillar 3 — signatures: who did what, not 'agents did things'",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Level",
+        "Mechanism",
+        "Ships"
+      ],
+      "id": "block-11",
+      "rows": [
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "v1 · attribution"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "agent identity minted at claim (name + session id + task + epoch), threaded through every mutation as actor — server-stamped, not self-reported free-form worker strings. Ledger already exists (mutation_events, audit-emit); the gap is only the identity field discipline."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "wave 1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "v2 · receipts"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "per-agent HMAC key minted at claim (the ticket-key mint/rotate/pause pattern, reused verbatim) signs each event row → tamper-evident per-agent history"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "wave 2, only if v1 proves insufficient"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Query surface: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "bp task history <id>"
+        },
+        {
+          "type": "text",
+          "value": " = per-agent timeline of one task; "
+        },
+        {
+          "type": "code",
+          "value": "bp agent history <name>"
+        },
+        {
+          "type": "text",
+          "value": " = one agent's actions across all tasks. Both are reads over the existing ledger once actor is disciplined."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-13",
+      "level": 2,
+      "text": "Decisions to make (the epic's Decide phase)",
+      "type": "heading"
+    },
+    {
+      "id": "block-14",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D1 manifest schema"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — which fields are mandatory; hash algorithm; where oversized artifacts live (task doc vs linked artifact doc vs object storage)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D2 compact-on-close policy"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — mandatory for all closes or opt-in per priority; which rubric (the /compact nine-section shape measured at 51.9× vs a task-scoped shorter one)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D3 resume semantics"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — does resume re-claim (new epoch) automatically; how many crash cycles before escalation; interaction with the pr-task-gate."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D4 identity minting"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — who mints (server at claim vs spinner at spawn); collision rules with existing free-form worker strings; migration."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D5 archive layer"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — flattened transcript stored per close (800 KB) or on-demand only; ruled by the compact-vs-optical experiment verdict."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-15",
+      "level": 2,
+      "text": "Measured costs (from the flight-recorder costing, 2026-07-17)",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Item",
+        "Per task",
+        "Per 1,000 closes"
+      ],
+      "id": "block-16",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "priming manifest"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~1-2 KB, $0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~2 MB"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "self-written compact at close"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~15 KB, ~$0.10"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "15 MB, ~$100-120"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "optional raw-transcript archive"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~800 KB, $0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0.8 GB object storage, ~€0.02/mo"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "payback"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "first retrieval: 3.8 KB compact read replaces 10-50k tokens of re-derivation"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "net negative cost in practice"
+                }
+              ],
+              "type": "strong"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-17",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Existing seams this rides: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "Tasks.claim/close (epoch CAS) · mutation_events durable-then-ack · task.pulse now-line · ttl_sweeper lease_expired · audit-emit · ticket-key identity pattern"
+        },
+        {
+          "type": "text",
+          "value": " · research: "
+        },
+        {
+          "type": "code",
+          "value": "optical-compression-findings-illustrated"
+        },
+        {
+          "type": "text",
+          "value": " · costing in the session record."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    }
+  ],
+  "source_rev": "6fa749555649eaceafad2a5c56472963",
+  "style": "article",
+  "title": "The agent flight recorder: primed, signed, recoverable"
+}

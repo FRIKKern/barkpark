@@ -1367,7 +1367,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc false
-  defdelegate paper_stream_items(blocks, dataset, scope), to: Paper
+  defdelegate paper_stream_items(blocks, dataset, scope, paper_id \\ nil), to: Paper
+
+  @doc false
+  defdelegate paper_doc_id(paper), to: Paper
 
   @doc false
   defdelegate paper_stream_block_id(block, index), to: Paper
