@@ -135,17 +135,28 @@ defmodule Barkpark.Media.Blobstore.S3 do
   #     AUTHORIZATION, not sanitisation: the sole route is
   #     `BarkparkWeb.WorkspaceController`'s `:import` action, mounted in the
   #     router's `scope "/api"` that pipes through `[:api, :require_admin]`, and
-  #     no HTTP token mint issues the `admin` permission — the mint allowlists
-  #     cap at `public-read`/`read`/`write`/`chat` (`@allowed_permissions` in
+  #     the mint allowlists for the app/session/support tiers cap at
+  #     `public-read`/`read`/`write`/`chat` (`@allowed_permissions` in
   #     `BarkparkWeb.TokenController`, `@app_token_permissions` in
   #     `BarkparkWeb.AppTokenController`, the inline `["read", "write"]` in
   #     `BarkparkWeb.PlaygroundController`, `@support_permissions` in
   #     `BarkparkWeb.FleetSupportTokenController`, `@claude_session_permissions`
-  #     in `Barkpark.Auth`) and the one HTTP-reachable personal-access-token mint
-  #     — `BarkparkWeb.AuthController`, the sole caller of
-  #     `Auth.create_personal_access_token/3` outside `Barkpark.Auth` — hardcodes
-  #     `["read"]`. A caller who can plant that path already holds admin and can
-  #     already restore an arbitrary workspace.
+  #     in `Barkpark.Auth`).
+  #
+  #     The one HTTP-reachable personal-access-token mint —
+  #     `BarkparkWeb.AuthController.create_token/2`, the sole caller of
+  #     `Auth.create_personal_access_token/3` outside `Barkpark.Auth` — no
+  #     longer hardcodes `["read"]`; #14245 made it DERIVE the tier from the
+  #     caller's OWN `Tenancy.Membership` role via
+  #     `Auth.max_pat_permissions_for_role/1`. A member still resolves to
+  #     `@pat_allowed_member_permissions` (`["read"]`); an owner/admin resolves
+  #     to `@pat_allowed_admin_permissions`, which is `["read", "write",
+  #     "admin"]` today. So "no HTTP mint issues `admin`" is NOT the bound here
+  #     any more — narrowing that self-mint is the open PR #14933's subject, not
+  #     this module's. What still bounds THIS clause is unchanged and
+  #     sufficient: `:require_admin` demands the `admin` permission, so a caller
+  #     who can plant that path already holds admin standing and can already
+  #     restore an arbitrary workspace.
 
   @impl true
   # `source_path` is the `%Plug.Upload{path: …}` temp file chosen by Plug —
