@@ -158,7 +158,12 @@ jobs:
           # Full history: the PR base sha must be resolvable locally for the
           # three-dot diff below. A shallow checkout makes `git cat-file -e`
           # miss it, which this step treats as a hard failure. Measured cost of
-          # depth 0 over depth 1 in this repo: ~3 seconds.
+          # depth 0 in this repo (2026-09-02, 75-run sample): 22-27 s for the
+          # checkout step, versus 5-9 s for a default shallow one — this
+          # Dispatch job's own checkout was 22 s, of which "Fetching the
+          # repository" 21 s. The "~3 seconds" this comment used to claim was
+          # stale by ~6x. A partial (`filter: blob:none`) clone is the fix and
+          # is owned elsewhere; do not delete `fetch-depth: 0` to chase it.
           fetch-depth: 0
 
       - id: sets
@@ -529,9 +534,15 @@ jobs:
           POSTGRES_DB: barkpark_test
         ports:
           - 5432:5432
+        # --health-interval 2s, not the 10s default: `Waiting for all services
+        # to be ready` was measured at 15.5 s (elixir Test) and 13.6 s (cloud
+        # test) while pg_isready answers in ~3 s — that wait is poll
+        # granularity, not postgres. Same health command, polled sooner.
+        # (Comments cannot live inside the folded `>-` block below: they would
+        # be passed to docker as literal arguments.)
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
           --health-retries 5
     env:
@@ -762,7 +773,13 @@ jobs:
         # See README "Phase 7: Bokbasen integration" and
         # docs/spec/bokbasen-api-contract.md "How to test" for details.
         # Do NOT add a CI job that requires real Bokbasen credentials.
-        run: mix test
+        # `--slowest 50` is OUTPUT ONLY (ExUnit prints the 50 slowest tests
+        # after the run; it changes no selection, no exit code, no timing).
+        # It exists because the per-module cost of this 900 s suite is
+        # UNMEASURED: the 43 stalls >=5 s that make up ~56% of the wall time
+        # are today located only by log timestamps, with the owning test
+        # inferred from adjacent lines. This names them.
+        run: mix test --slowest 50
 
       - name: OpenAPI drift check (docs/openapi.json must match the manifest)
         # Regenerates the spec from the live capabilities manifest and fails if
