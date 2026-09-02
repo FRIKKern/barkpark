@@ -1147,6 +1147,21 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  # THE INSTANCE-OPERATOR gate (task-c7e2b87f1bbca815). Layered ON TOP of
+  # `:require_admin`, never instead of it: `pipe_through([:api, :require_admin,
+  # :require_platform_operator])` keeps the `admin` bit NECESSARY (and keeps an
+  # anonymous caller on RequireToken's 401) and adds a narrower, config-backed
+  # allowlist on the seven INSTANCE-GLOBAL route groups the census
+  # (`require_admin_route_census_test.exs`, THE RULING rows 1-7) found have no
+  # tenant row to confine them to. UNSET allowlist = pass-through (legacy);
+  # armed = allowlist-only, fail closed. RequireAdmin itself is UNTOUCHED, and
+  # so is every workspace-scoped admin route -- those re-bind through
+  # `Tenancy.Auth.workspace_admin?/2`, and an instance allowlist in front of
+  # them would lock tenant admins out of their own workspaces.
+  pipeline :require_platform_operator do
+    plug(BarkparkWeb.Plugs.RequirePlatformOperator)
+  end
+
   # Bare /studio and / redirect to the session-resolved SCOPED Studio
   # (P3 cutover — see PageController.redirect_to_studio for the
   # resolution rule). The :soft_token pipeline supplies the optional
@@ -2042,7 +2057,7 @@ defmodule BarkparkWeb.Router do
 
   # Incident management — admin only.
   scope "/v1/status", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
     post("/incidents", StatusController, :create_incident)
     post("/incidents/:id/resolve", StatusController, :resolve_incident)
   end
@@ -2503,14 +2518,14 @@ defmodule BarkparkWeb.Router do
   # `/v1/plugins/<slug>/…` plugin-contributed `:api` / `:ingest` route buckets
   # nor the `/v1/plugins/settings/:plugin_name` CRUD scope below.
   scope "/v1/plugins", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
 
     get("/", PluginsController, :index)
   end
 
   # ── Plugin settings — admin-only encrypted-JSON CRUD ───────────────────
   scope "/v1/plugins/settings", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
 
     get("/:plugin_name", PluginSettingsController, :show)
     put("/:plugin_name", PluginSettingsController, :update)
@@ -2520,7 +2535,7 @@ defmodule BarkparkWeb.Router do
   # ── Cloud run-secrets — admin-only encrypted store ─────────────────────
   # GET /:name REVEALS the unmasked value (audited); the list stays masked.
   scope "/v1/secrets", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
 
     get("/", SecretController, :index)
     get("/:name/audit", SecretController, :audit)
@@ -2560,7 +2575,7 @@ defmodule BarkparkWeb.Router do
   # box back to the idle blue/green slot's recorded sha (same apply gate +
   # single-flight; sync preflight → async Port). See Barkpark.SelfUpdate.Runner.
   scope "/v1/admin", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
 
     post("/self-update", SelfUpdateController, :trigger)
     get("/self-update", SelfUpdateController, :status)
@@ -3162,7 +3177,7 @@ defmodule BarkparkWeb.Router do
   # invisible to the OpenAPI drift gate (mirrors DELETE above, also absent from
   # the spec) — zero drift trip, zero local-OOM spec regen (charter D22).
   scope "/api", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_admin, :require_platform_operator])
 
     post("/playground", PlaygroundController, :provision)
   end
@@ -3209,6 +3224,20 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_admin])
 
     get("/workspaces/:workspace_slug/export", WorkspaceController, :export)
+  end
+
+  # ── Bundle IMPORT — the operator half of the transfer pair (RULING row 7) ──
+  # Split out of the export scope above onto the INSTANCE-OPERATOR pipeline
+  # (task-c7e2b87f1bbca815). The asymmetry documented above is exactly why:
+  # `export/2` binds to the URL's workspace with `TenancyAuth.workspace_admin?/2`
+  # and stays a tenant-admin verb, while `import/2` IGNORES its `workspace_slug`
+  # and takes its target from the uploaded bundle's manifest -- there is no
+  # victim-selecting parameter to bind, so the only honest narrowing is the
+  # instance-operator allowlist. Same admin gate underneath, same 401/403
+  # surface; on an UNSET allowlist this is byte-identical to the old behaviour.
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_admin, :require_platform_operator])
+
     post("/workspaces/:workspace_slug/import", WorkspaceController, :import)
   end
 
