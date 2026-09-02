@@ -72,6 +72,14 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
       {"malformed", {:error, :malformed}, "malformed", 400, []},
+      # Same registered `malformed` code, one step narrower: a block list whose
+      # element is not an object. It rides `malformed` on purpose (a request-body
+      # SHAPE error, not a schema validation failure), so known_codes/0 and the
+      # OpenAPI Error.code enum stay unchanged — and it carries `details` naming
+      # every offending path, which is the only way it differs from the row above.
+      {"malformed_blocks",
+       {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}},
+       "malformed", 400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
