@@ -826,9 +826,19 @@ defmodule Barkpark.StudioChat do
   Attach a tool's output to its persisted tool row (matched by the
   metadata tool_use_id). `:noop` when no row matches — a result for a tool we
   never persisted must not raise.
+
+  `error?` is the wire `tool_result.is_error` fact. It is stamped as
+  `metadata.tool_error` so a REPLAYED row can draw ✗ instead of ✓ without
+  re-parsing the output — the provenance half of the settle-gated gutter glyph
+  (`ChatToolRenderer.settle_state/1`, mirrored by the Go TUI's `toolRowGlyph`).
+  A non-error result never writes the key, so an untouched row's metadata is
+  byte-identical to what it was before this seam existed.
   """
-  def attach_tool_result(session_id, tool_use_id, output)
-      when is_binary(session_id) and is_binary(tool_use_id) and is_binary(output) do
+  def attach_tool_result(session_id, tool_use_id, output, error? \\ false)
+
+  def attach_tool_result(session_id, tool_use_id, output, error?)
+      when is_binary(session_id) and is_binary(tool_use_id) and is_binary(output) and
+             is_boolean(error?) do
     row =
       Repo.one(
         from(m in Message,
@@ -844,10 +854,54 @@ defmodule Barkpark.StudioChat do
         :noop
 
       %Message{} = m ->
+        meta = Map.put(m.metadata || %{}, "output", output)
+        meta = if error?, do: Map.put(meta, "tool_error", true), else: meta
+
         m
-        |> Ecto.Changeset.change(metadata: Map.put(m.metadata || %{}, "output", output))
+        |> Ecto.Changeset.change(metadata: meta)
         |> Repo.update()
     end
+  end
+
+  @doc """
+  SETTLE every unsettled tool row of a session — the durable half of the
+  settle-gated gutter glyph, called by the Recorder on the turn's terminal
+  `result` frame.
+
+  Stateless BY DESIGN: a result frame means the turn ended, and every earlier
+  turn's rows were already stamped by their own result frame, so "settle all
+  tool rows of this session that are not yet settled" is exactly "settle this
+  turn's rows" — without the Recorder holding a per-turn id list that a restart
+  would lose. One UPDATE, no read-modify-write race with `attach_tool_result/4`
+  (that seam writes `output`/`tool_error`; this one writes `turn_settled`, and
+  `jsonb_set` merges rather than replaces).
+
+  The already-settled rows are excluded in the WHERE, so a second result frame
+  (or a session with a long settled history) writes ZERO rows. Returns the
+  number of rows settled.
+  """
+  @spec settle_tool_rows(String.t()) :: non_neg_integer()
+  def settle_tool_rows(session_id) when is_binary(session_id) do
+    {count, _} =
+      Repo.update_all(
+        from(m in Message,
+          where:
+            m.session_id == ^session_id and m.role == "tool" and
+              fragment("coalesce(?->>'turn_settled', '') <> 'true'", m.metadata),
+          update: [
+            set: [
+              metadata:
+                fragment(
+                  "jsonb_set(coalesce(?, '{}'::jsonb), '{turn_settled}', 'true'::jsonb)",
+                  m.metadata
+                )
+            ]
+          ]
+        ),
+        []
+      )
+
+    count
   end
 
   @doc """
