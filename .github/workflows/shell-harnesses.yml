@@ -757,10 +757,19 @@ jobs:
         # Harness FIRST, subject second — the house selftest-first idiom. A gate
         # that has lost the ability to fail must red before its green is read.
         run: bash scripts/deploy-concurrency-check.sh
-      # The same eviction shape on the MAIN runs of the two gate workflows
+      # The same eviction shape on the MAIN runs of the gate workflows
       # (task-b04364c216f877e6): 37 of 40 main elixir runs since 10:27Z on
       # 2026-09-02 were cancelled by the next merge. Per-sha group on main.
-      - name: main runs of elixir.yml + doc-gates.yml keep one group per main sha
+      #
+      # Harness FIRST, subject second. The selftest matters more here than it
+      # looks: this gate USED to read a hardcoded two-file corpus and reported
+      # "2 workflow(s) keep one group per main sha" while go-tests.yml carried
+      # the pre-fix stanza on main (13 of its last 20 main runs cancelled). It
+      # now DISCOVERS its corpus, and the selftest is what proves the discovery
+      # still reds on a workflow nobody added to a list.
+      - name: the main-run gate can still LOSE (discovery, both directions)
+        run: bash scripts/main-run-concurrency-check.sh --selftest
+      - name: every main-triggered workflow keeps one group per main sha
         run: bash scripts/main-run-concurrency-check.sh
 
   console-path-ratchet:

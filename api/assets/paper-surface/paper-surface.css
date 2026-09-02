@@ -103,7 +103,28 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
   --bp-body-tracking: var(--tok-reading-body-tracking);
-  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
+  /* THE DISPLAY SIZE IS VIEWPORT-CLAMPED, and the token is still the ceiling.
+     `--tok-reading-h1-size` (40px) is sized for the 580px reading column. On a
+     390px phone the column is 358px and a nine-word title wrapped to FIVE lines
+     of 40px display type — measured on /papers/heggemsnes-act, headless
+     Chromium at 390x844: 40px -> 5 lines, 34px -> 4, 28px -> 3. A title that
+     costs a third of the first screen is not a title, it is a wall.
+
+     `clamp(28px, 8vw, <token>)`: the token is the MAX, so every width at or
+     above 500px (40 / 0.08) renders the authored 40px and desktop is untouched
+     byte-for-byte. Below it the display size tracks the viewport the column
+     tracks — 31.2px at 390 (4 lines), floor 28px at 350 and under. The floor is
+     not a taste number: 28px is the largest size that still reads as display
+     type against the 18px body while fitting the title inside four lines.
+
+     ON THE TOKEN, NOT ON A SHELL. `.bp-paper-surface h1` is byte-mirrored into
+     root.html.heex and paper-editor/src/styles.css and view_edit_parity_test
+     compares it property-by-property, so a media override per shell would have
+     to be written three times and kept in sync by hand — and root.html.heex is
+     forbidden from DEFINING a `--bp-*` token at all (stylesheet_test.exs:85).
+     Clamping the token instead moves the reader and both editor surfaces
+     together, which is what parity means. */
+  --bp-h1-size: clamp(28px, 8vw, var(--tok-reading-h1-size));   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);   --bp-h2-tracking: var(--tok-reading-h2-tracking);
   --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
@@ -1430,36 +1451,50 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
 
 .bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
-/* THE VALUE MUST BE ABLE TO BREAK, AND `anywhere` IS THE ONLY THING THAT WORKS.
-   `.bp-stat__v` is the largest type in the sheet — 1.7rem mono — and it sits in
-   a cell that is far narrower than a phone screen. The `.bp-stats` grid below
-   is `repeat(auto-fit, minmax(140px, 1fr))`, so at a 390px viewport the reading
-   column (358px of content) makes exactly two ~179px tracks. Measured in
-   headless Chromium: a value of twelve characters with no break opportunity
-   fills that track and pushes the DOCUMENT past the viewport, and from there
-   every extra character costs another ~16px of sideways page scroll.
+/* A VALUE IS ONE THING AND MUST RENDER AS ONE THING — `nowrap`, a size that
+   fits, and a contained overflow.
 
-   Twelve characters is not an exotic input, it is a formatted number. Neither
-   `$1,234,567.89` nor `1 234 567,89` offers a single break opportunity —
-   comma, period and the U+202F narrow no-break space used for digit grouping
-   all refuse one — and a stats row formats every cell the same way, so the
-   second cell is already at the screen edge when it starts. A stat block whose
-   job is to show a large figure could not show a large figure on a phone.
+   `.bp-stat__v` is the largest type in the sheet and it sits in a cell far
+   narrower than a phone screen: `.bp-stats` is `repeat(auto-fit, minmax(140px,
+   1fr))`, so at a 390px viewport the 358px reading column makes exactly two
+   ~178px tracks, ~149px of them inside the cell's padding.
 
-   `anywhere`, not `break-word`: `.bp-stat` is `inline-flex`, i.e. shrink-to-fit,
-   and outside the grid it sizes itself from its content's intrinsic width.
-   `break-word` never reports a smaller intrinsic width, so it fixes the grid
-   case and leaves the standalone stat exactly as broken — measured, both arms.
-   Only `anywhere` participates in min-content sizing, which is precisely the
-   property needed here and precisely the property that makes it the wrong
-   choice for the headings elsewhere in this sheet.
+   WHAT WAS WRONG. The rule used to read `overflow-wrap: anywhere` at a flat
+   1.7rem, which stops the page scrolling sideways by breaking the value. Both
+   halves of that break are wrong, and they are different wrongs:
 
-   Wrapping a number is not lovely. Truncating one is a lie, and `overflow:
-   hidden; text-overflow: ellipsis` — the clamp the nowrap labels in this sheet
-   use — would present a shortened figure as if it were the whole figure. A
-   number that wraps is still readable; a number silently missing its last
-   digits is not. */
-.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+     * `anywhere` breaks INSIDE a number. `$1,234,567.89` has no break
+       opportunity of its own, so `anywhere` splits it mid-digit — the reader
+       gets `$1,234,56` over `7.89` and has to reassemble a figure by eye.
+     * ordinary wrapping breaks a compound value at its spaces. Measured on
+       /papers/heggemsnes-act at 390x844, `8 min 10 s` rendered as `8 min 10`
+       over `s`, which reads as two numbers.
+
+   WHAT REPLACES IT, in three parts that only work together:
+
+     * `white-space: nowrap` — a value never breaks, at a space or inside a
+       digit run. This is the actual contract.
+     * `font-size: clamp(1.15rem, 5.6vw, 1.7rem)` — the size is what makes
+       nowrap affordable. The 1.7rem MAX is reached at a 486px viewport, so
+       every desktop width renders exactly the size this rule always rendered
+       (measured: the 1280 and 1920 rig baselines are unmoved). Below it the
+       value tracks the cell that shrank: 21.8px at 390, where `8 min 10 s`
+       measures 135px inside a 149px cell — measured in headless Chromium, the
+       same way the old `anywhere` threshold was.
+     * `max-width: 100%; overflow-x: auto` — the safety net for the value no
+       clamp can size for. A figure longer than its cell scrolls INSIDE the
+       cell instead of growing the document, so the page still never rocks
+       sideways; that guarantee was `anywhere`'s job and it does not lapse.
+
+   NOT AN ELLIPSIS, still. Several nowrap labels in this sheet pair with
+   `overflow: hidden; text-overflow: ellipsis`. That clamp is wrong for a
+   figure: it presents a shortened number as though it were the whole number.
+   `overflow-x: auto` hides no digit — every one stays reachable — which is why
+   it is the containment that may be used here and the ellipsis is not.
+
+   The arithmetic above is asserted, not remembered:
+   api/assets/paper-editor/src/__narrow_stat_guards.test.mjs. */
+.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: clamp(1.15rem, 5.6vw, 1.7rem); font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; white-space: nowrap; max-width: 100%; overflow-x: auto; }
 /* The label is prose in a 179px track. `break-word` is enough here — the label
    never sizes its own box (the grid track does), so the min-content behaviour
    `.bp-stat__v` needs is not required, and the weaker declaration is the one

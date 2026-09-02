@@ -183,7 +183,15 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     "live/studio/connectors_live.ex" => 2,
     # ConfirmModal is invoked at components.ex:940 — after the editor shell
     # closes (:913) and before `</.pane_layout>` (:1143): a layout sibling.
-    "components/confirm_modal.ex" => 1
+    "components/confirm_modal.ex" => 1,
+    # The Cmd/Ctrl+K session palette overlay. ChatLive is its own full-page
+    # route (router.ex "/chat" and "/chat/:session_id") and renders NEITHER
+    # `.pane-layout` NOR `.editor-panel` — grep both in chat_live.ex for zero
+    # hits — so, exactly like connectors_live.ex above, no panel containing
+    # block can reach it and the D33 carve-out does not apply. The overlay is a
+    # full-viewport scrim (inset: 0) that must cover the whole page, which is
+    # why it is fixed rather than absolute.
+    "live/studio/chat_live.ex" => 1
   }
 
   # Shipped studio JS that emits `position: fixed` from script. Each MUST portal
