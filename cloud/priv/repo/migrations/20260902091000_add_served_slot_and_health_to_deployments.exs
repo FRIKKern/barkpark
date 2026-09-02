@@ -41,6 +41,13 @@ defmodule BarkparkCloud.Repo.Migrations.AddServedSlotAndHealthToDeployments do
 
   ## Why this ALTER is safe on the live table
 
+  `add_if_not_exists` rather than `add`: this migration first shipped under
+  version 20260901120000, which collided with #14853's
+  `finalize_lapsed_trial_subscriptions` (Ecto refuses a duplicated version), so
+  it was re-stamped to 20260902091000. Any database that already ran the old
+  version has the three columns; the guarded add makes the re-stamp a no-op
+  there instead of a failed ALTER.
+
   All three columns are NULLABLE with NO default, so this is a catalog-only
   `ALTER` — no table rewrite, no per-row work, and the ACCESS EXCLUSIVE lock is
   held for a catalog update rather than a scan of the ~45 MB `deployments`
@@ -58,18 +65,18 @@ defmodule BarkparkCloud.Repo.Migrations.AddServedSlotAndHealthToDeployments do
       # NULL on every static deploy (a symlink swap has no slot), on any node
       # build that died before SWITCH, and whenever the served port matched
       # neither of this site's allocated slots.
-      add :slot, :string
+      add_if_not_exists :slot, :string
 
       # The loopback port that slot answers on — the literal read out of the
       # site's Caddy marker block. Independently nullable from `slot`: the port
       # is the stronger fact (it is what the Caddyfile carries), the slot is a
       # NAME derived from it against `sites.port_base`.
-      add :port, :integer
+      add_if_not_exists :port, :integer
 
       # The HEALTH stage's exit code: 0 (ran, passed), 14 (ran, failed — the
       # cross-engine HEALTH convention), or NULL (never measured). NO DEFAULT,
       # deliberately: see the moduledoc.
-      add :health_exit_code, :integer
+      add_if_not_exists :health_exit_code, :integer
     end
   end
 end

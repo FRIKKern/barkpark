@@ -13064,7 +13064,7 @@ defmodule BarkparkCloud.Web.Router do
       #     it as `*int` and renders nil as an explicit dash.
       #
       # All three are nil on every static row, on every container row, and on
-      # every row written before the 20260901120000 migration — honestly unknown,
+      # every row written before the 20260902091000 migration — honestly unknown,
       # never backfilled.
       slot: d.slot,
       port: d.port,
