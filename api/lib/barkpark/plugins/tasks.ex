@@ -826,7 +826,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Optimistic concurrency guard; a stale value is refused 409 fenced_off."
           },
           %{
             name: "lifecycle_status",
@@ -921,7 +922,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Optimistic concurrency guard; a stale value is refused 409 fenced_off."
           }
         ],
         flags: [],
@@ -957,7 +959,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "observed_epoch",
             required: true,
             type: "int",
-            summary: "Claim epoch returned at claim time (same fence as close)."
+            summary:
+              "The CURRENT claim epoch — NOT necessarily the one returned at claim time: every `bp task pulse` ADVANCES it, so a stored claim-time epoch is stale after the first heartbeat. Re-read it from the pulse receipt, or with `bp task get <id>` -> .doc.claim.epoch. Same fence as close; a stale value is refused 409 fenced_off."
           }
         ],
         flags: [

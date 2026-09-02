@@ -478,6 +478,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
 		emitMovementDoctrine(out, cmd)
 		emitHelpHints(out, respBody)
+		// The lease a claim/next/pulse just granted or renewed — one line
+		// carrying the epoch, the absolute UTC expiry and the length in
+		// minutes. Silent on every envelope without a `lease` object, so no
+		// other verb's receipt changes (tasks_lease.go).
+		emitClaimLease(out, respBody)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
