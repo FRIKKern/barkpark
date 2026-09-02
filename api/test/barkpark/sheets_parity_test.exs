@@ -640,7 +640,16 @@ defmodule Barkpark.SheetsParityTest do
            "#{rel} ERROR_VALUES drifted from Engine.error_values/0.\n" <>
              "  only in the TS mirror: #{inspect(codes -- Engine.error_values())}\n" <>
              "  only in the engine:    #{inspect(Engine.error_values() -- codes)}\n" <>
-             "Update the mirror in the SAME PR as the engine change."
+             "Engine.error_values/0 is the source of truth; the TS mirror follows it. " <>
+             "The fix is to edit #{rel} until it matches the engine, in the SAME PR " <>
+             "as the engine change.\n" <>
+             "Do NOT make this green by deleting the code from Engine.error_values/0, " <>
+             "by trimming this assertion, or by moving the literal somewhere the " <>
+             "extractor stops finding it. This is the ONLY guard on that file that " <>
+             "runs in a context which CAN block a merge — the package's own vitest " <>
+             "runs under js-tests, which publishes no required check, so it fires and " <>
+             "is ignored. Silencing it here ships error cells as plain black text, " <>
+             "which is exactly what #15374 did for about a day."
   end
 
   # Pull the `ERROR_VALUES = new Set([...])` members out of a TS source file.
