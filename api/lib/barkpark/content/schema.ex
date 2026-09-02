@@ -84,14 +84,7 @@ defmodule Barkpark.Content.Schema do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
-    # `include_global: true` makes a workspace-scoped read ALSO surface shared
-    # global (nil-workspace) schemas — the Studio desk wants the workspace's own
-    # types plus the shared/plugin base layer (see Barkpark.Structure.build/2).
-    # The default stays the strict, fail-closed workspace-or-global read.
-    scope_fun =
-      if Keyword.get(opts, :include_global, false),
-        do: &scope_to_workspace_including_global/3,
-        else: &scope_to_workspace_or_global/3
+    scope_fun = workspace_scope_fun(opts)
 
     SchemaDefinition
     |> scope_schema_to_dataset(dataset, opts)
@@ -427,12 +420,57 @@ defmodule Barkpark.Content.Schema do
     |> Enum.uniq()
   end
 
+  @doc """
+  Deterministic 16-char hex digest of a dataset's schema CATALOG — `{row count,
+  latest updated_at}` over exactly the rows `list_schemas/2` would return for
+  the same `opts`. Served as `datasetSchemaHash` / `schemaHash` so an SDK can
+  tell whether its generated types are stale.
+
+  It applies BOTH confinements `list_schemas/2` applies — the dataset filter AND
+  `workspace_scope_fun/1` — because either one alone leaks (task-09ea9f28764a8790).
+  `scope_to_dataset/3` narrows authoritatively only when the dataset STRING
+  resolves to a `dataset_id`; when it does not, it falls back to the bare
+  `dataset == <slug>` STRING. That fallback is the NORMAL case on every FLAT
+  route: `AssignDefaultScope` deliberately declines to pair a non-Default
+  workspace with the Default project, so the opts carry a `workspace_id` with no
+  `project_id` and `resolve_read_dataset_id/2` returns nil. Without the
+  workspace clause the digest then spanned EVERY workspace's same-named dataset,
+  making the value a cross-tenant change oracle: any tenant's admin could watch
+  another tenant's schema count and mtime move.
+
+  A nil `workspace_id` (an opts-less internal caller) still reads globally —
+  `scope_to_workspace_or_global/3`'s nil arm is the explicit unscoped read, so
+  in-process callers are untouched.
+  """
   def schema_hash_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
+    scope_fun = workspace_scope_fun(opts)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     SchemaDefinition
     |> scope_to_dataset(dataset, opts)
+    |> scope_fun.(workspace_id, project_id)
     |> select([s], {count(s.id), max(s.updated_at)})
     |> Repo.one()
     |> hash_schema_tuple()
+  end
+
+  # THE one workspace-confinement rule for the schema catalog, shared by
+  # `list_schemas/2` (the rows) and `schema_hash_for_dataset/2` (their digest).
+  #
+  # Extracted rather than copied on purpose: this task exists because the hash
+  # applied a STRICT SUBSET of the confinement its own catalog applied, and two
+  # inline copies of the rule is how that gap reopens. Sharing the selector
+  # makes "the hash covers exactly the rows the array covers" structural.
+  #
+  # `include_global: true` makes a workspace-scoped read ALSO surface shared
+  # global (nil-workspace) schemas — the Studio desk wants the workspace's own
+  # types plus the shared/plugin base layer (see Barkpark.Structure.build/2).
+  # The default stays the strict, fail-closed workspace-or-global read.
+  defp workspace_scope_fun(opts) do
+    if Keyword.get(opts, :include_global, false),
+      do: &scope_to_workspace_including_global/3,
+      else: &scope_to_workspace_or_global/3
   end
 
   @doc """

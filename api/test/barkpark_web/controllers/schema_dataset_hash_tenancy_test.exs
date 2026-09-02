@@ -107,6 +107,23 @@ defmodule BarkparkWeb.SchemaDatasetHashTenancyTest do
     schema.name
   end
 
+  # The FLAT route (task-09ea9f28764a8790). No /w/:ws/p/:project in the path:
+  # `DeriveWorkspaceFromToken` resolves the workspace from the BEARER TOKEN, and
+  # `AssignDefaultScope` deliberately declines to pair a non-Default workspace
+  # with the Default project — so the opts carry a `workspace_id` with NO
+  # `project_id`, `resolve_read_dataset_id/2` returns nil, and the dataset filter
+  # degrades to the bare `dataset == "production"` STRING. That is the exact
+  # configuration in which the digest used to span every tenant.
+  defp read_flat_hash(conn) do
+    body =
+      conn
+      |> get("/v1/schemas/#{@dataset}")
+      |> json_response(200)
+
+    assert body["datasetSchemaHash"] =~ ~r/^[0-9a-f]{16}$/
+    body["datasetSchemaHash"]
+  end
+
   defp read_hash(conn, ws_b, proj_b) do
     body =
       conn
@@ -156,5 +173,74 @@ defmodule BarkparkWeb.SchemaDatasetHashTenancyTest do
     refute Enum.any?(names, &String.starts_with?(&1, "default_type_")),
            "the schemas array leaked a Default-workspace type — this control must stay " <>
              "GREEN on both sides of the fix; a red here means the fence moved"
+  end
+
+  describe "FLAT /v1/schemas/:dataset — the workspace-only scope" do
+    setup do
+      # A THIRD tenant, so the proof is not Default-specific: the old digest was
+      # a bare `dataset == "production"` count, which any workspace could move.
+      ws_c = create_workspace!()
+      proj_c = create_project!(ws_c)
+      scope_c = [workspace_id: ws_c.id, project_id: proj_c.id]
+      seed_schema!(scope_c, "c")
+
+      %{scope_c: scope_c}
+    end
+
+    test "hash MOVES when B adds a schema", %{conn: conn, scope_b: scope_b} do
+      before = read_flat_hash(conn)
+
+      seed_schema!(scope_b, "b")
+
+      refute read_flat_hash(conn) == before,
+             "the flat datasetSchemaHash did not move after workspace B added a schema " <>
+               "to its OWN `#{@dataset}` — the caller's own edits must be exactly what " <>
+               "moves this value"
+    end
+
+    test "hash is DEAF to a DEFAULT-workspace-only edit",
+         %{conn: conn, default_scope: default_scope} do
+      before = read_flat_hash(conn)
+
+      seed_schema!(default_scope, "default")
+
+      assert read_flat_hash(conn) == before,
+             "the flat datasetSchemaHash moved for workspace B when only the DEFAULT " <>
+               "workspace added a schema — schema_hash_for_dataset/2 applied only the " <>
+               "dataset filter, which degrades to the bare `dataset` STRING on the flat " <>
+               "path, so the digest spans every workspace's same-named dataset"
+    end
+
+    test "hash is DEAF to a THIRD workspace's edit (the oracle is not Default-specific)",
+         %{conn: conn, scope_c: scope_c} do
+      before = read_flat_hash(conn)
+
+      seed_schema!(scope_c, "c")
+
+      assert read_flat_hash(conn) == before,
+             "the flat datasetSchemaHash moved for workspace B when unrelated workspace C " <>
+               "added a schema — any tenant could watch any other tenant's schema count " <>
+               "and mtime move"
+    end
+
+    test "control: the flat `schemas` array is B's only, on both sides of the fix",
+         %{conn: conn, b_first: b_first} do
+      names =
+        conn
+        |> get("/v1/schemas/#{@dataset}")
+        |> json_response(200)
+        |> Map.get("schemas")
+        |> Enum.map(& &1["name"])
+
+      assert b_first in names
+
+      refute Enum.any?(
+               names,
+               &(String.starts_with?(&1, "default_type_") or String.starts_with?(&1, "c_type_"))
+             ),
+             "the flat schemas array leaked another workspace's type — list_schemas/2's " <>
+               "confinement is the thing the hash is being aligned WITH, so a red here " <>
+               "invalidates the premise of the fix"
+    end
   end
 end
