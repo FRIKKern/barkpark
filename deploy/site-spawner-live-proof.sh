@@ -17,6 +17,12 @@
 #   bash deploy/site-spawner-live-proof.sh --self-check # offline; proves every red fires
 #   bash deploy/site-spawner-live-proof.sh --prebuilt --slug <site> [--dist <dir>]
 #                                                       # the off-box build lane, ssh-free
+#   bash deploy/site-spawner-live-proof.sh --accented --slug <site>
+#                                                       # THE UNICODE TAIL: an accented
+#                                                       # dist, generated from numeric
+#                                                       # codepoint escapes, packed by our
+#                                                       # own bp, fetched at its
+#                                                       # percent-encoded path
 #
 # WHY THE PURE `judge_*` LAYER
 #   Fetching and judging are deliberately split. Every assertion is a pure
@@ -54,6 +60,9 @@
 #   50 DEPLOY_FAILED                — the deployment never reached live
 #   51 DEPLOY_STAGES_INCOMPLETE     — the six stages did not all land, in order
 #   52 PREBUILT_BUILD_NO_TIMINGS    — the payload carried NO per-stage durations to compare
+#   53 ACCENTED_FIXTURE_BAD         — the accented fixture did not generate in the normal forms it asserts
+#   54 ACCENTED_PATH_NOT_200        — the percent-encoded accented path does not serve its own bytes
+#   55 ACCENTED_CONTROL_NOT_MISS    — a deliberately-missing path answered 200, so no 200 on this site proves anything
 #   60 LIVE_NOT_200                 — the live URL does not serve
 #   61 LIVE_BUILD_ID_MISMATCH       — served bp-build-id != the deployment's build_id
 #   62 LIVE_CONTENT_EMPTY           — bp-content-rev or bp-doc-id empty (a vacuous green page)
@@ -121,6 +130,9 @@ E_PB_BASE_BROKEN=49
 E_DEPLOY_FAILED=50
 E_DEPLOY_STAGES=51
 E_PB_BUILD_NO_TIMINGS=52
+E_ACC_FIXTURE=53
+E_ACC_NOT_200=54
+E_ACC_CONTROL=55
 E_LIVE_NOT_200=60
 E_LIVE_BUILD_MISMATCH=61
 E_LIVE_CONTENT_EMPTY=62
@@ -153,6 +165,9 @@ codename() {
     "$E_DEPLOY_FAILED") echo "DEPLOY_FAILED" ;;
     "$E_DEPLOY_STAGES") echo "DEPLOY_STAGES_INCOMPLETE" ;;
     "$E_PB_BUILD_NO_TIMINGS") echo "PREBUILT_BUILD_NO_TIMINGS" ;;
+    "$E_ACC_FIXTURE") echo "ACCENTED_FIXTURE_BAD" ;;
+    "$E_ACC_NOT_200") echo "ACCENTED_PATH_NOT_200" ;;
+    "$E_ACC_CONTROL") echo "ACCENTED_CONTROL_NOT_MISS" ;;
     "$E_LIVE_NOT_200") echo "LIVE_NOT_200" ;;
     "$E_LIVE_BUILD_MISMATCH") echo "LIVE_BUILD_ID_MISMATCH" ;;
     "$E_LIVE_CONTENT_EMPTY") echo "LIVE_CONTENT_EMPTY" ;;
@@ -534,6 +549,50 @@ judge_site_base() {
   return 0
 }
 
+# ---- the accented lane's judges (the Unicode tail, charter D109/D116) --------
+#
+# WHY THE CONTROL IS PART OF THE ORACLE, NOT A COURTESY. Through the real Caddy
+# on the box EVERY miss on a spawned static site answers 503, not 404 (measured;
+# the cause was never derived — task ssw11-bl-static-miss-503-not-404). So a
+# reader who sees a non-200 on an accented path cannot tell "the tar mangled the
+# name" from "this site answers 503 to everything", and — the direction that
+# actually matters — a 200 on the accented path proves the name survived ONLY if
+# a path that certainly does not exist gets a different answer. Without the
+# control, a site whose server answered 200 to literally any path would produce
+# an identical green. The control is asserted FIRST for that reason.
+
+# judge_accented_control <http_code>
+# A path no artifact ever contained must NOT answer 200. Its actual code (503 on
+# this box, 404 elsewhere) is reported by the caller, not judged here: what makes
+# the accented 200 mean something is only that the two differ.
+judge_accented_control() {
+  [ "${1:-}" != "200" ] || return "$E_ACC_CONTROL"
+  return 0
+}
+
+# judge_accented_hit <http_code> <marker_found>
+# The percent-encoded accented path must answer 200 AND serve the fixture's own
+# bytes. A 200 alone is not enough: Caddy's SPA/index fallbacks can answer 200
+# with the ROOT index for a path that does not exist, which would read as "the
+# accented name survived" when nothing under it was ever staged. <marker_found>
+# is the caller's yes/no on a string that appears ONLY in the accented page.
+judge_accented_hit() {
+  local code="${1:-}" marker="${2:-}"
+  [ "$code" = "200" ] || return "$E_ACC_NOT_200"
+  [ "$marker" = "yes" ] || return "$E_ACC_NOT_200"
+  return 0
+}
+
+# judge_build_skipped <prebuilt_build_status>
+# The single-run form of judge_build_disagree: this lane ships ONE deploy (it
+# must leave the accented artifact live for the box-side probes, so it cannot
+# follow with a source rebuild), so it cannot compare two runs — but the box
+# still has to say, in its own words, that it ran no build for these bytes.
+judge_build_skipped() {
+  [ "${1:-}" = "skipped" ] || return "$E_PB_BUILD_NOT_SKIPPED"
+  return 0
+}
+
 # =============================================================================
 # SELF-CHECK — offline. Proves every named red actually fires on input that must
 # trigger it, and that the greens still pass. Runs anywhere; no network, no bp,
@@ -643,6 +702,37 @@ self_check() {
   expect_code "$E_PB_BASE_BROKEN" "bp-site-base is a full URL — every asset href is dead" \
     judge_site_base "/https://guerrilla.barkpark.cloud/sites/perfect-proof/" /sites/perfect-proof/
   expect_code "$E_PB_BASE_BROKEN" "bp-site-base is empty"            judge_site_base "" /sites/perfect-proof/
+
+  note "accented lane (the Unicode tail — the control is judged BEFORE the hit)"
+  expect_pass      "a path that never existed does not answer 200 (503 on this box)" judge_accented_control 503
+  expect_pass      "…nor when the server 404s it properly"          judge_accented_control 404
+  expect_code "$E_ACC_CONTROL" "THE VACUOUS GREEN: the site answers 200 to a path that cannot exist" \
+    judge_accented_control 200
+  expect_pass      "the accented path serves 200 AND the page's own marker" judge_accented_hit 200 yes
+  expect_code "$E_ACC_NOT_200" "the accented path 503s (the tar mangled the name)"  judge_accented_hit 503 no
+  expect_code "$E_ACC_NOT_200" "the accented path 404s"                             judge_accented_hit 404 no
+  expect_code "$E_ACC_NOT_200" "200, but it is the ROOT index — an SPA fallback, not the staged page" \
+    judge_accented_hit 200 no
+  expect_pass      "the box says it ran no build for the uploaded bytes"  judge_build_skipped skipped
+  expect_code "$E_PB_BUILD_NOT_SKIPPED" "the box BUILT the prebuilt upload" judge_build_skipped "done"
+  expect_code "$E_PB_BUILD_NOT_SKIPPED" "the box reported no BUILD stage at all" judge_build_skipped missing
+
+  # The fixture generator is part of this proof's chain of custody: if it cannot
+  # write the two normal forms it claims, the whole accented lane is measuring
+  # nothing. It is exercised here, offline, in the same breath as the judges.
+  note "the accented fixture generator (offline; it asserts its own normal forms)"
+  if [ -x "$ROOT/deploy/site-spawner-accented-fixture.sh" ] || [ -f "$ROOT/deploy/site-spawner-accented-fixture.sh" ]; then
+    if bash "$ROOT/deploy/site-spawner-accented-fixture.sh" --self-check >"$TMP/acc-fixture-selfcheck.log" 2>&1; then
+      ok "$(printf '%-30s' "FIXTURE") the generator writes café NFC and naïve NFD, and reads both back in form"
+    else
+      printf '  %s✗%s the accented fixture generator failed its own self-check:\n' "$RED" "$OFF" >&2
+      sed 's/^/      /' "$TMP/acc-fixture-selfcheck.log" >&2 || true
+      SC_FAILED=1
+    fi
+  else
+    printf '  %s✗%s deploy/site-spawner-accented-fixture.sh is missing — the accented lane has no fixture\n' "$RED" "$OFF" >&2
+    SC_FAILED=1
+  fi
 
   # The reason a red is legible at all. `bp … -o json` puts its error ENVELOPE on
   # STDOUT and leaves stderr EMPTY; quoting stderr printed a BLANK reason for a
@@ -1376,6 +1466,194 @@ prebuilt_journey() {
   printf '  %s%s%s\n' "$BLD" "$url" "$OFF" >&2
 }
 
+# =============================================================================
+# THE ACCENTED WALK — the Unicode tail (charter D109/D116), end to end against a
+# real box: a dist whose directory names are GENERATED FROM NUMERIC CODEPOINT
+# ESCAPES is packed by our own `bp`, minted, uploaded, staged, HEALTH-gated and
+# SWITCHed live, and then FETCHED at its percent-encoded path against a control.
+#
+# WHY THIS IS ITS OWN MODE AND NOT `--prebuilt --dist <accented>`
+#   The prebuilt journey ends with step 6/6, a `--force` SOURCE rebuild, because
+#   its oracle is a two-run BUILD comparison. That rebuild REPLACES what is live
+#   — so by the time anyone could fetch an accented URL, the accented artifact is
+#   no longer being served. This lane stops at the fetch on purpose and leaves the
+#   accented release live, which is also what the box-side proofs need: a staged
+#   tree to list, and two normal forms of one path to ask the box's own filesystem
+#   about. It pays for that by giving up the two-run comparison, so it asserts the
+#   single-run form instead (`judge_build_skipped`): the box's own word that it
+#   ran no build for these bytes.
+#
+# WHAT IT CANNOT PROVE, AND SAYS SO
+#   Whether NFD and NFC are DISTINCT paths on the serving box is a property of
+#   that box's filesystem, not a pass/fail of this lane — so the wrong-form probes
+#   are REPORTED as a stated verdict, never judged. A red there would be this
+#   script asserting a fact about ext4. What IS judged is the pair that makes any
+#   of it legible: the control must miss, and the written form must hit with the
+#   accented page's OWN bytes.
+# =============================================================================
+
+accented_journey() {
+  local slug="${SLUG:-perfect-proof}"
+  step "ACCENTED WALK — the Unicode tail on '$slug' (names from codepoint escapes; packed by our own bp)"
+
+  command -v "$BP" >/dev/null 2>&1 ||
+    fail "$E_NO_BP" "the \`$BP\` binary is not on PATH." \
+      "the INSTALLED bp has no --prebuilt support at all; build one: CGO_ENABLED=0 go build -o ./bin/bp ./cmd/barkpark, then BP=./bin/bp"
+  local ctoken; ctoken="$(cfgval cloud_token)"
+  [ -n "$ctoken" ] ||
+    fail "$E_NO_SESSION" "no cloud session token in $CFG — this walk deploys a REAL site." "bp login"
+  ok "bp present, cloud session present"
+
+  local base="/sites/$slug/"
+
+  # ---- 1/5 FIXTURE ---------------------------------------------------------
+  step "1/5 FIXTURE — generated from numeric codepoint escapes, with its normal forms asserted"
+  local dist="$TMP/accented-dist" man="$TMP/accented-manifest.env"
+  bash "$ROOT/deploy/site-spawner-accented-fixture.sh" --out "$dist" --slug "$slug" --manifest "$man" ||
+    fail "$E_ACC_FIXTURE" "deploy/site-spawner-accented-fixture.sh refused to write the fixture (see its output above) — nothing accented was generated, so there is nothing to walk." \
+      "the generator reads every name BACK off the disk and refuses if the form it wrote is not the form it reads; that refusal is the fixture telling you the filesystem renormalised it"
+  # shellcheck source=/dev/null
+  . "$man"
+  ok "fixture at $dist — probe paths ${ACC_NFC_MATCH}/ (NFC on disk) and ${ACC_NFD_MATCH}/ (NFD on disk)"
+
+  # ---- 2/5 OPT-IN ----------------------------------------------------------
+  step "2/5 OPT-IN — prebuilt uploads are per-site and OFF by default"
+  local sx=0
+  "$BP" cloud site settings "$slug" --prebuilt-enabled true -o json \
+    >"$TMP/acc-settings.json" 2>"$TMP/acc-settings.err" || sx=$?
+  [ "$sx" -eq 0 ] ||
+    fail "$E_PB_NOT_ENABLED" "\`bp cloud site settings $slug --prebuilt-enabled true\` exited $sx: $(cli_err "$TMP/acc-settings.json" "$TMP/acc-settings.err")" \
+      "a 404 here means this cloud session's team does not own '$slug'"
+  ok "prebuilt_enabled=true on '$slug'"
+
+  # ---- 3/5 MINT ------------------------------------------------------------
+  step "3/5 MINT — the nonced deployment, and the exports the accented bytes must carry"
+  "$BP" cloud site deploy "$slug" --prebuilt "$dist" >"$TMP/acc-mint.out" 2>"$TMP/acc-mint.err" || true
+  local mintall; mintall="$(cat "$TMP/acc-mint.out" "$TMP/acc-mint.err" 2>/dev/null)"
+  printf '%s\n' "$mintall" | sed 's/^/    │ /' >&2 || true
+
+  local dep_id mint_bid mint_crev mint_base
+  dep_id="$(printf '%s\n' "$mintall" | sed -n 's/.*--deployment \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p' | tail -n 1)"
+  mint_bid="$(printf '%s\n' "$mintall" | sed -n 's/.*BARKPARK_BUILD_ID=\([^ ]*\).*/\1/p' | tail -n 1)"
+  mint_crev="$(printf '%s\n' "$mintall" | sed -n 's/.*BARKPARK_CONTENT_REV=\([^ ]*\).*/\1/p' | tail -n 1)"
+  mint_base="$(printf '%s\n' "$mintall" | sed -n 's/.*BARKPARK_SITE_BASE=\([^ ]*\).*/\1/p' | tail -n 1)"
+  judge_prebuilt_mint "$dep_id" "$mint_bid" "$mint_crev" ||
+    fail $? "the mint named deployment='${dep_id:-none}' build_id='${mint_bid:-none}' content_rev='${mint_crev:-none}'. Output above." \
+      "the mint is NONCED: a plain re-run mints a NEW build id and refuses forever — the resume half (--deployment) is what makes the loop terminate"
+  ok "minted deployment $dep_id, build id $mint_bid, content rev $mint_crev"
+  judge_site_base "$mint_base" "$base" ||
+    fail $? "the mint printed BARKPARK_SITE_BASE='${mint_base:-<nothing>}' but the site is served at '$base'." \
+      "the CLI must print the PATH \`/sites/<slug>/\`, derived from the slug, unconditionally"
+  ok "site base $mint_base"
+
+  # ---- 4/5 SHIP ------------------------------------------------------------
+  step "4/5 SHIP — restamp the fixture with the minted ids, then upload; the box runs no npm"
+  local touched; touched="$(restamp_markers "$dist" "$mint_bid" "$mint_crev")"
+  [ "${touched:-0}" -gt 0 ] 2>/dev/null ||
+    fail "$E_ACC_FIXTURE" "restamping $dist changed 0 files — the fixture carries no bp-build-id marker to stamp, so HEALTH would refuse it." \
+      "the generator bakes all five markers; 0 touched means it wrote something else"
+  ok "restamped $touched file(s) — every page now carries build $mint_bid"
+
+  local shipx=0
+  "$BP" cloud site deploy "$slug" --prebuilt "$dist" --deployment "$dep_id" -o json \
+    >"$TMP/acc-ship.json" 2>"$TMP/acc-ship.stream" || shipx=$?
+  say ""
+  sed 's/^/    │ /' "$TMP/acc-ship.stream" >&2 || true
+  say ""
+
+  local ship_status ship_stage ship_reason names
+  ship_status="$(jget "$TMP/acc-ship.json" deployment.status)"
+  ship_stage="$(jget "$TMP/acc-ship.json" deployment.stage)"
+  ship_reason="$(jget "$TMP/acc-ship.json" deployment.failure_reason)"
+  names="$(python3 - "$TMP/acc-ship.json" <<'PY' 2>/dev/null || true
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+out = []
+for s in (d.get("deployment") or {}).get("stages") or []:
+    if str(s.get("status", "")).lower() in ("done", "skipped"):
+        out.append(str(s.get("name", "")).upper())
+print(" ".join(out))
+PY
+)"
+  judge_prebuilt_ship "$ship_status" ||
+    fail $? "the accented deploy exited $shipx and ended status='${ship_status:-none}' (want live); stage=${ship_stage:-none}, reason='${ship_reason:-none}'; stages landed: [${names:-none}]. Stream above." \
+      "THE FAIL-BEFORE THIS LANE PIVOTS ON: before the extractor learned pax, this exact shape answered \`E_UNKNOWN_TYPE — unsupported tar entry type \"x\"\` with all six stages skipped, because our own Go packer emits a pax 'x' header for any non-ASCII name. A refusal here that names E_UNKNOWN_TYPE means the box is running an extractor from before that fix"
+  ok "the accented artifact is LIVE — stages landed: [${names:-none}]"
+
+  local pb_build pb_ms
+  read -r pb_build pb_ms <<<"$(stage_status_ms "$TMP/acc-ship.json" BUILD)"
+  judge_build_skipped "$pb_build" ||
+    fail $? "the box reported BUILD '$pb_build' for an upload it was handed pre-built — it built these bytes itself, so nothing about the off-box lane is proven here." \
+      "PLAN_MODE=prebuilt must make the engine report BUILD skipped and run no npm"
+  ok "BUILD reported '$pb_build' by the engine itself (${pb_ms}ms) — no npm ran on the box"
+
+  # ---- 5/5 FETCH -----------------------------------------------------------
+  step "5/5 FETCH — the percent-encoded accented path, judged AGAINST A CONTROL"
+  note "every miss on a spawned static site answers 503 on this box, not 404 (task ssw11-bl-static-miss-503-not-404),"
+  note "so the control is fetched FIRST: a 200 on an accented path means nothing until a path that cannot exist misses."
+
+  local host="https://$LIVE_HOST"
+
+  # acc_fetch <pct-path> — prints "<code> <yes|no>": the http code, and whether
+  # the body carries the marker that appears ONLY in an accented page.
+  acc_fetch() {
+    local pct="$1" f="$TMP/acc-fetch.html" code
+    code="$(curl -sS -m 30 -o "$f" -w '%{http_code}' "$host$base$pct" 2>/dev/null || echo 000)"
+    if grep -q "data-bp-fixture=\"$ACC_MARKER\"" "$f" 2>/dev/null; then
+      printf '%s yes\n' "$code"
+    else
+      printf '%s no\n' "$code"
+    fi
+  }
+
+  # The control's marker answer is read too, and REPORTED: a 503 that somehow
+  # carried the accented page's own bytes would be a stranger fact than the miss.
+  local c_code c_mark
+  read -r c_code c_mark <<<"$(acc_fetch "$ACC_CONTROL/")"
+  judge_accented_control "$c_code" ||
+    fail $? "the CONTROL path $base$ACC_CONTROL/ — which no artifact has ever contained — answered HTTP $c_code. This site answers 200 to paths that do not exist, so a 200 on the accented path would prove nothing at all." \
+      "the control exists to make the accented 200 mean something; fix the server's fallback before reading anything into this lane"
+  ok "control $base$ACC_CONTROL/ → HTTP $c_code, own bytes: $c_mark (a miss, and NOT 200 — so a 200 below is a real hit)"
+
+  local n_code n_mark
+  read -r n_code n_mark <<<"$(acc_fetch "$ACC_NFC_MATCH/")"
+  judge_accented_hit "$n_code" "$n_mark" ||
+    fail $? "$host$base$ACC_NFC_MATCH/ answered HTTP $n_code and the accented page's own marker was ${n_mark} — the NFC-on-disk accented path does not serve its own bytes. Control answered $c_code." \
+      "a tar that dropped the non-ASCII byte stages \`caf/\` instead; a 200 WITHOUT the marker is a server fallback serving the root index"
+  ok "$base$ACC_NFC_MATCH/ → HTTP $n_code, serving the accented page's OWN bytes"
+  ok "  the request is the NFC form: caf + U+00E9, percent-encoded $ACC_NFC_MATCH"
+
+  local d_code d_mark
+  read -r d_code d_mark <<<"$(acc_fetch "$ACC_NFD_MATCH/")"
+  judge_accented_hit "$d_code" "$d_mark" ||
+    fail $? "$host$base$ACC_NFD_MATCH/ answered HTTP $d_code and the accented page's own marker was ${d_mark} — the NFD-on-disk accented path does not serve its own bytes. Control answered $c_code." \
+      "this name was written DECOMPOSED (i + U+0308); if it misses while the NFC one hits, something between the packer and the disk renormalised it"
+  ok "$base$ACC_NFD_MATCH/ → HTTP $d_code, serving the accented page's OWN bytes"
+  ok "  the request is the NFD form: nai + U+0308 + ve, percent-encoded $ACC_NFD_MATCH"
+
+  # ---- the normalization verdict — REPORTED, never judged ------------------
+  local o1_code o1_mark o2_code o2_mark
+  read -r o1_code o1_mark <<<"$(acc_fetch "$ACC_NFC_OTHER/")"
+  read -r o2_code o2_mark <<<"$(acc_fetch "$ACC_NFD_OTHER/")"
+  note "the WRONG normal form of each name — this is a fact about the serving box's filesystem,"
+  note "so it is stated, not judged (a red here would be this script asserting how ext4 works):"
+  note "  $ACC_NFC_OTHER/  (NFD asked of an NFC-on-disk name) → HTTP $o1_code, own bytes: $o1_mark"
+  note "  $ACC_NFD_OTHER/  (NFC asked of an NFD-on-disk name) → HTTP $o2_code, own bytes: $o2_mark"
+  if [ "$o1_mark" = no ] && [ "$o2_mark" = no ]; then
+    ok "VERDICT: the serving box is normalization-SENSITIVE — NFD and NFC are DISTINCT paths, and the wrong form misses"
+  elif [ "$o1_mark" = yes ] && [ "$o2_mark" = yes ]; then
+    ok "VERDICT: the serving box is normalization-INSENSITIVE — both forms resolve to the same file (as APFS does)"
+  else
+    ok "VERDICT: the serving box answers the two forms ASYMMETRICALLY ($ACC_NFC_OTHER=$o1_mark, $ACC_NFD_OTHER=$o2_mark) — record this, it is neither of the two documented behaviours"
+  fi
+
+  say ""
+  printf '%s✓ ACCENTED WALK PROVEN%s — %s: fixture generated from codepoint escapes → packed by our own bp → minted %s → uploaded → BUILD %s → live → fetched at %s and %s against a %s control.\n' \
+    "$GRN$BLD" "$OFF" "$slug" "$dep_id" "$pb_build" "$ACC_NFC_MATCH/" "$ACC_NFD_MATCH/" "$c_code" >&2
+  printf '  %s%s%s\n' "$BLD" "$host$base" "$OFF" >&2
+}
+
 # ---- main --------------------------------------------------------------------
 
 usage() {
@@ -1388,6 +1666,7 @@ while [ $# -gt 0 ]; do
     --preflight | --preflight-only) MODE="preflight" ;;
     --self-check) MODE="self-check" ;;
     --prebuilt | --prebuilt-journey) MODE="prebuilt" ;;
+    --accented | --accented-walk) MODE="accented" ;;
     --dist) shift; DIST_IN="${1:-}" ;;
     --keep) KEEP=1 ;;
     --slug) shift; SLUG="${1:-}" ;;
@@ -1410,6 +1689,10 @@ case "$MODE" in
     # a journey whose reds were never executed is itself a vacuous green.
     self_check
     prebuilt_journey
+    ;;
+  accented)
+    self_check
+    accented_journey
     ;;
   full)
     self_check

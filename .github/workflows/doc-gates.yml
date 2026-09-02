@@ -641,6 +641,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash scripts/studio-link-lint.sh --selftest
 
+      # --selftest FIRST (distrust vacuous green): the studio and go literal gates
+      # below each run their bundled tripwire before the real scan; the web gate
+      # ran only the scan, so an edit that blinded its detector would have kept
+      # reporting a clean web/ tree. Plants nothing in the tree.
+      - name: Web literal-color gate self-test (tripwire)
+        if: ${{ !cancelled() }}
+        run: bash scripts/web-literal-check.sh --selftest
+
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
       # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
       # design tokens via var(--color-…) / Tailwind token utilities — never a

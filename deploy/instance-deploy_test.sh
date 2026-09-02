@@ -154,7 +154,7 @@ exit 0
 EOF
   cat > "$dir/mix" <<'EOF'
 #!/usr/bin/env bash
-echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}]" >> "$MIXLOG"
+echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}] [BARKPARK_DB_STATEMENT_TIMEOUT=${BARKPARK_DB_STATEMENT_TIMEOUT-unset}]" >> "$MIXLOG"
 # MIX_FAIL=<subcommand> fails exactly that step (e.g. compile -> exit 12,
 # ecto.migrate -> exit 13): the build-failure half of the slot-stamp ordering.
 [ -n "${MIX_FAIL:-}" ] && [ "$1" = "${MIX_FAIL}" ] && exit 1
@@ -347,6 +347,8 @@ check "green root built"                  "[ -f '$APP/api/_build_green/prod/MARK
 check "blue root never created/touched"   "[ ! -e '$APP/api/_build_blue' ]"
 check "build used MIX_BUILD_ROOT=_build_green" "grep -q 'MIX_BUILD_ROOT=_build_green' '$MIXLOG'"
 check "exactly one clean build (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
+check "migrate runs with the statement timeout OFF" "grep -q 'ecto.migrate .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG'"
+check "the build steps do NOT inherit that export"  "! grep -E 'mix (deps.get|deps.compile|compile) .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG' >/dev/null"
 check "slot env files written"            "grep -q 'BARKPARK_PORT_OVERRIDE=4001' '$APP/.slots/green.env' && grep -q '_build_blue' '$APP/.slots/blue.env'"
 check "green slot booted"                 "grep -q 'restart barkpark-slot@green' '$SYSCTLLOG'"
 check "Caddy flipped to :4001"            "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
@@ -354,6 +356,10 @@ check "armed Caddyfile caddy-valid"       "caddy validate --adapter caddyfile --
 check "maintenance handler armed once"    "[ \"\$(grep -c 'handle_errors {' '$CADDY')\" = '1' ]"
 check "mcp route armed once"              "[ \"\$(grep -c 'BARKPARK_MCP_ROUTE' '$CADDY')\" = '1' ]"
 check "mcp route proxies :4010, exactly one line" "[ \"\$(grep -c 'localhost:4010' '$CADDY')\" = '1' ]"
+# connectors-mcp-deploy-path-literal-guard: the harness pinned the PORT but never
+# the PATH — a matcher armed as `/mcp-BROKEN` would have proxied :4010 and passed.
+check "mcp matcher path literal is exactly '/mcp /mcp/*'" "[ \"\$(grep -cE '^[[:space:]]*@barkpark_mcp path /mcp /mcp/\\*[[:space:]]*$' '$CADDY')\" = '1' ]"
+check "no other @barkpark_mcp matcher shape is armed" "[ \"\$(grep -c '@barkpark_mcp path' '$CADDY')\" = '1' ]"
 check "mcp handle sits before the bare slot proxy" "[ \"\$(grep -n 'handle @barkpark_mcp' '$CADDY' | head -1 | cut -d: -f1)\" -lt \"\$(grep -nE 'reverse_proxy localhost:400[01]' '$CADDY' | head -1 | cut -d: -f1)\" ]"
 check "flip sed left :4010 untouched"     "grep -q 'reverse_proxy localhost:4010' '$CADDY'"
 check "mcp unit NOT enabled (bp lacks --http)" "! grep -q 'enable barkpark-mcp' '$SYSCTLLOG'"

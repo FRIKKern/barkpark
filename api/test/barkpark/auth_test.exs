@@ -190,18 +190,31 @@ defmodule Barkpark.AuthTest do
                Auth.create_personal_access_token("ci-admin", ["admin"], role: "member")
     end
 
-    test "an admin/owner may mint write + admin tokens" do
+    test "an admin/owner may mint WRITE — but \"admin\" is forbidden at every role (the flat bit is instance-wide, ruling 2026-09-02)" do
       assert {:ok, {_raw, wt}} =
                Auth.create_personal_access_token("rw", ["read", "write"], role: "admin")
 
       assert "write" in wt.permissions
+      refute "admin" in wt.permissions
 
-      assert {:ok, {_raw2, at}} =
+      # INVERTED 2026-09-02 (orchestrator ruling A, delegated; owner informed
+      # 2026-09-01). This used to assert an `owner` COULD mint
+      # ["read", "write", "admin"]. `"admin"` is the flat, instance-wide
+      # permission `BarkparkWeb.Plugs.RequireAdmin` reads workspace-blind, so
+      # deriving it from a workspace role handed any workspace owner the whole
+      # instance. @pat_allowed_elevated_permissions now tops out at `write`,
+      # and this is the SAME allowed set `max_pat_permissions_for_role/1`
+      # publishes — an explicit request is refused, not silently trimmed.
+      assert {:error, :forbidden} =
                Auth.create_personal_access_token("root", ["read", "write", "admin"],
                  role: "owner"
                )
 
-      assert "admin" in at.permissions
+      assert {:error, :forbidden} =
+               Auth.create_personal_access_token("root-admin-only", ["admin"], role: "owner")
+
+      assert Auth.max_pat_permissions_for_role("owner") == ["read", "write"]
+      assert Auth.max_pat_permissions_for_role("admin") == ["read", "write"]
     end
 
     test "an empty permission set is rejected" do

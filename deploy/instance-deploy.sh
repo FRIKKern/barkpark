@@ -894,7 +894,14 @@ if ! build deps.compile --force; then log "deps.compile failed"; git -C "$APP" r
 if ! build compile;              then log "compile failed";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
 if [ ! -d "_build_$TARGET/prod" ]; then log "build produced no _build_$TARGET/prod — abort, live slot untouched"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
 log "migrate (new code, active slot still serving)"
-if ! build ecto.migrate;         then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
+# BARKPARK_DB_STATEMENT_TIMEOUT=0 — `mix ecto.migrate` boots the repo with the
+# runtime config, so every migration connection would otherwise inherit the
+# per-statement wall config/runtime.exs sets for request traffic (30 s, #15005;
+# 60 s on the role). A backfill or a CREATE INDEX CONCURRENTLY on a big table
+# is an operator-supervised, offline-shaped step and must be allowed to run to
+# completion; the per-migration guard in Barkpark.Release is the seatbelt, this
+# is the belt-and-braces (lead-cli-2's handoff, task-e2f5ecca0be9a6d1).
+if ! BARKPARK_DB_STATEMENT_TIMEOUT=0 build ecto.migrate; then log "migrate failed";      git -C "$APP" reset --hard "$OLD"; exit 13; fi
 
 # ---- Boot the idle slot and gate on it. The active slot is never touched;
 # every failure path from here on is zero-downtime.

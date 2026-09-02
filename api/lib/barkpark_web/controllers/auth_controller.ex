@@ -281,9 +281,27 @@ defmodule BarkparkWeb.AuthController do
       (no membership row at all) rather than falling back to any default.
     * Permissions are `Auth.max_pat_permissions_for_role/1` of that SAME
       resolved role (Option A, lead-ratified 2026-08-24): an owner/admin
-      self-mints up to `["read", "write", "admin"]`, a member still gets
-      `["read"]` only — `authorize_pat_permissions/2` is the same gate it was
-      written for, never bypassed.
+      self-mints up to `["read", "write"]`, a member still gets `["read"]`
+      only — `authorize_pat_permissions/2` is the same gate it was written
+      for, never bypassed.
+
+  ### PAT admin mint closed 2026-09-02
+
+  Orchestrator ruling, delegated; owner informed 2026-09-01: owner/admin
+  self-mint tops out at `["read", "write"]`; the flat admin bit is
+  instance-wide and is not a workspace-role artefact.
+
+  Option A as ratified on 2026-08-24 let this arm return
+  `["read", "write", "admin"]`. `BarkparkWeb.Plugs.RequireAdmin` is an
+  UNSCOPED `Auth.has_permission?(token, "admin")` with no workspace in the
+  check, so that PAT cleared every `[:api, :require_admin]` route on the
+  instance — `GET /v1/secrets/:name` returned run secrets in cleartext to any
+  owner of any workspace, including one they had just created. The ceiling now
+  lives in `Auth`'s `@pat_allowed_elevated_permissions`; this action is
+  unchanged and still derives, never literalises. `RequireAdmin` is untouched
+  (it is the flat instance tier by design) and workspace-scoped admin
+  authority stays on the MEMBERSHIP role, read by
+  `Tenancy.Auth.workspace_admin?/2`.
 
   `owner_user_id` stays hard-bound regardless of any of the above.
 
