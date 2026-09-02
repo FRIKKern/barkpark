@@ -4,12 +4,29 @@ defmodule Barkpark.Media.Delivery.SearchParams do
   @default_limit 50
   @max_limit 500
 
+  # `offset` was clamped to nothing while `limit` was clamped to 500. That is not
+  # a "the database skips more rows" cost: `Delivery.Search.paginate_ids/2` asks
+  # Postgres for `limit(limit + offset + 20)` and then does `Enum.uniq_by/2` and
+  # `Enum.drop(offset)` IN THE BEAM, so `?offset=5000000` materialises ~5M
+  # {uuid, timestamp} tuples plus a 5M-key uniqueness map in one request's heap.
+  # GET /v1/media/:dataset/search sits on the `:api` pipeline (OptionalToken), so
+  # no credential is needed to ask for that.
+  #
+  # 10_000 is the bound because deep paging here is the cursor's job, not the
+  # offset's: this module already parses `cursor`, and `Search.next_cursor/1`
+  # hands one back on every page. An offset window of 10k rows covers every
+  # UI-shaped "jump to page N" caller (200 pages at the max limit) while capping
+  # the worst-case materialisation at 10_520 rows. Clamp rather than 400 for the
+  # same reason `limit` clamps: a well-behaved caller that overshoots keeps
+  # working, and a scanner learns nothing from the response.
+  @max_offset 10_000
+
   @doc "Parse query params into search options for `Barkpark.Media.Delivery.Search`."
   @spec parse(map()) :: keyword()
   def parse(params) when is_map(params) do
     [
       limit: parse_int(params["limit"], @default_limit) |> min(@max_limit),
-      offset: parse_int(params["offset"], 0),
+      offset: parse_int(params["offset"], 0) |> min(@max_offset),
       cursor: blank_to_nil(params["cursor"]),
       q: blank_to_nil(params["q"]),
       mime_type: blank_to_nil(params["type"] || params["mimeType"]),
