@@ -51,7 +51,6 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, CallerContext, Document, DraftId, Envelope, Graph}
-  alias Barkpark.Content.SchemaDefinition
 
   @revision_action "valueref-writeback"
 
@@ -213,15 +212,9 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
   # row is genuinely global (nil workspace) — another workspace's same-named
   # schema never gates this tenant's visibility.
   defp target_schema(type, dataset, opts) do
-    case Content.get_schema(type, dataset, opts) do
-      {:ok, schema} ->
-        {:ok, schema}
-
-      _ ->
-        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
-          {:ok, %SchemaDefinition{workspace_id: nil} = schema} -> {:ok, schema}
-          _ -> {:error, :unauthorized}
-        end
+    case Content.Schema.get_schema_for_redaction(type, dataset, opts) do
+      {:ok, schema} -> {:ok, schema}
+      :error -> {:error, :unauthorized}
     end
   end
 

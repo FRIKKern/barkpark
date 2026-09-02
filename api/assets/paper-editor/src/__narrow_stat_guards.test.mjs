@@ -1,47 +1,68 @@
-// __narrow_stat_guards.test.mjs — a stat block must be able to show a number.
+// __narrow_stat_guards.test.mjs — a stat block must be able to show a number,
+// and show it as ONE number.
 //
-// THE DEFECT. `.bp-stat__v` is the largest type in this sheet (1.7rem mono) and
-// it sits in a cell far narrower than a phone screen: `.bp-stats` is
+// THE DEFECT, AS IT WAS FIRST FOUND. `.bp-stat__v` is the largest type in the
+// sheet and it sits in a cell far narrower than a phone screen: `.bp-stats` is
 // `repeat(auto-fit, minmax(140px, 1fr))`, so at a 390px viewport the reading
-// column's 358px of content makes exactly two ~179px tracks. Measured in
-// headless Chromium against the reader's real container geometry, filling both
-// cells the way every real stats row does:
+// column's 358px of content makes exactly two ~178px tracks, ~149px of them
+// inside the cell padding. At a flat 1.7rem with no break opportunity, a
+// twelve-character formatted number filled that track and pushed the DOCUMENT
+// past the viewport — the page scrolled sideways to read a figure. The first
+// fix was `overflow-wrap: anywhere`, which stopped the page scrolling by
+// letting the number break.
 //
-//   value                      chars   document width (390px viewport)
-//   "1 478"                      5      fits
-//   "$1,234,567.89"             13      420px   <- page scrolls
-//   "1 234 567,89" (U+202F)     12      407px   <- page scrolls
-//   twelve digits, no breaks    12      404px   <- the exact threshold
+// THE DEFECT THAT FIX LEFT BEHIND (task-414967096bbe011b, measured 2026-09-02
+// on /papers/heggemsnes-act at 390x844). Breaking is not free, and the break
+// lands inside the datum:
 //
-// Twelve characters is not an exotic input, it is a formatted number. None of
-// `$1,234,567.89`, `1 234 567,89` offers a single break opportunity — comma,
-// period, and the U+202F narrow no-break space used for digit grouping all
-// refuse one. A block whose entire job is to show a large figure could not show
-// a large figure on a phone.
+//   * `anywhere` splits a digit run. `$1,234,567.89` has no break opportunity
+//     of its own, so the reader is handed `$1,234,56` over `7.89` and has to
+//     reassemble the figure by eye.
+//   * ordinary wrapping splits a compound value at its spaces: `8 min 10 s`
+//     rendered as `8 min 10` over `s`, which reads as two numbers.
 //
-// WHY `anywhere` HERE AND `break-word` ON THE LABEL. They are not
-// interchangeable and the difference decides whether the fix works at all.
-// `.bp-stat` is `inline-flex` — shrink-to-fit — so outside the grid it sizes
-// itself from its content's intrinsic width. `break-word` never reports a
-// smaller intrinsic width, so it repairs the grid case and leaves the
-// standalone stat exactly as broken; that arm was measured, not assumed. Only
-// `anywhere` participates in min-content sizing, which is the property needed
-// here and the same property that makes `anywhere` the WRONG choice for
-// headings (see __narrow_heading_guards.test.mjs, where a heading must not be
-// allowed to shrink its ancestors). The label never sizes its own box — the
-// grid track does — so the weaker declaration is right for it, and the weaker
-// declaration is the one that cannot move a layout.
+// WHAT THE RULE IS NOW, and why it takes three declarations. Each one is
+// load-bearing and none of them works alone:
 //
-// WHY NOT AN ELLIPSIS. Several nowrap labels in this sheet pair with `overflow:
-// hidden; text-overflow: ellipsis`. That clamp is wrong for a figure: it would
-// present a shortened number as though it were the whole number. A number that
-// wraps is still readable; a number silently missing its last digits is a lie
-// with a tidy right edge.
+//   * `white-space: nowrap` — the contract. A value is one thing and renders
+//     as one thing, at a space or inside a digit run.
+//   * `font-size: clamp(1.15rem, 5.6vw, 1.7rem)` — what makes nowrap
+//     affordable. The 1.7rem MAX is reached at a 486px viewport, so every
+//     desktop width renders exactly the size this rule always rendered (the
+//     1280/1920 rig baselines are unmoved). Below it the value tracks the
+//     viewport the column tracks: 21.8px at 390, where `8 min 10 s` measures
+//     149px in a 149px cell.
+//   * `max-width: 100%` + `overflow-x: auto` — the net, and the reason the
+//     ORIGINAL page-scroll guarantee does not lapse. The clamp is keyed on the
+//     VIEWPORT while the cell is not a monotonic function of it: `auto-fit`
+//     adds a column, so a 620px viewport has FOUR ~112px tracks while the font
+//     is already at its 27.2px ceiling. Where the two disagree the value
+//     scrolls inside its own cell instead of growing the document.
 //
-// DESKTOP IS UNCHANGED, MEASURED. Every element's rendered geometry (tag,
-// class, x, y, width, height) across all 63 pd-golden block fixtures is
-// byte-identical before and after this change at 1280px. The declarations act
-// only where the page was already broken.
+// MEASURED, headless Chromium, the 13-character `$1,234,567.89` in EVERY cell
+// (the case that started this file), document.scrollWidth against the viewport:
+//
+//   viewport   font     cell    value ink   tracks   doc      overflow
+//    320px     18.4px   114px     142px       2      320px      0px
+//    360px     20.2px   134px     155px       2      360px      0px
+//    390px     21.8px   149px     168px       2      390px      0px
+//    480px     26.9px   113px     207px       3      480px      0px
+//    620px     27.2px   112px     209px       4      620px      0px
+//    768px     27.2px   141px     209px       4      768px      0px
+//   1280px     27.2px   264px     264px       4     1280px      0px
+//
+// The page never scrolls sideways at any width, for `$1,234,567.89`,
+// `1 234 567,89` (U+202F) or `8 min 10 s`. That was `anywhere`'s job and it is
+// still done — by containment rather than by breaking the number.
+//
+// WHY NOT AN ELLIPSIS, unchanged. Several nowrap labels in this sheet pair with
+// `overflow: hidden; text-overflow: ellipsis`. That clamp is wrong for a
+// figure: it presents a shortened number as though it were the whole number.
+// `overflow-x: auto` hides no digit — every one stays reachable — which is
+// exactly why it is the containment allowed here and the ellipsis is not.
+//
+// DESKTOP IS UNCHANGED, MEASURED. At 1280 the computed font-size is 27.2px
+// before and after, and the value renders on one line in both.
 //
 // Run: node src/__narrow_stat_guards.test.mjs   (or: npm test)
 
@@ -73,38 +94,71 @@ function ruleFor(selector) {
   return m[1];
 }
 
-check(".bp-stat__v can break a number that has no break opportunity", () => {
+check(".bp-stat__v renders a value as ONE unbroken value", () => {
   const decls = ruleFor(".bp-paper-surface .bp-stat__v");
   assert.match(
     decls,
-    /overflow-wrap\s*:\s*anywhere/,
-    ".bp-stat__v must set overflow-wrap: anywhere. Without it a twelve-character " +
-      "formatted number — $1,234,567.89 has no break opportunity at all — fills a " +
-      "179px stats track at 390px and pushes the whole document past the viewport, " +
-      "so the reader drags the page sideways to read a figure.",
+    /white-space\s*:\s*nowrap/,
+    ".bp-stat__v must set white-space: nowrap. Without it a compound value " +
+      "breaks at its spaces — `8 min 10 s` rendered as `8 min 10` over `s` at " +
+      "390px, which reads as two numbers.",
   );
   assert.doesNotMatch(
     decls,
-    /overflow-wrap\s*:\s*break-word/,
-    "break-word is not enough for .bp-stat__v: `.bp-stat` is inline-flex, so " +
-      "outside the grid it sizes from its content's intrinsic width, and " +
-      "break-word never reports a smaller one. Measured, the standalone stat " +
-      "stays broken under break-word and is repaired under anywhere.",
+    /overflow-wrap\s*:\s*(anywhere|break-word)/,
+    "no overflow-wrap on .bp-stat__v: `anywhere` is what splits `$1,234,567.89` " +
+      "mid-digit-run, and it is inert under nowrap anyway, so leaving it reads " +
+      "as a live break opportunity that is not one.",
   );
   assert.doesNotMatch(
     decls,
     /text-overflow\s*:\s*ellipsis/,
     "never clamp .bp-stat__v with an ellipsis — that shows a truncated figure as " +
-      "if it were the whole figure. Wrapping keeps the number readable; clamping " +
-      "makes it wrong.",
+      "if it were the whole figure. Containment keeps every digit reachable; " +
+      "clamping makes the number wrong.",
   );
-  // A neighbouring declaration from the same rule. If the matcher ever lands on
-  // a different rule, this fails loudly rather than the test passing by luck.
+});
+
+check(".bp-stat__v cannot push the document sideways", () => {
+  const decls = ruleFor(".bp-paper-surface .bp-stat__v");
+  // THE ORIGINAL GUARANTEE. `overflow-wrap: anywhere` used to buy it by
+  // breaking the number; nowrap gives that up, so the containment below is now
+  // the only thing standing between a long figure and a page that rocks
+  // sideways on a phone. Both halves: a cap on the box, and a contained
+  // overflow for the ink inside it.
+  assert.match(
+    decls,
+    /max-width\s*:\s*100%/,
+    ".bp-stat__v lost max-width: 100% — a nowrap value then sizes its own box " +
+      "from its content and the grid track stops bounding it.",
+  );
+  assert.match(
+    decls,
+    /overflow-x\s*:\s*auto/,
+    ".bp-stat__v lost overflow-x: auto. Under nowrap that is the ONLY thing " +
+      "keeping a 13-character figure from growing document.scrollWidth past the " +
+      "viewport — measured at 320/360/390/480/620/768/1280, overflow 0px at " +
+      "every one. Removing it re-opens the exact defect this file was opened for.",
+  );
+});
+
+check(".bp-stat__v is sized by a clamp whose ceiling is the authored 1.7rem", () => {
+  const decls = ruleFor(".bp-paper-surface .bp-stat__v");
+  // The neighbour pin: if the matcher ever lands on a different rule this fails
+  // loudly instead of the test passing by luck. It is also the desktop-parity
+  // assertion — 1.7rem must remain the MAX, or every width above 486px moves.
+  const m = decls.match(/font-size\s*:\s*clamp\(([^)]*)\)/);
   assert.ok(
-    decls.includes("font-size: 1.7rem"),
-    ".bp-stat__v lost font-size: 1.7rem — that size is exactly why the value " +
-      "runs out of track first, so losing it means this rule is no longer the " +
-      "rule this test is about.",
+    m,
+    ".bp-stat__v no longer sizes itself with a clamp(). A flat size is what made " +
+      "nowrap unaffordable on a phone: at 1.7rem a ten-character value needs " +
+      "161px of a 149px cell.",
+  );
+  assert.ok(
+    m[1].trim().endsWith("1.7rem"),
+    `.bp-stat__v clamps to \`${m[1].trim()}\` — the MAX must stay 1.7rem, the ` +
+      "size every width at or above 486px renders and every committed rig " +
+      "baseline was shot at.",
   );
 });
 

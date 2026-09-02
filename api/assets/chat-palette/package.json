@@ -1,0 +1,8 @@
+{
+  "name": "bp-chat-palette-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "for f in __*.test.mjs; do node --test \"$f\" || exit 1; done"
+  }
+}

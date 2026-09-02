@@ -86,7 +86,7 @@ defmodule Barkpark.Content.Export do
 
       :error ->
         schema =
-          case Content.get_schema(type, dataset, opts) do
+          case Content.Schema.get_schema_for_redaction(type, dataset, opts) do
             {:ok, s} -> s
             _ -> nil
           end
