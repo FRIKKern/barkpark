@@ -198,6 +198,7 @@ on:
       - "scripts/deploy-reliability-exit-2026-08-10.md"
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
+      - "scripts/shell-harnesses-dispatch.test.sh"
       # ── MERGE-GATE AUTOSTAMP BRIDGE (task-8fb6aa7b6d57f737) ─────────────────
       # Per file, never a directory glob — D26. The controller and the App
       # manifest are INPUTS to the parity tripwire, not merely neighbours: the
@@ -416,6 +417,7 @@ on:
       - "scripts/deploy-reliability-exit-2026-08-10.md"
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
+      - "scripts/shell-harnesses-dispatch.test.sh"
       # ── ORPHAN SWEEP II (cgsiw-s3) — mirrors the pull_request list above,
       # globs included. A lane wired on PRs only goes dark the moment a merge
       # lands, and these two lists staying set-equal is itself now guarded (by
@@ -488,7 +490,322 @@ concurrency:
 
 jobs:
 
+  changes:
+    # THE DISPATCHER. No `if:`, no path filter — it runs on every event this
+    # workflow fires for, so every job behind it always has a defined answer.
+    # Same shape as security.yml's `changes` job, and the same polarity: it
+    # NEVER emits a silent false. An unresolvable base, a base with no common
+    # ancestor, or a missing base sha FAILS the job; an empty diff dispatches
+    # TRUE for everything; a push (or any non-pull_request event) dispatches
+    # TRUE for everything. A dispatcher that "couldn't tell" and said false
+    # would skip a harness and publish a green check run over nothing.
+    #
+    # WHY IT EXISTS, measured on PR #15631 (head cbbe4a63, three files, all
+    # under cloud/lib/): 55 check runs, 28 of them from this workflow, because
+    # the workflow-level `paths:` is an OR over the inputs of every harness and
+    # cloud/lib/barkpark_cloud/web/router.ex is in it for ONE job
+    # (cloud-static-gz). All 28 ran; 27 measured nothing and held runners the
+    # required gates were queued behind. The workflow-level list stays as it
+    # is — it decides whether the RUN starts — and this job decides which
+    # harness inside the run has a reason to.
+    #
+    # THE ROSTER below is the per-job partition of that same list: one row per
+    # (job, path), every path a verbatim entry of on.pull_request.paths, and
+    # this workflow file itself in every set by construction. Two invariants
+    # are enforced by scripts/shell-harnesses-dispatch.test.sh on every PR that
+    # touches either file: each job's rows are a SUBSET of the workflow-level
+    # list, and the UNION of all rows EQUALS it — so a path added above without
+    # a row here (a harness that would never fire) reds, and so does a row here
+    # that names a path the workflow does not even trigger on.
+    name: Dispatch (shell-harness paths)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      node-test-floor: ${{ steps.sets.outputs.node-test-floor }}
+      doctor-matrix: ${{ steps.sets.outputs.doctor-matrix }}
+      merge-verb-table: ${{ steps.sets.outputs.merge-verb-table }}
+      release-scan-verdict: ${{ steps.sets.outputs.release-scan-verdict }}
+      zero-criteria-census: ${{ steps.sets.outputs.zero-criteria-census }}
+      webhook-fanout-guard: ${{ steps.sets.outputs.webhook-fanout-guard }}
+      seal-run-guard: ${{ steps.sets.outputs.seal-run-guard }}
+      registration-sample-bar: ${{ steps.sets.outputs.registration-sample-bar }}
+      deploy-convergence: ${{ steps.sets.outputs.deploy-convergence }}
+      deploy-concurrency: ${{ steps.sets.outputs.deploy-concurrency }}
+      console-path-ratchet: ${{ steps.sets.outputs.console-path-ratchet }}
+      weekly-changelog-backfill-guard: ${{ steps.sets.outputs.weekly-changelog-backfill-guard }}
+      pds-harnesses: ${{ steps.sets.outputs.pds-harnesses }}
+      ci-failure-issue-filer: ${{ steps.sets.outputs.ci-failure-issue-filer }}
+      distribution-harnesses: ${{ steps.sets.outputs.distribution-harnesses }}
+      tooling-harnesses: ${{ steps.sets.outputs.tooling-harnesses }}
+      launcher-boot-selftest: ${{ steps.sets.outputs.launcher-boot-selftest }}
+      workflow-portability: ${{ steps.sets.outputs.workflow-portability }}
+      exit-runner-guard: ${{ steps.sets.outputs.exit-runner-guard }}
+      cloud-static-gz: ${{ steps.sets.outputs.cloud-static-gz }}
+      pds-hetzner-offline: ${{ steps.sets.outputs.pds-hetzner-offline }}
+      task-lease-renew: ${{ steps.sets.outputs.task-lease-renew }}
+      landed-mark: ${{ steps.sets.outputs.landed-mark }}
+      doc-gates-paths-parity: ${{ steps.sets.outputs.doc-gates-paths-parity }}
+      merge-gate-bridge: ${{ steps.sets.outputs.merge-gate-bridge }}
+      fleet-coordination-harnesses: ${{ steps.sets.outputs.fleet-coordination-harnesses }}
+      compose-smoke-dispatcher: ${{ steps.sets.outputs.compose-smoke-dispatcher }}
+      workflow-trigger-coverage: ${{ steps.sets.outputs.workflow-trigger-coverage }}
+      dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. Without `ref:` checkout lands on
+          # refs/pull/N/merge, which already contains main's advance, while
+          # pull_request.base.sha LAGS the base tip — the three-dot diff then
+          # sweeps in everything main gained and the skip never fires.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the three-dot diff needs the merge base, and the PR
+          # base sha must resolve locally. A shallow checkout makes
+          # `git cat-file -e` miss it, which the step below treats as a hard
+          # failure, never as "nothing changed".
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set per harness
+        run: |
+          set -euo pipefail
+
+          # One row per (job, path). The first column is the job id, the second
+          # a VERBATIM entry of this workflow's on.pull_request.paths (globs
+          # included — bash `case` matches them, and `**` reads as `*`). Rows
+          # come from the grouped comments of that list plus each job's steps:
+          # a script a job sources or reads (scripts/lib/check-runs.sh,
+          # scripts/pr-task-gate.sh, .github/workflows/*.yml for the corpus
+          # readers) is a row for every job that consumes it. When in doubt a
+          # path is IN — over-running a harness is cheap; a false skip is the
+          # defect. This workflow file is in every set implicitly (see below)
+          # and is deliberately not a row.
+          roster='
+          node-test-floor scripts/node-test-floor.mjs
+          node-test-floor scripts/node-test-floor.test.sh
+          node-test-floor sdk/package.json
+          node-test-floor web/package.json
+          node-test-floor apps/hundesteder/package.json
+          node-test-floor templates/search-starter/package.json
+          node-test-floor templates/astro-search-starter/package.json
+          node-test-floor .github/workflows/hundesteder.yml
+          node-test-floor .github/workflows/astro-search-finder-test.yml
+          node-test-floor .github/workflows/search-starter-smoke.yml
+          doctor-matrix scripts/doctor.sh
+          doctor-matrix scripts/doctor.test.sh
+          merge-verb-table scripts/bp-merge.sh
+          merge-verb-table scripts/bp-merge.test.sh
+          merge-verb-table scripts/required-checks-verify.sh
+          merge-verb-table scripts/lib/check-runs.sh
+          release-scan-verdict scripts/release-scan.sh
+          release-scan-verdict scripts/release-scan.test.sh
+          zero-criteria-census scripts/epic-zero-criteria-census.sh
+          webhook-fanout-guard scripts/webhook-fanout-watch.sh
+          webhook-fanout-guard scripts/webhook-fanout-watch.test.sh
+          seal-run-guard scripts/seal-run.sh
+          seal-run-guard scripts/seal-run.test.sh
+          seal-run-guard cloud/priv/static/__preview__/seal-predicate.mjs
+          seal-run-guard .github/workflows/cloud.yml
+          registration-sample-bar scripts/registration-sample.sh
+          registration-sample-bar scripts/registration-sample.test.sh
+          registration-sample-bar scripts/lib/check-runs.sh
+          registration-sample-bar scripts/cloud-path-escape-check.sh
+          registration-sample-bar scripts/console-path-escape-check.sh
+          deploy-convergence scripts/deploy-convergence-check.sh
+          deploy-convergence .github/workflows/deploy.yml
+          deploy-concurrency scripts/deploy-concurrency-check.sh
+          deploy-concurrency scripts/deploy-concurrency-check.test.sh
+          deploy-concurrency scripts/main-run-concurrency-check.sh
+          deploy-concurrency .github/workflows/deploy.yml
+          deploy-concurrency .github/workflows/*.yml
+          console-path-ratchet scripts/console-path-escape-check.sh
+          console-path-ratchet scripts/console-path-escape-check.test.sh
+          console-path-ratchet .github/workflows/console-harness.yml
+          weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
+          weekly-changelog-backfill-guard .github/workflows/weekly-changelog.yml
+          pds-harnesses scripts/pds-ledger-census.sh
+          pds-harnesses scripts/pds-ledger-census_test.sh
+          pds-harnesses scripts/pds-record-parity.sh
+          pds-harnesses scripts/pds-record-parity.test.sh
+          pds-harnesses scripts/pds-scratch-target.sh
+          pds-harnesses scripts/pds-scratch-target_test.sh
+          pds-harnesses scripts/pr-task-gate.sh
+          ci-failure-issue-filer scripts/file-ci-failure-issue.sh
+          ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
+          distribution-harnesses scripts/install-cli.sh
+          distribution-harnesses scripts/install-cli.test.sh
+          distribution-harnesses scripts/fetch-prebuilt.sh
+          distribution-harnesses scripts/fetch-prebuilt.test.sh
+          distribution-harnesses scripts/deploy-rebuild.sh
+          distribution-harnesses scripts/deploy-rebuild.test.sh
+          distribution-harnesses deploy/site-runtime-install.sh
+          distribution-harnesses deploy/site-runtime-install_test.sh
+          tooling-harnesses tooling/task-obsession/reland_check.py
+          tooling-harnesses tooling/task-obsession/reland_check.test.sh
+          tooling-harnesses tooling/task-obsession/reland_fetch.py
+          tooling-harnesses tooling/task-obsession/reland_workflow_sim.py
+          tooling-harnesses tooling/task-obsession/reland_loudfail.test.sh
+          tooling-harnesses tooling/task-obsession/fixtures/*.json
+          tooling-harnesses .github/workflows/reland-check.yml
+          tooling-harnesses tooling/fleet/fleet-run.sh
+          tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
+          tooling-harnesses scripts/audit-paper-readers.sh
+          tooling-harnesses scripts/audit-paper-readers-test.sh
+          launcher-boot-selftest bin/barkpark
+          launcher-boot-selftest scripts/barkpark-boot-selftest.sh
+          workflow-portability scripts/workflow-portability-check.sh
+          workflow-portability scripts/workflow-portability-check.test.sh
+          workflow-portability scripts/workflow-module-exec-smoke.sh
+          workflow-portability scripts/workflow-module-exec-smoke.test.sh
+          workflow-portability .claude/workflows/*.workflow.js
+          workflow-portability scripts/workflow-run-shell-check.sh
+          workflow-portability .github/workflows/*.yml
+          exit-runner-guard scripts/deploy-reliability-exit-run.sh
+          exit-runner-guard scripts/deploy-reliability-exit-run.test.sh
+          exit-runner-guard internal/cloudclient/client.go
+          exit-runner-guard internal/cli/cloud_deploy_census_cmd.go
+          exit-runner-guard scripts/deploy-reliability-exit-2026-08-10.md
+          exit-runner-guard scripts/check-doc-budgets.sh
+          exit-runner-guard scripts/seal-run.sh
+          cloud-static-gz scripts/cloud-static-gz-guard.sh
+          cloud-static-gz cloud/priv/static/**
+          cloud-static-gz cloud/.gitignore
+          cloud-static-gz cloud/Dockerfile
+          cloud-static-gz cloud/lib/barkpark_cloud/web/router.ex
+          pds-hetzner-offline scripts/pds-live-hetzner-placement-group.sh
+          pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
+          task-lease-renew scripts/task-lease-renew.sh
+          task-lease-renew scripts/task-lease-renew.test.sh
+          task-lease-renew .github/workflows/task-lease-renew.yml
+          task-lease-renew scripts/pr-task-gate.sh
+          landed-mark scripts/landed-mark.sh
+          landed-mark scripts/landed-mark.test.sh
+          landed-mark scripts/fixtures/landed-mark/**
+          landed-mark scripts/pr-task-gate.sh
+          landed-mark .github/workflows/landed-mark.yml
+          doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
+          doc-gates-paths-parity .github/workflows/doc-gates.yml
+          merge-gate-bridge scripts/github-webhook-subscription-parity.sh
+          merge-gate-bridge scripts/github-webhook-subscription-parity.test.sh
+          merge-gate-bridge scripts/merge-gate-autostamp-liveness.sh
+          merge-gate-bridge scripts/merge-gate-autostamp-liveness.test.sh
+          merge-gate-bridge api/lib/barkpark_web/controllers/github_webhook_controller.ex
+          merge-gate-bridge scripts/github-app-bootstrap.py
+          merge-gate-bridge docs/ops/github-sync.md
+          fleet-coordination-harnesses scripts/already-fixed.sh
+          fleet-coordination-harnesses scripts/already-fixed.test.sh
+          fleet-coordination-harnesses scripts/branch-owner.sh
+          fleet-coordination-harnesses scripts/branch-owner.test.sh
+          fleet-coordination-harnesses scripts/pr-overlap.sh
+          fleet-coordination-harnesses scripts/pr-overlap.test.sh
+          compose-smoke-dispatcher scripts/compose-smoke-dispatch.test.sh
+          compose-smoke-dispatcher .github/workflows/compose-smoke.yml
+          compose-smoke-dispatcher scripts/env-census.py
+          workflow-trigger-coverage scripts/workflow-trigger-coverage.sh
+          workflow-trigger-coverage scripts/workflow-trigger-coverage.test.sh
+          workflow-trigger-coverage .github/workflows/*.yml
+          dispatch-selftest scripts/shell-harnesses-dispatch.test.sh
+          '
+          self=".github/workflows/shell-harnesses.yml"
+
+          refuse() {
+            echo "::error::dispatcher: $1"
+            exit 1
+          }
+
+          # The job list is DERIVED from the roster, in first-appearance order,
+          # so a job cannot be dispatched without at least one row.
+          jobs="$(printf '%s\n' "$roster" | awk 'NF { print $1 }' | awk '!seen[$0]++')"
+          [ -n "$jobs" ] || refuse "the roster is empty — nothing to dispatch."
+
+          emit_all() {
+            for j in $jobs; do
+              echo "${j}=$1" >> "$GITHUB_OUTPUT"
+            done
+            echo "verdict: every harness=$1"
+          }
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is what every
+            # PR is compared against and there is no reviewer left to notice a
+            # partial main.
+            echo "event '$event' is not a pull_request — every harness set is true."
+            emit_all true
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          [ -n "$base" ] || refuse "the PR carries no base sha. Refusing to guess — a guessed base skips harnesses and reports green."
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # Absent during burst merges. Try once, then give up LOUDLY.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          git cat-file -e "${base}^{commit}" 2>/dev/null || refuse "PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base." # MUT: unresolvable-base
+
+          # No common ancestor makes the three-dot diff exit 128 with a raw
+          # `fatal:` and no annotation. Name it, and refuse a two-dot fallback,
+          # which sweeps in the base's ENTIRE content and dispatches true for
+          # the wrong reason.
+          git merge-base "$base" HEAD >/dev/null 2>&1 || refuse "PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Rebase the branch onto its base branch."
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are both load-bearing (measured in
+          # security.yml): plain --name-only QUOTES odd paths so they miss the
+          # match, and rename detection prints only the destination.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair or a branch-sync PR nets to nothing.
+            # Run everything: expensive, never wrong. Never false.
+            echo "::warning::dispatcher: the changed-file set is EMPTY against ${base}. Dispatching every harness rather than skipping any — a skip here would green a check nothing measured."
+            emit_all true
+            exit 0
+          fi
+
+          hits=" "
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if [ "$f" = "$self" ]; then
+              # This file is in EVERY set: an edit to the roster, the gating or
+              # a step changes what every harness means.
+              echo "$f changed — every harness set is true."
+              emit_all true
+              exit 0
+            fi
+            while read -r job pat; do
+              [ -n "$job" ] || continue
+              # The roster entry IS a glob (cloud/priv/static/**, *.yml) and
+              # must match as one; quoting it would match literally. SC2254.
+              # shellcheck disable=SC2254
+              case "$f" in
+                $pat)
+                  case "$hits" in
+                    *" $job "*) ;;
+                    *) hits="${hits}${job} " ;;
+                  esac
+                  ;;
+              esac
+            done <<EOF
+          $roster
+          EOF
+          done <<EOF
+          $changed
+          EOF
+
+          for j in $jobs; do
+            case "$hits" in
+              *" $j "*) v=true ;;
+              *) v=false ;;
+            esac
+            echo "verdict: ${j}=${v}"
+            echo "${j}=${v}" >> "$GITHUB_OUTPUT"
+          done
   node-test-floor:
+    needs: [changes]
+    if: needs.changes.outputs.node-test-floor == 'true'
     name: node-test-floor.mjs mutation matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -520,6 +837,8 @@ jobs:
         # position-keyed consumer breaks silently -- verified by mutation.
         run: bash scripts/node-test-floor.test.sh
   doctor-matrix:
+    needs: [changes]
+    if: needs.changes.outputs.doctor-matrix == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -535,6 +854,8 @@ jobs:
         run: bash scripts/doctor.test.sh
 
   merge-verb-table:
+    needs: [changes]
+    if: needs.changes.outputs.merge-verb-table == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -549,6 +870,8 @@ jobs:
         run: bash scripts/required-checks-verify.sh --selftest
 
   release-scan-verdict:
+    needs: [changes]
+    if: needs.changes.outputs.release-scan-verdict == 'true'
     name: release-scan.sh CI-verdict derivation
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -570,6 +893,8 @@ jobs:
         run: bash scripts/release-scan.test.sh
 
   zero-criteria-census:
+    needs: [changes]
+    if: needs.changes.outputs.zero-criteria-census == 'true'
     name: epic-zero-criteria-census.sh self-test
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -598,6 +923,8 @@ jobs:
         run: bash scripts/epic-zero-criteria-census.sh --self-test
 
   webhook-fanout-guard:
+    needs: [changes]
+    if: needs.changes.outputs.webhook-fanout-guard == 'true'
     name: webhook-fanout-watch.sh mutation matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -636,6 +963,8 @@ jobs:
   # repaired in the same change rather than wired red.
 
   seal-run-guard:
+    needs: [changes]
+    if: needs.changes.outputs.seal-run-guard == 'true'
     name: seal-run.sh probe matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -668,6 +997,8 @@ jobs:
         run: bash scripts/seal-run.test.sh
 
   registration-sample-bar:
+    needs: [changes]
+    if: needs.changes.outputs.registration-sample-bar == 'true'
     name: registration-sample.sh mutation matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -688,6 +1019,8 @@ jobs:
         run: bash scripts/registration-sample.test.sh
 
   deploy-convergence:
+    needs: [changes]
+    if: needs.changes.outputs.deploy-convergence == 'true'
     name: deploy-convergence-check.sh ancestry + strand matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -721,6 +1054,8 @@ jobs:
   # starting and production sat 1.5 h behind main, with nothing red anywhere:
   # a cancelled-before-start run reports no failure to report.
   deploy-concurrency:
+    needs: [changes]
+    if: needs.changes.outputs.deploy-concurrency == 'true'
     name: a queued deploy or main gate run cannot be evicted (per-sha groups + already-covered exit)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -773,6 +1108,8 @@ jobs:
         run: bash scripts/main-run-concurrency-check.sh
 
   console-path-ratchet:
+    needs: [changes]
+    if: needs.changes.outputs.console-path-ratchet == 'true'
     name: console-path-escape-check.sh classification matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -789,6 +1126,8 @@ jobs:
         run: bash scripts/console-path-escape-check.test.sh
 
   weekly-changelog-backfill-guard:
+    needs: [changes]
+    if: needs.changes.outputs.weekly-changelog-backfill-guard == 'true'
     name: weekly-changelog-backfill.test.sh drift check
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -815,6 +1154,8 @@ jobs:
         run: bash scripts/weekly-changelog-backfill.test.sh
 
   pds-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.pds-harnesses == 'true'
     name: PDS census / parity / scratch-target harnesses
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -837,6 +1178,8 @@ jobs:
         run: bash scripts/pds-scratch-target_test.sh
 
   ci-failure-issue-filer:
+    needs: [changes]
+    if: needs.changes.outputs.ci-failure-issue-filer == 'true'
     name: file-ci-failure-issue.sh behaviour matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -848,6 +1191,8 @@ jobs:
         run: bash scripts/file-ci-failure-issue.test.sh
 
   distribution-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.distribution-harnesses == 'true'
     name: install-cli / fetch-prebuilt / site-runtime-install harnesses
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -876,6 +1221,8 @@ jobs:
         run: bash deploy/site-runtime-install_test.sh
 
   tooling-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.tooling-harnesses == 'true'
     name: reland-check / fleet-run-verdict / paper-reader-audit harnesses
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -915,6 +1262,8 @@ jobs:
         run: bash scripts/audit-paper-readers-test.sh
 
   launcher-boot-selftest:
+    needs: [changes]
+    if: needs.changes.outputs.launcher-boot-selftest == 'true'
     name: bin/barkpark up/stop differential selftest
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -938,6 +1287,8 @@ jobs:
         run: bash scripts/barkpark-boot-selftest.sh
 
   workflow-portability:
+    needs: [changes]
+    if: needs.changes.outputs.workflow-portability == 'true'
     name: .claude/workflows engines load on a machine that is not this one
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1040,6 +1391,8 @@ jobs:
         run: bash scripts/workflow-run-shell-check.sh
 
   exit-runner-guard:
+    needs: [changes]
+    if: needs.changes.outputs.exit-runner-guard == 'true'
     name: deploy-reliability-exit-run.sh mutation matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1094,6 +1447,8 @@ jobs:
   # that is reported before its verdict on the live tree is believed.
 
   cloud-static-gz:
+    needs: [changes]
+    if: needs.changes.outputs.cloud-static-gz == 'true'
     name: cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1117,6 +1472,8 @@ jobs:
           bash scripts/cloud-static-gz-guard.sh
 
   pds-hetzner-offline:
+    needs: [changes]
+    if: needs.changes.outputs.pds-hetzner-offline == 'true'
     name: pds-live-hetzner-placement-group.sh --selftest-offline
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1168,6 +1525,8 @@ jobs:
   # logs its argv, so the REAL request the subject builds is asserted rather
   # than assumed. No network, no token, no bp — it cannot rot into a skip.
   task-lease-renew:
+    needs: [changes]
+    if: needs.changes.outputs.task-lease-renew == 'true'
     name: task-lease-renew response classification
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1191,6 +1550,8 @@ jobs:
         run: bash scripts/task-lease-renew.test.sh
 
   landed-mark:
+    needs: [changes]
+    if: needs.changes.outputs.landed-mark == 'true'
     name: landed-mark.sh selftest + idempotency mutation
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1249,6 +1610,8 @@ jobs:
             echo "the scan count moved — the fixture and the instrument disagree" >&2; exit 1; }
 
   doc-gates-paths-parity:
+    needs: [changes]
+    if: needs.changes.outputs.doc-gates-paths-parity == 'true'
     name: doc-gates.yml push.paths == pull_request.paths
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1315,6 +1678,8 @@ jobs:
   # harnesses below exist because a unit test on a handler cannot see a delivery
   # that never happens.
   merge-gate-bridge:
+    needs: [changes]
+    if: needs.changes.outputs.merge-gate-bridge == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -1363,6 +1728,8 @@ jobs:
   # All three harnesses stub git, gh and bp; nothing reaches the network, a
   # credential, or the real repo. python3 is the sole unstubbed dependency.
   fleet-coordination-harnesses:
+    needs: [changes]
+    if: needs.changes.outputs.fleet-coordination-harnesses == 'true'
     name: already-fixed / branch-owner / pr-overlap harnesses
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1412,6 +1779,8 @@ jobs:
   # copying it, and re-derives the census's roots from env-census.py's own
   # --root choices, so a third root or a re-narrowed filter reds by name.
   compose-smoke-dispatcher:
+    needs: [changes]
+    if: needs.changes.outputs.compose-smoke-dispatcher == 'true'
     name: compose-smoke dispatcher covers the census roots
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1431,6 +1800,8 @@ jobs:
   # globs in 58 workflows, so there is no debt to grandfather and no baseline
   # that can rot. If it ever reds, a filter really is pointing at nothing.
   workflow-trigger-coverage:
+    needs: [changes]
+    if: needs.changes.outputs.workflow-trigger-coverage == 'true'
     name: every workflow path filter matches something
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1444,3 +1815,37 @@ jobs:
         run: bash scripts/workflow-trigger-coverage.test.sh
       - name: no declared path alternative is dead
         run: bash scripts/workflow-trigger-coverage.sh
+
+  # ── DISPATCHER SELFTEST ──────────────────────────────────────────────────
+  # The `changes` job above partitions this workflow's paths list per harness.
+  # Two lists that must agree and nothing making them is the defect class this
+  # whole file keeps finding in other workflows, so the partition is guarded:
+  # every roster row is a verbatim workflow-level entry (SUBSET), every
+  # workflow-level entry has a row (UNION == list), every job except `changes`
+  # is gated on its own output and has an output to be gated on, and the
+  # dispatcher body itself is EXTRACTED and RUN over mktemp git fixtures —
+  # push, empty diff, the measured router.ex case, the unresolvable base — with
+  # the unresolvable-base refusal proven load-bearing by mutation. Gated on its
+  # own inputs like every other job here; this file is in every set.
+  dispatch-selftest:
+    name: shell-harnesses dispatcher partition + fixture matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [changes]
+    if: needs.changes.outputs.dispatch-selftest == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        # DEFAULT depth. The harness reads this file from the working tree and
+        # builds every git fixture under mktemp.
+      - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
+      - name: harness syntax check
+        run: bash -n scripts/shell-harnesses-dispatch.test.sh
+      - name: partition invariants + dispatcher fixture matrix (incl. mutation arm)
+        run: bash scripts/shell-harnesses-dispatch.test.sh
