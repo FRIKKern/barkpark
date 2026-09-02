@@ -911,12 +911,142 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   sentinel (`mint_refused_sentinel/0`); `:not_attempted` — the session carried
   no minter principal (no socket identity to mint from); `:unknown` — the
   session is gone.
+
+  Two states are CLOCK-derived (task-cth-bl-token-renewal), because a
+  credential that was real at spawn stops being real four hours later and the
+  card must say so instead of letting every bp call 401 unexplained:
+  `:expired` — the held credential is past `expires_at` (or a renewal failed
+  and the old one ran out); `:rearmed` — a renewal succeeded, so a FRESH
+  credential is installed in the per-session mcp-config for the next spawn,
+  while THIS child's `BARKPARK_API_TOKEN` still carries the retired value
+  (a live process's environment cannot be rewritten — see `renew_task_token/1`).
   """
-  @spec task_hands(pid()) :: :minted | :mint_refused | :not_attempted | :unknown
+  @spec task_hands(pid()) ::
+          :minted | :rearmed | :expired | :mint_refused | :not_attempted | :unknown
   def task_hands(session) when is_pid(session) do
     GenServer.call(session, :task_hands)
   catch
     :exit, _reason -> :unknown
+  end
+
+  # ── task-token renewal (task-cth-bl-token-renewal, charter D63) ───────────
+  #
+  # The minted `bpcs_` credential is short-lived by design (4h default, 24h
+  # cap — the TTL is the crash backstop a brutal VM kill leaves behind).
+  # Without renewal a long conversation simply loses its hands mid-flight:
+  # every bp/MCP call starts 401ing and nothing says why. This seam renews it
+  # THROUGH THE SAME MINT (`Auth.create_claude_session_token/3` — never a
+  # second mint function, never a widened TTL), revokes the predecessor, and
+  # refreshes the one consumer a live session can still reach.
+  #
+  # THE CONSUMER TRUTH, stated once so nothing downstream can lie about it:
+  #
+  #   * the per-session 0600 mcp-config FILE is rewritable at any time — the
+  #     NEXT `--mcp-config` read (a resume respawn, an MCP child restart)
+  #     picks the fresh token up. Renewal rewrites it in place, 0600 first.
+  #   * the SPAWN ENV (`BARKPARK_API_TOKEN`, the Bash lane) is fixed at
+  #     `Port.open` and CANNOT be changed on a live child. That is OS
+  #     semantics, not a missing feature: no amount of Elixir rewrites a
+  #     running process's environment, and killing the child to re-arm it
+  #     would throw away the conversation the renewal exists to protect.
+  #
+  # So a renewal is honest only if it SAYS so: the post-renewal hands verdict
+  # is `:rearmed`, never `:minted` — "a fresh credential is installed for the
+  # next spawn; this child's Bash lane is re-armed when the session restarts".
+  # The onboarding card renders exactly that, with the restart as its named
+  # next step. Reporting `:minted` would be the silent failure D2 bans.
+
+  # Renew this far ahead of expiry, so the swap happens BEFORE the first 401
+  # rather than after it.
+  @task_token_renew_skew_s 300
+  # How often a live session re-checks its credential's clock.
+  @task_token_check_ms 60_000
+  # A floor between two renewals of the SAME session. It answers duplicate and
+  # concurrent requests without minting, and it bounds a misconfiguration
+  # (a skew wider than the TTL would otherwise renew on every single tick).
+  @task_token_renew_cooldown_s 60
+
+  @doc """
+  The `ttl:` opts threaded into EVERY `Auth.create_claude_session_token/3`
+  call this module makes — spawn mint and renewal alike. Config
+  `:task_token_ttl_s` (seconds) shortens it; absent ⇒ `[]` ⇒ auth.ex's own
+  4h default. This is auth.ex's OWN injection seam (it clamps the value to
+  the 24h cap and ignores anything non-positive), reached from config so a
+  test can drive a real, DB-true expiry without touching auth.ex.
+  """
+  @spec task_token_ttl_opts() :: keyword()
+  def task_token_ttl_opts do
+    case Keyword.get(config(), :task_token_ttl_s) do
+      ttl when is_integer(ttl) and ttl > 0 -> [ttl: ttl]
+      _ -> []
+    end
+  end
+
+  @doc "Seconds before expiry at which a live session renews (config `:task_token_renew_skew_s`)."
+  @spec task_token_renew_skew_s() :: non_neg_integer()
+  def task_token_renew_skew_s,
+    do: Keyword.get(config(), :task_token_renew_skew_s, @task_token_renew_skew_s)
+
+  @doc "Milliseconds between a live session's credential clock checks (config `:task_token_check_ms`)."
+  @spec task_token_check_ms() :: pos_integer()
+  def task_token_check_ms, do: Keyword.get(config(), :task_token_check_ms, @task_token_check_ms)
+
+  @doc "Seconds a session must wait between two renewals (config `:task_token_renew_cooldown_s`)."
+  @spec task_token_renew_cooldown_s() :: non_neg_integer()
+  def task_token_renew_cooldown_s,
+    do: Keyword.get(config(), :task_token_renew_cooldown_s, @task_token_renew_cooldown_s)
+
+  @doc """
+  Classify a minted credential against the wall clock: `:live` (comfortably
+  valid), `:renew_due` (inside the renew-ahead skew — renew NOW, before the
+  first failure), `:expired` (past `expires_at`; every call 401s already),
+  `:unknown` (no credential at all). The whole renewal decision reads off it.
+  """
+  @spec token_phase(DateTime.t() | nil) :: :live | :renew_due | :expired | :unknown
+  def token_phase(nil), do: :unknown
+
+  def token_phase(%DateTime{} = expires_at) do
+    case DateTime.diff(expires_at, DateTime.utc_now()) do
+      secs when secs <= 0 -> :expired
+      secs -> if secs <= task_token_renew_skew_s(), do: :renew_due, else: :live
+    end
+  end
+
+  def token_phase(_), do: :unknown
+
+  @doc """
+  Renew a live session's task credential now. The automatic clock loop inside
+  the Session calls the SAME code path on its own timer, so this is the
+  manual door onto one behaviour, never a second one.
+
+  `{:ok, info}` carries `:expires_at`, `:config_refreshed` and
+  `:env_rearm_required` — the last is always `true` and is the honest half:
+  the running child keeps the retired value in its environment until the
+  session restarts (see the consumer note above).
+
+  Fails closed. Every failure leaves the session exactly as it was — ONE
+  credential, still the old one, still revoked at teardown, and no token
+  anywhere that no consumer can read:
+
+    * `{:error, :not_attempted}` — the session never had a minter principal,
+      so there is nothing to renew (its env carries the poison sentinel).
+    * `{:error, :no_refreshable_consumer}` — the spawn-time mcp-config write
+      failed, so no consumer could ever read a replacement. Minting one would
+      create an orphan credential by construction; refuse instead.
+    * `{:error, {:mint_refused, reason}}` — the mint said no. The OLD token is
+      untouched and NEVER revoked (it may still have minutes of life left).
+    * `{:error, {:config_write_failed, reason}}` — the replacement could not be
+      installed, so it is revoked immediately and the old one stays in place.
+    * `{:ok, :already_renewed}` — a duplicate/concurrent request whose
+      credential is already fresh. Deliberately NOT a second mint: two mints
+      for one expiry is exactly how an orphan credential is born.
+    * `{:error, :session_gone}` — the session died first.
+  """
+  @spec renew_task_token(pid()) :: {:ok, map() | :already_renewed} | {:error, term()}
+  def renew_task_token(session) when is_pid(session) do
+    GenServer.call(session, :renew_task_token, 15_000)
+  catch
+    :exit, _reason -> {:error, :session_gone}
   end
 
   defp default_args(mode) do
@@ -1353,6 +1483,11 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           # DOWN and stop a session the new owner is still driving).
           sink_ref = Process.monitor(sink)
 
+          # Arm the credential clock loop for a session that actually holds a
+          # credential (task-cth-bl-token-renewal). A handless session has
+          # nothing to renew, so it never pays for the timer.
+          if mcp.mint == :minted, do: schedule_token_check()
+
           {:ok,
            %{
              port: port,
@@ -1375,6 +1510,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
              mcp_token: mcp.token,
              mcp_config_path: mcp.config_path,
              task_hands: mcp.mint,
+             # Everything the renewal loop needs to remint through the SAME
+             # seam (task-cth-bl-token-renewal): the minter principal (the
+             # human's own rights — a renewal can never exceed the mint it
+             # replaces), the label key, and the credential's expiry clock.
+             # The minter is an ApiToken STRUCT (a hash, never a raw secret),
+             # exactly like `mcp_token`; the raw values live only in the spawn
+             # env and the 0600 config file.
+             minter: Map.get(session_opts, :minter),
+             mcp_session_id: pinned_session_id(opts) || "anonymous",
+             token_expires_at: mcp.expires_at,
+             token_renewed_at: nil,
              buffer: "",
              pending_controls: %{},
              # request_id → the ORIGINAL ask input, tracked so a plain `:allow`
@@ -1409,7 +1555,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # child actually got — a real minted token, the poison sentinel, or no
     # attempt at all. The onboarding-card slice renders no_task_hands off this.
     def handle_call(:task_hands, _from, state) do
-      {:reply, state.task_hands, state}
+      {:reply, hands_verdict(state), state}
+    end
+
+    # Renew on demand — the same code path the clock loop runs, so the manual
+    # door and the automatic one can never drift (task-cth-bl-token-renewal).
+    # A `call` is deliberate: it serializes against every other message this
+    # process handles, so a second renewal request, a `close`, or a port exit
+    # can never interleave with a half-finished swap.
+    def handle_call(:renew_task_token, _from, state) do
+      {result, state} = renew_token(state)
+      {:reply, result, state}
     end
 
     @impl true
@@ -1551,6 +1707,30 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       {:stop, :normal, state}
     end
 
+    # The credential clock (task-cth-bl-token-renewal). Fires on a timer for
+    # the life of a session that holds a credential; renews as soon as the
+    # token enters the renew-ahead skew, i.e. BEFORE the first 401 rather than
+    # after it. The tick reschedules unconditionally so a refused renewal is
+    # retried on the next beat instead of silently giving up — and so the
+    # `:expired` verdict the card reads stays live even when the mint keeps
+    # saying no.
+    def handle_info(:task_token_check, state) do
+      state =
+        if renewable?(state) and
+             ClaudeChat.token_phase(Map.get(state, :token_expires_at)) in [:renew_due, :expired] do
+          {result, next} = renew_token(state)
+          # A no-op (cooling down) changed nothing, so it says nothing; a
+          # renewal or a refusal is exactly what the card needs to hear.
+          unless result == {:ok, :already_renewed}, do: announce_hands(next)
+          next
+        else
+          state
+        end
+
+      schedule_token_check()
+      {:noreply, state}
+    end
+
     def handle_info(_msg, state), do: {:noreply, state}
 
     @impl true
@@ -1682,6 +1862,181 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     defp safe_revoke(_), do: :ok
 
+    # ── task-token renewal (task-cth-bl-token-renewal) ───────────────────────
+
+    defp schedule_token_check do
+      Process.send_after(self(), :task_token_check, ClaudeChat.task_token_check_ms())
+    end
+
+    # The card's truth, computed from the held credential's clock rather than
+    # from what was true at spawn. `:minted`/`:rearmed` decay to `:expired` the
+    # moment the token they name runs out — a session whose renewal keeps being
+    # refused says `:expired` out loud instead of reporting stale success.
+    defp hands_verdict(%{task_hands: hands} = state) when hands in [:minted, :rearmed] do
+      case ClaudeChat.token_phase(Map.get(state, :token_expires_at)) do
+        :expired -> :expired
+        _ -> hands
+      end
+    end
+
+    defp hands_verdict(%{task_hands: hands}), do: hands
+    defp hands_verdict(_), do: :unknown
+
+    # Only a session that HAS a credential and the principal that minted it can
+    # renew. A handless session (`:mint_refused`, `:not_attempted`) has nothing
+    # to replace — its env carries the poison sentinel by design, and minting
+    # into it would produce a credential no consumer reads.
+    defp renewable?(%{task_hands: hands} = state) when hands in [:minted, :rearmed],
+      do: not is_nil(Map.get(state, :minter))
+
+    defp renewable?(_), do: false
+
+    # Tell the sink (the Recorder, which rebroadcasts to every viewer) what the
+    # hands verdict became, so the onboarding card flips in place — no browser
+    # reload, no polling, no waiting for the human to press Re-check. Sent on
+    # renewal outcomes only; a quiet tick says nothing.
+    defp announce_hands(state) do
+      send(state.sink, {:claude_chat_task_hands, hands_verdict(state)})
+      :ok
+    catch
+      _, _ -> :ok
+    end
+
+    # ONE renewal, ordered so that no failure can leave a credential behind:
+    #
+    #   mint (same seam)  ->  install into the refreshable consumer
+    #                     ->  revoke the predecessor LAST
+    #
+    # The predecessor dies only once its replacement is fully installed, and a
+    # replacement that cannot be installed is revoked before this function
+    # returns. At every intermediate point exactly one credential is live and
+    # `cleanup_mcp/1` at teardown revokes it.
+    defp renew_token(state) do
+      cond do
+        not renewable?(state) ->
+          {{:error, :not_attempted}, state}
+
+        cooling_down?(state) ->
+          # A duplicate or concurrent request for an expiry that was already
+          # handled. Two mints for one expiry is exactly how an orphan
+          # credential is born, so this one deliberately does not mint.
+          {{:ok, :already_renewed}, state}
+
+        is_nil(Map.get(state, :mcp_config_path)) ->
+          # The spawn-time config write failed, so this session has env-only
+          # hands and the env cannot change on a live child. A replacement
+          # would be readable by nobody — an orphan by construction. Refuse.
+          {{:error, :no_refreshable_consumer}, state}
+
+        true ->
+          mint_replacement(state)
+      end
+    end
+
+    # `renew_task_token/1` may be called by anyone at any time, and several
+    # callers may race the clock loop. At most ONE renewal per cooldown window:
+    # the losers are answered `{:ok, :already_renewed}` without a mint, so a
+    # burst of requests can never leave a trail of credentials behind. A failed
+    # renewal never stamps `token_renewed_at`, so a refusal is always retried.
+    defp cooling_down?(state) do
+      case Map.get(state, :token_renewed_at) do
+        %DateTime{} = at ->
+          DateTime.diff(DateTime.utc_now(), at) < ClaudeChat.task_token_renew_cooldown_s()
+
+        _ ->
+          false
+      end
+    end
+
+    defp mint_replacement(state) do
+      case Barkpark.Auth.create_claude_session_token(
+             state.minter,
+             state.mcp_session_id,
+             ClaudeChat.task_token_ttl_opts()
+           ) do
+        {:ok, {raw, token}} ->
+          install_replacement(state, raw, token)
+
+        {:error, reason} ->
+          # The OLD credential is untouched and NOT revoked — it may still have
+          # minutes left, and revoking it here would turn a refused renewal
+          # into an immediate outage. The next tick tries again.
+          Logger.warning(
+            "claude chat: task-token renewal mint refused (#{inspect(reason)}) — keeping the old credential"
+          )
+
+          {{:error, {:mint_refused, reason}}, state}
+      end
+    rescue
+      e ->
+        Logger.warning("claude chat: task-token renewal mint crashed (#{inspect(e)})")
+        {{:error, :renewal_crashed}, state}
+    end
+
+    # Install the replacement into the ONE consumer a live session can reach —
+    # the per-session 0600 mcp-config file, which the next `--mcp-config` read
+    # (a resume respawn, an MCP child restart) picks up. The spawn env of the
+    # RUNNING child keeps the retired value: that is why the verdict becomes
+    # `:rearmed` and never `:minted`.
+    defp install_replacement(state, raw, token) do
+      case rewrite_mcp_config(state, raw, token) do
+        :ok ->
+          safe_revoke(state.mcp_token)
+
+          {{:ok,
+            %{
+              expires_at: token.expires_at,
+              config_refreshed: true,
+              env_rearm_required: true
+            }},
+           %{
+             state
+             | mcp_token: token,
+               token_expires_at: token.expires_at,
+               token_renewed_at: DateTime.utc_now(),
+               task_hands: :rearmed
+           }}
+
+        {:error, reason} ->
+          # Nothing reads it, so nothing may keep it alive.
+          safe_revoke(token)
+
+          Logger.warning(
+            "claude chat: task-token renewal could not refresh the mcp config (#{inspect(reason)}) — replacement revoked"
+          )
+
+          {{:error, {:config_write_failed, reason}}, state}
+      end
+    rescue
+      e ->
+        safe_revoke(token)
+
+        Logger.warning(
+          "claude chat: task-token renewal install crashed (#{inspect(e)}) — replacement revoked"
+        )
+
+        {{:error, :renewal_crashed}, state}
+    end
+
+    # Rewrite the per-session mcp-config in place with the replacement
+    # credential, re-fetching this workspace's tool descriptors so a renewal
+    # never silently strips the session's tool connectors. 0600 is re-clamped
+    # BEFORE the secret lands, exactly as the spawn-time write does.
+    # The path was minted by `mcp_config_path/1` under the OS temp directory.
+    # sobelow_skip ["Traversal.FileModule"]
+    defp rewrite_mcp_config(%{mcp_config_path: path}, raw, token) when is_binary(path) do
+      {_ticket, descriptors} = tool_descriptors_for(token.workspace_id)
+      json = Jason.encode!(ClaudeChat.mcp_config(raw, descriptors))
+
+      with :ok <- File.touch(path),
+           :ok <- File.chmod(path, 0o600),
+           :ok <- File.write(path, json) do
+        :ok
+      end
+    end
+
+    defp rewrite_mcp_config(_state, _raw, _token), do: {:error, :no_config_path}
+
     # Mint the loopback credential + write the per-session mcp-config (charter
     # D63/D64). Only a session that carries a `:minter` principal — the chat
     # admin's api_token/user, threaded from the socket — gets hands, and never
@@ -1695,7 +2050,11 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp setup_mcp(opts, %{minter: minter}) when not is_nil(minter) do
       session_id = pinned_session_id(opts) || "anonymous"
 
-      case Barkpark.Auth.create_claude_session_token(minter, session_id) do
+      case Barkpark.Auth.create_claude_session_token(
+             minter,
+             session_id,
+             ClaudeChat.task_token_ttl_opts()
+           ) do
         {:ok, {raw, token}} ->
           # The OTHER direction (connectors D69): fetch this workspace's TOOL
           # connectors from the bridge and fold them into the config as extra
@@ -1713,6 +2072,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
             mint: :minted,
             raw: raw,
             token: token,
+            # The credential's own clock, carried into session state so the
+            # renewal loop can see expiry coming (task-cth-bl-token-renewal).
+            expires_at: token.expires_at,
             config_path: write_mcp_config(opts, raw, descriptors)
           }
 
@@ -1721,17 +2083,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
             "claude chat: mcp token mint refused (#{inspect(reason)}) — poisoning task hands"
           )
 
-          %{mint: :mint_refused, raw: nil, token: nil, config_path: nil}
+          %{mint: :mint_refused, raw: nil, token: nil, expires_at: nil, config_path: nil}
       end
     rescue
       e ->
         Logger.warning("claude chat: mcp setup crashed (#{inspect(e)}) — poisoning task hands")
 
-        %{mint: :mint_refused, raw: nil, token: nil, config_path: nil}
+        %{mint: :mint_refused, raw: nil, token: nil, expires_at: nil, config_path: nil}
     end
 
     defp setup_mcp(_opts, _session_opts),
-      do: %{mint: :not_attempted, raw: nil, token: nil, config_path: nil}
+      do: %{mint: :not_attempted, raw: nil, token: nil, expires_at: nil, config_path: nil}
 
     # The tool-connector fetch (connectors D69/D73) — the outbound direction. Sign
     # a session-length tool ticket for `workspace_id` and ask the bridge which MCP

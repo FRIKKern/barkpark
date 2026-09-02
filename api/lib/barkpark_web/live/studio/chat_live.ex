@@ -2036,6 +2036,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the catch-all below.
   def handle_info({:chat_heartbeat, _sid, _ts}, socket), do: {:noreply, socket}
 
+  # The session's task-credential verdict changed under us
+  # (task-cth-bl-token-renewal). A long conversation must never discover its
+  # lost hands as an unexplained 401: the Session renews on its own clock and
+  # pushes the outcome through the Recorder, so the onboarding card flips in
+  # place — no browser reload, no Re-check click, no reconnect. The frame
+  # carries a VERDICT ATOM only; the credential itself never reaches the
+  # LiveView, the assigns, or the DOM.
+  def handle_info({:claude_chat_task_hands, verdict}, socket) do
+    {:noreply, assign(socket, readiness: readiness_for_hands(verdict))}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   # The async readiness probe landed (chat-task-hands, charter decision 4).
@@ -3449,7 +3460,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
               named state + next step, never a silent Logger line). --%>
         <.chat_readiness_card
-          :if={@readiness in [:no_task_hands, :task_token_expired]}
+          :if={@readiness in [:no_task_hands, :task_token_expired, :task_token_rearmed]}
           readiness={@readiness}
           provider={@provider}
         />
@@ -3611,6 +3622,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp readiness_title(:task_token_expired, _provider),
     do: "The chat's task credential expired"
 
+  defp readiness_title(:task_token_rearmed, _provider),
+    do: "Task hands re-armed — restart to hand them over"
+
   defp readiness_title(_, _provider), do: "Checking readiness"
 
   # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
@@ -3638,13 +3652,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp readiness_body(:task_token_expired, _provider),
     do:
-      "This session's minted Barkpark task token has expired, so task tools stopped " <>
-        "working. Re-check, then your next send mints a fresh credential."
+      "This session's minted Barkpark task token has expired and Barkpark could not " <>
+        "mint a replacement, so its bp task tools are offline. The chat itself still " <>
+        "works. Start a new session to mint fresh task hands."
+
+  defp readiness_body(:task_token_rearmed, _provider),
+    do:
+      "This session's task credential was about to expire, so Barkpark minted a fresh " <>
+        "one and revoked the old. The new credential is already wired into this " <>
+        "session's MCP config; the running agent's shell still holds the retired one " <>
+        "until the session restarts — a live process's environment cannot be rewritten."
 
   defp readiness_body(_, provider), do: "Checking #{provider_name(provider)} readiness…"
 
   defp readiness_step(:not_logged_in, "claude"), do: "claude auth login"
   defp readiness_step(:not_logged_in, "codex"), do: "codex login"
+
+  # The named next step for a re-armed session: the MCP lane already has the
+  # fresh credential; the Bash lane is re-armed by the next spawn.
+  defp readiness_step(:task_token_rearmed, _provider), do: "Restart this session"
   defp readiness_step(_, _provider), do: nil
 
   defp provider_name("claude"), do: "Claude Code"
@@ -4250,6 +4276,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #   :not_logged_in      claude lane: CLI present, not authed  (locks composer)
   #   :no_task_hands      bp lane: the task-credential mint was refused
   #   :task_token_expired bp lane: the minted task credential expired
+  #   :task_token_rearmed bp lane: renewed — restart to re-arm the shell lane
   #   :ready              live composer
   #
   # The two claude-lane states REPLACE the composer (there is nothing to send
@@ -4299,16 +4326,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # moment. The default reads the spawn-env slice's queryable mint state
   # (provider `task_hands/1`: :minted | :mint_refused | :not_attempted |
   # :unknown); the config seam injects a verdict for deterministic tests.
-  # `:task_token_expired` is reachable only through the seam today —
-  # mid-session TTL expiry detection is backlogged (task-cth-bl-token-renewal);
-  # the card state is ready for it.
+  # `:expired` and `:rearmed` are now REAL provider verdicts, not seam-only
+  # placeholders (task-cth-bl-token-renewal): the session reads its own
+  # credential's clock, renews through the same mint before expiry, and reports
+  # `:rearmed` afterwards because a live child's environment still carries the
+  # retired value.
   defp hands_readiness(provider, session) do
-    case hands_state(provider, session) do
-      state when state in [:refused, :mint_refused] -> :no_task_hands
-      :expired -> :task_token_expired
-      _ -> :ready
-    end
+    readiness_for_hands(hands_state(provider, session))
   end
+
+  # One verdict->card mapping, shared by the probe path and the pushed
+  # `{:claude_chat_task_hands, verdict}` frame, so a renewal that lands
+  # mid-conversation and a Re-check can never disagree.
+  defp readiness_for_hands(state) when state in [:refused, :mint_refused], do: :no_task_hands
+  defp readiness_for_hands(:expired), do: :task_token_expired
+  defp readiness_for_hands(:rearmed), do: :task_token_rearmed
+  defp readiness_for_hands(_), do: :ready
 
   defp hands_state(_provider, nil), do: :ok
 
