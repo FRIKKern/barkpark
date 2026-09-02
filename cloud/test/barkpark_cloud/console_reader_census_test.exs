@@ -852,9 +852,12 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "read_failed",
       site: "router.ex GET /v1/deliveries",
       reason:
-        "CLI/PAT-only: require_user_or_pat + read ability, and app.js never calls " <>
-          "the platform-deliveries read (it reads /v1/notifications/deliveries, a " <>
-          "different route). Flip: a console platform-deliveries view ships."
+        "CLI/PAT/worker-only: require_user_or_pat_or_worker + read ability, and " <>
+          "app.js never calls the platform-deliveries read (it reads " <>
+          "/v1/notifications/deliveries, a different route). The worker principal " <>
+          "added by task-e2acb66e9ed0da09 is a CI reader, not a browser, so it does " <>
+          "not make this code console-reachable. Flip: a console " <>
+          "platform-deliveries view ships."
     },
     %{
       code: "record_failed",

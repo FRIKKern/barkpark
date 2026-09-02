@@ -1,9 +1,7 @@
 <!-- doc-tier: agent | canonical-for: tenancy-model | budget: 2000tok -->
 # Tenancy — workspace · project · dataset · membership
 
-How Barkpark isolates data across tenants and scopes every read/write. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
-
-**This doc owns the model + scoping** — auth enforcement and URL shapes live in Canonical homes below.
+How Barkpark's **API layer** isolates data across tenants and scopes every read/write; cloud-side team/barkpark object authz is `docs/contracts/cloud-object-authz.md`. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
 
 ## The hierarchy
 
@@ -41,7 +39,7 @@ Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-ta
 
 Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner · admin · member`, `membership.ex` `@roles`), distinct from the token's global `permissions[]`. The membership role — not global permissions — decides workspace-admin authority (`Tenancy.Auth.workspace_admin?/2`, true for `owner`/`admin`), so a globally-privileged token added elsewhere lands as `member`, **not** admin there. `create_membership/4` defaults to `member`; only `create_workspace_with_owner/2` (`owner`) and token-mint (`Auth.create_token`) grant higher.
 
-**Two role axes (GR46).** `owner · admin · member` is the *only* team-role vocabulary — every settings gate reads it. `platform_operator` is **not** a team role but an interim *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry + `/v1/operator/*`, reconciled by `isu-backlog-operator-principal`. **Supporter** is a billing *plan*, never a role — the owner/supporter/operator 5-role list is archived design fiction.
+**Two role axes (GR46).** `owner · admin · member` is the *only* team-role vocabulary — every settings gate reads it. `platform_operator` is **not** a team role but the *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry, `/v1/operator/*` and `bp cloud rollout` (isu-backlog-operator-principal). **Supporter** is a billing *plan*, never a role — the owner/supporter/operator 5-role list is archived design fiction.
 
 Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises — ruling + widening: the `Tenancy.Auth` moduledoc.
 

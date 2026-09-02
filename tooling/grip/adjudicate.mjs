@@ -31,6 +31,24 @@
 // "your fact is MALFORMED"; FAILED means "your fact is FALSE". Collapsing them
 // is exactly the distinction rerun.mjs's enum exists to prevent.
 //
+// THE ABSENCE VETO IS A SEPARATE CHANNEL FROM THE VERDICT (D50), and every
+// ruling carries it as `admits_absence`. FAILED is not one answer: rerun.mjs's
+// family table splits a matcher that ran and matched nothing (a genuine "X is
+// not there") from a DIFFER that exited 1 (differences found, WITH content) and
+// from every tool error, marking the latter two `absenceEligible: false`. Both
+// arrive here as the same FAILED, so a consumer mapping on the verdict alone
+// would cite a difference or an error as proof of absence — the polarity
+// inversion the table exists to stop. Minting an eleventh verdict name instead
+// would fail closed to UNKNOWN-VERDICT and disable the whole DIFFER family, so
+// the veto rides its own field: the ruling factory calls rerun.mjs's
+// `admitsAbsenceClaim` on the rerun result and stores the answer. ONE grammar,
+// evaluated once, promoted to the surface — this engine does not re-decide it,
+// and a consumer reads `ruling.admits_absence` instead of knowing to reach into
+// the nested raw result. A ruling with no rerun result (rejected on admission,
+// admission-only, or an empty rerun command) carries `false`: nothing ran, so
+// nothing may support a negative claim. So does a plain pass — an OK says the
+// claim reproduces, which is not evidence that anything is missing.
+//
 // WHAT A VERDICT CERTIFIES (D4): re-derivability, and nothing else. The wording
 // throughout is "re-derived just now", and never any phrasing that implies the
 // author was observed reading — that phrasing is banned repo-wide in
@@ -43,7 +61,7 @@
 
 import { admitFact } from "./record.mjs";
 import { deriveLevel } from "./level.mjs";
-import { runRerun, VERDICT } from "./rerun.mjs";
+import { runRerun, VERDICT, admitsAbsenceClaim } from "./rerun.mjs";
 import { screenCommand } from "./screen.mjs";
 
 // The ten names. Frozen so a caller cannot grow the vocabulary by assignment.
@@ -149,6 +167,10 @@ export function screenedRerun(command, opts = {}) {
  *   fact,        the admitted fact, or null when REJECTED
  *   level,       the admitted level, or null
  *   rerun,       the runRerun result, or null when not executed
+ *   admits_absence,  may this ruling be cited as "X is not there"? Exactly
+ *                rerun.mjs's admitsAbsenceClaim applied to `rerun` — the veto
+ *                promoted to the surface so no consumer has to reach into the
+ *                nested result to find it. false whenever nothing was executed.
  *   note,        one honest human line — "re-derived just now", never stronger
  * }
  *
@@ -262,6 +284,12 @@ function ruling({ verdict, label, reasons = [], rejections = [], fact = null, le
     fact,
     level,
     rerun,
+    // THE PROMOTION (D50). Delegated, never re-derived: a second copy of this
+    // predicate here is the hand-copied-authority defect class this epic exists
+    // to stop. `admitsAbsenceClaim` answers false for a null rerun on its own,
+    // so the no-execute, demoted and empty-rerun branches get an honest false
+    // from the same call rather than from a branch-local guess.
+    admits_absence: admitsAbsenceClaim(rerun),
     note,
     conflict: null,
   };

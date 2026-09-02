@@ -351,20 +351,27 @@ const CHECKS = [
     },
   },
   {
-    // A RATIFIED specimen must carry a real command. An UNRATIFIED one has no
-    // ratified command to carry and must say so in `rerun: null` +
-    // no_rerun_reason — never in prose parked in the `rerun` field. Prose there
-    // passes a presence check VACUOUSLY, and downstream (the executor, the
+    // A RATIFIED specimen must carry a real command. Prose parked in the `rerun`
+    // field passes a presence check VACUOUSLY, and downstream (the executor, the
     // acceptance suite) would hand "n/a — the ratified table did not…" to
     // /bin/sh. The absence of a command is data; it must be typed as absence.
-    name: "ratified specimens carry an executable rerun; unratified carry rerun:null + a reason",
-    check: (_c, s) =>
-      s.specimens.every((x) => {
-        if (x.ratified === true) {
-          return typeof x.rerun === "string" && x.rerun.trim().length > 0 && !/^n\/a\b/i.test(x.rerun.trim());
-        }
-        return x.rerun === null && typeof x.no_rerun_reason === "string" && x.no_rerun_reason.length > 20;
-      }),
+    //
+    // An UNRATIFIED specimen has two honest shapes, and PROSE IS NEITHER:
+    //   * `rerun: null` + no_rerun_reason — 101 and 102, which have no ratified
+    //     command to carry because their rows were never ratified;
+    //   * a REAL executable command + rerun_note saying what it re-derives —
+    //     103, whose honest counterpart is a live command in this repo. The note
+    //     is what keeps this arm from becoming "any string is fine": a command
+    //     with no account of what it answers is the vacuity the other arm bans.
+    name: "ratified specimens carry an executable rerun; unratified carry rerun:null + a reason, or a real command + a note",
+    check: (_c, s) => {
+      const executable = (v) => typeof v === "string" && v.trim().length > 0 && !/^n\/a\b/i.test(v.trim());
+      return s.specimens.every((x) => {
+        if (x.ratified === true) return executable(x.rerun);
+        if (x.rerun === null) return typeof x.no_rerun_reason === "string" && x.no_rerun_reason.length > 20;
+        return executable(x.rerun) && typeof x.rerun_note === "string" && x.rerun_note.length > 20;
+      });
+    },
     plant: (_c, s) => {
       const u = s.specimens.find((x) => x.ratified === false);
       if (u) u.rerun = "n/a — no command was ratified for this row";
@@ -405,10 +412,15 @@ const CHECKS = [
     },
   },
   {
-    name: "the two UNRATIFIED specimens are present and both UNCAUGHT",
+    // THREE since 2026-09-02: 103 joined 101 and 102 when specimen 5's R3 label
+    // was re-derived to R1. It is the fixture's first R3-shaped case — an R3
+    // violation with HONEST levels, which R1 structurally cannot reach — and it
+    // is a negative control, never a seventh ratified row. The count stays
+    // EXACT: a `>=` here would stop noticing a silently dropped control.
+    name: "the three UNRATIFIED specimens are present and all UNCAUGHT",
     check: (_c, s) => {
       const un = s.specimens.filter((x) => x.ratified === false);
-      return un.length === 2 && un.every((x) => x.caught_by === "UNCAUGHT");
+      return un.length === 3 && un.every((x) => x.caught_by === "UNCAUGHT");
     },
     plant: (_c, s) => {
       const u = s.specimens.find((x) => x.ratified === false);
@@ -471,11 +483,34 @@ const CHECKS = [
   },
 ];
 
+/**
+ * A NAMED NON-ZERO OUTCOME, thrown rather than exited (charter D92).
+ *
+ * Every failing arm in this file used to `console.error(...)` and then call
+ * `process.exit(N)` on the next line. Node writes stdout to a PIPE
+ * asynchronously, so process.exit() discards whatever the kernel has not taken
+ * yet — and verify() prints its whole check table and its selftest table to
+ * stdout BEFORE deciding the status, so `harvest.mjs --verify | tee` could come
+ * back missing the very lines that say which check failed while the same run
+ * redirected to a file was whole. Throwing carries the status up to the one
+ * handler at the bottom, which sets process.exitCode and lets the loop drain.
+ *
+ * The STATUS and the stderr TEXT are unchanged in every arm: 2 for a missing
+ * fixture or a bad mode, 1 for a failed check, 3 for a control that did not
+ * behave as a control, 2 for an unexpected throw.
+ */
+class Fatal extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "Fatal";
+    this.code = code;
+  }
+}
+
 function loadFixtures() {
   for (const [label, p] of [["evidence-corpus.json", CORPUS], ["level-skip-specimens.json", SPECIMENS]]) {
     if (!existsSync(p)) {
-      console.error(`FAIL  missing fixture ${label} — run: node tooling/grip/harvest.mjs --harvest`);
-      process.exit(2);
+      throw new Fatal(2, `FAIL  missing fixture ${label} — run: node tooling/grip/harvest.mjs --harvest`);
     }
   }
   const corpusRaw = readFileSync(CORPUS);
@@ -554,12 +589,10 @@ function verify() {
 
   console.log("");
   if (inert > 0) {
-    console.error(`CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted} plants did not trip their check.`);
-    process.exit(3);
+    throw new Fatal(3, `CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted} plants did not trip their check.`);
   }
   if (failed > 0) {
-    console.error(`FAIL: ${failed}/${CHECKS.length} checks failed.`);
-    process.exit(1);
+    throw new Fatal(1, `FAIL: ${failed}/${CHECKS.length} checks failed.`);
   }
   console.log(`PASS: ${CHECKS.length} checks green, ${planted} controls proven able to fail.`);
 }
@@ -591,16 +624,24 @@ try {
     const f = loadFixtures();
     const { inert, planted } = runSelftest(f);
     if (inert > 0) {
-      console.error(`CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted}`);
-      process.exit(3);
+      throw new Fatal(3, `CONTROL DID NOT BEHAVE AS A CONTROL: ${inert}/${planted}`);
     }
     console.log(`PASS: ${planted} controls proven able to fail.`);
   } else if (mode === "--stats") stats();
   else {
-    console.error(`usage: node tooling/grip/harvest.mjs [--harvest|--verify|--selftest|--stats]`);
-    process.exit(2);
+    throw new Fatal(2, `usage: node tooling/grip/harvest.mjs [--harvest|--verify|--selftest|--stats]`);
   }
 } catch (e) {
-  console.error(`ERROR: ${e?.message || e}`);
-  process.exit(2);
+  // ONE handler, and it keeps the two shapes apart: a Fatal already carries the
+  // message its arm wrote and the status that arm chose, while anything else is
+  // an unexpected throw that still reports 2 under the same ERROR prefix as
+  // before. No process.exit in either branch (D92) — exit-race.test.mjs is the
+  // pin, and the statuses are byte-identical to the exits they replace.
+  if (e instanceof Fatal) {
+    console.error(e.message);
+    process.exitCode = e.code;
+  } else {
+    console.error(`ERROR: ${e?.message || e}`);
+    process.exitCode = 2;
+  }
 }
