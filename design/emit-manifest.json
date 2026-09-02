@@ -7,7 +7,7 @@
     "api/lib/barkpark_web/controllers/error_html.ex#error page (error_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
     "api/lib/barkpark_web/controllers/session_html.ex#login (session_html)": "31667638d81efd9762630e7e8f79bd038c70c91c777ac612fdc45ffaf76e8e11",
     "api/lib/barkpark_web/controllers/status_controller.ex#status page chrome": "64ed2df4c3c3bb389c37ea147d0a02042787e568a15d1440484fc2fe9331c6f2",
-    "api/lib/barkpark_web/layouts/bulldocs.html.heex#/papers reader skin": "495bbae4f40be5d47518f8aa9bb9184a67b860df25c75cda227e58c83b8e244d",
+    "api/lib/barkpark_web/layouts/bulldocs.html.heex#/papers reader skin": "c845f5d6033583c4710e10f33936aeb3272d7fe4e431a2a0c2059b4245536fdc",
     "api/lib/barkpark_web/layouts/root.html.heex#Studio": "c2a134147d2f94a331c1d6581926de46ccee66b639c0a374c084b62a979292e8",
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
