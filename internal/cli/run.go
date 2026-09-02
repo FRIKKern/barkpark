@@ -60,6 +60,16 @@ type manifestRequest struct {
 	// rather than being printed in place. Today's only producer is
 	// unusedStdinNotice.
 	warnings []string
+
+	// ledger, when non-nil, is the retry + re-read-before-retry policy for a
+	// TASK LEDGER WRITE (claim/next/close/stamp/pulse/release — see
+	// tasks_write_retry.go). It is attached HERE, on the shared request, rather
+	// than in runCommand, because this struct is the ONE seam both the CLI
+	// dispatch and the headless MCP dispatch pass through: attaching it here is
+	// what makes the MCP task_* write tools inherit the policy with zero
+	// per-tool code. nil for every other command, which then takes the
+	// untouched single-shot send.
+	ledger *ledgerWrite
 }
 
 // dispatchError is a build-stage failure (bad args / URL / body) surfaced by
@@ -162,6 +172,9 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		body:     body,
 		stream:   stream,
 		warnings: warnings,
+		// Resolved from the SAME argMap/cmdFlags the body was built from, so the
+		// row a read-back targets can never drift from the row the POST carries.
+		ledger: ledgerWriteFor(ctx, m, cmd, argMap, cmdFlags, headers),
 	}, nil
 }
 
@@ -273,6 +286,13 @@ func draftIDRequiresAuth(cmd manifest.Command, argMap map[string]string) bool {
 func sendManifestRequest(req *manifestRequest) (int, []byte, string, error) {
 	if req.stream != nil {
 		return doRequestStreamCT(req.method, req.url, req.headers, req.stream, -1)
+	}
+	// A TASK LEDGER WRITE takes the retrying send: a 5xx or a dropped
+	// connection is retried, and the store is RE-READ before every retry so a
+	// write that already landed is never re-sent (tasks_write_retry.go). Every
+	// other request keeps the single-shot path, byte-identical.
+	if req.ledger != nil {
+		return sendLedgerWrite(req)
 	}
 	return doRequestCT(req.method, req.url, req.headers, req.body)
 }
@@ -1983,13 +2003,22 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 // screenUnpaginatedRead needs to tell a plaintext gateway banner from an
 // honest non-JSON payload like onixedit.export's ONIX 3.0 XML.
 func doRequestCT(method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, error) {
+	status, respBody, ct, _, err := doRequestFull(method, rawURL, headers, body)
+	return status, respBody, ct, err
+}
+
+// doRequestFull is doRequestCT plus the response HEADERS. Only the ledger-write
+// retry reads them, and only for one field: Retry-After, which a server uses to
+// name its own recovery window. Added alongside rather than replacing
+// doRequestCT so none of its call sites had to change.
+func doRequestFull(method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, http.Header, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
 	req, err := http.NewRequest(method, rawURL, rdr)
 	if err != nil {
-		return 0, nil, "", err
+		return 0, nil, "", nil, err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -1997,15 +2026,15 @@ func doRequestCT(method, rawURL string, headers map[string]string, body []byte) 
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, "", err
+		return 0, nil, "", nil, err
 	}
 	defer resp.Body.Close()
 	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
-		return resp.StatusCode, nil, ct, err
+		return resp.StatusCode, nil, ct, resp.Header, err
 	}
-	return resp.StatusCode, respBody, ct, nil
+	return resp.StatusCode, respBody, ct, resp.Header, nil
 }
 
 // maxResponseBytes caps how much of an HTTP response body the generic request

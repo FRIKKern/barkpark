@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // minimalClosePulseManifest carries ONLY `task close` and `task pulse`, so the
@@ -123,6 +124,14 @@ type cpStore struct {
 // back on GET /v1/tasks/:id — the read-back the verbs now perform.
 func cpTestServer(t *testing.T, mode cpStoreMode) (*cpStore, *int32) {
 	t.Helper()
+	// The ledger-write retry (tasks_write_retry.go) waits 0.5s/1.5s/4s between
+	// attempts against a 5xx. This suite is about the READ-BACK, not the
+	// schedule (ledger_write_retry_test.go owns that), so the waits are stubbed
+	// out — otherwise every 500-mode case here would spend six real seconds.
+	realSleep := ledgerSleep
+	ledgerSleep = func(time.Duration) {}
+	t.Cleanup(func() { ledgerSleep = realSleep })
+
 	var hits int32
 	// The row starts OPEN, claimed by "w", with no now-line: the state a task
 	// is in before either verb runs.
