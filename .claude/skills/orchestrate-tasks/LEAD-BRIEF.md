@@ -65,6 +65,12 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
    slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
    means re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
+   **A worker's green is scoped to the tests the worker CHOSE.** Three PRs on 2026-09-02 needed
+   lead intervention after a builder reported green, and every one of the three defects sat
+   outside the builder's own selection: a rebase conflict, a census refusal on an inline
+   `position: fixed`, and an order-dependent golden. Before you merge, run the wider net the
+   worker did not — the whole directory, the census scripts, the gate script — and make every
+   worker report state what it did NOT run.
    **An isolated green on an order-dependent test is VACUOUS.** Before trusting a green on a
    byte-locked golden or any ordering-sensitive file, grep the ledger for a flake row naming it
    and run the whole DIRECTORY, not the one file — the isolated run is the condition under which
