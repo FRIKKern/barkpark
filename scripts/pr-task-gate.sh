@@ -16,7 +16,9 @@
 #                                created_at (ISO-8601). Absent/unparseable is a
 #                                refusal on that branch, never a fall-open.
 #     PR_TASK_GATE_RETRIES       optional — ledger attempts (default 3)
-#     PR_TASK_GATE_RETRY_DELAY   optional — seconds between attempts (default 2)
+#     PR_TASK_GATE_RETRY_DELAY   optional — BASE seconds between attempts
+#                                (default 2). The wait doubles per attempt
+#                                (delay, delay*2, delay*4 ...), capped at 30s.
 #   Exit codes:
 #     0  pass   — the change is TASK-BACKED: the task exists and either
 #                   • lifecycle_status == in_progress with a claim.worker, or
@@ -31,15 +33,52 @@
 #                 claimed/closed through the engine, cancelled, or wrong worker.
 #                 Must not merge.
 #     2  UNCHECKED — the ledger could not be reached after PR_TASK_GATE_RETRIES
-#                 attempts (network error / 5xx / 429 / 000), OR it answered 2xx
-#                 with no task document in the envelope. This is NOT a pass:
+#                 attempts (network error / 5xx / 429 / 000). This is NOT a pass:
 #                 the caller (the workflow) turns it into a FAILURE carrying a
 #                 self-describing "re-run once the ledger is up" message.
+#     3  MISCONFIGURED CREDENTIAL — the ledger REFUSED the gate's credential
+#                 (HTTP 401 or 403). Never retried, because a rejected token is
+#                 not a blip and pressing re-run cannot clear it. The thing to
+#                 fix is the repo secret BARKPARK_TASK_TOKEN.
+#     5  MALFORMED ANSWER — the ledger answered 2xx and the body could not be
+#                 read as a task document (not valid JSON, or no document in the
+#                 `result` envelope). The ledger is UP and authenticating; it is
+#                 the payload that is wrong, so neither "re-run once it is up"
+#                 nor "fix the token" is the instruction.
 #
 # Why 2 is distinct from 1: a hard fail means "the rule was checked and broken";
 # 2 means "the rule could not be checked". Both block, but they read differently
 # and only one of them is fixed by pressing re-run. Collapsing them would print
 # a policy accusation at a reader whose PR is fine.
+#
+# ── WHY 3 AND 5 EXIST: THE 2026-09-01 OUTAGE THAT WAS NOT AN OUTAGE ──────────
+# BARKPARK_TASK_TOKEN was a leaked instance-admin token, revoked at 20:26Z. The
+# ledger then answered HTTP 401 to every read this gate made, and this script
+# treated 401 exactly as it treated a 500: retry, retry, then exit 2 — whose
+# message, verbatim in the required check, was "The task ledger did not answer
+# after the gate's bounded retries". Run 33555718748 attempt 1 (branch
+# studio/dead-admin-shell-css) is the record:
+#
+#   pr-task-gate: attempt 1/3 was indecisive (ledger returned HTTP 401 for
+#     spd-b3-dead-admin-shell-css); retrying in 2s
+#   pr-task-gate: attempt 2/3 was indecisive (ledger returned HTTP 401 ...)
+#   pr-task-gate: UNCHECKED: ledger returned HTTP 401 ... after 3 attempts
+#   ##[error]The task ledger did not answer after the gate's bounded retries ...
+#
+# The ATTEMPT LINES carried the truth and the VERDICT did not. Every agent who
+# read the verdict waited for a ledger that was up the whole time, and the only
+# instruction on offer ("re-run this check once the ledger is up") was one that
+# could never work. Three separable faults, each closed here:
+#   a) 401 was RETRIED. Retrying an auth refusal is noise, and worse, it is
+#      noise shaped exactly like a transient — three identical 401s read as a
+#      flapping ledger to anyone who did not know the difference.
+#   b) 401 ENDED IN THE OUTAGE MESSAGE. A verdict that names the wrong cause
+#      names the wrong cure. Exit 3 says the credential was refused, names
+#      BARKPARK_TASK_TOKEN, and says a re-run will not clear it.
+#   c) A required gate must red for exactly ONE reason and say WHICH. Sharing
+#      one exit code between "the ledger is down", "the token is refused" and
+#      "the answer was garbage" guarantees at most one of the three messages is
+#      ever true.
 #
 # Why 2 no longer passes (charter D24). The old contract was "neutral =
 # pass-with-warning", and the handler that would have emitted that warning was
@@ -185,6 +224,13 @@ case "$RETRY_DELAY" in ''|*[!0-9]*) echo "pr-task-gate: PR_TASK_GATE_RETRY_DELAY
 fail()      { echo "::error title=PR is not task-backed::pr-task-gate: FAIL: $*" >&2; exit 1; }
 unchecked() { echo "pr-task-gate: UNCHECKED: $*" >&2; exit 2; }
 pass()      { echo "pr-task-gate: PASS: $*";        exit 0; }
+# Neither of these wears the `not task-backed` title, for the same reason
+# unchecked() does not: they are findings about the GATE'S OWN plumbing, not
+# about the PR, and the workflow raises its own titled ::error for each.
+# The words matter as much as the code — these are the sentences a blocked
+# author reads at 2am, so each says what happened AND what clears it.
+credential_rejected() { echo "pr-task-gate: MISCONFIGURED CREDENTIAL: $*" >&2; exit 3; }
+malformed()           { echo "pr-task-gate: MALFORMED LEDGER ANSWER: $*" >&2; exit 5; }
 
 [ -n "${TASK_ID:-}" ] || fail "no task reference found on the PR (add a 'Task: <doc_id>' line to the PR description)"
 
@@ -290,12 +336,37 @@ if [ -n "${LEDGER_TOKEN:-}" ]; then
 fi
 
 last_reason=""
+# THE CLASSIFIER. Every HTTP answer lands in exactly one of four classes, and
+# the class — not a shared "something went wrong" — picks the verdict:
+#
+#   404, 2xx      ANSWERED   → return 0, decided below (never retried: retrying
+#                              an answer makes the verdict a function of the
+#                              wall clock).
+#   401, 403      REFUSED    → return 2 IMMEDIATELY. The ledger is up and it
+#                              said no to this credential. Retrying cannot
+#                              change a rejected token, and three identical
+#                              401s in the log read as a flapping ledger to
+#                              anyone who does not already know better — which
+#                              is exactly how 2026-09-01 was mis-read as an
+#                              outage. Zero retries is the honest budget.
+#   5xx, 429, 000 INDECISIVE → bounded retry with EXPONENTIAL backoff, then
+#                              return 1 → exit 2 UNCHECKED, unchanged.
+#
+# THE BACKOFF WAS FIXED, AND IS NOW EXPONENTIAL. It slept PR_TASK_GATE_RETRY_DELAY
+# (default 2) seconds flat between every attempt: 2s, 2s. Three requests inside
+# five seconds is not a retry budget, it is the same request three times — a
+# ledger shedding load under a thirty-agent fleet is still shedding load 2s
+# later. The wait now doubles (2s, 4s, 8s ...) so the LAST attempt lands in a
+# meaningfully different moment from the first, capped at BACKOFF_CAP so a
+# large PR_TASK_GATE_RETRIES cannot park the job for an hour.
+BACKOFF_CAP=30
 fetch_doc() {
-  local attempt=1
+  local attempt=1 delay="$RETRY_DELAY"
   while : ; do
     if http_code="$(curl -sS -m 20 ${auth_args[@]+"${auth_args[@]}"} -o "$tmp" -w '%{http_code}' "$url" 2>"$tmp.err")"; then
       case "$http_code" in
         404|2??) return 0 ;;
+        401|403) return 2 ;;
       esac
       last_reason="ledger returned HTTP ${http_code} for ${TASK_ID}"
     else
@@ -303,13 +374,28 @@ fetch_doc() {
       last_reason="could not reach the ledger at ${LEDGER_BASE} ($(head -1 "$tmp.err" 2>/dev/null))"
     fi
     [ "$attempt" -ge "$RETRIES" ] && return 1
-    echo "pr-task-gate: attempt ${attempt}/${RETRIES} was indecisive (${last_reason}); retrying in ${RETRY_DELAY}s" >&2
-    sleep "$RETRY_DELAY"
+    echo "pr-task-gate: attempt ${attempt}/${RETRIES} was indecisive (${last_reason}); retrying in ${delay}s" >&2
+    sleep "$delay"
+    delay=$((delay * 2))
+    [ "$delay" -gt "$BACKOFF_CAP" ] && delay="$BACKOFF_CAP"
     attempt=$((attempt + 1))
   done
 }
 
-fetch_doc || unchecked "${last_reason} after ${RETRIES} attempts — the task backing of this PR could not be checked at all. This is not a finding about your PR: re-run this check once the ledger is up (ledger: ${LEDGER_BASE})"
+fetch_rc=0
+fetch_doc || fetch_rc=$?
+case "$fetch_rc" in
+  2)
+    # THE VERDICT THE 2026-09-01 OUTAGE NEEDED AND DID NOT HAVE. Name the
+    # secret, name what it must be, and say plainly that re-running is not the
+    # cure — because the message it replaces told thirty agents to do exactly
+    # that, for fourteen minutes, against a ledger that was never down.
+    credential_rejected "the ledger REFUSED this gate's credential with HTTP ${http_code} (reading '${TASK_ID}' from ${LEDGER_BASE}). The ledger is UP — it answered — so this is NOT an outage and RE-RUNNING THIS CHECK WILL NOT CLEAR IT. The thing to fix is the repository secret BARKPARK_TASK_TOKEN: it must be a LEAST-PRIVILEGE app token with read,write scope minted for this gate, NEVER the instance admin token (one was set here and revoked on 2026-09-01, which is what this verdict exists to name). Re-mint it, update the secret (gh secret set BARKPARK_TASK_TOKEN), then re-run. See docs/ops/merge-gates.md"
+    ;;
+  1)
+    unchecked "${last_reason} after ${RETRIES} attempts — the task backing of this PR could not be checked at all. This is not a finding about your PR: re-run this check once the ledger is up (ledger: ${LEDGER_BASE})"
+    ;;
+esac
 
 # Status handling, decided by code not body. A 404 is an ANSWER, never retried
 # (fetch_doc returns it at once), but what it MEANS depends on whether we could
@@ -462,9 +548,15 @@ PY
 # worse false accusation ("task '' is '.'"). Honest limit: exit 2 is still turned
 # into a workflow FAILURE by design (D24) — this removes the false ACCUSATION,
 # not the block.
+#
+# THESE ARE NOW EXIT 5, NOT EXIT 2. Both used to share the outage code, and so
+# inherited the outage SENTENCE — "the ledger did not answer" — about a ledger
+# that answered, with a 2xx, promptly, having authenticated the caller. Exit 5
+# says the only true thing: the answer arrived and could not be read. Same
+# block, different cure: there is nothing to wait for and no token to re-mint.
 case "$found" in
-  error)   unchecked "ledger response for ${TASK_ID} was not valid JSON — the task backing of this PR could not be checked. Re-run this check once the ledger is serving well-formed documents" ;;
-  missing) unchecked "the ledger answered 2xx for '${TASK_ID}' but the response carried no task document in its 'result' envelope, so the task backing of this PR could not be checked at all. This is not a finding about your PR (a task that genuinely does not exist answers 404, which reds definitively): re-run this check once the ledger is serving documents (ledger: ${LEDGER_BASE})" ;;
+  error)   malformed "the ledger answered HTTP ${http_code} for '${TASK_ID}' but the body is not valid JSON, so the task backing of this PR could not be established. The ledger ANSWERED — this is not an outage and not a credential fault — its payload is wrong. Re-run once it is serving well-formed documents; if it persists, the ledger read path is the bug, not this PR (ledger: ${LEDGER_BASE})" ;;
+  missing) malformed "the ledger answered HTTP ${http_code} for '${TASK_ID}' but the response carried no task document in its 'result' envelope, so the task backing of this PR could not be established. This is not a finding about your PR (a task that genuinely does not exist answers 404, which reds definitively) and not an outage (the ledger answered): re-run once it is serving documents (ledger: ${LEDGER_BASE})" ;;
 esac
 
 # The task-backed predicate. Exactly two lifecycles can back a change, and each
