@@ -114,7 +114,7 @@ bp task ready --all                 # aggregate pages
 bp task ls --limit 20               # all tasks, goals included
 ```
 
-Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Never cap paging at a round number** — a run stopped at offset 3000 read its cap as the end; the set held 7,652. A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
+Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls`. **Default pages:** `ls` 100, `ready` 50, cap 1000; `has_more` = `returned == limit`; a filled default page warns on stderr — `--all` or a bigger `--limit`; one page is not the board. Unknown key → 400 `invalid_filter`. Order: priority/creation/UUID; `ls` is total-ordered (updated_at DESC; `parent` → inserted_at ASC; id tiebreak), pages disjoint; `--all` fails `pagination_stalled` on a repeated full page.
 
 **7. Watch the stream.** Both routes are in **What you get**. **Push:** SSE, `task.*`, no polling. **Pull:** `bp task events --since <id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic PK). Resume with the last `cursor` as `--since`; omit = from start, `has_more:true` → poll again. One `dataset` (default `production`), `type=task`.
 

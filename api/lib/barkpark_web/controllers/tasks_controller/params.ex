@@ -422,6 +422,35 @@ defmodule BarkparkWeb.TasksController.Params do
   # it). Checked against the RAW docs — the same inputs the render saw — so
   # the predicate can never drift from what actually got cut. Full view never
   # truncates, so it never carries the line.
+  @doc """
+  The `page` block every `/v1/tasks` list envelope carries: the window the
+  server actually served.
+
+  `has_more` is deliberately the CHEAP predicate `returned == limit` and not a
+  `COUNT(*)`. This whole change exists because one unbounded read over
+  `documents` was expensive; paying for a second scan just to narrate the first
+  would reintroduce the cost under a new name. The predicate is exact in the
+  direction that matters — `returned < limit` PROVES the page is the last one —
+  and over-reports only on an exactly-full final page, which tells a caller to
+  look again and find nothing. A reader that needs an exact total asks for one
+  (`bp task ls --all`, which pages by offset with a lookahead anchor).
+
+  `limit` is the EFFECTIVE limit after clamping, so `?limit=5000` reports 1000:
+  the number the caller asked for is not the number they got, and this field is
+  about what they got.
+  """
+  def page_meta(docs, page_opts) when is_list(docs) do
+    limit = Keyword.fetch!(page_opts, :limit)
+    returned = length(docs)
+
+    %{
+      limit: limit,
+      offset: Keyword.fetch!(page_opts, :offset),
+      returned: returned,
+      has_more: returned == limit
+    }
+  end
+
   def maybe_put_brief_truncation_help(base, _docs, :full), do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
