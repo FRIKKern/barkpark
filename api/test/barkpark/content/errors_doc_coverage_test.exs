@@ -24,6 +24,16 @@ defmodule Barkpark.Content.ErrorsDocCoverageTest do
   # api/test/barkpark/content/ → repo root → docs/api-v1.md.
   @api_v1_doc Path.expand("../../../../docs/api-v1.md", __DIR__)
 
+  # §9's endpoint-specific tail now lives in its own capped doc. docs/api-v1.md
+  # sat on 1 B of a 14,000 B budget cap, so the paragraph naming the endpoint
+  # codes was relocated to docs/api/error-codes.md and §9 kept a markdown link
+  # to it. THE DOCUMENTED VOCABULARY IS THEREFORE THE UNION, AND READING EITHER
+  # HALF ALONE IS A LIE — measured against known_codes/0 (84 codes) on the tree
+  # that shipped this: §9 alone leaves 50 undocumented (that is the real red
+  # this relocation produced before the amendment, not the 39 the filing
+  # predicted), the relocated file alone leaves 34, and the union leaves 0.
+  @error_codes_doc Path.expand("../../../../docs/api/error-codes.md", __DIR__)
+
   defp section_9 do
     doc = File.read!(@api_v1_doc)
 
@@ -34,6 +44,13 @@ defmodule Barkpark.Content.ErrorsDocCoverageTest do
     |> String.split(~r/\n## \d+/, parts: 2)
     |> List.first()
   end
+
+  # File.read! and not File.read: a missing relocated doc must RAISE, not
+  # silently shrink the vocabulary back to §9 and re-open the drift this file
+  # exists to close.
+  defp relocated_doc, do: File.read!(@error_codes_doc)
+
+  defp documented_vocabulary, do: section_9() <> "\n" <> relocated_doc()
 
   test "docs/api-v1.md §9 exists and is non-trivial" do
     section = section_9()
@@ -48,19 +65,38 @@ defmodule Barkpark.Content.ErrorsDocCoverageTest do
     assert section =~ "known_codes"
   end
 
-  test "every Content.Errors.known_codes/0 code is documented in §9" do
+  test "§9 still points at the relocated doc, and that doc is non-trivial" do
     section = section_9()
+
+    # THE UNION'S ANTI-VACUITY PIN. The coverage assertion below reads two files
+    # and passes if EITHER names a code — so a §9 that quietly drops the pointer,
+    # or a relocated file emptied to a header, would leave the union technically
+    # green while a reader of the contract could no longer reach half of it.
+    # docs-anchors-check §3c only resolves `](path.md)` syntax, so the link is
+    # pinned in that exact form: an inline-backtick pointer rots silently.
+    assert section =~ "](api/error-codes.md)",
+           "§9 must keep a markdown LINK to docs/api/error-codes.md — the relocated " <>
+             "half of the vocabulary is unreachable from the contract without it."
+
+    assert String.length(relocated_doc()) > 200,
+           "docs/api/error-codes.md is empty or stub — the union below would then " <>
+             "verdict on §9 alone and the relocation would have laundered 50 codes."
+  end
+
+  test "every Content.Errors.known_codes/0 code is documented in §9 or the doc it links to" do
+    documented = documented_vocabulary()
 
     missing =
       Errors.known_codes()
-      |> Enum.reject(fn code -> String.contains?(section, "`#{code}`") end)
+      |> Enum.reject(fn code -> String.contains?(documented, "`#{code}`") end)
       |> Enum.sort()
 
     assert missing == [],
-           "docs/api-v1.md §9 is missing #{length(missing)} error code(s) that " <>
-             "Content.Errors.known_codes/0 can emit: #{Enum.join(missing, ", ")}. " <>
-             "Add each (with its HTTP status + one-line meaning) to §9 so the served " <>
-             "vocabulary and the human contract cannot drift."
+           "docs/api-v1.md §9 + docs/api/error-codes.md are missing #{length(missing)} " <>
+             "error code(s) that Content.Errors.known_codes/0 can emit: " <>
+             "#{Enum.join(missing, ", ")}. Add each (with its HTTP status + one-line " <>
+             "meaning) to §9, or to the endpoint-specific doc §9 links to, so the " <>
+             "served vocabulary and the human contract cannot drift."
   end
 
   test "the wave-1 workspace codes are documented (regression pin)" do
