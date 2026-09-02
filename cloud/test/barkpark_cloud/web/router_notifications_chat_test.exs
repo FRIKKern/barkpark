@@ -312,12 +312,17 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
     conn = call(:post, "/v1/notifications/test", %{}, token2)
     assert conn.status == 200
 
+    queued_before_refusal = length(all_enqueued(worker: ChatNotificationWorker))
+
     conn = call(:post, "/v1/notifications/test", %{"channel" => "discord"}, token2)
     assert conn.status == 429, "the email send did not close the CHAT leg's window"
     assert body(conn)["error"] == "rate_limited"
 
-    # ...and the refused chat press queued nothing: team2 never enqueued a job.
-    assert all_enqueued(worker: ChatNotificationWorker) == []
+    # ...and the refused chat press queued NOTHING. Measured as a DELTA, not as
+    # an empty queue: part (1) of this same test legitimately enqueued a job for
+    # team1, so a global `== []` here asserts something the test itself made
+    # false. What this pins is the only thing that matters — a 429 adds no job.
+    assert length(all_enqueued(worker: ChatNotificationWorker)) == queued_before_refusal
   end
 
   # A fan-out that reached NOBODY sends no outbound POST, so it must not cost
