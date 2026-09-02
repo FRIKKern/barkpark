@@ -1,16 +1,21 @@
 /**
- * Error-vocabulary parity for the REACT sheet emitter — the fifth mirror.
+ * Error-vocabulary parity for the REACT sheet emitter.
  *
  * `Barkpark.Plugins.Sheets.Engine.error_values/0`
  * (@canonical capability:engine-error-vocabulary) is the single owner of the
- * "#…!" strings a computed cell can hold. Five surfaces mirror it, and until
- * this file existed only four were CHECKED:
+ * "#…!" strings a computed cell can hold. Six surfaces mirror it:
  *
  *   1. api/lib/barkpark/portable_doc/render/walk.ex        — sheets_parity_test
  *   2. api/lib/barkpark_web/live/studio/sheet_grid/cells.ex — sheets_parity_test
  *   3. web/lib/sheets.ts (ENGINE_ERRORS)                   — web/__tests__/sheets-errors.test.ts
  *   4. internal/pdrender                                   — Go golden
  *   5. js/packages/react/src/blocks/sheet.ts (ERROR_VALUES) — THIS FILE
+ *   6. apps/mobile/src/papers/portabledoc/blocks/sheet.tsx  — apps/mobile/__tests__/sheetErrorVocabulary.test.ts (added #15473)
+ *
+ * A GUARD IS NOT A GATE. This file fired correctly on the very next
+ * vocabulary bump (#15374 added `#NAME?`) and main merged past it anyway —
+ * js-tests.yml publishes no context in .github/required-checks.json, so its
+ * red cannot block. See the comment above ERROR_VALUES in src/blocks/sheet.ts.
  *
  * The lock is the SAME fixture the web mirror consumes:
  * `web/__tests__/fixtures/engine-errors.json`, which
