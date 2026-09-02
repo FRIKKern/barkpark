@@ -470,4 +470,209 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     # They are still orphans, so the next sweep tries again — the honest state.
     assert length(Registry.list_orphaned_static_deployments()) == 2
   end
+
+  ## 11. (task-c4c9a54cd073e011) THE ETERNAL-QUEUED ROW: a REFUSED DRIVER SPAWN.
+  ##
+  ##     A box-driven row's first driver is spawned by
+  ##     `Sites.Deploy.TaskStarter.start/1`. When the supervisor refuses the
+  ##     child, `Deploy.run/1` never runs, so `claim_deployment/2` never runs
+  ##     either: the row keeps `claim_epoch == 0` and a nil `claimed_at`. That put
+  ##     it outside EVERY pass this suite tested above — (i)–(iv) are all
+  ##     `claimed_at`-gated, (0a) is container-scoped, (0b) needs a MISSING
+  ##     dataset — and outside the orphan sweep, whose scope was `claim_epoch > 0`.
+  ##     Two shapes matched nothing at all and sat `queued` forever: a static site
+  ##     WITH a bootstrap_dataset, and a node site.
+  ##
+  ##     Each test below drives the whole life of one such row against a starter
+  ##     that ALWAYS refuses (`RefusingStarter`, above), in three sweeps:
+  ##
+  ##       1. FRESH — invisible to both halves (the deploy route is driving it).
+  ##       2. PAST THE LEASE HORIZON — found by the orphan sweep and re-attempted
+  ##          (the refusal is counted out of `resumed:`, per test 10), still
+  ##          `queued`: a transient supervisor blip must not kill a good build.
+  ##       3. PAST THE CLAIM BUDGET — pass (0c) terminates it with a reason that
+  ##          names the refused spawn. It is no longer an orphan, and it is no
+  ##          longer queued.
+  ##
+  ##     MUTATION PROOF (criterion 2), both directions:
+  ##       * restore the excluding predicate — put `d.claim_epoch > 0 and` back in
+  ##         `Registry.list_orphaned_static_deployments/0` in place of the
+  ##         `(d.claim_epoch > 0 or d.inserted_at < ^never_claimed_before)`
+  ##         disjunction — and sweep 2 reds ("expected 1 orphan, got 0"), naming
+  ##         the shape.
+  ##       * delete pass (0c) from `Registry.reap_stale_deployments/0` and sweep 3
+  ##         reds: `spawn_failed` is 0 and the row is still `queued` at
+  ##         `claim_epoch == 0` — eternally.
+
+  # Backdate a row's mint time. `inserted_at` is the ONLY clock a never-claimed
+  # row has: `claimed_at` is nil for it by construction, which is exactly why
+  # every claimed_at-gated pass is blind to it.
+  defp backdate_mint(deployment_id, seconds) do
+    minted_at =
+      DateTime.utc_now()
+      |> DateTime.add(-seconds, :second)
+      |> DateTime.truncate(:microsecond)
+
+    Repo.update_all(
+      from(d in Deployment, where: d.id == ^deployment_id),
+      set: [inserted_at: minted_at]
+    )
+  end
+
+  defp lease_horizon, do: Registry.deployment_stale_after_seconds()
+
+  defp spawn_budget,
+    do: Registry.max_deploy_claims() * Registry.deployment_stale_after_seconds()
+
+  # The three-sweep life of a row whose driver spawn is refused, for one site
+  # kind. Shared because the two shapes must be proven to behave IDENTICALLY —
+  # writing them out twice invites one of them to quietly drift.
+  defp assert_refused_spawn_is_swept(site) do
+    {:ok, d} = Registry.create_deployment(site, %{build_id: "rs1", content_rev: "rs1"})
+
+    # The shape a refused spawn leaves behind, asserted rather than assumed.
+    assert d.status == "queued"
+    assert d.claim_epoch == 0
+    assert is_nil(d.claimed_at)
+
+    # Nothing in the fleet claims it either — the off-box container builder is
+    # kind-scoped away, so no lazy recovery exists.
+    assert {:error, :no_queued} = Registry.claim_next_deployment("container-builder-1")
+
+    # Every spawn is refused, for the whole life of this row.
+    Process.put(:site_deploy_starter, RefusingStarter)
+
+    ## Sweep 1 — FRESH. The route is driving it right now; the sweep must not
+    ## touch it, or a healthy deploy dies within a minute of being minted.
+    assert [] == Registry.list_orphaned_static_deployments()
+
+    assert {:ok, %{spawn_failed: 0, no_source_failed: 0, resumed: 0}} =
+             perform_job(StaleDeploymentReaper, %{})
+
+    fresh = Repo.get(Deployment, d.id)
+    assert fresh.status == "queued"
+    assert is_nil(fresh.failure_reason)
+
+    ## Sweep 2 — PAST THE LEASE HORIZON, under the budget. It is an orphan now,
+    ## so the sweep FINDS it and re-attempts the spawn. The attempt is refused,
+    ## so `resumed:` honestly stays 0 (test 10's contract) and the row survives
+    ## for the next try — a transient blip must not be terminal.
+    backdate_mint(d.id, lease_horizon() + 60)
+
+    assert [%Deployment{id: found}] = Registry.list_orphaned_static_deployments()
+    assert found == d.id
+
+    assert {:ok, %{spawn_failed: 0, resumed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    retried = Repo.get(Deployment, d.id)
+    assert retried.status == "queued"
+    assert retried.claim_epoch == 0
+    assert is_nil(retried.failure_reason)
+
+    ## Sweep 3 — PAST THE CLAIM BUDGET. The re-attempts have cost this row the
+    ## same budget a claimed row gets, so it is told the truth instead of
+    ## spinning forever.
+    backdate_mint(d.id, spawn_budget() + 60)
+
+    assert {:ok, %{spawn_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+
+    failed = Repo.get(Deployment, d.id)
+    assert failed.status == "failed"
+    # THE ROW IS NEVER `queued` AT epoch 0 AGAIN — the whole point.
+    refute failed.status == "queued"
+
+    # An HONEST reason that names the refused spawn, and the caption agrees.
+    assert failed.failure_reason =~ "the deploy driver was never spawned"
+    assert failed.failure_reason =~ "never claimed"
+    assert failed.detail == failed.failure_reason
+
+    # It does NOT accuse a builder lease that never existed — nothing ever
+    # claimed this row, and `DeployLedger` would file that sentence as
+    # STALE_LEASE.
+    refute failed.failure_reason =~ "stale builder lease"
+    refute failed.failure_reason =~ "exceeded max deploy claim attempts"
+    # Nor is it mislabelled as a missing build source: the dataset IS bound.
+    refute failed.failure_reason =~ "no build source"
+    refute failed.failure_reason =~ "no content binding"
+
+    # And it has left the orphan set, so no sweep re-drives a terminal row.
+    assert [] == Registry.list_orphaned_static_deployments()
+
+    failed
+  end
+
+  test "a STATIC row (dataset bound) whose first driver spawn was refused is re-driven, then failed terminally" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = static_site_fixture(bp)
+
+    # The shape (0b) cannot see: the content binding is PRESENT, so this row is
+    # perfectly buildable — it simply never got a driver.
+    refute is_nil(site.bootstrap_dataset)
+    assert site.kind == "static"
+
+    assert_refused_spawn_is_swept(site)
+  end
+
+  test "a NODE row whose first driver spawn was refused is re-driven, then failed terminally" do
+    bp = team_fixture() |> barkpark_fixture()
+
+    site =
+      static_site_fixture(bp, %{
+        kind: "node",
+        framework: "nextjs",
+        template: "search-starter"
+      })
+
+    assert site.kind == "node"
+    refute is_nil(site.bootstrap_dataset)
+
+    assert_refused_spawn_is_swept(site)
+  end
+
+  ## 11b. The blast radius of pass (0c), in the two directions that matter.
+
+  test "pass (0c) never resurrects or re-terminates a row a HUMAN cancelled" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = static_site_fixture(bp)
+    {:ok, d} = Registry.create_deployment(site, %{build_id: "c1", content_rev: "c1"})
+
+    # A person stopped this build. `cancelled` is terminal by a human's decision,
+    # and it is older than every horizon this sweep uses.
+    Repo.update_all(
+      from(x in Deployment, where: x.id == ^d.id),
+      set: [status: "cancelled"]
+    )
+
+    backdate_mint(d.id, spawn_budget() + 3600)
+
+    assert {:ok, %{spawn_failed: 0, resumed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    still = Repo.get(Deployment, d.id)
+    assert still.status == "cancelled"
+    assert is_nil(still.failure_reason)
+    assert [] == Registry.list_orphaned_static_deployments()
+  end
+
+  test "pass (0c) leaves a CONTAINER row alone — a long builder queue is not a fault" do
+    bp = team_fixture() |> barkpark_fixture()
+    # Repo-backed so (0a) does not fail it for having no build source; the point
+    # here is (0c)'s kind scope, not (0a)'s.
+    site = site_fixture(bp)
+    {:ok, site} = Registry.set_site_github(site, "owner/repo", "main", "shh")
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    backdate_mint(d.id, spawn_budget() + 3600)
+
+    assert {:ok, %{spawn_failed: 0, no_source_failed: 0}} =
+             perform_job(StaleDeploymentReaper, %{})
+
+    kept = Repo.get(Deployment, d.id)
+    assert kept.status == "queued"
+    assert kept.claim_epoch == 0
+
+    # NON-VACUITY: the off-box builder really can still claim it, so "untouched"
+    # means "waiting for its claimer", not "invisible to the whole fleet".
+    assert {:ok, claimed} = Registry.claim_next_deployment("container-builder-1")
+    assert claimed.id == d.id
+  end
 end

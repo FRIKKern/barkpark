@@ -640,6 +640,158 @@ grep -q "TREND: no READ baseline yet — 1 earlier run(s) left a START with no R
   && ok "(m5) with only dangling STARTs the trend refuses a baseline and counts them UNREAD" \
   || bad "(m5) no honest no-baseline arm: $out"
 
+# ═══ (n) THE RATCHET: the pin, and the two arms that can still fail ══════════
+#
+# This watch was RED on every scheduled run from 2026-08-08 to 2026-09-01,
+# mostly about ONE pull request. A check that fails identically for three weeks
+# cannot warn about the next one. The probes below are the ones that decide
+# whether the ratchet ADDED a mechanism or just added silence: the pin must
+# fail on a NOVEL row, and it must fail when a pinned row HEALS — otherwise it
+# is an allowlist that can only grow.
+section "(n) the pinned baseline: NOVEL fails, KNOWN warns, HEALED fails"
+
+NB="$TMP/n-baseline"
+HEAD_PIN="0123456789abcdef0123456789abcdef01234567"   # pr_row's fixed head
+: > "$NB.empty"
+printf '9001 %s 2026-08-01 pinned by the harness to prove KNOWN does not fail the run\n' \
+  "${HEAD_PIN:0:9}" > "$NB.pinned"
+
+# (n1) the pre-ratchet behaviour, unchanged: nothing pinned → the row is NOVEL.
+out="$(run_watch "$TMP/a.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "1" ] && ok "(n1) with an EMPTY pin a stale conflicted row is NOVEL and exits 1" \
+  || bad "(n1) expected exit 1 with an empty pin, got $rc"
+grep -q "NOVEL  1 — #9001" <<<"$out" && ok "(n1) …and it is named NOVEL" \
+  || bad "(n1) the row was not classified NOVEL: $out"
+
+# (n2) the same row, pinned: exit 0 — and STILL PRINTED. A pin that hid the
+# row would trade a red that cannot warn for a green that cannot inform.
+out="$(run_watch "$TMP/a.json" --baseline "$NB.pinned")"; rc=$?
+[ "$rc" = "0" ] && ok "(n2) a pinned row is KNOWN and the run exits 0" \
+  || bad "(n2) expected exit 0 for a pinned row, got $rc"
+grep -q "KNOWN  1 — #9001" <<<"$out" && ok "(n2) …counted KNOWN" || bad "(n2) not counted KNOWN: $out"
+grep -q "^  #9001 " <<<"$out" \
+  && ok "(n2) …and the row is still printed in full: the debt stays visible in a green run" \
+  || bad "(n2) the pinned row was hidden from the report: $out"
+grep -q "STALE: ${CTX[0]} passed at $OLD" <<<"$out" \
+  && ok "(n2) …with its staleness distance intact" \
+  || bad "(n2) the pinned row lost its staleness detail: $out"
+
+# (n3) THE ADD ARM. A pin must not cover a pull request it does not name.
+fixture "$TMP/n-two.json" \
+  "$(pr_row 9001 CONFLICTING DIRTY "$(full_set "$OLD")")" \
+  "$(jq -c '.headRefOid = "feedfacefeedfacefeedfacefeedfacefeedface"' \
+       <<<"$(pr_row 9002 CONFLICTING DIRTY "$(full_set "$OLD")")")"
+out="$(run_watch "$TMP/n-two.json" --baseline "$NB.pinned")"; rc=$?
+[ "$rc" = "1" ] && ok "(n3) a NEW conflicted row beside a pinned one still exits 1" \
+  || bad "(n3) expected exit 1 with one pinned and one novel row, got $rc"
+grep -q "NOVEL  1 — #9002" <<<"$out" && ok "(n3) …and only the unpinned #9002 is novel" \
+  || bad "(n3) the novel row was not isolated from the pinned one: $out"
+
+# (n4) THE SHRINK ARM — and the reason this is a ratchet and not an allowlist.
+# The pinned PR is gone from the population: the run FAILS until the line goes.
+echo "[]" > "$TMP/n-empty.json"
+out="$(run_watch "$TMP/n-empty.json" --baseline "$NB.pinned")"; rc=$?
+[ "$rc" = "8" ] && ok "(n4) a pinned entry that stopped reporting exits 8 — the baseline must shrink" \
+  || bad "(n4) expected exit 8 when a pin healed, got $rc"
+grep -q "HEALED 1 — #9001" <<<"$out" && ok "(n4) …#9001 is named HEALED" || bad "(n4) #9001 not named HEALED: $out"
+grep -q "DELETE its line from the baseline" <<<"$out" \
+  && ok "(n4) …with the exact remedy printed" || bad "(n4) no shrink instruction: $out"
+
+# (n5) …and the SAME empty population with an EMPTY pin is a clean 0. Without
+# this, (n4)'s red could be "any empty population reds" rather than "a pin
+# healed", which is a different claim.
+out="$(run_watch "$TMP/n-empty.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "0" ] && ok "(n5) the same empty population with an EMPTY pin exits 0 — (n4) reds on the PIN, not on emptiness" \
+  || bad "(n5) an empty population with an empty pin exited $rc"
+
+# (n6) AN UNCLASSIFIED PINNED ROW IS NOT A HEALED ONE. GitHub answers UNKNOWN
+# for rows it has not recomputed; if that emptied the baseline, a flaky read
+# would delete the debt and the next run would re-report it as novel forever.
+fixture "$TMP/n-unknown.json" "$(pr_row 9001 UNKNOWN null "$(full_set "$OLD")")"
+out="$(run_watch "$TMP/n-unknown.json" --baseline "$NB.pinned")"; rc=$?
+[ "$rc" = "5" ] && ok "(n6) an all-UNKNOWN population is BLIND (5), never a baseline-drift verdict" \
+  || bad "(n6) expected exit 5 when the only row went UNKNOWN, got $rc"
+grep -q "UNREAD 1 — #9001" <<<"$out" && ok "(n6) …the pinned row is counted UNREAD" \
+  || bad "(n6) an unclassified pinned row was not held out of the healed set: $out"
+grep -q "HEALED 0" <<<"$out" && ok "(n6) …and HEALED stays empty on a read that did not happen" \
+  || bad "(n6) healed was non-empty on an unread row: $out"
+
+# (n7) THE PIN IS KEYED ON THE HEAD, NOT THE NUMBER. A push gives the PR a new
+# head and a freshly-dispatched verdict; the old line covers a tree that no
+# longer exists and must not launder the new one.
+fixture "$TMP/n-moved.json" \
+  "$(jq -c '.headRefOid = "99999999abcdef0123456789abcdef0123456789"' \
+       <<<"$(pr_row 9001 CONFLICTING DIRTY "$(full_set "$OLD")")")"
+out="$(run_watch "$TMP/n-moved.json" --baseline "$NB.pinned")"; rc=$?
+[ "$rc" = "1" ] && ok "(n7) a pinned NUMBER at a new HEAD is novel and exits 1" \
+  || bad "(n7) expected exit 1 when the pinned head moved, got $rc"
+grep -q "is PINNED at head ${HEAD_PIN:0:9} and is reported at head" <<<"$out" \
+  && ok "(n7) …and the message says the pin describes a different tree" \
+  || bad "(n7) no head-moved explanation: $out"
+
+# (n8) GROWING THE FILE COSTS A SENTENCE. A pin with no written reason is a
+# configuration fault, not a warning — the reason IS the cost of the pin.
+printf '9001 %s 2026-08-01\n' "${HEAD_PIN:0:9}" > "$NB.noreason"
+out="$(run_watch "$TMP/a.json" --baseline "$NB.noreason")"; rc=$?
+[ "$rc" = "3" ] && ok "(n8) a reasonless pin is refused (3), never silently honoured" \
+  || bad "(n8) expected exit 3 for a reasonless pin, got $rc"
+
+# (n9) A --baseline THAT CANNOT BE OPENED IS A TYPO, NOT AN EMPTY PIN. The
+# permissive reading would disarm the shrink arm on a misspelling.
+out="$(run_watch "$TMP/a.json" --baseline "$TMP/n-does-not-exist")"; rc=$?
+[ "$rc" = "3" ] && ok "(n9) an unopenable --baseline is refused (3), never treated as empty" \
+  || bad "(n9) expected exit 3 for a missing --baseline, got $rc"
+
+# (n10) THE COMMITTED FILE PARSES, and every line in it carries a reason. A
+# baseline that only the harness's own fixtures can parse governs nothing.
+BASE_REAL="$REPO_ROOT/scripts/stale-verdict-watch.baseline"
+if [ -f "$BASE_REAL" ]; then
+  ok "(n10) the committed baseline exists at scripts/stale-verdict-watch.baseline"
+  out="$(run_watch "$TMP/n-empty.json" --baseline "$BASE_REAL" 2>&1)"; rc=$?
+  [ "$rc" != "3" ] \
+    && ok "(n10) …and the shipped file parses (exit $rc, not a 3 configuration fault)" \
+    || bad "(n10) the committed baseline does not parse: $out"
+else
+  bad "(n10) the committed baseline is missing — the default pin path is unreadable"
+fi
+
+# ═══ (o) the script's own --selftest, and proof it can lose ══════════════════
+section "(o) --selftest is a prover, not a decoration"
+
+out="$(bash "$WATCH" --selftest 2>&1)"; rc=$?
+[ "$rc" = "0" ] && ok "(o) --selftest passes on the shipped ratchet" || bad "(o) --selftest failed: $out"
+grep -qE "^── stale-verdict-watch --selftest: [0-9]+ passed, 0 failed ──$" <<<"$out" \
+  && ok "(o) …and prints a real pass/fail count" || bad "(o) no pass/fail count from --selftest: $out"
+sel_n="$(sed -n 's/^── stale-verdict-watch --selftest: \([0-9][0-9]*\) passed.*/\1/p' <<<"$out" | tail -1)"
+[ "${sel_n:-0}" -ge 12 ] \
+  && ok "(o) …over ${sel_n} assertions, so the count is not a vacuous zero" \
+  || bad "(o) --selftest reported only ${sel_n:-0} passing assertions"
+
+# THE ONE THAT MATTERS: break one arm of the partition and --selftest must go
+# RED. A selftest that cannot lose proves nothing about the ratchet it guards,
+# and each mutation is refused outright if its sed matched nothing — so a
+# reflow of the jq turns a silently-vacuous mutant into a loud one.
+for mut in pin-any never-healed head-blind; do
+  out="$(SVW_MUTATE="$mut" bash "$WATCH" --selftest 2>&1)"; rc=$?
+  [ "$rc" != "0" ] \
+    && ok "(o) --selftest LOSES under SVW_MUTATE=$mut (exit $rc)" \
+    || bad "(o) --selftest passed with the ratchet mutated ($mut) — it cannot lose: $out"
+  grep -q "matched nothing in RATCHET_JQ" <<<"$out" \
+    && bad "(o) the $mut mutation matched nothing — the mutant is the original, so that probe is vacuous" \
+    || ok "(o) …and the $mut mutation actually applied to the program"
+done
+
+# AND THE MUTATION SWITCH IS UNREACHABLE FROM A REAL RUN. An env var that can
+# disarm a gate in production is a worse defect than the one it tests for.
+out="$(SVW_MUTATE=pin-any run_watch "$TMP/a.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "1" ] \
+  && ok "(o) an ambient SVW_MUTATE is IGNORED by a normal run (still exit 1)" \
+  || bad "(o) SVW_MUTATE reached a production run and changed its verdict to $rc"
+out="$(SVW_SELFTEST_CHILD=1 SVW_MUTATE=pin-any run_watch "$TMP/a.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "0" ] \
+  && ok "(o) …and the switch IS real inside a selftest child, so the line above tested the guard, not a no-op" \
+  || bad "(o) the mutation had no effect even inside a selftest child (exit $rc) — the guard probe above is vacuous"
+
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
 

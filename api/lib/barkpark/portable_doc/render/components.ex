@@ -1066,7 +1066,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def chat_approval_html(block) when is_map(block) do
     tool = Map.get(block, "tool_name", "tool")
     summary = Map.get(block, "summary", "")
-    status = Map.get(block, "approval_status", "pending")
+    status = chat_approval_status(Map.get(block, "approval_status", "pending"))
     title = if status == "pending", do: "Allow #{tool}?", else: tool
 
     ~s|<div class="bp-chat-approval text-xs" style="font-family: var(--font-mono);">| <>
@@ -1084,7 +1084,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   """
   def chat_question_html(block) when is_map(block) do
     questions = block |> Map.get("questions") |> as_list()
-    status = Map.get(block, "approval_status", "pending")
+    status = chat_approval_status(Map.get(block, "approval_status", "pending"))
 
     body =
       if questions == [] do
@@ -1109,7 +1109,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def chat_plan_html(block) when is_map(block) do
     title = Map.get(block, "title", "Proposed plan")
     preview = Map.get(block, "preview", "")
-    status = Map.get(block, "approval_status", "pending")
+    status = chat_approval_status(Map.get(block, "approval_status", "pending"))
 
     ~s|<div class="bp-chat-plan text-xs" style="font-family: var(--font-mono);">| <>
       chat_card_header(title, status) <>
@@ -1124,10 +1124,24 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # The shared header row: a bold title and a right-aligned status word. The
   # status is the honest read-only state a replay shows (the interactive answer
   # layer lives on the envelope, not here).
+  #
+  # INVARIANT: `status` arrives ALREADY folded through `chat_approval_status/1`.
+  # Every caller (chat_approval_html/1, chat_question_html/1, chat_plan_html/1)
+  # folds it, and that fold is the SINGLE guard — deliberately not doubled here
+  # or inside `chat_status_label/1`, so removing any one caller's fold is a
+  # mutation the block tests actually catch instead of one a second layer hides.
+  #
+  # NO INLINE `white-space: nowrap`. It used to sit on this span, and being
+  # INLINE it beat every paper-surface.css rule — a long status word forced one
+  # unbreakable line and gave the whole reader page horizontal scroll at a
+  # 390px viewport. `overflow-wrap: anywhere` is the guard a shrink-to-fit box
+  # needs (only `anywhere` reduces the intrinsic width the box is sized from);
+  # `min-width: 0` lets the flex item shrink below its content size at all.
   defp chat_card_header(title, status) do
     ~s|<div style="display: flex; gap: 6px; align-items: baseline;">| <>
-      ~s|<span style="font-weight: 600;">#{escape_html(title)}</span>| <>
-      ~s|<span class="text-dim" style="margin-left: auto; white-space: nowrap;">| <>
+      ~s|<span style="font-weight: 600; min-width: 0; overflow-wrap: anywhere;">| <>
+      ~s|#{escape_html(title)}</span>| <>
+      ~s|<span class="text-dim" style="margin-left: auto; min-width: 0; overflow-wrap: anywhere;">| <>
       ~s|#{escape_html(chat_status_label(status))}</span></div>|
   end
 
