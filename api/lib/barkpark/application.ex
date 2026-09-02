@@ -67,6 +67,18 @@ defmodule Barkpark.Application do
     # compile-time static — hot-reload is out of scope for v1.
     plugin_children = Barkpark.Plugins.Registry.collect_workers(%{phase: :boot})
 
+    # THE inverted edge-extractor seam — the one and only installer.
+    # `Barkpark.Content.Graph`'s drafts fold needs every plugin's projected
+    # edges, but `content` is a KERNEL concept and the registry is a FEATURE:
+    # the kernel importing the registry is a wrong-direction dependency the
+    # boundary gate (tooling/concept-map/boundary.mjs) reports. So the arrow is
+    # turned around HERE, at the composition root, which is allowed to know
+    # both sides. Content reads `:edge_extractor_collector`; it never names the
+    # registry. Unset → core edges only (the fresh-install invariant: a
+    # plugin-free host still walks its drafts graph, it just has no plugin
+    # edges to add).
+    install_edge_extractor_seam()
+
     # C4-1: plugins may contribute Oban Cron entries via `oban_crontab/0`.
     # Collect them here (a pure, GenServer-independent call, same as
     # collect_workers/1 above) and fold them into the host's static Oban
@@ -353,6 +365,23 @@ defmodule Barkpark.Application do
       end
 
     Keyword.put(oban_config, :plugins, merged_plugins)
+  end
+
+  # Installs the plugin edge-extractor fan-out into the key
+  # `Barkpark.Content.Graph` reads. An explicit `config :barkpark,
+  # :edge_extractor_collector, …` WINS — an operator (or a test) that has
+  # already wired the seam is not overwritten at boot, which is what makes the
+  # seam substitutable rather than merely indirect.
+  defp install_edge_extractor_seam do
+    if is_nil(Application.get_env(:barkpark, :edge_extractor_collector)) do
+      Application.put_env(
+        :barkpark,
+        :edge_extractor_collector,
+        &Barkpark.Plugins.Registry.collect_edge_extractors/1
+      )
+    end
+
+    :ok
   end
 
   # P1c: one-time post-boot banner for LAN sharing. No-op (and silent) unless
