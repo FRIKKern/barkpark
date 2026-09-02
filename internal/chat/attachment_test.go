@@ -27,7 +27,7 @@ func TestRenderUserRowDrawsAttachmentChipsFromTheReference(t *testing.T) {
 		},
 	}
 
-	out := strings.Join(renderMessage(80, msg, false, ""), "\n")
+	out := strings.Join(renderMessage(80, msg, false, "", ""), "\n")
 
 	if !strings.Contains(out, "look at this") {
 		t.Errorf("the prompt echo went missing:\n%s", out)
@@ -51,7 +51,7 @@ func TestRenderUserRowDrawsAttachmentChipsFromTheReference(t *testing.T) {
 func TestRenderUserRowIsUnchangedWithoutAttachments(t *testing.T) {
 	plain := Message{Seq: 1, Role: "user", SourceMarkdown: "just words"}
 
-	got := renderMessage(80, plain, false, "")
+	got := renderMessage(80, plain, false, "", "")
 	want := renderUserEcho(bodyWidth(80), "just words")
 
 	if len(got) != len(want) {
