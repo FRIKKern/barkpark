@@ -485,7 +485,7 @@ defmodule BarkparkWeb.ListenController do
   end
 
   defp fetch_schema(type, dataset, scope) do
-    case Content.get_schema(type, dataset, scope) do
+    case Content.Schema.get_schema_for_redaction(type, dataset, scope) do
       {:ok, schema} -> schema
       _ -> nil
     end

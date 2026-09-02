@@ -44,7 +44,7 @@
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
   --bp-body-tracking: var(--tok-reading-body-tracking);
-  --bp-h1-size: var(--tok-reading-h1-size);
+  --bp-h1-size: clamp(28px, 8vw, var(--tok-reading-h1-size));
   --bp-h1-lh: var(--tok-reading-h1-lh);
   --bp-h1-tracking: var(--tok-reading-h1-tracking);
   --bp-h2-size: var(--tok-reading-h2-size);

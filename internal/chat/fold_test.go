@@ -94,24 +94,40 @@ func TestFoldLabelReadsTheEnvelopeNeverTheClock(t *testing.T) {
 // ── the settle gate ─────────────────────────────────────────────────────────
 
 // TestLiveTurnNeverFolds is the SETTLE GATE's named test on this surface: while
-// the turn runs, its tool rows render flat, exactly as they always have. Delete
-// the settle gate (fold before settle) and this test reds — the rows vanish
-// behind a "Worked for 0s" header mid-turn.
+// the turn runs, its tool rows never wear a DURATION header. Delete the settle
+// gate (fold before settle) and this test reds — the rows vanish behind a
+// "Worked for 0s" header mid-turn.
+//
+// A live turn is no longer rendered flat: show-active-only
+// (task-b66928b2958c8cfa) folds the rows BEFORE the active one behind a
+// "+N previous" control. That is a DIFFERENT fold with a different header, and
+// this test now pins the boundary between the two — a live turn wears the
+// running control and never the settled one.
 func TestLiveTurnNeverFolds(t *testing.T) {
 	m := foldModel(
 		toolRow(1, "Read — a.txt", "", "", 0),
 		toolRow(2, "Edit — b.txt", "", "", 0),
 	)
-	lines, _, starts := m.transcriptAnchored(m.width, "")
+	lines, _, _ := m.transcriptAnchored(m.width, "")
 	out := strings.Join(lines, "\n")
 	if strings.Contains(out, "Worked for") || strings.Contains(out, "You stopped after") {
-		t.Fatalf("a LIVE turn must never wear a fold header:\n%s", out)
+		t.Fatalf("a LIVE turn must never wear a SETTLED fold header:\n%s", out)
 	}
+	if !strings.Contains(out, "+1 previous") {
+		t.Fatalf("a live turn wears the RUNNING control instead:\n%s", out)
+	}
+	// ctrl+o opens the running control, and the flat transcript it has always
+	// shown is still exactly one block per row underneath it.
+	nm, _ := m.handleChatKey(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = nm.(Model)
+	lines, _, starts := m.transcriptAnchored(m.width, "")
+	out = strings.Join(lines, "\n")
 	if !strings.Contains(out, "a.txt") || !strings.Contains(out, "b.txt") {
-		t.Fatalf("a live turn's rows must all render:\n%s", out)
+		t.Fatalf("an expanded live turn renders every row:\n%s", out)
 	}
-	if len(starts) != 2 {
-		t.Fatalf("two unfolded rows must be two blocks, got %d", len(starts))
+	// control + 2 rows
+	if len(starts) != 3 {
+		t.Fatalf("control + two rows is 3 blocks, got %d", len(starts))
 	}
 }
 
