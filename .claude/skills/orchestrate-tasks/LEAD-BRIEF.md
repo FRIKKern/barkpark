@@ -65,6 +65,10 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
    slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
    means re-read and pass `--set observed_rev=<current_rev>`. Close writes `close_reason`.
+   **An isolated green on an order-dependent test is VACUOUS.** Before trusting a green on a
+   byte-locked golden or any ordering-sensitive file, grep the ledger for a flake row naming it
+   and run the whole DIRECTORY, not the one file — the isolated run is the condition under which
+   that class of bug hides (measured 2026-09-02: `spd-w18-bl-chat-render-golden-flake`).
    **Evidence is PERMANENT at close.** A stamp on a closed row is refused
    `not_in_progress:done`, so a wrong sentence you stamped can never be repaired. Read the
    criterion's own `merge_gate` KEY before you believe bp's refusal prose — its message
