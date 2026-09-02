@@ -79,7 +79,13 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # not on the wire. Red-before (mutation-proven, paper-links): changing
   # `text-underline-offset` to `0.19em` on `.bp-paper-surface a` alone reds §2
   # ("a.text-underline-offset: View=\"0.19em\" Edit=\"0.18em\"").
-  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols)
+  #
+  # `.bp-section` / `.bp-section__title` are the CONTAINER shape of a section head:
+  # the reader draws the boundary with the container's OWN `border-top` and the
+  # canvas node-view wears the same class, so both surfaces take the device from
+  # ONE declaration. They ride §2 so a one-sided edit to the boundary (or to the
+  # head's type) reds exactly like an unmirrored `h2` change would.
+  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-section .bp-section__title)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
@@ -789,6 +795,9 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   @section_head_reader "> #paper-body > h2"
   @section_head_stream "> #paper-body > div:not([class]) > h2"
   @section_head_edit "> h2"
+  # The CONTAINER shape of the same head. Same element token on both surfaces (the
+  # canvas node-view wears the reader's `bp-section` class), so ONE constant.
+  @section_head_container ".bp-section"
 
   test "the section head is byte-identical across the reader and all three editor copies" do
     view = view_css()
@@ -945,6 +954,86 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
            that belongs in design/tokens.json `font.reading.stack` behind the
            au-w5-reading-typography gate, and then BOTH sides carry it.
            """
+  end
+  # ── §9b. THE CONTAINER SHAPE OF THE SECTION HEAD ───────────────────────────
+  # A paper opens a section in TWO shapes — a top-level level-2 heading, and a
+  # `section` BLOCK whose head lives inside the container's flex stack. §9 pins
+  # the heading shape. This pins the OTHER one, and pins them to each other:
+  # before this, the container shape opened at 16px over an inline 1px `<hr>`
+  # while the heading shape opened at 92px over a 2px rule — one authorial act
+  # drawn two ways, invisible because only one shape was ever measured. The
+  # container's declarations ride @parity_elements (§2) for the View<->Edit half;
+  # these are the VIEW-INTERNAL half plus the EMITTER half.
+
+  test "the container shape of the section head declares all three halves of the device" do
+    surfaces = [
+      {"reader", declarations_for(view_css(), "bp-paper-surface", @section_head_container)},
+      {"Studio inline",
+       declarations_for(edit_css(), "bp-paper-editor-body", @section_head_container)},
+      {"embedder bundle",
+       declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_container)}
+    ]
+
+    for {name, decls} <- surfaces do
+      for {prop, token} <- [
+            {"margin-top", "--bp-section-beat"},
+            {"border-top", "--bp-section-rule"},
+            {"padding-top", "--bp-section-gap"}
+          ] do
+        value = Map.get(decls, prop)
+
+        assert value && String.contains?(value, "var(#{token})"),
+               "#{name}: the CONTAINER section head's #{prop} is #{inspect(value)}, expected " <>
+                 "var(#{token}) — a `section` block opens a section exactly the way a top-level " <>
+                 "h2 does, and a container that draws its own tighter boundary is the defect " <>
+                 "this leg closed (measured 16px over a 1px rule against 92px over 2px)"
+      end
+    end
+  end
+
+  test "both shapes of a section head draw the SAME boundary" do
+    view = view_css()
+
+    heading = declarations_for(view, "bp-paper-surface", @section_head_reader)
+    container = declarations_for(view, "bp-paper-surface", @section_head_container)
+
+    for prop <- ["margin-top", "border-top", "padding-top"] do
+      assert Map.get(heading, prop) == Map.get(container, prop),
+             """
+             the two shapes of a section head disagree on #{prop}:
+               #{@section_head_reader} => #{inspect(Map.get(heading, prop))}
+               #{@section_head_container} => #{inspect(Map.get(container, prop))}
+             One law, two shapes: a reader who has learned what a boundary looks like
+             must see the same one whether the author wrote a heading or a section.
+             """
+    end
+  end
+
+  # THE EMITTER HALF. The stylesheet can declare the device perfectly and still
+  # draw nothing if the emitter stops stamping the class it hangs on — and it
+  # would draw the OLD 1px boundary if the leading `<hr>` came back, because
+  # walk.ex stamps `border-top-width:1px` INLINE where no stylesheet can reach.
+  # So assert the rendered bytes, not only the CSS.
+  test "a rendered section carries the head class and NO rules of its own" do
+    section = %{
+      "type" => "section",
+      "title" => "Overview",
+      "blocks" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]}]
+    }
+
+    html = Render.render_block(section, %{style: :article})
+
+    assert html =~ ~s(<div class="bp-section" style="display:flex;flex-direction:column">),
+           "the section container lost the `bp-section` class the device hangs on: #{html}"
+
+    refute html =~ "bp-hr",
+           "a section still emits an <hr class=bp-hr> — the boundary is the " <>
+             "container's own border-top now, and an inline `border-top-width:1px` on " <>
+             "an hr is a weight the stylesheet cannot outrank: #{html}"
+
+    assert html =~ ~s(<h2 class="bp-section__title">Overview</h2>),
+           "the section head is not an <h2> — a bold div/span is invisible to the " <>
+             "document outline and to a screen reader's heading list: #{html}"
   end
 
   # ── 11. THE READING STACK, on EVERY surface that spells it out ──────────────

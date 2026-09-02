@@ -19,7 +19,7 @@
       "cell": "design-probe__light__1280",
       "file": "design-probe__light__1280.jpeg",
       "scale": 2,
-      "bytes": 305792,
+      "bytes": 320112,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -27,39 +27,30 @@
         {
           "kind": "container",
           "head": "Prose above, evidence below",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "Components that earn their width",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "A callout to end on",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
       "nestedH2s": 3,
-      "doubledRules": [
-        {
-          "between": "Components that earn their width",
-          "apart": 32
-        },
-        {
-          "between": "A callout to end on",
-          "apart": 32
-        }
-      ],
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -138,14 +129,46 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 9,
-        "heavy": 0,
-        "structuralHeavy": 0,
+        "total": 6,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 3,
+          "2": 3
         },
-        "heavyRules": []
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 302.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 862.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1321.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          }
+        ]
       },
       "blockedRequests": 3
     },
@@ -153,7 +176,7 @@
       "cell": "design-probe__light__1920",
       "file": "design-probe__light__1920.jpeg",
       "scale": 2,
-      "bytes": 334122,
+      "bytes": 349773,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -161,39 +184,30 @@
         {
           "kind": "container",
           "head": "Prose above, evidence below",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "Components that earn their width",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "A callout to end on",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
       "nestedH2s": 3,
-      "doubledRules": [
-        {
-          "between": "Components that earn their width",
-          "apart": 32
-        },
-        {
-          "between": "A callout to end on",
-          "apart": 32
-        }
-      ],
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -272,14 +286,46 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 9,
-        "heavy": 0,
-        "structuralHeavy": 0,
+        "total": 6,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 3,
+          "2": 3
         },
-        "heavyRules": []
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 302.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 862.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1321.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          }
+        ]
       },
       "blockedRequests": 3
     },
@@ -287,7 +333,7 @@
       "cell": "design-probe__dark__1280",
       "file": "design-probe__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 306787,
+      "bytes": 316299,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -295,39 +341,30 @@
         {
           "kind": "container",
           "head": "Prose above, evidence below",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "Components that earn their width",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "A callout to end on",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
       "nestedH2s": 3,
-      "doubledRules": [
-        {
-          "between": "Components that earn their width",
-          "apart": 32
-        },
-        {
-          "between": "A callout to end on",
-          "apart": 32
-        }
-      ],
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -406,14 +443,46 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 9,
-        "heavy": 0,
-        "structuralHeavy": 0,
+        "total": 6,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 3,
+          "2": 3
         },
-        "heavyRules": []
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 302.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 862.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1321.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          }
+        ]
       },
       "blockedRequests": 3
     },
@@ -421,7 +490,7 @@
       "cell": "design-probe__dark__1920",
       "file": "design-probe__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 335095,
+      "bytes": 345784,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 7,
@@ -429,39 +498,30 @@
         {
           "kind": "container",
           "head": "Prose above, evidence below",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "Components that earn their width",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         },
         {
           "kind": "container",
           "head": "A callout to end on",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
       "nestedH2s": 3,
-      "doubledRules": [
-        {
-          "between": "Components that earn their width",
-          "apart": 32
-        },
-        {
-          "between": "A callout to end on",
-          "apart": 32
-        }
-      ],
+      "doubledRules": [],
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
@@ -540,14 +600,46 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 9,
-        "heavy": 0,
-        "structuralHeavy": 0,
+        "total": 6,
+        "heavy": 3,
+        "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 9
+          "1": 3,
+          "2": 3
         },
-        "heavyRules": []
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 302.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 862.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1321.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
+          }
+        ]
       },
       "blockedRequests": 3
     }

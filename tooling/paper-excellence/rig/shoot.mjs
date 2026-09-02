@@ -142,8 +142,14 @@ const SECTION_RULE_MIN_PX = 1;
 // list. No Barkpark block emits it yet, and an allowlist entry that can never
 // match is a decoy: it reads as coverage and gates nothing. The device that ships
 // the framed finale extends this list, on purpose, with a fixture behind it.
+// `.bp-section` is the CONTAINER shape of a section head — a `section` block,
+// whose boundary is the container's own `border-top`. It draws at the same
+// `--bp-section-rule` weight as the heading shape and for the same reason, so it
+// belongs on this list: without it every container boundary would be counted a
+// STRAY heavy rule. It is not a decoy entry — seven of them exist across the
+// committed panel (3 design-probe, 3 portabledoc-showcase, 1 eight-minute-erasure).
 const STRUCTURAL_RULE_SELECTOR =
-  ".bp-paper-surface > #paper-body > h2, .bp-paper-surface > #paper-body > div:not([class]) > h2";
+  ".bp-paper-surface > #paper-body > h2, .bp-paper-surface > #paper-body > div:not([class]) > h2, .bp-paper-surface .bp-section";
 
 // ── The INGRESS RATIO contract (pe-w2-bl-device5-ratio-arm, charter D6) ──────
 // The opening ingress reads BIGGER than the body prose, and that size
@@ -562,26 +568,38 @@ async function main() {
           //                 the eyebrow + h2 that follow sit INSIDE the container,
           //                 so no `> #paper-body > … > h2` leg reaches them.
           //
-          // The container shape is measured and REPORTED but not asserted against
-          // the 92px target: it is currently unsized (the hr keeps its generic
-          // `.bp-hr` rhythm), which is a finding this rig exists to make visible
-          // with numbers rather than a claim. Asserting it here would red a
-          // committed fixture for a defect this change does not fix.
+          // BOTH shapes are now ASSERTED against the same target. The container
+          // shape used to be measured-and-reported only, because it was unsized:
+          // its head was a leading `<hr class="bp-hr">` carrying an INLINE
+          // `border-top-width:1px` (walk.ex hr/2) that no stylesheet could
+          // outrank, so it opened at 16px over a 1px rule against the heading
+          // shape's 92px over 2px. The emitters now drop that hr — and the
+          // trailing one — and the boundary is the container's OWN `border-top`
+          // (`.bp-paper-surface .bp-section`), which is the SAME device the
+          // heading shape gets. One law, two shapes, one assertion.
+          //
+          // The detector deliberately still knows the OLD shape. If it only
+          // matched `.bp-section`, reverting the emitter would produce ZERO
+          // container beats and the assertion below would pass vacuously — the
+          // measurement would disappear instead of reddening. Detecting the
+          // hr-led stack as the same `container` kind means a revert reports
+          // 16px over a 1px rule and reds on the numbers.
           const sectionHead = (el) => {
             const h = unwrap(el);
             if (h) return { kind: "heading", el: h, label: h.textContent.trim().slice(0, 44) };
             // The section container: a class-less stream div wrapping the flex
-            // stack whose first element child is the leading rule.
+            // stack (the LiveView keyed-stream item).
             const stack = el.tagName === "DIV" && el.children.length === 1 ? el.firstElementChild : null;
-            const lead = stack && stack.firstElementChild;
-            if (lead && lead.tagName === "HR") {
-              const h2 = stack.querySelector("h2");
-              return {
-                kind: "container",
-                el: lead,
-                label: (h2 ? h2.textContent : stack.textContent).trim().slice(0, 44),
-              };
+            if (!stack) return null;
+            const h2 = stack.querySelector("h2");
+            const label = (h2 ? h2.textContent : stack.textContent).trim().slice(0, 44);
+            // Post-device: the container box IS the head (its border-top is the rule).
+            if (stack.classList && stack.classList.contains("bp-section")) {
+              return { kind: "container", el: stack, label };
             }
+            // Pre-device: the head was the leading rule inside the stack.
+            const lead = stack.firstElementChild;
+            if (lead && lead.tagName === "HR") return { kind: "container", el: lead, label };
             return null;
           };
 
@@ -622,18 +640,20 @@ async function main() {
             });
           }
           // Headings nested inside a container block (a `section`'s own stack)
-          // are NOT top-level. Their air is owned by the container's leading
-          // rule, which is measured above as a "container" beat. Counted so the
-          // omission is visible rather than inferred.
+          // are NOT top-level. Their air is owned by the container's OWN top
+          // border, which is measured above as a "container" beat. Counted so
+          // the omission is visible rather than inferred.
           const nestedH2s = main.querySelectorAll("h2").length - topLevel.filter((el) => unwrap(el)).length;
 
-          // THE DOUBLED BOUNDARY. `compose_section_stack/2` wraps every section
-          // in a leading AND a trailing rule, so two adjacent `section` blocks
-          // put two hairlines a few px apart where the grammar wants one. It is
-          // a THREE-engine contract (walk.ex, internal/pdrender/blocks.go and
-          // js blocks/core.ts all emit `PdHr, …, PdHr`), so it is measured and
-          // reported here rather than fixed in CSS — a stylesheet that hid one
-          // of the two would leave the TUI and the SDK still drawing both.
+          // THE DOUBLED BOUNDARY. `compose_section_stack/2` USED to wrap every
+          // section in a leading AND a trailing rule, so two adjacent `section`
+          // blocks put two hairlines a few px apart where the grammar wants one.
+          // It was a THREE-engine contract (compose.ex, internal/pdrender/
+          // blocks.go and js blocks/core.ts all emitted `PdHr, …, PdHr`), which
+          // is why it could never be fixed in CSS — a stylesheet that hid one of
+          // the two would leave the TUI and the SDK still drawing both. All
+          // three emitters dropped the trailing rule; this list must now come
+          // back EMPTY, and the assertion below is what keeps it empty.
           const doubledRules = [];
           for (let i = 1; i < topLevel.length; i++) {
             const prevStack = topLevel[i - 1].children.length === 1 ? topLevel[i - 1].firstElementChild : null;
@@ -914,12 +934,13 @@ async function main() {
         // ── the section-boundary contract, per boundary ────────────────────
         // Every boundary is checked, not a sample: one collapsed section is the
         // whole defect, and an average over ten good ones would hide it.
-        // Only the HEADING shape is asserted against the target — that is the one
-        // the device sizes. Container-shaped sections are reported with their
-        // measured (unsized) numbers; see the measurement comment for why holding
-        // them to 92px here would red a committed fixture for an unfixed defect.
+        // BOTH shapes are asserted against the target now. The container shape
+        // used to be exempt because it was unsized (16px over a 1px rule); it
+        // takes the same device as the heading shape, so it takes the same
+        // assertion — that exemption WAS the finding.
         const sized = seen.sectionBeats.filter((b) => b.kind === "heading");
-        for (const b of sized) {
+        const containers = seen.sectionBeats.filter((b) => b.kind === "container");
+        for (const b of seen.sectionBeats) {
           if (Math.abs(b.gap - SECTION_BEAT_PX) > SECTION_BEAT_TOL_PX) {
             fail(
               `${cell}: the section opening "${b.head}" measures ${b.gap}px of air, not the ` +
@@ -946,7 +967,21 @@ async function main() {
               `failure this assertion exists to catch`,
           );
         }
-        assertions += 2 * sized.length + 1;
+        // ONE RULE PER BOUNDARY. `compose_section_stack/2` used to wrap every
+        // section in a leading AND a trailing rule, so two adjacent sections put
+        // two hairlines a few px apart where the grammar wants one. Both are
+        // gone in all three engines (compose.ex, internal/pdrender/blocks.go, js
+        // blocks/core.ts); this is the assertion that keeps them gone.
+        if (seen.doubledRules.length) {
+          fail(
+            `${cell}: ${seen.doubledRules.length} DOUBLED section boundary/-ies — a section still ` +
+              `closes with a rule of its own, so the next section's opening rule lands ` +
+              `${seen.doubledRules.map((d) => `${d.apart}px`).join(", ")} below it. One boundary is one ` +
+              `line; two lines read as a mistake, not as structure. Offenders: ` +
+              seen.doubledRules.map((d) => `"${d.between}"`).join(", "),
+          );
+        }
+        assertions += 2 * seen.sectionBeats.length + 2;
 
         // ── the heavy-rule census, per cell ────────────────────────────────
         // Same function the artifact is measured with (census.mjs), evaluated in
@@ -968,11 +1003,16 @@ async function main() {
         // all would report zero strays and be just as broken. Every boundary the
         // beat assertion above measured must also appear in the census as a heavy
         // rule, so the two halves cannot pass each other's absence.
-        if (census.structuralHeavy !== sized.length) {
+        // BOTH shapes count here. This is also the check that pins the container
+        // rule's WEIGHT: a container drawing its old inline 1px hairline is below
+        // HEAVY_PX and never enters the heavy census, so the two halves disagree
+        // and this reds — a boundary a reader cannot tell from chrome.
+        const boundaries = seen.sectionBeats.length;
+        if (census.structuralHeavy !== boundaries) {
           fail(
-            `${cell}: the census sees ${census.structuralHeavy} heavy section rule(s) but ${sized.length} ` +
-              `section boundary/-ies were measured — a boundary is being counted whose rule does not paint ` +
-              `(or paints below ${HEAVY_PX}px)`,
+            `${cell}: the census sees ${census.structuralHeavy} heavy section rule(s) but ${boundaries} ` +
+              `section boundary/-ies were measured (${sized.length} heading, ${containers.length} container) — ` +
+              `a boundary is being counted whose rule does not paint (or paints below ${HEAVY_PX}px)`,
           );
         }
         assertions += 2;
@@ -1075,12 +1115,11 @@ async function main() {
         console.log(
           `rig/shoot: ${cell} — column ${seen.columnWidth}px, band ${seen.evidenceBand ?? "n/a"}px ` +
             `(${seen.bandRows.length} components), ` +
-            `${sized.length} sized section beats` +
+            `${sized.length} heading section beats` +
             (sized.length ? ` at ${sized[0].gap}px over a ${sized[0].rule}px rule` : "") +
-            (seen.sectionBeats.length - sized.length
-              ? `, ${seen.sectionBeats.length - sized.length} UNSIZED container heads` +
-                ` at ${seen.sectionBeats.find((b) => b.kind === "container").gap}px` +
-                ` over a ${seen.sectionBeats.find((b) => b.kind === "container").rule}px rule`
+            (containers.length
+              ? `, ${containers.length} container heads` +
+                ` at ${containers[0].gap}px over a ${containers[0].rule}px rule`
               : "") +
             (seen.doubledRules.length ? `, ${seen.doubledRules.length} DOUBLED rules` : "") +
             `, ${census.total} rules (${census.heavy} heavy, all structural)` +

@@ -37,13 +37,14 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
 
   @article %{style: :article}
 
-  # The pre-hook stack render for a titled one-paragraph section (article mode)
-  # — the same literal tripwire section_layout_test.exs pins.
-  @stack_html ~s(<div style="display:flex;flex-direction:column">) <>
-                ~s(<hr class="bp-hr" style="border-top-width:1px">) <>
-                ~s(<span style="font-weight:bold">Finale</span>) <>
-                ~s(<p>closing</p>) <>
-                ~s(<hr class="bp-hr" style="border-top-width:1px"></div>)
+  # The stack render for a titled one-paragraph section (article mode) — the same
+  # literal tripwire section_layout_test.exs pins. `bp-section` is the
+  # UNCONDITIONAL base class (it is what carries the section device); a variant
+  # rides beside it, and there are NO `bp-hr` rules — the boundary is the
+  # container's own border-top.
+  @stack_html ~s(<div class="bp-section" style="display:flex;flex-direction:column">) <>
+                ~s(<h2 class="bp-section__title">Finale</h2>) <>
+                ~s(<p>closing</p></div>)
 
   defp section do
     %{
@@ -62,17 +63,16 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
   end
 
   describe "stack leg — class on the section's own box div" do
-    test "variant=framed emits class=\"bp-section--framed\" on the box wrapper (:article)" do
+    test "variant=framed adds bp-section--framed BESIDE the base class (:article)" do
       html = Render.render_block(framed(), @article)
 
       assert String.starts_with?(
                html,
-               ~s(<div class="bp-section--framed" style="display:flex;flex-direction:column">)
+               ~s(<div class="bp-section bp-section--framed" style="display:flex;flex-direction:column">)
              )
 
-      # Same interior bytes as the unframed stack — only the class attr differs.
-      assert String.replace(html, ~s( class="bp-section--framed"), "", global: false) ==
-               @stack_html
+      # Same interior bytes as the unframed stack — only the variant token differs.
+      assert String.replace(html, ~s( bp-section--framed), "", global: false) == @stack_html
     end
 
     test "unframed byte-identity: a variant-less section renders the pre-hook bytes" do
@@ -84,7 +84,7 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
         b = Map.put(section(), "variant", variant)
 
         assert Render.render_block(b, @article) == @stack_html,
-               "variant #{inspect(variant)} must NOT class the wrapper"
+               "variant #{inspect(variant)} must NOT add a modifier beside the base class"
       end
     end
   end
@@ -95,15 +95,20 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
 
       assert String.starts_with?(
                html,
-               ~s(<div class="bp-section--framed" style="display:flex;flex-direction:column">)
+               ~s(<div class="bp-section bp-section--framed" style="display:flex;flex-direction:column">)
              )
 
       assert html =~ "bp-section__grid"
     end
 
-    test "an unframed grid section's outer div stays classless" do
+    test "an unframed grid section's outer div carries the base class ONLY" do
       html = Render.render_block(grid(section()), @article)
-      assert String.starts_with?(html, ~s(<div style="display:flex;flex-direction:column">))
+
+      assert String.starts_with?(
+               html,
+               ~s(<div class="bp-section" style="display:flex;flex-direction:column">)
+             )
+
       refute html =~ "bp-section--framed"
     end
   end
@@ -145,13 +150,29 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
 
     test "the whitelisted class emits on :article only — never on :email" do
       article =
-        Render.render_html(raw_box("bp-section--framed"), %{style: :article, doctype: false})
+        Render.render_html(raw_box("bp-section bp-section--framed"), %{
+          style: :article,
+          doctype: false
+        })
 
       assert article ==
-               ~s(<div class="bp-section--framed" style="display:flex;flex-direction:column"></div>)
+               ~s(<div class="bp-section bp-section--framed" style="display:flex;flex-direction:column"></div>)
 
-      email = Render.render_html(raw_box("bp-section--framed"), %{doctype: false})
+      email = Render.render_html(raw_box("bp-section bp-section--framed"), %{doctype: false})
       refute email =~ "bp-section--framed"
+    end
+
+    test "a variant token WITHOUT the base class is not whitelisted" do
+      # The whitelist lists whole literal attribute VALUES, so the pre-device
+      # single-token forms no longer pass. This is the pin that a stale emitter
+      # (or hand-authored Pd JSON) cannot re-introduce a classless-base wrapper
+      # that would silently lose the section device.
+      for class <- ["bp-section--framed", "bp-section--wide"] do
+        html = Render.render_html(raw_box(class), %{style: :article, doctype: false})
+
+        assert html == ~s(<div style="display:flex;flex-direction:column"></div>),
+               "class #{inspect(class)} must not pass the whitelist"
+      end
     end
 
     test "a non-binary class value stays inert" do
@@ -174,14 +195,16 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
 
       html = Render.render_blocks([framed(), neighbour], @article)
 
-      # Exactly ONE classed wrapper — the framed section's own box div.
-      assert length(String.split(html, ~s(class="bp-section--framed"))) == 2
+      # Exactly ONE framed wrapper — the framed section's own box div.
+      assert length(String.split(html, "bp-section--framed")) == 2
 
-      # The neighbour's wrapper is the CLASSLESS flex-column div with the h2
-      # inside — the exact DOM shape the paper-surface.css section-head rule
-      # (`div:not([class]) > h2` → border-top 2px beat) selects on.
+      # The neighbour is a plain `bp-section` container, and it takes the section
+      # device from THAT class — not from the accidental `div:not([class]) > h2`
+      # match its classless wrapper used to earn in the flat leg (a match the
+      # reader's keyed-stream leg never made, so the two legs disagreed). One
+      # class, one device, both legs.
       assert html =~
-               ~s(<div style="display:flex;flex-direction:column"><hr class="bp-hr" style="border-top-width:1px"><h2>Next section</h2>)
+               ~s(<div class="bp-section" style="display:flex;flex-direction:column"><h2>Next section</h2>)
     end
   end
 end

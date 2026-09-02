@@ -22,13 +22,15 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
 
   @article %{style: :article}
 
-  # The CURRENT stack render for a titled one-paragraph section (article mode).
-  # Captured from the pre-layout engine — the literal today-string tripwire.
-  @stack_html ~s(<div style="display:flex;flex-direction:column">) <>
-                ~s(<hr class="bp-hr" style="border-top-width:1px">) <>
-                ~s(<span style="font-weight:bold">Overview</span>) <>
-                ~s(<p>hi</p>) <>
-                ~s(<hr class="bp-hr" style="border-top-width:1px"></div>)
+  # The CURRENT stack render for a titled one-paragraph section (article mode) —
+  # the literal today-string tripwire. `bp-section` is the UNCONDITIONAL base
+  # class (it carries the section device: `--bp-section-beat` of air, a
+  # `--bp-section-rule` `--paper-ink` rule, `--bp-section-gap` below), the head is
+  # a real `<h2>`, and there are NO `bp-hr` rules — one rule per boundary, drawn
+  # by the container's own border-top.
+  @stack_html ~s(<div class="bp-section" style="display:flex;flex-direction:column">) <>
+                ~s(<h2 class="bp-section__title">Overview</h2>) <>
+                ~s(<p>hi</p></div>)
 
   defp stack_section,
     do: %{
@@ -104,15 +106,20 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       assert String.contains?(html, "<p>two</p>"), "the paragraph child renders as a real <p>"
     end
 
-    test "grid mode keeps the flex-column wrapper + leading/trailing rules" do
+    test "grid mode keeps the flex-column wrapper and opens on the section device" do
       html = Render.render_block(grid_section(2), @article)
-      assert String.starts_with?(html, ~s(<div style="display:flex;flex-direction:column">))
-      assert String.contains?(html, ~s(<hr class="bp-hr">))
 
-      assert String.contains?(
+      assert String.starts_with?(
                html,
-               ~s(<div class="bp-section__title" style="font-weight:bold">Overview</div>)
+               ~s(<div class="bp-section" style="display:flex;flex-direction:column">)
              )
+
+      # ONE rule per boundary, and it is the container's own border-top — an
+      # `<hr>` here would re-draw the old inline 1px hairline the stylesheet
+      # cannot outrank, and would double the boundary against the next section.
+      refute String.contains?(html, "bp-hr")
+
+      assert String.contains?(html, ~s(<h2 class="bp-section__title">Overview</h2>))
     end
 
     test "an absent title emits NO title node in the grid path" do
@@ -176,7 +183,7 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       |> Map.put("layout", %{"mode" => "grid", "tracks" => 3})
 
     html = Render.render_block(section, @article)
-    assert html =~ ~s(class="bp-section--wide")
+    assert html =~ ~s(class="bp-section bp-section--wide")
     assert html =~ ~s(class="bp-section__grid")
   end
 
@@ -252,13 +259,12 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
   describe "STEP-6 no-cells grid byte-identity (the backward-compat tripwire)" do
     # The exact bytes a two-child grid section (tracks:2, no title) emitted BEFORE
     # step 6 — bare .bp-section__cell wrappers, no per-child style.
-    @grid_html_no_cells ~s(<div style="display:flex;flex-direction:column">) <>
-                          ~s(<hr class="bp-hr">) <>
+    @grid_html_no_cells ~s(<div class="bp-section" style="display:flex;flex-direction:column">) <>
                           ~s|<div class="bp-section__grid" style="--bp-tracks:2;--bp-grid-gap:var(--bp-space-md,1.6rem)">| <>
                           ~s(<div class="bp-section__cell"><p>a</p></div>) <>
                           ~s(<div class="bp-section__cell"><p>b</p></div>) <>
                           ~s(</div>) <>
-                          ~s(<hr class="bp-hr"></div>)
+                          ~s(</div>)
 
     defp grid_no_cells do
       %{

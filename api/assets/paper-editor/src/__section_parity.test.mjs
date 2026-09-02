@@ -19,25 +19,28 @@
 // and (2) the node-view SOURCE that builds the DOM. Both run in pure Node.
 //
 // ── READER GROUND TRUTH (verified in this slice) ─────────────────────────────────
-//   STACK (compose.ex compose_section_stack → walk.ex box/hr/text):
-//     <div style="display:flex;flex-direction:column">        ← PdBox flex column (NO class)
-//       <hr class="bp-hr">                                    ← leading PdHr
-//       <span style="font-weight:bold">TITLE</span>           ← title PdText → walk.ex text/3
-//                                                               L257 (a bare bold SPAN, NO class,
-//                                                               ONLY when title set)
+//   STACK (compose.ex compose_section_stack → walk.ex box/text):
+//     <div class="bp-section" style="display:flex;flex-direction:column">
+//       <h2 class="bp-section__title">TITLE</h2>              ← ONE head producer, both legs
+//                                                               (compose.ex section_title_html/1),
+//                                                               ONLY when title set
 //       …children…
-//       <hr class="bp-hr">                                    ← trailing PdHr
 //     </div>
 //   GRID (compose.ex section_grid_html):
-//     <div style="display:flex;flex-direction:column">
-//       <hr class="bp-hr">
-//       <div class="bp-section__title" style="font-weight:bold">TITLE</div>  ← DIV in grid only
+//     <div class="bp-section" style="display:flex;flex-direction:column">
+//       <h2 class="bp-section__title">TITLE</h2>
 //       <div class="bp-section__grid" style="--bp-tracks:N;--bp-grid-gap:…">
 //         <div class="bp-section__cell" style="grid-column:span N;order:K">child</div>  ← CELL wrapper
 //         …
 //       </div>
-//       <hr class="bp-hr">
 //     </div>
+//   THE TWO `<hr class="bp-hr">` RULES ARE GONE from both legs. A section's boundary
+//   is the container's OWN `border-top` (`.bp-paper-surface .bp-section` — the same
+//   `--bp-section-beat` / `--bp-section-rule` / `--bp-section-gap` device a top-level
+//   `<h2>` section head gets), so two adjacent sections meet at ONE line instead of
+//   two, and the head is no longer 16px over an inline 1px hairline. `bp-section` is
+//   therefore a SHARED reader class the node-view wears — the head and the boundary
+//   are inherited, not hand-mirrored.
 //   Shared reader CSS: `.bp-section__cell { min-width: 0 }` and `> :first-child {
 //   margin-top: 0 }` (paper-surface.css:691-692, mirrored root.html.heex).
 //
@@ -152,27 +155,54 @@ check("wrapper carries the reader's inline display:flex;flex-direction:column", 
   );
 });
 
-// ── 5. DIVERGENCE (a) — STACK TITLE: reader <span style=font-weight:bold> vs
-//        editor <div class=bp-section__title style=font-weight:bold>.
-//        VERDICT: JUSTIFY.
-//        Reader stack title is a bare bold SPAN (walk.ex text/3 L257); the editor
-//        renders a bold DIV with class `bp-section__title` (which the reader itself
-//        uses in GRID mode, compose.ex section_grid_html). The delta is visually
-//        INERT: (1) both apply `font-weight:bold` (the class rule is font-weight:700
-//        == bold — no extra paint), so the typography is byte-matched; (2) inside a
-//        `display:flex;flex-direction:column` container a <span> flex item is
-//        blockified onto its own line exactly like a <div>, so the box is identical.
-//        The class is LOAD-BEARING for editing (the contentEditable title island +
-//        its data-test-id + hidden-when-empty reveal) — a bare classless span could
-//        not carry that affordance. So we keep the class and JUSTIFY the delta. ───
-check("(a) title binds font-weight:bold — typography byte-matches the reader span", () => {
+// ── 5. DIVERGENCE (a) — STACK TITLE. VERDICT: RECONCILED.
+//        This used to be a JUSTIFIED delta: the reader's stack title was a bare bold
+//        <span> (walk.ex text/3) and the grid title a bold <div class=
+//        bp-section__title>, while the editor always rendered the bold DIV.
+//        Both reader legs now emit the SAME `<h2 class="bp-section__title">` from ONE
+//        producer (compose.ex section_title_html/1) — a real heading, in the document
+//        outline and in a screen reader's heading list, which a bold div/span was in
+//        neither — and the node-view emits the same element. There is no inline
+//        font-weight on either side any more: the SHARED `.bp-section__title` rule
+//        (paper-surface.css, mirrored in root.html.heex + styles.css, pinned by
+//        view_edit_parity_test.exs §2) sizes and weights both surfaces from one
+//        declaration. So this check now asserts SAMENESS, not a justified delta. ───
+check("(a) title is an <h2> carrying the SHARED bp-section__title class (reconciled)", () => {
+  assert.ok(
+    /createElement\("h2"\)/.test(SRC),
+    "the title element is no longer an <h2> — a bold div/span is invisible to the document outline",
+  );
   assert.ok(
     /titleEl\.className\s*=\s*"bp-section__title"/.test(SRC),
     "title element lost its bp-section__title binding",
   );
   assert.ok(
-    /titleEl\.style\.fontWeight\s*=\s*"bold"/.test(SRC),
-    "title lost font-weight:bold — it no longer matches the reader's bold span/div",
+    !/titleEl\.style\.fontWeight/.test(SRC),
+    "the title re-grew an INLINE font-weight — it must take its type from the shared .bp-section__title rule, or View and Edit can drift again",
+  );
+});
+
+// ── 5b. ONE RULE PER BOUNDARY — the node-view draws NO `bp-hr` of its own. ────
+//        The reader dropped the leading AND trailing `<hr class="bp-hr">`; the
+//        boundary is the container's own border-top. An `<hr>` here would re-draw
+//        the old 1px hairline (walk.ex stamped `border-top-width:1px` INLINE, a
+//        weight no stylesheet can outrank) and would double the boundary between
+//        two adjacent sections — the exact defect this device closed. ────────────
+check("(5b) the node-view carries the shared bp-section class and draws no bp-hr", () => {
+  assert.ok(
+    /dom\.className\s*=\s*"bp-canvas-section bp-section"/.test(SRC),
+    "wrapper lost the SHARED bp-section class — the canvas would stop inheriting the section device the reader draws",
+  );
+  // Match CODE, not prose: the ground-truth comment above names `bp-hr` while
+  // explaining why the node-view no longer draws one, so a whole-file refute
+  // would red on its own documentation.
+  assert.ok(
+    !/createElement\("hr"\)/.test(SRC),
+    "the section node-view re-grew an <hr> — one rule per boundary, and it is the container's border-top",
+  );
+  assert.ok(
+    !/className\s*=\s*"bp-hr"/.test(SRC),
+    "the section node-view re-grew a bp-hr rule — an inline border-top-width:1px is a weight the stylesheet cannot outrank",
   );
 });
 
@@ -197,7 +227,7 @@ check("(b) layout controls are edit-only — display:none when not editable (vie
   );
   // The mount hook + stamp that JUSTIFY the wrapper-class delta must still be present.
   assert.ok(
-    /dom\.className\s*=\s*"bp-canvas-section"/.test(SRC),
+    /dom\.className\s*=\s*"bp-canvas-section bp-section"/.test(SRC),
     "wrapper lost its bp-canvas-section mount hook",
   );
   assert.ok(

@@ -448,6 +448,48 @@ html[data-theme="dark"] .bp-paper-body {
   border-top: var(--bp-section-rule) solid var(--paper-ink);
   padding-top: var(--bp-section-gap);
 }
+/* ── THE SECTION HEAD, CONTAINER SHAPE (the same law, the other shape) ────────
+   A paper opens a section in TWO shapes and the device is ONE. The rule above
+   sizes the shape whose head is a top-level level-2 heading. This one sizes the
+   shape written as a `section` BLOCK, whose head lives INSIDE the container's
+   flex stack where no `> #paper-body > … > h2` leg can reach it. Measured before
+   this rule: 16px of air over an inline 1px hairline, against the heading
+   shape's 92px over 2px — a sixth of the air, half the rule, for the same
+   authorial act.
+
+   IT GOES ON THE CONTAINER, NOT ON A CHILD. The container's own top border IS
+   the boundary rule, so the device needs no `<hr>` inside the stack at all —
+   which is the point: `walk.ex hr/2` stamps `border-top-width:1px` INLINE and no
+   stylesheet can outrank it, so the emitters (compose.ex, blocks/core.ts,
+   blocks.go) drop the leading AND the trailing rule and this declaration draws
+   the one that remains. Two adjacent sections therefore meet at ONE line.
+
+   `> :first-child { margin-top: 0 }` clamps the head's own prose margin so the
+   distance from the rule to the first words is exactly `--bp-section-gap`,
+   matching the heading shape's `padding-top` — otherwise the first child's
+   `margin-top` would stack on top of the padding and the two shapes would open
+   at different depths again.
+
+   `.bp-section--framed` / `.bp-section--wide` are declared LATER in this file;
+   the framed variant's `border` + `padding` shorthands deliberately override the
+   rule and gap here (a frame IS its own boundary), and `wide` only moves the
+   composition into the evidence band. */
+.bp-paper-surface .bp-section {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  padding-top: var(--bp-section-gap);
+}
+.bp-paper-surface .bp-section > :first-child { margin-top: 0; }
+/* The head's WORDS. Both legs emit a real h2 carrying this class (compose.ex
+   section_title_html/1) — in the outline and in a screen reader's heading list,
+   where a bold div/span was neither. It therefore takes the DISPLAY VOICE from
+   the `.bp-paper-surface h2` element rule above for FREE: size, the per-step
+   `--bp-h2-weight`, leading, tracking and `text-wrap: balance`, all from one
+   owner. This rule restates NONE of that on purpose — a copy here would outrank
+   the element rule on specificity (0,2,0 over 0,1,1) and silently pin the
+   container head to whatever the type scale said the day it was written. The
+   ONLY thing it declares is the margin the container's own boundary replaces. */
+.bp-paper-surface .bp-section__title { margin: 0; }
 /* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
    hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
    of white space; nothing on this surface is justified (text-align stays
@@ -1410,6 +1452,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    padding — NEVER spacer paragraphs (the publish floor walks the subtree).
    Mirror: paper-editor/src/styles.css. */
 .bp-paper-surface .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+/* LEGACY-ONLY now: the emitters no longer put an `<hr class="bp-hr">` inside a
+   section at all (the boundary is the container's own border-top). This stays
+   for CACHED HTML rendered before that change, so an old framed section does
+   not show a stray rule inside its frame. */
 .bp-paper-surface .bp-section--framed > .bp-hr { display: none; }
 
 /* ── cards: titled rule/feature card grid ── */

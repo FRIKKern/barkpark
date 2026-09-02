@@ -210,7 +210,18 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # external Pd JSON, so an open `"class"` pass-through would let any document
   # claim arbitrary paper-surface classes (class injection). Compose stamps
   # these as FIXED literals (compose_section_stack); anything else stays inert.
-  @box_class_whitelist ~w(bp-section--framed)
+  # The section box's class is now a COMPOSITE (`bp-section` is the unconditional
+  # base that carries the section device; a variant rides beside it), so the
+  # whitelist lists whole literal attribute VALUES rather than single tokens —
+  # still a fixed set, still the closure of the raw-Pd JSON class-injection
+  # surface. A value not in this list emits NO class at all, so a new variant in
+  # compose.ex that is not added here silently loses the section device: that is
+  # why section_layout_test.exs asserts the base class on every variant.
+  @box_class_whitelist [
+    "bp-section",
+    "bp-section bp-section--framed",
+    "bp-section bp-section--wide"
+  ]
 
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)

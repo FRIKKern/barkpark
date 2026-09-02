@@ -910,21 +910,41 @@ function cellLayoutAttr(child: unknown): string {
   return parts.length ? ` style="${parts.join(';')}"` : ''
 }
 
-const HR = '<hr class="bp-hr">'
-const HR_STACK = '<hr class="bp-hr" style="border-top-width:1px">'
+// The section head's CLASS attribute — the twin of compose.ex
+// `section_frame_class_attr/2` and the stack leg's box class. `bp-section` is the
+// UNCONDITIONAL base: it is what carries the section device (paper-surface.css
+// `.bp-paper-surface .bp-section` — `--bp-section-beat` of air, a
+// `--bp-section-rule` `--paper-ink` rule, `--bp-section-gap` below), the SAME
+// device a top-level `<h2>` section head gets. A variant rides beside it; an
+// unknown variant fail-softs to the plain base, exactly as the reader does.
+const sectionClass = (variant: unknown): string => {
+  if (variant === 'framed') return ' class="bp-section bp-section--framed"'
+  if (variant === 'wide') return ' class="bp-section bp-section--wide"'
+  return ' class="bp-section"'
+}
+
+// ONE producer for the head's markup, both legs — a real `<h2>` (in the document
+// outline and in a screen reader's heading list, where the old bold `<div>`/
+// `<span>` was in neither), sized by the shared `.bp-section__title` rule.
+const sectionTitleHtml = (title: unknown): string =>
+  title != null ? `<h2 class="bp-section__title">${escapeHtml(str(title))}</h2>` : ''
 
 const section: Emit = (b) => {
   const layout = b.layout
   const isGrid = isMap(layout) && layout.mode === 'grid'
   const blocks = asList<Block>(b.blocks)
+  // ONE RULE PER BOUNDARY. Both legs used to open AND close with an `<hr
+  // class="bp-hr">`, so two adjacent sections stacked two hairlines a few px
+  // apart where the grammar wants one. Both are gone: the boundary is the
+  // container's own `border-top`. This mirrors compose.ex and
+  // internal/pdrender/blocks.go — a three-engine contract, which is exactly why
+  // it could never have been a stylesheet that hid one of the two rules.
+  const cls = sectionClass(b.variant)
+  const titleHtml = sectionTitleHtml(b.title)
 
   if (isGrid) {
     const tracks = gridTracks(layout.tracks)
     const gap = gapTokenVar(layout.gap)
-    const titleHtml =
-      b.title != null
-        ? `<div class="bp-section__title" style="font-weight:bold">${escapeHtml(str(b.title))}</div>`
-        : ''
     const cells = blocks
       .map(
         (child) =>
@@ -932,29 +952,18 @@ const section: Emit = (b) => {
       )
       .join('')
     return (
-      `<div style="display:flex;flex-direction:column">` +
-      HR +
+      `<div${cls} style="display:flex;flex-direction:column">` +
       titleHtml +
       `<div class="bp-section__grid" style="--bp-tracks:${tracks};--bp-grid-gap:${gap}">` +
       cells +
       `</div>` +
-      HR +
       `</div>`
     )
   }
 
-  // Stack section: PdHr, [bold title span], inner blocks, PdHr.
-  const titleSpan =
-    b.title != null ? `<span style="font-weight:bold">${escapeHtml(str(b.title))}</span>` : ''
+  // Stack section: [h2 head], inner blocks.
   const inner = blocks.map((child) => renderBlock(child)).join('')
-  return (
-    `<div style="display:flex;flex-direction:column">` +
-    HR_STACK +
-    titleSpan +
-    inner +
-    HR_STACK +
-    `</div>`
-  )
+  return `<div${cls} style="display:flex;flex-direction:column">` + titleHtml + inner + `</div>`
 }
 
 /* columns (compose.ex :article) */

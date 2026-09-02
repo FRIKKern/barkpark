@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2281220,
+      "bytes": 2328094,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -75,9 +75,9 @@
         {
           "kind": "container",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -228,13 +228,13 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 36,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 29,
+          "2": 7
         },
         "heavyRules": [
           {
@@ -295,6 +295,16 @@
             "structural": true,
             "owners": [
               "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8085.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
             ]
           }
         ]
@@ -305,7 +315,7 @@
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2469232,
+      "bytes": 2513298,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -361,9 +371,9 @@
         {
           "kind": "container",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -514,13 +524,13 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 36,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 29,
+          "2": 7
         },
         "heavyRules": [
           {
@@ -582,6 +592,16 @@
             "owners": [
               "h2"
             ]
+          },
+          {
+            "px": 2,
+            "y": 8061.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
           }
         ]
       },
@@ -591,7 +611,7 @@
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2294502,
+      "bytes": 2321229,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -647,9 +667,9 @@
         {
           "kind": "container",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -800,13 +820,13 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 36,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 29,
+          "2": 7
         },
         "heavyRules": [
           {
@@ -868,6 +888,16 @@
             "owners": [
               "h2"
             ]
+          },
+          {
+            "px": 2,
+            "y": 8085.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
+            ]
           }
         ]
       },
@@ -877,7 +907,7 @@
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2483580,
+      "bytes": 2508349,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -933,9 +963,9 @@
         {
           "kind": "container",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -1086,13 +1116,13 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 36,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 29,
+          "2": 7
         },
         "heavyRules": [
           {
@@ -1153,6 +1183,16 @@
             "structural": true,
             "owners": [
               "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8061.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "bp-section"
             ]
           }
         ]

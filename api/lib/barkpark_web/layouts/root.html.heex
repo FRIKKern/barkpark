@@ -4684,6 +4684,20 @@
       border-top: var(--bp-section-rule) solid var(--paper-ink);
       padding-top: var(--bp-section-gap);
     }
+    /* THE SECTION HEAD, CONTAINER SHAPE — the EDIT twin of the reader's
+     * `.bp-paper-surface .bp-section` (paper-surface.css carries the full reasoning).
+     * A `section` BLOCK is the OTHER shape a paper opens a section in, and it takes
+     * the SAME device: the boundary rule is the container's own `border-top`, so the
+     * canvas node-view drops its two `bp-hr` children and wears the shared
+     * `bp-section` class instead. Byte-mirrored with the reader declaration; the pair
+     * is pinned by view_edit_parity_test.exs, and drift here IS View<->Edit drift. */
+    .bp-paper-editor-body .bp-section {
+      margin-top: var(--bp-section-beat);
+      border-top: var(--bp-section-rule) solid var(--paper-ink);
+      padding-top: var(--bp-section-gap);
+    }
+    .bp-paper-editor-body .bp-section > :first-child { margin-top: 0; }
+    .bp-paper-editor-body .bp-section__title { margin: 0; }
     .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
     /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
        (paper-surface.css carries the measurement: `--paper-accent-soft` as a

@@ -13,19 +13,21 @@
 //
 // ── READER GROUND TRUTH (compose.ex:201-214 → walk.ex box()/hr()/text()) ──────
 //
-//   <div style="display:flex;flex-direction:column">   ← PdBox, flexDirection:column
-//     <hr class="bp-hr" style="border-top-width:1px">   ← leading PdHr
-//     <span style="font-weight:bold">TITLE</span>       ← title PdText (ONLY when set)
+//   <div class="bp-section" style="display:flex;flex-direction:column">
+//     <h2 class="bp-section__title">TITLE</h2>          ← title (ONLY when set)
 //     …inner children (each compose_block→walk, in column order)…
-//     <hr class="bp-hr" style="border-top-width:1px">   ← trailing PdHr
 //   </div>
 //
-//   There is NO `bp-section` reader class — the wrapper is a generic flex-column
-//   div with INLINE styles and the title is a bare bold <span> on its OWN LINE (flex
-//   column stacks it ABOVE the body, NOT run-in). Only `bp-hr` is a shared reader
-//   class (paper-surface.css + the styles.css/root.html.heex mirror), so the two HRs
-//   inherit reader-identical rules for free. The node-view hand-matches the rest as
-//   inline style (route a — no reader change).
+//   THE SECTION DEVICE IS THE CONTAINER'S OWN TOP BORDER. `bp-section` IS a shared
+//   reader class now (paper-surface.css `.bp-paper-surface .bp-section` — beat of
+//   air, a `--bp-section-rule` `--paper-ink` rule, `--bp-section-gap` below), and
+//   this node-view carries it so the canvas inherits the boundary from the SAME
+//   declaration the reader draws (route b for the head; the flex-column stays
+//   inline, route a). The two `<hr class="bp-hr">` rules are GONE on both sides:
+//   one rule per boundary, and an inline `border-top-width:1px` on an hr is a
+//   weight no stylesheet can outrank. The title is a real `<h2>` — in the outline
+//   and in a screen reader's heading list — sized by the shared
+//   `.bp-section__title` rule rather than a hand-matched inline bold.
 //
 // ── PERSIST SHAPE (unchanged; backend nests + recurses — compose.ex:201, patch.ex) ─
 //
@@ -257,14 +259,15 @@ export const Section = Node.create({
 
   // ── the NodeView: reader-shaped flex-column chrome around a contentDOM body ───
   //
-  //   <div class="bp-canvas-section" data-bp-type="section"
+  //   <div class="bp-canvas-section bp-section" data-bp-type="section"
   //        style="display:flex;flex-direction:column">
-  //     <hr class="bp-hr" style="border-top-width:1px">       ← leading rule (chrome)
-  //     <div class="bp-section__title" style="font-weight:bold"
-  //          contenteditable="true">TITLE</div>               ← EDITABLE title chrome
+  //     <h2 class="bp-section__title"
+  //         contenteditable="true">TITLE</h2>                 ← EDITABLE title chrome
   //     <div class="bp-section__body">…block+ children…</div>  ← contentDOM (editable)
-  //     <hr class="bp-hr" style="border-top-width:1px">       ← trailing rule (chrome)
   //   </div>
+  //
+  //   The boundary rule is the wrapper's own `border-top` (the shared
+  //   `bp-section` class), not an `<hr>` child — mirroring the reader exactly.
   //
   // The title is contentEditable chrome OUTSIDE the PM content: it writes
   // node.attrs.title via a debounced, re-entrancy-guarded setNodeMarkup, and its
@@ -274,23 +277,22 @@ export const Section = Node.create({
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
-      dom.className = "bp-canvas-section";
+      // `bp-canvas-section` is the edit-only layout hook; `bp-section` is the
+      // SHARED reader class that draws the section device (one declaration, both
+      // surfaces — view_edit_parity_test.exs pins the pair).
+      dom.className = "bp-canvas-section bp-section";
       dom.setAttribute("data-bp-type", "section");
       // Match the reader's inline flex-column (route a — no reader change).
       dom.style.display = "flex";
       dom.style.flexDirection = "column";
 
-      const hrTop = document.createElement("hr");
-      hrTop.className = "bp-hr";
-      hrTop.contentEditable = "false";
-      hrTop.style.borderTopWidth = "1px";
-
       // The EDITABLE title chrome — a contentEditable island writing node.attrs.title.
       // It is NOT PM content (the code/diagram non-PM-island precedent, but editable
       // and contentEditable rather than a <textarea>).
-      const titleEl = document.createElement("div");
+      // A REAL `<h2>` (reader parity + document outline). No inline font-weight:
+      // the shared `.bp-section__title` rule sizes and weights it on both surfaces.
+      const titleEl = document.createElement("h2");
       titleEl.className = "bp-section__title";
-      titleEl.style.fontWeight = "bold";
       titleEl.setAttribute("data-test-id", "paper-section-title");
 
       // The editable BODY: the contentDOM hole PM fills with the block+ children.
@@ -298,8 +300,6 @@ export const Section = Node.create({
       // (the SHARED reader class — parity by construction, no competing producer).
       const body = document.createElement("div");
       body.className = "bp-section__body";
-
-      const hrBot = hrTop.cloneNode();
 
       // ── STEP-2 layout controls (hover-revealed bp-canvas-* chrome; the table/
       // terminal rail precedent). A mode toggle (stack⇄grid) + a tracks stepper,
@@ -334,7 +334,7 @@ export const Section = Node.create({
 
       // Reader column order: HR, title, children, HR. Controls ride at the top,
       // OUTSIDE the reader order (edit-only chrome, hidden at rest via CSS).
-      dom.append(controls, hrTop, titleEl, body, hrBot);
+      dom.append(controls, titleEl, body);
 
       // Guards the paint→titleEl write from re-entering the input listener.
       let syncingTitle = false;
@@ -373,8 +373,8 @@ export const Section = Node.create({
       const paint = (n) => {
         // ── FRAMED-FINALE (charter D34): show the frame in the canvas. The reader's
         // `.bp-section--framed` class rides the canvas wrapper too (root.html.heex
-        // inline editor styles + styles.css carry the rule pair: hairline border,
-        // direct-child .bp-hr hidden). ignoreMutation already swallows attribute
+        // inline editor styles + styles.css carry the rule: a hairline frame that
+        // overrides the section device's rule). ignoreMutation already swallows attribute
         // mutations on `dom`, so this class write never churns PM.
         dom.classList.toggle(
           "bp-section--framed",
@@ -592,7 +592,6 @@ export const Section = Node.create({
             return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // layout controls are attr writes
-          if (hrTop.contains(m.target) || hrBot.contains(m.target)) return true;
           // Let PM handle mutations inside the editable body (contentDOM); ignore all
           // other chrome.
           return !body.contains(m.target);

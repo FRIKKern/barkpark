@@ -26,10 +26,12 @@ if [ ${#SLUGS[@]} -eq 0 ]; then
   # design-probe joined with pe-w1-section-lever and is the ONE authored fixture
   # (BPML, no published paper behind it — see its `_source`). It carries the three
   # shapes the six real papers do not: `section` CONTAINERS with eyebrow+h2 heads,
-  # consecutive containers stacking a doubled boundary rule, and a content-narrow
-  # table whose ink pins to the band's left edge while its box stays centred. All
-  # three are measured and none asserted, so it is the fixture an open finding
-  # gets closed against.
+  # consecutive containers that used to stack a doubled boundary rule, and a
+  # content-narrow table whose ink pins to the band's left edge while its box
+  # stays centred. The first two are now ASSERTED (container heads open at the
+  # same beat/rule/gap as heading heads, and `doubledRules` must be empty); the
+  # table's ink offset is still measured-only, so this stays the fixture an open
+  # finding gets closed against.
   #
   # stat-partial-row joined with the slab remedy (task-0098ba55d2642545, charter
   # D36) and is the SECOND authored fixture: two eleven-stat strips (a prime

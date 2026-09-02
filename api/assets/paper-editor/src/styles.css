@@ -532,6 +532,20 @@
   border-top: var(--bp-section-rule) solid var(--paper-ink);
   padding-top: var(--bp-section-gap);
 }
+/* THE SECTION HEAD, CONTAINER SHAPE — the EDIT twin of the reader's
+ * `.bp-paper-surface .bp-section` (paper-surface.css carries the full reasoning).
+ * A `section` BLOCK is the OTHER shape a paper opens a section in, and it takes
+ * the SAME device: the boundary rule is the container's own `border-top`, so the
+ * canvas node-view drops its two `bp-hr` children and wears the shared
+ * `bp-section` class instead. Byte-mirrored with the reader declaration; the pair
+ * is pinned by view_edit_parity_test.exs, and drift here IS View<->Edit drift. */
+.bp-paper-editor-body .bp-section {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  padding-top: var(--bp-section-gap);
+}
+.bp-paper-editor-body .bp-section > :first-child { margin-top: 0; }
+.bp-paper-editor-body .bp-section__title { margin: 0; }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
 /* THE LINK AFFORDANCE — byte-mirrored from the reader's `.bp-paper-surface a`
  * (paper-surface.css carries the measurement: `--paper-accent-soft` as a
@@ -945,13 +959,12 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); cursor: pointer; }
 
 /* ── canvas section container node-view (loop-epic/editable-section) ──────────
- * `bp-canvas-section` is a THIN edit-only layout hook. PARITY rides the node-view's
- * INLINE styles hand-matching the reader (a flex-column PdBox, a bold title on its
- * OWN line, two `bp-hr` rules) — the section has NO reader class, so there is no
- * cascade to inherit (route a). These rules add ONLY edit affordances (the body's
- * column layout + a small child gap), kept visually inert so View == Edit. */
+ * `bp-canvas-section` is a THIN edit-only layout hook. The section DOES have a
+ * reader class now (`bp-section`, which the node-view also wears), so the boundary
+ * device and the `.bp-section__title` sizing are inherited from the ONE mirrored
+ * declaration above rather than hand-matched inline. These rules add ONLY edit
+ * affordances (the body's column layout), kept visually inert so View == Edit. */
 .bp-canvas-section > .bp-section__body { display: flex; flex-direction: column; }
-.bp-canvas-section > .bp-section__title { font-weight: 700; }
 /* S2 layout-engine: the hover-revealed layout controls (mode toggle + tracks stepper).
  * EDIT-ONLY chrome (bp-canvas-* — the table/terminal rail precedent), hidden at rest,
  * revealed on hover/focus-within; NO reader counterpart. Bound to the --paper-* token
@@ -966,10 +979,11 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-opaque { user-select: none; }
 
 /* ── section rule mirror (embedder only) ─────────────────────────────────────
- * The section's two `bp-hr` rules inherit the reader's rule styling from
- * `.bp-paper-surface .bp-hr` in Studio (paper-surface.css inlined), but a standalone
- * embedder host has no `.bp-paper-surface` ancestor — so mirror the reader rule here,
- * scoped to `.bp-paper-editor-body`, byte-matching paper-surface.css:309. */
+ * A `bp-hr` (the `divider` block, and any LEGACY cached section HTML that still
+ * carries the two rules this device replaced) inherits the reader's rule styling
+ * from `.bp-paper-surface .bp-hr` in Studio (paper-surface.css inlined), but a
+ * standalone embedder host has no `.bp-paper-surface` ancestor — so mirror the
+ * reader rule here, scoped to `.bp-paper-editor-body`. */
 .bp-paper-editor-body .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
 
 /* ── canvas read-only atom node-views (Phase-4 S3.6: sheet + embed) ──────────

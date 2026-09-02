@@ -2477,17 +2477,34 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # bold-title PdText, inner children via compose_block, trailing PdHr, wrapped in
   # a flex-column PdBox. BYTE-IDENTICAL to the pre-layout engine.
   defp compose_section_stack(b, style) do
-    leading = [%{"kind" => "PdHr"}]
+    # ONE RULE PER BOUNDARY. The pre-fix body opened AND closed every section with
+    # a PdHr, so two adjacent sections stacked two hairlines a few px apart where
+    # the grammar wants one. The trailing rule is gone on every arm — it is a
+    # THREE-ENGINE contract (this seam, internal/pdrender/blocks.go
+    # sectionRenderer, js blocks/core.ts `section`), never a stylesheet hide,
+    # which would leave the TUI and the SDK still drawing both.
+    #
+    # THE HEAD. :article no longer emits a leading PdHr either: the section device
+    # rides the BOX (`.bp-section` — `--bp-section-beat` of air, a
+    # `--bp-section-rule` `--paper-ink` rule, `--bp-section-gap` below), the SAME
+    # device `.bp-paper-surface > #paper-body > … > h2` gives the top-level-heading
+    # shape of a section. Before this, the container shape measured 16px over an
+    # inline 1px rule against the heading shape's 92px over 2px — one authorial
+    # intent drawn two ways, and the tighter of the two. The rule weight HAS to
+    # move in the emitter: walk.ex `hr/2` stamps `border-top-width:1px` INLINE,
+    # which no stylesheet can outrank — so the fix is the ABSENCE of the hr, not a
+    # CSS override of it.
+    #
+    # The :email leg keeps its inline-styled leading PdHr: render.ex's email
+    # document embeds NO stylesheet ("Outlook is the contract"), so a class the
+    # cascade never reaches would draw nothing at all.
+    leading = if style == :article, do: [], else: [%{"kind" => "PdHr"}]
 
-    title =
-      case Map.get(b, "title") do
-        nil -> []
-        t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
-      end
+    title = section_title_nodes(Map.get(b, "title"), style)
 
     inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
 
-    children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+    children = leading ++ title ++ inner
     box = %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
 
     # Section-frame hook (charter D19): variant=="framed" stamps a top-level
@@ -2495,11 +2512,38 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # Emission is the walker's call (box_class_attr): :article only + whitelist,
     # so the email leg stays byte-identical and an unknown variant fail-softs
     # to the exact unclassed bytes above.
+    # `bp-section` is now the UNCONDITIONAL base class — it is what carries the
+    # section device — and a variant rides beside it. The walker's whitelist
+    # (walk.ex @box_class_whitelist) still gates emission on :article + a fixed
+    # literal, so the email leg stays classless and an unknown variant fail-softs
+    # to the plain `bp-section` box.
     case Map.get(b, "variant") do
-      "framed" -> Map.put(box, "class", "bp-section--framed")
-      "wide" -> Map.put(box, "class", "bp-section--wide")
-      _ -> box
+      "framed" -> Map.put(box, "class", "bp-section bp-section--framed")
+      "wide" -> Map.put(box, "class", "bp-section bp-section--wide")
+      _ -> Map.put(box, "class", "bp-section")
     end
+  end
+
+  # The section HEAD's words. :article emits a real `<h2>`: the container head is
+  # a heading in the document's argument, and the pre-fix `<span
+  # style="font-weight:bold">` (stack) / `<div class="bp-section__title"
+  # style="font-weight:bold">` (grid) were invisible to the document outline and
+  # to a screen reader's heading list. `_raw` rather than a PdHeading because the
+  # CLASS is what binds it to the `.bp-section__title` sizing rule the Edit twin
+  # mirrors, and PdHeading carries no class slot. The :email leg keeps the
+  # inline-styled bold PdText (inline-only surface, no cascade to bind to).
+  defp section_title_nodes(nil, _style), do: []
+
+  defp section_title_nodes(t, :article),
+    do: [%{"kind" => "_raw", "html" => section_title_html(t)}]
+
+  defp section_title_nodes(t, _style),
+    do: [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
+
+  # ONE producer for the head markup — both legs (stack `_raw` and grid) call it,
+  # so the tag/class can never drift between the two shapes of the same section.
+  defp section_title_html(t) do
+    ~s(<h2 class="bp-section__title">) <> Util.escape_html(stringish(t)) <> "</h2>"
   end
 
   # EMAIL-DEGRADE helper — stable-sort a grid section's `blocks` by their CSS
@@ -2566,8 +2610,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           ""
 
         t ->
-          ~s(<div class="bp-section__title" style="font-weight:bold">) <>
-            Util.escape_html(stringish(t)) <> "</div>"
+          section_title_html(t)
       end
 
     cells =
@@ -2579,15 +2622,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end)
       |> Enum.join("")
 
-    hr = ~s(<hr class="bp-hr">)
-
+    # No leading/trailing `<hr class="bp-hr">`: the grid leg opens on the SAME
+    # `.bp-section` device the stack leg does — one rule per boundary, sized to
+    # the artifact. See compose_section_stack/2 for the full reasoning.
     ~s(<div#{section_frame_class_attr(b, style)} style="display:flex;flex-direction:column">) <>
-      hr <>
       title_html <>
       ~s(<div class="bp-section__grid" style="--bp-tracks:#{tracks};--bp-grid-gap:#{gap}">) <>
       cells <>
       "</div>" <>
-      hr <>
       "</div>"
   end
 
@@ -2599,10 +2641,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # a stated invariant rather than a positional accident. Unknown variants
   # fall to "" — byte-identical to the pre-hook wrapper.
   defp section_frame_class_attr(%{"variant" => "framed"}, :article),
-    do: ~s( class="bp-section--framed")
+    do: ~s( class="bp-section bp-section--framed")
 
   defp section_frame_class_attr(%{"variant" => "wide"}, :article),
-    do: ~s( class="bp-section--wide")
+    do: ~s( class="bp-section bp-section--wide")
+
+  defp section_frame_class_attr(_b, :article), do: ~s( class="bp-section")
 
   defp section_frame_class_attr(_b, _style), do: ""
 
