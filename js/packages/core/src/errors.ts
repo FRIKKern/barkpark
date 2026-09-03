@@ -230,6 +230,9 @@ export interface BarkparkConflictErrorOptions extends BarkparkAPIErrorOptions {
 /**
  * 409 conflict (id collision) or 412 precondition failed (ifMatch mismatch).
  * Carries `serverEtag` / `serverDoc` when available for recovery flows.
+ * `serverEtag` is read off the 412 ERROR ENVELOPE (`details.expected`) — never
+ * off the `ETag` response header, which is a cache validator and would 412 if
+ * replayed as `ifMatch`.
  */
 export class BarkparkConflictError extends BarkparkAPIError {
   public readonly serverEtag?: string

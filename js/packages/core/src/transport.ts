@@ -532,6 +532,13 @@ export async function request<T>(
             }
             const rid = strOrUndefined(respHeaders['x-request-id'])
             if (rid !== undefined) respCtx.requestId = rid
+            // CACHE VALIDATOR, observability only. This is the HTTP `ETag`
+            // RESPONSE HEADER (RFC 9110 §8.8.1) — "is the cached
+            // REPRESENTATION still valid?" — which folds the dataset schema
+            // hash on top of the document rev. It is NOT a write precondition:
+            // never feed `respCtx.etag` into `ifMatch` / `If-Match`. The write
+            // token is the BODY's rev, which `getDoc` returns as
+            // `DocResult.etag` (js/packages/core/src/doc.ts).
             const etagRaw = strOrUndefined(respHeaders['etag'])
             if (etagRaw !== undefined) respCtx.etag = etagRaw.replace(/^"|"$/g, '')
             await config.onResponse(respCtx)
