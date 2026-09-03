@@ -1,23 +1,38 @@
 /**
- * Tests for the REAL absent-vs-unavailable ruling (`lib/doc-absence.ts`) that
- * `lib/get-document.ts` routes every throw through. Not a hand-kept mirror:
- * this module imports only `@barkpark/core`, so `node --test` loads the shipped
- * code and the SHIPPED error classes directly.
+ * The ABSENT-vs-MISCONFIGURED split for `lib/doc-absence.ts`, which
+ * `lib/get-document.ts` routes every fetch through (task-2811a42a66c7b649).
+ * Not a hand-kept mirror: this module imports only `@barkpark/core`, so
+ * `node --test` loads the shipped code and the SHIPPED error classes directly.
  *
- * The defect under pin: `get-document.ts` turned EVERY throw into
- * `{ doc: null, error: message }`, which its three consumers read as "upstream
- * unavailable". `js/packages/core/src/docs.ts` makes the slug-query leg REJECT
- * with `BarkparkNotFoundError` when the TYPE is unknown or private to the token
- * (a decided asymmetry, wave-7 D72), so a document that does not exist rendered
- * the red "Failed to load document." panel behind an HTTP 200 instead of a
- * 404 — a soft-404 reachable by a hand-typed URL and by any crawler.
+ * THE DEFECT UNDER PIN, in two acts. #13431 fixed a soft-404 — `get-document.ts`
+ * turned EVERY throw into `{ doc: null, error: message }`, so a document that
+ * did not exist wore the red "Failed to load document." panel behind an HTTP
+ * 200. That fix over-shot: it ruled a `BarkparkNotFoundError` ABSENT, verbatim
+ * "from the reader's point of view the document is ABSENT, so it 404s".
+ *
+ * But `js/packages/core/src/docs.ts` is asymmetric on purpose (wave-7 D72): a
+ * public type with zero matching documents RESOLVES null, a missing or private
+ * TYPE REJECTS, and the by-id leg swallows its own 404 inside core
+ * (`js/packages/core/src/doc.ts`). So the only `BarkparkNotFoundError` that can
+ * reach the ruling is the TYPE. And `app/(finder)/d/[type]/[slug]/page.tsx`
+ * gates on a hard-coded `KNOWN_TYPES` set before any fetch, so an unknown type
+ * cannot arrive from a hand-typed URL — it means THIS SITE'S config is wrong.
+ * Mistype a schema name and the demo rendered a clean, confident 404 with
+ * nothing red and nothing logged.
+ *
+ * THE TEST THAT WOULD HAVE CAUGHT IT is `both paths are driven, and they
+ * DIFFER` below: covering only the absent path is the state that let this ship,
+ * so the two are asserted against each other in ONE test rather than apart.
  *
  * NAMED MUTANTS each test kills:
- *   • swallow-everything-as-failure → the not-found tests red (no 404)
- *   • swallow-everything-as-absent  → the outage tests red (real failures hidden)
- *   • instanceof-instead-of-code    → the cross-realm test reds
- *   • drop-the-message              → the message-preserved test reds
- *   • unwire-get-document           → the SHIPPED wiring test reds
+ *   • collapse the buckets (NotFound -> { doc: null, error: null })
+ *       → "both paths are driven, and they DIFFER"
+ *       → and "an unknown TYPE is surfaced, never reported as a normal absence"
+ *   • surface a resolved-null as an error        → "absent is not an error"
+ *   • swallow a non-NotFound throw to absent     → "a real outage keeps its message"
+ *   • instanceof-instead-of-code                 → the cross-realm test reds
+ *   • drop the type from the message             → the message test reds
+ *   • unwire-get-document                        → the SHIPPED wiring test reds
  */
 
 import { test } from "node:test";
@@ -30,29 +45,84 @@ import {
   BarkparkAuthError,
   BarkparkTimeoutError,
 } from "@barkpark/core";
-import { docResultFromError } from "../lib/doc-absence.ts";
+import { resolveDocOutcome, unknownTypeMessage } from "../lib/doc-absence.ts";
 
-/* ── absent → 404 ───────────────────────────────────────────────────────── */
+interface Doc {
+  _id: string;
+}
 
-test("an upstream 404 is ABSENCE — no error, so the page 404s honestly", () => {
-  const err = new BarkparkNotFoundError("schema unknown: project", {
-    status: 404,
-  });
-  assert.deepEqual(docResultFromError(err), { doc: null, error: null });
-});
+const DOC: Doc = { _id: "doc-1" };
 
-test("the not-found message is DISCARDED on purpose, not surfaced", () => {
-  // Surfacing it is what produced the red panel. `error: null` is the whole
-  // point: it is the signal `page.tsx`'s `if (!doc && !error) notFound()` reads.
-  const { error } = docResultFromError(
-    new BarkparkNotFoundError("no such type", { status: 404 }),
+/** A valid, public type whose slug filter matched nothing: core resolves null. */
+const absentDocument = () => Promise.resolve(null);
+
+/** A type the API does not know, or that this token cannot read: core rejects. */
+const unknownType = () =>
+  Promise.reject(new BarkparkNotFoundError("schema unknown: pots", { status: 404 }));
+
+/* ── the test that would have caught it ──────────────────────────────────── */
+
+test("both paths are driven, and they DIFFER", async () => {
+  const absent = await resolveDocOutcome<Doc>("post", absentDocument);
+  const misconfigured = await resolveDocOutcome<Doc>("pots", unknownType);
+
+  // A valid type with no matching slug: absent, and that is fine. This is the
+  // signal `page.tsx`'s `if (!doc && !error) notFound()` reads.
+  assert.deepEqual(absent, { doc: null, error: null });
+
+  // An unknown type name: the operator must see it (document-detail.tsx renders
+  // `error` verbatim inside the red panel).
+  assert.equal(misconfigured.doc, null);
+  assert.equal(typeof misconfigured.error, "string");
+
+  // The whole point. Two 404-shaped outcomes, two different answers — collapse
+  // them and this line is the one that reds.
+  assert.notDeepEqual(
+    absent,
+    misconfigured,
+    "an absent document and an unknown TYPE must not produce the same result",
   );
-  assert.equal(error, null);
 });
 
-/* ── unavailable → keep the panel ───────────────────────────────────────── */
+/* ── bucket 1: absence of DATA is a normal state ─────────────────────────── */
 
-test("a real outage stays a FAILURE and keeps its message", () => {
+test("absent is not an error — a valid type with no matching slug 404s honestly", async () => {
+  const r = await resolveDocOutcome<Doc>("post", absentDocument);
+  assert.deepEqual(r, { doc: null, error: null });
+});
+
+test("a resolved document passes through untouched", async () => {
+  const r = await resolveDocOutcome<Doc>("post", () => Promise.resolve(DOC));
+  assert.deepEqual(r, { doc: DOC, error: null });
+});
+
+/* ── bucket 2: a misconfiguration the operator must see ──────────────────── */
+
+test("an unknown TYPE is surfaced, never reported as a normal absence", async () => {
+  const r = await resolveDocOutcome<Doc>("pots", unknownType);
+  assert.equal(r.doc, null);
+  assert.notEqual(
+    r.error,
+    null,
+    "a TYPE 404 must NOT land in the absent bucket — that is the whole defect",
+  );
+  assert.equal(r.error, unknownTypeMessage("pots"));
+});
+
+test("the message NAMES the type and BOTH causes", async () => {
+  const msg = unknownTypeMessage("pots");
+  assert.match(msg, /"pots"/, "the operator must be told WHICH type");
+  assert.match(msg, /misspelled/i, "cause 1: the schema name is wrong");
+  assert.match(msg, /token/i, "cause 2: the type is not readable by this token");
+  // It must not be the upstream's own words: "schema unknown: pots" tells an
+  // operator nothing about which of the two things to go and fix.
+  const r = await resolveDocOutcome<Doc>("pots", unknownType);
+  assert.equal(r.error, msg);
+});
+
+/* ── everything else stays a real failure ────────────────────────────────── */
+
+test("a real outage keeps its message", async () => {
   // The opposite mistake would be just as dishonest: degrading a 500 or a
   // timeout to a 404 hides an outage behind a "not found".
   for (const err of [
@@ -60,70 +130,69 @@ test("a real outage stays a FAILURE and keeps its message", () => {
     new BarkparkAuthError("token rejected", { status: 401 }),
     new BarkparkTimeoutError("request timed out", { status: 0 }),
   ]) {
-    const out = docResultFromError(err);
-    assert.equal(out.doc, null);
+    const r = await resolveDocOutcome<Doc>("post", () => Promise.reject(err));
+    assert.equal(r.doc, null);
     assert.equal(
-      out.error,
+      r.error,
       err.message,
       `${err.name} must keep its message, not become an absence`,
+    );
+    assert.notEqual(
+      r.error,
+      unknownTypeMessage("post"),
+      `${err.name} must not be mislabelled an unknown type`,
     );
   }
 });
 
-test("a plain Error keeps its message", () => {
-  assert.deepEqual(docResultFromError(new Error("boom")), {
+test("a NON-Error throw is stringified rather than lost", async () => {
+  assert.deepEqual(await resolveDocOutcome<Doc>("post", () => Promise.reject("boom")), {
     doc: null,
     error: "boom",
   });
-});
-
-test("a NON-Error throw is stringified rather than lost", () => {
-  assert.deepEqual(docResultFromError("just a string"), {
-    doc: null,
-    error: "just a string",
-  });
-  assert.equal(docResultFromError(null).error, "null");
-  assert.equal(docResultFromError(undefined).error, "undefined");
+  assert.equal((await resolveDocOutcome<Doc>("post", () => Promise.reject(null))).error, "null");
 });
 
 /* ── the predicate ──────────────────────────────────────────────────────── */
 
-test("membership keys on the error CODE, not on instanceof", () => {
+test("membership keys on the error CODE, not on instanceof", async () => {
   // `@barkpark/core` is linked by `file:` in this monorepo, so a second copy of
   // the class in another module realm would defeat an `instanceof` check while
   // the code comparison holds. This shape-only object is that second realm.
-  const foreign = Object.assign(new Error("not found"), {
+  const foreign = Object.assign(new Error("schema unknown: pots"), {
     code: "BarkparkNotFoundError",
     status: 404,
   });
-  assert.deepEqual(docResultFromError(foreign), { doc: null, error: null });
+  const r = await resolveDocOutcome<Doc>("pots", () => Promise.reject(foreign));
+  assert.equal(r.error, unknownTypeMessage("pots"));
 });
 
-test("an error carrying a DIFFERENT barkpark code is not an absence", () => {
+test("an error carrying a DIFFERENT barkpark code is not an unknown type", async () => {
   const foreign = Object.assign(new Error("rate limited"), {
     code: "BarkparkRateLimitError",
   });
-  assert.equal(docResultFromError(foreign).error, "rate limited");
+  const r = await resolveDocOutcome<Doc>("post", () => Promise.reject(foreign));
+  assert.equal(r.error, "rate limited");
 });
 
 /* ── shipped wiring ─────────────────────────────────────────────────────── */
 
-test("SHIPPED (lib/get-document.ts): every throw is routed through the ruling", () => {
+test("SHIPPED (lib/get-document.ts): the fetch is routed through the ruling", () => {
   // `get-document.ts` imports `next/cache`, which does not resolve under bare
   // `node --test`, so this reads the shipped bytes — the idiom
-  // `template-webhook-lazy.test.ts` uses. Without it, unwiring the catch would
-  // leave every test above green while the soft-404 came back.
+  // `template-webhook-lazy.test.ts` uses. Without it, unwiring the call would
+  // leave every test above green while the silent 404 came back.
   const src = readFileSync(
     fileURLToPath(new URL("../lib/get-document.ts", import.meta.url)),
     "utf8",
   );
   assert.match(
     src,
-    /catch \(err\) \{\s*return docResultFromError\(err\);\s*\}/,
-    "the catch must delegate to docResultFromError, not shape the result itself",
+    /resolveDocOutcome<GenericDoc>\(\s*type,\s*\(\) => cachedDoc\(type\)\(slug\),?\s*\)/,
+    "getDocument must delegate to resolveDocOutcome, not shape the result itself",
   );
   assert.ok(
-    !/error:\s*err instanceof Error \? err\.message : String\(err\)/.test(src),
-    "the old catch-all that made every throw a failure must be gone",
+    !/catch \(err\)/.test(src),
+    "get-document.ts must own no try/catch of its own — the ruling owns classification",
   );
 });
