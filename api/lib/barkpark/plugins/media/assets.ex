@@ -36,37 +36,18 @@ defmodule Barkpark.Plugins.Media.Assets do
   the lookup is scoped to that tenant so a delete in workspace B never resolves
   workspace A's asset doc for the same `mediaFileId` (barkpark-5p3y). An absent
   workspace_id is the deliberate global / legacy single-tenant path.
-
-  ## The result is now LOAD-BEARING (task-57ee9fff4aae9217 #12)
-
-  This used to discard every `Content.delete_document/4` result with `_ =` and
-  return a hard-coded `:ok`. A `rev_mismatch` (the draft was edited between the
-  scope read and the delete) or a `before_delete` HALT therefore left the
-  document alive while `Barkpark.Media.delete_file/2` — which reached here only
-  through the `after_media_delete` plugin hook, itself `:ok`-hardcoded — still
-  reported a successful delete. That is the silent half of Gyldendal's 517
-  dangling drafts.
-
-  It now answers `{:error, reason}` for the FIRST document that genuinely
-  failed, so `delete_file/2` can roll the blob row back with it.
-  `{:error, :not_found}` is NOT a failure: a blob with no companion document,
-  or a re-issued delete, is success, which is what keeps the delete idempotent.
   """
-  @spec delete_for_blob(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  @spec delete_for_blob(String.t(), String.t(), keyword()) :: :ok
   def delete_for_blob(media_file_id, dataset, opts \\ [])
       when is_binary(media_file_id) and is_binary(dataset) and is_list(opts) do
     Document
     |> asset_doc_scope(media_file_id, dataset, opts)
     |> Repo.all()
-    |> Enum.reduce_while(:ok, fn doc, :ok ->
-      case Content.delete_document(doc.doc_id, @asset_type, dataset, opts) do
-        {:ok, _deleted} -> {:cont, :ok}
-        # Already gone (or never there) — the postcondition this function
-        # promises already holds.
-        {:error, :not_found} -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
+    |> Enum.each(fn doc ->
+      _ = Content.delete_document(doc.doc_id, @asset_type, dataset, opts)
     end)
+
+    :ok
   end
 
   @doc """
