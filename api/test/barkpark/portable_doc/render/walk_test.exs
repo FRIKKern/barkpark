@@ -499,6 +499,48 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdChip" do
+    test "article: a .bp-chip pill in its tone with a dot, and the note as a block beneath" do
+      node = %{
+        "kind" => "PdChip",
+        "tone" => "success",
+        "strong" => false,
+        "text" => "Lett",
+        "note" => "finnes, trigram"
+      }
+
+      assert Walk.render_body(node, @width, @article) ==
+               ~s(<span class="bp-chip bp-chip--success"><i class="bp-chip__dot"></i>Lett</span>) <>
+                 ~s(<span class="bp-chip__note">finnes, trigram</span>)
+    end
+
+    test "article: strong fills the pill, an unknown tone degrades to neutral, no note emits no note span" do
+      node = %{"kind" => "PdChip", "tone" => "hot", "strong" => true, "text" => "X", "note" => ""}
+
+      assert Walk.render_body(node, @width, @article) ==
+               ~s(<span class="bp-chip bp-chip--neutral bp-chip--strong"><i class="bp-chip__dot"></i>X</span>)
+    end
+
+    test "article: text and note are HTML-escaped" do
+      node = %{"kind" => "PdChip", "tone" => "info", "text" => "<b>", "note" => "a & b"}
+      html = Walk.render_body(node, @width, @article)
+      assert html =~ "&lt;b&gt;"
+      assert html =~ "a &amp; b"
+      refute html =~ "<b>"
+    end
+
+    test "email: inlines the tone pair from Util.tone_palette/1 and inverts it for strong" do
+      plain = %{"kind" => "PdChip", "tone" => "warning", "text" => "Middels"}
+      html = Walk.render_body(plain, @width, @email)
+      assert html =~ "background:#f7f0df;color:#8a6420"
+      assert html =~ ">Middels</span>"
+
+      strong = Map.put(plain, "strong", true)
+      html = Walk.render_body(strong, @width, @email)
+      assert html =~ "background:#8a6420;color:#ffffff"
+    end
+  end
+
   describe "render_body/3 — PdTag" do
     test "renders a navigable <a href=/tags/:name> chip with #name text" do
       node = %{"kind" => "PdTag", "name" => "design"}

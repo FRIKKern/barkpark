@@ -173,6 +173,26 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     %{"kind" => "PdTag", "name" => Map.get(n, "name", "")}
   end
 
+  # Verdict chip — a coloured label with an optional qualifier under it, the
+  # cell of a scorecard table and the swatch of a legend. `tone` is the
+  # paperCallout tone set (success | warning | danger | info | neutral — the
+  # SAME vocabulary `Util.tone_palette/1` resolves, so no sixth colour enters
+  # the token system); `strong` fills the chip, the "worse than danger" step a
+  # four-band scale needs. `note` renders beneath the chip. Non-string fields
+  # degrade to "" — a chip never crashes a cell.
+  def compose_inline(%{"type" => "chip"} = n, _inside_link) do
+    %{
+      "kind" => "PdChip",
+      "tone" => string_or_empty(Map.get(n, "tone")),
+      "strong" => Map.get(n, "strong") == true,
+      "text" => string_or_empty(Map.get(n, "text")),
+      "note" => string_or_empty(Map.get(n, "note"))
+    }
+  end
+
+  defp string_or_empty(v) when is_binary(v), do: v
+  defp string_or_empty(_), do: ""
+
   # Inline live value (lvw-t1, wire §3). `target` is a doc_id slug; `field` a
   # single top-level declared field name. The node's `children` are the D6
   # dual-written fallback subtree for OLD renderers — NEW renderers IGNORE

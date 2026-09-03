@@ -802,6 +802,28 @@ html[data-theme="dark"] .bp-paper-body {
   color: var(--paper-accent); background: var(--paper-bg-deep); padding: 1px 6px;
   border-radius: 3px; font-size: 0.9em; text-decoration: none; border-bottom: none;
 }
+/* Verdict chips (inline `chip` node, walk.ex chip_html/5): a coloured pill in
+   one of the five paperCallout tones with a dot that survives grayscale, and an
+   optional note as a block beneath. The chip is what a scorecard CELL carries
+   and what a legend is made of — colour is the verdict, so every colour here is
+   a `--bp-tone-*` pair, never a literal. `--strong` fills the pill: the step a
+   four-band scale needs above danger without a sixth tone entering the token
+   system. `white-space: nowrap` keeps "Ikke relevant" on one line inside a
+   narrow cell; the note wraps freely under it. */
+.bp-paper-surface .bp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 999px; font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; line-height: 1.45; letter-spacing: 0.01em; white-space: nowrap; vertical-align: middle; }
+.bp-paper-surface .bp-chip__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.bp-paper-surface .bp-chip--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chip--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chip--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chip--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chip--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-chip--strong { color: var(--paper-bg); }
+.bp-paper-surface .bp-chip--success.bp-chip--strong { background: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chip--warning.bp-chip--strong { background: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chip--danger.bp-chip--strong  { background: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chip--info.bp-chip--strong    { background: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chip--neutral.bp-chip--strong { background: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-chip__note { display: block; font-size: 0.78rem; color: var(--paper-ink-soft); line-height: 1.35; margin-top: 4px; max-width: 22em; }
 .bp-paper-surface .bp-embed {
   margin: 1em 0; padding: 0.25em 0 0.25em 1em; border-left: 3px solid var(--paper-accent);
 }
