@@ -386,15 +386,14 @@ function tagHtml(rawName: string): string {
 // in :article mode: a `.bp-chip` pill in one of the five paperCallout tones
 // (unknown → neutral), `strong` fills it, and `note` follows as a block
 // beneath. The surface CSS owns every colour; nothing here carries a hex.
-const CHIP_TONES = new Set(['success', 'warning', 'danger', 'info', 'neutral'])
 function chipHtml(node: Record<string, unknown>): string {
-  const rawTone = str(node.tone)
-  const tone = CHIP_TONES.has(rawTone) ? rawTone : 'neutral'
-  const strong = node.strong === true ? ' bp-chip--strong' : ''
-  const text = escapeHtml(str(node.text))
+  const t = str(node.tone)
+  const tone = /^(success|warning|danger|info|neutral)$/.test(t) ? t : 'neutral'
   const note = escapeHtml(str(node.note))
-  const noteHtml = note === '' ? '' : `<span class="bp-chip__note">${note}</span>`
-  return `<span class="bp-chip bp-chip--${tone}${strong}"><i class="bp-chip__dot"></i>${text}</span>${noteHtml}`
+  return (
+    `<span class="bp-chip bp-chip--${tone}${node.strong === true ? ' bp-chip--strong' : ''}"><i class="bp-chip__dot"></i>${escapeHtml(str(node.text))}</span>` +
+    (note === '' ? '' : `<span class="bp-chip__note">${note}</span>`)
+  )
 }
 
 function valuerefHtml(v: {

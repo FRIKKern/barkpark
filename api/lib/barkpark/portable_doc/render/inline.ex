@@ -190,9 +190,6 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
-  defp string_or_empty(v) when is_binary(v), do: v
-  defp string_or_empty(_), do: ""
-
   # Inline live value (lvw-t1, wire §3). `target` is a doc_id slug; `field` a
   # single top-level declared field name. The node's `children` are the D6
   # dual-written fallback subtree for OLD renderers — NEW renderers IGNORE
@@ -378,6 +375,11 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   defp wrap_children(acc) when is_binary(acc), do: [acc]
   defp wrap_children(acc) when is_list(acc), do: acc
   defp wrap_children(acc), do: [acc]
+
+  # Chip fields are display strings; anything else (nil, a number, a map from a
+  # hostile payload) reads as empty rather than crashing the cell.
+  defp string_or_empty(v) when is_binary(v), do: v
+  defp string_or_empty(_), do: ""
 
   defp link_child(s, _il) when is_binary(s), do: s
   defp link_child(%{"kind" => "PdText"} = t, _il), do: t

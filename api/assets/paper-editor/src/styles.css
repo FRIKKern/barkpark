@@ -583,7 +583,7 @@
  * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
  * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
  * copy. */
-.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 /* The stat grid's seams are drawn per CELL, not by a container ground (the
  * partial-last-row slab, task-0098ba55d2642545 — paper-surface.css carries the
  * reasoning). Cell rules are parity-INVISIBLE (`.bp-stat` is not a parity
