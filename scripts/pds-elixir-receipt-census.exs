@@ -3993,7 +3993,7 @@ defmodule PDS.Census do
       p("      #{short(path)}  #{mfa}")
       p("        recorded #{hh}/#{fp} · vacated the #{Map.get(r, :retired_route, "?")}-routed population row")
       p("        BOUGHT VERDICT #{r.verdict} / #{r.basis} — STANDS, as history")
-      wrap(r.retired, "        ")
+      wrap(Map.get(r, :retired, "(no retirement note recorded)"), "        ")
     end)
 
     p("")
@@ -7960,8 +7960,7 @@ defmodule PDS.Census do
       # retired key, and it reds on the branch that would otherwise be unreachable until
       # the first real repair lands.
       mut:
-        {"defp retired_rows, do: Enum.filter(@register, &Map.has_key?(&1, " <> ":retired))",
-         "defp retired_rows, do: Enum.filter(@register, &Map.has_key?(&1, :verdict))"},
+        {"retired? = Map.has_key?(r, " <> ":retired)", "retired? = Map.has_key?(r, :verdict)"},
       exit: 1,
       expect: ["FAIL  REGISTER-RETIRED-STAYS-RETIRED", "RESURRECTED"],
       proves: "a RETIRED row whose site is live again reds by name instead of quietly re-adopting the site — the retired form cannot be used as a suppression switch"
@@ -9791,7 +9790,7 @@ defmodule PDS.Census do
         back != [] ->
           "#{length(back)} RETIRED row(s) resolve to a LIVE emitted site again — the row says the literal left by repair and the tree says it is back: " <>
             Enum.map_join(back, " · ", fn r ->
-              "RESURRECTED #{short(elem(r.key, 0))} #{elem(r.key, 1)} — retired as: #{r.retired}"
+              "RESURRECTED #{short(elem(r.key, 0))} #{elem(r.key, 1)} — retired as: #{Map.get(r, :retired, "(no retirement note recorded)")}"
             end) <>
             " — a reverted repair must NOT inherit the verdict the repair bought; un-retire the row with a re-derivation, or re-land the repair"
 
