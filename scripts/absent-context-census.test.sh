@@ -661,6 +661,83 @@ else
   bad "5c.6 an enormous dormancy window must restore the live-head scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
+# ═══ 5d. THE PHANTOM SLICE — the depth number, not a verdict ═════════════════
+section "5d. a queued run GitHub will not dequeue is sliced out of the DEPTH, and moves no verdict"
+
+# THE POPULATION, measured 2026-09-03 08:03Z (task-82059e31bcccdbd7): eight
+# queued run records, seven created 2026-08-07T09:08:43Z and one 2026-08-19T05:23:37Z,
+# the seven answering 409 "has not been queued yet" to both cancel paths (this
+# report classifies those ORPHANED; the eighth, compose-smoke run 32219250070,
+# reads DISPATCHED and keeps its SCREAM, because a remedy exists for it). At
+# 08:03Z the queue feed returned 8 rows and all 8 were phantoms; the same report
+# run at 16:11Z read 31 rows of which 8 were. The constant is +8; the share it
+# corrupts is whatever the hour makes it. These probes prove the slice is real,
+# that the THRESHOLD produces it rather than a date literal, and that it changes
+# no classification.
+
+phantom_pair() { # <output> -> "<phantom> <depth>"
+  local ph de
+  ph="$(grep -oE -- 'ago\): +[0-9]+' <<<"$1" | grep -oE '[0-9]+$')"
+  de="$(grep -oE -- 'depth to quote: +[0-9]+' <<<"$1" | grep -oE '[0-9]+$')"
+  echo "${ph:-x} ${de:-x}"
+}
+
+# The base fixture's seven queued rows are all hours old against the pinned NOW,
+# so the slice must be EMPTY there — a counter that is never zero is a constant.
+read -r PH0 DE0 <<<"$(phantom_pair "$(run_census "$BASE")")"
+if [ "$PH0" = "0" ] && [ "$DE0" = "7" ]; then
+  ok "5d.1 on the base fixture the phantom slice is 0 and the depth is the full 7 — the slice is earned, not printed"
+else
+  bad "5d.1 expected phantom=0 depth=7; read phantom=$PH0 depth=$DE0"
+fi
+
+# ONE synthetic 30-day-old queued row — the live specimen's shape (created
+# 2026-07-08, i.e. 30 days before the pinned NOW of 2026-08-07T00:00:00Z).
+D5H="$(derive phantom-30d)"
+jq '{workflow_runs: (.workflow_runs + [{id: 910030, path: ".github/workflows/compose-smoke.yml", status: "queued", run_attempt: 1, created_at: "2026-07-08T00:00:00Z", updated_at: "2026-07-08T00:00:00Z", head_sha: "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef"}])}'   "$D5H/queued-paginated.json" > "$D5H/.tmp" && mv "$D5H/.tmp" "$D5H/queued-paginated.json"
+OUT="$(run_census "$D5H")"; RC=$?
+read -r PH1 DE1 <<<"$(phantom_pair "$OUT")"
+if [ "$PH1" = "1" ] && [ "$DE1" = "7" ] && grep -q 'phantom-queued=1' <<<"$OUT"; then
+  ok "5d.2 a 30-day-old queued row is sliced out: the feed reports 8, the phantom slice 1, the DEPTH still 7"
+else
+  bad "5d.2 expected phantom=1 depth=7 and phantom-queued=1 in SUMMARY; read phantom=$PH1 depth=$DE1"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# THE THRESHOLD DOES THE WORK, not the row's id and not a date literal. The
+# identical fixture under a threshold wider than the row's age must put it back
+# in the depth — the same shape as 5.2 for --stale-queue-hours.
+read -r PH2 DE2 <<<"$(phantom_pair "$(run_census "$D5H" --phantom-queue-hours 100000)")"
+if [ "$PH2" = "0" ] && [ "$DE2" = "8" ]; then
+  ok "5d.3 …and raising --phantom-queue-hours past its age returns it to the depth (phantom 0, depth 8) — the knob does the work"
+else
+  bad "5d.3 the identical fixture under a 100000h threshold should read phantom=0 depth=8; read phantom=$PH2 depth=$DE2"
+fi
+
+# DIRECTION: AN UNREADABLE created_at IS NOT A PHANTOM. `age_exceeds` answers
+# TRUE on a date it cannot parse, which is right for the ZOMBIED guard and
+# exactly wrong here — it would quietly REMOVE the row from the depth. A row
+# whose date nobody can read stays counted.
+D5I="$(derive phantom-unparseable)"
+jq '{workflow_runs: (.workflow_runs + [{id: 910031, path: ".github/workflows/compose-smoke.yml", status: "queued", run_attempt: 1, created_at: "not-a-timestamp", head_sha: "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef"}])}' \
+  "$D5I/queued-paginated.json" > "$D5I/.tmp" && mv "$D5I/.tmp" "$D5I/queued-paginated.json"
+read -r PH3 DE3 <<<"$(phantom_pair "$(run_census "$D5I")")"
+if [ "$PH3" = "0" ] && [ "$DE3" = "8" ]; then
+  ok "5d.4 a queued row with an UNPARSEABLE created_at stays in the depth (phantom 0, depth 8) — the slice never guesses a row away"
+else
+  bad "5d.4 an unparseable created_at was counted as a phantom (phantom=$PH3 depth=$DE3) — the depth can now be made quieter by a broken date"
+fi
+
+# AND IT MOVES NO VERDICT. The 5c.1 orphan tuple is a proved ORPHAN at exit 0
+# both before and after this change; the slice is arithmetic on the depth line
+# and nothing else. Run the same fixture and read the classification, not the
+# count.
+OUT="$(run_census "$D5C")"; RC=$?
+if [ "$RC" = "0" ] && grep -q 'ORPHANED (never dispatched' <<<"$OUT" && grep -q 'stale-queued=0' <<<"$OUT"; then
+  ok "5d.5 …and the 5c.1 orphan tuple keeps its ORPHANED classification and exit 0 — the slice changes the DEPTH, never a verdict"
+else
+  bad "5d.5 the phantom slice moved a verdict: the 5c.1 orphan tuple now exits $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
 # ═══ 6. it fails CLOSED — an unreadable feed is never a clean bill of health ══
 section "6. an unreadable feed is UNKNOWN (exit 2), never a silent pass"
 

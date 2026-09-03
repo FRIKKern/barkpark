@@ -277,11 +277,98 @@ PY
   return $rc
 }
 
+# ---------------------------------------------------------------------------
+# drop_phantom_queued — NDJSON run rows in, NDJSON run rows out, minus the ones
+# GitHub will never dequeue and will not let anyone cancel.
+#
+# THE POPULATION, measured 2026-09-03 08:03Z (task-82059e31bcccdbd7): eight
+# `status: queued` run records — seven created 2026-08-07T09:08:43Z
+# (breakglass-watch, cloud, console-harness, doc-gates, elixir, release-artifact,
+# required-checks-drift) and one 2026-08-19T05:23:37Z (compose-smoke), all
+# push/main. Both `POST .../cancel` and `POST .../force-cancel` answer 409
+# "Cannot cancel a workflow run that has not been queued yet" (measured on the
+# seven of 2026-08-07). They are stuck in GitHub's pre-queue state, they execute
+# no step, and they will still be there tomorrow. THE COUNT IS A CONSTANT, THE
+# SHARE IS NOT: at 08:03Z on 2026-09-03 the queued feed returned 8 rows and all
+# 8 were phantoms; at 16:11Z the same feed returned 31 rows of which 8 were.
+#
+# WHY THIS SCRIPT CARES, in the two places it reads run rows:
+#   fetch()        a phantom drawn into the systematic sample consumes a slot,
+#                  counts in `fetched`, and delivers ZERO jobs. That is the
+#                  worst direction: the under-fill guard (arm a6) reads a full
+#                  sample while the analyzer got nothing from that slot.
+#   value_audit()  a phantom counts in a workflow's `runs` denominator, so its
+#                  red rate and rerun rate are divided by runs that never ran.
+#
+# THE COUNT IS PRINTED, NEVER SWALLOWED — one line on stderr, always, including
+# the zero. A filter nobody can see the size of is indistinguishable from a
+# filter that has gone blind.
+#
+# WHAT IT REFUSES TO DROP: a row with no `status`, a row whose `created_at` will
+# not parse, and any row younger than the cutoff. Only a row PROVABLY queued and
+# PROVABLY old leaves; everything else stays and is measured.
+PHANTOM_QUEUE_HOURS="${CI_MEASURE_PHANTOM_HOURS:-24}"
+
+drop_phantom_queued() {
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'PPY'
+import json, os, sys, datetime
+
+hours = float(os.environ.get("PHANTOM_HOURS", "24"))
+now_env = os.environ.get("CI_MEASURE_NOW", "")
+
+def parse(ts):
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+now = parse(now_env) or datetime.datetime.now(datetime.timezone.utc)
+dropped = 0
+for line in sys.stdin:
+    raw = line.strip()
+    if not raw:
+        continue
+    try:
+        o = json.loads(raw)
+    except json.JSONDecodeError:
+        sys.stdout.write(line)
+        continue
+    created = parse(o.get("created") or o.get("created_at"))
+    # PROVABLY queued AND PROVABLY old, or it stays.
+    if o.get("status") == "queued" and created is not None:
+        if (now - created).total_seconds() > hours * 3600:
+            dropped += 1
+            continue
+    sys.stdout.write(line)
+# WHERE THE DISCLOSURE GOES. stderr by default — but the value audit publishes
+# its machine-readable JSON on stderr, and a second line there would make that
+# payload unparseable for every consumer that json.loads it (the selftest arms
+# v1..v3 among them). So a caller whose stderr is a DATA channel passes
+# PHANTOM_LOG and prints the file itself, on the channel a human reads.
+msg = ("ci-measure: phantom queued runs ignored: %d (status=queued, created more than %gh ago; "
+       "GitHub answers 409 'has not been queued yet' to both cancel paths on these — "
+       "measured 2026-09-03 on all 8 specimens)" % (dropped, hours))
+log = os.environ.get("PHANTOM_LOG", "")
+if log:
+    with open(log, "a") as fh:
+        fh.write(msg + "\n")
+else:
+    print(msg, file=sys.stderr)
+PPY
+  PHANTOM_HOURS="$PHANTOM_QUEUE_HOURS" python3 "$pyf"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
 fetch() {
   if [ -n "${CI_MEASURE_FIXTURE:-}" ]; then cat "$CI_MEASURE_FIXTURE"; return; fi
   local d="$SINCE"
   while :; do
-    local day_total=0 day_got=0 h
+    local day_total=0 day_got=0 day_phantom=0 h
     # HOURLY partition — see "THE 1000-ITEM CAP" above. Each window is well under
     # the cap, so a systematic sample inside it is a real sample of that hour.
     for h in $(seq 0 23); do
@@ -300,9 +387,22 @@ fetch() {
         local off=$(( i * total / take ))
         [ "$off" -ge 1000 ] && break            # the cap, honoured explicitly
         local page=$(( off / 100 + 1 )) idx=$(( off % 100 ))
-        local rid
-        rid=$(gh api "repos/$REPO/actions/runs?created=$lo..$hi&per_page=100&page=$page" \
-                --jq ".workflow_runs[$idx].id" 2>/dev/null)
+        local rrow kept rid
+        # The ROW, not just the id: `status` and `created_at` are what separate a
+        # run that will produce jobs from a phantom that never will. Same call,
+        # two fields more.
+        rrow=$(gh api "repos/$REPO/actions/runs?created=$lo..$hi&per_page=100&page=$page" \
+                --jq ".workflow_runs[$idx] | {id, status, created_at}" 2>/dev/null)
+        # ONE implementation of "is this a phantom", never two: the row goes
+        # through the same filter the value audit uses, and a non-empty row that
+        # comes back empty WAS the drop. A second copy of the rule here would be
+        # free to drift from the one the selftest proves.
+        kept=$(printf '%s\n' "$rrow" | drop_phantom_queued 2>/dev/null)
+        if [ -n "$rrow" ] && [ -z "$(printf '%s' "$kept" | tr -d '[:space:]')" ]; then
+          day_phantom=$(( day_phantom + 1 ))
+          i=$(( i + 1 )); continue
+        fi
+        rid=$(printf '%s' "$kept" | jq -r '.id // empty' 2>/dev/null)
         if [ -n "$rid" ] && [ "$rid" != "null" ]; then
           day_got=$(( day_got + 1 ))
           gh api "repos/$REPO/actions/runs/$rid/jobs?per_page=100" \
@@ -312,6 +412,10 @@ fetch() {
         i=$(( i + 1 ))
       done
     done
+    # The ignored count is PRINTED, per day, including the zero. A sample slot
+    # spent on a phantom delivers no jobs while still counting as fetched, which
+    # is exactly the direction that would quiet the under-fill guard (arm a6).
+    echo "ci-measure: phantom queued runs skipped while sampling $d: $day_phantom" >&2
     echo "{\"__population__\":true,\"day\":\"$d\",\"runs\":$day_total,\"requested\":$SAMPLE,\"fetched\":$day_got}"
     [ "$d" = "$UNTIL" ] && break
     d=$(python3 -c "import datetime,sys;print((datetime.date.fromisoformat(sys.argv[1])+datetime.timedelta(days=1)).isoformat())" "$d")
@@ -523,6 +627,83 @@ FIX
     fail=$((fail+1)); echo "  FAIL v3 got '$vv', expected 'NEVER-RED 0'"
   fi
 
+  # ── p1..p5 THE PHANTOM QUEUED RUN ────────────────────────────────────────
+  # RAW run lines, the exact shape the live `gh api` projection emits — never a
+  # pre-filtered fixture, because a fixture that arrives already clean proves
+  # only that the harness can count.
+  #
+  # THE SPECIMEN, measured 2026-09-03 08:03Z (task-82059e31bcccdbd7): eight
+  # queued runs from 2026-08-07 and 2026-08-19 that GitHub refuses to cancel by
+  # either path. `--now` is pinned here through CI_MEASURE_NOW so "27 days old"
+  # is a fact about the fixture and not about when CI ran.
+  local PNOW=2026-09-03T00:00:00Z
+  cat > "$tmp/phantom.jsonl" <<'FIX'
+{"wf":"elixir.yml","sha":"jjj111","concl":"success","created":"2026-09-01T10:00:00Z","pr":21,"id":30,"attempt":1,"status":"completed"}
+{"wf":"elixir.yml","sha":"kkk222","concl":null,"created":"2026-08-07T09:08:43Z","pr":0,"id":31,"attempt":1,"status":"queued"}
+FIX
+  local p_runs p_line
+  p_runs=$(CI_MEASURE_NOW="$PNOW" CI_MEASURE_FIXTURE="$tmp/phantom.jsonl" bash "$0" --value-audit --since 2026-08-01 2>&1 >/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["runs"])' 2>/dev/null)
+  if [ "$p_runs" = "1" ]; then
+    pass=$((pass+1)); echo "  ok   p1 a 27-day-old queued run is NOT counted in elixir.yml's run total (1, not 2) — the denominator holds only runs that ran"
+  else
+    fail=$((fail+1)); echo "  FAIL p1 runs=$p_runs, expected 1 — a run GitHub will not dequeue is being counted as a run, so every rate for this workflow is divided by it"
+  fi
+
+  # p2 — and the count is DISCLOSED. A filter whose size nobody can read is
+  # indistinguishable from a filter that has gone blind.
+  p_line=$(CI_MEASURE_NOW="$PNOW" CI_MEASURE_FIXTURE="$tmp/phantom.jsonl" bash "$0" --value-audit --since 2026-08-01 2>/dev/null \
+            | grep -c 'phantom queued runs ignored: 1' || true)
+  if [ "$p_line" = "1" ]; then
+    pass=$((pass+1)); echo "  ok   p2 the report states 'phantom queued runs ignored: 1' — the ignored count is printed, not swallowed"
+  else
+    fail=$((fail+1)); echo "  FAIL p2 the disclosure line for 1 ignored run is missing (matched $p_line times)"
+  fi
+
+  # p3 — THE THRESHOLD DOES THE WORK, not the id and not a date literal. The
+  # identical fixture under a wider cutoff must keep the row.
+  local p_wide
+  p_wide=$(CI_MEASURE_NOW="$PNOW" CI_MEASURE_PHANTOM_HOURS=100000 CI_MEASURE_FIXTURE="$tmp/phantom.jsonl" \
+             bash "$0" --value-audit --since 2026-08-01 2>&1 >/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["runs"])' 2>/dev/null)
+  if [ "$p_wide" = "2" ]; then
+    pass=$((pass+1)); echo "  ok   p3 …and under a 100000h cutoff the SAME row is kept (runs=2) — the threshold is doing the work"
+  else
+    fail=$((fail+1)); echo "  FAIL p3 runs=$p_wide under an enormous cutoff, expected 2 — the drop is keyed on something other than age"
+  fi
+
+  # p4 — IT IS NOT "DROP EVERY QUEUED RUN". A run queued an hour ago is a real
+  # queue: it will execute, and removing it would understate the queue instead
+  # of correcting it.
+  cat > "$tmp/fresh-queued.jsonl" <<'FIX'
+{"wf":"elixir.yml","sha":"jjj111","concl":"success","created":"2026-09-01T10:00:00Z","pr":21,"id":30,"attempt":1,"status":"completed"}
+{"wf":"elixir.yml","sha":"lll333","concl":null,"created":"2026-09-02T23:00:00Z","pr":22,"id":32,"attempt":1,"status":"queued"}
+FIX
+  local p_fresh
+  p_fresh=$(CI_MEASURE_NOW="$PNOW" CI_MEASURE_FIXTURE="$tmp/fresh-queued.jsonl" bash "$0" --value-audit --since 2026-08-01 2>&1 >/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["runs"])' 2>/dev/null)
+  if [ "$p_fresh" = "2" ]; then
+    pass=$((pass+1)); echo "  ok   p4 a run queued ONE HOUR ago is kept (runs=2) — the filter discriminates by age, it does not delete the queue"
+  else
+    fail=$((fail+1)); echo "  FAIL p4 runs=$p_fresh, expected 2 — a live queued run was dropped, which understates the queue"
+  fi
+
+  # p5 — AND IT NEVER GUESSES A ROW AWAY. A row whose created_at will not parse
+  # is not PROVABLY old, so it stays and is measured. (v1/v1b/v2/v3's fixtures
+  # carry no `status` field at all and must likewise survive — they do, above.)
+  cat > "$tmp/unparseable-queued.jsonl" <<'FIX'
+{"wf":"elixir.yml","sha":"jjj111","concl":"success","created":"2026-09-01T10:00:00Z","pr":21,"id":30,"attempt":1,"status":"completed"}
+{"wf":"elixir.yml","sha":"mmm444","concl":null,"created":"not-a-timestamp","pr":0,"id":33,"attempt":1,"status":"queued"}
+FIX
+  local p_bad
+  p_bad=$(CI_MEASURE_NOW="$PNOW" CI_MEASURE_FIXTURE="$tmp/unparseable-queued.jsonl" bash "$0" --value-audit --since 2026-08-01 2>&1 >/dev/null \
+           | python3 -c 'import json,sys; print(json.load(sys.stdin)["rows"][0]["runs"])' 2>/dev/null)
+  if [ "$p_bad" = "2" ]; then
+    pass=$((pass+1)); echo "  ok   p5 a queued row with an UNPARSEABLE created_at is kept (runs=2) — only a PROVABLE phantom leaves"
+  else
+    fail=$((fail+1)); echo "  FAIL p5 runs=$p_bad, expected 2 — an unreadable date is being treated as proof of age"
+  fi
+
   echo
   echo "SELFTEST: $pass passed, $fail failed."
   [ "$fail" -eq 0 ]
@@ -568,6 +749,24 @@ census() {
     d=$(python3 -c "import datetime,sys;print((datetime.date.fromisoformat(sys.argv[1])+datetime.timedelta(days=1)).isoformat())" "$d")
     [ "$d" \> "$UNTIL" ] && break
   done
+
+  # THE CONSTANT THIS TABLE CARRIES. Every number above is GitHub's own
+  # `total_count`, which counts a phantom queued run exactly like a run that
+  # executed. There is no server-side "exclude the undequeuable" filter, so the
+  # census cannot subtract them per workflow — it MEASURES them and says so, on
+  # the principle that a disclosed constant is a number a reader can correct and
+  # an undisclosed one is a number they will quote.
+  local queued_rows kept_rows n_all n_keep
+  queued_rows=$(gh api "repos/$REPO/actions/runs?status=queued&per_page=100" --paginate \
+                  --jq '.workflow_runs[] | {id, status, created_at}' 2>/dev/null)
+  n_all=$(printf '%s\n' "$queued_rows" | grep -c . || true)
+  kept_rows=$(printf '%s\n' "$queued_rows" | drop_phantom_queued 2>/dev/null)
+  n_keep=$(printf '%s\n' "$kept_rows" | grep -c . || true)
+  echo
+  echo "queued RIGHT NOW (not inside the window — the queue has no history endpoint):"
+  echo "  rows returned: $n_all   PHANTOM (>${PHANTOM_QUEUE_HOURS}h, uncancellable): $((n_all - n_keep))   DEPTH: $n_keep"
+  echo "  the totals above are GitHub's total_count and INCLUDE any phantom created inside the window."
+  echo "  The compute table and the value audit exclude them."
 }
 
 # ---------------------------------------------------------------------------
@@ -596,10 +795,16 @@ census() {
 # HIGHEST. The two must never be summed.
 # ---------------------------------------------------------------------------
 value_audit() {
-  local wfs
+  local wfs plog rc
+  # stderr here carries the JSON payload, so the filter's disclosure is routed
+  # to a file and printed on STDOUT with the report — see WHERE THE DISCLOSURE
+  # GOES in drop_phantom_queued.
+  plog="$(mktemp)"
   if [ -n "${CI_MEASURE_FIXTURE:-}" ]; then
-    cat "$CI_MEASURE_FIXTURE" | classify_runs
-    return $?
+    PHANTOM_LOG="$plog" drop_phantom_queued < "$CI_MEASURE_FIXTURE" | classify_runs
+    rc=$?
+    cat "$plog"; rm -f "$plog"
+    return $rc
   fi
   wfs=$(gh api "repos/$REPO/actions/workflows?per_page=100" --jq '.workflows[] | "\(.id)\t\(.path)"' 2>/dev/null)
   [ -z "$wfs" ] && { echo "value-audit: could not list workflows" >&2; return 1; }
@@ -609,11 +814,14 @@ value_audit() {
       local page=1
       while [ "$page" -le 3 ]; do
         gh api "repos/$REPO/actions/workflows/$id/runs?event=pull_request&created=>=$SINCE&per_page=100&page=$page" \
-          --jq ".workflow_runs[] | {wf: \"$(basename "$path")\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt, prior: .previous_attempt_url}" 2>/dev/null
+          --jq ".workflow_runs[] | {wf: \"$(basename "$path")\", sha: .head_sha, concl: .conclusion, created: .created_at, pr: (.pull_requests[0].number // 0), id: .id, attempt: .run_attempt, status: .status, prior: .previous_attempt_url}" 2>/dev/null
         page=$((page + 1))
       done
     done <<< "$wfs"
-  } | enrich_prior | classify_runs
+  } | PHANTOM_LOG="$plog" drop_phantom_queued | enrich_prior | classify_runs
+  rc=$?
+  cat "$plog"; rm -f "$plog"
+  return $rc
 }
 
 # enrich_prior — resolve what the PRIOR attempt concluded, for reruns only.
