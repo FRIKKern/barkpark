@@ -116,9 +116,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp block(%{"type" => "stats"} = b, d) do
     items =
-      Enum.map(Map.get(b, "items", []), fn i ->
-        "#{pad(d + 1)}<stat#{attr_str(i, ["label", "value", "denom"])}>#{esc(Map.get(i, "body", ""))}</stat>"
-      end)
+      Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}#{stat_item(&1)}")
 
     wrap("stats", attr_str(b, ["id"]), items, d)
   end
@@ -210,6 +208,174 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("expandable", attrs, children, d)
   end
 
+  # ── the grid/widget tier (task-3b08cbd8a16ad48e criterion 1) ────────────────
+  #
+  # The kernel spelled 19 types while the renderer registered 79, so 294 of the
+  # 1006 block-bearing published papers (29.2%, census 2026-09-03) answered 422
+  # on `bp paper pull`. The eleven clauses below are the corpus's biggest
+  # unspellable types by PAPER count — paper-links 145, cards 43, terminal 32,
+  # action 28, pipeline 27, stat-grid 27, blockquote 24, toc 23, chart 17,
+  # lineage 6, bar-chart 2 — and they take that share to 8.4%.
+  #
+  # Every one follows the module's standing contract: ACCEPT every key spelling
+  # the RENDER side reads (`alias_get`), EMIT the canonical one, and REFUSE
+  # rather than drop a payload this spelling has no room for.
+
+  # `paper-links` — a curated list of sibling papers. The block's own copy
+  # (title/description) rides attributes; each ref's `description` is the long
+  # field, so it takes the element BODY. `featured` / `prefer_authored_copy`
+  # are booleans: they print as "true"/"false" and the parser coerces them back
+  # (`bool_attr`), so a pull/push round trip does not retype the stored ref.
+  defp block(%{"type" => "paper-links"} = b, d) do
+    refs =
+      Enum.map(alias_get(b, ["refs", "items"]) || [], fn r ->
+        "#{pad(d + 1)}<ref#{attr_str(r, ["slug", "title", "eyebrow", "meta", "reason", "featured", "prefer_authored_copy"])}>" <>
+          "#{esc(plain_alias(r, ["description"]) || "")}</ref>"
+      end)
+
+    wrap("paper-links", attr_str(b, ["id", "title", "description", "layout"]), refs, d)
+  end
+
+  # `cards` — the legacy card grid. An item's body is spelled `text` (299) or
+  # `body` (14); `text` is canonical, so the second print is byte-stable.
+  defp block(%{"type" => "cards"} = b, d) do
+    items =
+      Enum.map(Map.get(b, "items", []), fn i ->
+        "#{pad(d + 1)}<card#{attr_str(i, ["title", "tone"])}>" <>
+          "#{esc(plain_alias(i, ["text", "body"]) || "")}</card>"
+      end)
+
+    wrap("cards", attr_str(b, ["id"]), items, d)
+  end
+
+  # `terminal` — a console transcript. Its body is a real BLOCK list (849
+  # paragraphs + 16 code blocks in the corpus), so it recurses through
+  # `block/2`: a child the kernel cannot spell still refuses, loudly. Body key
+  # read with the renderer's own preference (compose.ex `container_children`:
+  # "children" first, then "blocks"); the parser emits canonical "children".
+  defp block(%{"type" => "terminal"} = b, d) do
+    children = Enum.map(alias_get(b, ["children", "blocks"]) || [], &block(&1, d + 1))
+    wrap("terminal", attr_str(b, ["id", "title", "footer", "live"]), children, d)
+  end
+
+  # `action` — a call-to-action button. A leaf: label/href/priority, no body.
+  defp block(%{"type" => "action"} = b, d),
+    do: pad(d) <> "<action#{attr_str(b, ["id", "label", "href", "priority"])}/>"
+
+  # `pipeline` — ordered stage nodes. `detail` is the long field and takes the
+  # body; `source` is a boolean in 27 corpus nodes and a string ref in 1, and
+  # `bool_attr` reads "true"/"false" back as booleans and everything else as
+  # the string it was.
+  defp block(%{"type" => "pipeline"} = b, d) do
+    nodes =
+      Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
+        "#{pad(d + 1)}<node#{attr_str(n, ["title", "kind", "source", "files"])}>" <>
+          "#{esc(plain_alias(n, ["detail"]) || "")}</node>"
+      end)
+
+    wrap("pipeline", attr_str(b, ["id"]), nodes, d)
+  end
+
+  # `stat-grid` — the renderer's accepted alias of `stats` (compose.ex reads
+  # both through one clause), so it reuses the `<stat>` element. A
+  # `scale_profile` carries axis semantics this spelling has no room for: it
+  # REFUSES rather than print the grid without it.
+  defp block(%{"type" => "stat-grid"} = b, d) do
+    if Map.get(b, "scale_profile") not in [nil, %{}] do
+      raise(UnprintableError.new(:block, "stat-grid"))
+    end
+
+    items = Enum.map(alias_get(b, ["items", "stats"]) || [], &"#{pad(d + 1)}#{stat_item(&1)}")
+    wrap("stat-grid", attr_str(b, ["id"]), items, d)
+  end
+
+  # `blockquote` — an attributed quotation. Inline body read the way the
+  # renderer reads it (compose.ex `paragraph_inline`: `content`, else a bare
+  # `text` string), attribution under `cite`/`attribution`.
+  defp block(%{"type" => "blockquote"} = b, d) do
+    cite = plain_alias(b, ["cite", "attribution"])
+
+    pad(d) <>
+      "<blockquote#{attr_str(%{"id" => Map.get(b, "id"), "cite" => cite}, ["id", "cite"])}>" <>
+      inline(alias_get(b, ["content", "text"]) || []) <> "</blockquote>"
+  end
+
+  # `toc` — a table of contents. `level` is an integer and `numbered`/`depth`
+  # are an integer and a boolean; all three round-trip through the typed
+  # attribute coercions rather than as strings.
+  defp block(%{"type" => "toc"} = b, d) do
+    entries =
+      Enum.map(Map.get(b, "items", []), fn i ->
+        "#{pad(d + 1)}<entry#{attr_str(i, ["level", "anchor"])}>" <>
+          "#{esc(plain_alias(i, ["text", "title"]) || "")}</entry>"
+      end)
+
+    wrap("toc", attr_str(b, ["id", "depth", "numbered"]), entries, d)
+  end
+
+  # `bar-chart` — labelled bars. `value` is numeric and `values` (show the
+  # numbers) is a boolean.
+  defp block(%{"type" => "bar-chart"} = b, d) do
+    bars =
+      Enum.map(alias_get(b, ["bars", "items"]) || [], fn bar ->
+        "#{pad(d + 1)}<bar#{attr_str(bar, ["label", "value"])}/>"
+      end)
+
+    wrap("bar-chart", attr_str(b, ["id", "values"]), bars, d)
+  end
+
+  # `lineage` — dated nodes on a line (the jarl figure family). `source` is
+  # THE KILDE LAW's provenance ref and is never dropped.
+  defp block(%{"type" => "lineage"} = b, d) do
+    nodes =
+      Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
+        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source"])}>" <>
+          "#{esc(plain_alias(n, ["body"]) || "")}</lineage-node>"
+      end)
+
+    wrap("lineage", attr_str(b, ["id"]), nodes, d)
+  end
+
+  # `chart` — a line/area plot. The axis bounds and every series point are
+  # NUMBERS and print as numbers, so a pull/push does not retype them into
+  # strings. `xLabels` rides one comma-joined attribute (no corpus label holds
+  # a comma; one that did would be ambiguous on read, so it REFUSES).
+  #
+  # A chart carrying a live `query` (2 blocks) or `annotations` (2) refuses
+  # outright: a query resolves against data this printer cannot reach — the
+  # `valueref` precedent — and annotations are a second coordinate space this
+  # spelling has no element for. Printing either without its payload would be
+  # exactly the silent loss this module exists to refuse.
+  defp block(%{"type" => "chart"} = b, d) do
+    if Map.get(b, "query") not in [nil, %{}] or Map.get(b, "annotations") not in [nil, %{}] do
+      raise(UnprintableError.new(:block, "chart"))
+    end
+
+    axes = Map.get(b, "axes") || %{}
+    labels = Map.get(axes, "xLabels") || []
+
+    if Enum.any?(labels, &(is_binary(&1) and String.contains?(&1, ","))) do
+      raise(UnprintableError.new(:block, "chart"))
+    end
+
+    head = %{
+      "id" => Map.get(b, "id"),
+      "kind" => Map.get(b, "kind"),
+      "caption" => Map.get(b, "caption"),
+      "min" => Map.get(axes, "min"),
+      "max" => Map.get(axes, "max"),
+      "xlabels" => if(labels == [], do: nil, else: Enum.map_join(labels, ",", &to_string/1))
+    }
+
+    series =
+      Enum.map(Map.get(b, "series") || [], fn s ->
+        points = Enum.map_join(Map.get(s, "points") || [], ",", &esc(&1))
+        "#{pad(d + 1)}<series#{attr_str(s, ["label"])}>#{points}</series>"
+      end)
+
+    wrap("chart", attr_str(head, ["id", "kind", "caption", "min", "max", "xlabels"]), series, d)
+  end
+
   # THE HEADING-LEVEL DECISION, recorded. A NIL/ABSENT level (20 blocks / 4
   # papers: barkpark-cli-reliability-wave-2026-07-22,
   # bp-cloud-build-doneset-audit-2026-08-18,
@@ -272,6 +438,18 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp note_item(s) when is_binary(s), do: "<note>#{esc(s)}</note>"
   defp note_item(_other), do: raise(UnprintableError.new(:block, "notes"))
+
+  # One `<stat>` element — a `stats` item and a `stat-grid` item are THE SAME
+  # shape (compose.ex renders both through one clause, `stat-grid` being the
+  # accepted alias), so they share one spelling. `caption`/`note` are the two
+  # attrs only the grid uses today; a `stats` item that grows one prints it
+  # rather than dropping it. A non-dict item takes the ONE typed refusal.
+  defp stat_item(%{} = i),
+    do:
+      "<stat#{attr_str(i, ["label", "value", "denom", "caption", "note"])}>" <>
+        "#{esc(Map.get(i, "body", ""))}</stat>"
+
+  defp stat_item(_other), do: raise(UnprintableError.new(:block, "stat-grid"))
 
   defp empty_content?(c), do: c in [nil, [], ""]
 

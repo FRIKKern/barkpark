@@ -29,7 +29,30 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h3" => ~w(id),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
-    "stat" => ~w(label value denom),
+    "stat" => ~w(label value denom caption note),
+    # The grid/widget tier (task-3b08cbd8a16ad48e criterion 1) — the corpus's
+    # biggest unspellable types and their child elements. `stat` above is
+    # SHARED by <stats> and <stat-grid>: the renderer composes both through one
+    # clause (compose.ex `t in ["stats", "stat-grid"]`), so one element spells
+    # both, and `caption`/`note` are the two attrs only the grid uses today.
+    "paper-links" => ~w(id title description layout),
+    "ref" => ~w(slug title eyebrow meta reason featured prefer_authored_copy),
+    "cards" => ~w(id),
+    "card" => ~w(title tone),
+    "terminal" => ~w(id title footer live),
+    "action" => ~w(id label href priority),
+    "pipeline" => ~w(id),
+    "node" => ~w(title kind source files),
+    "stat-grid" => ~w(id),
+    "blockquote" => ~w(id cite),
+    "toc" => ~w(id depth numbered),
+    "entry" => ~w(level anchor),
+    "bar-chart" => ~w(id values),
+    "bar" => ~w(label value),
+    "lineage" => ~w(id),
+    "lineage-node" => ~w(title overline source),
+    "chart" => ~w(id kind caption min max xlabels),
+    "series" => ~w(label),
     "step" => ~w(title),
     "tag" => ~w(tag strength),
     "item" => [],
@@ -56,12 +79,11 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h5" => "headings stop at <h3>",
     "h6" => "headings stop at <h3>",
     "ol" => "ordered lists are not in the BPML kernel yet — use <ul>",
-    "blockquote" => "use <pullquote> for quotes",
     "em" => "<em>/<i> are inline — valid only inside a text-bearing element like <p>",
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards terminal action pipeline stat-grid blockquote toc bar-chart lineage chart)
 
   @inline_marks %{
     "b" => "strong",
@@ -276,20 +298,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   end
 
   defp build_block("stats", attrs, sc, cur) do
-    builder = fn stat_attrs, sc, cur ->
-      with {:ok, body, cur} <- tag_text("stat", sc, cur) do
-        item =
-          %{}
-          |> put_attr("value", stat_attrs)
-          |> put_attr("label", stat_attrs)
-          |> put_attr("denom", stat_attrs)
-          |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
-
-        {:ok, item, cur}
-      end
-    end
-
-    with {:ok, items, cur} <- child_seq("stats", "stat", sc, cur, builder) do
+    with {:ok, items, cur} <- child_seq("stats", "stat", sc, cur, &stat_item_builder/3) do
       {:ok, %{"type" => "stats", "items" => items} |> put_attr("id", attrs), cur}
     end
   end
@@ -311,6 +320,241 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp build_block("note", attrs, sc, cur) do
     with {:ok, item, cur} <- note_item_builder(attrs, sc, cur) do
       {:ok, Map.put(item, "type", "note"), cur}
+    end
+  end
+
+  # ── the grid/widget tier (task-3b08cbd8a16ad48e criterion 1) ────────────────
+  #
+  # Eleven block types the printer now spells, read back. Every clause is the
+  # exact inverse of its printer clause: the printer emits the CANONICAL key
+  # (it accepts several spellings on read), so what these return re-prints
+  # byte-for-byte — which is what the golden round-trip tests pin.
+  #
+  # A scalar that is a NUMBER or a BOOLEAN in the stored block comes back as
+  # one (`put_num_attr` / `put_bool_attr`), never as the string it travelled
+  # as: a pull/push must not retype `level: 2` into `level: "2"`.
+
+  # `paper-links` — the ref's `description` is the long field and rides the
+  # element body; everything else is an attribute.
+  defp build_block("paper-links", attrs, sc, cur) do
+    builder = fn ref_attrs, sc, cur ->
+      with {:ok, body, cur} <- tag_text("ref", sc, cur) do
+        ref =
+          %{}
+          |> put_attr("slug", ref_attrs)
+          |> put_attr("title", ref_attrs)
+          |> put_attr("eyebrow", ref_attrs)
+          |> put_attr("meta", ref_attrs)
+          |> put_attr("reason", ref_attrs)
+          |> put_bool_attr("featured", ref_attrs)
+          |> put_bool_attr("prefer_authored_copy", ref_attrs)
+          |> then(&if body == "", do: &1, else: Map.put(&1, "description", body))
+
+        {:ok, ref, cur}
+      end
+    end
+
+    with {:ok, refs, cur} <- child_seq("paper-links", "ref", sc, cur, builder) do
+      block =
+        %{"type" => "paper-links", "refs" => refs}
+        |> put_attr("id", attrs)
+        |> put_attr("title", attrs)
+        |> put_attr("description", attrs)
+        |> put_attr("layout", attrs)
+
+      {:ok, block, cur}
+    end
+  end
+
+  # `cards` — the item body is canonically `text` (the printer also READS the
+  # legacy `body` spelling, so a `body`-keyed card canonicalizes on round-trip).
+  defp build_block("cards", attrs, sc, cur) do
+    builder = fn card_attrs, sc, cur ->
+      with {:ok, body, cur} <- tag_text("card", sc, cur) do
+        item =
+          %{}
+          |> put_attr("title", card_attrs)
+          |> put_attr("tone", card_attrs)
+          |> then(&if body == "", do: &1, else: Map.put(&1, "text", body))
+
+        {:ok, item, cur}
+      end
+    end
+
+    with {:ok, items, cur} <- child_seq("cards", "card", sc, cur, builder) do
+      {:ok, %{"type" => "cards", "items" => items} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # `terminal` — a console transcript whose body is a real BLOCK list, so it
+  # recurses through `block_seq` exactly as `section` does. Canonical body key
+  # is `children`, the one the renderer prefers (compose.ex container_children).
+  defp build_block("terminal", attrs, sc, cur) do
+    base = fn blocks ->
+      %{"type" => "terminal", "children" => blocks}
+      |> put_attr("id", attrs)
+      |> put_attr("title", attrs)
+      |> put_attr("footer", attrs)
+      |> put_bool_attr("live", attrs)
+    end
+
+    if sc do
+      {:ok, base.([]), cur}
+    else
+      {blocks, errors, cur} = block_seq(cur, "terminal")
+      {errors, cur} = expect_close("terminal", cur, errors)
+
+      if errors == [], do: {:ok, base.(blocks), cur}, else: {:skip, errors, cur}
+    end
+  end
+
+  # `action` — a call-to-action leaf, the `hr` shape (attributes only, no body).
+  defp build_block("action", attrs, _sc, cur) do
+    block =
+      %{"type" => "action"}
+      |> put_attr("id", attrs)
+      |> put_attr("label", attrs)
+      |> put_attr("href", attrs)
+      |> put_attr("priority", attrs)
+
+    {:ok, block, cur}
+  end
+
+  # `pipeline` — ordered stage nodes; `detail` is the body. `source` is a
+  # boolean in 27 corpus nodes and a string source-ref in 1, so `put_bool_attr`
+  # reads "true"/"false" back as booleans and leaves every other value a string.
+  defp build_block("pipeline", attrs, sc, cur) do
+    builder = fn node_attrs, sc, cur ->
+      with {:ok, body, cur} <- tag_text("node", sc, cur) do
+        node =
+          %{}
+          |> put_attr("title", node_attrs)
+          |> put_attr("kind", node_attrs)
+          |> put_bool_attr("source", node_attrs)
+          |> put_attr("files", node_attrs)
+          |> then(&if body == "", do: &1, else: Map.put(&1, "detail", body))
+
+        {:ok, node, cur}
+      end
+    end
+
+    with {:ok, nodes, cur} <- child_seq("pipeline", "node", sc, cur, builder) do
+      {:ok, %{"type" => "pipeline", "nodes" => nodes} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # `stat-grid` — the renderer's accepted alias of `stats`; SAME `<stat>` child.
+  defp build_block("stat-grid", attrs, sc, cur) do
+    with {:ok, items, cur} <- child_seq("stat-grid", "stat", sc, cur, &stat_item_builder/3) do
+      {:ok, %{"type" => "stat-grid", "items" => items} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # `blockquote` — an attributed quotation: `paragraph`'s inline body plus a
+  # `cite`. (The printer also reads the legacy bare-`text` body spelling; this
+  # returns the canonical `content` list.)
+  defp build_block("blockquote", attrs, sc, cur) do
+    with {:ok, nodes, cur} <- tag_inline("blockquote", sc, cur) do
+      block =
+        %{"type" => "blockquote", "content" => nodes}
+        |> put_attr("id", attrs)
+        |> put_attr("cite", attrs)
+
+      {:ok, block, cur}
+    end
+  end
+
+  # `toc` — `level` and `depth` are integers, `numbered` a boolean.
+  defp build_block("toc", attrs, sc, cur) do
+    builder = fn entry_attrs, sc, cur ->
+      with {:ok, body, cur} <- tag_text("entry", sc, cur) do
+        item =
+          %{}
+          |> put_int_attr("level", entry_attrs)
+          |> put_attr("anchor", entry_attrs)
+          |> then(&if body == "", do: &1, else: Map.put(&1, "text", body))
+
+        {:ok, item, cur}
+      end
+    end
+
+    with {:ok, items, cur} <- child_seq("toc", "entry", sc, cur, builder) do
+      block =
+        %{"type" => "toc", "items" => items}
+        |> put_attr("id", attrs)
+        |> put_int_attr("depth", attrs)
+        |> put_bool_attr("numbered", attrs)
+
+      {:ok, block, cur}
+    end
+  end
+
+  # `bar-chart` — a bar's `value` is numeric; the block's `values` (show the
+  # numbers) is a boolean.
+  defp build_block("bar-chart", attrs, sc, cur) do
+    builder = fn bar_attrs, sc, cur ->
+      with {:ok, _body, cur} <- tag_text("bar", sc, cur) do
+        {:ok, %{} |> put_attr("label", bar_attrs) |> put_num_attr("value", bar_attrs), cur}
+      end
+    end
+
+    with {:ok, bars, cur} <- child_seq("bar-chart", "bar", sc, cur, builder) do
+      block =
+        %{"type" => "bar-chart", "bars" => bars}
+        |> put_attr("id", attrs)
+        |> put_bool_attr("values", attrs)
+
+      {:ok, block, cur}
+    end
+  end
+
+  # `lineage` — dated nodes on a line; `source` carries THE KILDE LAW's
+  # provenance ref and `body` is the node's prose.
+  defp build_block("lineage", attrs, sc, cur) do
+    builder = fn node_attrs, sc, cur ->
+      with {:ok, body, cur} <- tag_text("lineage-node", sc, cur) do
+        node =
+          %{}
+          |> put_attr("title", node_attrs)
+          |> put_attr("overline", node_attrs)
+          |> put_attr("source", node_attrs)
+          |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
+
+        {:ok, node, cur}
+      end
+    end
+
+    with {:ok, nodes, cur} <- child_seq("lineage", "lineage-node", sc, cur, builder) do
+      {:ok, %{"type" => "lineage", "nodes" => nodes} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # `chart` — the axis bounds and the x labels ride the block's own attributes
+  # and reassemble into the stored `axes` map; a series body is its comma-
+  # separated numeric points. An axes map with nothing in it is OMITTED, not
+  # written as `%{}` — the one corpus chart without axes must re-print the same.
+  defp build_block("chart", attrs, sc, cur) do
+    builder = fn series_attrs, sc, cur ->
+      with {:ok, body, cur} <- tag_text("series", sc, cur) do
+        {:ok, %{} |> put_attr("label", series_attrs) |> Map.put("points", num_list(body)), cur}
+      end
+    end
+
+    with {:ok, series, cur} <- child_seq("chart", "series", sc, cur, builder) do
+      axes =
+        %{}
+        |> put_num_attr("min", attrs)
+        |> put_num_attr("max", attrs)
+        |> put_labels_attr("xLabels", "xlabels", attrs)
+
+      block =
+        %{"type" => "chart", "series" => series}
+        |> put_attr("id", attrs)
+        |> put_attr("kind", attrs)
+        |> put_attr("caption", attrs)
+        |> then(&if axes == %{}, do: &1, else: Map.put(&1, "axes", axes))
+
+      {:ok, block, cur}
     end
   end
 
@@ -409,6 +653,25 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # block are the SAME shape (the block just adds its `"type"` tag). Body under
   # `text` (never `body` — the legacy `notes` item vocab, slots.ex legacy_slot
   # body→flat `text`), empty body dropped (the stats precedent).
+  # ONE `<stat>` item, shared by `<stats>` and `<stat-grid>` — the renderer
+  # composes both through a single clause (`t in ["stats", "stat-grid"]`), so
+  # one element spells both. `caption`/`note` are the two attrs only the grid
+  # uses today; a `stats` item that grows one reads it rather than dropping it.
+  defp stat_item_builder(stat_attrs, sc, cur) do
+    with {:ok, body, cur} <- tag_text("stat", sc, cur) do
+      item =
+        %{}
+        |> put_attr("value", stat_attrs)
+        |> put_attr("label", stat_attrs)
+        |> put_attr("denom", stat_attrs)
+        |> put_attr("caption", stat_attrs)
+        |> put_attr("note", stat_attrs)
+        |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
+
+      {:ok, item, cur}
+    end
+  end
+
   defp note_item_builder(note_attrs, sc, cur) do
     with {:ok, body, cur} <- tag_text("note", sc, cur) do
       item =
@@ -910,6 +1173,55 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
       nil ->
         map
+    end
+  end
+
+  # A stored BOOLEAN travels as the attribute text "true"/"false" and comes
+  # back a boolean — anything else stays the string it was, which is what lets
+  # `pipeline`'s `source` be a boolean in 27 corpus nodes and a source-ref
+  # string ("queue.ex:42") in one without either losing its type.
+  defp put_bool_attr(map, key, attrs) do
+    case List.keyfind(attrs, key, 0) do
+      {^key, "true"} -> Map.put(map, key, true)
+      {^key, "false"} -> Map.put(map, key, false)
+      {^key, v} -> Map.put(map, key, v)
+      nil -> map
+    end
+  end
+
+  # A stored NUMBER (a bar's value, a chart axis bound) — integer where the
+  # text is an integer, float where it is a float, else the string verbatim.
+  defp put_num_attr(map, key, attrs) do
+    case List.keyfind(attrs, key, 0) do
+      {^key, v} -> Map.put(map, key, num(v))
+      nil -> map
+    end
+  end
+
+  # The comma-joined `xlabels` attribute → the stored `xLabels` list. An absent
+  # or empty attribute contributes NO key, so an axes map that would be empty
+  # stays absent rather than becoming `%{}`.
+  defp put_labels_attr(map, key, attr_key, attrs) do
+    case List.keyfind(attrs, attr_key, 0) do
+      {^attr_key, ""} -> map
+      {^attr_key, v} -> Map.put(map, key, String.split(v, ","))
+      nil -> map
+    end
+  end
+
+  defp num_list(""), do: []
+  defp num_list(s), do: s |> String.split(",") |> Enum.map(&num/1)
+
+  defp num(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {i, ""} ->
+        i
+
+      _ ->
+        case Float.parse(s) do
+          {f, ""} -> f
+          _ -> s
+        end
     end
   end
 
