@@ -99,23 +99,12 @@ defmodule Barkpark.Media.Delivery.Urls do
   end
 
   # ── If-None-Match conformance (charter http-edge-truth D11) ───────────────
-  # RFC 9110 §13.1.2: the field is a LIST, may repeat across header lines,
-  # accepts `*`, and compares WEAKLY — so `W/"x"`, `"a", "x"` and `*` must all
-  # match `"x"`. The previous pin-match (`[^etag | _]`) honoured only a single
-  # header line whose entire value was the exact strong tag; every other
-  # conformant form fell through to a full 200.
-  defp if_none_match_hit?(conn, etag) do
-    conn
-    |> Plug.Conn.get_req_header("if-none-match")
-    |> Enum.flat_map(&String.split(&1, ","))
-    |> Enum.map(&String.trim/1)
-    |> Enum.any?(fn candidate ->
-      candidate == "*" or strip_weak(candidate) == strip_weak(etag)
-    end)
-  end
-
-  defp strip_weak("W/" <> rest), do: rest
-  defp strip_weak(value), do: value
+  # ONE matcher for the whole app: `BarkparkWeb.Http.IfNoneMatch.match?/2`
+  # (@canonical capability:if-none-match-compare) folds every header line,
+  # splits on commas, drops empty entries, honours `*` and compares weakly.
+  # This used to be a private copy with the same semantics minus the
+  # empty-entry drop; a copy is a mirror nobody locks, so it delegates.
+  defp if_none_match_hit?(conn, etag), do: BarkparkWeb.Http.IfNoneMatch.match?(conn, etag)
 
   @doc "Strong ETag from size + mtime."
   @spec etag_for(String.t()) :: String.t()
