@@ -2479,7 +2479,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # bold-title PdText, inner children via compose_block, trailing PdHr, wrapped in
   # a flex-column PdBox. BYTE-IDENTICAL to the pre-layout engine.
   defp compose_section_stack(b, style) do
-    leading = [%{"kind" => "PdHr"}]
+    blocks = Map.get(b, "blocks", [])
 
     title =
       case Map.get(b, "title") do
@@ -2487,9 +2487,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
       end
 
-    inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
+    inner = Enum.map(blocks, &compose_block(&1, style))
 
-    children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+    # A section that OPENS with a heading (and carries no title of its own) draws
+    # no rule pair in article mode: the heading IS the boundary, and the
+    # section-head device in paper-surface.css (`… > div:not([class]) >
+    # h2:first-child`) gives it the beat + rule. Before this, such a section drew
+    # a hairline, then the heading's own rule, then a trailing hairline the NEXT
+    # heading's rule duplicated — three lines for one boundary. A titled or
+    # heading-less section keeps the pair (the bold title needs the rule above it
+    # to read as a head); email/default mode keeps it unconditionally, having no
+    # stylesheet to carry a head.
+    children =
+      if style == :article and title == [] and opens_with_heading?(blocks) do
+        inner
+      else
+        [%{"kind" => "PdHr"}] ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+      end
+
     box = %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
 
     # Section-frame hook (charter D19): variant=="framed" stamps a top-level
@@ -2533,6 +2548,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # a malformed non-map `layout` value can never raise here.
   defp grid_layout(%{"layout" => %{"mode" => "grid"} = layout}), do: layout
   defp grid_layout(_), do: nil
+
+  # The stack's "the heading carries the boundary" test: true when the section's
+  # FIRST block is a heading of any level (the CSS device fires on h2 only, but a
+  # section opening with an h3 has no business drawing a hairline above it either).
+  defp opens_with_heading?([%{"type" => "heading"} | _]), do: true
+  defp opens_with_heading?(_), do: false
 
   # The grid section render: a `_raw` HTML node the walker passes through
   # verbatim. Shape mirrors the stack reader's chrome (leading rule, optional
