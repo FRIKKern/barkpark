@@ -6210,6 +6210,12 @@ defmodule BarkparkCloud.Web.Router do
               actor_user_id: user.id,
               action: "token.minted",
               target_type: "token",
+              # ssw10: the metadata here is a PLACEHOLDER, overwritten by the
+              # `target_fun` below off the PERSISTED row. `attrs.abilities` is the
+              # REQUESTED list and `UserToken.normalize_abilities/1` has not run
+              # yet, so recording it here would have the issuance log claim a grant
+              # the credential does not hold. `Accounts.audit/3` merges
+              # `target_fun.(result)` OVER `base_attrs`, so the key is replaced.
               metadata: %{name: attrs.name, abilities: attrs.abilities}
             },
             fn ->
@@ -6218,7 +6224,9 @@ defmodule BarkparkCloud.Web.Router do
                 other -> other
               end
             end,
-            fn {_plaintext, pat} -> %{target_id: pat.id} end
+            fn {_plaintext, pat} ->
+              %{target_id: pat.id, metadata: mint_audit_metadata(attrs, pat)}
+            end
           )
 
         case audit_mint do
@@ -10990,8 +10998,16 @@ defmodule BarkparkCloud.Web.Router do
   # wave 13 S2: each step's "detail" is a REMOTE capture (an ssh stderr fold, a
   # provider body) and reaches a person's screen verbatim, so it is scrubbed at
   # this boundary. The stored row keeps the raw bytes for ops.
+  #
+  # cchi-w26 / D310 tail: scrubbing is not the whole boundary. `app.js` paints the
+  # HUMANIZED `provision_error` as the timeline's failureDetail while the step
+  # rows directly beneath it carried raw provider jargon — one event, two stories,
+  # the exact asymmetry wave 26 S3 closed in the provision_failed email. A bare
+  # `FailureCopy.humanize/1` is the WRONG remedy here (and `Sites.Deploy`'s `stage_caption/2` moduledoc
+  # says so): it REPLACES the narration, and this payload holds the only copy of
+  # it. `class_then_capture/1` emits BOTH.
   defp merge_provision_steps(map, %{steps: steps}) when is_list(steps),
-    do: Map.put(map, :provision_steps, Enum.map(steps, &scrub_entry(&1, "detail")))
+    do: Map.put(map, :provision_steps, Enum.map(steps, &class_then_capture_entry(&1, "detail")))
 
   defp merge_provision_steps(map, _), do: Map.put(map, :provision_steps, [])
 
@@ -11000,10 +11016,50 @@ defmodule BarkparkCloud.Web.Router do
   # on presence without an existence check.
   #
   # wave 13 S2: console lines are raw remote output — scrubbed here, raw in the DB.
+  # cchi-w26 / D310 tail: same both-not-either fold as the step details above.
   defp merge_provision_console(map, %{console: console}) when is_list(console),
-    do: Map.put(map, :provision_console, Enum.map(console, &scrub_entry(&1, "line")))
+    do: Map.put(map, :provision_console, Enum.map(console, &class_then_capture_entry(&1, "line")))
 
   defp merge_provision_console(map, _), do: Map.put(map, :provision_console, [])
+
+  # cchi-w26 / task-3b59e1ea682c03a1 (charter D310): CLASS ALONGSIDE CAPTURE, the
+  # shape `Notifications.EventEmail.cause_then_capture/1` already ships.
+  #
+  # A provision step's `detail` and a console `line` are the ONLY copy of the
+  # worker's narration on this payload — there is no sibling key holding the raw
+  # bytes, which is why `Sites.Deploy.stage_caption/2` (classify-or-scrub) is
+  # right on a deploy stage and wrong here: it would destroy the narration waves
+  # 12-14 built. So this fold emits the class AND keeps the capture, in one
+  # string, in the element group the person is already looking at.
+  #
+  # An entry whose capture does NOT classify is BYTE-IDENTICAL to what this
+  # boundary shipped before (`FailureCopy.raw/1` = strip_ansi |> scrub), so no
+  # existing narration moves.
+  defp class_then_capture_entry(%{} = entry, key) do
+    case Map.fetch(entry, key) do
+      {:ok, value} when is_binary(value) -> Map.put(entry, key, class_then_capture(value))
+      _ -> entry
+    end
+  end
+
+  defp class_then_capture_entry(entry, _key), do: entry
+
+  # STRIP FIRST, THEN CLASSIFY — the same order `cause_then_capture/1` documents
+  # and for the same load-bearing reason. `humanize/1` ends `scrub |> strip_ansi`,
+  # so on its PASS-THROUGH arm (an unclassified capture returns itself) it scrubs
+  # colourised bytes — the leaky order. Feeding it an already-stripped capture
+  # makes that arm land on exactly `capture`, which keeps the `^capture` equal-arm
+  # below firing (a colourised unclassified capture would otherwise fall to the
+  # `cause` arm and print the leaky pass-through paragraph ABOVE the clean one).
+  defp class_then_capture(value) do
+    stripped = FailureCopy.strip_ansi(value)
+    capture = FailureCopy.scrub(stripped)
+
+    case FailureCopy.humanize(stripped) do
+      ^capture -> capture
+      cause -> "#{cause} — #{capture}"
+    end
+  end
 
   # wave 13 S2: redact secret-shaped substrings in the string-valued keys of a
   # step/console entry. No-ops on a non-map entry and on a non-binary value, so a
@@ -12483,6 +12539,31 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp valid_repo_name?(_), do: false
+
+  # ssw10: what the `token.minted` audit row records — read off the PERSISTED
+  # row, never off the request.
+  #
+  # `UserToken.normalize_abilities/1` is the server-side authority on ability
+  # EXCLUSIVITY: a mint asking for `["write", "deploy"]` stores `["deploy"]`, and
+  # `["read", "root"]` stores `["root"]`. Recording `attrs.abilities` wrote an
+  # issuance record for a grant that never existed — on the one surface an
+  # incident review reads to answer "what was this credential allowed to do".
+  #
+  # The collapse is also NAMED rather than silently absorbed: when the stored
+  # list is narrower than the requested one, the row carries the requested list
+  # and the dropped abilities alongside the granted one. Both keys are ABSENT
+  # when nothing was dropped, so an ordinary mint's row is unchanged.
+  defp mint_audit_metadata(attrs, pat) do
+    granted = pat.abilities || []
+    requested = attrs.abilities || []
+    dropped = Enum.uniq(requested -- granted)
+
+    base = %{name: attrs.name, abilities: granted}
+
+    if dropped == [],
+      do: base,
+      else: Map.merge(base, %{requested_abilities: requested, dropped_abilities: dropped})
+  end
 
   # The non-secret PAT shape for the dashboard's API-tokens view. NEVER emits
   # token_hash and NEVER the plaintext (the plaintext is returned once, only in
