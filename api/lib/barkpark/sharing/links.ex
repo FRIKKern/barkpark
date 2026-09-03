@@ -376,15 +376,28 @@ defmodule Barkpark.Sharing.Links do
   carries the PLAINTEXT `token` (and its hash), so a caller must be authorised
   against `workspace_id` BEFORE it serialises anything this returns — the raw is
   NOT unrecoverable. `ref_type` may be nil (media).
+
+  `opts` NARROWS the workspace to one tenant slice: `:project_id` and
+  `:dataset`. A row is bound to a `(workspace_id, project_id, dataset)` triple
+  (see `Barkpark.Sharing.ShareLink`), but the workspace-only filter answers a
+  scoped question with every sibling project's rows — and each row it returns
+  carries a LIVE `/s/<token>`. Callers that KNOW their project and dataset
+  (`GET /v1/shares/links`, whose `scope=` names both) must pass them; the
+  4-arity stays for the callers that legitimately have only a workspace.
   """
-  @spec list_for(binary(), binary(), binary() | nil, binary()) :: [ShareLink.t()]
-  def list_for(workspace_id, kind, ref_type, ref_id) do
+  @spec list_for(binary(), binary(), binary() | nil, binary(), keyword()) :: [ShareLink.t()]
+  def list_for(workspace_id, kind, ref_type, ref_id, opts \\ []) do
     ShareLink
     |> where([l], l.workspace_id == ^workspace_id and l.kind == ^kind and l.ref_id == ^ref_id)
     |> ref_type_filter(ref_type)
+    |> scope_filter(:project_id, Keyword.get(opts, :project_id))
+    |> scope_filter(:dataset, Keyword.get(opts, :dataset))
     |> order_by([l], desc: l.inserted_at)
     |> Repo.all()
   end
+
+  defp scope_filter(query, _field, nil), do: query
+  defp scope_filter(query, field, value), do: where(query, [l], field(l, ^field) == ^value)
 
   # `attrs` reaches create/1 with either atom or string keys depending on the
   # door, so both are normalised; a map carrying neither is left alone for the

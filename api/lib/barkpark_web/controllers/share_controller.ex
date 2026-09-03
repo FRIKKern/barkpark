@@ -195,6 +195,16 @@ defmodule BarkparkWeb.ShareController do
       not is_binary(surfaces) or surfaces == "" ->
         unprocessable(conn, "surfaces is required (comma list of papers,docs,media)")
 
+      # SHAPE GUARD, alongside its two siblings. `access` is the only create
+      # attribute that reached `do_create/4` unshaped, and it is INTERPOLATED
+      # into the `"scope:surfaces:access"` spec string there — so a JSON body
+      # sending it as an object raised `Protocol.UndefinedError` (String.Chars
+      # is not implemented for Map) and a list of objects raised
+      # `ArgumentError`, both 500s. Every other malformed attribute on this
+      # action is a 422; this arm makes the third one agree.
+      not is_binary(access) ->
+        unprocessable(conn, "access must be read or edit")
+
       true ->
         case scope_workspace(scope) do
           {:ok, ws_id} ->

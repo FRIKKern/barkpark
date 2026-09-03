@@ -395,12 +395,25 @@ defmodule BarkparkWeb.ShareLinkController do
 
   @doc "GET /v1/shares/links?scope=&kind=&ref_type=&ref_id= — list an item's links."
   def list(conn, params) do
-    with {:ok, {ws, proj, _dataset}} <- scope_triple(params["scope"]),
+    with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_workspace_admin(conn, workspace.id),
-         %Tenancy.Project{} <- Tenancy.get_project(ws, proj),
+         %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params) do
-      links = Links.list_for(workspace.id, kind, ref_type, ref_id) |> Enum.map(&link_json/1)
+      # THE SCOPE PARAMETER IS THE ANSWER'S SCOPE. `project` and `dataset` were
+      # parsed and validated here and then DROPPED, so the listing filtered on
+      # workspace alone: a link minted for the same `ref_id` in a SIBLING
+      # project (or another dataset) of the same workspace came back under a
+      # scope that does not name it, each row carrying its live `/s/<token>`
+      # url. Not cross-tenant — the caller is a proven workspace admin — but
+      # the response contradicted its own request.
+      links =
+        Links.list_for(workspace.id, kind, ref_type, ref_id,
+          project_id: project.id,
+          dataset: dataset
+        )
+        |> Enum.map(&link_json/1)
+
       json(conn, %{links: links})
     else
       # Explicit, ahead of the catch-all — without it the denial is 422 and the
