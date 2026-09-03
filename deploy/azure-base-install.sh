@@ -136,17 +136,36 @@ install_go() {
 }
 
 # ── 4. Clone (or fast-forward) the repo ──────────────────────────────────────
+# This runs unattended on a fresh box with no tty. Without GIT_TERMINAL_PROMPT=0
+# a git that decides it needs a username BLOCKS on the prompt; and the clone
+# fallback below sends its first attempt to /dev/null, so the real diagnosis was
+# discarded before anyone could read it. git_net_die names the git version,
+# because "could not read Username" is the symptom BOTH of a credential problem
+# and of the protocol-v2 refusal observed on git 2.34.x boxes (the apt git on
+# Ubuntu 22.04) — see deploy/cp-deploy.sh and PR #15634.
+export GIT_TERMINAL_PROMPT=0
+git_net_die() {
+  log "FATAL: git network operation failed: $*"
+  log "  git version      : $(git --version 2>&1)"
+  log "  protocol.version : $(git config --get protocol.version 2>/dev/null || echo 'unset/default')"
+  log "  A 'could not read Username' here can be the WIRE protocol, not credentials."
+  log "  Retry the same command with: git -c protocol.version=0 ..."
+  exit 11
+}
+
 fetch_repo() {
   if [ -d "$APP/.git" ]; then
     log "repo present at $APP — fetching $REF"
-    git -C "$APP" fetch --depth 1 origin "$REF"
+    git -C "$APP" fetch --depth 1 origin "$REF" \
+      || git_net_die "fetch --depth 1 origin $REF in $APP"
     git -C "$APP" checkout -q "$REF"
     git -C "$APP" reset --hard "origin/$REF" 2>/dev/null || git -C "$APP" reset --hard "$REF"
   else
     log "cloning $REPO → $APP (ref $REF)"
     mkdir -p "$(dirname "$APP")"
     git clone --depth 1 --branch "$REF" "$REPO" "$APP" 2>/dev/null \
-      || git clone --depth 1 "$REPO" "$APP"
+      || git clone --depth 1 "$REPO" "$APP" \
+      || git_net_die "clone --depth 1 $REPO (branch $REF, then default branch)"
   fi
 }
 
