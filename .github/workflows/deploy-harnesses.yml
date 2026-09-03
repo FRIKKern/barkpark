@@ -98,7 +98,9 @@ jobs:
       # basePath arming, standalone runtime, rollback preflight and more. Same
       # reasoning as its static sibling above: an untested deploy engine is the
       # weakest link, so gate it here. The script self-gates and exits non-zero
-      # on any failure — no hardcoded total (check counts grow over time).
+      # on any failure, and since #15813 (2026-09-03) it also refuses below a
+      # literal, committed check floor (SELFTEST_FLOOR_FULL in the script) so a
+      # run that silently lost a block cannot read as green.
       # BARKPARK_SELFTEST_REQUIRE_E2E=1 for the same reason it is set above: this
       # engine's gate block proves that the slot process HEALTH boots does not
       # inherit the box's only build slot (a permanent fleet-wide deny), and that
