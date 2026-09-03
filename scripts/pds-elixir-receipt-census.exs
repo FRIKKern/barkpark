@@ -7514,7 +7514,10 @@ defmodule PDS.Census do
       name: "ROUTE-ALIAS-BINDING-RESOLVES",
       corpus: :full,
       argv: [],
-      mut: {"Map.get(counts, name, 0) == 1", "Map.get(counts, name, 0) == 99"},
+      # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+      # an ambiguous anchor, and a mut literal that occurs twice is exactly that.
+      mut:
+        {"Map.get(counts, name, " <> "0) == 1", "Map.get(counts, name, " <> "0) == 99"},
       exit: 1,
       expect: [
         "FAIL  ROUTED-POPULATION-COMPLETE",
