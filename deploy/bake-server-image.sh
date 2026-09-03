@@ -1,6 +1,43 @@
 #!/usr/bin/env bash
 # bake-server-image.sh — the nightly warm-image bake (snapshot-management).
 #
+# ── DECISION 2026-09-03: the base image STAYS ubuntu-22.04 ──────────────────
+# (internal/cli/cloud/provider.go DefaultSpec. Recorded here because this script
+# owns the image; the decision was asked for by task-8a523f080fa406d2.)
+#
+# The case for moving was that Ubuntu 22.04's apt git is 2.34.1, the version
+# that appeared to strand the control plane 49 commits behind for ~7h with
+# "fatal: could not read Username for 'https://github.com'" — and PR #15634
+# pinned `-c protocol.version=0` on deploy/cp-deploy.sh:98 to get past it.
+#
+# MEASURED, and the premise did not survive:
+#   * A clean `ubuntu:22.04` container with apt's git 2.34.1 clones this repo
+#     over the DEFAULT protocol (v2), anonymously, rc=0.
+#   * On the control-plane box ITSELF (178.105.92.191, git 2.34.1, Ubuntu
+#     22.04.5), `git ls-remote origin HEAD` succeeds under the default, under
+#     `-c protocol.version=0` AND under an explicit `-c protocol.version=2`.
+#     That box carries no credential helper, no proxy, no /etc/gitconfig and no
+#     ~/.gitconfig — nothing that distinguishes it from the container.
+#   * Guerrilla (157.180.90.121) runs Ubuntu 24.04 / git 2.43.0.
+#
+# So 2.34.1 is NOT broken against GitHub, and protocol v2 is not the fault line.
+# git 2.34.1 is well past 2.26, where v2 became the default, and past 2.18 where
+# it landed. The refusal was environmental or transient. Moving every box to a
+# newer image to chase it would be a large, risky change bought with no
+# evidence, and it would not prevent a recurrence of whatever actually happened.
+#
+# THE MITIGATION SHIPPED INSTEAD — because the real, reproducible defect is the
+# DIAGNOSIS, not the version: these scripts run with no tty, so any git that
+# decides it wants a username either hangs or dies pointing at credentials.
+# Every git-over-HTTPS call site on a provisioned box now sets
+# GIT_TERMINAL_PROMPT=0 (fail, never hang) and fails LOUDLY with a message
+# naming the git version, the protocol.version in force, and the v0 retry.
+# The pin on cp-deploy.sh:98 is left exactly as it is: it is measured-harmless
+# and it is the one site with a real incident behind it.
+#
+# REVISIT IF: a git-version-dependent failure is reproduced on a box, or
+# Ubuntu 22.04 nears end of standard support (April 2027).
+#
 # THE structural fix for "every deploy has to update Barkpark first": the baked
 # snapshot used to be a hand-managed, ever-staler pin, so claim-time freshen
 # paid a 4-6 minute on-box rebuild for the accumulated drift. This pipeline
