@@ -53,15 +53,12 @@ defmodule BarkparkWeb.Live.ScopeDatasetSwitchReauthTest do
   @shared_title "PROD-DOC"
 
   setup %{conn: conn} do
-    prior_shares = Application.get_env(:barkpark, :shares)
+    # arpss-w8: snapshots :shares AND :shares_env (refresh/0 reads both).
+    Barkpark.SharingFixtures.snapshot_shares!()
     prev_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
     System.delete_env("BARKPARK_PAPER_CANVAS")
 
     on_exit(fn ->
-      if is_nil(prior_shares),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior_shares)
-
       case prev_canvas do
         nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
         v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
@@ -100,10 +97,8 @@ defmodule BarkparkWeb.Live.ScopeDatasetSwitchReauthTest do
       )
 
     # ONLY `production` is `:docs`-shared read-only. `staging` is not shared.
-    Application.put_env(
-      :barkpark,
-      :shares,
-      Sharing.parse("#{ws.slug}/#{proj.slug}/#{@shared_dataset}:docs:read")
+    Barkpark.SharingFixtures.plant_shares!(
+      "#{ws.slug}/#{proj.slug}/#{@shared_dataset}:docs:read"
     )
 
     {:ok, conn: conn, ws: ws, proj: proj}
