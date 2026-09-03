@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
 
   ## Mutation proof
 
-  Drop `#{schema_hash}|` from `list_etag/4`'s payload and make `doc_etag/2`
+  Drop the schema-hash segment from `list_etag/4`'s payload and make `doc_etag/2`
   return the bare rev again: both `must answer 200` tests red with `304`.
 
   Two non-vacuity controls guard every pin: the field IS present in the first
