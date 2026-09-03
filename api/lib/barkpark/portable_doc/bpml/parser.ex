@@ -1245,7 +1245,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # A stored BOOLEAN travels as the attribute text "true"/"false" and comes
   # back a boolean — anything else stays the string it was, which is what lets
   # `pipeline`'s `source` be a boolean in 27 corpus nodes and a source-ref
-  # string ("queue.ex:42") in one without either losing its type.
+  # string (a file-and-line pointer into someone else's repo) in one, without
+  # either losing its type.
   defp put_bool_attr(map, key, attrs) do
     case List.keyfind(attrs, key, 0) do
       {^key, "true"} -> Map.put(map, key, true)
