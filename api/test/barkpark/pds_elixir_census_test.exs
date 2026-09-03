@@ -127,7 +127,6 @@ defmodule Barkpark.PdsElixirCensusTest do
   # perturbs it by one, so the arm is always exactly one off whatever the tree
   # currently says and can only ever red for the reason it was written for.
 
-
   # ## Why the four arms run in setup_all, CONCURRENTLY
   #
   # Each arm is one `elixir` subprocess walking the whole `api/lib` corpus, and
