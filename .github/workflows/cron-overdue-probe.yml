@@ -18,8 +18,9 @@
 # WHY NO NAME IN HERE CAN ENTER THE REQUIRED SET. The probe job carries
 # `if: github.event_name != 'pull_request'`, so its name never renders on a PR
 # head the required-checks generator samples, and the pull_request trigger below
-# is paths-filtered besides (generator stage S4). It reads the Actions API;
-# requiring an API-reading check would gate every merge on GitHub's availability.
+# is paths-filtered besides (generator stage S4). That placement is deliberate
+# rather than incidental: this job reads the Actions API, so its verdict is only
+# ever as available as GitHub is.
 #
 # WHY THERE IS NO continue-on-error. Job-level `continue-on-error: true` renders
 # a red check run and launders the WORKFLOW RUN to success — and the run
