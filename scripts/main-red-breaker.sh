@@ -32,18 +32,57 @@
 #   no such job on main, or we failed on a step main did not)
 #                                          -> exit 1 naming OUR failed steps
 #
-# The comparison is by STEP NAME within the SAME JOB NAME. A PR that fails the
-# same step for a different reason is still waved through — that is the
-# accepted cost for NON-required jobs, whose red the main watcher owns. This
-# script must never be wired into a required context (required-checks-floor.sh
-# guards the four names; this script's harness asserts it names none of them).
+# The comparison is by STEP NAME within the SAME JOB NAME **and by a normalised
+# FAILURE SIGNATURE**. Step name alone is too coarse, and it cost us a merge:
 #
-# READING MAIN. One REST call for the newest completed push run on main, one
-# for its jobs. Unreadable main == not inherited (the job reds on its own
-# failure), so an API outage can only make the breaker LESS forgiving.
+#   MEASURED 2026-09-03 (task-cf774c315a1deca0). PR #15784 added prose to
+#   .github/workflows/architecture.yml that tripped required-checks-verify.sh's
+#   advisory-prose clause. The 'Required-check spec gate' job was ALREADY red on
+#   main at the SAME step from a DIFFERENT file (#15650's sidecar sentence), so
+#   the PR's brand-new hit read as inherited and merged; main then carried two
+#   hits instead of one. Same step, same script, same `FAIL:` header line — only
+#   the file:line differed. A fresh defect hid inside an already-red step.
 #
-# HARNESS HOOK. MAIN_RED_BREAKER_FIXTURE=<file> supplies main's jobs JSON
-# instead of the API (the harness also stubs curl); nothing else differs.
+# SIGNATURE. Every error line of a red is normalised (leading runner timestamp,
+# ANSI colour, `##[error]`/`##[warning]` annotation prefix stripped; 7-40 char
+# hex runs -> <sha>; every remaining digit run -> #; whitespace collapsed) so
+# that the SAME defect reported at a shifted line, in a rerun, or under a new
+# run id still matches, while a DIFFERENT file or a different message does not.
+# Digits are erased on purpose: line drift must not manufacture a fresh red.
+# The comparison is a SUBSET test, exactly like the step-name test: inherit only
+# when every one of our normalised error lines also appears in main's.
+#
+# WHERE OUR SIGNATURE COMES FROM — and what is NOT available. The breaker runs
+# as the LAST step of the very job it judges, so the job's own log is NOT
+# readable: `gh api /actions/jobs/{id}/logs` 404s until the job is complete, and
+# a check-run's annotations are not final either. The one source that exists at
+# that moment is a CAPTURE FILE a gate step wrote while it was failing:
+#
+#   BREAKER_ERROR_LOG   default ${RUNNER_TEMP}/main-red-breaker-errors.txt
+#                       plain raw log lines, appended by any gate step that
+#                       wants its red discriminated. Raw is the contract: this
+#                       script does the normalising, callers do not.
+#
+# When that file is absent or empty our signature is UNKNOWN. An unknown
+# signature falls back to the v1 step-name-only verdict and SAYS SO in the
+# notice (`SIGNATURE-UNVERIFIED`) — because failing closed there would turn all
+# 631 known-inherited reds back on in one commit, and failing silently is what
+# this change exists to stop. Main's side has no such problem: main's run is
+# complete, so its job log is always readable.
+#
+# This script must never be wired into a required context
+# (required-checks-floor.sh guards the four names; this script's harness asserts
+# it names none of them).
+#
+# READING MAIN. One REST call for the newest completed push run on main, one for
+# its jobs, one for the failing job's plain-text log. Unreadable main == not
+# inherited (the job reds on its own failure), so an API outage can only make
+# the breaker LESS forgiving; an unreadable main LOG only makes the signature
+# unknown, which the notice states.
+#
+# HARNESS HOOK. MAIN_RED_BREAKER_FIXTURE=<file> supplies main's jobs JSON and
+# MAIN_RED_BREAKER_LOG_FIXTURE=<file> main's raw job log, instead of the API
+# (the harness also stubs curl); nothing else differs.
 set -uo pipefail
 
 say() { echo "main-red-breaker: $*"; }
@@ -95,15 +134,19 @@ else
   curl -sS --max-time 20 "${auth[@]}" "${API}/actions/runs/${MAIN_RUN_ID}/jobs?per_page=100" -o "$MAIN_JOBS" 2>/dev/null || : > "$MAIN_JOBS"
 fi
 
-# Main's failed step names for the job of the same name.
-python3 - "$MAIN_JOBS" "$JOB_NAME" > "$TMPD/mains.txt" <<'PY' || : > "$TMPD/mains.txt"
+# Main's failed step names for the job of the same name, plus that job's id
+# (written to mainjob.id) so its plain-text log can be read for the signature.
+python3 - "$MAIN_JOBS" "$JOB_NAME" "$TMPD/mainjob.id" > "$TMPD/mains.txt" <<'PY' || : > "$TMPD/mains.txt"
 import json, sys
 d = json.load(open(sys.argv[1])); want = sys.argv[2]
+jid = ""
 for j in d.get("jobs") or []:
     if j.get("name") == want and j.get("conclusion") == "failure":
+        jid = jid or str(j.get("id") or "")
         for s in j.get("steps") or []:
             if s.get("conclusion") == "failure":
                 print(s.get("name"))
+open(sys.argv[3], "w").write(jid)
 PY
 MAINS="$(sort -u "$TMPD/mains.txt")"
 
@@ -118,7 +161,72 @@ if [ -n "$NOT_ON_MAIN" ]; then
   exit 1
 fi
 
-MSG="INHERITED-FROM-MAIN — '${JOB_NAME}' failed only on step(s) main's newest completed run (${MAIN_RUN_ID}) already fails: $(printf '%s' "$OURS" | tr '\n' ';'). This is main's defect, not this PR's; the main watcher owns it. This job reports neutral (exit 0)."
+# ── the FAILURE SIGNATURE clause ────────────────────────────────────────────
+# The step names agree. That is exactly where v1 stopped, and exactly where a
+# fresh defect got in on 2026-09-03 (see the header). Now compare what the red
+# actually SAID.
+sigfile() { # $1 = file of RAW log lines -> stdout: normalised error lines, sorted -u
+  python3 - "$1" <<'PY'
+import re, sys
+TS    = re.compile(r'^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s')
+ANSI  = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+ANN   = re.compile(r'^##\[(?:error|warning|notice)\]')
+SHA   = re.compile(r'\b[0-9a-f]{7,40}\b')
+DIG   = re.compile(r'\d+')
+# An error line OPENS a block; indented non-empty lines CONTINUE it. The
+# continuation is not decoration: in the 2026-09-03 case the `FAIL:` header was
+# byte-identical on both sides and the only thing that differed was the indented
+# file:line detail underneath it. A first-line-only signature would have
+# inherited that red too.
+START = re.compile(r'##\[error\]|(?:^|[^A-Za-z])(?:FAIL|FAILED|ERROR)\b|\berror:|^\s*✗')
+def norm(t):
+    t = DIG.sub('#', SHA.sub('<sha>', ANN.sub('', t)))
+    return ' '.join(t.split())
+out, inblock = set(), False
+for raw in open(sys.argv[1], errors='replace'):
+    body = ANSI.sub('', TS.sub('', raw.rstrip('\r\n')))
+    if START.search(body):
+        inblock = True
+    elif not (inblock and body.strip() and body[:1].isspace()):
+        inblock = False
+        continue
+    n = norm(body)
+    if n:
+        out.add(n)
+for n in sorted(out):
+    print(n)
+PY
+}
+
+OUR_LOG="${BREAKER_ERROR_LOG:-${RUNNER_TEMP:-/nonexistent}/main-red-breaker-errors.txt}"
+: > "$TMPD/our-sigs.txt"
+[ -s "$OUR_LOG" ] && sigfile "$OUR_LOG" > "$TMPD/our-sigs.txt"
+
+MAIN_LOG="$TMPD/main-job.log"; : > "$MAIN_LOG"
+if [ -n "${MAIN_RED_BREAKER_LOG_FIXTURE:-}" ]; then
+  cp -- "$MAIN_RED_BREAKER_LOG_FIXTURE" "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
+elif [ -z "${MAIN_RED_BREAKER_FIXTURE:-}" ] && [ -s "$TMPD/mainjob.id" ]; then
+  curl -sSL --max-time 20 "${auth[@]}" "${API}/actions/jobs/$(cat "$TMPD/mainjob.id")/logs" -o "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
+fi
+: > "$TMPD/main-sigs.txt"
+[ -s "$MAIN_LOG" ] && sigfile "$MAIN_LOG" > "$TMPD/main-sigs.txt"
+
+if [ ! -s "$TMPD/our-sigs.txt" ]; then
+  SIG_NOTE=" SIGNATURE-UNVERIFIED: no gate step wrote ${OUR_LOG}, so this red was matched on STEP NAME ALONE — a different defect inside the same red step is indistinguishable from here."
+elif [ ! -s "$TMPD/main-sigs.txt" ]; then
+  SIG_NOTE=" SIGNATURE-UNVERIFIED: main's job log was empty or unreadable, so this red was matched on STEP NAME ALONE."
+else
+  NEW_SIG="$(comm -23 "$TMPD/our-sigs.txt" "$TMPD/main-sigs.txt")"
+  if [ -n "$NEW_SIG" ]; then
+    say "FAIL — '${JOB_NAME}' failed on the same step(s) main does ($(printf '%s' "$OURS" | tr '\n' ';')) but NOT with the same failure signature, so the red is this PR's OWN." >&2
+    say "  THIS PR's signature line(s) that main does not have:" >&2; printf '    %s\n' "$NEW_SIG" >&2
+    say "  MAIN's signature line(s) (run ${MAIN_RUN_ID}):" >&2; sed 's/^/    /' "$TMPD/main-sigs.txt" >&2
+    exit 1
+  fi
+  SIG_NOTE=" Signature matched too: all $(wc -l < "$TMPD/our-sigs.txt" | tr -d ' ') normalised error line(s) of this red also appear in main's."
+fi
+
+MSG="INHERITED-FROM-MAIN — '${JOB_NAME}' failed only on step(s) main's newest completed run (${MAIN_RUN_ID}) already fails: $(printf '%s' "$OURS" | tr '\n' ';').${SIG_NOTE} This is main's defect, not this PR's; the main watcher owns it. This job reports neutral (exit 0)."
 echo "::notice title=Inherited from main::${MSG}"
 say "$MSG"
 { echo "### Inherited from main"; echo; echo "$MSG"; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
