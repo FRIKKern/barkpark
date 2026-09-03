@@ -178,6 +178,14 @@ defmodule Barkpark.Content.Errors do
                          "session_restarting",
                          "session_start_failed",
                          "invalid_request_id",
+                         # 503 + retry-after: the exactly-once replay ring has no
+                         # table to read, so the session refuses the batch
+                         # (fail-CLOSED) rather than re-apply a non-idempotent op
+                         # it can no longer recognise. Nothing was applied; the
+                         # same request_id succeeds once the ring is back. Its own
+                         # token rather than `session_restarting` because the
+                         # SESSION is fine — only the ring is gone.
+                         "replay_unavailable",
                          # Media collection share link expired — v1/media_collections_controller.ex
                          "share_expired",
                          # Access-grant claim + token / ticket-key create (422) —

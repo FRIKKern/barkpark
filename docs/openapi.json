@@ -166,6 +166,7 @@
                   "precondition_failed",
                   "quota_exceeded",
                   "rate_limited",
+                  "replay_unavailable",
                   "rev_mismatch",
                   "runtime_capacity",
                   "runtime_unavailable",
