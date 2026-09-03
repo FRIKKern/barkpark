@@ -225,7 +225,17 @@ jobs:
           # installs the cloud-sandbox-runner from that tree (charter D275, W35).
           # The prefix is exact — scripts/connectors, not scripts — so a change
           # under scripts/other/ does not falsely flip instance=true.
-          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
+          # cmd/ rides the content instance TOO — it is the one prefix BOTH jobs
+          # must claim. instance-deploy.sh:1071 builds /usr/local/bin/barkpark-agent
+          # from ./cmd/barkpark-agent (and the bp CLI from ./cmd/barkpark), and
+          # instance-deploy.sh is the ONLY thing that rebuilds that binary. cmd/**
+          # is in on.push.paths and matched the cp regex above, so a cmd/-only merge
+          # STARTED this workflow, deployed the control plane, ran no instance
+          # deploy, and left a stale agent on the content box under a GREEN run.
+          # The TARGET arm of check-deployyml-filters.sh pins BOTH halves of this
+          # prefix by name (cmd -> instance, cmd -> cp): the forward arm cannot see
+          # it, because a path matched by the WRONG job is still a path matched.
+          if echo "$changed" | grep -qE '^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
           # THE OVERRIDE, AND ONLY ON A DISPATCH. A push can never reach this —
           # `github.event_name` is the trigger, not an input — so the automatic
           # path is byte-for-byte what it was. `auto` deliberately falls through
