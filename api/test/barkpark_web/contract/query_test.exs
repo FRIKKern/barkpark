@@ -207,8 +207,17 @@ defmodule BarkparkWeb.Contract.QueryTest do
     assert is_binary(body["etag"])
     assert is_binary(body["schemaHash"])
 
+    # The header and the body carry DIFFERENT tokens on purpose
+    # (task-496f010fa8f4d9dc). The body's `etag` is the SDK's document change
+    # token — `js/packages/core/src/doc.ts` hands it back as `ifMatch`, which
+    # `Content.Mutations.if_rev/1` compares to the stored rev. The `ETag` header
+    # is a CACHE VALIDATOR and additionally folds the dataset schema hash,
+    # because `Envelope.render/3` picks the visible field set out of the schema
+    # and a schema edit moves no `_rev`. This used to assert the two were equal;
+    # that identity is what let a newly-private field be served out of a 304.
     [header_etag | _] = Plug.Conn.get_resp_header(resp, "etag")
-    assert header_etag == ~s("#{body["etag"]}")
+    assert is_binary(header_etag)
+    refute header_etag == ~s("#{body["etag"]}")
 
     type_tag = "bp:ds:test:type:post"
     assert type_tag in body["syncTags"]
