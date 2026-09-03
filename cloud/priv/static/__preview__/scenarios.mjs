@@ -5080,12 +5080,50 @@ export function route(name, method, path, state) {
   //     401 invalid_code — the honest inline error, one click away).
   //   • d.reset answers the set-new-password submit off the emailed link.
   if (method === "POST" && p === "/v1/auth/request-reset") return { status: 200, body: {} };
-  if (method === "POST" && p === "/v1/auth/login" && d.login) return d.login;
+  if (method === "POST" && p === "/v1/auth/login" && d.login) {
+    // A successful sign-in mints a new token, so it lifts the revocation the
+    // logout arm below records — otherwise a sign-out is a one-way trap the
+    // fixture can never leave, which no real server does.
+    if (state && d.login.status && d.login.status < 400) delete state.loggedOut;
+    return d.login;
+  }
   if (method === "POST" && p === "/v1/auth/two-factor-challenge" && d.twoFactorChallenge) return d.twoFactorChallenge;
   if (method === "POST" && p === "/v1/auth/reset" && d.reset) return d.reset;
 
   // Logged out: no authed reads are modelled.
   if (!scen.authed) return { status: 401, body: { error: "unauthorized" } };
+
+  // cch-w11-bl-unmodelled-delete-route-arms — DELETE /v1/auth/logout, THE LAST
+  // destroy verb that still fell through to the terminal `/v1/` 200 {} at the
+  // bottom of this function. A verb that succeeds against a route the fixture
+  // never modelled would report success against literally any server, which is
+  // this harness's founding sin in a smaller costume.
+  //
+  // RE-DERIVED, not copied from the filing: the row named four routes. Three
+  // are modelled today — /v1/github/installation (gated on the `github`
+  // fixture), /v1/sites/:id/github (the `siteGithub` matcher) and the webhook
+  // DELETE (the `whDelete` matcher, a full destroyFrom/listOf shrink oracle)
+  // all answer real shapes. Only logout was left, and this is it. Derived by
+  // sentinel: the terminal catch-all was replaced with a marker body and every
+  // DELETE the console issues was probed across all 118 scenarios — logout was
+  // the only one that reached it (112/118; the other 6 are the logged-out
+  // scenarios, whose 401 is the authed gate above, not a logout arm).
+  //
+  // THE OBSERVABLE STATE THE VERB CHANGES: the calling token is REVOKED, so
+  // every authed read after it must answer 401 — the same 401 the logged-out
+  // scenarios answer above. `state.loggedOut` is that fact, on the sessionsOf /
+  // listOf / githubOf contract: opt-in on `state` (a stateless caller keeps its
+  // old 200 byte-for-byte) and the READS GO THROUGH IT, which is the whole
+  // point — a DELETE nothing re-reads proves nothing.
+  //
+  // Signing back in clears it: the unauthenticated POSTs above sit ABOVE this
+  // gate on purpose, so a scenario that signs out and signs in again is not
+  // trapped in a 401 the fixture can never leave.
+  if (method === "DELETE" && p === "/v1/auth/logout") {
+    if (state) state.loggedOut = true;
+    return { status: 200, body: { ok: true } };
+  }
+  if (state && state.loggedOut) return { status: 401, body: { error: "unauthorized" } };
 
   if (p === "/v1/invitations/accept" && method === "POST") {
     return (d.invitation && d.invitation.accept) || { status: 404, body: { error: "invalid_or_expired" } };
