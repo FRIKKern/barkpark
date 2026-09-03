@@ -161,6 +161,8 @@ on:
       - "tooling/task-obsession/fixtures/*.json"
       - ".github/workflows/reland-check.yml"
       - "scripts/relandcheck-diff-producer.test.sh"
+      - "scripts/main-red-breaker.sh"
+      - "scripts/main-red-breaker.test.sh"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -367,6 +369,8 @@ on:
       - "tooling/task-obsession/fixtures/*.json"
       - ".github/workflows/reland-check.yml"
       - "scripts/relandcheck-diff-producer.test.sh"
+      - "scripts/main-red-breaker.sh"
+      - "scripts/main-red-breaker.test.sh"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -653,6 +657,8 @@ jobs:
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
+          tooling-harnesses scripts/main-red-breaker.sh
+          tooling-harnesses scripts/main-red-breaker.test.sh
           launcher-boot-selftest bin/barkpark
           launcher-boot-selftest scripts/barkpark-boot-selftest.sh
           workflow-portability scripts/workflow-portability-check.sh
@@ -1266,6 +1272,10 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
           bash scripts/relandcheck-diff-producer.test.sh
+      - name: main-red-breaker.sh syntax + harness (stub curl + fixtures, no network)
+        run: |
+          bash -n scripts/main-red-breaker.sh
+          bash scripts/main-red-breaker.test.sh
       - name: fleet-run verdict matrix
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check

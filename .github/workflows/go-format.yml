@@ -56,6 +56,8 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Check gofmt
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: |
           dirty=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
           if [ -n "$dirty" ]; then
@@ -79,6 +81,21 @@ jobs:
   # roster (.go-format-drift-ceiling, currently empty = zero tolerance), and
   # fails closed if gofmt is missing or the scan is implausibly small — an empty
   # `gofmt -l` is never accepted as clean without confirming files were scanned.
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Check gofmt\"}"
+          JOB_NAME: "gofmt -l (advisory)"
+          WORKFLOW_FILE: go-format.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/main-red-breaker.sh
+
   gofmt-ceiling:
     name: gofmt drift ceiling (blocking)
     runs-on: ubuntu-latest
@@ -88,6 +105,25 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Enforce the gofmt drift ceiling
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/go-format-drift-ceiling.sh
       - name: Ceiling self-test (tripwire — prove the gate can fail)
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/go-format-drift-ceiling.sh --selftest
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Enforce the gofmt drift ceiling\", \"s2\": \"Ceiling self-test (tripwire \u2014 prove the gate can fail)\"}"
+          JOB_NAME: "gofmt drift ceiling (blocking)"
+          WORKFLOW_FILE: go-format.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/main-red-breaker.sh
+
