@@ -68,6 +68,21 @@ jobs:
         working-directory: api
     steps:
       - uses: actions/checkout@v4
+        # fetch-depth: 0 — REQUIRED, do not drop it, and the same shape elixir.yml's
+        # mix-test job uses (no `filter:`, because that job does not use one either).
+        # The default depth-1 checkout is what made run 33717527961 red:
+        # PdsPublishedArtifactDoorTest shells scripts/pds-published-artifact-door.sh,
+        # which derives R by walking package.json history and comparing each commit to
+        # its PARENT. On a truncated history no parent resolves, R collapses onto HEAD,
+        # exports(R) == exports(HEAD) for every package, and the door printed
+        # VERDICT: PASS on a tree that REFUSES with real history — the R column read
+        # a94db512a (= HEAD) for every row and "0 commit(s) ... since a94db512a". The
+        # door now exits 2 on shallow history rather than passing vacuously, so without
+        # this line the nightly would be red on the venue instead of silently green.
+        # Barkpark.BuildInfo's `git describe --tags` needs the tags for the same reason
+        # mix-test does.
+        with:
+          fetch-depth: 0
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
