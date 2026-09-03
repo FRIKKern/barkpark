@@ -53,6 +53,13 @@ on:
     # followed by a push in practice, and firing on every keystroke-save of a
     # description would spend renewals against the cap for no queue time.
     types: [opened, synchronize, reopened, ready_for_review, closed]
+  # The event arm above renews ONCE per push; one renewal buys ~45 min. A PR
+  # that then waits in the CI queue lost its claim (task-b345a8dce6ca9b8a:
+  # 43 percent of the required task gate's reds quoted a lapsed claim). The
+  # task-lease-sweep job below renews EVERY open PR's row every 20 minutes.
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
 
 # `pull_request`, never `pull_request_target` — the repo's stance, copied from
 # pr-task-gate.yml. A fork PR therefore receives no secret and the script says
@@ -69,12 +76,13 @@ concurrency:
   # A bare `true` is honest here (never-cancel-main-check.sh: a
   # pull_request-only workflow cannot self-cancel a main run, because
   # github.ref is never refs/heads/main on this trigger).
-  group: task-lease-renew-${{ github.event.pull_request.number }}
+  group: task-lease-renew-${{ github.event.pull_request.number || 'sweep' }}
   cancel-in-progress: true
 
 jobs:
   task-lease-renew:
     name: Keep the claim alive while this PR is open
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -116,4 +124,25 @@ jobs:
           set -uo pipefail
           rc=0
           bash scripts/task-lease-renew.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
+          exit "$rc"
+
+  task-lease-sweep:
+    name: Renew every open PR's claim (20-min sweep)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Harness first — the sweep must be able to fail
+        run: bash scripts/task-lease-sweep.test.sh
+      - name: Sweep every open PR's row
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/task-lease-sweep.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
           exit "$rc"
