@@ -165,6 +165,19 @@ DORMANT_PR_DAYS=14
 # BELOW, never a new class: each row is still classified STALE / DISPATCHED /
 # ORPHANED by the remedy that exists for it, and no verdict moves because of
 # this number. The slice exists so that a DEPTH is quotable at all.
+#
+# THE THIRD SHAPE, and the ONE case where the slice does move a verdict — it
+# RETIRES a scream, it never creates one. Seven of those eight rows have
+# jobs.total_count 0 and were already NOTICES (ORPHANED). The eighth,
+# compose-smoke 32219250070, carries ONE job row that never started, so the
+# DISPATCHED branch printed `gh run cancel` as its remedy; run 33786896365 of
+# absent-context-census.yml on main (2026-09-03, lead-gates-3) exited 1 on it
+# alone — `SUMMARY absent=3 stale-queued=1 unknown=0 in-flight=18 orphaned=7
+# phantom-queued=8` — and the cancel it named answered "Cannot cancel a workflow
+# run that is completed" on a run GitHub still lists as queued. A remedy that
+# does not exist is not a finding, so a queued row past this threshold whose job
+# list is non-empty and contains NO started job is treated as the phantom it is:
+# printed, counted here, no verdict. See read_jobs_started_count.
 PHANTOM_QUEUE_HOURS=24
 SHAS=()
 
@@ -190,6 +203,11 @@ ORPHAN_ROWS=0
 # Rows in the PHANTOM SLICE above. Reported, never exited on: it is a property
 # of the DEPTH NUMBER, not a finding.
 PHANTOM_ROWS=0
+# The subset of PHANTOM_ROWS that carries JOB ROWS which never started — the
+# third phantom shape (see read_jobs_started_count). Kept apart only so the
+# NOTICE can say how many rows were spared the DISPATCHED scream; it is already
+# inside phantom-queued and deliberately adds no field to SUMMARY.
+PHANTOM_NEVER_STARTED_ROWS=0
 
 # Informational rows are buffered, not printed inline, so the queue limb's
 # verdict is never pushed off the top of a log by in-flight noise.
@@ -380,6 +398,46 @@ read_jobs_count() { # <run id>
       *) printf '%s\n' "$out" ;;
     esac
   fi
+}
+
+# How many of a run's jobs have EVER LEFT THE QUEUE — status in_progress or
+# completed — or -1 when that cannot be established. It exists for ONE
+# discrimination the total_count above cannot make: a queued run whose job list
+# is non-empty but where not one job ever started.
+#
+# THE SPECIMEN, measured 2026-09-03 by lead-gates-3 on run 33786896365 of
+# absent-context-census.yml (main): compose-smoke run 32219250070, created
+# 2026-08-19T05:23:37Z (370 h old at that read), status queued, jobs feed
+# total_count 1 — a single job "Dispatch (compose-smoke paths)", status queued,
+# conclusion null, completed_at null. total_count > 0 made the census call it
+# DISPATCHED and name `gh run cancel` as the live remedy; the lead ran that
+# cancel and GitHub answered "Cannot cancel a workflow run that is completed"
+# while the run still listed as queued. So the cancel remedy this census printed
+# does not exist for that shape, and a remedy that does not exist is not a
+# finding — it is the same GitHub-side inconsistency the phantom slice already
+# names, wearing a job row.
+#
+# -1 (UNREADABLE) IS THE FAIL-CLOSED ANSWER and every ambiguity routes to it:
+# no payload, no `jobs` array, an empty array, or ANY job whose `status` is not
+# a non-empty string. Only a fully-readable list of statuses can retire the
+# DISPATCHED scream, because the cost of a wrong 0 here is silence about a run
+# that really is holding a runner slot.
+read_jobs_started_count() { # <run id> -> count of started jobs, or -1
+  local id="$1" f payload
+  if [ -n "$FIXTURES" ]; then
+    f="$(fixture "jobs-$id.json")" || { echo "-1"; return 0; }
+    payload="$(cat "$f")"
+  else
+    payload="$(gh api "repos/$REPO/actions/runs/$id/jobs" 2>/dev/null)" || payload=""
+  fi
+  [ -n "$payload" ] || { echo "-1"; return 0; }
+  jq -e '(.jobs | type) == "array" and (.jobs | length) > 0
+         and (.jobs | all((.status | type) == "string" and (.status | length) > 0))' \
+     <<<"$payload" >/dev/null 2>&1 || { echo "-1"; return 0; }
+  # A WHITELIST, not "anything but queued": an unknown future status must read
+  # as not-started only when every other job is also not-started, and the
+  # readability gate above is what keeps that from being a guess.
+  jq -r '[.jobs[] | select(.status == "in_progress" or .status == "completed")] | length' <<<"$payload"
 }
 
 # THE PAGINATED, SERVER-FILTERED TRUTH.
@@ -719,6 +777,27 @@ else
       elif [ -n "$qhead" ] && [ "$qhead" != "-" ] && case " $LIVE_HEADS " in *" $qhead "*) true ;; *) false ;; esac; then
         say "$line  STALE (> ${STALE_QUEUE_HOURS}h)  LIVE HEAD — remedy: re-run this workflow on the head"
         STALE_ROWS=$((STALE_ROWS + 1))
+      elif [ "$qjobs" != "0" ] && [ "$(read_jobs_started_count "$qid")" = "0" ] \
+           && iso_to_epoch "$created" >/dev/null 2>&1 \
+           && age_exceeds "$created" "$PHANTOM_QUEUE_HOURS"; then
+        # THE THIRD PHANTOM SHAPE. Job rows exist, and not one of them ever
+        # left the queue, and the run is older than the phantom threshold. The
+        # cancel remedy the DISPATCHED branch below would print was tried on the
+        # specimen (compose-smoke 32219250070, 2026-09-03 by lead-gates-3) and
+        # GitHub answered "Cannot cancel a workflow run that is completed" on a
+        # run it still lists as queued. No remedy exists from our side, so this
+        # moves NO verdict: it is already inside phantom-queued, and screaming
+        # about it is the same never-green failure ORPHANED was demoted for.
+        #
+        # THREE CONDITIONS, all required, in fail-closed order: a started job
+        # (or an unreadable job list, -1) keeps the DISPATCHED scream; an
+        # UNPARSEABLE created_at keeps it too — age_exceeds answers TRUE on a
+        # date it cannot read, and here TRUE would silence a finding, so the
+        # parse is demanded first exactly as it is in the depth slice above; and
+        # the age is measured against PHANTOM_QUEUE_HOURS, not
+        # STALE_QUEUE_HOURS, so raising that knob restores the scream.
+        say "$line  PHANTOM (queued > ${PHANTOM_QUEUE_HOURS}h; $qjobs job row(s), NONE ever started — GitHub refuses cancel on this shape). No remedy; counted in phantom-queued only."
+        PHANTOM_NEVER_STARTED_ROWS=$((PHANTOM_NEVER_STARTED_ROWS + 1))
       elif [ "$qjobs" != "0" ]; then
         # Dispatched outranks dormancy: cancel works on ANY head, live, dormant
         # or dead, and a dispatched queued run is holding a runner slot.
@@ -783,6 +862,9 @@ if [ "$STALE_ROWS" -gt 0 ]; then
   say "VERDICT  queue limb   : SCREAM — $STALE_ROWS queued run(s) older than ${STALE_QUEUE_HOURS}h with a live remedy (re-run or cancel)"
 else
   say "VERDICT  queue limb   : clean — no actionable queued run is older than ${STALE_QUEUE_HOURS}h"
+fi
+if [ "$PHANTOM_NEVER_STARTED_ROWS" -gt 0 ]; then
+  say "NOTICE   queue limb   : $PHANTOM_NEVER_STARTED_ROWS queued run(s) whose job rows NEVER started — dispatched on paper, undispatched in fact, and GitHub refuses cancel on them. No remedy exists; already inside phantom-queued."
 fi
 if [ "$ORPHAN_ROWS" -gt 0 ]; then
   say "NOTICE   queue limb   : $ORPHAN_ROWS orphaned run record(s) — undispatchable, on heads no open PR or main carries. No remedy exists; kept as the audit trail of the class."
