@@ -25,7 +25,11 @@
 #                   • lifecycle_status == done with a claim.closed_by, or
 #                   • lifecycle_status == open with a claim that was still LIVE
 #                     when this PR was opened (the TTL sweeper reaped it while
-#                     the PR sat in review)
+#                     the PR sat in review), or
+#                   • lifecycle_status == open with a LIVE claim.worker and a
+#                     stage fingerprint (content.disposition /
+#                     content.disposition_rerun) — `bp task stage` moves a task
+#                     back to open without touching content.claim
 #                 (and the actor matches EXPECTED_WORKER when that is set)
 #     1  fail   — a DEFINITIVE violation: no task ref, task not found, task
 #                 open and never claimed (or lapsed BEFORE the PR was opened),
@@ -446,7 +450,23 @@ esac
 # than comparing against a guess), and `open_lead` is claim.expired_at minus the
 # PR's created_at in whole seconds: >= 0 means the claim was still LIVE when the
 # PR was opened, < 0 means it had already lapsed by then (see the `open` branch).
-IFS=$'\t' read -r found lifecycle worker closed_by claimed prev_worker lapse_age released_ge_expired pr_open_state open_lead < <(python3 - "$tmp" <<'PY'
+#
+# `staged` is the THIRD WRITER's fingerprint (see the `open` branch). It is
+# "yes" only when the document carries a non-empty content.disposition or
+# content.disposition_rerun — the two keys the raw /v1/data/mutate door REFUSES
+# to change on a type:task (Barkpark.Content.Mutations.ensure_disposition_via_verb/4,
+# api/lib/barkpark/content/mutations.ex, @disposition_key / @disposition_rerun_key),
+# naming `bp task stage` as the only writer. Their presence is therefore
+# positive evidence that Barkpark.Tasks.Stage wrote on this row.
+#
+# content.disposition_reason is DELIBERATELY NOT in the fingerprint even though
+# stage writes it too (Stage.apply_durable_reason/2): it is not fenced by that
+# raw door, and TtlSweeper.apply_lapse independently PROMOTES a legacy
+# engagement.note into it (api/lib/barkpark/tasks/stage.ex moduledoc, "The
+# durable/ephemeral split"). A key with more than one writer cannot attribute
+# anything, so it is treated as absent — a narrower fingerprint than the filing
+# asked for, and the only one the code supports.
+IFS=$'\t' read -r found lifecycle worker closed_by claimed prev_worker lapse_age released_ge_expired pr_open_state open_lead staged < <(python3 - "$tmp" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
 
@@ -496,13 +516,13 @@ try:
     with open(sys.argv[1]) as f:
         d = json.load(f)
 except Exception:
-    emit("error", ".", ".", ".", "no", ".", ".", "unknown", pr_open_state, ".")
+    emit("error", ".", ".", ".", "no", ".", ".", "unknown", pr_open_state, ".", "no")
     sys.exit(0)
 doc = d.get("result")
 if isinstance(doc, list):
     doc = doc[0] if doc else None
 if not isinstance(doc, dict) or not doc.get("_id"):
-    emit("missing", ".", ".", ".", "no", ".", ".", "unknown", pr_open_state, ".")
+    emit("missing", ".", ".", ".", "no", ".", ".", "unknown", pr_open_state, ".", "no")
     sys.exit(0)
 raw = doc.get("claim")
 claim = raw if isinstance(raw, dict) else {}
@@ -524,6 +544,17 @@ open_lead = "."
 if expired_at is not None and pr_opened_at is not None:
     open_lead = int((expired_at - pr_opened_at).total_seconds())
 
+# The stage fingerprint. Read at the TOP LEVEL of the document, exactly where
+# lifecycle_status and claim are read: /v1/data/doc flattens content, so a
+# content key arrives beside them. Only the two verb-fenced keys count, and only
+# when non-empty — a key present as null or "" attributes nothing.
+def stage_key(name):
+    v = doc.get(name)
+    return isinstance(v, str) and v.strip() != ""
+
+
+staged = "yes" if (stage_key("disposition") or stage_key("disposition_rerun")) else "no"
+
 emit("found",
      doc.get("lifecycle_status") or ".",
      claim.get("worker") or ".",
@@ -533,7 +564,8 @@ emit("found",
      lapse_age,
      released_ge_expired,
      pr_open_state,
-     open_lead)
+     open_lead,
+     staged)
 PY
 )
 
@@ -599,52 +631,88 @@ case "$lifecycle" in
     # Every clause below is load-bearing; each one is a fixture in
     # scripts/pr-task-gate.test.sh.
     [ "$claimed" = "yes" ] || fail "task '${TASK_ID}' is still 'open' and carries no claim at all — it was never claimed, so this PR was not opened under a live claim. ${CURE}"
-    [ "$worker" = "." ] || fail "task '${TASK_ID}' is 'open' but its claim still names worker '${worker}' — that mixed state does not come from the claim/close engine (a reap nulls the worker). ${CURE}"
-    [ "$prev_worker" != "." ] || fail "task '${TASK_ID}' is still 'open' — its claim carries no previous_worker, so it was never claimed and reaped. ${CURE}"
-    [ "$lapse_age" != "." ] || fail "task '${TASK_ID}' is 'open' with a previous_worker but no readable claim.expired_at, so how long ago the claim lapsed cannot be established. ${CURE}"
-    # THE ORDERING CLAUSE. Release MERGES into the surviving claim — it stamps
-    # released_by/released_at and never previous_worker — so a task that was
-    # reaped, re-claimed, then voluntarily RELEASED still carries the old
-    # expired_at and would read as "just lapsed" without this. A release is a
-    # worker walking away, which is exactly the state the gate exists to red.
-    # Only an explicit "no" (released_at is absent or predates the reap) passes.
-    [ "$released_ge_expired" = "no" ] || fail "task '${TASK_ID}' is 'open' because its claim was RELEASED (released_at is at or after expired_at), not because a lease lapsed under a live PR — a released task is unowned. ${CURE}"
-    # THE FUTURE-CLOCK FLOOR. A reap can never stamp an expiry ahead of the
-    # clock — the sweeper only reaps a claim whose expiry has already passed —
-    # so a negative age is not "very recently lapsed"; it is a clock or a
-    # document the gate cannot trust, and the epic's rule for that is red, never
-    # pass. Kept under P4 because P4 is PR-relative and would otherwise accept
-    # any expiry stamped far enough forward: a one-field document edit would buy
-    # an indefinite waiver. -300s of slack absorbs honest runner/ledger skew.
-    [ "$lapse_age" -ge -300 ] || fail "task '${TASK_ID}' is 'open' and its claim.expired_at is ${lapse_age#-}s in the FUTURE — a reap cannot stamp a future expiry, so this document (or one of the two clocks) cannot be trusted to say when the claim lapsed. ${CURE}"
-    # THE LEASE PREDICATE, P4 (charter D58): the claim was LIVE when this PR was
-    # OPENED — claim.expired_at >= pull_request.created_at. It replaces the old
-    # wall-clock grace, which made the verdict a function of how long a PR sat in
-    # review: the same PR went green in the morning and red in the afternoon
-    # having changed nothing, and 8 of 15 open PRs were red for that reason
-    # alone. P4 has no tunable number in it, so there is no number to be wrong
-    # about, and its answer for a given PR never changes.
+    # THE THIRD WRITER (task-19674fbd76242b63). The old single clause here read
+    # "that mixed state does not come from the claim/close engine (a reap nulls
+    # the worker)" and refused every open-with-a-worker row. That assertion is
+    # TRUE and INCOMPLETE: it is scoped to the claim/close engine, and
+    # `bp task stage` is a third writer that is not bound by it. Stage moves
+    # lifecycle_status under the same advisory lock and DELIBERATELY never
+    # touches content.claim (api/lib/barkpark/tasks/stage.ex: "do_stage never
+    # touches content.claim", moduledoc; do_stage/5 writes lifecycle_status plus
+    # the adjudication keys and nothing else), so its legal done->open,
+    # cancelled->open, blocked->open and in_progress->open edges all leave
+    # claim.worker standing. A 7,051-row audit found 9 rows in this shape and
+    # zero write-path defects: this was a READER defect. PR #13154 sat blocked
+    # on it for hours.
     #
-    # THE COST, stated rather than smuggled: P4 certifies "this PR was opened
-    # under a live claim", NOT "the task is still being worked". A PR opened
-    # under a live claim therefore passes forever, however long it then sits.
-    # That is a real narrowing of what the gate asserts, accepted with eyes open
-    # — the alternative on offer was a predicate whose verdict decays with the
-    # wall clock, which is the contamination this epic exists to remove.
+    # The remedy is a POSITIVE fingerprint, not a relaxation. `staged` is "yes"
+    # only when the document carries content.disposition or
+    # content.disposition_rerun — the two keys whose raw /v1/data/mutate door is
+    # closed by ensure_disposition_via_verb/4, which names `bp task stage` as the
+    # writer to retry through. Nothing but Barkpark.Tasks.Stage can have written
+    # them, so their presence attributes a write by that verb to this row.
     #
-    # Refuse, never fall open, when the PR's open time is unreadable: without it
-    # the only honest answer is "the gate cannot tell", and a gate that cannot
-    # tell must not certify. This is scoped to THIS branch because it is the only
-    # one whose decision needs the comparison — in_progress and done are decided
-    # from the document alone and refusing them would red PRs the gate can read.
-    case "$pr_open_state" in
-      absent)      fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT was not supplied, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read. The workflow passes it as PR_OPENED_AT: \${{ github.event.pull_request.created_at }} (.github/workflows/pr-task-gate.yml)" ;;
-      unparseable) fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT ('${PR_OPENED_AT:-}') is not a readable ISO-8601 timestamp, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read" ;;
-    esac
-    [ "$open_lead" != "." ] || fail "task '${TASK_ID}' is 'open' and the gate could not compare claim.expired_at with this PR's open time, so whether the claim was live when the PR opened cannot be established. ${CURE}"
-    [ "$open_lead" -ge 0 ] || fail "task '${TASK_ID}' is 'open': the claim by '${prev_worker}' had ALREADY lapsed ${open_lead#-}s before this PR was opened, so this PR was not opened under a live claim. ${CURE}"
-    actor="$prev_worker"
-    verdict="open, but the claim by '${prev_worker}' was still live when this PR was opened (it lapsed ${open_lead}s after, and was reaped ${lapse_age}s ago)"
+    # WHAT THIS DOES NOT CLAIM, stated rather than smuggled: the fingerprint
+    # proves stage wrote HERE, not that stage performed THIS transition. A
+    # document could in principle carry an old adjudication and then be
+    # hand-flipped. That residual is accepted because the arm it opens is no
+    # weaker than the in_progress arm directly above — an open row whose claim
+    # still names a worker holds a LIVE claim (both engine paths that free a
+    # claim, TtlSweeper.apply_reap/1 and Release.apply_release_update/2, write
+    # worker->nil), so the actor is that worker, exactly as in_progress decides.
+    # Everything the gate CANNOT attribute to stage still reds: the clause below
+    # is a positive test, and its absence is a refusal.
+    if [ "$worker" != "." ]; then
+      [ "$staged" = "yes" ] || fail "task '${TASK_ID}' is 'open' but its claim still names worker '${worker}' — and the gate cannot attribute that mixed state to any sanctioned writer. It does not come from the claim/close engine (a reap and a release both null the worker), and it cannot be attributed to bp task stage either: stage legitimately produces this state — it moves lifecycle_status while never touching content.claim — but a stage stamps content.disposition / content.disposition_rerun, the two keys the raw mutate door refuses, and this row carries neither. So this reads as a hand-flip of lifecycle_status (bp doc patch), not as a staged row. If the row really was staged, re-stage it through the verb with an adjudication (bp task stage ${TASK_ID} open --disposition open --note <why>). ${CURE}"
+      actor="$worker"
+      verdict="open with a live claim by '${worker}', staged back into the ready backlog by bp task stage (the row carries content.disposition / content.disposition_rerun, which only that verb can write)"
+    else
+      [ "$prev_worker" != "." ] || fail "task '${TASK_ID}' is still 'open' — its claim carries no previous_worker, so it was never claimed and reaped. ${CURE}"
+      [ "$lapse_age" != "." ] || fail "task '${TASK_ID}' is 'open' with a previous_worker but no readable claim.expired_at, so how long ago the claim lapsed cannot be established. ${CURE}"
+      # THE ORDERING CLAUSE. Release MERGES into the surviving claim — it stamps
+      # released_by/released_at and never previous_worker — so a task that was
+      # reaped, re-claimed, then voluntarily RELEASED still carries the old
+      # expired_at and would read as "just lapsed" without this. A release is a
+      # worker walking away, which is exactly the state the gate exists to red.
+      # Only an explicit "no" (released_at is absent or predates the reap) passes.
+      [ "$released_ge_expired" = "no" ] || fail "task '${TASK_ID}' is 'open' because its claim was RELEASED (released_at is at or after expired_at), not because a lease lapsed under a live PR — a released task is unowned. ${CURE}"
+      # THE FUTURE-CLOCK FLOOR. A reap can never stamp an expiry ahead of the
+      # clock — the sweeper only reaps a claim whose expiry has already passed —
+      # so a negative age is not "very recently lapsed"; it is a clock or a
+      # document the gate cannot trust, and the epic's rule for that is red, never
+      # pass. Kept under P4 because P4 is PR-relative and would otherwise accept
+      # any expiry stamped far enough forward: a one-field document edit would buy
+      # an indefinite waiver. -300s of slack absorbs honest runner/ledger skew.
+      [ "$lapse_age" -ge -300 ] || fail "task '${TASK_ID}' is 'open' and its claim.expired_at is ${lapse_age#-}s in the FUTURE — a reap cannot stamp a future expiry, so this document (or one of the two clocks) cannot be trusted to say when the claim lapsed. ${CURE}"
+      # THE LEASE PREDICATE, P4 (charter D58): the claim was LIVE when this PR was
+      # OPENED — claim.expired_at >= pull_request.created_at. It replaces the old
+      # wall-clock grace, which made the verdict a function of how long a PR sat in
+      # review: the same PR went green in the morning and red in the afternoon
+      # having changed nothing, and 8 of 15 open PRs were red for that reason
+      # alone. P4 has no tunable number in it, so there is no number to be wrong
+      # about, and its answer for a given PR never changes.
+      #
+      # THE COST, stated rather than smuggled: P4 certifies "this PR was opened
+      # under a live claim", NOT "the task is still being worked". A PR opened
+      # under a live claim therefore passes forever, however long it then sits.
+      # That is a real narrowing of what the gate asserts, accepted with eyes open
+      # — the alternative on offer was a predicate whose verdict decays with the
+      # wall clock, which is the contamination this epic exists to remove.
+      #
+      # Refuse, never fall open, when the PR's open time is unreadable: without it
+      # the only honest answer is "the gate cannot tell", and a gate that cannot
+      # tell must not certify. This is scoped to THIS branch because it is the only
+      # one whose decision needs the comparison — in_progress and done are decided
+      # from the document alone and refusing them would red PRs the gate can read.
+      case "$pr_open_state" in
+        absent)      fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT was not supplied, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read. The workflow passes it as PR_OPENED_AT: \${{ github.event.pull_request.created_at }} (.github/workflows/pr-task-gate.yml)" ;;
+        unparseable) fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT ('${PR_OPENED_AT:-}') is not a readable ISO-8601 timestamp, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read" ;;
+      esac
+      [ "$open_lead" != "." ] || fail "task '${TASK_ID}' is 'open' and the gate could not compare claim.expired_at with this PR's open time, so whether the claim was live when the PR opened cannot be established. ${CURE}"
+      [ "$open_lead" -ge 0 ] || fail "task '${TASK_ID}' is 'open': the claim by '${prev_worker}' had ALREADY lapsed ${open_lead#-}s before this PR was opened, so this PR was not opened under a live claim. ${CURE}"
+      actor="$prev_worker"
+      verdict="open, but the claim by '${prev_worker}' was still live when this PR was opened (it lapsed ${open_lead}s after, and was reaped ${lapse_age}s ago)"
+    fi
     ;;
   *)
     fail "task '${TASK_ID}' is '${lifecycle}' — only 'in_progress' (claimed) or 'done' (closed through the engine) back a change"
