@@ -40,3 +40,4 @@ scripts/stale-verdict-watch.test.sh 2 HARNESS fixtures for stale-verdict-watch.s
 scripts/check-deploy-smoke.sh 1 PROSE the single match is an error string quoting deploy.yml's anchor
 scripts/check-deployyml-filters.sh 1 PROSE the single match is an error string quoting deploy.yml's anchor
 scripts/run-level-reader-census.sh 8 CENSUS its own SRC_RE/READ_RE patterns and the readers its --selftest plants; adjudicated, never excluded from its own walk
+scripts/ci-measure.sh 6 JOB-LEVEL the CI measurement harness (task-ee3fc32d1615bd58): reads repos/<r>/actions/runs only to ENUMERATE run ids for a window (lines 291-305), then descends to /runs/<id>/jobs and counts per-JOB conclusions (line 149, 308-309); it answers nothing pass/fail, it tallies job-minutes and reds for the CI-diet report. Lines 330-331 are fixture rows for its own selftest.

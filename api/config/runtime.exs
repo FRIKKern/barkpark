@@ -604,8 +604,7 @@ for {env_name, config_key} <- [
       {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
     ] do
   entries =
-    env_name
-    |> System.get_env("")
+    System.get_env(env_name, "")
     |> String.split(",")
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
