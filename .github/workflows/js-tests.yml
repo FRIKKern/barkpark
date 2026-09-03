@@ -55,18 +55,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # cache: pnpm needs pnpm on PATH first, hence the reorder above
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Cache turbo task outputs (js/.turbo)
+        # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
+        # change; without this cache every PR run started cold. Key on the lockfile +
+        # sha, restore the newest prefix match (task-4e377262789d8fd3).
+        uses: actions/cache@v4
+        with:
+          path: js/.turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('js/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('js/pnpm-lock.yaml') }}-
+            turbo-${{ runner.os }}-
 
       - name: Build
         run: pnpm build
@@ -109,8 +124,8 @@ jobs:
       # where an empty project passes as long as a sibling project has files.
       # @barkpark/nextjs therefore runs its two projects as separate commands
       # (see its package.json `test`), and no config may set passWithNoTests.
-      - name: Test
-        run: pnpm test
+      - name: Test (one run, with coverage — the advisory duplicate run is gone)
+        run: pnpm test -- --coverage
 
       # @barkpark/core advertises edge/worker runtime support, and the two files
       # that look like the proof of that claim were the two that never ran: `pnpm
@@ -186,10 +201,6 @@ jobs:
       # presence proxy. The `json` reporter is configured in each package's
       # vitest.config.ts; turbo's test task already declares coverage/** outputs.
       # Never blocks — coverage is an observability signal, not a merge gate.
-      - name: "JS coverage (ADVISORY — feeds codebase-quality tooling)"
-        continue-on-error: true
-        run: pnpm test -- --coverage
-
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -210,15 +221,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # cache: pnpm needs pnpm on PATH first, hence the reorder above
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile
