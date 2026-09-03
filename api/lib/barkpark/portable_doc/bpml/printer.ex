@@ -336,6 +336,37 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("lineage", attr_str(b, ["id"]), nodes, d)
   end
 
+  # `card` — the composition-doctrine SPLIT of the `cards` grid: one standalone
+  # widget whose body is a map of NAMED SLOTS (title/body/action/media), each a
+  # block list. Slots print in KEY ORDER so the second print is byte-stable and
+  # no slot is ever dropped, whatever a future producer names it.
+  #
+  # Nested rather than top-level, this is the corpus's single biggest refusal —
+  # 133 of the 1006 block-bearing papers, invisible to a top-level type census
+  # because a `card` lives inside a grid `section`.
+  defp block(%{"type" => "card"} = b, d) do
+    slots =
+      (Map.get(b, "slots") || %{})
+      |> Enum.sort_by(fn {name, _} -> name end)
+      |> Enum.map(fn {name, blocks} ->
+        children = Enum.map(List.wrap(blocks), &block(&1, d + 2))
+        wrap("slot", attr_str(%{"name" => name}, ["name"]), children, d + 1)
+      end)
+
+    wrap("card", attr_str(b, ["id", "tone", "span"]), slots, d)
+  end
+
+  # `quote` — the pre-`blockquote` spelling agents authored through raw mutate
+  # (compose.ex renders it BY aliasing to blockquote). Same shape, own tag, so
+  # the stored `"type" => "quote"` survives a pull/push unchanged.
+  defp block(%{"type" => "quote"} = b, d) do
+    cite = plain_alias(b, ["cite", "attribution"])
+
+    pad(d) <>
+      "<quote#{attr_str(%{"id" => Map.get(b, "id"), "cite" => cite}, ["id", "cite"])}>" <>
+      inline(alias_get(b, ["content", "text"]) || []) <> "</quote>"
+  end
+
   # `chart` — a line/area plot. The axis bounds and every series point are
   # NUMBERS and print as numbers, so a pull/push does not retype them into
   # strings. `xLabels` rides one comma-joined attribute (no corpus label holds
@@ -495,7 +526,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   #                  as three sibling `strong` nodes prints as one `<b>` too
   #                  (2 papers churned on exactly that until this pass existed).
   #   `inline_run/2` walks that flat list and opens each shared mark once.
-  defp inline(content), do: content |> expand([]) |> inline_run([])
+  # A ZERO-LENGTH run carries no characters, so the mark around it wraps
+  # nothing: `%{"marks" => ["strong"], "value" => ""}` printed `<b></b>`, the
+  # parser (correctly) returned no node for it, and the second print dropped
+  # the tag — the round trip churned on an untouched paper. The empty run is
+  # dropped HERE, where the canonical spelling is decided, not in the parser.
+  defp inline(content),
+    do: content |> expand([]) |> Enum.reject(&match?({_marks, ""}, &1)) |> inline_run([])
 
   # ── pass 1: every inline spelling → {marks, body} ───────────────────────────
 
@@ -566,7 +603,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # Only a TEXT node carries a `marks` list. A value that is not a list used to
   # reach `Enum.reverse/1` and escape as a raw 500; it takes the ONE typed
   # refusal instead.
-  defp node_marks(%{"marks" => marks}) when is_list(marks), do: marks
+  defp node_marks(%{"marks" => marks}) when is_list(marks), do: Enum.map(marks, &mark_name/1)
   defp node_marks(%{"marks" => nil}), do: []
   defp node_marks(%{"marks" => _other}), do: raise(UnprintableError.new(:mark, nil))
   defp node_marks(_n), do: []
@@ -611,11 +648,34 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       else: {group, tail}
   end
 
+  # A mark is spelled TWO ways in the corpus: a bare name ("strong" 1133,
+  # "code" 3771, "em" 53, "italic" 50) and a NODE-shaped map ({"type" =>
+  # "code"} 3578, {"type" => "bold"} 3005, {"type" => "italic"} 172). The map
+  # spelling reached `Enum.reverse/1`-shaped code as an opaque term and took
+  # the typed refusal, so 76 papers refused on a mark the renderer draws
+  # perfectly. A BARE map carrying only its type is that same mark; a map
+  # carrying anything else (a link mark's `href`/`attrs`) is a second payload
+  # this position has no room for and KEEPS refusing.
+  defp mark_name(m) when is_binary(m), do: m
+
+  defp mark_name(%{"type" => t} = m) when is_binary(t) do
+    if map_size(Map.delete(m, "type")) == 0,
+      do: t,
+      else: raise(UnprintableError.new(:mark, t))
+  end
+
+  defp mark_name(_other), do: raise(UnprintableError.new(:mark, nil))
+
   defp mark_tag("strong"), do: "b"
   defp mark_tag("em"), do: "i"
   defp mark_tag("code"), do: "code"
   defp mark_tag("underline"), do: "u"
   defp mark_tag("strike"), do: "s"
+  # The corpus's HTML-ish aliases for the same two marks; the parser returns
+  # the canonical name, so a `bold` mark canonicalizes to `strong` on push the
+  # way an alias KEY canonicalizes (`alias_get`'s contract, one level down).
+  defp mark_tag("bold"), do: "b"
+  defp mark_tag("italic"), do: "i"
 
   defp mark_tag(other) when is_binary(other) or is_atom(other),
     do: raise(UnprintableError.new(:mark, other))

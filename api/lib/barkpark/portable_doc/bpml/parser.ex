@@ -38,7 +38,12 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "paper-links" => ~w(id title description layout),
     "ref" => ~w(slug title eyebrow meta reason featured prefer_authored_copy),
     "cards" => ~w(id),
-    "card" => ~w(title tone),
+    # ONE `<card>` element, two positions: a `<cards>` grid item (title/tone +
+    # a text body) and the standalone `card` WIDGET (id/tone/span + named
+    # <slot> children). The tag's row is the union of both.
+    "card" => ~w(id title tone span),
+    "slot" => ~w(name),
+    "quote" => ~w(id cite),
     "terminal" => ~w(id title footer live),
     "action" => ~w(id label href priority),
     "pipeline" => ~w(id),
@@ -83,7 +88,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards terminal action pipeline stat-grid blockquote toc bar-chart lineage chart)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart)
 
   @inline_marks %{
     "b" => "strong",
@@ -383,6 +388,66 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
     with {:ok, items, cur} <- child_seq("cards", "card", sc, cur, builder) do
       {:ok, %{"type" => "cards", "items" => items} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # `card` — the standalone widget: named SLOTS, each a block list, read back
+  # into the stored `slots` map. `<slot>` is also a block tag so a slot's
+  # children recurse through the same `block_seq` a `section`'s do.
+  defp build_block("card", attrs, sc, cur) do
+    builder = fn slot_attrs, sc, cur ->
+      name =
+        case List.keyfind(slot_attrs, "name", 0) do
+          {"name", n} -> n
+          nil -> ""
+        end
+
+      if sc do
+        {:ok, {name, []}, cur}
+      else
+        {blocks, errors, cur} = block_seq(cur, "slot")
+
+        case expect_close("slot", cur, errors) do
+          {[], cur} -> {:ok, {name, blocks}, cur}
+          {errors, cur} -> {:error, errors, cur}
+        end
+      end
+    end
+
+    with {:ok, pairs, cur} <- child_seq("card", "slot", sc, cur, builder) do
+      block =
+        %{"type" => "card", "slots" => Map.new(pairs)}
+        |> put_attr("id", attrs)
+        |> put_attr("tone", attrs)
+        |> put_num_attr("span", attrs)
+
+      {:ok, block, cur}
+    end
+  end
+
+  # A bare `<slot>` outside a `<card>` is a shape error, not a block: it is in
+  # `@known_block_tags` only so a slot's own children parse through block_seq.
+  defp build_block("slot", _attrs, sc, cur) do
+    {:skip,
+     [
+       err(
+         "orphan-slot",
+         "<slot> is valid only inside <card>",
+         line(cur),
+         "wrap it: <card><slot name=\"body\">…</slot></card>"
+       )
+     ], consume_element("slot", sc, cur)}
+  end
+
+  # `quote` — the pre-`blockquote` spelling, same shape, own type.
+  defp build_block("quote", attrs, sc, cur) do
+    with {:ok, nodes, cur} <- tag_inline("quote", sc, cur) do
+      block =
+        %{"type" => "quote", "content" => nodes}
+        |> put_attr("id", attrs)
+        |> put_attr("cite", attrs)
+
+      {:ok, block, cur}
     end
   end
 
@@ -1296,8 +1361,14 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {Enum.reverse(acc), cur}
 
       _ ->
+        # UNDERSCORES are part of an attribute NAME. The corpus spells one
+        # (`prefer_authored_copy`, 27 paper-links refs) and the name stopped at
+        # the `_`, leaving the lexer mid-tag: the whole paper failed with
+        # `malformed tag <ref …` rather than on anything the author wrote.
         {name, cur2} =
-          take_while(cur, [], fn c -> c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?- end)
+          take_while(cur, [], fn c ->
+            c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?- or c == ?_
+          end)
 
         case {name, cur2} do
           {"", _} ->
