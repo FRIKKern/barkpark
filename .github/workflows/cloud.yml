@@ -33,7 +33,9 @@ on:
     branches: [main]
 
 concurrency:
-  group: cloud-${{ github.ref }}
+  # per-sha on main: a per-ref group evicts the PENDING main run when the next merge lands,
+  # so the older sha never gets a verdict (same fix as security.yml; measured 2026-09-02).
+  group: cloud-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
   # otherwise starves the suite (2026-06-10: 19 consecutive main runs
   # cancelled, zero completions all day). Queued main runs collapse to one.
