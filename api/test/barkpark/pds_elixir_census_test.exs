@@ -53,6 +53,55 @@ defmodule Barkpark.PdsElixirCensusTest do
   actually cost and they are the baseline this change is measured against — they
   are not a description of today's run.
 
+  ## CONCURRENCY WAS NOT THE LEVER, AND SAYING SO IS THE POINT
+
+  Spawning the four arms together bought NOTHING on the CI runner and the wave-47
+  prose above does not say so. THE MEASUREMENT, NOT A STORY ABOUT CORE COUNTS: the
+  arms are CPU-bound and `ubuntu-latest` has few cores to spare, but this file does
+  not know how many and does not claim to — what it knows is that the gap did not
+  move. Measured on main by the team lead with `scripts/ci-log-gap-census.sh`, the
+  module's silent gap in the required Test job's log read 38,1 s BEFORE the
+  concurrency change (run 33720395852) and 38,1 s / 39,5 s AFTER it (runs
+  33739945118 / 33768348712). A wall-clock win on a machine with cores to spare is
+  not a win on the machine that runs the gate.
+
+  THE LEVER WAS THE CENSUS'S OWN PRICE. `report_depth_sweep/2` and the LiveView
+  depth sweep each answered the same reachability question at 12 budgets by
+  re-walking the call graph from scratch 12 times; 11 of those 12 walks were
+  re-derivations of a walk already taken. `bfs_budgets/3` in the census now reads
+  every budget off ONE walk (see the comment above it, and the 0-1 queue rule that
+  makes the reduction exact rather than approximate).
+
+  METERED IN PAIRS, BECAUSE ON THIS BOX AN UNPAIRED FIGURE IS A FIGURE ABOUT THE
+  NEIGHBOURS. load1 swung 16 to 95 over the session; the very first wall pair taken
+  here read 144 s before / 175 s AFTER — the change "made it slower" — because the
+  after-run raced a dependency compile. Everything below alternates A/B/A/B so the
+  drift lands on both sides. Whole module, four arms, OS user CPU summed
+  (`/usr/bin/time -p`, one arm at a time): 76,44 s -> 45,97 s, ratio 0,60. The
+  census's own in-BEAM `user cpu` line over three paired trials: 0,709 / 0,583 /
+  0,517. The whole process under `+S 1:1 +sbwt none` (one scheduler, no busy wait)
+  over two paired trials: 0,508 / 0,632. Six pairs, three meters, 0,51-0,71,
+  centred on ~0,60 — about 40 percent off the module's CPU. THE CONTROL IS THE ARGV
+  ARM: this change cannot touch it (it refuses before any census work), and its own
+  figure moved 6,17 -> 3,55 s on pure noise, which is how much of any single number
+  here is load.
+
+  THIS MODULE, BY ExUnit'S OWN `Finished in`, paired, warm build, load1 18-23:
+  58,7 -> 29,4 s and 52,3 -> 30,3 s. That halving is a TEN-CORE box, where the four
+  concurrent arms do have cores to run on; do not carry it to CI. `--slowest 5` is
+  BLIND to all of it and saying so is the point: every one of the four tests reports
+  0,0-104 ms because the whole price is in `setup_all`, which ExUnit attributes to
+  no test at all. The module's price is `Finished in`, never the slowest list.
+
+  WHAT IT DID NOT BUY: the census still prints exactly what it printed. The whole
+  api/lib census output is BYTE-IDENTICAL before and after, save the census's own
+  `user cpu` line, which it labels THE ONE VOLATILE LINE itself.
+
+  AND THE CI FIGURE IS NOT MEASURED HERE. This module's gap on a main run can only
+  be read off a main run's Test log; a local box cannot produce it. The command is
+  `bash scripts/ci-log-gap-census.sh <Test job log>` against the first green main
+  run after this merges.
+
   ## Why the assertions are on prose, never on numbers
 
   `CENSUS OK` and `FAIL  CLASSIFICATION-TOTAL` are the census's own verdict
@@ -136,6 +185,14 @@ defmodule Barkpark.PdsElixirCensusTest do
   # — 22,7 + 21,9 + 17,8 s, 62,4 s of the run's 111,6 s of >= 10 s gaps
   # (task-18f209f185f5b3f1). They are now spawned TOGETHER here and awaited, so
   # the module costs one arm's wall clock instead of four.
+  #
+  # AND THAT PARAGRAPH IS TRUE ONLY OF A MACHINE WITH FOUR CORES TO SPARE. The
+  # arms are CPU-bound and the CI runner has no such cores going spare, so the
+  # gate's measured gap did not move at all when they were made concurrent
+  # (38,1 s before, 38,1 / 39,5 s after — figures and runs in the moduledoc's
+  # "CONCURRENCY WAS NOT THE LEVER" section). The concurrency is KEPT because it
+  # costs nothing and helps a developer's laptop; it is not the reason this
+  # module got cheaper.
   #
   # WHAT THIS DOES NOT CHANGE: every arm still runs, over the live corpus, from
   # the root, as its own subprocess, and every assertion below still reads that

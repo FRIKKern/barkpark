@@ -2567,44 +2567,117 @@ defmodule PDS.Census do
       List.first(cands)
   end
 
-  defp bfs([], _index, _seen, verbs, depth, chain, _max), do: {verbs, depth, chain}
+  # ONE WALKER, TWO DOORS. `bfs/7` is the single-budget spelling every caller in this
+  # file still uses and its return is unchanged; `bfs_budgets/3` reads MANY budgets off
+  # ONE walk. They share `bfs_walk/9` rather than carrying two copies of a traversal —
+  # a second copy of this loop is how the two sweeps drift apart under the next edit.
+  defp bfs(queue, index, seen, verbs, found_at, chain, max),
+    do: bfs_walk(queue, index, seen, verbs, found_at, chain, max, [], %{}) |> elem(0)
 
-  defp bfs([{d, depth, path} | rest], index, seen, verbs, found_at, chain, max) do
-    key = {d.module, d.name, d.arity}
+  # ---------------------------------------------------------------- one walk, every budget
+  #
+  # THE DEPTH SWEEPS USED TO WALK THE GRAPH ONCE PER BUDGET. `report_depth_sweep/2` and
+  # the LiveView sweep each ask the SAME question at 12 budgets (1..8, 9, 10, 12, 14), and
+  # each re-ran `bfs/7` from scratch for every one of them — 12 full closures per start
+  # def, of which 11 are re-derivations of a walk that had already been taken. Metered on
+  # this corpus (`:erlang.statistics(:runtime)` around the phases, load stamped): the two
+  # sweeps were 15,5 s of a 28,2 s census run — 55 percent of the price, none of it a new
+  # measurement. The census rides the required Elixir gate FOUR times per run (one plain
+  # arm, two mutant arms, one ARGV arm), so that 15,5 s is paid three times per CI run and
+  # showed up as the largest silent gap in the Test job's log (task-18f209f185f5b3f1).
+  #
+  # WHAT MAKES ONE WALK SOUND, AND IT IS NOT A CONVENIENCE. With the 0-1 rule above the
+  # queue's depths are non-decreasing, so the sequence of nodes a budget-b run processes
+  # is exactly the PREFIX of the budget-B run's sequence consisting of the nodes at depth
+  # <= b: enqueueing is gated only by `depth + step > max`, which differs between the two
+  # runs ONLY for children at depth b+1, and those sort after every node the budget-b run
+  # would ever hold. `seen` therefore evolves identically over that prefix. So snapshotting
+  # {verbs, found_at, chain} at the moment the walk first steps past b IS the budget-b
+  # result — not an approximation of it.
+  #
+  # IT RETURNS THE SAME TRIPLE `bfs/7` RETURNS, one per budget, and nothing downstream
+  # learns a new shape. `bfs/7` and `lv_bfs/3` are UNCHANGED in signature and still the
+  # single-budget spelling — including the exact `bfs([{d, 0, [label(d)]}], …` text the
+  # census's own `--selftest` pins a mutation anchor on.
+  defp bfs_budgets(queue, index, budgets) do
+    sorted = budgets |> Enum.uniq() |> Enum.sort()
 
-    if MapSet.member?(seen, key) do
-      bfs(rest, index, seen, verbs, found_at, chain, max)
-    else
-      seen = MapSet.put(seen, key)
-      hits = verb_hits(d)
-      # every function the route actually entered — the evidence the shape test reads
-      verbs = Map.update(verbs, :visited, [d], &[d | &1])
+    {_final, out} =
+      bfs_walk(queue, index, MapSet.new(), %{}, nil, [], List.last(sorted), sorted, %{})
 
-      verbs =
-        Enum.reduce(hits, verbs, fn {kind, verb, line}, acc ->
-          Map.update(acc, kind, [{verb, line, d.path, depth}], &[{verb, line, d.path, depth} | &1])
-        end)
+    out
+  end
 
-      {found_at, chain} =
-        if found_at == nil and Map.has_key?(verbs, :write),
-          do: {depth, path},
-          else: {found_at, chain}
+  defp bfs_walk([], _index, _seen, verbs, found_at, chain, _max, pending, out),
+    do:
+      {{verbs, found_at, chain},
+       Enum.reduce(pending, out, &Map.put(&2, &1, {verbs, found_at, chain}))}
 
-      # A defdelegate is a RENAME, not a call: it holds no logic that could make the
-      # claim true or false, so following one costs no depth. Charging it a hop is how
-      # a 24-entry facade like Barkpark.Tasks eats the whole budget and reports false.
-      step = if d.delegate, do: 0, else: 1
+  defp bfs_walk([{d, depth, path} | rest] = queue, index, seen, verbs, found_at, chain, max, pending, out) do
+    case pending do
+      # the walk has stepped past `b`; a budget-b run's queue is empty HERE, so this state
+      # is its answer.
+      [b | more] when b < depth ->
+        bfs_walk(queue, index, seen, verbs, found_at, chain, max, more,
+          Map.put(out, b, {verbs, found_at, chain}))
 
-      next =
-        if depth + step > max do
-          []
+      _ ->
+        key = {d.module, d.name, d.arity}
+
+        if MapSet.member?(seen, key) do
+          bfs_walk(rest, index, seen, verbs, found_at, chain, max, pending, out)
         else
-          d
-          |> callees(index)
-          |> Enum.map(&{&1, depth + step, path ++ [label(&1)]})
-        end
+          seen = MapSet.put(seen, key)
+          hits = verb_hits(d)
+          verbs = Map.update(verbs, :visited, [d], &[d | &1])
 
-      bfs(rest ++ next, index, seen, verbs, found_at, chain, max)
+          verbs =
+            Enum.reduce(hits, verbs, fn {kind, verb, line}, acc ->
+              Map.update(acc, kind, [{verb, line, d.path, depth}], &[{verb, line, d.path, depth} | &1])
+            end)
+
+          {found_at, chain} =
+            if found_at == nil and Map.has_key?(verbs, :write),
+              do: {depth, path},
+              else: {found_at, chain}
+
+          step = if d.delegate, do: 0, else: 1
+
+          next =
+            if depth + step > max do
+              []
+            else
+              d
+              |> callees(index)
+              |> Enum.map(&{&1, depth + step, path ++ [label(&1)]})
+            end
+
+          # A ZERO-COST CHILD GOES TO THE FRONT, A ONE-COST CHILD TO THE BACK — THE 0-1 BFS
+          # RULE. `rest ++ next` for both is what a plain FIFO does, and with the `step = 0`
+          # delegate edge above that is NOT breadth-first: a delegate processed at depth k
+          # appended its SAME-DEPTH children behind nodes already queued at depth k+1, so
+          # the queue's depths were not sorted and a key could be `seen`-claimed by a
+          # DEEPER visit than the one that reaches it first. Front-inserting the zero-cost
+          # child restores the sort, which buys the two properties this file now leans on:
+          # `found_at` is the SMALLEST depth at which a write is reached, and a run at
+          # budget b is exactly the PREFIX of a run at budget B > b (see bfs_budgets/3).
+          # PROVEN BY RUN, TWICE, AND THE SECOND RUN IS THE ONE THAT MATTERS.
+          #   (1) Reorder ALONE, sweeps still re-walking per budget: the census's whole
+          #       output over api/lib is BYTE-IDENTICAL to the committed one. The reorder
+          #       is not a lens change — it moved no printed figure.
+          #   (2) Sweeps reading one walk, reorder REMOVED (`queue = rest ++ next`): 16
+          #       lines MOVE. The route sweep reads write 22/24/30/43/50 at depths 1..5
+          #       instead of 22/26/35/44/51, and the LiveView sweep 46/55 instead of 47/61
+          #       at depths 4 and 5 — an UNDERCOUNT at every shallow budget, closing only
+          #       at 6. That is precisely the failure the reorder rules out: a plain FIFO
+          #       let a key be `seen`-claimed by a DEEPER visit, so the snapshot taken at
+          #       budget b had not yet recorded the write that a real budget-b run finds.
+          # So this line is load-bearing for the reduction below, and the reduction is
+          # sound only WITH it. Do not "simplify" it back to one `rest ++ next`.
+          queue = if step == 0, do: next ++ rest, else: rest ++ next
+
+          bfs_walk(queue, index, seen, verbs, found_at, chain, max, pending, out)
+        end
     end
   end
 
@@ -3201,7 +3274,7 @@ defmodule PDS.Census do
     p("THE FLOOR MOVES WITH THE LENS (depth sensitivity — the drift vs PDS-D448 explained)")
     p(String.duplicate("-", 78))
 
-    rows = Enum.map(@sweep ++ @beyond, &sweep_row(emitted, index, &1))
+    rows = sweep_rows(emitted, index, @sweep ++ @beyond)
     {inside, beyond} = Enum.split_with(rows, &(&1.depth <= @max_depth))
 
     Enum.each(inside, fn r ->
@@ -3243,17 +3316,107 @@ defmodule PDS.Census do
     p("")
   end
 
-  defp sweep_row(emitted, index, d) do
-    routed = Enum.map(emitted, &route(&1, index, d))
-    shaped = Enum.map(routed, &classify(&1, index))
+  # ONE ROW PER DEPTH, ONE WALK PER SITE. `sweep_row/3` used to take the whole `emitted`
+  # list and re-`route/3` every site at its own budget — 12 budgets x N sites x a full
+  # `bfs/7` closure each, of which 11 twelfths were re-derivations. `route_budgets/3`
+  # returns route/3's map for EVERY budget off one walk per site (plus one per caller it
+  # actually consults), and the counting below is untouched: same predicates, same
+  # `classify/2`, same order.
+  defp sweep_rows(emitted, index, depths) do
+    per_site = Enum.map(emitted, &route_budgets(&1, index, depths))
 
-    %{
-      depth: d,
-      write: Enum.count(routed, & &1.write?),
-      read: Enum.count(routed, &(not &1.write? and &1.read?)),
-      unrouted: Enum.count(routed, &(not &1.write? and not &1.read?)),
-      post_read: Enum.count(shaped, fn s -> elem(s.shape, 0) == "POST-READ" end)
-    }
+    Enum.map(depths, fn d ->
+      routed = Enum.map(per_site, &Map.fetch!(&1, d))
+      shaped = Enum.map(routed, &classify(&1, index))
+
+      %{
+        depth: d,
+        write: Enum.count(routed, & &1.write?),
+        read: Enum.count(routed, &(not &1.write? and &1.read?)),
+        unrouted: Enum.count(routed, &(not &1.write? and not &1.read?)),
+        post_read: Enum.count(shaped, fn s -> elem(s.shape, 0) == "POST-READ" end)
+      }
+    end)
+  end
+
+  # route/3 AT MANY BUDGETS. Every clause below mirrors route/3 above line for line — the
+  # downward walk, the ONE-HOP-UP caller fallback taken only when the downward walk found
+  # no write, `Enum.reduce_while`'s halt on the FIRST caller that does, and the same merge
+  # and the same keys. What differs is that each walk is taken once and read at every
+  # budget, and that a caller's walk is taken LAZILY and memoised: route/3 consults
+  # callers only for the budgets that need them, and so does this.
+  defp route_budgets(site, index, budgets) do
+    budgets = budgets |> Enum.uniq() |> Enum.sort()
+    start = site.def && resolve_exact(index, site.def)
+
+    downs =
+      case start do
+        nil -> Map.new(budgets, &{&1, {%{}, nil, []}})
+        d -> bfs_budgets([{d, 0, [label(d)]}], index, budgets)
+      end
+
+    # route/3 builds the caller list INSIDE the `if`, so it is not built at all for a site
+    # whose downward walk already found a write. Same here: `callers/2` is only paid when
+    # at least one budget would have asked for it.
+    up =
+      if start && Enum.any?(budgets, &(not Map.has_key?(elem(Map.fetch!(downs, &1), 0), :write))),
+        do: Enum.with_index(callers(start, index)),
+        else: []
+
+    {rows, _cache} =
+      Enum.map_reduce(budgets, %{}, fn b, cache ->
+        {verbs, depth, chain} = Map.fetch!(downs, b)
+
+        {{via, via_verbs}, cache} =
+          if start && not Map.has_key?(verbs, :write) do
+            route_up(up, index, budgets, b, cache)
+          else
+            {{nil, %{}}, cache}
+          end
+
+        merged =
+          Map.merge(via_verbs, verbs, fn
+            :visited, a, c -> a ++ c
+            _k, a, c -> a ++ c
+          end)
+
+        {{b,
+          Map.merge(site, %{
+            verbs: merged,
+            write?: Map.has_key?(merged, :write),
+            read?: Map.has_key?(merged, :read),
+            depth: depth,
+            via_caller: via,
+            chain: chain,
+            owner: start
+          })}, cache}
+      end)
+
+    Map.new(rows)
+  end
+
+  # THE HALT IS THE POINT: the first caller whose walk reaches a write wins, and the rest
+  # are never walked — exactly route/3's reduce_while. The cache is keyed on the caller's
+  # POSITION, never on `label/1`: two clauses of one function share a label and do not
+  # share a body.
+  defp route_up([], _index, _budgets, _b, cache), do: {{nil, %{}}, cache}
+
+  defp route_up([{c, i} | rest], index, budgets, b, cache) do
+    {snap, cache} =
+      case cache do
+        %{^i => s} ->
+          {s, cache}
+
+        _ ->
+          s = bfs_budgets([{c, 1, [label(c)]}], index, budgets)
+          {s, Map.put(cache, i, s)}
+      end
+
+    {v, _, _} = Map.fetch!(snap, b)
+
+    if Map.has_key?(v, :write),
+      do: {{label(c), v}, cache},
+      else: route_up(rest, index, budgets, b, cache)
   end
 
   defp pad(n), do: String.pad_leading(to_string(n), 3)
@@ -5274,9 +5437,32 @@ defmodule PDS.Census do
     p("      the mount count cannot stand in for this one in either direction.")
     p("")
 
+    depths = @lv_sweep ++ @lv_beyond
+
+    # ONE WALK PER CLAUSE, TWELVE ROWS READ OFF IT. This was `lv_bfs(&1, index, depth)`
+    # inside the depth loop — the same closure re-taken at 12 budgets for every
+    # handle_event/3 clause in the corpus, and the largest single phase of a census run
+    # (metered: ~10,5 s of 28,2 s). `bfs_budgets/3` takes it once. The predicate is
+    # unchanged: a clause is a hit at depth d iff its walk holds a :write at budget d,
+    # which is what `elem(lv_bfs(d, index, depth), 0)` asked. `lv_bfs/3` itself is
+    # untouched and still the spelling the other four blocks below use.
+    #
+    # AND THE GUARDS MOVED WITH IT, BECAUSE THE SELFTEST MADE THEM. Two `--selftest`
+    # cases — LIVEVIEW-DEPTH-NOT-CONSTANT and LIVEVIEW-WRITE-FLAG-ARMED — mutated
+    # `lv_bfs/3`, which this block no longer calls, so the first run of this reduction
+    # left both of them unable to reach the thing they assert on. They FAILED, by name,
+    # and their anchors are now on the two expressions below. A refactor that moves code
+    # out from under a mutant and leaves the mutant reporting PASS is the exact vacuity
+    # this instrument exists to refuse; it refused it here, on its own author.
+    reach = Enum.map(pop, fn d -> {d, bfs_budgets([{d, 0, [label(d)]}], index, depths)} end)
+
     rows =
-      Enum.map(@lv_sweep ++ @lv_beyond, fn depth ->
-        hits = Enum.filter(pop, &elem(lv_bfs(&1, index, depth), 0))
+      Enum.map(depths, fn depth ->
+        hits =
+          for {d, snap} <- reach,
+              Map.has_key?(elem(Map.fetch!(snap, depth), 0), :write),
+              do: d
+
         %{depth: depth, full: length(hits), routed: Enum.count(hits, routed?)}
       end)
 
@@ -7088,11 +7274,20 @@ defmodule PDS.Census do
       # corpus UNMUTATED before any mutant runs, so a fixture edit is a function the
       # mutant never calls and passes vacuously. Charging the entry clause one hop less
       # is the same displacement seen from the lens side.
-      # THE ANCHOR CARRIES ITS BINDING. The bare `bfs([{d, 0, …` spelling occurs THREE
+      # THE ANCHOR CARRIES ITS BINDING. The bare `bfs([{d, 0, …` spelling occurs several
       # times in this file — apply_mutation/2 refuses an ambiguous anchor rather than
       # mutating the first one it meets, which is the guard working.
-      mut: {"{verbs, _found, _chain} = bfs([{d, 0" <> ", [label(d)]}], index, MapSet.new(), %{}, nil, [], max)",
-            "{verbs, _found, _chain} = bfs([{d, -1, [label(d)]}], index, MapSet.new(), %{}, nil, [], max)"},
+      #
+      # RE-POINTED WHEN THE SWEEP STOPPED CALLING `lv_bfs/3`. This case used to displace
+      # the start depth inside `lv_bfs/3`; the sweep now reads its twelve rows off ONE
+      # `bfs_budgets/3` walk, so that mutation no longer REACHES the block this case
+      # asserts on and the case went vacuous — it FAILED, loudly, on the run that
+      # introduced the reduction, which is the selftest doing its job. The anchor moved
+      # to the sweep's own walk; the displacement, the expectation and the refutation are
+      # unchanged. `, index, depths)` is what makes it unique: `route_budgets/3` spells
+      # the same call with `, index, budgets)`.
+      mut: {"bfs_budgets([{d, 0" <> ", [label(d)]}], index, depths)",
+            "bfs_budgets([{d, -1, [label(d)]}], index, depths)"},
       exit: 0,
       expect: ["1 / 4  (25.0%)    1 / 5  (20.0%)   <- @max_depth, the census budget"],
       refute: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
@@ -7105,8 +7300,13 @@ defmodule PDS.Census do
       # THE OTHER DIRECTION, AND THE ONE THAT WAS MEASURED VACUOUS. Forcing the write
       # flag false made every LiveView depth cell read 0 and the census STILL exited 0
       # with CENSUS OK — nothing in the selftest could see it. It can now.
-      mut: {"{Map.has_key?(verbs, :write)" <> ", Map.get(verbs, :visited, [])}",
-            "{false, Map.get(verbs, :visited, [])}"},
+      #
+      # RE-POINTED FOR THE SAME REASON AS THE CASE ABOVE, and it failed the same way
+      # first: the flag the sweep reads is no longer `lv_bfs/3`'s return but the `:write`
+      # key of the snapshot the sweep takes, so forcing `lv_bfs/3` false left the sweep
+      # printing 1 / 4 and this case caught it. The forced-false mutation is the same
+      # mutation, now aimed at the expression the block actually consults.
+      mut: {"Map.has_key?(elem(Map.fetch!(snap, depth), 0)" <> ", :write)", "false"},
       exit: 0,
       expect: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
       refute: ["1 / 4  (25.0%)    1 / 5  (20.0%)"],
