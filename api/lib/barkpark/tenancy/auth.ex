@@ -60,13 +60,13 @@ defmodule Barkpark.Tenancy.Auth do
       inside a `for`), so a silent denial there would provision a principal
       with NO SEAT and report success. Every caller derives its ids from an
       already-loaded row, so the crash is unreachable from client input anyway.
-    * `role_permits?/3` and `granted_actions/2` take NO id guard. A built-in
+    * `role_permits?/3` and `granted_actions/2,3` take NO id guard. A built-in
       role name is workspace-id-INDEPENDENT by design — it resolves from the
       compiled-in `@builtin_role_actions` map BEFORE any DB read, so a tenant
       can never redefine `admin` to escalate. `role_permits?("admin", "",
       :admin)` is `true` today and MUST stay true; a guard above that lookup
       would silently TIGHTEN authorization. The cast guard therefore sits on
-      the DB read inside `db_actions/2` alone — the only branch a CUSTOM
+      the DB read inside `db_actions/3` alone — the only branch a CUSTOM
       (non-built-in) role name reaches.
 
   ## Two distinctions this module must not blur
@@ -79,7 +79,14 @@ defmodule Barkpark.Tenancy.Auth do
       B as a plain `member` PASSES `authorize(tok, B, :admin)` and correctly
       FAILS `workspace_admin?(tok, B)`. That divergence IS the cross-tenant
       admin bypass fix (barkpark-23yi / barkpark-fsko); it is load-bearing and
-      the two predicates must never be "unified".
+      the two predicates must never be "unified". What the divergence covers is
+      the GRANT SHAPE (a token's global `permissions[]` vs a membership role),
+      NOT the role vocabulary: since
+      `arpss-w10-bl-workspace-admin-denies-custom-role-admin` both predicates
+      read a CUSTOM role's action set through the same `granted_actions/3`, so
+      a workspace-scoped custom role carrying `admin` is an admin at both. The
+      global-permissions denial above is unchanged — it is a `member` ROLE that
+      denies there, and `member` grants no `admin` action at either predicate.
     * A scope-bound share-EDIT token (`Barkpark.Auth.create_share_token/5`)
       carries a non-nil `workspace_id` but is inserted with a plain
       `Repo.insert` — never the membership-creating path — so it has NO
@@ -475,35 +482,54 @@ defmodule Barkpark.Tenancy.Auth do
   # for enforcement, so a tenant can never redefine `admin`/`member` (via a
   # workspace- or global-scoped row of the same name) to escalate OR to weaken
   # the fail-safe. A custom name resolves purely from its DB rows.
-  defp granted_actions(role, workspace_id) do
+  defp granted_actions(role, workspace_id), do: granted_actions(role, workspace_id, :inherit_global)
+
+  # THE ONE ROLE RESOLVER. The `case` ORDER is the shadowing tripwire: the
+  # built-in map is consulted BEFORE any DB read, in every scope, so a tenant
+  # row named `admin`/`owner`/`member` is inert for enforcement. Flip these two
+  # arms and a workspace row named `member` carrying an `admin` action
+  # escalates — `test/barkpark/tenancy/workspace_admin_custom_role_test.exs`
+  # ("built-in shadowing") reds on exactly that mutation.
+  #
+  # `scope` says whether a nil-`workspace_id` (global) custom row counts:
+  #
+  #   * `:inherit_global` — the historical `role_permits?/3` / `authorize/3`
+  #     reach, unchanged.
+  #   * `:workspace_only` — the ADMIN gate's reach. See `workspace_admin?/2`.
+  defp granted_actions(role, workspace_id, scope) do
     case Map.get(@builtin_role_actions, role) do
-      nil -> db_actions(role, workspace_id)
+      nil -> db_actions(role, workspace_id, scope)
       builtin -> builtin
     end
   end
 
-  # The ONLY id guard on the role path. `granted_actions/2` above answers for a
+  # The ONLY id guard on the role path. `granted_actions/3` above answers for a
   # built-in role WITHOUT consulting the workspace id at all, so the guard
   # cannot sit any higher without flipping `role_permits?("admin", "", :admin)`
   # from true to false — a silent authorization TIGHTENING. Here, a malformed
   # workspace id yields no permission rows, i.e. a denial for a custom role.
-  defp db_actions(role, workspace_id) do
+  defp db_actions(role, workspace_id, scope) do
     case Repo.uuid_or_nil(workspace_id) do
       nil ->
         []
 
       ws_uuid ->
-        Repo.all(
-          from rp in RolePermission,
-            join: r in Role,
-            on: rp.role_id == r.id,
-            where:
-              r.name == ^role and
-                (r.workspace_id == ^ws_uuid or is_nil(r.workspace_id)),
-            select: rp.action
+        from(rp in RolePermission,
+          join: r in Role,
+          on: rp.role_id == r.id,
+          where: r.name == ^role,
+          select: rp.action
         )
+        |> role_scope(ws_uuid, scope)
+        |> Repo.all()
     end
   end
+
+  defp role_scope(query, ws_uuid, :inherit_global),
+    do: from([_rp, r] in query, where: r.workspace_id == ^ws_uuid or is_nil(r.workspace_id))
+
+  defp role_scope(query, ws_uuid, :workspace_only),
+    do: from([_rp, r] in query, where: r.workspace_id == ^ws_uuid)
 
   @doc """
   True when the token's permissions satisfy `action`, ignoring membership.
@@ -599,7 +625,10 @@ defmodule Barkpark.Tenancy.Auth do
     if "admin" in permissions, do: "admin", else: "member"
   end
 
-  # Roles that confer workspace-admin authority on a scoped surface.
+  # The BUILT-IN roles that confer workspace-admin authority on a scoped
+  # surface, resolved with no DB read. NOT the whole rule: a workspace-scoped
+  # CUSTOM role carrying the `admin` action also confers it — see
+  # `admin_role?/2`, the one place both arms are spelled.
   @admin_roles ~w(owner admin)
 
   @doc """
@@ -628,15 +657,54 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   @doc """
-  True when the token's membership ROLE in `workspace_id` confers admin
-  authority (`owner` or `admin`). This is the per-membership admin gate: a
-  `member` of B — even one holding global `admin` perms — is NOT a workspace
-  admin of B. A non-member is never an admin.
+  True when the principal's membership ROLE in `workspace_id` confers admin
+  authority. This is the per-membership admin gate: a `member` of B — even one
+  holding global `admin` perms — is NOT a workspace admin of B. A non-member is
+  never an admin.
+
+  Two ways a role confers it, and only two:
+
+    * it IS a built-in admin role (`owner` / `admin`), resolved from the
+      compiled-in `@admin_roles` constant with NO DB read — the fail-safe is
+      unchanged, an unseeded DB can never lock a built-in admin out; or
+    * it is a CUSTOM role DEFINED IN THIS WORKSPACE whose stored
+      `role_permissions` rows carry the `admin` action, resolved through the
+      same `granted_actions/3` the `authorize/3` chokepoint uses.
+
+  ## Why the second arm exists (arpss-w10-bl-workspace-admin-denies-custom-role-admin)
+
+  Without it this predicate was a role-NAME check while `authorize/3` resolved
+  the ACTION SET, so a workspace-scoped custom role carrying the `admin` action
+  made `authorize(user, ws, :admin)` `:ok` and `workspace_admin?(user, ws)`
+  FALSE. `BarkparkWeb.LiveAuth`'s `:scoped_admin` mount gate bars on THIS
+  predicate, so a legitimate custom-role admin was locked out of
+  `/w/:ws/…/_plugins` and every other scoped-admin surface. RULED
+  (team-lead, 2026-09-02): honour the custom role.
+
+  ## What this deliberately does NOT widen — charter D9 stands
+
+    * A GLOBAL-PERMISSIONS principal is still not an admin. The arm reads the
+      membership ROLE only; a global-`admin` token added to workspace B as a
+      plain `member` resolves `"member"` → the built-in map → no `admin`
+      action → still DENIED. The D9 divergence from `authorize/3` is intact.
+    * A SHARE-EDIT token is still not an admin. It has no membership row at
+      all, so `membership_role/2` is `nil` and the guardless clause denies.
+    * A tenant role NAMED a built-in cannot escalate. `granted_actions/3`
+      resolves built-in names from the compiled map BEFORE any DB read, so a
+      workspace row named `member` carrying an `admin` action is inert.
+    * A GLOBAL custom role (`workspace_id: nil`) cannot confer admin
+      EVERYWHERE. This arm resolves `:workspace_only` — strictly rows scoped to
+      THIS workspace — while `role_permits?/3` keeps its historical
+      `:inherit_global` reach. Nothing in `api/lib` writes a nil-workspace
+      CUSTOM role (`Barkpark.Seeds.Shared.ensure_builtin_roles/0` is the sole
+      `Role` writer and inserts built-ins only), and the migration declares
+      "NULL = global built-in", so honouring one here would have amplified a
+      single hand-inserted row into admin of every workspace on the instance.
   """
   # @canonical capability:workspace-admin-authority aka:is_admin,workspace_admin,mount_gate,scoped_admin doc:docs/contracts/tenancy.md
   @spec workspace_admin?(principal(), binary()) :: boolean()
   def workspace_admin?(token_or_principal_id, workspace_id) do
-    membership_role(token_or_principal_id, workspace_id) in @admin_roles
+    admin_role?(membership_role(token_or_principal_id, workspace_id), workspace_id)
   end
 
   @doc """
@@ -649,8 +717,21 @@ defmodule Barkpark.Tenancy.Auth do
   """
   @spec workspace_admin?(binary(), binary(), principal_kind()) :: boolean()
   def workspace_admin?(principal_id, workspace_id, principal_kind) do
-    membership_role(principal_id, workspace_id, principal_kind) in @admin_roles
+    admin_role?(membership_role(principal_id, workspace_id, principal_kind), workspace_id)
   end
+
+  # THE admin-authority rule, written ONCE so /2 and /3 can never diverge.
+  # Short-circuits on the built-in constant, so the common case still costs no
+  # DB read and a built-in admin survives an unseeded `roles` table. The custom
+  # arm is `:workspace_only` on purpose — see `workspace_admin?/2`'s doc.
+  # `nil` (non-member) and any non-binary role fall to the catch-all: DENY.
+  defp admin_role?(role, workspace_id) when is_binary(role) and is_binary(workspace_id) do
+    role in @admin_roles or "admin" in granted_actions(role, workspace_id, :workspace_only)
+  end
+
+  defp admin_role?(role, _workspace_id) when is_binary(role), do: role in @admin_roles
+
+  defp admin_role?(_role, _workspace_id), do: false
 
   # The role that confers WORKSPACE-OWNER authority. Deliberately a SEPARATE
   # constant from `@admin_roles` — the point of this predicate is that it is
