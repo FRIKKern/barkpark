@@ -134,7 +134,7 @@ defmodule Barkpark.Tenancy.Auth do
   alias Barkpark.Repo
   alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
-  alias Barkpark.Tenancy.{Membership, Role, RolePermission}
+  alias Barkpark.Tenancy.{Membership, Role, RolePermission, Workspace}
 
   @type action :: :read | :write | :admin
   @type principal :: ApiToken.t() | User.t() | binary()
@@ -681,5 +681,96 @@ defmodule Barkpark.Tenancy.Auth do
   @spec workspace_owner?(principal(), binary()) :: boolean()
   def workspace_owner?(token_or_principal_id, workspace_id) do
     membership_role(token_or_principal_id, workspace_id) in @owner_roles
+  end
+
+  @doc """
+  List the Workspaces a principal is a MEMBER of, ordered by slug.
+
+  Accepts an `%ApiToken{}` struct, a `%User{}` struct, or a raw principal id
+  binary. The hard tenant boundary: the query INNER-JOINs
+  `workspace_memberships` on `principal_id == <principal id>` (and a
+  `principal_type` pinned per clause), so a workspace the caller has no
+  membership row in can never appear — there is no unscoped fallback.
+
+  ## Fail closed, not fail crash
+
+  TOTAL for malformed input: every clause routes its id through
+  `Repo.uuid_or_nil/1` and a non-castable id yields the declared denial value,
+  the EMPTY LIST — the same posture this module's other read predicates
+  hold. Before this seam the bare-binary clause accepted ANY binary (the empty
+  string, `"not-a-uuid"`) and reached the query, where the `:binary_id`
+  comparison raised **`Ecto.Query.CastError`** — mapped to 400 by
+  `phoenix_ecto`. Note the module: `Ecto.Query.CastError`, NOT `Ecto.CastError`
+  (which `Repo.uuid_or_nil/1`'s own docstring names); the latter fires zero
+  times on this path, so a test asserting it would be vacuous. A
+  `%ApiToken{id: nil}` did NOT crash before — it delegated to the raw-binary
+  arity, missed the `is_binary` guard and landed on the terminal `[]` by luck
+  of clause ORDER. It now denies by RULE, at the normalisation seam.
+
+  As elsewhere in this module, normalisation is `Ecto.UUID.cast/1` and nothing
+  else:
+  a 16-byte binary is accepted as raw UUID bytes and DOES reach the query,
+  where it denies by matching no membership row.
+
+  ## This is the INVERSE index — never rewrite it on top of `membership/2`
+
+  This module's other predicates are POINT lookups: every one of them takes a
+  `workspace_id` and answers about ONE workspace. This one takes no workspace
+  argument and enumerates them, so it is the inverse index over the SAME
+  `(principal_id, workspace_id, principal_type)` keying, not another copy of
+  the point lookup. It arrived here by RELOCATION from `Barkpark.Tenancy`
+  (`task-e7571b83f9a101fd`), query byte-for-byte, precisely so the enumeration
+  sits at the chokepoint without being re-expressed in terms of it.
+
+  The shape this must NOT become:
+
+      list_workspaces() |> Enum.filter(&Auth.member?(principal, &1.id))
+
+  That is N+1 queries over an unbounded workspace scan, and — the reason that
+  matters — it is FAIL-OPEN in shape. Starting from every workspace and
+  filtering down makes the tenant boundary depend on the filter being right;
+  the INNER JOIN below starts from the membership rows, so a workspace with no
+  membership row is not merely filtered out, it is UNREACHABLE. That structural
+  property is the isolation and it must not be traded for dedup.
+  `test/barkpark/tenancy/list_workspaces_for_totality_test.exs` pins the shape
+  by COUNTING queries: the enumeration is exactly one, so the filter rewrite
+  reds instead of passing silently.
+  """
+  @spec list_workspaces_for(User.t() | ApiToken.t() | binary() | nil) :: [Workspace.t()]
+  def list_workspaces_for(%ApiToken{id: principal_id}),
+    do: member_workspaces(principal_id, "api_token")
+
+  # A User principal joins on `principal_type == "user"`. Kept SEPARATE from the
+  # raw-binary clause below (pinned to "api_token") so a user id can never match
+  # a token's membership grant — the discriminator IS the cross-kind isolation.
+  def list_workspaces_for(%User{id: principal_id}),
+    do: member_workspaces(principal_id, "user")
+
+  def list_workspaces_for(principal_id) when is_binary(principal_id),
+    do: member_workspaces(principal_id, "api_token")
+
+  # TERMINAL DENIAL — a nil, a number, an unrecognised principal struct. Must
+  # stay CONTIGUOUS with the clauses above: a def of another name between them
+  # emits "clauses with the same name and arity should be grouped together",
+  # which --warnings-as-errors turns into a failed build.
+  def list_workspaces_for(_), do: []
+
+  # The one membership query behind all three clauses. The `principal_type` is
+  # a per-clause LITERAL, never derived from the id, so cross-kind isolation
+  # survives the sharing.
+  defp member_workspaces(principal_id, principal_type) do
+    case Repo.uuid_or_nil(principal_id) do
+      nil ->
+        []
+
+      pid ->
+        Repo.all(
+          from w in Workspace,
+            join: m in Membership,
+            on: m.workspace_id == w.id,
+            where: m.principal_id == ^pid and m.principal_type == ^principal_type,
+            order_by: w.slug
+        )
+    end
   end
 end
