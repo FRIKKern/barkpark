@@ -84,7 +84,11 @@ defmodule Barkpark.PortableDoc.Render.InlineBlockWrapperUnwrapTest do
   # list tests above.
   describe "the fix is in the shared walk, not the list path" do
     test "a HEADING carrying the same wrapper renders its text" do
-      block = %{"type" => "heading", "level" => 2, "content" => [paragraph_wrapper("Wrapped heading")]}
+      block = %{
+        "type" => "heading",
+        "level" => 2,
+        "content" => [paragraph_wrapper("Wrapped heading")]
+      }
 
       assert flatten_text(Compose.compose_block(block, :article)) == "Wrapped heading"
     end
