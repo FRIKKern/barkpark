@@ -24,7 +24,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingScopeAndBrickTest do
   moving the row out of its own tenancy.
 
   The near-identical sibling write, `Media.patch_asset_metadata/3`
-  (`media.ex:449-454`), already threads `Assets.file_scope_opts(file)`. So does
+  (`media.ex:Media.patch_asset_metadata/3`), already threads `Assets.file_scope_opts(file)`. So does
   the sibling READ at `v1/media_controller.ex:599`. This door was the odd one
   out; the fix is to match them.
 
