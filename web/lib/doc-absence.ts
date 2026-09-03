@@ -16,8 +16,8 @@
  *     `BarkparkNotFoundError`, because a schema-name typo or a type that is
  *     private for this token is a MISCONFIGURATION THE OPERATOR MUST SEE;
  *   - `getDoc` (the by-id leg, `client.doc(type, slug)`) maps its OWN 404 to
- *     `null` inside core (`js/packages/core/src/doc.ts:90`), since the absence
- *     of ONE document of a valid type IS a normal data state.
+ *     `null` inside core (`js/packages/core/src/doc.ts`, in `getDoc`), since the
+ *     absence of ONE document of a valid type IS a normal data state.
  *
  * That third bullet is what makes the split decidable with no extra plumbing:
  * the by-id leg never throws `BarkparkNotFoundError`, so any that reaches this
