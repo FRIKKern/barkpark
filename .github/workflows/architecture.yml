@@ -45,7 +45,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # 22, not 20: scripts/node-test-floor.mjs imports globSync from node:fs
+          # (Node 22+, since #14004 on 2026-08-24). On 20 the selftest died with a
+          # SyntaxError on every run, every later step was skipped, and the job-level
+          # continue-on-error read the corpse as green (task-6891e8f620c1bdea).
+          node-version: "22"
 
       # THE PREDICATE'S OWN SELFTEST, BEFORE THE INSTRUMENT IT GOVERNS.
       #
