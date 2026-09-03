@@ -131,7 +131,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   # ── THE POPULATION, HALF (b): the router's terminal call sites ────────────
   #
-  # SIX `Registry.delete_barkpark/1` call sites — the exact count IS the ADD arm
+  # THREE `Registry.delete_barkpark/1` call sites — the exact count IS the ADD arm
   # — plus the one destructive billing verb, whose residue row is driven below.
   #
   # CITED BY ROUTE, NOT BY LINE. This register used to name the call sites as
@@ -147,10 +147,30 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # different, much shorter file), so quoting them makes the sweep resolve the
   # wrong file and red on a comment that is only describing the past.
   #
-  #   DELETE /v1/barkparks/:id ....................... 1 (inside Accounts.audit/2)
-  #   DELETE /v1/fleet/supports/:id .................. 2 (residue row below)
-  #   POST /v1/internal/barkparks/:id/deprovision .... 2
-  #   the site domain-status reaper .................. 1
+  #   DELETE /v1/barkparks/:id ....................... 1 (inline, in Accounts.audit/3)
+  #   audited_delete_barkpark/3, the shared helper ... 1
+  #   the resurrect enqueue-failure rollback ......... 1
+  #
+  # SIX -> THREE, deliberately, in the commit that lowered it
+  # (task-55fb1f33a217249b). Four call sites did not disappear — they were routed
+  # through ONE audited helper, because all four deleted a team's instance row
+  # and wrote no audit event: both arms of `DELETE /v1/fleet/supports/:id` and
+  # both arms of `POST /v1/internal/barkparks/:id/deprovision`. The two residue
+  # rows below still describe the two support ARMS; what changed is that a single
+  # call site now serves four of them.
+  #
+  # WHICH MEANS THIS COUNT NO LONGER EQUALS THE NUMBER OF TERMINAL ARMS, and
+  # saying so is the point: it counts CALL SITES, which is all a scan can do. The
+  # arm-level population is pinned instead by `audit_vocabulary_census_test.exs`
+  # ARM (d), which enumerates every row-destroying unit in `cloud/lib` and holds
+  # each of the four lanes by name.
+  #
+  # THE SIXTH ROW ABOVE USED TO READ "the site domain-status reaper .... 1", AND
+  # IT WAS FALSE. No reaper calls `Registry.delete_barkpark/1`; that call site is
+  # the resurrect enqueue-failure rollback, twenty lines under a
+  # `barkpark.resurrected` stamp. The error outlived the register — it was copied
+  # into the filing that commissioned this change — which is what a register
+  # naming its population by hand buys you when nothing re-reads the names.
   #
   # RESIDUE ROW for the call site this count GAINED (5 → 6).
   #
@@ -174,7 +194,7 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # which deletes the row only AFTER the zone sweep succeeds — the row is the
   # sole pointer to the record that must die — and an in-flight
   # provision/resurrect is refused 409 rather than stranding a box being built.
-  @delete_barkpark_call_sites 6
+  @delete_barkpark_call_sites 3
   @billing_cancel_route {"post", "/v1/billing/cancel"}
 
   # The five tables whose FK to `barkparks` is ON DELETE CASCADE. The sixth FK
