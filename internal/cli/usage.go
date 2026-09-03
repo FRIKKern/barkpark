@@ -492,6 +492,76 @@ func freeTextReadVerbs(n *manifest.TreeNoun) []*manifest.Command {
 	return out
 }
 
+// searchPhraseVerb reports the verb a VERBLESS `bp search <token…>` must be
+// re-dispatched to, and whether that re-dispatch may fire at all.
+//
+// THE DEFECT IT CLOSES. `bp search "fork" --type task` answered
+// {"ok":false,"error":{"code":"usage","message":"no verb \"fork\" under `barkpark
+// search`"}} — the CLI reported the PHRASE THE USER TYPED as if it were a
+// misspelled verb. That envelope carries no `documents` key, so every caller
+// that reads results and not the error sees NOTHING FOUND. It cost this campaign
+// a wrong handover brief and a near-duplicate filing in one day.
+//
+// WHY SEARCH-ONLY AND NOT A GENERAL "free-text verb" RULE. A manifest-driven
+// rule ("re-dispatch to the noun's first non-writing verb taking one required
+// string arg") is tempting, but on the LIVE manifest it fires for `doc` (→ ls),
+// `task` (→ get), `media` (→ get), `tag` (→ docs), `graph` (→ show) and ten
+// more — turning every fat-fingered verb on every noun into a silent read
+// against a verb the caller never named. `search` is the one noun whose entire
+// declared purpose IS free text, and `query` is the verb that consumes it, so
+// this is the one place where "the token is a phrase" is a fact and not a guess.
+// The general case stays where it already is: `noVerbMsg`/`verbHint` NAME the
+// runnable correction and still refuse (exitUsage). `soleReadVerb`'s one-verb
+// rule is untouched.
+//
+// The verb is still taken from the MANIFEST, never hard-coded: if the server
+// stops declaring a non-writing `search query` with exactly one required string
+// arg, the inference disappears and the caller gets the old precise error back.
+func searchPhraseVerb(n *manifest.TreeNoun, noun, typed string) (*manifest.Command, bool) {
+	if noun != "search" || typed == "" || strings.HasPrefix(typed, "-") {
+		return nil, false
+	}
+	for _, c := range n.Verbs {
+		if c.Verb != "query" {
+			continue
+		}
+		if c.Writes {
+			return nil, false
+		}
+		required := 0
+		for _, a := range c.Args {
+			if !a.Required {
+				continue
+			}
+			required++
+			if a.Type != "" && a.Type != "string" {
+				return nil, false
+			}
+		}
+		if required != 1 {
+			return nil, false
+		}
+		return c, true
+	}
+	return nil, false
+}
+
+// nearestSiblingVerb returns the verb of n that the typed token most looks like
+// a typo of, for the AMBIGUITY note the search re-dispatch prints. It only fires
+// for a single bareword (a token with whitespace is unambiguously a phrase), so
+// `bp search sugestions` can say what it searched for AND name `suggestions`,
+// while `bp search "PDS crown proof"` just searches.
+func nearestSiblingVerb(n *manifest.TreeNoun, typed string) (string, bool) {
+	if argShapedToken(typed) {
+		return "", false
+	}
+	verbs := make([]string, 0, len(n.Verbs))
+	for _, c := range n.Verbs {
+		verbs = append(verbs, c.Verb)
+	}
+	return nearestVerb(typed, verbs)
+}
+
 // noVerbMsg is the error line for a REAL noun followed by no valid verb. It
 // never says the noun is unknown (that was the bug), and it carries the fix in
 // the message itself — which matters because `-o json` renders only this string

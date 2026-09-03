@@ -7,16 +7,21 @@ import (
 	"testing"
 )
 
-// multiVerbSearchManifest is `search` AS THE LIVE SERVER DECLARES IT — many
-// verbs, not one. This fixture is the whole point of the row.
+// multiVerbSearchManifest is a MULTI-VERB noun in the shape the live server
+// declares — many verbs, not one. It exercises the GENERAL free-text
+// correction: a real noun followed by an argument-shaped token gets a runnable
+// suggestion and a REFUSAL (never a silent read through a verb the caller did
+// not name).
 //
-// The pre-existing regression test (TestExecuteRealNounFreeTextInfersSoleVerb)
-// pins the free-text correction against docs/cli/fixtures/full-manifest.json,
-// whose `search` noun declares a SINGLE verb (`query`). That makes it green and
-// UNREACHABLE from production: the real manifest declares thirteen verbs for
-// `search`, so both `soleReadVerb`'s auto-run and `noVerbMsg`'s single-verb
-// did-you-mean arm are structurally dead in the field, and `bp search "<phrase>"`
-// answered with a bare verb list carrying no runnable fix.
+// THE NOUN HERE IS `doc`, NOT `search`, AND THAT IS THE POINT. `search` used to
+// take this same refusal path — which is exactly the defect
+// task-c8e5f7f13385a1ea reports: `bp search "fork"` answered
+// {"ok":false,"error":{"code":"usage",…}}, an envelope with no `documents` key
+// that every results-reading caller saw as NOTHING FOUND. `search` now
+// re-dispatches the phrase to its `query` verb (searchPhraseVerb, usage.go), and
+// search_bare_phrase_test.go owns that contract. This file keeps the refusal
+// path honest for every OTHER multi-verb noun, where "the token is a phrase" is
+// a guess and not a fact.
 //
 // The three verbs below reproduce the live shape in miniature:
 //   - query           non-writing, one required string arg  → the correction
@@ -29,11 +34,11 @@ const multiVerbSearchManifest = `{
   "auth_tier": "none",
   "generated_at": "now",
   "etag": "e",
-  "nouns": [{"name": "search", "summary": "Full-text search over documents."}],
+  "nouns": [{"name": "doc", "summary": "Documents."}],
   "commands": [
-    {"id":"search.query","noun":"search","verb":"query","summary":"q","http":{"method":"GET","path_template":"/v1/search"},"auth_tier":"none","args":[{"name":"q","required":true,"type":"string","summary":"q"}],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
-    {"id":"search.synonym-preview","noun":"search","verb":"synonym-preview","summary":"p","http":{"method":"GET","path_template":"/v1/search/synonym-preview"},"auth_tier":"none","args":[{"name":"q","required":true,"type":"string","summary":"q"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
-    {"id":"search.reindex","noun":"search","verb":"reindex","summary":"r","http":{"method":"POST","path_template":"/v1/search/reindex"},"auth_tier":"none","args":[],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}
+    {"id":"doc.query","noun":"doc","verb":"query","summary":"q","http":{"method":"GET","path_template":"/v1/doc"},"auth_tier":"none","args":[{"name":"q","required":true,"type":"string","summary":"q"}],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
+    {"id":"doc.synonym-preview","noun":"doc","verb":"synonym-preview","summary":"p","http":{"method":"GET","path_template":"/v1/doc/synonym-preview"},"auth_tier":"none","args":[{"name":"q","required":true,"type":"string","summary":"q"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
+    {"id":"doc.reindex","noun":"doc","verb":"reindex","summary":"r","http":{"method":"POST","path_template":"/v1/doc/reindex"},"auth_tier":"none","args":[],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}
   ]
 }`
 
@@ -55,7 +60,7 @@ func TestFreeTextOnMultiVerbNounNamesRunnableFix(t *testing.T) {
 	// A closed port: the message is under test, not any HTTP round trip.
 	t.Setenv("BARKPARK_API_URL", "http://127.0.0.1:1")
 
-	out, code := captureExecuteCode(t, []string{"search", "PDS crown proof"})
+	out, code := captureExecuteCode(t, []string{"doc", "PDS crown proof"})
 
 	// GUARD AGAINST A VACUOUS RUN: if the fixture ever collapses to one verb this
 	// test silently becomes a duplicate of the single-verb path it exists to
@@ -70,14 +75,14 @@ func TestFreeTextOnMultiVerbNounNamesRunnableFix(t *testing.T) {
 	if code != exitUsage {
 		t.Errorf("exit code = %d, want %d (exitUsage)", code, exitUsage)
 	}
-	if strings.Contains(out, `unknown command "search"`) || strings.Contains(out, `unknown command \"search\"`) {
-		t.Errorf("real noun `search` reported as unknown; got:\n%s", out)
+	if strings.Contains(out, `unknown command "doc"`) || strings.Contains(out, `unknown command \"doc\"`) {
+		t.Errorf("real noun `doc` reported as unknown; got:\n%s", out)
 	}
-	if !strings.Contains(out, "barkpark search query") {
-		t.Errorf("output never names the runnable fix `barkpark search query`; got:\n%s", out)
+	if !strings.Contains(out, "barkpark doc query") {
+		t.Errorf("output never names the runnable fix `barkpark doc query`; got:\n%s", out)
 	}
 	// The writing verb is never offered as a correction for a fat-fingered call.
-	if strings.Contains(out, "did you mean `barkpark search reindex") {
+	if strings.Contains(out, "did you mean `barkpark doc reindex") {
 		t.Errorf("suggested a WRITING verb as the correction; got:\n%s", out)
 	}
 }
@@ -89,12 +94,12 @@ func TestFreeTextHintRidesTheJSONEnvelope(t *testing.T) {
 	t.Setenv("BARKPARK_MANIFEST", writeMultiVerbManifest(t))
 	t.Setenv("BARKPARK_API_URL", "http://127.0.0.1:1")
 
-	out, code := captureExecuteCode(t, []string{"search", "PDS crown proof", "-o", "json"})
+	out, code := captureExecuteCode(t, []string{"doc", "PDS crown proof", "-o", "json"})
 
 	if code != exitUsage {
 		t.Errorf("exit code = %d, want %d (exitUsage)", code, exitUsage)
 	}
-	if !strings.Contains(out, `"hint"`) || !strings.Contains(out, `barkpark search query`) {
+	if !strings.Contains(out, `"hint"`) || !strings.Contains(out, `barkpark doc query`) {
 		t.Errorf("json envelope carries no runnable hint; got:\n%s", out)
 	}
 	// The envelope must not look like a successful, empty search.
@@ -111,7 +116,7 @@ func TestMistypedVerbOnMultiVerbNounStillCorrectsTheVerb(t *testing.T) {
 	t.Setenv("BARKPARK_MANIFEST", writeMultiVerbManifest(t))
 	t.Setenv("BARKPARK_API_URL", "http://127.0.0.1:1")
 
-	out, code := captureExecuteCode(t, []string{"search", "quer"})
+	out, code := captureExecuteCode(t, []string{"doc", "quer"})
 
 	if code != exitUsage {
 		t.Errorf("exit code = %d, want %d (exitUsage)", code, exitUsage)
@@ -119,7 +124,7 @@ func TestMistypedVerbOnMultiVerbNounStillCorrectsTheVerb(t *testing.T) {
 	if strings.Contains(out, "contains spaces") {
 		t.Errorf("a single-token typo took the argument-shaped path; got:\n%s", out)
 	}
-	if !strings.Contains(out, "barkpark search query") {
+	if !strings.Contains(out, "barkpark doc query") {
 		t.Errorf("typo correction lost; got:\n%s", out)
 	}
 }
@@ -129,9 +134,9 @@ func TestMistypedVerbOnMultiVerbNounStillCorrectsTheVerb(t *testing.T) {
 // CLI offers to a caller who typed an argument where a verb belongs.
 func TestFreeTextReadVerbsSkipsWritingAndMultiArgVerbs(t *testing.T) {
 	m, _ := loadTreeFrom(t, writeMultiVerbManifest(t))
-	n, ok := lookupNoun(m.Tree(), "search")
+	n, ok := lookupNoun(m.Tree(), "doc")
 	if !ok {
-		t.Fatal("fixture has no `search` noun")
+		t.Fatal("fixture has no `doc` noun")
 	}
 	got := freeTextReadVerbs(n)
 	var names []string
