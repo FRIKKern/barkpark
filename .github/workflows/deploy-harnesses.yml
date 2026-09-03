@@ -56,6 +56,16 @@ jobs:
             echo "::error title=Caddy too old::caddy $ver cannot parse the heredoc maintenance block (needs >= 2.7)"
             exit 1
           fi
+      - name: Every deploy/*.sh parses and passes shellcheck -S warning (task-6f18e71a351f8081 D)
+        # 17 files / 14k lines had ONE bash -n and zero shellcheck in CI. Zero-findings
+        # gate: the two warnings that existed (SC2034 x2) were fixed in the same change,
+        # so any NEW finding is a regression, not a baseline. ~1-3 s.
+        run: |
+          set -euo pipefail
+          for f in deploy/*.sh; do bash -n "$f"; done
+          shellcheck --version | grep -m1 version:
+          shellcheck -S warning deploy/*.sh
+          echo "deploy/*.sh: $(ls deploy/*.sh | wc -l | tr -d " ") files parse and carry no shellcheck warning"
       - name: Instance deploy harness
         run: bash deploy/instance-deploy_test.sh
       - name: Control-plane deploy harness
@@ -98,3 +108,41 @@ jobs:
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
+
+  git-2-34-fetch:
+    # task-6f18e71a351f8081 B. The control-plane box is Ubuntu 22.04 with git
+    # 2.34.1, which cannot speak protocol v2 to GitHub ("could not read Username"
+    # on a PUBLIC repo; evidence 2026-09-02, fix #15634 pins protocol.version=0
+    # in deploy/cp-deploy.sh). Nothing in CI ran the box's git against origin, so
+    # the pin could be deleted as cargo cult and nobody would know until the next
+    # deploy. This job runs the EXACT pull form cp-deploy.sh uses, on the box's
+    # git, against the real remote. It reds if the pinned form stops working or
+    # if cp-deploy.sh loses the pin. deploy/** only.
+    name: cp-deploy.sh's pull form works on git 2.34 (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: The runner's git is the box's git
+        run: |
+          git --version
+          git --version | grep -qE 'git version 2\.34\.' || { echo "::error::ubuntu-22.04 no longer ships git 2.34 — this probe no longer models the box; re-point it"; exit 1; }
+      - name: cp-deploy.sh still carries the protocol pin
+        run: grep -nE 'git .*-c protocol\.version=0 .*pull --ff-only origin main' deploy/cp-deploy.sh
+      - name: The pinned pull form succeeds against origin (as the box runs it)
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"; git clone --quiet --depth 1 --branch main "https://github.com/${GITHUB_REPOSITORY}.git" "$tmp/repo"
+          cd "$tmp/repo"
+          git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main
+          echo "pinned form: OK on $(git --version)"
+      - name: Control — the unpinned (v2) form, recorded not gated
+        continue-on-error: true
+        run: |
+          tmp="$(mktemp -d)"; git clone --quiet --depth 1 --branch main "https://github.com/${GITHUB_REPOSITORY}.git" "$tmp/repo"
+          cd "$tmp/repo"
+          if git -c core.hooksPath=/dev/null -c protocol.version=2 pull --ff-only origin main; then
+            echo "::notice::protocol v2 works from this runner on git 2.34 — the box's refusal is environmental (proxy/curl); the pin still stands as measured on the box"
+          else
+            echo "::notice::protocol v2 REFUSED on git 2.34 from this runner too — the pin is load-bearing everywhere"
+          fi

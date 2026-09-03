@@ -122,7 +122,9 @@
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
-BP_LOG_TAG="site-deploy-node"
+# Read by log() in deploy/lib/site-deploy-common.sh (sourced below). Exported so
+# the linter sees a use (SC2034) and any child shell carries the same tag.
+export BP_LOG_TAG="site-deploy-node"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
 # meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy.sh
