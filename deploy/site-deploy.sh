@@ -680,8 +680,9 @@ if [ "$MODE" = selftest ]; then
   # 2026-09-03 at origin/main 0cb244bfb:
   #
   #   MIN  =  67  every optional block skipped (no python3/curl, no flock, no api/)
-  #   FULL = 415  all blocks run — this is what CI gets (405 + the 10 rows of
-  #                the static-miss 404 block, which needs a real caddy(1))
+  #   FULL = 433  all blocks run — this is what CI gets (405 + the 10 rows of
+  #                the static-miss 404 block + the 18 rows of the already-armed
+  #                hide-UPGRADE block, both of which need a real caddy(1))
   #
   # FULL applies when BARKPARK_SELFTEST_REQUIRE_E2E=1, which is exactly the venue
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine self-test",
@@ -693,7 +694,7 @@ if [ "$MODE" = selftest ]; then
   # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
   # the same commit. A red here is either a missing block or an unraised floor.
   SELFTEST_FLOOR_MIN=67
-  SELFTEST_FLOOR_FULL=415
+  SELFTEST_FLOOR_FULL=433
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -2280,6 +2281,134 @@ FAKECP
       grep -qE 'BARKPARK_SITE_ROUTE:pfx-capstone([[:space:]]|$)' "$PX/Caddyfile"
     check "prefix/disarm: the sibling still proxies its own release tree" \
       grep -q "root \* $E2E/sites/pfx-capstone/current" "$PX/Caddyfile"
+
+    # -----------------------------------------------------------------------
+    # AN ALREADY-ARMED BLOCK IS UPGRADED TO HIDE THE RELEASE MARKERS
+    # (task-5d7bb5b283ac27d0). The three "the armed file_server HIDES …" rows
+    # above pin what a FRESH arm emits — and that is ALL they pin. The arm is
+    # marker-guarded, so a block armed BEFORE the hide landed keeps its bare
+    # `file_server` on every subsequent deploy, forever. Measured read-only on
+    # guerrilla 157.180.90.121 (2026-09-03, `cat /etc/caddy/Caddyfile`): all FOUR
+    # armed STATIC blocks (the other six site routes are node reverse_proxy
+    # blocks, no file_server) are that pre-hide shape, so .bp-prebuilt-sha256 and
+    # .bp-health-failed are fetchable over HTTPS on every live static site.
+    #
+    # This block is the REGRESSION PIN for the in-place UPGRADE branch, and it
+    # pins the OUTCOME, not the text: a pre-hide Caddyfile (marker present, bare
+    # file_server) plus a real release tree carrying both markers is driven
+    # through the REAL engine and then through a REAL caddy on a real port with
+    # real requests. Remove the upgrade branch and rows "…is upgraded in place",
+    # "…returns 404" and "…returns 404 too" go red BY NAME while the index row
+    # stays green — the marker guard alone cannot tell the two shapes apart.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: an already-armed PRE-HIDE static block is upgraded in place and its markers stop being fetchable (REAL caddy)"
+    HU="$E2E/hideup"; HUSRC="$HU/src"
+    mkdir -p "$HU/bin" "$HUSRC"
+    printf '{"name":"selftest-hideup","private":true}\n' > "$HUSRC/package.json"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$HU/bin/systemctl"
+    chmod +x "$HU/bin/systemctl"
+    if ! command -v caddy >/dev/null 2>&1; then
+      if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+        echo "[selftest] FAIL - the already-armed hide UPGRADE proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but there is no real caddy(1) on PATH — a fake caddy validates nothing and serves nothing, so the only rows that prove the markers actually stop being fetchable did not run"
+        exit 1
+      fi
+      echo "[selftest] SKIP already-armed hide upgrade — needs a REAL caddy(1) on PATH"
+    else
+      HUROOT="$HU/sites/hideup/current"
+      # THE PRE-HIDE SHAPE, byte for byte as guerrilla carries it: this engine's
+      # own marker comment, the handle_path, the root, and a BARE file_server.
+      { printf 'example.com {\n'
+        printf "\t# BARKPARK_SITE_ROUTE:hideup — static site 'hideup' served from its immutable current release.\n"
+        printf '\t# handle_path strips the /sites/hideup prefix; root follows the symlink.\n'
+        printf '\thandle_path /sites/hideup/* {\n'
+        printf '\t\troot * %s\n' "$HUROOT"
+        printf '\t\tfile_server\n'
+        printf '\t}\n'
+        printf '\treverse_proxy localhost:4000\n'
+        printf '}\n'; } > "$HU/Caddyfile"
+      check "the pre-hide fixture really is the un-hidden shape (no hide anywhere)" \
+        sh -c "! grep -q 'hide ' '$HU/Caddyfile'"
+      check "the pre-hide fixture validates on a REAL caddy (it is a shape the box runs)" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      # A deploy of the SAME slug: the marker is present, so this run takes the
+      # already-armed branch — the one that said nothing and rewrote nothing.
+      hu_rc="$(env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu1 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up.out" 2> "$HU/up.err"; echo $?)"
+      check "the re-deploy over the pre-hide block still exits 0 (never fatal)" \
+        [ "$hu_rc" = 0 ]
+      check "the pre-hide block is upgraded in place: the file_server now HIDES the prebuilt digest marker" \
+        grep -qE 'hide .*\.bp-prebuilt-sha256' "$HU/Caddyfile"
+      check "…and the health-failed marker" \
+        grep -qE 'hide .*\.bp-health-failed' "$HU/Caddyfile"
+      check "…INSIDE a file_server block, not loose in the site" \
+        grep -qE 'file_server \{' "$HU/Caddyfile"
+      check "…and NOT by re-arming: this site's marker still appears exactly once" \
+        sh -c "[ \"\$(grep -c 'BARKPARK_SITE_ROUTE:hideup' '$HU/Caddyfile')\" = 1 ]"
+      check "…and the handle_path is still there exactly once (no duplicate route)" \
+        sh -c "[ \"\$(grep -c 'handle_path /sites/hideup/\\*' '$HU/Caddyfile')\" = 1 ]"
+      check "the upgraded Caddyfile is brace-balanced and REAL-caddy valid" \
+        caddy validate --adapter caddyfile --config "$HU/Caddyfile"
+      check "the upgrade is announced on the DURABLE machine channel, naming the outcome" \
+        grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu1 detail="already armed, UPGRADED: ' "$HU/up.out"
+      check "the upgrade left no backup file behind on the happy path" \
+        sh -c "! ls '$HU'/Caddyfile.bak.* >/dev/null 2>&1"
+      # A SECOND re-deploy: the block now has the hide, so nothing is rewritten
+      # and the detail goes back to the plain already-armed line (idempotent).
+      cp "$HU/Caddyfile" "$HU/Caddyfile.after1"
+      env PATH="$HU/bin:$FAKEBIN:$PATH" \
+        SITE_SLUG=hideup BUILD_ID=hu2 CONTENT_REV=rev-1 SITE_SRC="$HUSRC" \
+        BARKPARK_HEALTH_HOST=sites.example.com \
+        BARKPARK_SITES_DIR="$HU/sites" BARKPARK_CADDYFILE="$HU/Caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$HU/deploy.lock" BARKPARK_CADDYFILE_LOCK="$HU/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$HU/up2.out" 2> "$HU/up2.err" || true
+      check "a SECOND re-deploy rewrites nothing (the upgrade is idempotent)" \
+        cmp -s "$HU/Caddyfile.after1" "$HU/Caddyfile"
+      check "…and it reports the plain already-armed detail, not another upgrade" \
+        grep -q '^BPSTAGE name=ROUTE status=ok build_id=hu2 detail="already armed: ' "$HU/up2.out"
+      # ---- THE OUTCOME, through a real caddy on a real port -----------------
+      # The engine's own markers live INSIDE the served tree. .bp-prebuilt-sha256
+      # is written by the prebuilt path; .bp-health-failed by a failed gate. Put
+      # both in the LIVE release the way the box has them, then ask for them.
+      printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$HUROOT/.bp-prebuilt-sha256"
+      printf 'hu1\n' > "$HUROOT/.bp-health-failed"
+      check "both release markers really are inside the served tree (the fixture is non-vacuous)" \
+        sh -c "[ -f '$HUROOT/.bp-prebuilt-sha256' ] && [ -f '$HUROOT/.bp-health-failed' ] && [ -f '$HUROOT/index.html' ]"
+      HU_PORT=0; HU_PID=""
+      for HU_TRY in 38211 38307 38419 38523 38631; do
+        { printf '{\n\tadmin off\n\tauto_https off\n}\n'
+          printf ':%s {\n' "$HU_TRY"
+          sed -n '/BARKPARK_SITE_ROUTE:hideup/,/^\t}$/p' "$HU/Caddyfile"
+          printf '}\n'; } > "$HU/serve.caddy"
+        caddy run --config "$HU/serve.caddy" --adapter caddyfile >"$HU/caddy.log" 2>&1 &
+        HU_PID=$!
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+          if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$HU_TRY/sites/hideup/" 2>/dev/null)" = 200 ]; then
+            HU_PORT="$HU_TRY"; break
+          fi
+          sleep 0.25
+        done
+        [ "$HU_PORT" != 0 ] && break
+        kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; HU_PID=""
+      done
+      hu_code() { curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$HU_PORT$1"; }
+      # A false 200/404 off a port a PEER holds is the trap here: assert the
+      # fixture itself came up before believing any status code below.
+      check "the upgraded block came up on a REAL caddy (this suite owns the port)" \
+        [ "$HU_PORT" != 0 ]
+      check "real caddy: the site index still serves 200 (the upgrade did not break the route)" \
+        [ "$(hu_code /sites/hideup/)" = 200 ]
+      check "real caddy: .bp-prebuilt-sha256 returns 404 — the artifact digest is no longer fetchable" \
+        [ "$(hu_code /sites/hideup/.bp-prebuilt-sha256)" = 404 ]
+      check "real caddy: .bp-health-failed returns 404 too — the failed-gate state is no longer disclosed" \
+        [ "$(hu_code /sites/hideup/.bp-health-failed)" = 404 ]
+      [ -n "$HU_PID" ] && { kill "$HU_PID" 2>/dev/null; wait "$HU_PID" 2>/dev/null; }
+    fi
   fi
 
   # -------------------------------------------------------------------------
@@ -3033,7 +3162,82 @@ arm_caddy_site_route() {
   # matched a prefix SIBLING's marker and returned "already armed" for a site
   # that had never been armed at all.
   if has_site_route_marker "$CADDYFILE"; then
-    ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live)"
+    # ---------------------------------------------------------------------
+    # UPGRADE, NOT RE-ARM (the marker guard freezes the FIRST shape forever).
+    #
+    # The arm below emits `file_server { hide … }` and the self-test pins it —
+    # but the pin only proves what a FRESH arm writes. A block armed BEFORE the
+    # hide landed carries a BARE `file_server`, and the guard above returns
+    # "already armed" for it on every subsequent deploy, forever. Measured
+    # read-only on guerrilla 157.180.90.121 (2026-09-03, `cat /etc/caddy/Caddyfile`):
+    # all FOUR armed STATIC blocks (the other six routes are node reverse_proxy
+    # blocks and carry no file_server) are the pre-hide shape —
+    #
+    #     handle_path /sites/perfect-proof/* {
+    #         root * /opt/barkpark/sites/perfect-proof/current
+    #         file_server
+    #     }
+    #
+    # so $PREBUILT_MARK and $HEALTH_FAIL_MARK are fetchable over HTTPS on every
+    # one of them: the artifact digest, and the fact that the LIVE release is one
+    # this engine already knows failed its health gate.
+    #
+    # Re-arming is not the remedy (that is the duplicate-handle defect D345
+    # guards against), so upgrade THAT ONE BLOCK in place, under the same
+    # contract as the arm: backup, rewrite, `caddy validate`, revert on reject,
+    # reload. Scoped by the delimiter-anchored marker + brace count (the same
+    # walk disarm_caddy_site_route uses), so a prefix sibling's block is never
+    # the one rewritten. Non-fatal in every direction: a rejected or unwritable
+    # upgrade leaves the route exactly as it was and the deploy still succeeds —
+    # the site was already being served.
+    # Idempotent by construction: the awk demands EXACTLY ONE bare `file_server`
+    # inside this site's block, so an already-hidden block (and every node-route
+    # block, which has no file_server at all) rewrites nothing.
+    # ---------------------------------------------------------------------
+    local upgraded=0
+    local utmp; utmp="$(mktemp)"
+    if BP_MARK="$(site_route_marker_re)" BP_HIDE="$PREBUILT_MARK $HEALTH_FAIL_MARK" awk '
+      BEGIN { m = ENVIRON["BP_MARK"]; hide = ENVIRON["BP_HIDE"]; n = 0 }
+      !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; print; next }
+      inb {
+        if ($0 ~ /^[ \t]*file_server[ \t]*$/) {
+          match($0, /^[ \t]*/); ind = substr($0, 1, RLENGTH)
+          printf "%sfile_server {\n%s\thide %s\n%s}\n", ind, ind, hide, ind
+          n++
+        } else print
+        o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
+        if (o > 0) opened = 1
+        if (opened && depth <= 0) inb = 0
+        next
+      }
+      { print }
+      END { exit (n == 1 ? 0 : 1) }
+    ' "$CADDYFILE" > "$utmp"; then
+      local ubak; ubak="${CADDYFILE}.bak.hide.${SITE_SLUG}.$(date -u +%Y%m%d%H%M%S)"
+      cp -a "$CADDYFILE" "$ubak"
+      if cp "$utmp" "$CADDYFILE"; then
+        chmod --reference="$ubak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+        chown --reference="$ubak" "$CADDYFILE" 2>/dev/null || true
+        if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+          rm -f "$ubak"
+          upgraded=1
+          systemctl reload caddy 2>/dev/null || true
+          log "upgraded the already-armed /sites/$SITE_SLUG file_server to hide $PREBUILT_MARK $HEALTH_FAIL_MARK"
+        else
+          cp -a "$ubak" "$CADDYFILE" && rm -f "$ubak"
+          log "caddy validate rejected the /sites/$SITE_SLUG hide upgrade — reverted, Caddy untouched"
+        fi
+      else
+        cp -a "$ubak" "$CADDYFILE" 2>/dev/null; rm -f "$ubak"
+        log "could not rewrite $CADDYFILE for the /sites/$SITE_SLUG hide upgrade — Caddy untouched"
+      fi
+    fi
+    rm -f "$utmp"
+    if [ "$upgraded" = 1 ]; then
+      ROUTE_DETAIL="already armed, UPGRADED: $CADDYFILE carried this site's own $marker block with a bare file_server (armed before the hide landed), so this run rewrote that one block in place to hide $PREBUILT_MARK and $HEALTH_FAIL_MARK, validated it and reloaded Caddy — those markers are no longer fetchable over /sites/$SITE_SLUG/"
+    else
+      ROUTE_DETAIL="already armed: $CADDYFILE carries this site's own $marker block, so this deploy left Caddy untouched (the symlink flip is what goes live)"
+    fi
     log "caddy /sites/$SITE_SLUG route already armed"
     return 0
   fi
