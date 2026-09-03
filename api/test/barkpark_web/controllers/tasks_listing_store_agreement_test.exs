@@ -124,7 +124,9 @@ defmodule BarkparkWeb.TasksListingStoreAgreementTest do
       # Insert the DRAFT first and in the alphabetically-earlier dataset, so
       # only the status arm of the order can put the published row on top.
       draft = insert_task!(doc_id, ws, project, dataset: "aaa-staging", status: "draft")
-      published = insert_task!(doc_id, ws, project, dataset: "zzz-production", status: "published")
+
+      published =
+        insert_task!(doc_id, ws, project, dataset: "zzz-production", status: "published")
 
       resp = get(conn, "/v1/tasks/#{doc_id}") |> json_response(200)
 
@@ -158,9 +160,7 @@ defmodule BarkparkWeb.TasksListingStoreAgreementTest do
       insert_task!(parent_id, ws, project, [])
 
       for i <- 1..3 do
-        insert_task!("#{parent_id}-child-#{i}", ws, project,
-          content: %{"parent_id" => parent_id}
-        )
+        insert_task!("#{parent_id}-child-#{i}", ws, project, content: %{"parent_id" => parent_id})
       end
 
       %{parent_id: parent_id}
@@ -223,7 +223,10 @@ defmodule BarkparkWeb.TasksListingStoreAgreementTest do
         |> Enum.find(&(&1["doc_id"] == leaf))
 
       assert full["child_count"] == 0
-      assert get(conn, "/v1/tasks/#{leaf}") |> json_response(200) |> get_in(["doc", "child_count"]) ==
+
+      assert get(conn, "/v1/tasks/#{leaf}")
+             |> json_response(200)
+             |> get_in(["doc", "child_count"]) ==
                0
     end
   end
