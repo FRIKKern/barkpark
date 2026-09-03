@@ -1266,7 +1266,7 @@ defmodule BarkparkCloud.Web.Router do
            true <- is_binary(code) and is_binary(state),
            :ok <- OAuth.verify_state(state, provider),
            {:ok, identity} <- OAuth.fetch_identity(provider, code),
-           {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
+           {:ok, user, oauth_branch} <- Accounts.get_or_create_user_from_oauth(identity),
            # `provider` is already bound by this with-chain and IS the answer, so
            # it rides the code's own `sent_to` as "oauth:<provider>" — that is how
            # the honest `origin: "oauth:<provider>"` survives the mint moving to
@@ -1274,6 +1274,7 @@ defmodule BarkparkCloud.Web.Router do
            # rather than collapsing to a generic "oauth".
            {:ok, exchange_code} <- Accounts.create_oauth_exchange_code(user, provider) do
         team = Accounts.primary_team(user)
+        audit_oauth_linked(user, team, oauth_branch, provider)
         redirect_to(conn, "/#oauth_code=#{exchange_code}&team=#{team && team.id}")
       else
         _ -> redirect_to(conn, "/#oauth_error=oauth_failed")
@@ -1647,6 +1648,59 @@ defmodule BarkparkCloud.Web.Router do
           {:ok, _event} -> push_event(team.id, "audit")
           {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
         end
+    end
+
+    :ok
+  end
+
+  # cch-w53-bl-oauth-linked-needs-a-branch-reporting-return — the `oauth.linked`
+  # producer, and the ONLY one.
+  #
+  # THE BRANCH GATE IS THE WHOLE POINT. `oauth.linked` says "an account that
+  # already existed gained a provider identity". Only
+  # `Accounts.get_or_create_user_from_oauth/1`'s `:linked` arm is that event:
+  # `:created` is a first-ever signup (there was no account to link ONTO) and
+  # `:existing` linked nothing at all — it recognised an identity we already
+  # held. Before that function reported its branch, a producer here could not
+  # tell the three apart, which is precisely why this verb sat unproduced and
+  # excused by name in audit_vocabulary_census_test.exs's @producerless.
+  #
+  # BEST-EFFORT AND POST-COMMIT, and the nil-team arm is REAL — both copied
+  # deliberately from `audit_account_security/2` above, for the same two reasons:
+  # the identity row is already committed by the time this runs, so nothing here
+  # may turn into a 500 (a user who cannot sign in because an audit insert failed
+  # is a far worse outcome than a missing row); and `Accounts.primary_team/1` is
+  # `list_user_teams() |> List.first()`, which is nil for a membership-less user
+  # while `audit_events.team_id` is `null: false`. A password account whose only
+  # membership was removed, then converged onto by an IdP, is exactly that user.
+  # It gets a LOGGED SKIP — never a crash, never a silent discard
+  # (cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site).
+  #
+  # The metadata is the provider name only. There is nothing else to say about a
+  # link that is not the IdP subject id (a durable correlator for an account we
+  # do not otherwise expose) or the user's own email, already on the row's actor.
+  defp audit_oauth_linked(_user, _team, branch, _provider) when branch != :linked, do: :ok
+
+  defp audit_oauth_linked(user, nil, :linked, provider) do
+    Logger.warning(
+      "audit oauth.linked SKIPPED for user #{user.id} (provider #{provider}): no primary_team " <>
+        "(Accounts.primary_team/1 returned nil) and audit_events.team_id is null: false"
+    )
+
+    :ok
+  end
+
+  defp audit_oauth_linked(user, team, :linked, provider) do
+    case Accounts.record_audit(%{
+           team_id: team.id,
+           actor_user_id: user.id,
+           action: "oauth.linked",
+           target_type: "user",
+           target_id: user.id,
+           metadata: %{provider: provider}
+         }) do
+      {:ok, _event} -> push_event(team.id, "audit")
+      {:error, cs} -> Logger.error("audit oauth.linked failed: #{inspect(cs)}")
     end
 
     :ok

@@ -613,6 +613,221 @@ test("cch-w10: init() hands the boot to bootOAuth — render() is no longer the 
   assert.ok(!/async function render\(/.test(src), "render() must not become async");
 });
 
+// ── cch-w53-bl-the-emailed-confirmation-link-has-no-client ──────────────────
+//
+// THE DEFECT WAS AN ABSENCE, so only a DRIVE can see it. The control plane has
+// mailed <dashboard>/?confirm=<token> since email-verification-recovery, and
+// POST /v1/auth/verify-email -> Accounts.confirm_user/1 has stood ready to
+// honour it the whole time. Between them: nothing. `grep -rnF 'confirm='
+// cloud/priv/static` and `grep -rnF 'verify-email' cloud/priv/` both exited 1
+// on origin/main — measured, with a control grep that DID hit
+// (`/v1/auth/login`, four files) so the empty result is a fact about the tree
+// and not about the grep. Clicking the emailed link landed you on the dashboard
+// and nothing happened.
+//
+// A pure-helper test cannot fail on that: the helpers did not exist, so there
+// was nothing to assert about them being uncalled. These tests drive
+// bootEmailConfirm against a stubbed fetch and assert THE HOP HAPPENS — which
+// is exactly the assertion the missing client would have failed.
+//
+// The second obligation is the copy: a spent token must never read as a sign-in
+// failure. That is not fussiness. `confirmed_at` gates no authority anywhere in
+// cloud/lib, so a person whose confirmation link expired has lost nothing —
+// telling them their sign-in failed would invent a problem and point them at a
+// screen that cannot fix it.
+
+// Swap the sandbox globals bootEmailConfirm reads, run it to completion,
+// restore. Mirrors driveBootOAuth above, with one addition: the history call
+// count is snapshotted AT THE MOMENT OF THE HOP, because "scrub before the
+// network" is an ORDERING claim and a post-hoc read cannot tell the two orders
+// apart.
+async function driveBootEmailConfirm({ search, hash = "", pathname = "/", status, payload = {} }) {
+  const saved = {
+    location: sandbox.location, history: sandbox.history, fetch: sandbox.fetch,
+    document: sandbox.document, localStorage: sandbox.localStorage,
+    sessionStorage: sandbox.sessionStorage,
+  };
+  const { loc, assigned } = recordingLocation(hash);
+  loc.search = search;
+  loc.pathname = pathname;
+  const history = recordingHistory();
+  const fetch = fetchStub(status, payload);
+  const dom = oauthDom();
+  const local = memStore();
+  const session = memStore();
+
+  sandbox.location = loc;
+  sandbox.history = history;
+  sandbox.document = dom.document;
+  sandbox.localStorage = local;
+  sandbox.sessionStorage = session;
+
+  let scrubsBeforeHop = null;
+  const wrapped = (...args) => {
+    scrubsBeforeHop = history.calls.length;
+    return fetch(...args);
+  };
+  wrapped.calls = fetch.calls;
+  sandbox.fetch = wrapped;
+
+  let doneCalls = 0;
+  try {
+    await new Promise((resolve) => {
+      hooks.bootEmailConfirm(() => { doneCalls++; resolve(); });
+    });
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+  return { assigned, history, fetch: wrapped, dom, local, session, doneCalls, scrubsBeforeHop };
+}
+
+test("cch-w53-bl: the confirm client is exported (RED on origin/main, where it does not exist)", () => {
+  assert.equal(typeof hooks.confirmTokenFromSearch, "function", "confirmTokenFromSearch must be hookable");
+  assert.equal(typeof hooks.emailConfirmOutcome, "function", "emailConfirmOutcome must be hookable");
+  assert.equal(typeof hooks.bootEmailConfirm, "function", "bootEmailConfirm must be hookable");
+});
+
+test("cch-w53-bl: confirmTokenFromSearch reads ?confirm= and nothing else", () => {
+  const f = (q) => hooks.confirmTokenFromSearch(q);
+
+  assert.equal(f("?confirm=tok-abc"), "tok-abc");
+  assert.equal(f("confirm=tok-abc"), "tok-abc", "a leading ? is optional");
+  // The mailed link can land beside the OTHER two boot readers' parameters.
+  assert.equal(f("?checkout=success&confirm=tok-abc&billing=portal"), "tok-abc");
+  // Percent-encoding survives: the token is url-safe base64 today, but a client
+  // that corrupts the credential it was handed is worse than one that ignores it.
+  assert.equal(f("?confirm=a%2Bb%2Fc"), "a+b/c");
+
+  // NOT a confirm landing.
+  assert.equal(f(""), null);
+  assert.equal(f(null), null);
+  assert.equal(f("?checkout=success"), null);
+  assert.equal(f("?confirm="), null, "an empty token is not a token — never POST an empty string");
+  assert.equal(f("?confirm=%20%20"), null, "nor is whitespace");
+  // A NEAR MISS that must not be honoured: another key ENDING in "confirm".
+  assert.equal(f("?reconfirm=tok"), null);
+});
+
+test("cch-w53-bl: a confirm landing POSTs the token to /v1/auth/verify-email — the hop origin/main never made", async () => {
+  const r = await driveBootEmailConfirm({
+    search: "?confirm=one-time-token",
+    status: 200,
+    payload: { ok: true },
+  });
+
+  assert.equal(r.fetch.calls.length, 1, "exactly one verify call");
+  assert.equal(r.fetch.calls[0].path, "/v1/auth/verify-email");
+  assert.equal(r.fetch.calls[0].opts.method, "POST");
+  assert.deepEqual(JSON.parse(r.fetch.calls[0].opts.body), { token: "one-time-token" });
+
+  // Unauthenticated by construction — the token IS the credential, and a
+  // logged-out click must reach the same answer as a logged-in one.
+  assert.ok(!r.fetch.calls[0].opts.headers.Authorization,
+    "the verify hop must not ride a session — the route takes none");
+
+  // THE SCRUB IS BEFORE THE HOP, and it is a REPLACE. A single-use token in a
+  // history entry is one Back press from being replayed.
+  assert.equal(r.scrubsBeforeHop, 1, "the URL must be scrubbed BEFORE the request goes out");
+  assert.deepEqual(r.history.calls[0], ["replace", "/"]);
+  assert.deepEqual(r.assigned, [], "never location.hash = … — that is a history PUSH");
+
+  assert.equal(r.doneCalls, 1);
+  assert.equal(r.dom.toasts.length, 1);
+  assert.match(r.dom.toasts[0].innerHTML, /Email confirmed/);
+});
+
+test("cch-w53-bl: the scrub drops ONLY confirm, keeping the other boot readers' parameters and the fragment", async () => {
+  const r = await driveBootEmailConfirm({
+    search: "?checkout=success&confirm=tok&billing=portal",
+    hash: "#billing",
+    status: 200,
+    payload: { ok: true },
+  });
+
+  assert.deepEqual(r.history.calls[0], ["replace", "/?checkout=success&billing=portal#billing"],
+    "handleCheckoutReturn and handleBillingPortalReturn read the SAME query on this boot — " +
+    "scrubbing the whole search string would silently eat their landings");
+});
+
+test("cch-w53-bl: no ?confirm= is a free boot — no request, no history write, done() on the spot", async () => {
+  const r = await driveBootEmailConfirm({ search: "?checkout=success", status: 200 });
+
+  assert.equal(r.fetch.calls.length, 0, "a normal boot must not touch the network");
+  assert.equal(r.history.calls.length, 0, "nor rewrite the URL");
+  assert.equal(r.doneCalls, 1);
+  assert.equal(r.dom.toasts.length, 0);
+});
+
+test("cch-w53-bl: a SPENT token is not a login failure — the copy, the session and the route are all untouched", async () => {
+  // The route folds already-used / expired / revoked into ONE opaque 422
+  // invalid_token (Accounts.confirm_user/1 fails closed on all three).
+  const r = await driveBootEmailConfirm({
+    search: "?confirm=spent-token",
+    status: 422,
+    payload: { error: "invalid_token" },
+  });
+
+  assert.equal(r.fetch.calls.length, 1);
+  assert.equal(r.doneCalls, 1, "the boot completes — a failed verify never strands the screen");
+
+  assert.equal(r.dom.toasts.length, 1);
+  const copy = r.dom.toasts[0].innerHTML;
+  assert.match(copy, /spent/i, "the outcome says what actually happened");
+  assert.doesNotMatch(copy, /sign[- ]?in|signing in|log[- ]?in|password/i,
+    "a spent confirmation link must NEVER read as a sign-in failure: confirmed_at gates no " +
+    "authority in cloud/lib, so the person has lost nothing and there is nothing to re-enter");
+
+  // Nothing about the session moved: no store write, no route change.
+  assert.equal(r.local.getItem("bp.session"), null);
+  assert.equal(r.session.getItem("bp.session"), null);
+  assert.deepEqual(r.assigned, [], "no navigation — not to the sign-in screen, not anywhere");
+  // The one history write is the scrub, and it happened before the hop.
+  assert.equal(r.history.calls.length, 1);
+});
+
+test("cch-w53-bl: a 500 says only what is true, and still never mentions signing in", async () => {
+  const r = await driveBootEmailConfirm({
+    search: "?confirm=tok",
+    status: 500,
+    payload: { error: "boom" },
+  });
+
+  assert.equal(r.doneCalls, 1);
+  const copy = r.dom.toasts[0].innerHTML;
+  // NB: the apostrophe is HTML-escaped by esc() before it reaches innerHTML
+  // ("couldn&#39;t"), so the anchor is the half of the sentence without one.
+  assert.match(copy, /confirm this address just now/i);
+  assert.doesNotMatch(copy, /sign[- ]?in|signing in|log[- ]?in/i);
+  // It must NOT claim the link is spent — a transport fault is retryable and a
+  // "spent" claim would send the person off to mint a token they do not need.
+  assert.doesNotMatch(copy, /spent|expired/i);
+});
+
+test("cch-w53-bl: emailConfirmOutcome is a THREE-way classifier, not a two-way one", () => {
+  assert.equal(hooks.emailConfirmOutcome({ ok: true, status: 200 }).kind, "success");
+  assert.equal(hooks.emailConfirmOutcome({ ok: false, status: 422 }).kind, "info");
+  assert.equal(hooks.emailConfirmOutcome({ ok: false, status: 500 }).kind, "info");
+  assert.equal(hooks.emailConfirmOutcome(null).kind, "info");
+
+  // Never `error`: the toast kind carries an aria role, and role="alert" for an
+  // email confirmation nobody asked about is an interruption with no action
+  // behind it. And the two failure sentences must DIFFER — folding them would
+  // tell a person with a transport blip to go mint a fresh token.
+  const spent = hooks.emailConfirmOutcome({ ok: false, status: 422 });
+  const fault = hooks.emailConfirmOutcome({ ok: false, status: 500 });
+  assert.notEqual(spent.title, fault.title);
+  assert.notEqual(spent.body, fault.body);
+});
+
+test("cch-w53-bl: init() actually calls bootEmailConfirm — the wiring tripwire", () => {
+  // Every test above drives the reader directly, so all of them stay green if
+  // the client is built and never called: PRECISELY the defect this row is
+  // about. init() is unreachable from this harness (readyState "loading"), so
+  // the call site is asserted in the SOURCE.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(src, /\n\s*bootEmailConfirm\(\);\n/, "init() must call bootEmailConfirm()");
+});
+
 // ── cch-bl-mockjs-revoke-stateless · THE BROWSER PREVIEW'S REVOKE ───────────
 // scenarios.mjs models the two session DELETEs statefully, but ONLY when the
 // caller hands route() its optional 4th arg — a per-boot mutable bag. smoke.mjs

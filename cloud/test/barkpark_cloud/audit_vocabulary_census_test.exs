@@ -118,20 +118,17 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   # green run): a regex pair proves the cited code exists and the cited blocker
   # does not. It does not prove the SENTENCE is a good reason. It catches decay
   # and fabrication, which is exactly the pair of failures wave 51 shipped.
+  # `oauth.linked` LEFT THIS MAP under cch-w53-bl-oauth-linked-needs-a-branch-
+  # reporting-return, and its exit is the shape working as designed rather than a
+  # loosened guard. Its `blocker_absent: ~r/:linked\b/` said, mechanically, "this
+  # verb is unproduced because nothing in cloud/lib reports a :linked branch". The
+  # slice made `Accounts.get_or_create_user_from_oauth/1` return
+  # `{:ok, user, :existing | :linked | :created}`, so that regex started matching
+  # code — the census RED that demanded the verb be produced and this entry
+  # deleted. The producer is `audit_oauth_linked/4` in router.ex, gated on the
+  # `:linked` arm alone, and arm (a) below now resolves the verb through
+  # `literal_producers/0` with no allowlist help.
   @producerless %{
-    "oauth.linked" => %{
-      reason:
-        "NOT unbuilt — the OAuth callback (router.ex, `/v1/auth/oauth/:provider/callback`) " <>
-          "really does link identities: Accounts.get_or_create_user_from_oauth/1 -> " <>
-          "birth_or_link_oauth/3 -> link_external_identity/2 inserts a durable " <>
-          "external_identities row. It is unproduced because the callback cannot tell a LINK " <>
-          "from a BIRTH: get_or_create_user_from_oauth/1 returns a bare {:ok, user}, so a " <>
-          "producer there would stamp oauth.linked on first-ever signups too. Producing it " <>
-          "honestly needs a branch-reporting return — " <>
-          "cch-w53-bl-oauth-linked-needs-a-branch-reporting-return.",
-      anchor: ~r/link_external_identity/,
-      blocker_absent: ~r/:linked\b/
-    },
     "email.verified" => %{
       reason:
         "NOT unbuilt — `post \"/v1/auth/verify-email\"` exists and is reachable, and " <>
