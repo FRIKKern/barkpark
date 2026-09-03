@@ -164,10 +164,13 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
       for {label, content} <- shapes do
         doc_id = "rb-ok-#{System.unique_integer([:positive])}"
 
-        assert {:ok, {_tx, [_result]}} = create_paper(content, doc_id, ctx),
-               "readable shape refused: #{label}"
+        written = create_paper(content, doc_id, ctx)
 
-        assert :ok = ReadableBody.classify(content), "classify/1 refused #{label}"
+        assert match?({:ok, {_tx, [_result]}}, written),
+               "readable shape refused: #{label} — got #{inspect(written)}"
+
+        classified = ReadableBody.classify(content)
+        assert classified == :ok, "classify/1 refused #{label} — got #{inspect(classified)}"
       end
     end
 
