@@ -144,9 +144,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, Shared.refetch_paper(socket)}
 
       true ->
+        # The write-capable arm of the third feed. `write_denied?` above decides
+        # WHICH SOURCE this socket is served; it does not decide whether the
+        # bytes are safe to `raw/1` — so this html gets the same scrub the two
+        # mount-side feeds now take, via the one copy in `Paper`. A frame is
+        # off-the-wire markup that lands straight in `raw(@paper_html)`, so
+        # leaving it unscrubbed would re-open on the broadcast exactly what the
+        # mount-side clamp closes.
         {:noreply,
          socket
-         |> assign(:paper_html, html)
+         |> assign(:paper_html, Shared.editor_body_html(html))
          |> assign(:paper_block_mode, false)
          |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
     end
