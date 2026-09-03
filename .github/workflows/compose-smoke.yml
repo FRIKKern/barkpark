@@ -205,15 +205,21 @@ jobs:
       - name: Env census (both runtime roots)
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash scripts/compose-smoke.sh census
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/compose-smoke.sh census
       - name: Blessing-word grep (D23 — hedge word is "experimental")
         id: s2
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash scripts/compose-smoke.sh blessing-grep
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/compose-smoke.sh blessing-grep
       - name: Green arm (compose up → healthy → exec wget /api/schemas + /login)
         id: s3
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash scripts/compose-smoke.sh green
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/compose-smoke.sh green
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -226,7 +232,9 @@ jobs:
       - name: Refusal arm (container exit + log anchor, never HTTP)
         id: s4
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash scripts/compose-smoke.sh refusal
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/compose-smoke.sh refusal
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries

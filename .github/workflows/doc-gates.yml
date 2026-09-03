@@ -453,6 +453,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/check-doc-budgets.sh --selftest
           bash scripts/check-doc-budgets.sh
 
@@ -475,6 +476,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/docs-anchors-check.sh --selftest
           bash scripts/docs-anchors-check.sh
 
@@ -492,6 +494,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/connectors-ddl-drift-check.sh --selftest
           bash scripts/connectors-ddl-drift-check.sh
 
@@ -513,6 +516,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/connectors-catalog-drift-check.sh --selftest
           bash scripts/connectors-catalog-drift-check.sh
 
@@ -533,6 +537,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/never-cancel-main-check.sh --selftest
           bash scripts/never-cancel-main-check.sh
 
@@ -556,6 +561,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/check-deployyml-filters.sh --selftest
           bash scripts/check-deployyml-filters.sh
 
@@ -564,6 +570,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/check-deploy-smoke.sh --selftest
           bash scripts/check-deploy-smoke.sh
 
@@ -571,7 +578,9 @@ jobs:
         id: s8
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/paper-editor-mirror-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-editor-mirror-check.sh
 
       # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
       # is the ONE source of the white ladder; the Elixir emitters read it at
@@ -581,7 +590,9 @@ jobs:
         id: s9
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/status-manifest-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/status-manifest-check.sh
 
       # Preview-contract cross-surface parity tripwire (preview-contract W4,
       # charter D20 Layer 2). Field parity is proven by the golden-fixture tests
@@ -605,6 +616,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/preview-parity-check.sh --selftest
           bash scripts/preview-parity-check.sh
 
@@ -620,6 +632,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node design/validate.mjs
           node design/check.mjs
           # theme-system Wave 2 (D17): the zero-dep OKLCH compiler core's unit
@@ -653,7 +666,9 @@ jobs:
         id: s12
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-literal-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-literal-check.sh
 
       # Durable tripwire (spd-w19; mirrors the Go + link-gate self-tests): prove
       # the gate actually REDs on a planted literal — a temp-dir self-test that
@@ -668,7 +683,9 @@ jobs:
         id: s13
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-literal-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-literal-check.sh --selftest
 
       # Studio link/path gate (bp-studio-deep-link W1). Every Studio destination
       # has ONE canonical path, built through BarkparkWeb.Studio.StudioLive.Paths.
@@ -680,7 +697,9 @@ jobs:
         id: s14
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-link-lint.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-link-lint.sh
 
       # Tripwire (mirrors the Go literal self-test): prove the link gate actually
       # REDs on a planted hand-built href — a temp-dir self-test that asserts the
@@ -690,7 +709,9 @@ jobs:
         id: s15
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/studio-link-lint.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/studio-link-lint.sh --selftest
 
       # --selftest FIRST (distrust vacuous green): the studio and go literal gates
       # below each run their bundled tripwire before the real scan; the web gate
@@ -700,7 +721,9 @@ jobs:
         id: s16
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/web-literal-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/web-literal-check.sh --selftest
 
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
       # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
@@ -713,7 +736,9 @@ jobs:
         id: s17
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/web-literal-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/web-literal-check.sh
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
       # (cmd/barkpark/** + internal/cli/** + internal/taskboard/theme.go)
@@ -728,7 +753,9 @@ jobs:
         id: s18
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/go-literal-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-literal-check.sh
 
       # Durable tripwire (au-w4-cli-ratchet, AC5): prove the gate actually REDs on
       # a planted literal — a temp-dir self-test that plants #ff0000, asserts the
@@ -739,7 +766,9 @@ jobs:
         id: s19
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/go-literal-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-literal-check.sh --selftest
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE and ordinary `#`//`//` comments.
@@ -764,6 +793,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
           node tooling/doc-truth/lineref-sweep.mjs --selftest
@@ -799,6 +829,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/new-lineref-check.sh --selftest
           bash scripts/new-lineref-check.sh
 
@@ -816,7 +847,9 @@ jobs:
         id: s22
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/tenant-scope-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/tenant-scope-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs on a
       # planted fail-open + by-PK read — a temp-dir self-test that plants nothing in
@@ -825,7 +858,9 @@ jobs:
         id: s23
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/tenant-scope-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/tenant-scope-check.sh --selftest
 
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
       # principal is the MOST RESTRICTIVE anonymous one — never a full-content
@@ -840,6 +875,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/nil-polarity-check.sh --selftest
           bash scripts/nil-polarity-check.sh
 
@@ -854,7 +890,9 @@ jobs:
         id: s25
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/preview-env-isolation-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/preview-env-isolation-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
       # on a planted async:true / on_exit-less preview-env mutation — a temp-dir
@@ -864,7 +902,9 @@ jobs:
         id: s26
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/preview-env-isolation-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/preview-env-isolation-check.sh --selftest
 
       # PortableDoc render-parity completeness guard (render-unification D8/D45).
       # The ONE canonical JS renderer (@barkpark/react) must render EVERY in-scope
@@ -879,7 +919,9 @@ jobs:
         id: s27
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: bash scripts/pd-parity-completeness.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/pd-parity-completeness.sh
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # repo-aware validator (internal/scaffy/repocheck.go, opt-in via --repo)
@@ -899,7 +941,9 @@ jobs:
         id: s28
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
-        run: go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
       # on a drifted anchor. A mktemp fixture — a text-clean command whose fenced
@@ -912,6 +956,7 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: ${{ !cancelled() }}
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           set -u
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT

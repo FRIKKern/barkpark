@@ -117,4 +117,155 @@ has "$out" "INHERITED-FROM-MAIN" "14) no capture file => v1 behaviour preserved"
 has "$out" "SIGNATURE-UNVERIFIED" "14) and the notice admits the signature was not checked"
 has "$out" "RC=0" "14) rc 0"
 
+# ── 15-16. THE CAPTURE HALF (task-2dbe8808f2a6f7b5) ─────────────────────────
+# Arms 11-14 prove the signature clause DECIDES correctly once it has this PR's
+# error block. Arm 14 is why these two exist: for the whole of PR #15842 NO gate
+# step wrote the capture, so every LIVE verdict took arm 14's
+# SIGNATURE-UNVERIFIED path and behaved exactly like the step-name-only v1 the
+# 2026-09-03 miss came from. A shipped-inert discriminator is invisible to arms
+# 11-14 — they hand it the file. So arm 15 derives the gate steps from the
+# WORKFLOW TREE and asserts each one arms scripts/breaker-capture.sh.
+#
+# Derived, not listed: a hardcoded 9 in arm 10 reddened main when compose-smoke's
+# two arm jobs became one. A gate step is a step carrying the breaker's own
+# continue-on-error marker inside a workflow that has a Decide step, so a step
+# that becomes a gate step tomorrow is counted tomorrow with no edit here.
+gate_capture_audit() { # $1 = workflows dir -> "OK <n>" (rc 0) or "<m> of <n> … UNWIRED" (rc 1)
+  python3 - "$1" <<'AUDIT'
+import os, re, sys
+MARK = "main-red breaker: the Decide step below owns the verdict"
+ARM  = "scripts/breaker-capture.sh"
+d = sys.argv[1]
+gates = missing = 0
+for fn in sorted(os.listdir(d)):
+    if not fn.endswith((".yml", ".yaml")):
+        continue
+    lines = open(os.path.join(d, fn), errors="replace").read().split("\n")
+    if not any("main-red-breaker.sh" in l and "run:" in l for l in lines):
+        continue  # not one of the breaker workflows
+    for i, l in enumerate(lines):
+        if MARK not in l:
+            continue
+        gates += 1
+        j = i
+        while j < len(lines) and not re.match(r"(\s+)run:", lines[j]):
+            j += 1
+        if j >= len(lines):
+            print("MISSING %s:%d - gate step has no run: block" % (fn, i + 1)); missing += 1; continue
+        ind = len(re.match(r"(\s+)run:", lines[j]).group(1))
+        body, k = [lines[j]], j + 1
+        while k < len(lines) and (not lines[k].strip() or len(lines[k]) - len(lines[k].lstrip()) > ind):
+            body.append(lines[k]); k += 1
+        if not any(ARM in b for b in body):
+            name = next((lines[x].split("- name:")[1].strip() for x in range(i, max(i - 6, -1), -1) if "- name:" in lines[x]), "?")
+            print("MISSING %s:%d - gate step %r does not arm %s" % (fn, j + 1, name, ARM)); missing += 1
+print("OK %d gate step(s) arm the capture" % gates if not missing else "%d of %d gate step(s) UNWIRED" % (missing, gates))
+sys.exit(1 if missing or gates == 0 else 0)
+AUDIT
+}
+out="$(gate_capture_audit "$ROOT/.github/workflows" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then ok "15) every gate step of every breaker job arms the capture — $out"; else bad "15) unwired gate step(s): $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"; fi
+# 15b. MUTATION: strip ONE step's capture in a COPY of the tree. The audit must
+#      red and name it — a derivation that cannot fail is not a check.
+mut="$TMP/wf-mut"; rm -rf "$mut"; mkdir -p "$mut"; cp "$ROOT"/.github/workflows/*.yml "$mut/" 2>/dev/null
+victim="$(grep -ln 'main-red breaker: the Decide step below owns the verdict' "$mut"/*.yml 2>/dev/null | head -1)"
+if [ -n "$victim" ] && grep -q 'scripts/breaker-capture.sh' "$victim"; then
+  python3 - "$victim" <<'MUTATE'
+import sys
+p = sys.argv[1]; lines = open(p).read().split("\n")
+for i, l in enumerate(lines):
+    if "scripts/breaker-capture.sh" in l and "exec bash" in l:
+        del lines[i]; break
+open(p, "w").write("\n".join(lines))
+MUTATE
+  mout="$(gate_capture_audit "$mut" 2>&1)"; mrc=$?
+  if [ "$mrc" -ne 0 ]; then ok "15b) MUTATION: removing one gate step's capture reds the audit"; else bad "15b) MUTATION SURVIVED: audit green with a capture removed — $mout"; fi
+  has "$mout" "UNWIRED" "15b) and it names how many"
+else
+  bad "15b) could not build the mutation (no wired gate step found in $victim)"
+fi
+# 16. THE EXIT-CODE INVARIANT. A capture wrapper that swallows a red is worse
+#     than no capture, so breaker-capture.sh re-raises the step's status
+#     verbatim, and appends ONLY when the step failed: a GREEN tripwire
+#     self-test that prints the word FAIL would otherwise poison the signature
+#     set and turn a genuinely inherited red into the author's own.
+CAPSH="$ROOT/scripts/breaker-capture.sh"
+if [ -f "$CAPSH" ]; then
+  cap="$TMP/cap.txt"; : > "$cap"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "FAIL: planted red at docs/x.md:41"' 'exit 3' > "$TMP/red-step.sh"
+  o="$( (BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/red-step.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=3" "16) a failing step's exit code passes through UNCHANGED (3, not 0 and not 1)"
+  has "$o" "FAIL: planted red" "16) the step's own output still reaches the job log"
+  grep -q 'FAIL: planted red at docs/x.md:41' "$cap" && ok "16) the failing step's error block landed in the capture" || bad "16) capture empty after a red"
+  : > "$cap"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "tripwire OK — FAIL was never planted"' 'exit 0' > "$TMP/green-step.sh"
+  o="$( (BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/green-step.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=0" "16) a passing step still exits 0"
+  [ ! -s "$cap" ] && ok "16) a PASSING step writes nothing (green output cannot poison the signature)" || bad "16) a passing step polluted the capture: $(cat "$cap")"
+  : > "$cap"; printf '%s\n' '#!/usr/bin/env bash' 'echo "armed=${BREAKER_CAPTURE_ARMED:-unset}"' > "$TMP/armed-step.sh"
+  o="$(BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/armed-step.sh" 2>&1)"
+  has "$o" "armed=1" "16) the child sees BREAKER_CAPTURE_ARMED, so the workflow guard cannot recurse"
+else
+  bad "16) scripts/breaker-capture.sh is missing"
+fi
+
+
+# ── 17. MAIN'S SIDE, AS THE API ACTUALLY RENDERS IT (task-2dbe8808f2a6f7b5) ──
+# Arms 2-5 and 11-14 feed main's jobs JSON with gate steps marked
+# `"conclusion": "failure"`. A real runner NEVER writes that: every gate step
+# carries `continue-on-error: true`, and such a step reports conclusion
+# "success" even when it failed — only its `outcome` is "failure", and `outcome`
+# is not in the jobs API. MEASURED on run 33788784458 job 100759983487 ('Doc
+# budgets + anchors'): 33 gate steps all `conclusion: success`, one `failure`,
+# the Decide step. So on every real run the step-name clause found a step "main
+# does not fail on" and exited one clause BEFORE the signature test — PR
+# #15854's own doc-gates job 100761669105 printed exactly that while main's log
+# said, in the breaker's own words, that main failed on that same step.
+# This fixture is main's shape as it really is.
+main_real="$TMP/main-real.json"; cat > "$main_real" <<'J'
+{"jobs":[{"id":100759983487,"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"success"},{"name":"Code-comment citation guard (fails this job)","conclusion":"success"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success"},{"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+# Main's job log — its Decide step PRINTS the gate step names the API withholds.
+main_log_real="$TMP/main-real.log"; cat > "$main_log_real" <<'L'
+2026-09-03T18:14:43.4410599Z FAIL: lineref drift
+2026-09-03T18:14:43.4411203Z   ✗ NOVEL api/lib/barkpark/content/query.ex:661
+2026-09-03T18:14:43.8939295Z main-red-breaker: FAIL — 'Doc budgets + anchors' failed on: Code-comment citation guard (fails this job). This is not a pull_request run, so the red is main's state and stands.
+2026-09-03T18:14:43.8955306Z ##[error]Process completed with exit code 1.
+L
+our_same="$TMP/our-same.txt"; cat > "$our_same" <<'L'
+FAIL: lineref drift
+  ✗ NOVEL api/lib/barkpark/content/query.ex:663
+L
+our_diff="$TMP/our-diff.txt"; cat > "$our_diff" <<'L'
+FAIL: lineref drift
+  ✗ NOVEL web/app/page.tsx:12
+L
+# 17a. main red on the same step, recovered from its LOG, and the signature
+#      matches (the line drifted 661 -> 663) -> inherited. This is the verdict
+#      the breaker could not reach on any real run before.
+out="$(run "$out_s2" pull_request "$main_real" "$our_same" "$main_log_real")"
+has "$out" "INHERITED-FROM-MAIN" "17a) main's gate step read from its own Decide line => inherited"
+has "$out" "Signature matched too" "17a) and only because the signature agreed"
+has "$out" "RC=0" "17a) rc 0"
+# 17b. same step, DIFFERENT defect -> the PR's own red (the 2026-09-03 shape,
+#      now on main's real API shape rather than a hand-marked fixture).
+out="$(run "$out_s2" pull_request "$main_real" "$our_diff" "$main_log_real")"
+has "$out" "NOT with the same failure signature" "17b) a different defect in the same step is still the PR's own"
+has "$out" "RC=1" "17b) rc 1"
+# 17c. THE FAIL-CLOSED CLAUSE. A step name recovered only from main's log, with
+#      NO signature to check, must NOT inherit: turning the step-name clause on
+#      by itself would neutralise every known-inherited red in one commit on
+#      step name alone — precisely what #15842's SIGNATURE-UNVERIFIED fallback
+#      was chosen to avoid. The capture wiring is what unlocks inheritance.
+out="$(run "$out_s2" pull_request "$main_real" "$TMP/absent-capture.txt" "$main_log_real")"
+has "$out" "ONLY per its own Decide line" "17c) a log-derived match with no signature does NOT inherit"
+has "$out" "SIGNATURE-UNVERIFIED" "17c) and says which half was missing"
+has "$out" "RC=1" "17c) rc 1"
+case "$out" in *INHERITED-FROM-MAIN*) bad "17c) waved a red through on step name alone" ;; *) ok "17c) never claims INHERITED without a signature" ;; esac
+# 17d. the API path is untouched: when main's JSON DOES mark the gate step
+#      failed (arms 2/12/13/14's shape), an unverified signature still inherits.
+out="$(run "$out_s2" pull_request "$main_red_s2" "$TMP/absent-capture.txt" "$main_log_15650")"
+has "$out" "INHERITED-FROM-MAIN" "17d) the pre-existing API path keeps v1's fallback"
+has "$out" "RC=0" "17d) rc 0"
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

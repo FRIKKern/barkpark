@@ -307,7 +307,9 @@ jobs:
       - name: Fetch deps
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: mix deps.get
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          mix deps.get
 
       # NO apt libvips-dev HERE. Same mechanism cb298518f (#13083) established
       # for the elixir.yml Test job, which compiles the whole app: the repo sets
@@ -327,13 +329,17 @@ jobs:
         # A newly introduced insecure pattern is not in the reviewed baseline and
         # reds this advisory job. Never regenerate/commit the baseline on a dev
         # toolchain; the matched-toolchain artifact below is for human review.
-        run: mix sobelow --skip --exit Low
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          mix sobelow --skip --exit Low
 
       - name: Reconcile baseline on the pinned CI toolchain
         id: s3
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: always()
-        run: bash scripts/sobelow-baseline-reconcile.sh "${{ runner.temp }}/sobelow-baseline-reconcile"
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/sobelow-baseline-reconcile.sh "${{ runner.temp }}/sobelow-baseline-reconcile"
 
       - name: Fresh-finding guard can lose (selftest first, like its two siblings below)
         id: s4
@@ -344,13 +350,17 @@ jobs:
         # sobelow-baseline-staleness-check.sh already run selftest-then-bare
         # in this file; this was the one family member wired bare only.
         if: always()
-        run: bash scripts/sobelow-fresh-finding-guard.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/sobelow-fresh-finding-guard.sh --selftest
 
       - name: Prove a fresh String.to_atom finding still reds
         id: s5
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: always()
-        run: bash scripts/sobelow-fresh-finding-guard.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/sobelow-fresh-finding-guard.sh
 
       - name: Anchor-token table still matches the Sobelow detector modules
         id: s6
@@ -361,7 +371,9 @@ jobs:
         # against its source. Advisory like the rest of this job: a Sobelow
         # version bump that adds a detector should be visible, not a hard stop.
         if: always()
-        run: bash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow
 
       - name: Upload reconciled Sobelow baseline for human review
         if: always()
@@ -445,17 +457,23 @@ jobs:
       - name: Selftest (the overlap + binding ratchets must be able to fail)
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash api/scripts/sobelow-inline-overlap-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-inline-overlap-check.sh --selftest
 
       - name: No baseline entry duplicates an inline waiver, and every annotation is bound to its def
         id: s2
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash api/scripts/sobelow-inline-overlap-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-inline-overlap-check.sh
 
       - name: Selftest (the staleness ratchet must be able to fail)
         id: s3
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
 
       # BLOCKING as of wave 24 — the residue is zero, measured by execution.
       #
@@ -496,7 +514,9 @@ jobs:
       - name: Every baseline entry still points at a construct of its own type
         id: s4
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash api/scripts/sobelow-baseline-staleness-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-baseline-staleness-check.sh
 
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
@@ -597,12 +617,16 @@ jobs:
       - name: Selftest (the fingerprint ratchet must be able to fail)
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash api/scripts/sobelow-baseline-fingerprint-check.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-baseline-fingerprint-check.sh --selftest
 
       - name: Every reconstructible baseline row still hashes to its stored fingerprint
         id: s2
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash api/scripts/sobelow-baseline-fingerprint-check.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash api/scripts/sobelow-baseline-fingerprint-check.sh
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -663,7 +687,9 @@ jobs:
       - name: Fetch deps
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: mix deps.get
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          mix deps.get
 
       - name: mix deps.audit (scans mix.lock against the advisory DB)
         id: s2
@@ -673,7 +699,9 @@ jobs:
         # OTP 27+'s xmerl entity-disabling default (this runner + prod). Every
         # other CVE must be fixed by a bump, never ignored — drop the esaml id
         # the moment upstream ships a fix.
-        run: mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
