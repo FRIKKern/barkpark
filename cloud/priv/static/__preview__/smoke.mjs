@@ -1554,6 +1554,30 @@ const EXPECTATIONS = {
       assert.equal(ctx.localStorage.getItem("bpcloud.session"), null,
         "the local session survived the sign-out — clearSession() is the half that must happen even when the " +
         "revoke fails, and it did not happen at all");
+
+      // ── cch-w11-bl-unmodelled-delete-route-arms · THE FLAG ORACLE ─────────
+      // The two observables above are the WIRE and the LOCAL consequence. The
+      // third — the SERVER consequence — was unassertable until this wave,
+      // because DELETE /v1/auth/logout was UNMODELLED: it fell through to the
+      // terminal `/v1/` 200 {} at the bottom of scenarios.route(), so the leg
+      // above would have read one call and a cleared key against a fixture
+      // that answers 200 to any path at all — success against literally any
+      // server, which is exactly the founding sin this harness exists to kill.
+      //
+      // The arm now records the revocation on the per-boot state bag, and the
+      // READ GOES THROUGH IT: an authed read issued after the sign-out must
+      // answer the same 401 a logged-out scenario answers. REVERTING THE ARM
+      // (dropping the `state.loggedOut = true` write, or the gate that reads
+      // it) reds both assertions below — the /v1/me read falls back to the
+      // scenario's own 200.
+      assert.equal(ctx.state.loggedOut, true,
+        "DELETE /v1/auth/logout did not revoke anything the fixture can observe — the route is falling " +
+        "through to the terminal /v1/ catch-all again, and this whole leg is asserting against a 200 " +
+        "that any path would have earned");
+      const afterLogout = route("account-modal-revoke", "GET", "/v1/me", ctx.state);
+      assert.equal(afterLogout.status, 401,
+        "an authed read AFTER the sign-out must answer 401 — the revoked token is what the verb changed; " +
+        "got " + afterLogout.status);
     },
   },
   // ── cch-w23-bl-cruel-identity-own-scenario: THE CRUEL IDENTITY, AT REST ────
