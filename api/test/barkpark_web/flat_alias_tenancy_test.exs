@@ -280,9 +280,18 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
             plugs = pipeline_plugs(name),
             "AssignDefaultScope" in plugs,
             Enum.any?(plugs, &(&1 in ~w(OptionalToken RequireToken RequireBearerOrSessionToken))),
-            derive = Enum.find_index(plugs, &(&1 == "DeriveWorkspaceFromToken")),
-            default = Enum.find_index(plugs, &(&1 == "AssignDefaultScope")),
-            is_nil(derive) or derive > default,
+            # FLAT only. A `/w/:ws/p/:project` pipeline runs ResolveWorkspace, so
+            # `:current_workspace` is already set from the PATH and the token
+            # derivation would be a no-op by design (that is why
+            # `:scoped_media_mutate` carries AssignDefaultScope with no derive).
+            "ResolveWorkspace" not in plugs,
+            # NOT `derive = Enum.find_index(...)` inline: a bare assignment in a
+            # comprehension is a FILTER on its own value, so `nil` (the plug is
+            # ABSENT — the exact defect) silently dropped the pipeline from the
+            # scan. Measured 2026-09-03: with DeriveWorkspaceFromToken deleted
+            # from `pipeline :api`, this census stayed GREEN while three
+            # behavioural tests red. The predicate below is a plain boolean.
+            derives_too_late?(plugs),
             do: {name, plugs}
 
       assert offenders == [],
@@ -321,12 +330,23 @@ defmodule BarkparkWeb.FlatAliasTenancyTest do
     |> Enum.map(fn [_, arg] -> arg |> String.trim() |> String.split(".") |> List.last() end)
   end
 
+  # True when a pipeline stamps the Default scope without having derived the
+  # token's own workspace FIRST — either the derivation is missing outright, or
+  # it runs after the fallback (where it is a no-op, because Default is set).
+  defp derives_too_late?(plugs) do
+    derive = Enum.find_index(plugs, &(&1 == "DeriveWorkspaceFromToken"))
+    default = Enum.find_index(plugs, &(&1 == "AssignDefaultScope"))
+
+    is_nil(derive) or derive > default
+  end
+
   defp index_of!(plugs, plug, pipeline) do
     case Enum.find_index(plugs, &(&1 == plug)) do
       nil -> flunk("pipeline :#{pipeline} no longer runs #{plug} — got #{inspect(plugs)}")
       i -> i
     end
   end
+
   # ── write-arm helpers ─────────────────────────────────────────────────────
 
   defp flat_create(conn, token, doc_id) do
