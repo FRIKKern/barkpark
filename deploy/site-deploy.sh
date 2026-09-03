@@ -425,10 +425,20 @@ PY
   fi
 
   # Content-truth: the markers in the SERVED html must be the ones we ship.
-  local got_build got_rev got_doc
+  local got_build got_rev got_doc got_corpus
   got_build="$(meta_value "$body" bp-build-id)"
   got_rev="$(meta_value "$body" bp-content-rev)"
   got_doc="$(meta_value "$body" bp-doc-id)"
+  # bp-corpus-status (cause-truth) — the SAME marker site-deploy-node.sh reads.
+  # The template emits it ONLY when it could not anchor a content document, and
+  # it carries the upstream condition that stopped it ("graph 403: …",
+  # "graph 401: …", "graph 200: corpus read OK but carried 0 node(s)…"). Read it
+  # BEFORE the body is deleted — it is what turns the empty bp-doc-id refusal
+  # below from a symptom into a diagnosis. Without it a static build could only
+  # ever say "no content document", and `DeployLedger.classify/2` had nothing to
+  # match but the symptom, so EVERY static corpus failure landed in the causeless
+  # DOC_ID_EMPTY bucket regardless of what actually went wrong upstream.
+  got_corpus="$(meta_value "$body" bp-corpus-status)"
   rm -f "$body"
   if [ "$got_build" != "$BUILD_ID" ]; then
     HEALTH_DETAIL="bp-build-id marker is '${got_build:-<missing>}' but this deploy ships '$BUILD_ID' — the served html is not this build"
@@ -443,7 +453,23 @@ PY
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   if [ -z "$got_doc" ]; then
-    HEALTH_DETAIL="bp-doc-id marker is empty — the build rendered no content document"
+    # STILL REFUSES — fail-closed on an empty bp-doc-id is correct (D72) and is
+    # NOT relaxed here. What changes is legibility: when the build recorded WHY
+    # it could not read its corpus, that cause rides the failure_reason, so a
+    # 403 (public-read token), a 401 (no token), a wrong host and a genuinely
+    # empty corpus stop collapsing into one illegible row.
+    #
+    # THE SENTENCE IS A CONSUMER CONTRACT. `cloud/lib/barkpark_cloud/deploy_ledger.ex`
+    # reads the upstream status out of the stored failure_reason with the regex
+    #   could not read a content document: graph (\d+):
+    # anchored on this exact English. Reword it and every static row silently
+    # degrades back to DOC_ID_EMPTY with nothing anywhere failing — so the
+    # self-test asserts the anchor against these emitted bytes.
+    if [ -n "$got_corpus" ]; then
+      HEALTH_DETAIL="bp-doc-id marker is empty — the build could not read a content document: $got_corpus"
+    else
+      HEALTH_DETAIL="bp-doc-id marker is empty — the build rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract, so the upstream cause went unrecorded)"
+    fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   if [ -z "${CONTENT_REV:-}" ]; then
@@ -1188,16 +1214,25 @@ if [ -f ./.fail-build ]; then
   echo "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid" >&2
   exit 1
 fi
-bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"
+bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; corpus=""
 # The exact build that WENT LIVE on guerrilla: a wrong build id and an EMPTY
 # content rev, both of which the old name-only gate waved through.
 [ -f ./.lie ] && { bid=TOTALLY-WRONG; rev=""; }
+# A STATIC build that could NOT read its corpus: empty bp-doc-id (the gate must
+# still refuse) PLUS the bp-corpus-status marker naming the upstream condition.
+[ -f ./.no-corpus ] && { doc=""; corpus="graph 403: public-read tokens may only read published public documents"; }
+# The legacy shape: empty bp-doc-id and NO status marker (a template built before
+# the corpus-status contract) — the gate must refuse AND say the cause is unknown.
+[ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
 mkdir -p dist
 {
   printf '<!doctype html><html><head>\n'
   printf '<meta name="bp-build-id" content="%s">\n' "$bid"
   printf '<meta name="bp-content-rev" content="%s">\n' "$rev"
   printf '<meta name="bp-doc-id" content="%s">\n' "$doc"
+  # Emitted ONLY when there is something to record — same conditional the
+  # template uses (a healthy build carries no bp-corpus-status at all).
+  [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>hello</h1></body></html>\n'
 } > dist/index.html
 exit 0
@@ -1221,6 +1256,9 @@ FAKENPM
     # The stage protocol is a STDOUT contract — assert against stdout alone.
     saw()   { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$E2E/out.log"; }
     nosaw() { ! grep -q "^BPSTAGE name=$1 " "$E2E/out.log"; }
+    # A NEGATIVE log assertion needs its own helper: `check` runs its arguments
+    # as a command, so a bare `!` cannot be passed through.
+    no_log_match() { ! grep -Eq "$1" "$E2E/out.log"; }
     livenow() { readlink "$E2E_SITE/current" 2>/dev/null || true; }
 
     echo "[selftest] e2e: a full deploy walks all six stages"
@@ -1279,6 +1317,46 @@ FAKENPM
     check "no SWITCH stage line at all"        nosaw SWITCH
     check "current did NOT move (still e1)"    [ "$(livenow)" = releases/e1 ]
     check "the poisoned release is purged"     [ ! -d "$E2E_SITE/releases/e3" ]
+
+    echo "[selftest] e2e: an UNREADABLE CORPUS fails HEALTH and the reason NAMES the upstream condition (403), not just the empty marker"
+    : > "$SRC/.no-corpus"
+    rc="$(E2E_REV=rev-3b e2e_deploy e3b)"
+    rm -f "$SRC/.no-corpus"
+    check "unreadable-corpus build exit 14"    [ "$rc" = 14 ]
+    check "HEALTH failed"                      saw HEALTH failed e3b
+    check "the reason names the UPSTREAM 403, read out of bp-corpus-status" \
+      grep -q 'bp-doc-id marker is empty .* graph 403: public-read tokens may only read published public documents' "$E2E/out.log"
+    # Dual-channel, same contract as the lying build: the cause must ride the
+    # plain human log too, because the run-level reason_tail is the copy the
+    # user actually sees at the verdict line.
+    check "the cause ALSO rides the plain human log (dual-channel)" \
+      grep -q '\[site-deploy .*HEALTH: bp-doc-id marker is empty .* graph 403: ' "$E2E/out.log"
+    # THE CLASSIFIER'S ANCHOR, asserted by the PRODUCER.
+    # `cloud/lib/barkpark_cloud/deploy_ledger.ex` reads the upstream status out
+    # of the stored failure_reason with the regex
+    #   could not read a content document: graph (\d+):
+    # and routes it to CONTENT_API_403 / _500 / _503 / _UNREACHABLE. Reword the
+    # English a few hundred lines above and every static row silently degrades
+    # back to the causeless DOC_ID_EMPTY bucket with nothing anywhere failing.
+    # So the producer asserts the consumer's anchor against its own bytes: a
+    # reflow reds HERE, on the shell side, at edit time.
+    check "the emitted reason still matches the CLASSIFIER's anchor (cloud deploy_ledger.ex)" \
+      grep -Eq 'could not read a content document: graph [0-9]+:' "$E2E/out.log"
+    check "no SWITCH stage line at all"        nosaw SWITCH
+    check "current did NOT move (the gate STILL fails closed)" [ "$(livenow)" = releases/e1 ]
+    check "the corpus-less release is purged"  [ ! -d "$E2E_SITE/releases/e3b" ]
+
+    echo "[selftest] e2e: an empty bp-doc-id with NO status marker still refuses, and SAYS the cause went unrecorded"
+    : > "$SRC/.no-corpus-legacy"
+    rc="$(E2E_REV=rev-3c e2e_deploy e3c)"
+    rm -f "$SRC/.no-corpus-legacy"
+    check "legacy empty-marker build exit 14"  [ "$rc" = 14 ]
+    check "HEALTH failed"                      saw HEALTH failed e3c
+    check "the reason admits the cause is UNRECORDED (never invents one)" \
+      grep -q 'no bp-corpus-status marker: this build predates the corpus-status contract' "$E2E/out.log"
+    check "it does NOT claim a 403"            no_log_match 'graph 403'
+    check "no SWITCH stage line at all"        nosaw SWITCH
+    check "current did NOT move (still e1)"    [ "$(livenow)" = releases/e1 ]
 
     echo "[selftest] e2e: redeploying the SAME build_id after a health failure REBUILDS"
     : > "$SRC/.npm-calls"
