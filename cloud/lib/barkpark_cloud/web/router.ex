@@ -2650,9 +2650,10 @@ defmodule BarkparkCloud.Web.Router do
             cond do
               # The caller tore box + DNS down itself and says so (see above).
               fleet_support_detach?(conn) ->
-                case Registry.delete_barkpark(support) do
+                case audited_delete_barkpark(conn, support, "fleet_support_detach") do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed", mode: "detach"})
 
                   {:error, %Ecto.Changeset{} = cs} ->
@@ -2679,9 +2680,10 @@ defmodule BarkparkCloud.Web.Router do
               # Non-live, nothing in flight: no box, no record — the row IS the
               # whole resource, so removing it strands nothing.
               true ->
-                case Registry.delete_barkpark(support) do
+                case audited_delete_barkpark(conn, support, "fleet_support_not_live") do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed"})
 
                   {:error, %Ecto.Changeset{} = cs} ->
@@ -2882,6 +2884,43 @@ defmodule BarkparkCloud.Web.Router do
       {:ok, _event} -> push_event(team.id, "audit")
       {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
     end
+  end
+
+  # EVERY OTHER LANE THAT DELETES A BARKPARK ROW (the destructive-lane arm of
+  # audit_vocabulary_census_test.exs). Five lanes removed a row and wrote
+  # nothing: both arms of `DELETE /v1/fleet/supports/:id`, both arms of
+  # `POST /v1/internal/barkparks/:id/deprovision`, and the resurrect
+  # enqueue-failure rollback. The first four are removals of a resource a team
+  # can see, so they belong on that team's trail exactly as the non-live arm of
+  # `DELETE /v1/barkparks/:id` already does. (The fifth is NOT routed here and is
+  # allowlisted in the census with its reason: it rolls back a row this same
+  # request created seconds earlier, and its paired `barkpark.resurrected` is
+  # written only on the success branch, so the trail stays consistent — a
+  # `deleted` for a box that never existed would be noise, not evidence.)
+  #
+  # `Accounts.audit/3`, not `record_audit/1`: the row delete and the audit insert
+  # share ONE transaction, so there is never a removal the trail cannot name and
+  # never a recorded removal that did not happen. Returns the wrapper's
+  # `{:ok, barkpark} | {:error, reason}` — the same shape the call sites already
+  # matched on `Registry.delete_barkpark/1`.
+  #
+  # `actor_user_id` is read defensively: the internal deprovision route is
+  # WORKER-authenticated and has no user at all, and a PAT caller on the fleet
+  # route may have none either. A nil actor is the documented shape for a
+  # system-caused event (`list_audit_events/2`'s actor filter never matches one),
+  # not a hole — `team_id` comes off the row itself and is always present.
+  defp audited_delete_barkpark(conn, %Barkpark{} = bp, lane) do
+    Accounts.audit(
+      %{
+        team_id: bp.team_id,
+        actor_user_id: conn.assigns[:current_user] && conn.assigns.current_user.id,
+        action: "barkpark.deleted",
+        target_type: "barkpark",
+        target_id: bp.id,
+        metadata: %{name: bp.name, lane: lane}
+      },
+      fn -> Registry.delete_barkpark(bp) end
+    )
   end
 
   # A REFUSED WRITE LEAVES A NAMED ROW (cch-w63-s8). When the plane refuses to
@@ -7425,9 +7464,10 @@ defmodule BarkparkCloud.Web.Router do
         %Barkpark{} = bp ->
           cond do
             detach? ->
-              case Registry.delete_barkpark(bp) do
+              case audited_delete_barkpark(conn, bp, "internal_deprovision_detach") do
                 {:ok, _} ->
                   push_event(bp.team_id, "fleet")
+                  push_event(bp.team_id, "audit")
                   json(conn, 200, %{ok: true, status: "removed"})
 
                 {:error, %Ecto.Changeset{} = cs} ->
@@ -7454,9 +7494,10 @@ defmodule BarkparkCloud.Web.Router do
               json(conn, 409, %{error: "provisioning_in_progress"})
 
             true ->
-              case Registry.delete_barkpark(bp) do
+              case audited_delete_barkpark(conn, bp, "internal_deprovision_not_live") do
                 {:ok, _} ->
                   push_event(bp.team_id, "fleet")
+                  push_event(bp.team_id, "audit")
                   json(conn, 200, %{ok: true, status: "removed"})
 
                 {:error, %Ecto.Changeset{} = cs} ->
