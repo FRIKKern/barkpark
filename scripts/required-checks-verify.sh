@@ -740,6 +740,13 @@ PROSE_RECORD_MARKERS='retracted|retired|struck|corrected|superseded|obsolete|no 
 # IN THE CLAIM'S OWN FILE, and a sibling file is a path, which this clause
 # refuses to key on by design. So the pin stays until the packet is retired
 # (its STALE arm then forces the drop). This pin dies with wave 3.
+# RULING (main, 2026-09-03 23:22Z): never edit or retire the byte-immutable
+# capture; the durable fix is a sibling CORRECTION-2026-09-03.md the prose
+# clause learns to fence on (rule 3(a) widened to a correction record). The
+# grip lane is stood down, so that work is filed for the next wave.
+#   owner:       main
+#   replacement: task-e428b30fb9b2d4c7 (P3, grip fence — correction record +
+#                the fence + dropping this entry in one PR)
 PROSE_CLAIM_PINS='tooling/grip/ledger/sidecars-2026-08-23/triage-cch-agent/packet/cch-w22-s7-cruelty-ledger-effective-caps-and-classes__crit15.txt|Cloud gate|` are advisory on the live branch'
 
 merge_truth_prose_check() {
