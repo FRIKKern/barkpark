@@ -732,10 +732,14 @@ PROSE_RECORD_MARKERS='retracted|retired|struck|corrected|superseded|obsolete|no 
 # false now (four contexts, enforced). It is NOT corrected in place because the
 # packet's own README declares the files "byte-unchanged: copied, never edited"
 # — the sidecar is an evidence capture, not a charter, and rewriting captured
-# evidence is the wrong fix. REPLACEMENT (owner: the grip lane, ruling asked of
-# main on 2026-09-03): either the packet gains a dated correction record the
-# clause can fence structurally, or the capture is retired with its packet;
-# either one drops this pin in the same commit. This pin dies with wave 3.
+# evidence is the wrong fix. RULING (main, 2026-09-03 15:43Z): the grip lane is
+# stood down and main committed the packets, so lead-gates-3 owns it: a dated
+# correction record now sits BESIDE the capture
+# (…/packet/CORRECTION-2026-09-03-crit15.md). The ruling asked for the pin to
+# drop in the same commit; it cannot — rule 3(a) fences a record by a marker
+# IN THE CLAIM'S OWN FILE, and a sibling file is a path, which this clause
+# refuses to key on by design. So the pin stays until the packet is retired
+# (its STALE arm then forces the drop). This pin dies with wave 3.
 PROSE_CLAIM_PINS='tooling/grip/ledger/sidecars-2026-08-23/triage-cch-agent/packet/cch-w22-s7-cruelty-ledger-effective-caps-and-classes__crit15.txt|Cloud gate|` are advisory on the live branch'
 
 merge_truth_prose_check() {
