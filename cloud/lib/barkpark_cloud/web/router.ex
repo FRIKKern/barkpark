@@ -1577,7 +1577,7 @@ defmodule BarkparkCloud.Web.Router do
         # Both booleans come from Authz — the same module the SEVENTEEN
         # `require_team_admin` routes call (auth.ex `&Authz.team_admin?/2`), so
         # against THOSE the wire and the gate are one read. They are NOT the
-        # only admin gate: the SEVEN `require_primary_team_admin` routes (1591,
+        # only admin gate: the SEVEN `require_current_team_admin` routes (1591,
         # 2020, 2059, 3081, 3218, 3342, 3638) go through `Accounts.team_admin?/2`
         # -> `TeamMembership.admin?/1`, a RANK THRESHOLD over `@ranks`, while
         # this boolean is SET MEMBERSHIP over `Authz.@admin_roles` — two
@@ -1822,14 +1822,14 @@ defmodule BarkparkCloud.Web.Router do
   #   skip     — dismiss early (Coolify's skipBoarding) — stamps completed_at
   # RBAC: the mutations change TEAM state (they finish/dismiss the whole team's
   # onboarding + set the activation metric), so they are gated at owner/admin via
-  # `Auth.require_primary_team_admin/1` — a plain `member` gets 403. GET stays
+  # `Auth.require_current_team_admin/1` — a plain `member` gets 403. GET stays
   # readable to any member. (401 unauth, 403 no_team, 403 non-admin all handled
   # inside the gate.) Deliberate Coolify divergence: NO force-redirect middleware
   # — the checklist is a soft, dismissable SPA surface; the real launch gate stays
   # the existing 402 on /v1/go-live. On any state change we push an "onboarding"
   # invalidation so other tabs refetch.
   post "/v1/onboarding" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     if conn.halted do
       conn
@@ -2287,12 +2287,12 @@ defmodule BarkparkCloud.Web.Router do
   # is a real page of matches, not a filtered slice of the newest 50.
   #
   # RBAC: ADMIN-gated (rbac-roles). Reading the audit log is owner/admin-only —
-  # require_primary_team_admin halts 401 (no session) / 403 no_team / 403 (a plain
+  # require_current_team_admin halts 401 (no session) / 403 no_team / 403 (a plain
   # member). This is the docstring-promised tightening the swarm candidate could
   # only hint at: main now ships the team-role gate, so a plain member can no
   # longer read the trail.
   get "/v1/audit" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     if conn.halted do
       conn
@@ -2326,12 +2326,12 @@ defmodule BarkparkCloud.Web.Router do
   # → still 202). NON-live box (host nil) → delete the row now, 200 {status:
   # "removed"} (no live server to tear down).
   # ADMIN-gated: removing an instance (and tearing down a billed box) is
-  # privileged. require_primary_team_admin halts 401 / 403 no_team / 403 for a
+  # privileged. require_current_team_admin halts 401 / 403 no_team / 403 for a
   # member; a non-admin can no longer deprovision the team's infrastructure.
   delete "/v1/barkparks/:id" do
-    # Infra-destructive → team admin (owner/admin) only. require_primary_team_admin
+    # Infra-destructive → team admin (owner/admin) only. require_current_team_admin
     # gates the user's PRIMARY team (401 / 403 no_team / 403), matching the doc above.
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -3761,13 +3761,13 @@ defmodule BarkparkCloud.Web.Router do
   #                                             admin endpoint).
   #
   # ADMIN-gated: rewriting a live box's running code is privileged infra, like
-  # DELETE above — require_primary_team_admin halts 401 / 403 no_team / 403 for
+  # DELETE above — require_current_team_admin halts 401 / 403 no_team / 403 for
   # a plain member. TEAM-SCOPED fail-closed: wrong-team / nonexistent /
   # malformed id is the SAME 404 (no existence leak). 409 not_live while
   # provisioning; 404 no_admin_token for pre-feature rows; 502 when the
   # instance is unreachable; 500 on tampered ciphertext.
   post "/v1/barkparks/:id/self-update" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -3945,7 +3945,7 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id → the SAME 404 (no existence leak); 409 not_live while
   # provisioning; 404 no_admin_token; 500 decrypt_failed; 502 unreachable.
   post "/v1/barkparks/:id/rollback" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4094,11 +4094,11 @@ defmodule BarkparkCloud.Web.Router do
   # absent keys are left unchanged (cast ignores them).
   #
   # ADMIN-gated: a policy that governs unattended production deploys is
-  # privileged, like self-update above — require_primary_team_admin halts 401 /
+  # privileged, like self-update above — require_current_team_admin halts 401 /
   # 403 no_team / 403 for a plain member. TEAM-SCOPED fail-closed: wrong-team /
   # nonexistent / malformed id is the SAME 404 (no existence leak).
   patch "/v1/barkparks/:id/autoupdate" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4745,11 +4745,11 @@ defmodule BarkparkCloud.Web.Router do
   # the SAME host again is still a 202 (the failed-attach recovery path).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
-  # privileged infra, like self-update above — require_primary_team_admin halts
+  # privileged infra, like self-update above — require_current_team_admin halts
   # 401 / 403 no_team / 403 for a plain member. TEAM-SCOPED fail-closed:
   # wrong-team / nonexistent / malformed id is the SAME 404 (no existence leak).
   post "/v1/barkparks/:id/domain" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -6431,18 +6431,18 @@ defmodule BarkparkCloud.Web.Router do
   # when the user has no team to bill.
   # OWNER-gated: billing is owner-only (`@action_min billing: [owner]`) — spending
   # money / changing the plan is the team owner's call, not any member or admin.
-  # require_primary_team_owner halts with 401 (no auth), 403 no_team, or 403
+  # require_current_team_owner halts with 401 (no auth), 403 no_team, or 403
   # (not-owner) before we reach here.
   post "/v1/billing/checkout" do
     # Spends money / changes plan → owner-only. Gated to the user's PRIMARY team
     # owner (401 / 403 no_team / 403), matching `@action_min billing: [owner]`.
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # UNREACHABLE belt-and-braces: require_current_team_owner above already
       # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
       # before it), so `conn.halted` catches that case one clause earlier. Kept
       # as a fail-closed guard, NOT as a contract this route can emit.
@@ -6508,13 +6508,13 @@ defmodule BarkparkCloud.Web.Router do
   # Coolify-anchor: getStripeCustomerPortalSession.
   # OWNER-gated: the portal exposes card/PII/cancel — owner-only, like checkout.
   post "/v1/billing/portal" do
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # UNREACHABLE belt-and-braces: require_current_team_owner above already
       # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
       # before it), so `conn.halted` catches that case one clause earlier. Kept
       # as a fail-closed guard, NOT as a contract this route can emit.
@@ -6547,7 +6547,7 @@ defmodule BarkparkCloud.Web.Router do
     # `confirm_password` check verifies the CALLER's own password (not authority),
     # so it must never be the sole gate on a destructive cancel. The owner gate
     # halts 401 / 403 no_team / 403 first.
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
@@ -10103,7 +10103,7 @@ defmodule BarkparkCloud.Web.Router do
     #   * a PAT must carry the `deploy` ability (Coolify's exclusive deploy-token).
     #   * a SESSION carries ["root"], so `require_ability` is a no-op for it — gate
     #     the session branch on TEAM-ADMIN inline here. NOT
-    #     `require_primary_team_admin/1`, which re-runs `require_user` and discards
+    #     `require_current_team_admin/1`, which re-runs `require_user` and discards
     #     the resolved PAT/session assigns.
     # The ROLE check precedes the entitlement (402) check, so a plain member gets
     # 403 (not 402) and the deploy-PAT path still works.
