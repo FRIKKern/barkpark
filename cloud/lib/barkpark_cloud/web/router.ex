@@ -7966,108 +7966,149 @@ defmodule BarkparkCloud.Web.Router do
   # `Ecto.StaleEntryError` before, it is `teardown/2`'s function clause now.
   delete "/v1/sites/:id" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
-      bp = Registry.get_barkpark(site.barkpark_id)
-      teardown_result = Sites.Deploy.teardown(site, bp)
+      # THE AUDIT IS THE GATE, AND IT RUNS FIRST — the standing ruling on the
+      # `record_audit` discard class, applied to the one route where the row is
+      # the ONLY thing that survives the act it describes. `delete_site/1` is a
+      # hard `Repo.delete`, so once this request finishes nothing in this
+      # database can say the site existed or who removed it.
+      #
+      # It cannot be the transactional `Accounts.audit/3` the twenty-eight other
+      # fail-closed writes use, and the reason is ORDERING, not taste: the box
+      # teardown below is an outbound call that `Repo.rollback` cannot undo. An
+      # `audit/3` wrapper around `delete_site/1` would refuse the registration
+      # delete with the Caddy route already disarmed and the tree already gone —
+      # a site row pointing at a dead box, the exact inverse orphan the
+      # box-first ordering and the typed `registration_not_removed` 500 exist to
+      # prevent. So the gate moves EARLIER instead of wrapping: record the row
+      # BEFORE anything is torn down, and on a refused insert answer the same
+      # 422 shape the `barkpark.deleted` twin answers with NOTHING touched — no
+      # teardown, no delete, no orphan of either polarity.
+      #
+      # TWO COSTS, NAMED RATHER THAN DISCOVERED LATER.
+      #
+      # (1) The row now describes an INTENT, so it can outlive a delete that
+      # then fails. A refused teardown (a box that is down — routine, and the
+      # relay arms below exist for it) leaves a `site.deleted` row for a site
+      # that is still registered and still serving. That is the lesser evil the
+      # ruling accepts: a trail that occasionally over-reports a removal is
+      # recoverable, a removal with no trail at all is not. The arms are pinned
+      # by `router_sites_test.exs` so the over-report is a DECISION on the
+      # record, not a surprise.
+      #
+      # (2) The metadata can no longer carry `read_token`. That fact is the
+      # OUTCOME of `revoke_site_read_token/1`, which happens inside
+      # `delete_site/1` — it does not exist yet at this point in the request and
+      # `audit_events` is append-only, so there is no second write to add it.
+      # The 200 body below still reports it to the caller, and
+      # `Mix.Tasks.BarkparkCloud.SiteReadTokens` is the sweep that finds a
+      # credential nobody confirmed dead.
+      audit_attrs = %{
+        team_id: site.team_id,
+        actor_user_id: conn.assigns.current_user.id,
+        action: "site.deleted",
+        target_type: "site",
+        target_id: site.id,
+        metadata: %{slug: site.slug, kind: site.kind}
+      }
 
-      case teardown_result do
-        :ok ->
-          # THE INVERSE ORPHAN, NOW TYPED (W70 S2 / D848, D856 — supersedes the
-          # W67 S2 / D820 hard match). `Registry.delete_site/1` is a bare
-          # `Repo.delete` on a struct with no declared constraint, so every child
-          # row is swept by the DATABASE. Three FKs reference `sites`
-          # (deployments, site_artifacts, content_publishes) and all three are ON
-          # DELETE CASCADE. If one were ever loosened to RESTRICT, `Repo.delete`
-          # RAISES `Ecto.ConstraintError` — AFTER the box teardown above already
-          # disarmed the Caddy route, so the box is gone and the site row SURVIVES:
-          # a dead site that is still registered. Under the old hard match that
-          # raise became `handle_errors`' `500 {"error":"server_error"}` with no
-          # `ok`, no `detail`, and no name for either half of the outcome. That
-          # was rejected as a lie by omission: the answer measured TWO facts (the
-          # instance IS torn down; the registration was NOT removed) and stated
-          # neither. `delete_site/1` now RESCUES the foreign_key case and returns
-          # `{:error, :foreign_key_constraint, constraint}`, so the nested case
-          # below answers a typed `500 registration_not_removed` whose detail
-          # names the blocking constraint and BOTH halves. It is still a 500 — the
-          # box being already gone means neither retry nor refuse is true, and a
-          # human (support) must remove the surviving row — but it is an HONEST
-          # 500 the console and CLI can read. The tripwire that keeps the branch
-          # from silently regressing is `site_cascade_census_test.exs` (an
-          # EXACT-SET census of the FKs referencing `sites` plus their confdeltype)
-          # backed by per-child delete-path tests in `router_sites_test.exs` and
-          # the behavioural 500 in `router_sites_destroy_failures_test.exs`.
-          #
-          # NB: the sibling `{:error, status, detail, code}` relay arm below
-          # matches `teardown_result` (the box seam), NOT this delete — it is
-          # unreachable from inside `:ok`, which is why the delete's own failure
-          # needs this nested case rather than a fourth outer arm.
-          case Registry.delete_site(site) do
-            {:ok, _, %{read_token: read_token}} ->
-              case Accounts.record_audit(%{
-                     team_id: site.team_id,
-                     actor_user_id: conn.assigns.current_user.id,
-                     action: "site.deleted",
-                     target_type: "site",
-                     target_id: site.id,
-                     # ssw8: the credential half of the teardown is RECORDED, not
-                     # assumed. `read_token` is the one fact about this delete that
-                     # nothing else in the system can reconstruct afterwards — the
-                     # row that named the token is gone by the time anyone asks.
-                     metadata: %{
-                       slug: site.slug,
-                       kind: site.kind,
-                       read_token: to_string(read_token)
-                     }
-                   }) do
-                {:ok, _event} -> push_event(site.team_id, "audit")
-                {:error, cs} -> Logger.error("audit site.deleted failed: #{inspect(cs)}")
-              end
+      case Accounts.record_audit(audit_attrs) do
+        {:error, %Ecto.Changeset{} = cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
 
-              push_event(site.team_id, "sites")
-
-              # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
-              # The delete succeeded either way (the CP row is the truth, and a
-              # box that is down must not make its sites undeletable), but the
-              # 200 states which of the two happened. On `:error` it also NAMES
-              # the leftover, because this response is the last place the pointer
-              # exists: the site row that carried the box, the workspace scope and
-              # the slug has just been deleted. `Mix.Tasks.BarkparkCloud.SiteReadTokens`
-              # is the sweep that finds it again if this line is missed.
-              body = %{
-                ok: true,
-                status: "deleted",
-                slug: site.slug,
-                read_token: read_token_status(read_token)
-              }
-
-              json(conn, 200, site_delete_token_warning(body, site, read_token))
-
-            {:error, :foreign_key_constraint, constraint} ->
-              json(conn, 500, %{
-                ok: false,
-                error: "registration_not_removed",
-                detail:
-                  "the instance was torn down, but the registration could not be removed: deleting " <>
-                    "the site row was refused by the foreign-key constraint #{constraint}. The site " <>
-                    "is no longer serving, yet it is still registered here — support must remove the " <>
-                    "row by hand. This is not something a retry can fix."
-              })
-          end
-
-        # Same typed relay as the rollback route (cch-w63-s3 / D763). THE
-        # DEFERRAL IS OVER: the console gained its site-delete flow — and the
-        # reader for these two arms — in W67 S1
-        # (cch-w63-bl-teardown-failed-has-no-console-reader-at-all, cloud/priv/static
-        # only). Until then `teardown_failed` had ZERO readers in `app.js` and no
-        # console caller could even reach this route, so the refusal had no human
-        # surface at all. The wire shape below is unchanged by that slice; this
-        # comment is edited here because S2 owns router.ex this wave.
-        {:error, status, detail, code} ->
-          json(conn, status, %{ok: false, error: code, detail: detail})
-
-        {:error, status, detail} ->
-          json(conn, status, %{ok: false, error: "teardown_failed", detail: detail})
+        {:ok, _event} ->
+          push_event(site.team_id, "audit")
+          delete_site_after_audit(conn, site)
       end
     end)
+  end
+
+  # The act half of `DELETE /v1/sites/:id`, reached ONLY once the audit row is
+  # committed. Split out so the route above reads as gate-then-act rather than
+  # as five levels of nesting.
+  defp delete_site_after_audit(conn, site) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    teardown_result = Sites.Deploy.teardown(site, bp)
+
+    case teardown_result do
+      :ok ->
+        # THE INVERSE ORPHAN, NOW TYPED (W70 S2 / D848, D856 — supersedes the
+        # W67 S2 / D820 hard match). `Registry.delete_site/1` is a bare
+        # `Repo.delete` on a struct with no declared constraint, so every child
+        # row is swept by the DATABASE. Three FKs reference `sites`
+        # (deployments, site_artifacts, content_publishes) and all three are ON
+        # DELETE CASCADE. If one were ever loosened to RESTRICT, `Repo.delete`
+        # RAISES `Ecto.ConstraintError` — AFTER the box teardown above already
+        # disarmed the Caddy route, so the box is gone and the site row SURVIVES:
+        # a dead site that is still registered. Under the old hard match that
+        # raise became `handle_errors`' `500 {"error":"server_error"}` with no
+        # `ok`, no `detail`, and no name for either half of the outcome. That
+        # was rejected as a lie by omission: the answer measured TWO facts (the
+        # instance IS torn down; the registration was NOT removed) and stated
+        # neither. `delete_site/1` now RESCUES the foreign_key case and returns
+        # `{:error, :foreign_key_constraint, constraint}`, so the nested case
+        # below answers a typed `500 registration_not_removed` whose detail
+        # names the blocking constraint and BOTH halves. It is still a 500 — the
+        # box being already gone means neither retry nor refuse is true, and a
+        # human (support) must remove the surviving row — but it is an HONEST
+        # 500 the console and CLI can read. The tripwire that keeps the branch
+        # from silently regressing is `site_cascade_census_test.exs` (an
+        # EXACT-SET census of the FKs referencing `sites` plus their confdeltype)
+        # backed by per-child delete-path tests in `router_sites_test.exs` and
+        # the behavioural 500 in `router_sites_destroy_failures_test.exs`.
+        #
+        # NB: the sibling `{:error, status, detail, code}` relay arm below
+        # matches `teardown_result` (the box seam), NOT this delete — it is
+        # unreachable from inside `:ok`, which is why the delete's own failure
+        # needs this nested case rather than a fourth outer arm.
+        case Registry.delete_site(site) do
+          {:ok, _, %{read_token: read_token}} ->
+            # The `site.deleted` row is ALREADY COMMITTED — it gated this
+            # branch. Nothing is recorded here.
+            push_event(site.team_id, "sites")
+
+            # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
+            # The delete succeeded either way (the CP row is the truth, and a
+            # box that is down must not make its sites undeletable), but the
+            # 200 states which of the two happened. On `:error` it also NAMES
+            # the leftover, because this response is the last place the pointer
+            # exists: the site row that carried the box, the workspace scope and
+            # the slug has just been deleted. `Mix.Tasks.BarkparkCloud.SiteReadTokens`
+            # is the sweep that finds it again if this line is missed.
+            body = %{
+              ok: true,
+              status: "deleted",
+              slug: site.slug,
+              read_token: read_token_status(read_token)
+            }
+
+            json(conn, 200, site_delete_token_warning(body, site, read_token))
+
+          {:error, :foreign_key_constraint, constraint} ->
+            json(conn, 500, %{
+              ok: false,
+              error: "registration_not_removed",
+              detail:
+                "the instance was torn down, but the registration could not be removed: deleting " <>
+                  "the site row was refused by the foreign-key constraint #{constraint}. The site " <>
+                  "is no longer serving, yet it is still registered here — support must remove the " <>
+                  "row by hand. This is not something a retry can fix."
+            })
+        end
+
+      # Same typed relay as the rollback route (cch-w63-s3 / D763). THE
+      # DEFERRAL IS OVER: the console gained its site-delete flow — and the
+      # reader for these two arms — in W67 S1
+      # (cch-w63-bl-teardown-failed-has-no-console-reader-at-all, cloud/priv/static
+      # only). Until then `teardown_failed` had ZERO readers in `app.js` and no
+      # console caller could even reach this route, so the refusal had no human
+      # surface at all. The wire shape below is unchanged by that slice; this
+      # comment is edited here because S2 owns router.ex this wave.
+      {:error, status, detail, code} ->
+        json(conn, status, %{ok: false, error: code, detail: detail})
+
+      {:error, status, detail} ->
+        json(conn, status, %{ok: false, error: "teardown_failed", detail: detail})
+    end
   end
 
   # POST /v1/sites/:id/deploy {git_ref?, artifact_url?} → 201 {deployment}.

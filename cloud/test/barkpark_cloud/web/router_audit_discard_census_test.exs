@@ -31,8 +31,11 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
 
     * ARM (a), tree-wide over `cloud/lib`: the pair appears ZERO times. Any
       module, not just the router — a new discard in a worker is the same bug.
-    * ARM (b), router-scoped: EVERY `Accounts.record_audit(%{` call site in
+    * ARM (b), router-scoped: EVERY `Accounts.record_audit(` call site in
       `router.ex` opens with `case `, so its `{:error, _}` has somewhere to go.
+      Keyed on the CALL, not on the `%{` that usually follows it — the
+      `site.deleted` gate passes a bound `audit_attrs`, and an arm keyed on the
+      inline map would stop seeing the strictest call site in the router.
       Arm (a) alone is defeated by a fresh discard spelling (`_ignored =`, or a
       bare call in statement position); arm (b) is keyed on the ONE accepted
       shape rather than on the shapes we happened to think of.
@@ -127,8 +130,8 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
   test "every record_audit call site in the router is case-gated" do
     lines = code_lines(@router)
 
-    all = Enum.count(lines, &String.contains?(&1, "Accounts.record_audit(%{"))
-    gated = Enum.count(lines, &String.contains?(&1, "case Accounts.record_audit(%{"))
+    all = Enum.count(lines, &String.contains?(&1, "Accounts.record_audit("))
+    gated = Enum.count(lines, &String.contains?(&1, "case Accounts.record_audit("))
 
     # Non-vacuity: the extractor found the sites it is supposed to be judging.
     assert all == @router_call_sites,
