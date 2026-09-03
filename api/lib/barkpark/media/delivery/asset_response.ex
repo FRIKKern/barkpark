@@ -53,14 +53,31 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
 
     # Request-scope URL emission (P4): a conn resolved under /w/:ws/p/:proj
     # prefixes every delivery URL with that scope; flat conns emit "".
+    scope_prefix = conn_scope_prefix(conn)
+
     url_opts = [
       sign_urls: sign_urls?,
       asset_doc: asset_doc,
-      scope_prefix: conn_scope_prefix(conn)
+      scope_prefix: scope_prefix
     ]
+
+    # `cdnUrls` gets the SCOPE PREFIX and nothing else (task-57ee9fff4aae9217
+    # #11): it used to call `Cdn.url_map/1`, which emits the flat
+    # `/media/files/...` path unconditionally, so `cdnUrls.original` in an
+    # upload receipt 404d for every caller outside the default workspace.
+    # Signing is deliberately NOT threaded here — `url` / `originalUrl` /
+    # `renditions` are the signed surface; cdnUrls is the edge-cacheable one.
+    cdn_opts = [scope_prefix: scope_prefix]
 
     base = %{
       id: file.id,
+      # THE BLOB ID, NAMED (task-57ee9fff4aae9217 #11). `id` is the media_files
+      # row id and always was — but a receipt that also carries `assetDocId`
+      # gives a client no way to tell WHICH id `id` is, and the field the
+      # /v1/media write routes take in their `:id` path segment is this one.
+      # Gyldendal's importer was REGEXING it back out of a rendition URL
+      # (`/media/renditions/<mediaFileId>/thumb`). It is stated now.
+      mediaFileId: file.id,
       dataset: file.dataset,
       filename: file.filename,
       originalName: file.original_name,
@@ -70,7 +87,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
       thumbnailUrl: Urls.thumbnail_url(file, url_opts),
       previewUrl: Urls.preview_url(file, url_opts),
       renditions: Urls.rendition_urls(file, url_opts),
-      cdnUrls: Cdn.url_map(file),
+      cdnUrls: Cdn.url_map(file, cdn_opts),
       mimeType: file.mime_type,
       size: file.size,
       createdAt: file.inserted_at,
