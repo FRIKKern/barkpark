@@ -306,6 +306,8 @@ on:
       - "scripts/task-lease-renew.sh"
       - "scripts/task-lease-renew.test.sh"
       - ".github/workflows/task-lease-renew.yml"
+      - "scripts/task-lease-sweep.sh"
+      - "scripts/task-lease-sweep.test.sh"
   push:
     branches: [main]
     paths:
@@ -483,6 +485,8 @@ on:
       - "scripts/task-lease-renew.sh"
       - "scripts/task-lease-renew.test.sh"
       - ".github/workflows/task-lease-renew.yml"
+      - "scripts/task-lease-sweep.sh"
+      - "scripts/task-lease-sweep.test.sh"
 
 permissions:
   contents: read
@@ -684,6 +688,8 @@ jobs:
           pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
           task-lease-renew scripts/task-lease-renew.sh
           task-lease-renew scripts/task-lease-renew.test.sh
+          task-lease-renew scripts/task-lease-sweep.sh
+          task-lease-renew scripts/task-lease-sweep.test.sh
           task-lease-renew .github/workflows/task-lease-renew.yml
           task-lease-renew scripts/pr-task-gate.sh
           landed-mark scripts/landed-mark.sh
@@ -1571,8 +1577,12 @@ jobs:
         run: |
           bash -n scripts/task-lease-renew.sh
           bash -n scripts/task-lease-renew.test.sh
+          bash -n scripts/task-lease-sweep.sh
+          bash -n scripts/task-lease-sweep.test.sh
       - name: every response class lands on its verdict (stub curl, no network)
         run: bash scripts/task-lease-renew.test.sh
+      - name: the 20-min sweep drives the whole chain per open PR (stub curl + stub gh, no network)
+        run: bash scripts/task-lease-sweep.test.sh
 
   landed-mark:
     needs: [changes]
