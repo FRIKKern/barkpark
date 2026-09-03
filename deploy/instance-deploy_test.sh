@@ -810,7 +810,7 @@ EOF
       BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
       bash "$HERE/site-deploy.sh" > "$TMP/site.log" 2>&1 &
   }
-  await_read() { local i; for i in $(seq 1 400); do [ -f "$SENT" ] && return 0; /bin/sleep 0.05; done; return 1; }
+  await_read() { local _i; for _i in $(seq 1 400); do [ -f "$SENT" ] && return 0; /bin/sleep 0.05; done; return 1; }
 
   # --- FAIL-BEFORE: locking defeated on both sides -> the flip is LOST.
   race_setup
