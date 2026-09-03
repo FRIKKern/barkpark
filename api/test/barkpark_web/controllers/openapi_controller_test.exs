@@ -50,4 +50,47 @@ defmodule BarkparkWeb.OpenApiControllerTest do
     assert conn.status == 200
     assert json_response(conn, 200)["openapi"] == "3.1.0"
   end
+
+  # This route emits `W/"openapi-…"` and used to compare it BYTE-EXACTLY.
+  # RFC 9110 §13.1.2 mandates the WEAK comparison function for If-None-Match.
+  # PIN: reds on the pre-delegation matcher (exact compare answered 200).
+  test "the STRONG form of the weak ETag 304s (D11 weak compare)", %{conn: conn} do
+    weak = conn |> get("/v1/openapi.json") |> get_resp_header("etag") |> hd()
+    "W/" <> strong = weak
+
+    resp =
+      build_conn()
+      |> put_req_header("if-none-match", strong)
+      |> get("/v1/openapi.json")
+
+    assert resp.status == 304
+    assert resp.resp_body == ""
+  end
+
+  test "a match on the SECOND If-None-Match line 304s", %{conn: conn} do
+    etag = conn |> get("/v1/openapi.json") |> get_resp_header("etag") |> hd()
+
+    resp =
+      build_conn()
+      |> then(fn c ->
+        %{c | req_headers: c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]}
+      end)
+      |> get("/v1/openapi.json")
+
+    assert resp.status == 304
+  end
+
+  # NEGATIVE CONTROL — an UNQUOTED bare token is not an entity-tag we ever
+  # emitted, so it must never buy a 304.
+  test "an unquoted bare token does not 304", %{conn: conn} do
+    weak = conn |> get("/v1/openapi.json") |> get_resp_header("etag") |> hd()
+    bare = weak |> String.replace_prefix("W/", "") |> String.trim("\"")
+
+    resp =
+      build_conn()
+      |> put_req_header("if-none-match", bare)
+      |> get("/v1/openapi.json")
+
+    assert resp.status == 200
+  end
 end
