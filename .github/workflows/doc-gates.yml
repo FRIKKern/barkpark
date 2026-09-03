@@ -955,5 +955,7 @@ jobs:
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 

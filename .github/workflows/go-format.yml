@@ -94,7 +94,9 @@ jobs:
           JOB_NAME: "gofmt -l (advisory)"
           WORKFLOW_FILE: go-format.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   gofmt-ceiling:
     name: gofmt drift ceiling (blocking)
@@ -125,5 +127,7 @@ jobs:
           JOB_NAME: "gofmt drift ceiling (blocking)"
           WORKFLOW_FILE: go-format.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 

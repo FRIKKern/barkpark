@@ -395,7 +395,9 @@ jobs:
           JOB_NAME: "Sobelow static analysis (regression gate, baseline .sobelow-skips)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   sobelow-inline-overlap:
     name: Sobelow baseline does not swallow its own inline waivers (blocking)
@@ -516,7 +518,9 @@ jobs:
           JOB_NAME: "Sobelow baseline does not swallow its own inline waivers (blocking)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   sobelow-baseline-fingerprint:
     name: Sobelow baseline rows still hash to their own fingerprint (blocking)
@@ -612,7 +616,9 @@ jobs:
           JOB_NAME: "Sobelow baseline rows still hash to their own fingerprint (blocking)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
 
   mix-audit:
@@ -681,7 +687,9 @@ jobs:
           JOB_NAME: "Dependency CVE audit (mix_audit over mix.lock, blocking)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
 
   security-gate:
