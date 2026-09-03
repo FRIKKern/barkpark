@@ -263,7 +263,26 @@ const HOOKS = [
   // that the day one of them renders ENABLED to a member, it is a FINDING and
   // not a silent new key.
   { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
-  { key: "button.btn.btn-sm", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "the CLI rail's lifecycle verb, drawn disabled for a member", source: "same band as the row above" },
+  // cch-w46-bl RE-KEYED THIS ROW, and the re-key IS the fix landing. `button.btn.btn-sm`
+  // was the GENERIC COLLIDING KEY this row's filing names as the harm: the CLI rail's
+  // refused arm emitted a bare `<button class="btn btn-sm" type="button" disabled>` with
+  // NO hook at all, so the same verb had one identity when it was offered
+  // (`data-life-verb`) and another when it was refused (its class list, shared with every
+  // small button in the tree). The console now gives the refused arm the SAME
+  // `data-life-verb` as the live one — one verb, ONE identity, offered or refused — so
+  // the stable identity this table pins is `button.btn.btn-sm[data-life-verb]`.
+  //
+  // NOT AN ALLOWLIST WIDENING: the row count is unchanged (the old key is REPLACED, not
+  // kept beside the new one), so a control that stops carrying the attribute reds here as
+  // a DEAD ROW rather than being absorbed by a surviving generic key. That is also what
+  // ends the flap the filing measured — reverting decommission's guard used to make
+  // `button.btn` stop matching and red as a dead row, which was noise about the class
+  // list rather than signal about the fence.
+  //
+  // The row ABOVE keeps its class-only key on purpose: `button.btn.btn-ghost.btn-sm` is
+  // adminWriteControlHtml's disabled arm, which is still hookless and belongs to a later
+  // PR. The two rows differing is the honest state of the tree today, not an oversight.
+  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
 ];
 const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
 
