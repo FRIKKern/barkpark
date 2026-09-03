@@ -4672,7 +4672,11 @@ defmodule BarkparkCloud.Web.Router do
   # 409 taken when the host is already claimed by a site domain / another
   # instance's custom_host (exact, or nesting under a different team's host) /
   # a provisioning FQDN; 409 already_attaching while a previous attach is still
-  # in flight (the one-active-job-per-kind partial index).
+  # in flight (the one-active-job-per-kind partial index); 409 already_attached
+  # {custom_host, detail} when THIS instance already answers on a different
+  # host — a re-attach is refused, never an overwrite, because an overwrite
+  # strands the previous host's A record on a live box (cch-w54-bl). Attaching
+  # the SAME host again is still a 202 (the failed-attach recovery path).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
   # privileged infra, like self-update above — require_primary_team_admin halts
@@ -4774,6 +4778,24 @@ defmodule BarkparkCloud.Web.Router do
           {:error, _changeset} ->
             json(conn, 422, %{error: "invalid"})
         end
+
+      # cch-w54-bl: this instance already answers on a DIFFERENT host. The
+      # persist is refused rather than overwritten — overwriting strands the
+      # previous host's A record on a live, billed box and drops the only
+      # pointer the plane had to it. There is no detach verb on this surface to
+      # sequence instead, so the refusal names the host that is in the way.
+      # Re-attaching the SAME host still succeeds (the failed-job recovery
+      # path) and never reaches this arm.
+      {:error, {:already_attached, existing}} ->
+        json(conn, 409, %{
+          error: "already_attached",
+          custom_host: existing,
+          detail:
+            "This instance already answers on #{existing}. Attaching a different " <>
+              "domain would leave #{existing}'s DNS record pointing at a live box " <>
+              "with nothing tracking it, so the attach is refused. Re-attaching " <>
+              "#{existing} itself is still allowed."
+        })
 
       {:error, :taken} ->
         json(conn, 409, %{error: "taken"})

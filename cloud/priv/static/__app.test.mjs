@@ -20858,6 +20858,55 @@ test("cch-w40-bl: the per-slug truth table — every arm relays what the plane m
   // copy of its own — asserting a sentence for it would pin an unreachable path.
 });
 
+// ── cch-w54-bl: the re-attach refusal (409 already_attached) ────────────────
+//
+// POST /v1/barkparks/:id/domain now REFUSES a second, different host instead of
+// overwriting custom_host and stranding the previous host's A record on a live
+// box. The console's side of that ruling is TWO facts, both pinned below:
+//
+//   1. renderInstance offers "Attach domain" only when `!bp.custom_host`
+//      (`lc.live && !bp.custom_host`), so the console already agrees with a
+//      refusal — it never offers the click the plane now rejects. That gate is
+//      the C2 reconciliation: an OVERWRITE would have been the thing the UI
+//      disagreed with.
+//   2. the arm exists anyway. The gate is one stale render away from being
+//      wrong (a peer attaches a domain while this tab holds the old fleet
+//      read), and an unarmed slug does not degrade to silence — friendly()
+//      answers "Something went wrong", burning a refusal whose entire value is
+//      naming the host in the way.
+test("cch-w54-bl: already_attached relays the plane's sentence — the host in the way is never dropped", () => {
+  const f = hooks.attachDomainFailureCopy;
+
+  const detail =
+    "This instance already answers on host-a.barkpark.cloud. Attaching a different " +
+    "domain would leave host-a.barkpark.cloud's DNS record pointing at a live box " +
+    "with nothing tracking it, so the attach is refused. Re-attaching " +
+    "host-a.barkpark.cloud itself is still allowed.";
+
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud", detail }),
+    detail,
+    "the server's detail sentence is relayed verbatim — one screen, one dialect");
+
+  // detail absent (an older plane / a trimmed body): the host still reaches the
+  // person. Falling to friendly() here would drop the only actionable fact.
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud" }),
+    "This instance already answers on host-a.barkpark.cloud.");
+
+  // Neither field present — still a NAMED refusal, never the generic.
+  const bare = f(409, { error: "already_attached" });
+  assert.equal(bare, "This instance already has a domain attached.");
+  assert.equal(bare.indexOf("Something went wrong"), -1);
+
+  // MUTATION: delete the already_attached branch from attachDomainFailureCopy
+  // and all three assertions above red — the first two on the relayed sentence,
+  // the third on friendly()'s generic.
+  assert.notEqual(f(409, { error: "already_attached", custom_host: "h.barkpark.cloud" }),
+    "That domain is already in use.",
+    "already_attached must not be confused with `taken` — taken is ANOTHER surface holding the host");
+});
+
 test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
   // The impure drive proves the wire → DOM path: the measured IP reaches the
   // inline error through textContent, not the false sentence. This is the leg that
