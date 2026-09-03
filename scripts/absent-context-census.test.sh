@@ -668,7 +668,9 @@ section "5d. a queued run GitHub will not dequeue is sliced out of the DEPTH, an
 # queued run records, seven created 2026-08-07T09:08:43Z and one 2026-08-19T05:23:37Z,
 # the seven answering 409 "has not been queued yet" to both cancel paths (this
 # report classifies those ORPHANED; the eighth, compose-smoke run 32219250070,
-# reads DISPATCHED and keeps its SCREAM, because a remedy exists for it). At
+# read DISPATCHED and kept its SCREAM until 2026-09-03, when the cancel that
+# verdict named was tried and refused — it is the never-started shape §5e
+# covers). At
 # 08:03Z the queue feed returned 8 rows and all 8 were phantoms; the same report
 # run at 16:11Z read 31 rows of which 8 were. The constant is +8; the share it
 # corrupts is whatever the hour makes it. These probes prove the slice is real,
@@ -736,6 +738,79 @@ if [ "$RC" = "0" ] && grep -q 'ORPHANED (never dispatched' <<<"$OUT" && grep -q 
   ok "5d.5 …and the 5c.1 orphan tuple keeps its ORPHANED classification and exit 0 — the slice changes the DEPTH, never a verdict"
 else
   bad "5d.5 the phantom slice moved a verdict: the 5c.1 orphan tuple now exits $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ═══ 5e. THE THIRD PHANTOM SHAPE — job rows that never started ══════════════
+section "5e. a queued run with job rows that NEVER started is a phantom, not a cancel remedy"
+
+# THE SPECIMEN, measured 2026-09-03 by lead-gates-3 on run 33786896365 of
+# absent-context-census.yml (main), which exited 1 printing `SUMMARY absent=3
+# stale-queued=1 unknown=0 in-flight=18 orphaned=7 phantom-queued=8`: the single
+# stale-queued row was compose-smoke 32219250070, created 2026-08-19T05:23:37Z
+# (370 h old), status queued, jobs feed total_count 1 — one job "Dispatch
+# (compose-smoke paths)", status queued, conclusion null, completed_at null.
+# total_count > 0 bought it the DISPATCHED verdict and `gh run cancel` as the
+# named remedy; the cancel answered "Cannot cancel a workflow run that is
+# completed" on a run still listing as queued. Non-empty job list, nothing ever
+# started, no remedy — the phantom shape, wearing a job row.
+
+# (a) the shape itself: 30 days old, dead head, ONE job that never left the
+# queue -> PHANTOM notice, exit 0, and NOT counted as stale-queued.
+D5J="$(derive phantom-never-started)"
+jq '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" else . end]}' \
+  "$D5J/queued-paginated.json" > "$D5J/.tmp" && mv "$D5J/.tmp" "$D5J/queued-paginated.json"
+jq -n '{total_count: 1, jobs: [{name: "Dispatch (compose-smoke paths)", status: "queued", conclusion: null, completed_at: null}]}' > "$D5J/jobs-910007.json"
+jq -n '{sha: "1234512345123451234512345123451234512345"}' > "$D5J/main-head.json"
+OUT="$(run_census "$D5J")"; RC=$?
+if [ "$RC" = "0" ] \
+   && grep -q 'NONE ever started' <<<"$OUT" \
+   && grep -q 'stale-queued=0' <<<"$OUT" \
+   && ! grep -q 'remedy: gh run cancel' <<<"$OUT" \
+   && grep -qF 'NOTICE   queue limb' <<<"$OUT"; then
+  ok "5e.1 a stale queued run whose only job never started is a PHANTOM notice at exit 0 — the cancel remedy it used to name does not exist"
+else
+  bad "5e.1 expected exit 0, no cancel remedy, stale-queued=0; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (b) ONE FIELD is the whole flip: the identical fixture with that job
+# in_progress is a genuinely dispatched run holding a runner slot, and it keeps
+# the SCREAM and the cancel remedy. This is the arm that stops the slice from
+# swallowing the class it was carved out of.
+D5K="$(derive phantom-started-job)"
+cp "$D5J/queued-paginated.json" "$D5K/queued-paginated.json"
+cp "$D5J/main-head.json" "$D5K/main-head.json"
+jq -n '{total_count: 1, jobs: [{name: "Dispatch (compose-smoke paths)", status: "in_progress", conclusion: null, completed_at: null}]}' > "$D5K/jobs-910007.json"
+OUT="$(run_census "$D5K")"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'DISPATCHED — remedy: gh run cancel' <<<"$OUT" && grep -q 'stale-queued=1' <<<"$OUT"; then
+  ok "5e.2 …and with that ONE job in_progress instead of queued the same run keeps its SCREAM and its cancel remedy"
+else
+  bad "5e.2 a run with a started job must keep the DISPATCHED scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (c) THE AGE THRESHOLD DISCRIMINATES, not the job list alone. The 5e.1 fixture
+# under a phantom window wider than the row's age is no longer a phantom, so the
+# DISPATCHED verdict comes back — the same knob probe as 5d.3, aimed at a
+# verdict instead of at the depth number.
+OUT="$(run_census "$D5J" --phantom-queue-hours 100000)"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'DISPATCHED — remedy: gh run cancel' <<<"$OUT" && grep -q 'stale-queued=1' <<<"$OUT"; then
+  ok "5e.3 …and raising --phantom-queue-hours past its age restores the DISPATCHED scream — the age bound is load-bearing, not decoration"
+else
+  bad "5e.3 a 100000h phantom window must restore the scream on the 5e.1 fixture; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (d) FAIL CLOSED on an unreadable job list. 5c.3's fixture is `[{}, {}]` — job
+# objects with no `status` at all. "No started job" must not be inferred from
+# fields nobody read, so that shape keeps the DISPATCHED scream, which is also
+# why 5c.3 is still green above. Same direction as 5c.4.
+D5L="$(derive phantom-status-unreadable)"
+cp "$D5J/queued-paginated.json" "$D5L/queued-paginated.json"
+cp "$D5J/main-head.json" "$D5L/main-head.json"
+jq -n '{total_count: 2, jobs: [{}, {}]}' > "$D5L/jobs-910007.json"
+OUT="$(run_census "$D5L")"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'DISPATCHED — remedy: gh run cancel' <<<"$OUT" && ! grep -q 'NONE ever started' <<<"$OUT"; then
+  ok "5e.4 a job list with no readable statuses keeps the SCREAM — never-started is PROVED off statuses, never assumed from silence"
+else
+  bad "5e.4 an unreadable job-status list must fail closed to the scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
 # ═══ 6. it fails CLOSED — an unreadable feed is never a clean bill of health ══
