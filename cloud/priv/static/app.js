@@ -23591,7 +23591,7 @@
   // `assignableRoles(ctx.role).length`: the ACTOR-TIER question, arity 1, in
   // front of update_member_role_as/4, which is a RELATION over (actor, target)
   // — can_grant? AND (self? OR outranks?), strict `>`, with NO owner escape
-  // hatch (accounts.ex:1784/:1801). Wave 44 made the ROW rank-relative and left
+  // hatch (`Accounts.update_member_role_as/4`). Wave 44 made the ROW rank-relative and left
   // this site actor-only, so the only thing keeping an owner off a PEER OWNER's
   // row (a 403 :forbidden) was that memberRowHtml declined to draw the button —
   // a rendering accident, not a gate, and the paint outlives the authority (see

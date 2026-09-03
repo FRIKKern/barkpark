@@ -25509,7 +25509,7 @@ test("cch-w45: openRoleModal REFUSES the owner-acting-on-peer-owner cell", () =>
     hooks.openRoleModal(OWNER_CTX, "u-peer", "peer@x.io", "owner");
     assert.equal(dom.opened(), false,
       "an owner may not change a PEER OWNER's role — update_member_role_as/4 " +
-      "answers {:error, :forbidden} (accounts.ex:1801, strict `>`), so the dialog " +
+      "answers {:error, :forbidden} (`Accounts.update_member_role_as/4`, strict `>`), so the dialog " +
       "must not open. It opened, which means the gate is still the actor-only " +
       "assignableRoles(ctx.role).length check.");
   } finally {
