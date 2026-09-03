@@ -16,7 +16,7 @@ defmodule BarkparkWeb.TasksControllerTest do
   `plugin_settings_controller_test.exs`.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

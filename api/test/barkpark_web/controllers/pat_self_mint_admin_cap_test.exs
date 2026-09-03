@@ -64,7 +64,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
   | `api/priv/**` | — | **NO CALL EXISTS.** Zero hits. |
   | `create_personal_access_token/3` in `cloud/lib/barkpark_cloud/accounts.ex` | separate function in a separate OTP app (`BarkparkCloud.Accounts`), not this one | out of scope for this row; its own role gate is `pat_abilities_allowed?/2` in the same file |
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures

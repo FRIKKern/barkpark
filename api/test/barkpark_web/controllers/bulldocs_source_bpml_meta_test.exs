@@ -15,7 +15,7 @@ defmodule BarkparkWeb.BulldocsSourceBpmlMetaTest do
   round-trip a field it was never handed, so the request is tested here rather
   than blamed on the encoder.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.LabelFixtures

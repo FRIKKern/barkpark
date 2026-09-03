@@ -20,7 +20,7 @@ defmodule BarkparkWeb.GrantSearchDenyTest do
   base query — the deny below is now LIVE (un-skipped) and green, protecting the
   fix. The positive control anchors the fixture.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
   import Barkpark.AccessFixtures

@@ -19,7 +19,7 @@ defmodule BarkparkWeb.MemberControllerTest do
       from a seat that does not exist (404), and — the part a status assertion
       alone would miss — that B's rows are still intact afterwards.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
   import Ecto.Query

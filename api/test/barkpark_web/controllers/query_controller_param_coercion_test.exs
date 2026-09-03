@@ -13,7 +13,7 @@ defmodule BarkparkWeb.QueryControllerParamCoercionTest do
   This asserts the anonymous public-read route never 500s on a non-binary
   `expand` param, and that the ordinary binary-shaped `expand` still works.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
 

@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.SamlControllerTest do
   @moduledoc "SAML SP HTTP surface — start redirect + ACS session mint + JIT."
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).

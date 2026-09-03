@@ -12,7 +12,7 @@ defmodule BarkparkWeb.GrantControllerTest do
     * expired and already-spent grants collapse to that same failure;
     * a successful claim stamps `grantee_user_id` (account-binding).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures

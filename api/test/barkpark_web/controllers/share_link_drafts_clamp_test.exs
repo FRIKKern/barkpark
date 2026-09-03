@@ -13,6 +13,7 @@ defmodule BarkparkWeb.ShareLinkDraftsClampTest do
   HTTP door has a Studio twin, and vice versa. A future change that fixes one
   and not the other reds here.
   """
+  # sync: swaps node-global Application env (:barkpark, :shares) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content}

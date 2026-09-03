@@ -28,6 +28,7 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
   positive controls in the same run pin that a legitimate binary param still
   reaches its real (non-500) outcome, so the guards are not blanket refusals.
   """
+  # sync: calls the named GenServer Barkpark.Plugins.Github.Auth; its sandbox ownership dies under concurrency
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}

@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.AuthGdprTest do
   @moduledoc "The GDPR data-subject HTTP surface (era-w6-gdpr): export + erase."
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Accounts
 

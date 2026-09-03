@@ -6,7 +6,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
   The full-circle test at the end is the API-level isomorphism proof:
   BPML in → blocks stored → BPML out → same blocks.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.LabelFixtures

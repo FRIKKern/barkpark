@@ -6,7 +6,7 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
   except the compliance paths (/me, /logout, enrolment), and the gate opens
   the moment a factor is armed. With no requiring org: byte-identical.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).

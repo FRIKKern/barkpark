@@ -22,7 +22,7 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
   tests below (they observe 200 with the original bytes instead); restoring
   the guard goes green again.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Renditions

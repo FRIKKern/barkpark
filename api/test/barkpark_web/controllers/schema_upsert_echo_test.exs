@@ -10,7 +10,7 @@ defmodule BarkparkWeb.SchemaUpsertEchoTest do
   `BarkparkSchema` type requires) got `nil`/`undefined`.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth
 

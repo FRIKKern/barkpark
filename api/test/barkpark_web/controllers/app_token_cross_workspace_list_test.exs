@@ -58,6 +58,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceListTest do
   reader that forgot to thread scope returns the same rows either way and the
   boundary is untested by construction. Every test below crosses a real seam.
   """
+  # sync: resets Barkpark.RateLimiter; :barkpark_rate_limiter is a :named_table — whole-node state
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.RateLimiterSandbox

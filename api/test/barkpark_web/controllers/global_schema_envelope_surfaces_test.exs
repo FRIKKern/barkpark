@@ -35,7 +35,7 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
   database. `reader_source/3` is the function the LiveView calls, and it pins
   `CallerContext.anonymous()` internally, so calling it IS the anonymous read.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

@@ -34,7 +34,7 @@ defmodule BarkparkWeb.TasksControllerRelabelTenancyTest do
   gain `file-claim:/a/intruder`). Restoring the clauses returns the suite to
   green. Verified locally on origin/main before commit.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, TenancyFixtures}
 

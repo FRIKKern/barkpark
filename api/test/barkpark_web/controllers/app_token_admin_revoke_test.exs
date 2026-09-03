@@ -15,6 +15,7 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
   The first test below is that gap, driven end to end.
   """
+  # sync: resets Barkpark.RateLimiter; :barkpark_rate_limiter is a :named_table — whole-node state
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.RateLimiterSandbox

@@ -5,7 +5,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   ceremony is verified end-to-end through `wax` WITHOUT a browser — only the
   actual `navigator.credentials` call is browser-gated.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
   alias Barkpark.{Accounts, Audit, Repo}

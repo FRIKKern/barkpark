@@ -30,7 +30,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
        a non-member (no resolvable role) mints the member-tier `["read"]`
        workspace-less token from #7.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures

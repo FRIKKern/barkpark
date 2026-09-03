@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.ScimGroupsControllerTest do
   @moduledoc "SCIM 2.0 /scim/v2/Groups — group→role mapping (era-w4-scim-groups)."
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Accounts, Repo, Scim, Tenancy}
   alias Barkpark.Audit.Event

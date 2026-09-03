@@ -21,7 +21,7 @@ defmodule BarkparkWeb.QueryControllerTruncationSignalTest do
   from the envelope and the two become equal again, which is the defect
   restored, and that test fails.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document

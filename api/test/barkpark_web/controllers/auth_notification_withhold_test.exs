@@ -9,7 +9,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
   "the operator-visible record must differ". Both must hold at once, or the fix
   has either leaked account existence or achieved nothing.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 

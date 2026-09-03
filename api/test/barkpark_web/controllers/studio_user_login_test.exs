@@ -9,7 +9,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
   token-paste and ticket flows are regression-pinned by session_controller
   tests; here we assert they still coexist.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).

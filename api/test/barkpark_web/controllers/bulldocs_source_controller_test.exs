@@ -1,5 +1,5 @@
 defmodule BarkparkWeb.BulldocsSourceControllerTest do
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   # NOTE: `show/2`'s `requested_dataset/1` guard (a non-binary `?dataset=` must
   # fall back to the default instead of raising Ecto.Query.CastError → 500) is

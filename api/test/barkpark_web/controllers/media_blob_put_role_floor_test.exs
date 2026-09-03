@@ -32,7 +32,7 @@ defmodule BarkparkWeb.MediaBlobPutRoleFloorTest do
       under the path-addressed law. Same status for the sub-admin member, so the
       response cannot be used to probe whether a seat exists either.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Media, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth

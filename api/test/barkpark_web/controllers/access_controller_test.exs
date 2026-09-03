@@ -19,7 +19,7 @@ defmodule BarkparkWeb.AccessControllerTest do
     * the claim decision runs through the SHARED `Access.ClaimFlow` — the SAME
       module the browser `GrantController` uses (one no-oracle contract).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures

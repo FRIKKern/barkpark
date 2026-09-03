@@ -31,7 +31,7 @@ defmodule BarkparkWeb.ChangesetDetailControllersTest do
   the exact `changeset_errors(cs)` call now sits in `create_token/2`'s
   changeset arm.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.Document
