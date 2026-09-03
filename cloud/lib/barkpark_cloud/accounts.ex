@@ -748,7 +748,7 @@ defmodule BarkparkCloud.Accounts do
     hash = UserToken.hash_token(plaintext)
 
     case Repo.get_by(UserToken, token_hash: hash) do
-      %UserToken{} = t -> stamp_revoked(t)
+      %UserToken{} = t -> revoke_session_row(t)
       nil -> {:error, :not_found}
     end
   end
@@ -772,7 +772,7 @@ defmodule BarkparkCloud.Accounts do
          # context: "session" keeps the per-row Revoke button from killing a PAT by id.
          %UserToken{} = t <-
            Repo.get_by(UserToken, id: token_id, user_id: uid, context: "session") do
-      stamp_revoked(t)
+      revoke_session_row(t)
     else
       _ -> {:error, :not_found}
     end
@@ -849,6 +849,74 @@ defmodule BarkparkCloud.Accounts do
 
     {:ok, count}
   end
+
+  ## STREAM BINDING HELPERS (cch-w53-bl)
+  ##
+  ## `user_has_live_session?/1` is a question about the USER, and on the per-row
+  ## revoke path the answer is YES by construction: the device that pressed
+  ## Revoke is itself a live session, so the count never reaches zero and the
+  ## revoked device's parked stream survived its own revocation. These two
+  ## narrow the question to ONE session row.
+
+  @doc """
+  Resolve a presented SESSION token `plaintext` to its row `id`, or `nil` when it
+  is absent, unknown, revoked, expired, or not a `"session"` row.
+
+  READ-ONLY on purpose, and that is the difference from
+  `verify_user_session_token/2`: it stamps NOTHING. It runs at the SSE-ticket
+  mint and at a header-authenticated stream connect, both of which already
+  verified the same token a line earlier, and a second `last_used_at` stamp from
+  here would be a duplicate liveness claim.
+  """
+  @spec live_session_token_id(binary() | nil) :: binary() | nil
+  def live_session_token_id(plaintext) when is_binary(plaintext) and plaintext != "" do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    Repo.one(
+      from t in UserToken,
+        where: t.token_hash == ^hash,
+        where: t.context == "session",
+        where: is_nil(t.revoked_at),
+        where: is_nil(t.expires_at) or t.expires_at > ^now,
+        select: t.id
+    )
+  end
+
+  def live_session_token_id(_), do: nil
+
+  @doc """
+  Is THIS ONE session row still live (unrevoked, unexpired, `context = "session"`)?
+
+  The per-device half of `user_has_live_session?/1`, for the SSE loop: a stream
+  bound to its minting session rechecks this row, so revoking that one row from
+  the sessions panel ends that one stream, bounded by a heartbeat, while every
+  other device keeps streaming.
+
+  A `token_id` that is not a UUID answers `false` rather than raising — the id
+  arrives from a ticket column and a stream must end, not 500, if it is ever
+  garbage.
+  """
+  @spec session_token_live?(binary() | nil) :: boolean()
+  def session_token_live?(token_id) when is_binary(token_id) do
+    case Repo.uuid_or_nil(token_id) do
+      nil ->
+        false
+
+      id ->
+        now = DateTime.utc_now()
+
+        Repo.exists?(
+          from t in UserToken,
+            where: t.id == ^id,
+            where: t.context == "session",
+            where: is_nil(t.revoked_at),
+            where: is_nil(t.expires_at) or t.expires_at > ^now
+        )
+    end
+  end
+
+  def session_token_live?(_), do: false
 
   @doc """
   Does `user` still hold at least ONE live session? The cheap existence half of
@@ -1301,6 +1369,35 @@ defmodule BarkparkCloud.Accounts do
 
   # Stamp revoked_at = now on a UserToken (idempotent). The verbatim twin of
   # Registry.revoke_agent_token/1's struct clause.
+  # Revoke ONE session row and, in the same breath, the unredeemed `"sse"` stream
+  # tickets that row minted (cch-w53-bl). Both single-row kill switches —
+  # `revoke_user_session_token/1` (this device logs out) and
+  # `revoke_user_session/2` (one row from the sessions panel) — go through here,
+  # so neither can leave a 60-second bearer behind that opens a FRESH
+  # authenticated stream for a device that was just signed out. That is the
+  # per-row twin of the ticket sweep `revoke_all_user_sessions/2` already does
+  # for sign-out-everywhere.
+  #
+  # SCOPED BY `session_token_id`, never by `user_id + context`: a user-wide "sse"
+  # sweep here would be charter D28's two-tab mutual-eviction storm (revoking a
+  # phone would evict the laptop's unredeemed ticket). A PAT row reaching this
+  # function sweeps nothing — no ticket points at it.
+  defp revoke_session_row(%UserToken{} = t) do
+    with {:ok, revoked} <- stamp_revoked(t) do
+      {_swept, _} =
+        Repo.update_all(
+          from(s in UserToken,
+            where: s.session_token_id == ^t.id,
+            where: s.context == "sse",
+            where: is_nil(s.revoked_at)
+          ),
+          set: [revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond)]
+        )
+
+      {:ok, revoked}
+    end
+  end
+
   defp stamp_revoked(%UserToken{} = t) do
     t
     |> Ecto.Changeset.change(revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
@@ -2535,8 +2632,18 @@ defmodule BarkparkCloud.Accounts do
   the other's unredeemed ticket: that tab would 401, which would make it remint,
   which would evict the first — a mutual-eviction storm, one junk 401 per turn.
   """
-  @spec create_sse_ticket(User.t()) :: {:ok, binary()} | {:error, Ecto.Changeset.t()}
-  def create_sse_ticket(%User{} = user) do
+  ## `session_token` (cch-w53-bl) is the plaintext SESSION token the mint request
+  ## carried in its `Authorization` header — the device asking for a stream. It is
+  ## resolved to that session ROW's id and stamped on the ticket as
+  ## `session_token_id`, which is what lets the parked stream be ended by a
+  ## PER-ROW revoke of that one device (`DELETE /v1/account/sessions/:id`) instead
+  ## of only by a user-wide sign-out. `nil` (the default, and any plaintext that
+  ## does not resolve to a live session) leaves the binding NULL, and the loop
+  ## falls back to the user-wide check — see `session_token_live?/1` and
+  ## `user_has_live_session?/1`.
+  @spec create_sse_ticket(User.t(), binary() | nil) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_sse_ticket(%User{} = user, session_token \\ nil) do
     plaintext = generate_token()
 
     expires_at =
@@ -2549,7 +2656,8 @@ defmodule BarkparkCloud.Accounts do
       user_id: user.id,
       context: "sse",
       token_hash: UserToken.hash_token(plaintext),
-      expires_at: expires_at
+      expires_at: expires_at,
+      session_token_id: live_session_token_id(session_token)
     })
     |> Repo.insert()
     |> case do
@@ -2579,7 +2687,32 @@ defmodule BarkparkCloud.Accounts do
   unenforceable.
   """
   @spec consume_sse_ticket(binary()) :: User.t() | nil
-  def consume_sse_ticket(plaintext) when is_binary(plaintext) do
+  def consume_sse_ticket(plaintext) do
+    case consume_sse_ticket_binding(plaintext) do
+      {%User{} = user, _session_token_id} -> user
+      nil -> nil
+    end
+  end
+
+  @doc """
+  `consume_sse_ticket/1` plus the ticket's STREAM BINDING: returns
+  `{user, session_token_id}` — where `session_token_id` is the `"session"` row
+  that minted the ticket, or `nil` for an unbound one — and `nil` for a ticket
+  that does not redeem.
+
+  THE BINDING HAS TO COME OUT OF THE REDEMPTION, not a later lookup, and that is
+  the whole reason this function exists (cch-w53-bl). Redeeming BURNS the row in
+  the same transaction and `SseTicketReaper` DELETES burnt rows on the minute, so
+  a caller that wanted the binding afterwards would be racing a reaper with the
+  plaintext it just spent. The stream loop needs it forever (it parks for hours),
+  so it is handed over once, at connect.
+
+  `consume_sse_ticket/1` stays the shape every non-stream caller wants — the
+  single-use semantics, filters, and the matched-row-only burn are all here and
+  described there.
+  """
+  @spec consume_sse_ticket_binding(binary()) :: {User.t(), binary() | nil} | nil
+  def consume_sse_ticket_binding(plaintext) when is_binary(plaintext) do
     hash = UserToken.hash_token(plaintext)
     now = lifecycle_now()
 
@@ -2596,9 +2729,13 @@ defmodule BarkparkCloud.Accounts do
           )
 
         case token do
-          %UserToken{user_id: user_id} = t ->
+          %UserToken{user_id: user_id, session_token_id: session_token_id} = t ->
             {:ok, _burned} = Repo.update(UserToken.changeset(t, %{revoked_at: now}))
-            Repo.get(User, user_id)
+
+            case Repo.get(User, user_id) do
+              %User{} = user -> {user, session_token_id}
+              nil -> nil
+            end
 
           nil ->
             nil
@@ -2606,12 +2743,12 @@ defmodule BarkparkCloud.Accounts do
       end)
 
     case result do
-      {:ok, user} -> user
+      {:ok, binding} -> binding
       {:error, _reason} -> nil
     end
   end
 
-  def consume_sse_ticket(_), do: nil
+  def consume_sse_ticket_binding(_), do: nil
 
   @doc """
   Delete every `"sse"` ticket row that is BURNED (`revoked_at` stamped) or past

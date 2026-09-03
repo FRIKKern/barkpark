@@ -681,13 +681,14 @@ defmodule BarkparkCloud.Web.Router do
   defp side_effecting_get?(["v1", "auth", "oauth", _provider, "callback"]), do: true
 
   # BURNS a live single-use SSE ticket. `require_user_sse` reads `?ticket=` and
-  # hands it to `Accounts.consume_sse_ticket/1`, which takes a BARE BINARY and
-  # stamps `revoked_at` unconditionally — structurally method-blind, and rightly
-  # so: the credential is spent by REDEMPTION, not by a verb. Without this clause
-  # any unfurler's `HEAD /v1/events?ticket=…` (the URL is in every access log,
-  # because EventSource cannot set headers) spends a ticket the real stream has
-  # not yet redeemed, and the user's own connect then 401s. There is exactly ONE
-  # call site of `consume_sse_ticket/1` in lib/, so this one clause is
+  # hands it to `Accounts.consume_sse_ticket_binding/1` (the same redemption as
+  # `consume_sse_ticket/1`, returning the stream's session binding as well), which
+  # takes a BARE BINARY and stamps `revoked_at` unconditionally — structurally
+  # method-blind, and rightly so: the credential is spent by REDEMPTION, not by a
+  # verb. Without this clause any unfurler's `HEAD /v1/events?ticket=…` (the URL is
+  # in every access log, because EventSource cannot set headers) spends a ticket
+  # the real stream has not yet redeemed, and the user's own connect then 401s.
+  # There is exactly ONE ticket-redeeming call site in lib/, so this one clause is
   # SUFFICIENT, not a sample — see `router_sse_ticket_head_burn_test.exs`.
   defp side_effecting_get?(["v1", "events"]), do: true
 
@@ -1893,7 +1894,16 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      case Accounts.create_sse_ticket(conn.assigns.current_user) do
+      # The bearer here is the SESSION token of the device asking for a stream,
+      # and passing it BINDS the ticket to that session row (cch-w53-bl) — which
+      # is what makes revoking this one device from the sessions panel end this
+      # one stream. Drop the argument and the ticket mints unbound: every stream
+      # falls back to the user-wide liveness check and per-row revoke goes back to
+      # not ending anything.
+      case Accounts.create_sse_ticket(
+             conn.assigns.current_user,
+             Auth.bearer_token(conn)
+           ) do
         {:ok, ticket} ->
           json(conn, 200, %{
             ticket: ticket,
@@ -14544,22 +14554,34 @@ defmodule BarkparkCloud.Web.Router do
   # the SPA's job, not the browser's: app.js remints and reopens on every stream
   # error rather than letting the native retry replay a spent ticket.
   #
-  # Assigns :current_user + :current_team on success; halts 401 otherwise.
+  # Both credential paths also resolve the SESSION ROW behind the stream
+  # (cch-w53-bl): the header path knows it directly, the ticket path reads the
+  # binding stamped at mint. `nil` is legitimate — an unbound legacy ticket — and
+  # means the loop falls back to the user-wide liveness check.
+  #
+  # Assigns :current_user + :current_team + :sse_session_token_id on success;
+  # halts 401 otherwise.
   defp require_user_sse(conn) do
     conn = Plug.Conn.fetch_query_params(conn)
 
-    user =
+    {user, session_token_id} =
       case Auth.bearer_token(conn) do
         header when is_binary(header) and header != "" ->
-          Accounts.verify_user_session_token(header)
+          case Accounts.verify_user_session_token(header) do
+            %{} = user -> {user, Accounts.live_session_token_id(header)}
+            _ -> {nil, nil}
+          end
 
         _ ->
           case conn.query_params["ticket"] do
             ticket when is_binary(ticket) and ticket != "" ->
-              Accounts.consume_sse_ticket(ticket)
+              case Accounts.consume_sse_ticket_binding(ticket) do
+                {user, session_token_id} -> {user, session_token_id}
+                nil -> {nil, nil}
+              end
 
             _ ->
-              nil
+              {nil, nil}
           end
       end
 
@@ -14568,6 +14590,7 @@ defmodule BarkparkCloud.Web.Router do
         conn
         |> assign(:current_user, user)
         |> assign(:current_team, Accounts.primary_team(user))
+        |> assign(:sse_session_token_id, session_token_id)
 
       _ ->
         conn
@@ -14583,11 +14606,16 @@ defmodule BarkparkCloud.Web.Router do
   # reaped by a fronting proxy. A failed chunk (client gone) ends the loop; :pg
   # auto-unsubscribes the dying process.
   #
-  # The loop carries the connecting user's id because it must OUTLIVE its own
-  # credential check — see `sse_loop/3`.
+  # The loop carries the connecting PRINCIPAL — the user's id and, when the
+  # credential carried one, the session row the stream belongs to — because it
+  # must OUTLIVE its own credential check. See `sse_loop/3`.
   defp stream_events(conn, team_id) do
     :ok = Events.subscribe(team_id)
-    user_id = conn.assigns.current_user.id
+
+    principal = %{
+      user_id: conn.assigns.current_user.id,
+      session_token_id: conn.assigns[:sse_session_token_id]
+    }
 
     conn =
       conn
@@ -14597,7 +14625,7 @@ defmodule BarkparkCloud.Web.Router do
       |> send_chunked(200)
 
     case Plug.Conn.chunk(conn, ": connected\n\n") do
-      {:ok, conn} -> sse_loop(conn, user_id, System.monotonic_time(:millisecond))
+      {:ok, conn} -> sse_loop(conn, principal, System.monotonic_time(:millisecond))
       {:error, _} -> conn
     end
   end
@@ -14605,8 +14633,10 @@ defmodule BarkparkCloud.Web.Router do
   # The parked stream, and the ONE thing to understand about it: authentication
   # happened once, at connect, and the credential is already gone by the time we
   # get here (an `?ticket=` is BURNED inside the connect transaction). So the loop
-  # cannot re-verify a token — it remembers `user_id` and re-asks the only
-  # question that survives: does this user still have a live session at all?
+  # cannot re-verify a token — it remembers a PRINCIPAL and re-asks the sharpest
+  # question that survives the burn: is the SESSION ROW this stream belongs to
+  # still live? (`session_token_id`; and where there is none, the older, blunter
+  # question — does this user still have any live session at all?)
   #
   # Before cch-w53-s4 it asked nothing. "Sign out everywhere" stamped every
   # session row revoked and this loop kept chunking team events to the signed-out
@@ -14623,23 +14653,29 @@ defmodule BarkparkCloud.Web.Router do
   # every broadcast into a query. Worst case a revoked stream sees frames for one
   # more window; before, it saw them for its whole life.
   #
-  # NOT COVERED, deliberately: per-row revoke (`DELETE /v1/account/sessions/:id`)
-  # does not end that device's stream, because the ACTING session keeps the count
-  # >= 1. Binding a stream to its minting session needs a `user_tokens` column
-  # that does not exist — filed as
-  # cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream.
-  defp sse_loop(conn, user_id, checked_at) do
+  # PER-ROW REVOKE IS NOW COVERED TOO (cch-w53-bl). The user-wide check could not
+  # see it: `DELETE /v1/account/sessions/:id` revokes ONE session and the ACTING
+  # session keeps the count >= 1, so a user who spotted an unfamiliar device and
+  # revoked it got a row that disappeared and a stream that did not. The
+  # `user_tokens.session_token_id` column binds a stream to the session that
+  # minted its credential, and `sse_principal_live?/1` rechecks THAT row — same
+  # one-heartbeat bound, now per device.
+  #
+  # A stream with NO binding (a ticket minted before the column existed) keeps the
+  # user-wide behaviour exactly: strictly weaker, never wrong, and it drains
+  # within one ticket TTL of a deploy.
+  defp sse_loop(conn, principal, checked_at) do
     receive do
       {:bpcloud_event, event} ->
-        case sse_session_check(user_id, checked_at, sse_recheck_ms()) do
+        case sse_session_check(principal, checked_at, sse_recheck_ms()) do
           :revoked ->
-            end_revoked_sse(conn, user_id)
+            end_revoked_sse(conn, principal)
 
           {:live, checked_at} ->
             case encode_sse_frame(event) do
               {:ok, frame} ->
                 case Plug.Conn.chunk(conn, frame) do
-                  {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+                  {:ok, conn} -> sse_loop(conn, principal, checked_at)
                   {:error, _} -> conn
                 end
 
@@ -14648,20 +14684,20 @@ defmodule BarkparkCloud.Web.Router do
                 # stream — the event is only an invalidation hint, safely dropped.
                 # Log and keep parking for the next (good) event / heartbeat.
                 Logger.error("sse_loop: dropping unencodable event #{inspect(event)}")
-                sse_loop(conn, user_id, checked_at)
+                sse_loop(conn, principal, checked_at)
             end
         end
     after
       sse_heartbeat_ms() ->
         # `0` forces the check: the heartbeat is the guaranteed recheck point,
         # and it is what makes the revocation bound a bound.
-        case sse_session_check(user_id, checked_at, 0) do
+        case sse_session_check(principal, checked_at, 0) do
           :revoked ->
-            end_revoked_sse(conn, user_id)
+            end_revoked_sse(conn, principal)
 
           {:live, checked_at} ->
             case Plug.Conn.chunk(conn, ": ping\n\n") do
-              {:ok, conn} -> sse_loop(conn, user_id, checked_at)
+              {:ok, conn} -> sse_loop(conn, principal, checked_at)
               {:error, _} -> conn
             end
         end
@@ -14670,23 +14706,40 @@ defmodule BarkparkCloud.Web.Router do
 
   # `{:live, checked_at}` (possibly the SAME checked_at, when the throttle window
   # has not elapsed) or `:revoked`. Throttled by monotonic time, never wall clock.
-  defp sse_session_check(user_id, checked_at, recheck_ms) do
+  defp sse_session_check(principal, checked_at, recheck_ms) do
     now = System.monotonic_time(:millisecond)
 
     cond do
       now - checked_at < recheck_ms -> {:live, checked_at}
-      Accounts.user_has_live_session?(user_id) -> {:live, now}
+      sse_principal_live?(principal) -> {:live, now}
       true -> :revoked
     end
   end
+
+  # A BOUND stream asks about its own session row, so revoking that one device
+  # ends that one stream while every sibling device keeps streaming. An UNBOUND
+  # one asks the user-wide question, which is the pre-cch-w53-bl behaviour and
+  # still ends the stream on sign-out-everywhere / password change.
+  #
+  # The clause order is the whole fix: swap them and a bound stream falls back to
+  # the count that per-row revoke can never drive to zero.
+  defp sse_principal_live?(%{session_token_id: session_token_id})
+       when is_binary(session_token_id),
+       do: Accounts.session_token_live?(session_token_id)
+
+  defp sse_principal_live?(%{user_id: user_id}),
+    do: Accounts.user_has_live_session?(user_id)
 
   # End a stream whose user has no live session left. Returning `conn` ends the
   # chunked response, which the client sees as the stream closing; the SPA's
   # error handler remints and gets a 401, which is its normal path to /login.
   # Logged because a stream ending for AUTHORISATION reasons is otherwise
   # indistinguishable from a network drop in the access log.
-  defp end_revoked_sse(conn, user_id) do
-    Logger.info("sse_loop: ending stream, no live session for user #{user_id}")
+  defp end_revoked_sse(conn, %{user_id: user_id, session_token_id: session_token_id}) do
+    Logger.info(
+      "sse_loop: ending stream for user #{user_id}, session #{inspect(session_token_id)} not live"
+    )
+
     conn
   end
 
