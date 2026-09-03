@@ -830,6 +830,16 @@ defmodule BarkparkWeb.Router do
   # login can set the signed `user_session` cookie. RateLimit keys on IP here
   # (anonymous), which is the brute-force defense for login.
   #
+  # THE SHARED IP BUDGET ON THESE ROUTES IS THE CONTROL, NOT A GAP. RateLimit
+  # runs BEFORE :fetch_session, so no caller on /v1/auth/* (or /v1/access/claim
+  # downstream) has an identity this server can verify yet — that is the point
+  # of the route. #15677 made the bucket key derive from a VERIFIED token and
+  # left this IP fallback exactly as it was: giving these callers their own
+  # resolver would hand every attacker a private budget on precisely the
+  # endpoints where sharing is the defence. When a TEST needs isolation here it
+  # takes it from `BarkparkWeb.ConnCase.scoped_conn/0`, never from the limiter —
+  # see BarkparkWeb.Plugs.RateLimitTestConnScopeTest.
+  #
   # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): this is a
   # JSON API (accepts ["json"] + AcceptBarkparkVendor), so a cross-site HTML form
   # cannot forge an application/json request against it. The session-gated

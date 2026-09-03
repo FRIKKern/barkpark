@@ -1215,7 +1215,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # request gets — the chat gate must not perturb the ungated pipeline.
       # etag is content-addressed off the final map (generated_at excluded), so
       # etag equality IS body identity minus the per-request timestamp.
-      twin = caps_conn(build_conn())
+      twin = caps_conn(scoped_conn())
       twin_body = json_response(twin, 200)
 
       assert Map.delete(body, "generated_at") == Map.delete(twin_body, "generated_at")
@@ -1258,7 +1258,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
          %{conn: conn} do
       plain = caps_conn(conn)
-      with_chat = caps_conn(build_conn(), "?chat=1")
+      with_chat = caps_conn(scoped_conn(), "?chat=1")
 
       plain_etag = plain |> get_resp_header("etag") |> List.first()
       chat_etag = with_chat |> get_resp_header("etag") |> List.first()
@@ -1274,7 +1274,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       # Presenting the plain etag against the chat request must re-render (200).
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> put_req_header("if-none-match", plain_etag)
         |> get("/v1/capabilities?chat=1")

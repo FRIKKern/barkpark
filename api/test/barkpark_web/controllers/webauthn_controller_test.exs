@@ -5,7 +5,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   ceremony is verified end-to-end through `wax` WITHOUT a browser — only the
   actual `navigator.credentials` call is browser-gated.
   """
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   import Ecto.Query, only: [from: 2]
   alias Barkpark.{Accounts, Audit, Repo}
@@ -17,7 +17,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   defp json_conn(conn), do: put_req_header(conn, "content-type", "application/json")
 
   defp authed(token),
-    do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+    do: scoped_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
 
   setup %{conn: conn} do
     conn
@@ -25,7 +25,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     |> post("/v1/auth/register", Jason.encode!(%{email: "pk@example.com", password: @password}))
 
     token =
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post("/v1/auth/login", Jason.encode!(%{email: "pk@example.com", password: @password}))
       |> json_response(201)
@@ -118,7 +118,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
     # Usernameless login: challenge → assertion → session token.
     ch =
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post("/v1/auth/webauthn/login/challenge", "{}")
       |> json_response(200)
@@ -126,7 +126,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assertion = make_assertion(cred, ch["challenge"], 1)
 
     resp =
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post(
         "/v1/auth/webauthn/login",
@@ -142,7 +142,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     _cred = register!(token)
     # A DIFFERENT authenticator (wrong key) for the same cred id-less challenge.
     ch =
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post("/v1/auth/webauthn/login/challenge", "{}")
       |> json_response(200)
@@ -156,7 +156,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
         1
       )
 
-    assert build_conn()
+    assert scoped_conn()
            |> json_conn()
            |> post(
              "/v1/auth/webauthn/login",
@@ -202,12 +202,12 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
     first = fn count ->
       ch =
-        build_conn()
+        scoped_conn()
         |> json_conn()
         |> post("/v1/auth/webauthn/login/challenge", "{}")
         |> json_response(200)
 
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post(
         "/v1/auth/webauthn/login",
@@ -235,12 +235,12 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
     # login emits passkey_login
     ch =
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post("/v1/auth/webauthn/login/challenge", "{}")
       |> json_response(200)
 
-    build_conn()
+    scoped_conn()
     |> json_conn()
     |> post(
       "/v1/auth/webauthn/login",
@@ -399,7 +399,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
         end)
 
       # A SECOND authenticated user attacks the first user's credential id.
-      build_conn()
+      scoped_conn()
       |> json_conn()
       |> post(
         "/v1/auth/register",
@@ -407,7 +407,7 @@ defmodule BarkparkWeb.WebauthnControllerTest do
       )
 
       other_token =
-        build_conn()
+        scoped_conn()
         |> json_conn()
         |> post(
           "/v1/auth/login",

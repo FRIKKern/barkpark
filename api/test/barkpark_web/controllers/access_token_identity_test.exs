@@ -30,7 +30,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
        a non-member (no resolvable role) mints the member-tier `["read"]`
        workspace-less token from #7.
   """
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures
@@ -380,7 +380,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
   # user. Returns {raw_token, personal_access_token_json}.
   defp self_mint(user, params \\ %{"name" => "cli"}) do
     conn =
-      build_conn()
+      scoped_conn()
       |> bearer(user_bearer(user))
       |> post("/v1/auth/tokens", params)
 
@@ -430,7 +430,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
       # where, on unpatched code (workspace_id defaulted to Default + a
       # Membership row inserted for it), this request answered 200.
       resp =
-        build_conn()
+        scoped_conn()
         |> bearer(raw)
         |> get("/w/#{default_ws.slug}/p/#{default_project.slug}/v1/data/query/#{dataset}/post")
 
@@ -462,7 +462,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
       assert TenancyAuth.member?(minted, ws.id)
 
       resp =
-        build_conn()
+        scoped_conn()
         |> bearer(raw)
         |> get("/w/#{ws.slug}/p/#{project.slug}/v1/data/query/#{dataset}/post")
 

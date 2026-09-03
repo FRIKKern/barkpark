@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.AuthControllerTest do
   @moduledoc "Phase 1 — the /v1/auth HTTP surface (register, login, MFA, sessions)."
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).
@@ -17,7 +17,7 @@ defmodule BarkparkWeb.AuthControllerTest do
 
   # A JSON-ready conn carrying `token` as a session bearer.
   defp authed(token),
-    do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+    do: scoped_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
 
   # Enrol TOTP on `token`'s session (enrol → verify). Returns {secret, recovery_codes}.
   defp enroll_totp!(token) do
@@ -88,7 +88,7 @@ defmodule BarkparkWeb.AuthControllerTest do
 
       # Second registration of the SAME email — same status, same body shape.
       dup =
-        post_json(build_conn(), "/v1/auth/register", %{
+        post_json(scoped_conn(), "/v1/auth/register", %{
           email: "enum@example.com",
           password: @password
         })
@@ -110,10 +110,13 @@ defmodule BarkparkWeb.AuthControllerTest do
       # check still fires alongside the password error — the 422 must NOT leak the
       # "has already been taken" signal, so both bodies must be identical.
       existing =
-        post_json(build_conn(), "/v1/auth/register", %{email: "taken@example.com", password: "x"})
+        post_json(scoped_conn(), "/v1/auth/register", %{email: "taken@example.com", password: "x"})
 
       absent =
-        post_json(build_conn(), "/v1/auth/register", %{email: "absent@example.com", password: "x"})
+        post_json(scoped_conn(), "/v1/auth/register", %{
+          email: "absent@example.com",
+          password: "x"
+        })
 
       assert response(existing, 422) == response(absent, 422)
 
@@ -135,7 +138,7 @@ defmodule BarkparkWeb.AuthControllerTest do
       token = login_token(conn, "alice@example.com")
 
       me =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{token}")
         |> get("/v1/auth/me")
         |> json_response(200)
@@ -163,7 +166,7 @@ defmodule BarkparkWeb.AuthControllerTest do
 
     test "logout revokes the session bearer", %{conn: conn} do
       token = login_token(conn, "alice@example.com")
-      authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
+      authed = fn -> scoped_conn() |> put_req_header("authorization", "Bearer #{token}") end
 
       assert authed.() |> delete("/v1/auth/logout") |> json_response(200)
       assert authed.() |> get("/v1/auth/me") |> json_response(401)
@@ -178,7 +181,7 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
 
     test "enroll → verify → login now requires a code", %{token: token} do
-      authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
+      authed = fn -> scoped_conn() |> put_req_header("authorization", "Bearer #{token}") end
 
       enroll =
         authed.()
@@ -209,13 +212,16 @@ defmodule BarkparkWeb.AuthControllerTest do
       # (restores LOW-13's removal) — this confirms password validity to a caller
       # who already supplied it, the industry-standard 2FA behaviour.
       no_code =
-        post_json(build_conn(), "/v1/auth/login", %{email: "mfa@example.com", password: @password})
+        post_json(scoped_conn(), "/v1/auth/login", %{
+          email: "mfa@example.com",
+          password: @password
+        })
 
       assert json_response(no_code, 401)["error"]["code"] == "mfa_required"
 
       # An INVALID code on a correct password is ALSO mfa_required (not generic).
       bad_code =
-        post_json(build_conn(), "/v1/auth/login", %{
+        post_json(scoped_conn(), "/v1/auth/login", %{
           email: "mfa@example.com",
           password: @password,
           totp_code: "000000"
@@ -226,12 +232,12 @@ defmodule BarkparkWeb.AuthControllerTest do
       # A WRONG password stays the generic invalid_credentials — the password
       # oracle is NOT widened: a wrong password never reveals the account has MFA.
       wrong_pw =
-        post_json(build_conn(), "/v1/auth/login", %{email: "mfa@example.com", password: "nope"})
+        post_json(scoped_conn(), "/v1/auth/login", %{email: "mfa@example.com", password: "nope"})
 
       assert json_response(wrong_pw, 401)["error"]["code"] == "invalid_credentials"
 
       # … and succeeds with a live TOTP code.
-      assert login_token(build_conn(), "mfa@example.com", %{
+      assert login_token(scoped_conn(), "mfa@example.com", %{
                totp_code: totp_code_stable!(secret)
              })
     end
@@ -241,7 +247,7 @@ defmodule BarkparkWeb.AuthControllerTest do
 
       # Correct password, WRONG second factor → 401 mfa_required.
       bad_code =
-        post_json(build_conn(), "/v1/auth/login", %{
+        post_json(scoped_conn(), "/v1/auth/login", %{
           email: "mfa@example.com",
           password: @password,
           totp_code: "000000"
@@ -264,7 +270,7 @@ defmodule BarkparkWeb.AuthControllerTest do
       {secret, _codes} = enroll_totp!(token)
 
       # Correct password AND a live TOTP → login succeeds.
-      assert login_token(build_conn(), "mfa@example.com", %{
+      assert login_token(scoped_conn(), "mfa@example.com", %{
                totp_code: totp_code_stable!(secret)
              })
 
@@ -277,7 +283,7 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
 
     test "MEDIUM-8: enroll + verify require the current password (re-auth)", %{token: token} do
-      authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
+      authed = fn -> scoped_conn() |> put_req_header("authorization", "Bearer #{token}") end
 
       # No password → 403, even with a valid session.
       assert authed.()
@@ -302,7 +308,7 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
 
     test "MEDIUM-8: mfa/disable needs the current password and turns MFA off", %{token: token} do
-      authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
+      authed = fn -> scoped_conn() |> put_req_header("authorization", "Bearer #{token}") end
 
       enroll =
         authed.()
@@ -341,15 +347,15 @@ defmodule BarkparkWeb.AuthControllerTest do
       refute Accounts.get_user_by_email("mfa@example.com").totp_enabled
 
       # Login no longer needs a code.
-      assert login_token(build_conn(), "mfa@example.com")
+      assert login_token(scoped_conn(), "mfa@example.com")
     end
   end
 
   describe "session management (era-w7)" do
     setup %{conn: conn} do
       register!(conn, "devices@example.com")
-      token_a = login_token(build_conn(), "devices@example.com")
-      token_b = login_token(build_conn(), "devices@example.com")
+      token_a = login_token(scoped_conn(), "devices@example.com")
+      token_b = login_token(scoped_conn(), "devices@example.com")
       %{token_a: token_a, token_b: token_b}
     end
 
@@ -405,8 +411,8 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
 
     test "another USER's session id is 404 and their session survives", %{token_a: a} do
-      register!(build_conn(), "other-user@example.com")
-      other_token = login_token(build_conn(), "other-user@example.com")
+      register!(scoped_conn(), "other-user@example.com")
+      other_token = login_token(scoped_conn(), "other-user@example.com")
 
       other_id =
         authed(other_token)
@@ -524,14 +530,14 @@ defmodule BarkparkWeb.AuthControllerTest do
              |> json_response(200)
 
       # Old password no longer works …
-      assert post_json(build_conn(), "/v1/auth/login", %{
+      assert post_json(scoped_conn(), "/v1/auth/login", %{
                email: "pwreset@example.com",
                password: @password
              })
              |> json_response(401)
 
       # … the new one does.
-      assert post_json(build_conn(), "/v1/auth/login", %{
+      assert post_json(scoped_conn(), "/v1/auth/login", %{
                email: "pwreset@example.com",
                password: "a-brand-new-password"
              })

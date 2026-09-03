@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.ScimGroupsControllerTest do
   @moduledoc "SCIM 2.0 /scim/v2/Groups — group→role mapping (era-w4-scim-groups)."
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Accounts, Repo, Scim, Tenancy}
   alias Barkpark.Audit.Event
@@ -23,7 +23,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
   end
 
   defp scim(token) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{token}")
     |> put_req_header("content-type", "application/json")
   end
