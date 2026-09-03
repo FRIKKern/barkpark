@@ -150,6 +150,22 @@ STALE_QUEUE_HOURS=24
 # (#11766: owner-held since Aug 17, 300+ commits behind main). Dispatched runs
 # are unaffected — cancel works regardless of whether anyone returns.
 DORMANT_PR_DAYS=14
+# THE PHANTOM SLICE. A queued run this old is not queue DEPTH: GitHub will not
+# dequeue it and will not let anyone cancel it. Measured 2026-09-03 08:03Z
+# (task-82059e31bcccdbd7): `gh api actions/runs?status=queued` answered 8 for a
+# whole night — seven created 2026-08-07T09:08:43Z (breakglass-watch, cloud,
+# console-harness, doc-gates, elixir, release-artifact, required-checks-drift)
+# and one 2026-08-19T05:23:37Z (compose-smoke), all push/main, all answering 409
+# "Cannot cancel a workflow run that has not been queued yet" to BOTH cancel
+# paths. Any queue-depth reading taken since carries a CONSTANT +8, and the
+# ratio it corrupts depends on the hour: this same report, run from a worktree
+# at 2026-09-03T16:11Z, read 31 queued rows of which 8 were phantoms (26%),
+# while `gh run list --status queued` at 08:03Z that morning returned 8 rows of
+# which all 8 were. This is a SLICE OF THE ROWS
+# BELOW, never a new class: each row is still classified STALE / DISPATCHED /
+# ORPHANED by the remedy that exists for it, and no verdict moves because of
+# this number. The slice exists so that a DEPTH is quotable at all.
+PHANTOM_QUEUE_HOURS=24
 SHAS=()
 
 # Report accumulators. ABSENT_ROWS and STALE_ROWS are the two SCREAMING limbs and
@@ -171,6 +187,9 @@ PENDING_ROWS=0
 # on. The run records stay: deleting them to green a gate would be destroying
 # the only evidence the class exists.
 ORPHAN_ROWS=0
+# Rows in the PHANTOM SLICE above. Reported, never exited on: it is a property
+# of the DEPTH NUMBER, not a finding.
+PHANTOM_ROWS=0
 
 # Informational rows are buffered, not printed inline, so the queue limb's
 # verdict is never pushed off the top of a log by in-flight noise.
@@ -191,6 +210,7 @@ while [ $# -gt 0 ]; do
     --repo)              REPO_OVERRIDE="$2"; shift 2 ;;
     --now)               NOW_ISO="$2"; shift 2 ;;
     --stale-queue-hours) STALE_QUEUE_HOURS="$2"; shift 2 ;;
+    --phantom-queue-hours) PHANTOM_QUEUE_HOURS="$2"; shift 2 ;;
     --dormant-pr-days) DORMANT_PR_DAYS="$2"; shift 2 ;;
     --sha)               SHAS+=("$2"); shift 2 ;;
     -h|--help)           usage; exit 0 ;;
@@ -648,8 +668,27 @@ else
   else
     QD_N="?"
   fi
+  # THE SLICE. Counted here, before any row is classified, because the DEPTH is
+  # the number other measurements copy out of this report.
+  #
+  # AN UNREADABLE created_at IS NOT A PHANTOM, and the direction is deliberate:
+  # `age_exceeds` answers TRUE on a date it cannot parse (correct for its one
+  # other caller, the ZOMBIED guard, where an unparseable date must not demote a
+  # real zombie). Here TRUE would REMOVE the row from the depth and make the
+  # number quieter, so the parse is required first and an unreadable row stays
+  # counted as depth. Probe 5d.4 fails if that ever flips.
+  while IFS= read -r prow; do
+    [ -n "$prow" ] || continue
+    pcreated="$(jq -r '.created_at // empty' <<<"$prow")"
+    [ -n "$pcreated" ] || continue
+    iso_to_epoch "$pcreated" >/dev/null 2>&1 || continue
+    age_exceeds "$pcreated" "$PHANTOM_QUEUE_HOURS" && PHANTOM_ROWS=$((PHANTOM_ROWS + 1))
+  done <<<"$QUEUED_PAGINATED"
+  QP_DEPTH=$(( QP_N - PHANTOM_ROWS ))
   say "  paginated + server-filtered (?status=queued&per_page=100 --paginate): $QP_N"
   say "  default page, filtered client-side (the form that loses):             $QD_N"
+  say "  of which PHANTOM (queued, created > ${PHANTOM_QUEUE_HOURS}h ago):     $PHANTOM_ROWS"
+  say "  queue DEPTH, phantoms excluded — the only depth to quote:             $QP_DEPTH"
   if [ "$QD_N" != "?" ] && [ "$QP_N" -gt "$QD_N" ]; then
     say "  the default-page form is UNDERCOUNTING by $((QP_N - QD_N)) run(s) right now — every one of them older than its last page"
   fi
@@ -749,7 +788,7 @@ if [ "$ORPHAN_ROWS" -gt 0 ]; then
   say "NOTICE   queue limb   : $ORPHAN_ROWS orphaned run record(s) — undispatchable, on heads no open PR or main carries. No remedy exists; kept as the audit trail of the class."
 fi
 say ""
-say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS  orphaned=$ORPHAN_ROWS"
+say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS  orphaned=$ORPHAN_ROWS  phantom-queued=$PHANTOM_ROWS"
 
 [ "$CONFIG_FAULT" = "1" ] && {
   warn "CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."
