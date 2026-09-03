@@ -6433,7 +6433,18 @@
     // field on an older CP must not read as stalled).
     if (live && typeof bp.queued_deploy_age_seconds === "number" &&
         bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
-    if (live && bp.update_state === "behind") return "behind";     // 9
+    // dr-w25: TWO independent sources can say `behind`, and until this slice the
+    // console read only the weaker one. `update_state` is the box's RELEASE-TAG
+    // self-grade; `commit_ancestry` is the control plane's own compare of the
+    // sha the box serves against main (see behindByCommits below). A box pinned
+    // at the newest tag grades itself `current` however far main runs ahead — so
+    // a row reading commit_ancestry "behind" + update_state "current" rendered
+    // live-green here while the SAME payload's commit column said 2,493 behind.
+    // Ported byte-for-byte from the Go twin's predicate (cloud_status_cmd.go
+    // attentionStatus: `live && (b.UpdateState == "behind" || behindByCommits(b))`)
+    // — same rung, same label, same bucket; it simply stops missing the boxes
+    // whose release-tag grade cannot express the gap.
+    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 9
     if (removing) return "removing";                              // 10
     if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
     return "ok";                                                // 12
@@ -6584,7 +6595,17 @@
     // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
     // and says the fact that makes the wait a problem.
     if (kind === "deploy_stalled") return { role: "warn", label: "Deploy stalled", detail: "Deploy queued " + Math.floor(bp.queued_deploy_age_seconds / 60) + "m — no builder claimed it" };
-    if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    // dr-w25 / Go attentionDetail: a row behind by its RELEASE TAG explains
+    // itself (the UPDATE column already shows running → latest), so it keeps the
+    // release sentence. A row behind BY COMMITS does NOT — its tag grade is
+    // sitting on the same row saying `current` — so commitBehindDetail names the
+    // disagreement, verbatim Go phrasing, instead of the false all-clear
+    // "A newer release is available" over a box no release can describe.
+    if (kind === "behind") {
+      var commitWhy = commitBehindDetail(bp);
+      if (commitWhy && bp.update_state !== "behind") return { role: "info", label: "Update available", detail: commitWhy };
+      return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    }
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
@@ -6687,6 +6708,9 @@
   //     → "" — the segment collapses out entirely, byte-identical to before.
   // `== null` (never truthiness) is what keeps a MEASURED zero rendering
   // "even" instead of collapsing into the unmetered arm.
+  // dr-w25: behindByCommits is no longer display-only — classifyBp's `behind`
+  // rung reads it too, so a box whose tag grade says `current` can never render
+  // live-green while the plane's own compare says it is behind main.
   var COMMIT_DISTANCE_UNMETERED = "UNMETERED";
   function behindByCommits(bp) {
     return String((bp && bp.commit_ancestry) || "").trim() === "behind";
