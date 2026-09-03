@@ -796,9 +796,34 @@ defmodule BarkparkCloud.Registry do
   LIVE managed box is not silently stranded; failed / never-provisioned rows are
   safe to remove outright (a failed provision already tore its half-built box
   down per the worker contract).
+
+  ssw8, SECOND DOOR (this row). Every site of this instance has its public-read
+  CONTENT TOKEN revoked on the box FIRST, exactly as `delete_site/1` does for one
+  site — because the FK cascade (`sites.barkpark_id` is `on_delete: :delete_all`)
+  removes those site rows in the same statement WITHOUT ever calling
+  `delete_site/1`. Before this, deleting an instance stranded one never-expiring
+  public-read credential per site on a box the control plane no longer tracks:
+  the same defect ssw8 measured, reached by a different door.
+
+  ORDER IS LOAD-BEARING for the same reason it is in `delete_site/1`: the site
+  rows ARE the pointers (`bootstrap_workspace`/`bootstrap_project` name the
+  scope, `slug` names the label), and after `Repo.delete/1` nothing in this
+  database can name what to revoke.
+
+  A box that cannot confirm the revoke does NOT block the delete — the CP row is
+  the truth — but it is never SILENT either: `revoke_barkpark_site_read_tokens/1`
+  logs a warning naming the box slug and every `site-read-<slug>` label that may
+  still be live, and `mix barkpark_cloud.site_read_tokens` finds them afterwards.
+  The return shape is unchanged on purpose (six router call sites); the
+  machine-readable report is available to any caller that wants it by calling
+  `revoke_barkpark_site_read_tokens/1` itself — which is what the DEPROVISION arm
+  does, so its outcomes land on the audit trail.
   """
   @spec delete_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
-  def delete_barkpark(%Barkpark{} = barkpark), do: Repo.delete(barkpark)
+  def delete_barkpark(%Barkpark{} = barkpark) do
+    _ = revoke_barkpark_site_read_tokens(barkpark)
+    Repo.delete(barkpark)
+  end
 
   @doc """
   Delete a Site row — the CP half of a site delete. Cascades the site's
@@ -2510,6 +2535,29 @@ defmodule BarkparkCloud.Registry do
   records the removal of one that never did. A refused audit insert rolls the
   delete back. Only the `:deleted` outcome writes: `:already_gone` deleted
   nothing, and a `:conflict` / `:stale_claim` never reached the row.
+
+  REVOKES FIRST (ssw8, this row). THE ARM THAT MATTERS: this is the path that
+  tears down a LIVE box, and a live box is where sites exist. It calls
+  `Repo.delete(bp)` DIRECTLY — it does not route through `delete_barkpark/1` —
+  so a revoke installed only there would miss it entirely. Every site's
+  public-read content token is revoked on the box BEFORE this function opens its
+  transaction, and the per-site outcomes ride the `barkpark.deleted` audit event
+  as `metadata["read_tokens"]` so a credential that could not be confirmed dead
+  is NAMED on the team's durable trail, not merely logged.
+
+  OUTSIDE THE TRANSACTION, DELIBERATELY. The revoke is an HTTP round-trip PER
+  SITE and the transaction below opens with a `FOR UPDATE` lock on the provision
+  job (`lock_provision_job/1`). Revoking inline would hold that row lock across
+  every one of those round-trips — including against a box that is down and only
+  answers on the client timeout. So the preflight re-reads the job UNLOCKED and
+  applies the same three refusals the locked body applies (missing job, terminal
+  `"failed"`, stale claim) before it calls a box at all: a call that is going to
+  be refused revokes nothing. The residual race is stated and accepted — between
+  the unlocked read and the lock, another worker could flip the job, in which
+  case a credential is revoked for an instance this call then declines to delete.
+  That costs a live site its public-read token (re-mintable) instead of holding a
+  lock across the network, and it can only happen in the window where two workers
+  are already fighting over one deprovision.
   """
   @spec succeed_deprovision_job(binary(), keyword()) ::
           {:ok, :deleted | :already_gone}
@@ -2522,6 +2570,11 @@ defmodule BarkparkCloud.Registry do
         {:ok, :already_gone}
 
       _uuid ->
+        # ssw8: the box calls happen HERE — before the transaction, so no
+        # `FOR UPDATE` lock is held across an HTTP round-trip. See the moduledoc
+        # above for the ordering law and the accepted residual race.
+        read_tokens = preflight_revoke_site_read_tokens(id, claim_token)
+
         # claim-fence (bp-c55): FOR UPDATE read + guard + delete in one transaction.
         # The terminal "failed" short-circuit runs BEFORE the token check.
         Repo.transaction(fn ->
@@ -2548,7 +2601,7 @@ defmodule BarkparkCloud.Registry do
 
                     case Repo.delete(bp) do
                       {:ok, _} ->
-                        case record_deprovision_audit(bp, site_slugs) do
+                        case record_deprovision_audit(bp, site_slugs, read_tokens) do
                           {:ok, _event} -> :deleted
                           {:error, cs} -> Repo.rollback(cs)
                         end
@@ -2560,6 +2613,29 @@ defmodule BarkparkCloud.Registry do
               end
           end
         end)
+    end
+  end
+
+  # The "nothing was revoked, and nothing needed to be" report — the shape
+  # `revoke_barkpark_site_read_tokens/1` returns, for the paths that never call a
+  # box. An EMPTY report and an ALL-`:ok` report are different facts, and the
+  # audit stamp downstream shows which one it got.
+  @empty_site_read_token_report %{ok: [], noop: [], error: []}
+
+  # ssw8 — the UNLOCKED preflight that revokes every site read token before the
+  # transaction opens. It mirrors the locked body's three refusals so a call that
+  # is about to be fenced out (`:conflict` / `:stale_claim`) or that has nothing
+  # to delete never touches a box. Returns the same report shape
+  # `revoke_barkpark_site_read_tokens/1` returns, so the audit stamp downstream
+  # takes one argument either way.
+  defp preflight_revoke_site_read_tokens(id, claim_token) do
+    with %ProvisionJob{} = job <- Repo.get(ProvisionJob, id),
+         false <- job.status == "failed",
+         false <- stale_claim?(job, claim_token),
+         %Barkpark{} = bp <- Repo.get(Barkpark, job.barkpark_id) do
+      revoke_barkpark_site_read_tokens(bp)
+    else
+      _ -> @empty_site_read_token_report
     end
   end
 
@@ -2586,7 +2662,7 @@ defmodule BarkparkCloud.Registry do
   # A rollback here is not theoretical politeness: a refused audit insert MUST
   # refuse the delete, or the register is back to recording fewer removals than
   # happened.
-  defp record_deprovision_audit(%Barkpark{} = bp, site_slugs) do
+  defp record_deprovision_audit(%Barkpark{} = bp, site_slugs, read_tokens) do
     BarkparkCloud.Accounts.record_audit(%{
       team_id: bp.team_id,
       actor_user_id: nil,
@@ -2597,7 +2673,16 @@ defmodule BarkparkCloud.Registry do
         "name" => bp.name,
         "host" => bp.host,
         "via" => "deprovision",
-        "sites" => site_slugs
+        "sites" => site_slugs,
+        # ssw8: what happened to each site's public-read credential on the way
+        # out. An `"error"` entry is a credential we could NOT confirm dead —
+        # named here because after this transaction nothing else in this database
+        # can name it. `mix barkpark_cloud.site_read_tokens` is the sweep.
+        "read_tokens" => %{
+          "ok" => read_tokens.ok,
+          "noop" => read_tokens.noop,
+          "error" => read_tokens.error
+        }
       }
     })
   end
@@ -5853,6 +5938,58 @@ defmodule BarkparkCloud.Registry do
     else
       _ -> :noop
     end
+  end
+
+  @doc """
+  Revoke the public-read content token of EVERY site on `barkpark` — the
+  INSTANCE-level counterpart of `revoke_site_read_token/1`, and the reason it
+  exists is that nothing else ever runs.
+
+  `sites.barkpark_id` is `references(:barkparks, on_delete: :delete_all)`
+  (migration `20260627150000_create_sites.exs`), so removing an instance deletes
+  its sites IN THE DATABASE — `delete_site/1`, and with it the per-site revoke
+  ssw8 installed there, never executes. Both Barkpark-row deletes in this module
+  (`delete_barkpark/1` and `succeed_deprovision_job/2`) call this FIRST, while the
+  site rows still name what to revoke.
+
+  Best-effort per site, exactly like `revoke_site_read_token/1`: a box that is
+  down never blocks the delete. It is not silent either — a non-empty `:error`
+  list is logged as a warning naming the box slug and each `site-read-<slug>`
+  label that may still be live, which is the pointer the deleted rows can no
+  longer hold. `mix barkpark_cloud.site_read_tokens` is the sweep that finds them
+  afterwards.
+
+  Returns `%{ok: [slug], noop: [slug], error: [slug]}` — the per-site outcomes of
+  `revoke_site_read_token/1`, bucketed. `succeed_deprovision_job/2` stamps this
+  onto the `barkpark.deleted` audit event so the leftover is named on a durable
+  trail, not only in a log line.
+  """
+  @spec revoke_barkpark_site_read_tokens(Barkpark.t()) :: %{
+          ok: [String.t()],
+          noop: [String.t()],
+          error: [String.t()]
+        }
+  def revoke_barkpark_site_read_tokens(%Barkpark{} = barkpark) do
+    report =
+      barkpark
+      |> list_sites()
+      |> Enum.reduce(@empty_site_read_token_report, fn site, acc ->
+        Map.update!(acc, revoke_site_read_token(site), &[site.slug | &1])
+      end)
+      |> Map.new(fn {outcome, slugs} -> {outcome, Enum.reverse(slugs)} end)
+
+    if report.error != [] do
+      labels = Enum.map_join(report.error, ", ", &site_read_token_label/1)
+
+      Logger.warning(
+        "instance delete on #{barkpark.slug}: #{length(report.error)} site read token(s) " <>
+          "could not be confirmed revoked — #{labels} may still be live on the box, and the " <>
+          "site rows that named them are being deleted. Sweep with " <>
+          "`mix barkpark_cloud.site_read_tokens`."
+      )
+    end
+
+    report
   end
 
   @doc """
