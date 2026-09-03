@@ -11,6 +11,8 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
   import Plug.Conn
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.EmailSettings
   alias BarkparkCloud.Web.Router
   alias BarkparkCloud.Workers.ChatNotificationWorker
 
@@ -253,5 +255,142 @@ defmodule BarkparkCloud.Web.RouterNotificationsChatTest do
       call(:put, "/v1/notifications/channels", %{"type" => "discord", "enabled" => false}, token)
 
     assert conn.status == 403
+  end
+
+  # ── cch-w32-bl: ONE ENDPOINT, ONE BUDGET — the guard that reds if EITHER
+  #                leg loses its limit ────────────────────────────────────────
+  #
+  # `POST /v1/notifications/test` has two legs. The EMAIL leg has honoured a
+  # 10s/team stamp (`last_test_sent_at`) since day one. The CHAT leg did not:
+  # the route's `cond` reaches `chat_test?/1` BEFORE `test_email/1`, so a chat
+  # body jumped the guard entirely and three rapid presses enqueued THREE
+  # fan-outs — an authenticated-but-cheap way to drive unbounded POSTs at a
+  # third-party webhook URL of the caller's choosing, from Barkpark's IP.
+  #
+  # WHY ONE TEST AND NOT TWO. Two per-leg unit tests are exactly what let the
+  # halves drift: each stays green while the OTHER loses its limit, and neither
+  # can see that they no longer share a budget. This drives BOTH legs of the
+  # REAL router through the REAL Plug pipeline in one body, and its third act
+  # asserts the CROSS refusal — an email press must hold the chat button and
+  # vice versa. Delete the limiter from either leg and this reds; give each leg
+  # its own stamp and act 3 reds while acts 1 and 2 still pass.
+  describe "the two legs of /v1/notifications/test share one per-team budget" do
+    test "three rapid presses on EITHER leg enqueue one send; the rest are refused, readably" do
+      {team, token} = owner_with_team()
+
+      _ =
+        call(
+          :put,
+          "/v1/notifications/channels",
+          %{
+            "type" => "slack",
+            "enabled" => true,
+            "credentials" => %{"url" => "https://hooks.slack.com/x"}
+          },
+          token
+        )
+
+      # ── ACT 1: the CHAT leg. Three presses, one fan-out. ──────────────────
+      first = call(:post, "/v1/notifications/test", %{"channel" => "slack"}, token)
+      assert first.status == 202
+      assert body(first) == %{"ok" => true, "queued" => 1}
+
+      second = call(:post, "/v1/notifications/test", %{"channel" => "slack"}, token)
+      third = call(:post, "/v1/notifications/test", %{"channel" => "slack"}, token)
+
+      for refused <- [second, third] do
+        assert refused.status == 429,
+               "the chat leg must refuse inside the window, not fan out again"
+
+        # The SAME refusal shape the email leg has always rendered — the console
+        # arm that reads `rate_limited` + `retry_after` is already shipped, so a
+        # new reason key here would be a new silent failure for an old one.
+        assert %{"error" => "rate_limited", "retry_after" => retry_after} = body(refused)
+
+        assert is_integer(retry_after) and retry_after > 0 and retry_after <= 10,
+               "the caller is told WHEN the budget refills, not just that it is empty"
+      end
+
+      # THE AMPLIFICATION BOUND ITSELF, measured rather than argued: three
+      # presses, ONE outbound job. This is the assertion the defect failed.
+      assert length(all_enqueued(worker: ChatNotificationWorker)) == 1
+
+      # ── ACT 2: the EMAIL leg, same shape, same window. ────────────────────
+      _ = age_test_stamp(team)
+
+      assert call(:post, "/v1/notifications/test", %{}, token).status == 200
+
+      for _ <- 1..2 do
+        refused = call(:post, "/v1/notifications/test", %{}, token)
+        assert refused.status == 429, "the email leg must keep the limit it already had"
+        assert %{"error" => "rate_limited", "retry_after" => n} = body(refused)
+        assert is_integer(n) and n > 0
+      end
+
+      # ── ACT 3: the budget is SHARED, not per-leg. ─────────────────────────
+      # An email press must hold the chat button. Two separate stamps pass acts
+      # 1 and 2 and fail here — which is the whole point of asserting it.
+      _ = age_test_stamp(team)
+      assert call(:post, "/v1/notifications/test", %{}, token).status == 200
+
+      crossed = call(:post, "/v1/notifications/test", %{"channel" => "slack"}, token)
+
+      assert crossed.status == 429,
+             "an email test must spend the same budget the chat test reads — one endpoint, one limit"
+
+      # …and the converse direction, so neither half can keep a private stamp.
+      _ = age_test_stamp(team)
+      assert call(:post, "/v1/notifications/test", %{"channel" => "slack"}, token).status == 202
+      assert call(:post, "/v1/notifications/test", %{}, token).status == 429
+
+      # Across every press above, exactly two chat fan-outs were ever queued:
+      # act 1's first press and act 3's converse press.
+      assert length(all_enqueued(worker: ChatNotificationWorker)) == 2
+    end
+
+    # The stamp is a rationing device, not a punishment: a fan-out that reached
+    # NOBODY sent nothing, so it must not spend a real user's window. This
+    # mirrors `deliver_test/2`, which does not stamp on `:no_recipient` either.
+    test "a fan-out that reaches zero channels does not burn the window" do
+      {_team, token} = owner_with_team()
+
+      # No channels configured at all → queued 0, three times over.
+      for _ <- 1..3 do
+        conn = call(:post, "/v1/notifications/test", %{"target" => "chat"}, token)
+        assert conn.status == 202
+        assert body(conn)["queued"] == 0
+      end
+
+      refute_enqueued(worker: ChatNotificationWorker)
+
+      # …and the budget is still there for the press that would actually send.
+      _ =
+        call(
+          :put,
+          "/v1/notifications/channels",
+          %{
+            "type" => "slack",
+            "enabled" => true,
+            "credentials" => %{"url" => "https://hooks.slack.com/x"}
+          },
+          token
+        )
+
+      conn = call(:post, "/v1/notifications/test", %{"channel" => "slack"}, token)
+      assert conn.status == 202, "a zero-reach probe must not have cost the real send its window"
+      assert body(conn)["queued"] == 1
+    end
+  end
+
+  # cch-w32-bl: both legs spend one stamp, so a test that presses twice inside
+  # the window ages it out ON PURPOSE (the manoeuvre `notifications_test.exs`
+  # already uses for the email leg).
+  defp age_test_stamp(team) do
+    old = DateTime.add(DateTime.utc_now(), -11, :second) |> DateTime.truncate(:microsecond)
+
+    team
+    |> Notifications.get_or_create_settings()
+    |> EmailSettings.changeset(%{last_test_sent_at: old})
+    |> Repo.update!()
   end
 end

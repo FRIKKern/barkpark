@@ -18069,6 +18069,33 @@ test("cch-w32-s1 notifChatTestToast: a non-2xx is still an honest error", () => 
   assert.match(legacy.body, /Sent to slack\./);
 });
 
+// ── cch-w32-bl: the chat leg's refusal is as readable as the email leg's ─────
+//
+// The chat leg jumped the 10s/team guard entirely, so `rate_limited` was
+// UNREACHABLE on this button and the toast never learned to read it — a 429
+// rendered "Try again shortly." while `retry_after` sat unused in the body.
+// Both legs now spend one budget, so both toasts must say the same number.
+test("cch-w32-bl notifChatTestToast: a rate-limited chat test reads the countdown, like the email one", () => {
+  const t = hooks.notifChatTestToast(
+    { ok: false, status: 429, data: { error: "rate_limited", retry_after: 7 } }, "slack", true);
+  assert.equal(t.kind, "error");
+  assert.match(t.body, /wait 7s/i, "the wire carried the number — the toast must show it");
+  assert.match(t.body, /share one per-team limit/i,
+    "a caller who just pressed the EMAIL button must be told why the CHAT button refused");
+
+  // The shared-limit sentence is what makes a cross-leg refusal legible; a
+  // generic 'try again' would leave the caller hunting a chat bug that is not
+  // there. And an older server that omits retry_after still gets a number.
+  const noNumber = hooks.notifChatTestToast(
+    { ok: false, status: 429, data: { error: "rate_limited" } }, "slack", true);
+  assert.match(noNumber.body, /wait 10s/i, "an absent retry_after falls back to the window itself");
+
+  // A NON-rate-limit failure must not gain the countdown sentence.
+  const other = hooks.notifChatTestToast(
+    { ok: false, status: 502, data: { error: "send_failed" } }, "slack", true);
+  assert.doesNotMatch(other.body, /per-team limit/i);
+});
+
 // ── cch-w40-bl: the EMAIL test button stops answering yes when it cannot know ─
 //
 // `sendTestNotification` posts a literal `{}`, which the router's `chat_test?/1`

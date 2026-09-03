@@ -1212,22 +1212,59 @@ defmodule BarkparkCloud.Notifications do
   same way. So the mute is not a refusal here; it TRAVELS WITH THE MESSAGE:
   the payload carries `alerts_muted`, and `Render.render/2`'s `test` arm
   discloses it on the wire.
+
+  cch-w32-bl — THE OTHER HALF OF THE ENDPOINT NOW COSTS THE SAME.
+
+  `POST /v1/notifications/test` has two legs and ONE budget: the same
+  `#{@test_rate_limit_seconds}`s-per-team stamp (`last_test_sent_at`) that
+  `deliver_test/2` reads and writes. This leg used to skip it entirely — the
+  router's `cond` routes a chat body here BEFORE `test_email/1` — so three
+  rapid presses enqueued three fan-outs, each one an outbound POST to a
+  third-party webhook URL of the caller's choosing, from Barkpark's IP. An
+  admin gate bounds WHO can do that; it does not bound HOW OFTEN.
+
+  ONE SHARED STAMP, NOT TWO, and the cost is stated rather than hidden: an
+  email test now holds the chat test for #{@test_rate_limit_seconds}s and vice
+  versa. That is deliberate. The thing being rationed is the ENDPOINT — one
+  button, one team, one budget — and a per-leg stamp would hand a caller
+  exactly 2x for free while making "the test button is rate-limited" a sentence
+  with a footnote. The chat leg is also the worse half to double: an email test
+  reaches ONE recipient, a chat test fans out to EVERY enabled channel.
+
+  THE STAMP IS WRITTEN ONLY WHEN SOMETHING WAS ACTUALLY QUEUED. A fan-out that
+  reached zero channels (no channels; only a disabled one; a `channel_type`
+  matching nothing) burns no window — it sent nothing, so there is nothing to
+  ration — and that mirrors `deliver_test/2`, which does not stamp on
+  `:no_recipient` either. A refusal must never spend a real user's budget.
+
+  Returns `{:ok, n}` or `{:error, {:rate_limited, seconds_remaining}}` — the
+  SAME refusal tuple `deliver_test/2` returns, so the router renders the same
+  `429 {error: "rate_limited", retry_after: n}` the console already reads.
   """
   @spec send_test_chat(Team.t() | binary(), String.t() | nil) ::
-          {:ok, non_neg_integer()}
+          {:ok, non_neg_integer()} | {:error, {:rate_limited, non_neg_integer()}}
   def send_test_chat(team, channel_type \\ nil) do
     settings = get_or_create_settings(team)
-    payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    queued =
-      settings
-      |> channels_for_event("test")
-      |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
-      |> Enum.count(fn cfg ->
-        match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
-      end)
+    case test_rate_limit_remaining(settings) do
+      0 ->
+        payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    {:ok, queued}
+        queued =
+          settings
+          |> channels_for_event("test")
+          |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
+          |> Enum.count(fn cfg ->
+            match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
+          end)
+
+        if queued > 0, do: stamp_test_sent(settings)
+
+        {:ok, queued}
+
+      remaining ->
+        {:error, {:rate_limited, remaining}}
+    end
   end
 
   @doc """
