@@ -1612,6 +1612,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	if cmd.SetKey != "" {
 		setTarget = map[string]any{}
 	}
+	// Keys a `--set key:=null` retired: on a patch they ride the mutation's
+	// `unset` list instead of storing a null (see below).
+	var unsetKeys []string
 	if sets, ok := flags["set"]; ok && len(sets) > 0 {
 		for _, kv := range sets {
 			// key:=raw-json sends a TYPED value (httpie convention): the
@@ -1623,22 +1626,59 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			// type is the caller's explicit choice, never sniffed from the
 			// value (a title that LOOKS numeric must stay a string).
 			if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
+				key := kv[:eq]
 				var typed any
 				if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
 					return nil, nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
 				}
-				setTarget[kv[:eq]] = typed
+				// `--set key:=null` on a patch DELETES the key. Storing a
+				// literal null instead left junk keys unremovable through the
+				// CLI: the patch op merges `set` into content, so a null value
+				// is a present key holding null and there is no other delete
+				// verb. The mutate patch op's own `unset` list is the delete
+				// (Map.drop in Mutations.apply_one/3), so route it there.
+				//
+				// The nesting refusal below is deliberately NOT applied to this
+				// branch: naming a key that already exists literally — such as
+				// the "content.description" a pre-fix dotted patch created — is
+				// the ONLY way its author can remove it. Refusing the dot here
+				// would seal the junk in.
+				if typed == nil && setSupportsUnset(cmd) {
+					unsetKeys = append(unsetKeys, key)
+					continue
+				}
+				if err := checkSetKeyNesting(kv, key); err != nil {
+					return nil, nil, "", err
+				}
+				// `--set 'content:={…}'` on a patch double-nests to
+				// content.content. The server only WARNS (Warnings advisory,
+				// mutations.ex warn_on_nested_content/1) and still returns a
+				// rev, so the no-op reads as success. Refuse it here with the
+				// same hint the dotted spelling gets — one mistake, one
+				// answer. Map values only, matching the server's own guard: a
+				// scalar field legitimately named `content` is not this shape.
+				if _, isMap := typed.(map[string]any); isMap && key == "content" && cmd.SetKey != "" {
+					return nil, nil, "", setNestingError(kv, key, "blocks:=[…]")
+				}
+				setTarget[key] = typed
 				continue
 			}
 			eq := strings.IndexByte(kv, '=')
 			if eq < 0 {
 				return nil, nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
-			setTarget[kv[:eq]] = kv[eq+1:]
+			key := kv[:eq]
+			if err := checkSetKeyNesting(kv, key); err != nil {
+				return nil, nil, "", err
+			}
+			setTarget[key] = kv[eq+1:]
 		}
 	}
 	if cmd.SetKey != "" {
 		obj[cmd.SetKey] = setTarget
+	}
+	if len(unsetKeys) > 0 {
+		obj["unset"] = unsetKeys
 	}
 
 	// A mutation command (doc publish/unpublish/delete) wraps its body-arg object
@@ -1658,6 +1698,51 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	}
 	raw, _ := json.Marshal(obj)
 	return raw, nil, "application/json", nil
+}
+
+// setNestingError is the ONE refusal both spellings of the content-nesting
+// mistake get: `--set 'content:={…}'` and `--set 'content.description=…'` are
+// the same error typed two ways, so they must read the same way. The message
+// names the mechanism (--set fields are merged INTO content, nothing nests) and
+// then spells the bare inner field the caller wanted. `example` is that
+// spelling.
+func setNestingError(kv, key, example string) error {
+	return fmt.Errorf("invalid --set %q: --set fields are merged INTO the document's content, "+
+		"so %q does not nest — it lands a literal key. Set the inner field directly, "+
+		"e.g. --set '%s' (use --file to send a body verbatim if you really meant a literal key)",
+		kv, key, example)
+}
+
+// checkSetKeyNesting refuses a --set key containing a dot. The merge is SHALLOW
+// at every write path, so `--set content.description=x` stored a key literally
+// named "content.description" beside the real `description` and still returned
+// a rev — every success signal a caller checks (rev, exit 0, a clean publish,
+// a moved updated_at) said the write landed while the field never changed. A
+// dot is never a path here, so the honest answer is a refusal, not a silent
+// literal. The ONE exception lives at the call site: `key:=null` on a patch is
+// a deletion, and a junk key already stored under a dotted name can only be
+// named to remove it.
+func checkSetKeyNesting(kv, key string) error {
+	if !strings.Contains(key, ".") {
+		return nil
+	}
+	// `content.<field>` is the exact double-nest mistake, one spelling further
+	// on: the read path prints these fields under a `content` object, so the
+	// caller writes back the path they just read. Point at the bare field.
+	if inner := strings.TrimPrefix(key, "content."); inner != key && inner != "" && !strings.Contains(inner, ".") {
+		return setNestingError(kv, key, inner+"=…")
+	}
+	head := key[:strings.Index(key, ".")]
+	return setNestingError(kv, key, head+":={…}")
+}
+
+// setSupportsUnset reports whether this command's wire shape has a place to put
+// a deletion. Only the mutate `patch` op does: its body carries an `unset` list
+// the server drops from content. A create/replace body has no such slot, and
+// there a `--set field:=null` is a legitimate null-valued field on a new
+// document — so it keeps riding as a null.
+func setSupportsUnset(cmd manifest.Command) bool {
+	return cmd.MutationOp == "patch" && cmd.SetKey != ""
 }
 
 // commandFlagBelongsInBody reports whether a command-local flag rides in the
