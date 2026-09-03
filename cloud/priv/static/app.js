@@ -23551,13 +23551,59 @@
       }).join("");
   }
 
+  // Pure: the authority THE ROLE DIALOG OPENS UNDER, re-derived at OPEN TIME.
+  //
+  // cch-w45 — THE STALE-CTX PATH, and why the answer is not "trust the paint".
+  // wireMembersPanel attaches a direct listener per button over the `ctx` that
+  // was live when membersPanelHtml ran, and loadMembers (the only thing that
+  // repaints those buttons) is called on view entry and after member WRITES —
+  // never on a /v1/me or team_authority refresh. So an actor demoted while the
+  // Members panel is open keeps a screen full of live buttons over a captured
+  // ctx that states authority they no longer hold.
+  //
+  // `live` is membersContext()'s answer NOW: null unless the band is determinate
+  // (grant/refuse), which is precisely "we have a newer fact". When it is
+  // determinate AND names the same team, it WINS over the captured ctx. When it
+  // is not (loading / failed / stale / teamless), there is no newer fact to
+  // prefer, so the captured ctx stands and the server stays the backstop — the
+  // members band's own rule, a reason to have no opinion is not a refusal.
+  //
+  // The TARGET role is re-derived too. `currentRole` comes off the DOM
+  // (data-role), which is the stale half by construction; on your OWN row the
+  // server compares against your RESOLVED role, so self takes actorRole.
+  function roleModalAuthority(ctx, live, userId, currentRole) {
+    var base = ctx || {};
+    var src = (live && String(live.teamId) === String(base.teamId)) ? live : base;
+    var actorRole = src.role;
+    var actorId = src.userId;
+    var isSelf = actorId != null && String(actorId) !== "" &&
+      String(userId) === String(actorId);
+    return {
+      actorRole: actorRole,
+      targetRole: isSelf ? actorRole : currentRole,
+      isSelf: isSelf,
+    };
+  }
+
   // Change role: PATCH /v1/teams/:id/members/:user_id {role}.
+  //
+  // cch-w45 — THE WRITE SITE IS RANK-RELATIVE, matching the row. This gate was
+  // `assignableRoles(ctx.role).length`: the ACTOR-TIER question, arity 1, in
+  // front of update_member_role_as/4, which is a RELATION over (actor, target)
+  // — can_grant? AND (self? OR outranks?), strict `>`, with NO owner escape
+  // hatch (accounts.ex:1784/:1801). Wave 44 made the ROW rank-relative and left
+  // this site actor-only, so the only thing keeping an owner off a PEER OWNER's
+  // row (a 403 :forbidden) was that memberRowHtml declined to draw the button —
+  // a rendering accident, not a gate, and the paint outlives the authority (see
+  // roleModalAuthority above). The dialog now asks canChangeMemberRole, the same
+  // predicate the row asks and the one __binding_census.mjs already pins for
+  // this PATCH — the pin named the fix before the call site made it true.
   function openRoleModal(ctx, userId, email, currentRole) {
-    // The actor-tier gate stays here (a member can assign nothing, so the
-    // dialog must not open at all); the OPTION LIST is roleModalOptionsHtml's,
-    // which owns the no-match placeholder.
-    if (!assignableRoles(ctx.role).length) return;
-    var opts = roleModalOptionsHtml(ctx.role, currentRole);
+    var auth = roleModalAuthority(ctx, membersContext(), userId, currentRole);
+    if (!canChangeMemberRole(auth.actorRole, auth.targetRole, auth.isSelf)) return;
+    // The OPTION LIST is roleModalOptionsHtml's, which owns the no-match
+    // placeholder — fed the re-derived pair, never the captured/DOM one.
+    var opts = roleModalOptionsHtml(auth.actorRole, auth.targetRole);
     openModal(
       '<h2 class="modal-title" id="modal-title">Change role</h2>' +
       '<p class="modal-sub">Set the team role for <b>' + esc(email || "this member") + "</b>.</p>" +
@@ -25960,6 +26006,11 @@
       // missing else arm (lifted out of init() so a harness can press it) and
       // the role dialog's no-match option list.
       membersInviteClick: membersInviteClick, roleModalOptionsHtml: roleModalOptionsHtml,
+      // cch-w45: the PATCH write site itself, plus the open-time authority it
+      // now re-derives. openRoleModal was reachable from NOTHING but a DOM
+      // click, so its gate could not be driven by a test at all — which is how
+      // it stayed actor-only for a whole wave after the row went rank-relative.
+      openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
