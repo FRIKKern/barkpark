@@ -1001,21 +1001,31 @@ func mcpRunFor(status int, body []byte, err error, writes bool) *mcp.CallToolRes
 }
 
 // mcpPoisonedReceipt names WHY a stated-success (< 400) body carries no honest
-// statement, reusing run.go's unexported discriminators — unreadableWriteReceipt
-// for a write, unreadableReadBody for a read — rather than re-deriving either
-// predicate. It returns ("", "") for every answer worth rendering, including
-// every honest empty those predicates already carve out, and for a declared
-// no-content status (204/205) with an empty body, which is a receipt, not
-// silence (mirroring screenWriteReceipt's own 204/205 exemption, run.go:486).
+// statement. It does NOT own either predicate.
+//
+// The WRITE arm is the shared fence itself: writeReceiptVerdict (run.go) is the
+// ONE function that turns a write response into a verdict, and the human CLI
+// render path (screenWriteReceipt) is its only other caller — so the MCP tool
+// result and the terminal cannot disagree about what a poisoned receipt is, and
+// a change to the fence lands on both surfaces or on neither. This function used
+// to re-implement the 204/205 declared-no-content arm beside it; that copy is
+// gone (pds-bl-mcp-exec-bypasses-write-fence c5).
+//
+// The READ arm still calls run.go's unreadableReadBody directly, and keeps its
+// own 204/205 exemption: an empty declared-no-content read is a receipt, not
+// silence, and no shared read-verdict function exists yet to hold it.
+//
+// It returns ("", "") for every answer worth rendering, including every honest
+// empty those predicates already carve out.
 func mcpPoisonedReceipt(status int, body []byte, writes bool) (reason, hint string) {
-	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
-		len(bytes.TrimSpace(body)) == 0 {
+	if writes {
+		if kind, r, h := writeReceiptVerdict(status, body); kind == writeReceiptPoisoned {
+			return r, h
+		}
 		return "", ""
 	}
-	if writes {
-		if r := unreadableWriteReceipt(body); r != "" {
-			return r, unreadableWriteReceiptHint
-		}
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(body)) == 0 {
 		return "", ""
 	}
 	r, contradiction := unreadableReadBody(body)

@@ -766,27 +766,70 @@ func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody 
 	if !cmd.Writes {
 		return 0, false
 	}
-
-	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
-		len(bytes.TrimSpace(respBody)) == 0 {
-		reason := fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status)
+	switch kind, reason, hint := writeReceiptVerdict(status, respBody); kind {
+	case writeReceiptDeclaredEmpty:
 		if !out.emitStructured(map[string]any{"ok": true, "confirmed": false, "reason": reason}) {
 			out.outf("not confirmed: %s", reason)
 		}
 		return exitOK, true
+	case writeReceiptPoisoned:
+		msg := fmt.Sprintf(
+			"unreadable write receipt: HTTP %d %s (%d bytes): %s",
+			status, reason, len(respBody), bodyPreview(respBody),
+		)
+		refuseWithRemedy(out, "unreadable_write_receipt", msg, hint)
+		return exitGeneric, true
 	}
+	return 0, false
+}
 
-	reason := unreadableWriteReceipt(respBody)
-	if reason == "" {
-		return 0, false
+// writeReceiptVerdictKind is the write fence's THREE outcomes, and the reason
+// there are three rather than two is the 204/205 arm: a declared empty receipt
+// is neither silence nor a renderable body.
+type writeReceiptVerdictKind int
+
+const (
+	// writeReceiptRenderable — the body carries a statement about the write;
+	// the caller renders it.
+	writeReceiptRenderable writeReceiptVerdictKind = iota
+	// writeReceiptDeclaredEmpty — HTTP 204/205 with an empty body: the server
+	// DECLARED it has no receipt for this write. An honest outcome that must be
+	// NAMED, never printed as a blank line and never refused.
+	writeReceiptDeclaredEmpty
+	// writeReceiptPoisoned — a stated success whose body said nothing at all.
+	writeReceiptPoisoned
+)
+
+// writeReceiptVerdict is THE write fence — one function, one verdict, for every
+// surface that turns a Barkpark write response into something a caller believes.
+// It returns the kind, the sentence naming WHY, and the remedy hint that belongs
+// to that sentence.
+//
+// PLACEMENT (pds-bl-mcp-exec-bypasses-write-fence, c1). It deliberately does NOT
+// live in execManifestCommand (run.go:307), the headless dispatch primitive. That
+// function's contract is "raw status + body, no guards, no rendering", and 3 of
+// its 12 callers are internal READ probes (destroy_confirm.go, discard_draft_guard.go,
+// doctor_onboarding.go) that must see the untouched response; a refusal there
+// would either break their contract or push a fourth return value through every
+// caller. The fence belongs where a response becomes a VERDICT, and there are
+// exactly two such sites — the CLI render path (screenWriteReceipt, above) and
+// the MCP tool result (mcpPoisonedReceipt, mcp_tasks.go). Both call this; neither
+// re-derives it. Before this consolidation both re-implemented the 204/205 arm
+// around a shared unreadableWriteReceipt, so half the fence was copied.
+//
+// THE DISCRIMINATOR ITSELF stays unreadableWriteReceipt (below): "did the server
+// say anything at all", never "does the body carry a key we recognise".
+func writeReceiptVerdict(status int, body []byte) (writeReceiptVerdictKind, string, string) {
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(body)) == 0 {
+		return writeReceiptDeclaredEmpty,
+			fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status),
+			""
 	}
-
-	msg := fmt.Sprintf(
-		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
-		status, reason, len(respBody), bodyPreview(respBody),
-	)
-	refuseWithRemedy(out, "unreadable_write_receipt", msg, unreadableWriteReceiptHint)
-	return exitGeneric, true
+	if reason := unreadableWriteReceipt(body); reason != "" {
+		return writeReceiptPoisoned, reason, unreadableWriteReceiptHint
+	}
+	return writeReceiptRenderable, "", ""
 }
 
 // failOnFailedDeliveryFlag is the literal token for `bp webhook test-send
