@@ -10,7 +10,8 @@
 //
 // Deliberate deltas from reduce.go:
 //   - D77 settle-race generation token is BUILT IN (the Go fix ships as its
-//     own slice `ct-bl-tail-settle-gen`): `gen` increments per init frame,
+//     own slice `ct-bl-tail-settle-gen`): `gen` increments per turn-start
+//     frame on either lane (claude system/init, codex runtime turn_started),
 //     `tailGen` stamps delta appends, fetch-tail effects/events carry the
 //     issuing gen, and the tail-clear guard is `ev.gen === st.tailGen` — a
 //     stale turn-1 refetch can never clear (or duplicate into) a streaming
@@ -839,12 +840,31 @@ export function tailRemainder(st: ChatState): string {
 // item/reasoning/textDelta → thinking_delta and item/commandExecution/
 // outputDelta → tool_delta to the SAME native.params.delta location. A loose
 // match would splice reasoning and command output into the answer. Everything
-// that is not text_delta or turn_completed is inert here — those rows arrive as
-// persisted truth at the turn boundary, exactly as on the claude lane.
+// that is not turn_started, text_delta or turn_completed is inert here — those
+// rows arrive as persisted truth at the turn boundary, as on the claude lane.
 function reduceRuntimeFrame(st: ChatState, data: string): ReduceResult {
   const frame = parseJson(data)
   if (frame === undefined) return { state: st, effects: none }
   const kind = typeof frame.kind === 'string' ? frame.kind : ''
+
+  if (kind === 'turn_started') {
+    // The codex lane's turn-start signal — the sibling of the claude lane's
+    // system/init — and the twin of internal/chat/reduce.go's turn_started arm.
+    // It advances the generation and emits NOTHING else: no effect, no phase
+    // change, no notice, and above all NO touch of tail/tailGen (that would
+    // blank-flash the prior turn's still-painted text, which carries its own
+    // generation until its own settle lands).
+    //
+    // Why the advance: before it, gen moved only on a claude system/init frame,
+    // so a codex turn kept the generation it started in — a stale turn-1 settle
+    // GET landed carrying a gen that still equalled tailGen, and the D77 clear
+    // guard (`ev.gen === st.tailGen`) wiped turn 2's live tail.
+    //
+    // THE CURSOR STAYS PUT. `committedBytes`/`stableTurn` are keyed on the
+    // SERVER turn, never on this client clock (see the `stableTurn` field), and
+    // __tests__/chatCursorTurnKeyed.test.ts reds if this arm ever takes them.
+    return { state: { ...st, gen: st.gen + 1 }, effects: none }
+  }
 
   if (kind === 'text_delta') {
     const native = (frame.native ?? {}) as Record<string, unknown>
@@ -852,10 +872,8 @@ function reduceRuntimeFrame(st: ChatState, data: string): ReduceResult {
     const delta = params.delta
     if (typeof delta !== 'string' || delta === '') return { state: st, effects: none }
     // Stamped with the current gen exactly as the claude lane stamps it, so the
-    // D77 settle guard sees the same shape on both lanes. (Residual, recorded:
-    // gen advances only on a claude system/init frame, so a codex turn keeps
-    // the generation it started in — the fence is inert rather than wrong there,
-    // and advancing it on runtime turn boundaries is a separate parity slice.)
+    // D77 settle guard sees the same shape on both lanes — and the generation it
+    // carries is now this lane's own, advanced by the turn_started arm above.
     return { state: appendTail(st, delta), effects: none }
   }
 
