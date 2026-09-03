@@ -722,4 +722,103 @@ defmodule Barkpark.SheetsParityTest do
 
     refute plain =~ "color:#dc2626;font-weight:bold"
   end
+
+  # ── FMT_CLASSES ↔ Fmt.vocabulary/0 mirror lock ──────────────────────────────
+  #
+  # `web/lib/sheets.ts` hand-writes `FMT_CLASSES`, the set `formatDisplay`
+  # gates on (and that `densifyTab` in web/components/sheet-grid.tsx documents).
+  # It is a MIRROR of the Elixir fmt vocabulary with ONE deliberate
+  # subtraction: `"checkbox"` is display-only — Studio renders it as a
+  # toggleable glyph and the web raw-document view never formats it — so the
+  # web side excludes it ON PURPOSE. That is why this is a set-DIFFERENCE
+  # guard and not naive equality: equality would be wrong, and a guard that is
+  # wrong gets deleted.
+  #
+  # Until this test the chain had one link and needed two.
+  # `golden_parity_fixture_test.exs` pins the golden fixture's
+  # `fmt_vocabulary` to the live `Fmt.vocabulary/0`, but NOTHING compared
+  # either of them to `FMT_CLASSES` — `grep FMT_CLASSES` returned three hits
+  # and zero tests. So adding an 8th class to `Fmt`'s `@canonical` shipped
+  # green: the fixture regenerates, Elixir stays green, `FMT_CLASSES` never
+  # learns the class, and the web raw view silently falls through to the
+  # general path while the server formats it.
+  #
+  # This lives in `mix test`, i.e. under the REQUIRED Elixir gate, on purpose:
+  # a guard that only reds a non-required context does not stop a drift from
+  # shipping — measured in this repo, not theorised.
+  @web_sheets_ts Path.expand("../../../web/lib/sheets.ts", __DIR__)
+
+  # The ONE permitted exclusion. Named and singular so that a SECOND silent
+  # exclusion reds instead of hiding inside a subtraction nobody reads.
+  @fmt_web_excluded ["checkbox"]
+
+  test "web FMT_CLASSES mirrors Fmt.vocabulary/0 minus the display-only classes" do
+    web = extract_fmt_classes(File.read!(@web_sheets_ts))
+    expected = Enum.sort(Barkpark.Plugins.Sheets.Fmt.vocabulary() -- @fmt_web_excluded)
+
+    missing = expected -- web
+    extra = web -- expected
+
+    assert {missing, extra} == {[], []}, """
+    web/lib/sheets.ts FMT_CLASSES drifted from Fmt.vocabulary/0.
+
+      vocabulary/0             : #{inspect(Barkpark.Plugins.Sheets.Fmt.vocabulary())}
+      permitted web exclusions : #{inspect(@fmt_web_excluded)}
+      expected FMT_CLASSES     : #{inspect(expected)}
+      actual FMT_CLASSES       : #{inspect(web)}
+
+      in the vocabulary, MISSING from FMT_CLASSES: #{inspect(missing)}
+      in FMT_CLASSES, NOT in the vocabulary       : #{inspect(extra)}
+
+    MISSING means a fmt class exists server-side that the web raw-document
+    view will not format — it falls through to the general path and shows a
+    different string than every other surface. Add it to FMT_CLASSES in
+    web/lib/sheets.ts (and teach formatDisplay to render it).
+
+    NOT-IN-VOCABULARY means FMT_CLASSES names a class the server never emits:
+    dead code, or a rename that only landed on one side.
+
+    DO NOT make this red go away by adding the class to @fmt_web_excluded.
+    That list is not a silencer — it records the ONE class ("checkbox") that
+    is display-only and deliberately unformatted on the web. Appending to it
+    converts a drift this test just CAUGHT into a permanent silent exclusion,
+    and the next reader will believe the omission was intended. If you truly
+    have a second display-only class, say why in a comment on the line and
+    make Fmt's @display_only agree with you.
+    """
+  end
+
+  # The extractor REFUSES rather than returning empty: if the FMT_CLASSES
+  # literal is renamed or restructured (an array, a const object, a computed
+  # set), a regex that matches nothing would quietly turn the lock above
+  # vacuous — green forever, guarding nothing.
+  defp extract_fmt_classes(src) do
+    body =
+      case Regex.run(~r/const\s+FMT_CLASSES\s*=\s*new\s+Set\(\[(.*?)\]\)/s, src,
+             capture: :all_but_first) do
+        [body] -> body
+        _ -> flunk(fmt_extractor_refusal("no `const FMT_CLASSES = new Set([...])` literal"))
+      end
+
+    members = ~r/"([^"]+)"/ |> Regex.scan(body, capture: :all_but_first) |> List.flatten()
+
+    if members == [] do
+      flunk(fmt_extractor_refusal("the FMT_CLASSES literal parsed to ZERO members"))
+    end
+
+    members |> Enum.sort() |> Enum.uniq()
+  end
+
+  defp fmt_extractor_refusal(what) do
+    """
+    Could not read FMT_CLASSES out of web/lib/sheets.ts — #{what}.
+
+    This is a REFUSAL, not a pass. The mirror lock above compares that set to
+    Fmt.vocabulary/0; an extractor that returned [] here would make the lock
+    vacuous and it would stay green while the two sides drifted apart.
+
+    Someone renamed or restructured the literal. Teach this extractor the new
+    shape (api/test/barkpark/sheets_parity_test.exs) — do not delete the test.
+    """
+  end
 end
