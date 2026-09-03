@@ -124,8 +124,13 @@ jobs:
       # where an empty project passes as long as a sibling project has files.
       # @barkpark/nextjs therefore runs its two projects as separate commands
       # (see its package.json `test`), and no config may set passWithNoTests.
-      - name: Test (one run, with coverage — the advisory duplicate run is gone)
-        run: pnpm test -- --coverage
+      - name: Test
+        # `pnpm test -- --coverage` never worked: pnpm hands `--coverage` to turbo
+        # itself ("unexpected argument '--coverage'"). The old advisory duplicate
+        # had been failing that way silently under continue-on-error, so no
+        # coverage artifact ever existed. One blocking run, no coverage flag;
+        # real coverage is its own row.
+        run: pnpm test
 
       # @barkpark/core advertises edge/worker runtime support, and the two files
       # that look like the proof of that claim were the two that never ran: `pnpm

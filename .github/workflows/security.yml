@@ -376,12 +376,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
-  # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
-  # which IS this job's rendered check-run context and IS a committed exclusion
-  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
-  # Renaming it would silently invalidate that row. The token means "blocking
-  # WITHIN this workflow, unlike the advisory sobelow job" — see the sentence
-  # below, which is the true and intended reading.
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -399,6 +393,12 @@ jobs:
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
         run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
+  # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
+  # which IS this job's rendered check-run context and IS a committed exclusion
+  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
+  # Renaming it would silently invalidate that row. The token means "blocking
+  # WITHIN this workflow, unlike the advisory sobelow job" — see the sentence
+  # below, which is the true and intended reading.
   sobelow-inline-overlap:
     name: Sobelow baseline does not swallow its own inline waivers (blocking)
     # BLOCKING on purpose, unlike the sobelow job above. That job is advisory
@@ -498,13 +498,6 @@ jobs:
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-baseline-staleness-check.sh
 
-  # spec-authority: advisory-ok — same standing as the job above, for the same
-  # reason. The `(blocking)` token is inside the JOB name, which IS this job's
-  # rendered check-run context, and that context carries a committed exclusion
-  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
-  # The token means "blocking WITHIN this workflow, unlike the advisory sobelow
-  # job" — it does not claim branch protection, which `Security gate` does not
-  # carry. Renaming this job would silently invalidate that ledger row.
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -522,6 +515,13 @@ jobs:
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
         run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
+  # spec-authority: advisory-ok — same standing as the job above, for the same
+  # reason. The `(blocking)` token is inside the JOB name, which IS this job's
+  # rendered check-run context, and that context carries a committed exclusion
+  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
+  # The token means "blocking WITHIN this workflow, unlike the advisory sobelow
+  # job" — it does not claim branch protection, which `Security gate` does not
+  # carry. Renaming this job would silently invalidate that ledger row.
   sobelow-baseline-fingerprint:
     name: Sobelow baseline rows still hash to their own fingerprint (blocking)
     # WHAT THIS JOB CAN AND CANNOT DO, stated exactly. It carries no
