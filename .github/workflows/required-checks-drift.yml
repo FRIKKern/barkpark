@@ -287,8 +287,18 @@ jobs:
       # actions/checkout gives the MERGE commit, so the candidate is the spec as
       # it would exist on main — a branch that is merely behind main cannot red
       # this.
+      #
+      # `+main:` (a FORCED ref update), and it is load-bearing on the push arm.
+      # On push:main the shallow checkout already carries refs/remotes/origin/main
+      # at the pushed sha; when main has moved on by the time this step runs (three
+      # merges landed inside one minute on 2026-09-03 17:26Z, runs 33784608224 /
+      # 33784621285 / 33784689210) an unforced fetch answers
+      # `! [rejected] main -> origin/main (non-fast-forward)` and the job reds one
+      # step AFTER the hermetic suite went green — a red that reads exactly like a
+      # spec-gate failure and is not one. The floor then compares the candidate
+      # against the NEWEST main, which is the reference it wants.
       - name: Fetch the floor's reference (origin/main's committed spec)
-        run: git fetch --depth=1 origin main:refs/remotes/origin/main
+        run: git fetch --depth=1 origin +main:refs/remotes/origin/main
 
       - name: The committed spec holds the floor (contexts, _readme, enforced)
         run: |
