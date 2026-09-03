@@ -700,6 +700,25 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/D566).
+    # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
+    # it stays in `status_only_receipt` with this comment rather than being moved, because
+    # the class's CURRENT prose is TRUE of it and the reason it is excluded is a limit of
+    # the JUDGED RELATION, not an absence of a receipt:
+    #   site_deploy_controller.ex emits a LITERAL `ok: true` inside `defp start/2`, reached
+    #   at DEPTH 2 — trigger -> do_trigger -> start. dispose_routed/4's relation is ONE HOP
+    #   (the action's own span, or a def the action calls locally), so a receipt two helpers
+    #   deep reads as EXCLUDED. That is the stated limit at dispose_routed/4, and this row
+    #   is its single live instance on this tree.
+    # SO THE CLASS SENTENCE IS EXACT AND THE ROW IS HONEST: the action "reaches no `ok:
+    # true` receipt THIS LENS keys on" — THIS LENS, at one hop. What would be false about
+    # it is wave 38's retired clause ("claims success by STATUS alone"): this route does not
+    # claim success by status, it emits the literal key two hops down. That clause is
+    # already retired from the class prose above; this comment is the row-level record so
+    # nobody has to re-run the BFS to learn which member the retirement was about.
+    # WIDENING THE RELATION TO DEPTH 2 IS REFUSED (and this row is the whole case for the
+    # refusal): it buys exactly this ONE member and imports unbounded FALSE JUDGED through
+    # shared render/fallback helpers that every branch reaches, error branches included.
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
@@ -4005,6 +4024,20 @@ defmodule PDS.Census do
   # A name this pass retires is not guessed: the tuple keeps `"?"` and the row DECLINES.
   # Declining is a smaller lie than inlining a binding that may not hold, and the selftest
   # plants exactly that nested rebind to prove the two behaviours differ.
+  #
+  # THE SECOND LIMIT, NAMED HERE BECAUSE AN UNDISCLOSED LIMIT INSIDE A FIX IS THIS EPIC'S
+  # OWN DISEASE. This pass runs on `register_routes/1`'s body, and plugin_route_specs/1
+  # applies it BEFORE both the literal walk and follow_route_delegation/2 — so a delegating
+  # callback whose OWN body binds an alias to a variable is covered. What is NOT covered is
+  # the DELEGATE'S body: follow_route_delegation/2 resolves `Routes.all()` to that def and
+  # hands its raw AST to route_specs/1 without a substitution pass, so a `var = Alias`
+  # binding inside the delegate resolves to `"?"` and its route DECLINES. That is EMPTY
+  # today and the emptiness is derived, not assumed — onixedit/routes.ex is the only
+  # delegate target in the tree and it holds zero `=` bindings — but it is a LIVE second
+  # instance of the same shape, and it is written down here rather than left dark. The
+  # repair, when a delegate first binds one, is one call: inline_alias_bindings/1 on `b`
+  # inside follow_route_delegation/2's flat_map. It is not made now because a resolver
+  # arm with no member to resolve is an unfalsifiable arm.
   defp inline_alias_bindings(body) do
     stmts = block_stmts(body)
 
@@ -5079,6 +5112,25 @@ defmodule PDS.Census do
 
     p("    UNDISPOSED #{pad(length(disp.undisposed))}  <- ROUTED-POPULATION-COMPLETE reds on this")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    p("")
+    p("  JUDGED FRACTION #{disp.ladder.judged_coverage}/#{length(d.population)} — the share of the routed write")
+    p("  surface this lens has JUDGED (disposed JUDGED or ROSTERED) — PRINTED, NEVER GATED")
+    wrap(
+      "IT IS NOT A THRESHOLD AND MUST NEVER BECOME ONE, and the reason is a measurement, " <>
+        "not a preference (PDS-D563). Over 95 api/lib commits this fraction MOVED 9 times " <>
+        "(once per 10.6 commits), and all 8 of the movers that moved the DENOMINATOR were " <>
+        "plain FEATURE commits that touched no receipt at all: a route added is a routed " <>
+        "member added, so an honest feature lowers this fraction the instant it lands. A " <>
+        "thresholded or non-decreasing arm over this line would have redded five times in " <>
+        "eleven days on work that broke nothing. THE NUMERATOR IS THE HALF THAT RATCHETS: " <>
+        "judged never decreased across all 95 commits and ROSTERED held at 7 throughout, " <>
+        "which is why a numerator floor is the only shape that could ever be honest here " <>
+        "— and even that is not shipped, because D454 stands. What this line buys is that " <>
+        "the coverage of the judgment can no longer be an unstated number a reader has to " <>
+        "divide two other lines to find.",
+      "    "
+    )
 
     p("")
     lad = disp.ladder
@@ -7378,6 +7430,36 @@ defmodule PDS.Census do
       expect: ["Keyed on {module, live_session}. 3 routed module(s) resolve to a"],
       refute: ["Keyed on {module, live_session}. 2 routed module(s) resolve to a"],
       proves: "the `?` decline is load-bearing: without it the fold credits a live_session to a spec whose module this lens cannot name, and the printed routed-module count goes 2 -> 3 on a corpus whose openable routed modules never changed"
+    },
+    # THE ALIAS RESOLVER GETS ITS OWN MUTANT (PDS-D562). inline_alias_bindings/1 is the
+    # clause that reclaimed the two Sheets write routes from the retired
+    # `action_not_in_corpus` class, and until this case existed it was a RESOLVER WITH NO
+    # MUTANT — exactly the quietly-rotting shape this epic distrusts, and one whose
+    # rot is INVISIBLE in the shipped numbers (a retired binding does not red anything on
+    # the real tree; it silently re-labels two members).
+    #
+    # IT PROVES THE JOIN BY NAME, WHICH IS THE WHOLE POINT. The fixture plugin binds
+    # `ops_mod = Barkpark.Filler.PluginOpsLive` at the top of register_routes/1 and spells
+    # its route with the VARIABLE, and a committed disposition row names the RESOLVED
+    # module. Retire the substitution (bind_counts/1 can never equal 99) and that one route
+    # splits in two directions AT ONCE: the live member arrives as `?.index` with no
+    # disposition, and the committed row that named the resolved module now names nothing
+    # live. BOTH halves are asserted, because either alone could be produced by something
+    # other than the substitution — together they can only mean the module name moved from
+    # `Barkpark.Filler.PluginOpsLive` to `?`, which IS the resolution, observed by name.
+    %{
+      name: "ROUTE-ALIAS-BINDING-RESOLVES",
+      corpus: :full,
+      argv: [],
+      mut: {"Map.get(counts, name, 0) == 1", "Map.get(counts, name, 0) == 99"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-POPULATION-COMPLETE",
+        "UNDISPOSED ARRIVAL live /plugins/ops-live -> ?.index",
+        "ORPHANED DISPOSITION live /plugins/ops-live -> Barkpark.Filler.PluginOpsLive.index"
+      ],
+      refute: ["PASS  ROUTED-POPULATION-COMPLETE"],
+      proves: "a route module bound to a LOCAL VARIABLE is resolved to its fully-qualified alias before route_specs/1 reads the tuple: retire the substitution and the same route arrives as `?.index` while the committed row naming Barkpark.Filler.PluginOpsLive.index is orphaned — the two halves name the resolved module and the unresolved one in the SAME run"
     },
     # THE LADDER'S TOP RUNG, AND THE ONLY DISCRIMINATOR THAT EXISTS FOR IT (wave 45).
     # OVERLAP is 0 on today's tree, so `leg_a + leg_b` and Enum.count(MapSet.union(..))
