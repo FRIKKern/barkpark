@@ -10,9 +10,9 @@ defmodule BarkparkWeb.Http.IfNoneMatch do
 
   Four call sites used to carry three different semantics:
 
-    * `CapabilitiesController` / `OpenApiController` — exact compare, first line
-      only. Both emit `W/"…"`, so a client sending the strong form `"caps-…"`
-      got a spurious 200.
+    * `CapabilitiesController` / `OpenApiController` — exact compare (every
+      line folded, but no `W/` strip). Both emit `W/"…"`, so a client sending
+      the strong form `"caps-…"` got a spurious 200.
     * `QueryController` — first line only, and it stripped `W/` AND the quotes
       off the CLIENT entry before comparing it to an UNQUOTED validator. That
       made a bare, unquoted token match a quoted ETag we never emitted.
