@@ -16822,8 +16822,19 @@ test("cch-w50: NON-VACUITY CONTROL — a RUNNING trial keeps every retracted str
     "the running trial still gets the backed teardown warning");
   assert.ok(owner.includes("Pick a plan below to keep it."),
     "and the RATIFIED CTA, verbatim (task-2ed0ea068f37345d)");
-  assert.ok(owner.includes("We'll remind you 3 days and 1 day before the trial ends."),
-    "and the reminder promise the worker actually keeps");
+  // cch-w50-s5 — the reminder promise is now THREE-valued on the team's mute
+  // state, so the running trial's card is asserted per state rather than as one
+  // unconditional sentence. The default (one-argument) call is the UNKNOWN arm:
+  // renderBilling never fetches /v1/notifications/settings, so on a direct
+  // /billing landing notifCache is null and the console has not earned the flat
+  // promise. Both numerals still have to be there in every arm — that is the
+  // half the worker really keeps.
+  assert.ok(owner.includes("3 days and 1 day before the trial ends"),
+    "the reminder promise the worker actually keeps, with both scheduled numerals");
+  assert.ok(owner.includes("If your team's alerts are on"),
+    "and the default arm is CONDITIONAL — an unread notifCache is not evidence alerts are on");
+  assert.ok(hooks.trialCardHtml(running, "on").includes("We'll remind you 3 days and 1 day before the trial ends."),
+    "with alerts KNOWN on, the flat promise is made verbatim");
   assert.ok(member.includes("When the trial ends, the instance is torn down."),
     "the member twin keeps the warning half too (cch-w55-s3)");
 
@@ -25281,4 +25292,113 @@ test("bpBase declares every key barkpark_json serializes", async () => {
     ". A key no fixture declares is a key no fixture can override, so no instrument here can ever drive it. " +
     "Add each to bpBase with the SERVER's default (the Ecto schema's for a column-backed key, null for the " +
     "serializer's UNMEASURED contract) — never a value the control plane would not send.");
+});
+
+// ── cch-w50-s5 · THE TRIAL REMINDER'S NUMERALS, AND WHO ACTUALLY GETS ONE ────
+//
+// Two defects, one sentence. The billing screen rendered "We'll remind you 3
+// days and 1 day before the trial ends." and:
+//
+//   1. NOTHING PINNED THE NUMERALS. `grep "3 days and 1 day" __app.test.mjs`
+//      returned rc=1, zero hits — the sentence could be edited to any pair of
+//      numbers with this whole suite green, and the server's real schedule
+//      (TrialExpiryWorker's @three_days / @one_day) could move without it. The
+//      schedule is now DATA (`trialNoticeDays`), composed into the sentence,
+//      and mirrored against the server accessor in billing_client_mirror_test.exs.
+//
+//   2. IT PROMISED MAIL A MUTED TEAM WILL NEVER GET. `alerts_enabled` reaches
+//      this file through exactly one door — GET /v1/notifications/settings,
+//      whose sole success path is renderNotifications, which is what populates
+//      notifCache. renderBilling fetches the SUBSCRIPTION and nothing else. So
+//      a person landing directly on /billing has notifCache === null and this
+//      console has never asked. The naive guard —
+//      `notifCache && notifCache.alerts_enabled === false` — is FALSE in that
+//      state, i.e. it KEEPS the promise for a muted team, whose worker
+//      (TrialExpiryWorker.receivable?/1) will send nothing. UNKNOWN is its own
+//      state and it softens.
+//
+// MUTATION-PROVED (run before commit, red output in the PR body):
+//   * `TRIAL_NOTICE_DAYS = [5, 1]` reds the mirror's here-declared list on BOTH
+//     sides and reds "the schedule is DATA" below.
+//   * deleting the numerals from the rendered sentence reds the mirror's
+//     "THE NUMERALS REACH THE SENTENCE" arm against @pinned_notice_days.
+//   * `trialAlertsState` weakened to the naive `notifCache && ... === false`
+//     shape (i.e. unknown → "on") reds the fail-closed test below.
+
+test("cch-w50-s5: the reminder schedule is DATA, and the sentence is composed from it", () => {
+  // Compared as JSON: the array crosses a node:vm realm boundary, so its
+  // prototype is not this realm's Array and deepEqual reads that as a mismatch.
+  assert.equal(JSON.stringify(Array.from(hooks.trialNoticeDays)), "[3,1]",
+    "the console's schedule — mirrored against TrialExpiryWorker.notice_thresholds_days/0");
+
+  // The phrase is BUILT, so a schedule change moves the sentence with it and
+  // the singular can never render as "1 days".
+  assert.equal(hooks.trialNoticePhrase([3, 1]), "3 days and 1 day");
+  assert.equal(hooks.trialNoticePhrase([1]), "1 day");
+  assert.equal(hooks.trialNoticePhrase([7]), "7 days");
+  assert.equal(hooks.trialNoticePhrase([7, 3, 1]), "7 days, 3 days and 1 day");
+  assert.equal(hooks.trialNoticePhrase([]), "");
+
+  // NON-VACUITY: the composition really is what reaches the card. A hypothetical
+  // schedule renders its own numerals, not the shipped ones.
+  const odd = hooks.trialReminderCopy("on", [9, 2]);
+  assert.ok(odd.includes("9 days and 2 days"), "the copy renders the schedule it is handed: " + odd);
+  assert.ok(!odd.includes("3 days"), "and not a numeral typed into the sentence");
+});
+
+test("cch-w50-s5: the mute read FAILS CLOSED — unknown softens, it does not promise", () => {
+  // The three-valued read. Only a settings payload that positively says
+  // alerts_enabled: true earns the flat promise.
+  assert.equal(hooks.trialAlertsState(null), "unknown",
+    "notifCache is null on a direct /billing landing — renderBilling never fetches settings");
+  assert.equal(hooks.trialAlertsState(undefined), "unknown");
+  assert.equal(hooks.trialAlertsState({}), "unknown", "a settings envelope without the key is not consent");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: null }), "unknown");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: "true" }), "unknown", "a string is not the boolean");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: true }), "on");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: false }), "muted");
+
+  // THE DEFECT, stated as an assertion: the unknown arm must not make the
+  // promise, because it is false for exactly the team that cannot see it.
+  const unknown = hooks.trialReminderCopy("unknown", hooks.trialNoticeDays);
+  assert.ok(!unknown.includes("We'll remind you 3 days"),
+    "UNKNOWN made the flat promise — this is the naive check: " + unknown);
+  assert.ok(unknown.includes("If your team's alerts are on"),
+    "UNKNOWN states its own condition rather than asserting or denying delivery");
+  assert.ok(unknown.includes("3 days and 1 day"),
+    "and still names the schedule, so the person knows what they are checking for");
+
+  const muted = hooks.trialReminderCopy("muted", hooks.trialNoticeDays);
+  assert.ok(!muted.includes("We'll remind you"), "a muted team is promised nothing");
+  assert.ok(muted.includes("alerts muted"), "the mute is named, so it can be acted on");
+  assert.ok(muted.includes("Notifications"), "and the screen that undoes it is named");
+
+  const on = hooks.trialReminderCopy("on", hooks.trialNoticeDays);
+  assert.equal(on, "We'll remind you 3 days and 1 day before the trial ends.",
+    "the flat promise survives for the ONE state that earns it — without this the guard above passes for the wrong reason");
+});
+
+test("cch-w50-s5: the trial CARD carries the mute state through to the rendered sentence", () => {
+  const running = { plan: "trial", status: "active", trial_days_remaining: 9 };
+
+  const dflt = hooks.trialCardHtml(running);
+  const on = hooks.trialCardHtml(running, "on");
+  const muted = hooks.trialCardHtml(running, "muted");
+
+  // The default (no second argument) is the UNKNOWN arm in this sandbox, where
+  // notifCache is null — the same state a direct /billing landing produces.
+  assert.ok(dflt.includes("If your team's alerts are on"),
+    "the default card softens: " + dflt);
+  assert.ok(on.includes("We'll remind you 3 days and 1 day before the trial ends."));
+  assert.ok(muted.includes("alerts muted"));
+  assert.equal(new Set([dflt, on, muted]).size, 3,
+    "three mute states must render three cards — otherwise the state is not reaching the copy");
+
+  // The cch-w50 clamp is untouched: an ENDED trial gets no reminder line in any
+  // mute state, because there is no future notice left to qualify.
+  for (const state of ["unknown", "on", "muted"]) {
+    const ended = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 0 }, state);
+    assert.ok(!/remind you|alerts muted|alerts are on/.test(ended),
+      state + ": the ended card promises and qualifies nothing — the reminder line is gone outright");
+  }
 });
