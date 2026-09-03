@@ -733,6 +733,30 @@ if [ "$MODE" = selftest ]; then
     exit 0
   fi
 
+  # -------------------------------------------------------------------------
+  # SELF-TEST FLOOR — two LITERAL, COMMITTED constants (task-7843c92e00b0a13a).
+  #
+  # Same defect and same remedy as the static engine's floor: the verdict below
+  # was `[ "$FAILS" -eq 0 ]` alone, so a run that executed a handful of checks
+  # and a run that executed 334 both printed `[selftest] PASS`. Two blocks below
+  # drop out on a condition (a real flock(1) for the fleet admission gate,
+  # api/lib/barkpark/sites/deploy_runner.ex for the DeployRunner doctrine row) —
+  # both already hard-fail under BARKPARK_SELFTEST_REQUIRE_E2E=1; the floor
+  # catches a block vanishing for a reason nobody guarded. The outer python3/curl
+  # skip above never reaches here (it exits before TESTS exists).
+  #
+  # LITERALS, never derived from the run. Measured 2026-09-03 at origin/main
+  # 0cb244bfb:
+  #
+  #   MIN  = 317  no flock and no api/ in the tree (the two optional blocks skip)
+  #   FULL = 334  all blocks run — this is what CI gets
+  #
+  # FULL applies under BARKPARK_SELFTEST_REQUIRE_E2E=1, the venue
+  # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine (Node)
+  # self-test", env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest).
+  # ADD rows -> raise the literal in the SAME commit.
+  SELFTEST_FLOOR_MIN=317
+  SELFTEST_FLOOR_FULL=334
   TESTS=0; FAILS=0
   check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
 
@@ -2205,6 +2229,16 @@ SWPMV
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # The floor (see SELFTEST_FLOOR_* above). `FAILED (1)` is the shape
+  # internal/cli/cloud_site_preflight.go recognises as terminal.
+  if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_FULL"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_FULL (BARKPARK_SELFTEST_REQUIRE_E2E=1: every block is required here)"
+  else
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_MIN"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_MIN (bare run: the flock/api optional blocks may skip honestly)"
+  fi
+  [ "$TESTS" -ge "$SELFTEST_FLOOR" ] || { echo "[selftest] FAILED (1) - only $TESTS checks ran, the floor is $SELFTEST_FLOOR from $SELFTEST_FLOOR_NAME: a block went missing, and a suite that stopped running rows must not report PASS. If rows were removed on purpose, lower the literal in the same commit."; exit 1; }
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
   echo "[selftest] PASS"
   exit 0
