@@ -591,6 +591,14 @@
 .bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; box-shadow: 1px 0 0 0 var(--paper-rule), 0 1px 0 0 var(--paper-rule); }
 .bp-paper-editor-body .bp-stats .bp-stat::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 1px; height: 1px; background: var(--paper-rule); }
 .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+/* THE ONE FIGCAPTION mirror. The reader styles every article <figcaption> through ONE
+ * class (paper-surface.css `.bp-paper-surface .bp-figcaption`) instead of the ~200 bytes
+ * of inline caption styling it used to repeat at three emit sites — one of which had
+ * drifted to a bare ink hex that is 2.97:1 on the dark ground. The canvas mounts figures
+ * through the SAME reader producer, so the class arrives here too and needs the twin.
+ * Values byte-copied from the View rule (view_edit_parity_test.exs §2 guards drift).
+ * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-paper-editor-body .bp-figcaption { margin: 0.8rem 0 0; max-width: var(--bp-evidence-caption, 50ch); font-family: var(--paper-font-serif); font-size: 0.9rem; line-height: 1.45; color: var(--paper-ink-soft); }
 /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF the
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
  * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
@@ -1032,18 +1040,19 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * child HTML styles itself identically to /papers with NO extra CSS (D8). Keep
  * BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
 .bp-canvas-figure { margin: 1.6rem 0; }
-/* The editable caption matches the reader <figcaption> INLINE styles (compose.ex
- * figure_html:924) — the reader figcaption has NO stylesheet rule (it is inline-
- * styled), so reproduce those values + an input reset. The empty-caption resting-hide
- * is JS (configControlHidden toggles the <figcaption> display), NOT CSS — same as the
- * diagram caption. */
+/* The editable caption matches the reader <figcaption>, which since
+ * papers/captions-floor is styled by ONE class (.bp-figcaption, mirrored above) rather
+ * than by inline styles — so reproduce THAT rule's values (serif, roman, 0.9rem/1.45,
+ * --paper-ink-soft) plus an input reset. An <input> inherits none of it, which is why
+ * the copy is here at all. The empty-caption resting-hide is JS (configControlHidden
+ * toggles the <figcaption> display), NOT CSS — same as the diagram caption. */
 .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
 .bp-canvas-figure-caption-input {
   display: block; width: 100%; box-sizing: border-box;
   border: none; background: transparent; padding: 0; margin: 0;
   color: var(--paper-ink-soft, #6a6a6a);
-  font-style: italic; font-size: 0.9rem;
-  font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 0.9rem; line-height: 1.45;
+  font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
 }
 .bp-canvas-figure-caption-input:focus { outline: none; }
 

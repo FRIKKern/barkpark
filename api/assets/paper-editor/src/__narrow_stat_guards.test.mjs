@@ -172,10 +172,16 @@ check(".bp-stat__l can break a long label", () => {
       "correct here: the label never sizes its own box, the grid track does, so " +
       "the declaration that cannot affect intrinsic sizing is the safe one.",
   );
+  // 0.72rem until papers/captions-floor, which put a 12px (0.75rem) floor under
+  // every text size on the paper — .bp-stat__l was 11.52px. The identity pin
+  // moves WITH the floor; what it is for is unchanged (a rule that lost its
+  // small size is no longer the rule this file's 12-character arithmetic
+  // describes), and the arithmetic in the comment above still holds: a slightly
+  // wider label overflows the 179px track SOONER, never later.
   assert.ok(
-    decls.includes("font-size: 0.72rem"),
-    ".bp-stat__l lost font-size: 0.72rem — this rule is no longer the rule this " +
-      "test is about.",
+    decls.includes("font-size: 0.75rem"),
+    ".bp-stat__l lost font-size: 0.75rem (the paper's 12px text floor) — this " +
+      "rule is no longer the rule this test is about.",
   );
 });
 

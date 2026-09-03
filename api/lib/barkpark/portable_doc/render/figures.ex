@@ -98,14 +98,25 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   #
   # The canonical paper-article figure for a Mermaid diagram. Article mode: a
   # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
-  # is muted/italic with the bold "Figure N." run-in. Email mode degrades to the
+  # carries the bold "Figure N." run-in and is styled by ONE class,
+  # `.bp-figcaption` (paper-surface.css, mirrored on both editor surfaces and
+  # gated by view_edit_parity_test.exs §2/§5). Email mode degrades to the
   # caption line + the source as a plain code block (Mermaid never runs there).
+  #
+  # THE CAPTION IS A CLASS, NOT AN INLINE STYLE (papers/captions-floor). It used
+  # to be ~200 bytes of inline `color/font-style/font-size/font-family/max-width`
+  # repeated at THREE emit sites, and the third copy (asciicast, below) had
+  # drifted to a BARE HEX where its siblings read `var(--paper-ink-soft, …)` —
+  # 2.97:1 on the dark ground, a contrast FAIL the token-reading copies did not
+  # have (7.05:1). One class cannot drift from itself. The :email/default
+  # clauses keep their inline styles: an email client has no stylesheet to carry
+  # a class, so their hex fallbacks are load-bearing and stay.
   def diagram_html(source, caption, :article) do
     cap =
       if caption == "" do
         ""
       else
-        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
+        ~s|<figcaption class="bp-figcaption">#{figcaption_inner(caption)}</figcaption>|
       end
 
     ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">| <>
@@ -135,7 +146,9 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # point the PaperMermaid hook's `runAsciicast()` upgrades into a live player
   # at runtime. The cast URL is carried in `data-cast-src` via `safe_url` (scheme
   # allowlist + attribute escape). The figcaption reuses diagram_html's article
-  # styling. Email / default mode: no player runtime — degrade to a plain link.
+  # class, `.bp-figcaption` — this is the site that had drifted to a hard-coded
+  # ink hex (2.97:1 on dark) while its two siblings read the soft-ink token.
+  # Email / default mode: no player runtime — degrade to a plain link.
   #
   # `poster` is the block's OPTIONAL resting frame — the asciinema-player
   # `poster` option, an npt timestamp (`"npt:1:23"`) or `"end"`. A recording
@@ -155,10 +168,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       if caption == "" do
         ""
       else
-        # `~s|…|`, not `~s(…)`: the caption measure is a `var(…)` read, and a
-        # paren-delimited sigil ends at the first `)` — the same reason the
-        # diagram figcaption above already uses the pipe form.
-        ~s|<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
+        ~s|<figcaption class="bp-figcaption">#{figcaption_inner(caption)}</figcaption>|
       end
 
     poster_attr =
