@@ -29,7 +29,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.Notifications
-  alias BarkparkCloud.Notifications.Withhold
+  alias BarkparkCloud.Workers.DeploymentAlertWorker
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
@@ -94,21 +94,6 @@ defmodule BarkparkCloud.Registry do
   # "exceeded max" + "attempts" so `FailureCopy`'s generic retry clause already
   # renders it without a new clause over there.
   @spawn_refused_reason "exceeded max deploy start attempts — the deploy driver was never spawned (the control plane refused the child), so this build was never claimed; deploy again to retry"
-
-  # BATCHING POLICY for a mass reap. `Notifications.dispatch_event/3` is
-  # SYNCHRONOUS for email (cloud/ has no Oban for the mail path — only for chat),
-  # and this sweep runs every minute on the `maintenance` queue. A cluster-wide
-  # incident can fail hundreds of rows in one pass, which would become hundreds
-  # of blocking `Mailer.deliver` calls inside one cron tick — enough to hold the
-  # queue past the next tick and to trip any provider's rate limit.
-  #
-  # So the sweep alerts at most this many DEPLOYMENTS per tick and logs the
-  # remainder. The choice is deliberate: past ~25 simultaneous failures the
-  # person's problem is an incident, not N deployments, and the 26th email tells
-  # them nothing the first 25 did not. Nothing is lost — every reaped row is
-  # terminal in the console with its reason, which is the surface of record. The
-  # correct fix is an Oban-backed mail queue; when that lands this cap should go.
-  @reap_alert_cap 25
 
   # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
   # treated as abandoned (the worker crashed, or its succeed/fail report failed in
@@ -3108,15 +3093,6 @@ defmodule BarkparkCloud.Registry do
   def max_deploy_claims do
     Application.get_env(:barkpark_cloud, :max_deploy_claims, @default_max_deploy_claims)
   end
-
-  @doc """
-  How many `deployment_failed` alerts one reaper sweep may send. See
-  `@reap_alert_cap` for why a cap exists at all. Public so the suppression
-  branch can be DRIVEN by a test rather than asserted in a comment — a cap that
-  no fixture crosses is a person-facing suppression nothing measures.
-  """
-  @spec reap_alert_cap() :: pos_integer()
-  def reap_alert_cap, do: @reap_alert_cap
 
   ## Warm pool (dwb-10)
 
@@ -8787,10 +8763,22 @@ defmodule BarkparkCloud.Registry do
   # sites carry the full identity, the reaper carries the id its `select:`
   # already named. Nothing is synthesized to fill a gap.
   defp dispatch_deployment_failed(site_id, failure_reason, identity) when is_map(identity) do
-    payload = Map.put(identity, :detail, failure_reason || "")
-
-    Notifications.dispatch_site_event(site_id, :deployment_failed, payload)
+    Notifications.dispatch_site_event(
+      site_id,
+      :deployment_failed,
+      deployment_failed_payload(failure_reason, identity)
+    )
   end
+
+  # ONE payload shape for both producers. The synchronous sites hand this map
+  # straight to `dispatch_site_event/3`; the reaper puts it in an Oban arg, where
+  # JSON turns its keys into strings — which is why every reader of it
+  # (`Notifications.Render.deployment_identity/1`, `EventEmail`'s `name/1` and
+  # `detail/1`) reads each key under both an atom and a string. Building it in
+  # two places is how the inbox and the queue would start disagreeing about what
+  # a failed deployment is called.
+  defp deployment_failed_payload(failure_reason, identity) when is_map(identity),
+    do: Map.put(identity, :detail, failure_reason || "")
 
   # The deployment's own identity, and ONLY facts that are columns.
   #
@@ -8829,54 +8817,50 @@ defmodule BarkparkCloud.Registry do
   defp put_present(identity, _key, value) when value in [nil, ""], do: identity
   defp put_present(identity, key, value), do: Map.put(identity, key, value)
 
-  # The capped fan-out described at `@reap_alert_cap`.
+  # THE UNCAPPED FAN-OUT. There used to be a cap here (25 deployments per sweep,
+  # the rest logged and written as `suppressed` withhold rows) for exactly one
+  # reason: `Notifications.dispatch_event/3`'s email leg is SYNCHRONOUS, so a
+  # cluster-wide incident became hundreds of blocking `Mailer.deliver` calls
+  # inside one minute-ly cron tick.
+  #
+  # The send is no longer on this thread. Each reaped deployment becomes one
+  # `DeploymentAlertWorker` job and `Oban.insert_all/1` writes the whole sweep's
+  # jobs in ONE statement, so the tick's cost is flat in the number of failures
+  # and the mail spends the `default` queue's concurrency instead. With the
+  # reason for the ceiling gone the ceiling is gone with it — every owning team
+  # is alerted, including the 26th.
+  #
+  # `Withhold` keeps its `:reap_alert_cap` reason and label: rows written under
+  # the old policy are still on live delivery logs and must keep rendering.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
 
   defp dispatch_reaped_deployment_alerts(alerts) do
-    {send_now, dropped} = Enum.split(alerts, @reap_alert_cap)
-
-    Enum.each(send_now, fn {site_id, reason, identity} ->
-      dispatch_deployment_failed(site_id, reason, identity)
+    alerts
+    |> Enum.map(fn {site_id, reason, identity} ->
+      DeploymentAlertWorker.new(%{
+        site_id: site_id,
+        payload: deployment_failed_payload(reason, identity)
+      })
     end)
-
-    if dropped != [] do
-      # The Logger line stays — operators read logs during an incident — but it is
-      # no longer the ONLY trace. Wave 32 S2: the cap decided, on the owner's
-      # behalf, that they would not hear about their own failed deployment, and
-      # that decision is now a `suppressed` row on the delivery log they can read.
-      Logger.warning(
-        "reap_stale_deployments: #{length(dropped)} deployment_failed alerts suppressed " <>
-          "(cap #{@reap_alert_cap}/sweep); the rows are terminal in the console"
-      )
-
-      record_withheld_reap_alerts(dropped)
-    end
+    |> Oban.insert_all()
 
     :ok
-  end
+  rescue
+    # An alert must never break the sweep that triggered it — the four bulk
+    # passes have already COMMITTED by the time this runs, and a raise here would
+    # fail the reaper job so Oban re-drove a sweep that can no longer find those
+    # rows (they are terminal now), losing the alerts AND re-running the passes.
+    # Loud, named, and counted: an operator can see exactly how many alerts the
+    # enqueue lost. This is not routed through `Withhold` because a withhold row
+    # is itself a `Repo.insert`, and the branch we are in is the one where
+    # writing to this database just failed.
+    error ->
+      Logger.error(
+        "reap_stale_deployments: failed to enqueue #{length(alerts)} deployment_failed " <>
+          "alerts: #{Exception.message(error)}"
+      )
 
-  # Site → team is OURS to resolve (a Deployment only `belongs_to :site`), so the
-  # hop happens here and `Notifications.Withhold` receives an already-resolved
-  # team_id. One batched lookup, not one per dropped alert — a mass reap is
-  # exactly the moment not to fire N queries. A since-deleted site simply has no
-  # team and drops out of the map.
-  defp record_withheld_reap_alerts(dropped) do
-    site_ids = dropped |> Enum.map(fn {site_id, _reason, _identity} -> site_id end) |> Enum.uniq()
-
-    teams_by_site =
-      from(s in Site, where: s.id in ^site_ids, select: {s.id, s.team_id})
-      |> Repo.all()
-      |> Map.new()
-
-    Enum.each(dropped, fn {site_id, _reason, _identity} ->
-      case Map.get(teams_by_site, site_id) do
-        team_id when is_binary(team_id) ->
-          Withhold.record(team_id, "deployment_failed", :reap_alert_cap)
-
-        _absent ->
-          :ok
-      end
-    end)
+      :ok
   end
 
   # Guard a :binary_id PK lookup: a non-UUID id (a malformed path param) makes
