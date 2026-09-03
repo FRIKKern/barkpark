@@ -8751,6 +8751,14 @@
   // where a mutation to a total fiction left the suite byte-identical (zero
   // detection). POST /v1/barkparks/:id/domain emits, on failure:
   //   409 taken / 409 already_attaching       — the attach conflicts on the wire
+  //   409 already_attached {custom_host, detail} — THIS instance already answers on a
+  //        different host; the re-attach is refused rather than overwriting it
+  //        (cch-w54-bl). Console-UNREACHABLE by the offer gate below — renderInstance
+  //        only paints "Attach domain" when `!bp.custom_host` — but the arm is written
+  //        anyway: the gate is a stale-render away from being wrong (a peer attaches,
+  //        this tab still shows the button), and an unarmed slug does not degrade to
+  //        silence, it degrades to friendly()'s "Something went wrong" for a refusal
+  //        whose whole value is naming the host in the way.
   //   422 domain_not_pointed {expected_ip, observed}  — the ONE slug carrying a remedy
   //   422 invalid_domain                       — bad domain syntax
   //   422 instance_no_origin {detail}          — box has no origin yet; relay the sentence
@@ -8772,6 +8780,16 @@
 
     if (code === "taken") return "That domain is already in use.";
     if (code === "already_attaching") return "An attach is already running.";
+    // Relay the plane's own sentence — it names the host that is in the way,
+    // which is the only actionable part of this refusal. Server-derived string,
+    // rendered via textContent by the caller (never markup).
+    if (code === "already_attached") {
+      if (typeof data.detail === "string" && data.detail) return data.detail;
+      if (typeof data.custom_host === "string" && data.custom_host) {
+        return "This instance already answers on " + data.custom_host + ".";
+      }
+      return "This instance already has a domain attached.";
+    }
 
     if (status === 422) {
       if (code === "domain_not_pointed") {

@@ -6541,17 +6541,47 @@ defmodule BarkparkCloud.Registry do
   constraint is the atomic backstop for a custom_host↔custom_host race
   (translated to the same `:taken`).
 
-  Returns `{:ok, %Barkpark{}}`, `{:error, :taken}`, or a validation
-  `{:error, %Ecto.Changeset{}}` for a malformed domain.
+  RE-ATTACH IS REFUSED, not overwritten
+  (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`).
+  A row that already carries a `custom_host` and is handed a DIFFERENT one gets
+  `{:error, {:already_attached, existing}}` before anything is written. Driven
+  2026-09-03 on pre-fix main: `POST .../domain host-a` → 202, then
+  `POST .../domain host-b` → 202, row flips to `host-b`, and
+  `domain_registered?("host-a")` goes `true → false` with `/v1/tls/ask` for
+  host-a flipping `200 → 404`. The A record the attach worker already published
+  for host-a survives that flip on a LIVE, still-billed box, and the control
+  plane no longer holds the host that would let anything find it again — an
+  orphan with no owner. There is NO detach verb on this surface to sequence
+  instead (`grep -rn detach_domain cloud/` is empty; `DELETE
+  /v1/sites/:id/domains` frees a SITE domain, a different surface), so the
+  honest fix is the refusal: it cannot strand a record, and it never has to
+  guess whether an unwritten teardown ran.
+
+  Re-attaching the SAME host is still `{:ok, _}` — that is the documented
+  recovery path after a failed attach job (`fail_attach_domain_job/3`), and it
+  strands nothing because there is no previous record to lose. Comparison is on
+  the CHANGESET-NORMALIZED host, so `" Host-A.Barkpark.Cloud. "` is recognised
+  as the host already on the row.
+
+  Returns `{:ok, %Barkpark{}}`, `{:error, {:already_attached, existing_host}}`,
+  `{:error, :taken}`, or a validation `{:error, %Ecto.Changeset{}}` for a
+  malformed domain.
   """
   @spec set_custom_host(Barkpark.t(), term()) ::
-          {:ok, Barkpark.t()} | {:error, :taken | Ecto.Changeset.t()}
+          {:ok, Barkpark.t()}
+          | {:error, :taken | {:already_attached, String.t()} | Ecto.Changeset.t()}
   def set_custom_host(%Barkpark{} = barkpark, domain) do
     changeset = Barkpark.custom_host_changeset(barkpark, %{custom_host: domain})
 
     cond do
       not changeset.valid? ->
         {:error, %{changeset | action: :update}}
+
+      # The re-attach gate. Ordered AFTER validation (a malformed domain is a
+      # syntax verdict whatever the row holds) and BEFORE the taken walk and
+      # the write, so no re-attach reaches `Repo.update/1`.
+      reattach_of_different_host?(barkpark, changeset) ->
+        {:error, {:already_attached, barkpark.custom_host}}
 
       custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark) ->
         {:error, :taken}
@@ -6560,6 +6590,17 @@ defmodule BarkparkCloud.Registry do
         changeset |> Repo.update() |> translate_custom_host_conflict()
     end
   end
+
+  # Does this write REPLACE a custom_host the row already holds? Both sides are
+  # normalized — the stored value by the changeset that wrote it, the incoming
+  # one by the changeset above — so the same host in a different spelling is a
+  # re-attach of ITSELF (allowed), not a replacement.
+  defp reattach_of_different_host?(%Barkpark{custom_host: existing}, changeset)
+       when is_binary(existing) and existing != "" do
+    Ecto.Changeset.fetch_field!(changeset, :custom_host) != existing
+  end
+
+  defp reattach_of_different_host?(%Barkpark{}, _changeset), do: false
 
   # Is `norm` (already normalized by the changeset) claimed anywhere else on
   # our boxes? Four surfaces, fail-closed OR: a Site's domains array, ANOTHER
@@ -6701,15 +6742,18 @@ defmodule BarkparkCloud.Registry do
 
   `self_id` (the /2 head; `/1` passes `nil` and excludes nobody) drops the
   asking row from the walk, so a row may attach the host it already answers on.
-  Two things this walk deliberately does NOT do, both pre-existing and owned
-  elsewhere: it adds no `custom_host IS NULL` gate, so a re-attach still
-  overwrites an existing `custom_host` and orphans that host's A record — the
-  class-level seam owned by
-  `cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`;
-  and a self-attach still runs the real persist-and-enqueue path
+  One thing this walk deliberately does NOT do, pre-existing and owned
+  elsewhere: a self-attach still runs the real persist-and-enqueue path
   (`persist_and_enqueue_domain`, `web/router.ex`), so it enqueues an
   attach_domain job and a DNS upsert — reasoned idempotent, not driven by a test
   here.
+
+  The re-attach orphan this note used to disclaim
+  (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`)
+  is CLOSED, and not here: `set_custom_host/2` refuses a write that would
+  replace a `custom_host` the row already holds
+  (`{:error, {:already_attached, existing}}`), so this walk never sees the
+  second host at all.
   """
   @spec provisioning_fqdn_claim(String.t()) :: :free | {:held, atom(), String.t()}
   def provisioning_fqdn_claim(host) when is_binary(host), do: provisioning_fqdn_claim(host, nil)
