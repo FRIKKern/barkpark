@@ -1246,7 +1246,6 @@ defmodule BarkparkWeb.TasksController.Params do
       ~s|bp task close <id> <worker> <epoch> --set observed_rev=#{current_rev}|
   end
 
-
   # ─── Success help[] (axi-s4 R5 — a success TEACHES the next command) ──────
   #
   # Every mutation SUCCESS envelope carries a top-level `help` list: 1–3

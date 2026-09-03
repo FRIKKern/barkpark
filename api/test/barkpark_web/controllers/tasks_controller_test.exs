@@ -811,6 +811,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert message =~ ~s|bp task close <id> <worker> <epoch> done "<your reason>"|
 
       reread = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+
       assert Jason.decode!(reread.resp_body)["doc"]["lifecycle_status"] == "open",
              "the refusal wrote nothing"
     end
