@@ -1766,6 +1766,7 @@ defmodule BarkparkWeb.TasksController do
 
     if :ets.info(@graph_corpus_slots, :size) > graph_corpus_max_concurrency() do
       :ets.delete(@graph_corpus_slots, ref)
+      emit_graph_corpus_refused()
       :busy
     else
       {:ok, ref}
@@ -1777,6 +1778,30 @@ defmodule BarkparkWeb.TasksController do
     # and an UNBOUNDED corpus derivation is the failure this cap was built to
     # prevent — so the safe answer is to shed, exactly as saturation races do.
     ArgumentError -> :busy
+  end
+
+  # The ONLY consumer of the row's `deadline`, and the accepted answer to the
+  # capacity loss recorded on `sweep_graph_corpus_slots/0` below: a slot held by
+  # an alive-but-wedged holder is now VISIBLE rather than bounded. Every refused
+  # acquire says how many slots are held and how long the OLDEST has been held,
+  # so an operator can tell a saturated cap (ages in seconds, ages that move)
+  # from a wedged one (ages in minutes, ages that only grow) without reaching
+  # into the ETS table. Age is derived from the row's deadline, which is stamped
+  # at acquire as `now + @graph_corpus_slot_ttl_ms`.
+  defp emit_graph_corpus_refused do
+    now = System.monotonic_time(:millisecond)
+
+    oldest_age_ms =
+      @graph_corpus_slots
+      |> :ets.tab2list()
+      |> Enum.map(fn {_ref, _pid, deadline} -> now - deadline + @graph_corpus_slot_ttl_ms end)
+      |> Enum.max(fn -> 0 end)
+
+    :telemetry.execute(
+      [:barkpark, :graph_corpus, :slot, :refused],
+      %{slots: :ets.info(@graph_corpus_slots, :size), oldest_holder_age_ms: oldest_age_ms},
+      %{cap: graph_corpus_max_concurrency()}
+    )
   end
 
   defp release_graph_corpus_slot(ref) do
@@ -1811,6 +1836,41 @@ defmodule BarkparkWeb.TasksController do
   # HEALTHY long derivations. Killing a wedged owner is a different mechanism
   # with real blast radius (a broken connection instead of a clean 503) and is
   # deliberately NOT done here (filed: acpc-bl-graph-slot-wedged-live-holder).
+  #
+  # THAT FILING IS NOW RESOLVED, AND THE ANSWER IS: ACCEPT THE CAPACITY LOSS.
+  # The kill-bound is not built, for three reasons, recorded here so the next
+  # reader does not re-open the trade from the symptom alone:
+  #
+  #   1. It is a DIFFERENT MECHANISM, not a tighter version of this one. Every
+  #      other arm of this cap answers a shed client with a clean 503 and a
+  #      `retry-after`; `Process.exit(pid, :kill)` answers an in-flight client
+  #      with a broken connection. And because `after` does not run on a kill,
+  #      the sweep would have to delete the row itself — so the sweep stops
+  #      being a reader of facts about holders and becomes a writer that acts on
+  #      a wall-time GUESS, which is exactly the property that made the deleted
+  #      deadline arm fail open.
+  #
+  #   2. ONLY ONE HALF OF A WEDGE IS EVEN UNBOUNDED, and it has no observed
+  #      instance. A DB-bound derivation is self-limiting: Ecto's per-query
+  #      default raises DBConnection.ConnectionError at 15s and `after` runs on
+  #      a raise, so the slot frees itself with no sweep at all (proven by
+  #      `graph_corpus_slot_wedge_acceptance_test.exs`). What is unbounded is the
+  #      in-memory node/edge dedup — `List.flatten |> Enum.uniq_by` over the
+  #      derived documents — which is pure BEAM work with no timeout in front of
+  #      it, and nothing in api/config bounds handler wall time (`queue_target`
+  #      appears once in the whole api tree, in `config/test.exs`; Bandit's
+  #      `read_timeout` gates reading request BYTES, not handler execution). We
+  #      have no production or CI report of that phase actually wedging — the
+  #      2026-07-28 storm was pool exhaustion, i.e. the DB half. Building a kill
+  #      path against a failure mode nobody has seen buys a real blast radius
+  #      with a hypothetical.
+  #
+  #   3. The honest remedy for capacity loss is OBSERVABILITY, not a guess.
+  #      There was no way to see this cap's occupancy from outside; there is now
+  #      (`emit_graph_corpus_refused/0` above). If a wedge is ever observed —
+  #      `oldest_holder_age_ms` climbing past minutes while `slots` sits at the
+  #      cap — reopen this with the evidence, and set any TTL well clear of the
+  #      32003ms storm request so a healthy slow derivation is never reaped.
   defp sweep_graph_corpus_slots do
     for {ref, pid, _deadline} <- :ets.tab2list(@graph_corpus_slots),
         not Process.alive?(pid) do
