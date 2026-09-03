@@ -8619,7 +8619,7 @@ defmodule PDS.Census do
       argv: [],
       mut:
         {"defp capture_arity({:__block__, _, [n]}) when is_integer(n), " <> "do: n",
-         "defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: nil"},
+         "defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: (n && nil)"},
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
@@ -9557,17 +9557,6 @@ defmodule PDS.Census do
        else
          "classified #{classified_n} + unclassified #{unclassified_n} != emitted #{length(emitted)} — #{length(emitted) - classified_n - unclassified_n} emitted site(s) fell out of the taxonomy entirely; every shape count below is over the wrong denominator"
        end},
-      # THE LITERAL CANNOT DRIFT INTO A LIE. @route_depth is typed; the depth the route
-      # relation actually closes at is measured by report_depth_sweep/2 off the same walk
-      # that prints the table. If a corpus change moves the closure, this reds instead of
-      # letting a stale 12 keep describing a route that now needs 14 — which is exactly
-      # how @evidence_depth spent two waves describing a closure that was an artefact.
-      {"ROUTE-DEPTH-IS-CLOSURE", route_closure.depth == @route_depth,
-       if route_closure.depth == @route_depth do
-         "@route_depth #{@route_depth} IS the measured closure: write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, flat at every deeper budget swept (POST-READ #{route_closure.post_read} there — never quote the write without it)"
-       else
-         "@route_depth is typed #{@route_depth} but the route relation closes at #{route_closure.depth} on this run (write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, POST-READ #{route_closure.post_read}) — RE-DERIVE the literal, never re-type it, and widen @beyond if the closure ran off the end of the sweep"
-       end},
       {"DELEGATE-REACHES-WRITE", delegate.close_write?,
        # On FAIL close_depth is nil, and "at depth " with nothing after it reads
        # like a truncated line rather than a finding — say what actually happened.
@@ -9580,7 +9569,8 @@ defmodule PDS.Census do
         routed_checks(routed) ++
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
-        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified)
+        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
+        route_depth_checks(route_closure, classified)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -10263,6 +10253,34 @@ defmodule PDS.Census do
   # baseline, so an unconditional arm would red the selftest on its own commit. That is
   # why the cases proving this arm CAN go red census the REPO (`corpus: :repo`) — an arm
   # proven only where it is scoped out is proven nowhere (PDS-D541).
+
+  # THE SAME SCOPE RULE baseline_checks/2 USES, AND FOR THE SAME REASON (PDS-D541). Over
+  # the synthetic selftest corpus the route relation closes wherever a five-file fixture
+  # happens to close; @route_depth describes api/lib and nothing else, so an unconditional
+  # arm here reds every case that censuses the fixture at exit 0. Proven where it is in
+  # scope: CAPTURE-EDGE-FIRES and CONCAT-BINDS-THE-VARIABLE both ride `corpus: :repo` and
+  # both red THIS arm by name.
+  defp route_depth_checks(route_closure, classified) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real -> [route_depth_check(route_closure)]
+    end
+  end
+
+  defp route_depth_check(route_closure) do
+    # THE LITERAL CANNOT DRIFT INTO A LIE. @route_depth is typed; the depth the route
+    # relation actually closes at is measured by report_depth_sweep/2 off the same walk
+    # that prints the table. If a corpus change moves the closure, this reds instead of
+    # letting a stale 12 keep describing a route that now needs 14 — which is exactly
+    # how @evidence_depth spent two waves describing a closure that was an artefact.
+    {"ROUTE-DEPTH-IS-CLOSURE", route_closure.depth == @route_depth,
+     if route_closure.depth == @route_depth do
+       "@route_depth #{@route_depth} IS the measured closure: write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, flat at every deeper budget swept (POST-READ #{route_closure.post_read} there — never quote the write without it)"
+     else
+       "@route_depth is typed #{@route_depth} but the route relation closes at #{route_closure.depth} on this run (write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, POST-READ #{route_closure.post_read}) — RE-DERIVE the literal, never re-type it, and widen @beyond if the closure ran off the end of the sweep"
+     end}
+  end
+
   defp baseline_checks(drift_rows, classified) do
     case register_scope(classified) do
       :scoped_out -> []
