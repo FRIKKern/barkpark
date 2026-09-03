@@ -680,7 +680,8 @@ if [ "$MODE" = selftest ]; then
   # 2026-09-03 at origin/main 0cb244bfb:
   #
   #   MIN  =  67  every optional block skipped (no python3/curl, no flock, no api/)
-  #   FULL = 405  all blocks run — this is what CI gets
+  #   FULL = 415  all blocks run — this is what CI gets (405 + the 10 rows of
+  #                the static-miss 404 block, which needs a real caddy(1))
   #
   # FULL applies when BARKPARK_SELFTEST_REQUIRE_E2E=1, which is exactly the venue
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine self-test",
@@ -692,7 +693,7 @@ if [ "$MODE" = selftest ]; then
   # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
   # the same commit. A red here is either a missing block or an unraised floor.
   SELFTEST_FLOOR_MIN=67
-  SELFTEST_FLOOR_FULL=405
+  SELFTEST_FLOOR_FULL=415
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -2044,6 +2045,104 @@ FAKECP
     fi
     check "every OTHER BPSTAGE name+status on the wire is still whitelisted" \
       sh -c "! grep '^BPSTAGE ' '$RF/bad.out' | grep -v '^BPSTAGE name=ROUTE ' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
+
+    # -----------------------------------------------------------------------
+    # A MISS ON A SPAWNED STATIC SITE IS A 404, NOT THE MAINTENANCE 503
+    # (ssw11-bl-static-miss-503-not-404). Measured on guerrilla from outside:
+    # /sites/<slug>/nope-missing/ answered 503, an accented miss answered 503,
+    # and the NFC form of an NFD-stored directory answered 503 — so the Unicode
+    # seam this epic cares about was INDISTINGUISHABLE from every other miss.
+    #
+    # THE CAUSE, read off the box's own Caddyfile rather than inferred from the
+    # status code: the FQDN site block ends with the maintenance handler
+    # deploy/instance-deploy.sh arms —
+    #
+    #     reverse_proxy localhost:4001
+    #     handle_errors {
+    #         header Retry-After "15"
+    #         respond 503 { body <<BARKPARK_MAINTENANCE … }
+    #     }
+    #
+    # `handle_errors` with NO status list catches EVERY error raised anywhere in
+    # the site, and a `file_server` miss inside this engine's own armed
+    # `handle_path /sites/<slug>/*` raises 404 AS AN ERROR. So the branded "Back
+    # in a moment" page ate the entire 4xx surface of every static site on the
+    # box. The block's header comment asserted the opposite — "fires ONLY on
+    # errors Caddy itself raises (dial failure / gateway timeout)" — which is
+    # true and irrelevant: a file_server 404 IS an error Caddy itself raises.
+    #
+    # The fix is `handle_errors 502 503 504` in instance-deploy.sh. This block
+    # is the REGRESSION PIN, and it pins the SEAM rather than either half: it
+    # takes the site route THIS engine generated (Caddyfile.ok, written by the
+    # real arm above), splices in the maintenance handler INSTANCE-DEPLOY.SH
+    # ITSELF arms (extracted from that file, never re-typed here), and drives the
+    # result through a REAL caddy on a real port with real requests. Re-widen
+    # either side and rows 4/5/6 go red.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a miss on a spawned static site 404s through REAL caddy (the maintenance 503 no longer eats it)"
+    MS="$E2E/misscode"; mkdir -p "$MS/bin" "$MS/root"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$MS/bin/systemctl"; chmod +x "$MS/bin/systemctl"
+    printf '<!doctype html><title>index</title>\n' > "$MS/root/index.html"
+    MS_INSTANCE="$(cd "$(dirname "$SELF")" && pwd)/instance-deploy.sh"
+    if ! command -v caddy >/dev/null 2>&1 || [ ! -f "$MS_INSTANCE" ]; then
+      if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+        echo "[selftest] FAIL - the static-miss 404 proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but a real caddy binary and deploy/instance-deploy.sh are both needed and one is missing — the only rows that drive a real Caddy did not run"
+        exit 1
+      fi
+      echo "[selftest] SKIP static-miss 404 through real caddy — needs a real caddy(1) and deploy/instance-deploy.sh in the tree"
+    else
+      # The maintenance handler EXACTLY as instance-deploy.sh arms it: the
+      # heredoc body between `<<'MAINT'` and the closing MAINT sentinel.
+      awk "/<<'MAINT'/{f=1;next} /^MAINT\$/{f=0} f" "$MS_INSTANCE" > "$MS/maint.caddy"
+      check "the maintenance handler instance-deploy.sh arms was extracted (non-empty)" \
+        [ -s "$MS/maint.caddy" ]
+      check "…and it is STATUS-SCOPED, so a file_server 404 is not one of its errors" \
+        grep -qE '^[[:space:]]*handle_errors[[:space:]]+502[[:space:]]+503[[:space:]]+504[[:space:]]*\{' "$MS/maint.caddy"
+      check "the reference copy deploy/caddy/barkpark-maintenance.caddy carries the same scoping" \
+        sh -c "[ ! -f '$(cd "$(dirname "$SELF")" && pwd)/caddy/barkpark-maintenance.caddy' ] || grep -qE '^handle_errors +502 +503 +504 *\{' '$(cd "$(dirname "$SELF")" && pwd)/caddy/barkpark-maintenance.caddy'"
+      # Build the BOX SHAPE: global opts, this engine's real armed handle_path
+      # (root repointed at a fixture tree), a DEAD app fallback, then the
+      # maintenance handler — the exact nesting /etc/caddy/Caddyfile has.
+      MS_PORT=0; MS_PID=""
+      for MS_TRY in 39211 39307 39419 39523 39631; do
+        {
+          printf '{\n\tadmin off\n\tauto_https off\n}\n'
+          printf ':%s {\n' "$MS_TRY"
+          sed -n '/BARKPARK_SITE_ROUTE:routefail/,/^\t}$/p' "$RF/Caddyfile.ok" \
+            | sed "s|root \* .*|root * $MS/root|"
+          printf '\treverse_proxy localhost:1 {\n\t\tlb_try_duration 1s\n\t}\n'
+          cat "$MS/maint.caddy"
+          printf '}\n'
+        } > "$MS/Caddyfile"
+        caddy run --config "$MS/Caddyfile" --adapter caddyfile >"$MS/caddy.log" 2>&1 &
+        MS_PID=$!
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+          if [ "$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://127.0.0.1:$MS_TRY/sites/routefail/" 2>/dev/null)" = 200 ]; then
+            MS_PORT="$MS_TRY"; break
+          fi
+          sleep 0.25
+        done
+        [ "$MS_PORT" != 0 ] && break
+        kill "$MS_PID" 2>/dev/null; wait "$MS_PID" 2>/dev/null; MS_PID=""
+      done
+      ms_code() { curl -s -o "$MS/body.out" --max-time 5 -w '%{http_code}' "http://127.0.0.1:$MS_PORT$1"; }
+      check "the box-shaped fixture (engine site route + armed maintenance handler) came up on a real caddy" \
+        [ "$MS_PORT" != 0 ]
+      check "real caddy: the static site index serves 200" \
+        [ "$(ms_code /sites/routefail/)" = 200 ]
+      check "real caddy: a MISSING ASCII path is 404, NOT the maintenance 503" \
+        [ "$(ms_code /sites/routefail/nope-missing/)" = 404 ]
+      check "real caddy: a MISSING ACCENTED path is 404, NOT the maintenance 503" \
+        [ "$(ms_code /sites/routefail/bl%C3%A5b%C3%A6r/)" = 404 ]
+      ms_code /sites/routefail/nope-missing/ >/dev/null
+      check "real caddy: the miss body is not the branded maintenance page" \
+        sh -c "! grep -q 'Back in a moment' '$MS/body.out'"
+      check "real caddy: a DEAD app upstream STILL gets the maintenance 503 (the scoping did not disarm it)" \
+        [ "$(ms_code /anything-the-app-owns)" = 503 ]
+      check "…and THAT body really is the branded maintenance page" \
+        grep -q 'Back in a moment' "$MS/body.out"
+      [ -n "$MS_PID" ] && { kill "$MS_PID" 2>/dev/null; wait "$MS_PID" 2>/dev/null; }
+    fi
 
     # -----------------------------------------------------------------------
     # THE PREFIX COLLISION (D345) — the case NO test in either engine could see.
