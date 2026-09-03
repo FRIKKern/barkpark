@@ -46,6 +46,13 @@ defmodule Barkpark.PdsElixirCensusTest do
   42,0 s for the four. The added arm is one more full census run over `api/lib`.
   Re-meter before quoting either number for anything else.
 
+  AND BOTH FIGURES DESCRIBE ARMS RUN ONE AFTER ANOTHER, which stopped being how
+  this case runs: the four arms are now spawned CONCURRENTLY from `setup_all`
+  (see the comment there), so the module costs roughly ONE arm's wall clock, not
+  four. The two figures above are kept because they are what the serial shape
+  actually cost and they are the baseline this change is measured against — they
+  are not a description of today's run.
+
   ## Why the assertions are on prose, never on numbers
 
   `CENSUS OK` and `FAIL  CLASSIFICATION-TOTAL` are the census's own verdict
@@ -120,6 +127,27 @@ defmodule Barkpark.PdsElixirCensusTest do
   # perturbs it by one, so the arm is always exactly one off whatever the tree
   # currently says and can only ever red for the reason it was written for.
 
+
+  # ## Why the four arms run in setup_all, CONCURRENTLY
+  #
+  # Each arm is one `elixir` subprocess walking the whole `api/lib` corpus, and
+  # nothing about any arm depends on another. Run one after another they cost
+  # ~22 s each and, because a subprocess prints nothing while it works, they
+  # showed up as the three largest silent gaps in the required Elixir gate's log
+  # — 22,7 + 21,9 + 17,8 s, 62,4 s of the run's 111,6 s of >= 10 s gaps
+  # (task-18f209f185f5b3f1). They are now spawned TOGETHER here and awaited, so
+  # the module costs one arm's wall clock instead of four.
+  #
+  # WHAT THIS DOES NOT CHANGE: every arm still runs, over the live corpus, from
+  # the root, as its own subprocess, and every assertion below still reads that
+  # arm's own rc and output. The mutation anchors are still checked for
+  # exactly-one occurrence, and that check still fails IN THE ARM'S OWN TEST —
+  # `occurrences` is computed here as data and asserted there, so an anchor that
+  # drifts still names the arm it broke rather than collapsing all four into one
+  # setup_all error.
+  #
+  # `async: false` still holds: four concurrent corpus walks have no business
+  # racing the async lane either.
   setup_all do
     census = Path.expand(@census_rel, __DIR__)
 
@@ -138,11 +166,60 @@ defmodule Barkpark.PdsElixirCensusTest do
             "census cannot be run. Failing loud rather than skipping."
         )
 
-    {:ok, census: census, elixir: elixir, root: Path.expand("../../..", __DIR__)}
+    root = Path.expand("../../..", __DIR__)
+    source = File.read!(census)
+
+    {baseline_from, baseline_to, derived, mutated} = baseline_perturbation(source)
+
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "pds-elixir-census-mutants-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    # rc/out for every arm, gathered in parallel. `plain` and `unknown_flag` run
+    # the committed census; `classification` and `baseline` each run a one-token
+    # mutant written outside the tree and executed FROM THE ROOT (`cd: root` is
+    # load-bearing — the corpus glob is CWD-relative and a tmp-dir mutant
+    # censuses an empty tree, exiting 2 REFUSED: TRUNCATED CORPUS).
+    arms = [
+      plain: fn -> System.cmd(elixir, [census], cd: root, stderr_to_stdout: true) end,
+      unknown_flag: fn ->
+        System.cmd(elixir, [census, "--not-a-real-flag"], cd: root, stderr_to_stdout: true)
+      end,
+      classification: fn ->
+        mutant = write_mutant(dir, "classification", source, @mutant_from, @mutant_to)
+        System.cmd(elixir, [mutant], cd: root, stderr_to_stdout: true)
+      end,
+      baseline: fn ->
+        mutant = write_mutant(dir, "baseline", source, baseline_from, baseline_to)
+        System.cmd(elixir, [mutant], cd: root, stderr_to_stdout: true)
+      end
+    ]
+
+    results =
+      arms
+      |> Enum.map(fn {name, fun} -> {name, Task.async(fun)} end)
+      |> Enum.map(fn {name, task} -> {name, Task.await(task, 540_000)} end)
+      |> Map.new()
+
+    {:ok,
+     census: census,
+     elixir: elixir,
+     root: root,
+     runs: results,
+     anchors: %{
+       classification: occurrences(source, @mutant_from),
+       baseline: occurrences(source, baseline_from)
+     },
+     baseline: %{from: baseline_from, derived: derived, mutated: mutated}}
   end
 
   test "the receipt census runs GREEN over the live corpus", ctx do
-    {out, rc} = System.cmd(ctx.elixir, [ctx.census], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = ctx.runs.plain
 
     assert rc == 0, "expected `elixir #{@census_rel}` (no flag) to exit 0, got #{rc}:\n#{out}"
 
@@ -152,33 +229,9 @@ defmodule Barkpark.PdsElixirCensusTest do
   end
 
   test "the gate CAN red: a one-token mutant exits 1 with FAIL  CLASSIFICATION-TOTAL", ctx do
-    source = File.read!(ctx.census)
+    assert_single_anchor(ctx.anchors.classification, @mutant_from)
 
-    occurrences = length(String.split(source, @mutant_from)) - 1
-
-    assert occurrences == 1,
-           "the mutation anchor #{inspect(@mutant_from)} occurs #{occurrences}x in the census " <>
-             "(expected exactly 1). At 0 this fail-demo proves nothing; above 1 the mutant " <>
-             "would rewrite a site this demo never reasoned about. Re-anchor it on a live " <>
-             "single-occurrence site rather than deleting the demo."
-
-    mutant_dir =
-      Path.join(
-        System.tmp_dir!(),
-        "pds-elixir-census-mutant-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(mutant_dir)
-    on_exit(fn -> File.rm_rf!(mutant_dir) end)
-
-    mutant = Path.join(mutant_dir, "pds-elixir-receipt-census.exs")
-    File.write!(mutant, String.replace(source, @mutant_from, @mutant_to, global: false))
-
-    # `cd: ctx.root` IS LOAD-BEARING: the corpus glob is CWD-relative, so a mutant
-    # run from its own tmp dir censuses an empty tree and exits 2 (REFUSED:
-    # TRUNCATED CORPUS) — not the rc 1 asserted below. See the moduledoc: it is
-    # NOT the "exits 0, vacuous green" this comment used to claim.
-    {out, rc} = System.cmd(ctx.elixir, [mutant], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = ctx.runs.classification
 
     assert rc == 1,
            "a mutated census exited #{rc}; the census cannot distinguish a site that fell out " <>
@@ -195,8 +248,9 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   test "the population baseline REFUSES: a perturbed literal exits 1 with FAIL  D448-DRIFT-REFUSES",
        ctx do
-    {from, to, derived, mutated} = baseline_perturbation(File.read!(ctx.census))
-    {out, rc} = mutate_and_run(ctx, from, to)
+    assert_single_anchor(ctx.anchors.baseline, ctx.baseline.from)
+
+    {out, rc} = ctx.runs.baseline
 
     assert rc == 1,
            "a census whose committed population baseline no longer matches the tree exited #{rc}. " <>
@@ -207,11 +261,11 @@ defmodule Barkpark.PdsElixirCensusTest do
            "the mutant exited 1 without naming the arm — the exit code did not descend from the " <>
              "baseline check. Output:\n#{out}"
 
-    assert out =~ "unrouted baseline #{mutated} derived #{derived}",
+    assert out =~ "unrouted baseline #{ctx.baseline.mutated} derived #{ctx.baseline.derived}",
            "the refusal named no row and no pair of numbers. A verdict that does not say WHICH " <>
              "population moved cannot be repaired by re-derivation. Expected the pair " <>
-             "#{mutated}/#{derived}, both READ OUT OF the census source rather than typed here. " <>
-             "Output:\n#{out}"
+             "#{ctx.baseline.mutated}/#{ctx.baseline.derived}, both READ OUT OF the census source " <>
+             "rather than typed here. Output:\n#{out}"
 
     assert out =~ "RE-DERIVE, never re-type",
            "the refusal shipped without the repair instruction, so the cheapest fix a reader can " <>
@@ -220,11 +274,7 @@ defmodule Barkpark.PdsElixirCensusTest do
   end
 
   test "the census REFUSES an unknown flag — ARGV-STRICT, not a shrug", ctx do
-    {out, rc} =
-      System.cmd(ctx.elixir, [ctx.census, "--not-a-real-flag"],
-        cd: ctx.root,
-        stderr_to_stdout: true
-      )
+    {out, rc} = ctx.runs.unknown_flag
 
     assert rc == 2,
            "expected the census to REFUSE an unknown flag with exit 2, got #{rc}. A census that " <>
@@ -234,16 +284,32 @@ defmodule Barkpark.PdsElixirCensusTest do
     assert out =~ "unknown argument", out
   end
 
-  # ONE ANCHORED EDIT, WRITTEN OUTSIDE THE TREE AND RUN FROM THE ROOT. The
-  # exactly-once assertion is the same guard the census's own selftest applies to
-  # every mutation anchor: at 0 the demo proves nothing, above 1 the mutant
-  # rewrites a site nobody reasoned about. `cd: ctx.root` is load-bearing — the
-  # corpus glob is CWD-relative, and a mutant run from its own tmp dir censuses an
-  # empty tree and exits 2 (REFUSED: TRUNCATED CORPUS), which is not the rc under
-  # test. Kept as a helper so a second arm cannot drift from the first one's setup.
+  # THE EXACTLY-ONCE GUARD, unchanged in force and moved in place. It is the same
+  # guard the census's own selftest applies to every mutation anchor: at 0 the
+  # fail-demo proves nothing, above 1 the mutant rewrites a site nobody reasoned
+  # about. It is asserted HERE, in the arm's own test, so a drifted anchor names
+  # the arm it broke — the count itself is taken once in setup_all.
+  defp assert_single_anchor(count, anchor) do
+    assert count == 1,
+           "the mutation anchor #{inspect(anchor)} occurs #{count}x in the census " <>
+             "(expected exactly 1). At 0 this fail-demo proves nothing; above 1 the mutant " <>
+             "would rewrite a site this demo never reasoned about. Re-anchor it on a live " <>
+             "single-occurrence site rather than deleting the demo."
+  end
+
+  defp occurrences(source, anchor), do: length(String.split(source, anchor)) - 1
+
+  # ONE ANCHORED EDIT, WRITTEN OUTSIDE THE TREE. Each mutant gets its own file so
+  # the concurrent arms cannot overwrite one another's source.
+  defp write_mutant(dir, name, source, from, to) do
+    path = Path.join(dir, "#{name}-pds-elixir-receipt-census.exs")
+    File.write!(path, String.replace(source, from, to, global: false))
+    path
+  end
+
   # WHAT THE BASELINE ARM PERTURBS, READ OUT OF THE CENSUS RATHER THAN TYPED HERE.
-  # Returns the anchor pair for `mutate_and_run/3` plus both sides of the comparison
-  # the census must then print, so the assertion above names a row and a pair of
+  # Returns the anchor pair for the mutant plus both sides of the comparison the
+  # census must then print, so the assertion above names a row and a pair of
   # numbers without this file ever transcribing one. An honest re-derivation of
   # @rederived.unrouted moves all four together and this arm does not notice.
   defp baseline_perturbation(source) do
@@ -260,30 +326,5 @@ defmodule Barkpark.PdsElixirCensusTest do
             "arm was repaired to stop carrying."
         )
     end
-  end
-
-  defp mutate_and_run(ctx, from, to) do
-    source = File.read!(ctx.census)
-    occurrences = length(String.split(source, from)) - 1
-
-    assert occurrences == 1,
-           "the mutation anchor #{inspect(from)} occurs #{occurrences}x in the census " <>
-             "(expected exactly 1). At 0 this fail-demo proves nothing; above 1 the mutant " <>
-             "would rewrite a site this demo never reasoned about. Re-anchor it on a live " <>
-             "single-occurrence site rather than deleting the demo."
-
-    dir =
-      Path.join(
-        System.tmp_dir!(),
-        "pds-elixir-census-mutant-#{System.unique_integer([:positive])}"
-      )
-
-    File.mkdir_p!(dir)
-    on_exit(fn -> File.rm_rf!(dir) end)
-
-    mutant = Path.join(dir, "pds-elixir-receipt-census.exs")
-    File.write!(mutant, String.replace(source, from, to, global: false))
-
-    System.cmd(ctx.elixir, [mutant], cd: ctx.root, stderr_to_stdout: true)
   end
 end
