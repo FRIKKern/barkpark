@@ -4815,7 +4815,22 @@
   // already holds, never invented here.
   function notifChatTestToast(r, type, alertsEnabled) {
     if (!(r && (r.ok || r.status === 202))) {
-      return { kind: "error", title: "Couldn't send test", body: friendly(r && r.data, "Try again shortly.") };
+      // cch-w32-bl: the chat leg now spends the SAME per-team test budget as
+      // the email leg, so `rate_limited` is a reachable answer HERE too. It
+      // used to fall through to `friendly()`'s "Try again shortly." — true but
+      // useless, and the one number the caller needs (how long) was on the wire
+      // and thrown away. Same reason key, same countdown sentence as
+      // notifEmailTestToast: one endpoint, one budget, one thing to read.
+      var d = r && r.data;
+      if (d && d.error === "rate_limited") {
+        return {
+          kind: "error",
+          title: "Couldn't send test",
+          body: "Please wait " + (d.retry_after || 10) + "s before another test. " +
+            "The email and chat tests share one per-team limit."
+        };
+      }
+      return { kind: "error", title: "Couldn't send test", body: friendly(d, "Try again shortly.") };
     }
     var queued = r.data && typeof r.data.queued === "number" ? r.data.queued : null;
     var muted = alertsEnabled === false

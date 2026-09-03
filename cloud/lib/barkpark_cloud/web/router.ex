@@ -5809,6 +5809,14 @@ defmodule BarkparkCloud.Web.Router do
   # a fan-out to nobody read as accepted to the console, to `bp` and to curl
   # alike. `ok: true` still means "the request was accepted"; `queued` is the
   # separate question of whether anything was sent, and the console reads it.
+  #
+  # cch-w32-bl: the CHAT leg spends the SAME per-team budget as the email leg —
+  # one `last_test_sent_at` stamp for the whole endpoint — so it too answers
+  # 429 {error: "rate_limited", retry_after}. One shared stamp means an email
+  # test holds the chat test for 10s and vice versa; that is the intent (one
+  # button, one team, one budget), and a per-leg stamp would have doubled the
+  # fan-out an admin token buys for free. A fan-out that reached ZERO channels
+  # does not burn the window — nothing was sent, so there is nothing to ration.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
@@ -5817,10 +5825,21 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       chat_test?(conn.body_params) ->
-        {:ok, queued} =
-          Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
+        # cch-w32-bl: the chat leg is reached BEFORE `test_email/1`, so it used
+        # to jump the 10s/team guard the email leg has honoured since day one —
+        # three rapid presses enqueued three fan-outs, each an outbound POST to
+        # a webhook URL of the caller's choosing. Both legs now spend the SAME
+        # per-team budget in `Notifications`, and this arm renders the SAME
+        # refusal `test_email/1` renders below, byte for byte: an already-shipped
+        # console arm reads `rate_limited` + `retry_after`, so a new reason key
+        # here would have been a new silent failure mode for an old one.
+        case Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"]) do
+          {:ok, queued} ->
+            json(conn, 202, %{ok: true, queued: queued})
 
-        json(conn, 202, %{ok: true, queued: queued})
+          {:error, {:rate_limited, retry_after}} ->
+            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
+        end
 
       true ->
         test_email(conn)
