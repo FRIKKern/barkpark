@@ -2797,7 +2797,7 @@ defmodule PDS.Census do
     w != [] and r != [] and Enum.max(r) > Enum.min(w)
   end
 
-  # `returning:` is a BLIND lens — Ecto silently ignores it on update_all (auth.ex:139-141).
+  # `returning:` is a BLIND lens — Ecto silently ignores it on update_all (auth.ex:consume_login_ticket/1).
   # The honest idiom is `select:` INSIDE the update query.
   #
   # KNOWN RESIDUAL UNSOUNDNESS, NAMED AND NOT FIXED HERE (PDS wave 34). This prewalks the

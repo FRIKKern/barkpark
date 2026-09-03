@@ -398,7 +398,7 @@ defmodule BarkparkWeb.ShareController do
   defp do_revoke(conn, token_id) do
     case Barkpark.Auth.revoke_token(token_id) do
       # RECEIPT LAW (pds w39): `Auth.revoke_token/1` returns the UPDATED row
-      # (auth.ex:200-226). `revoked: true` was a literal and `token_id` echoed
+      # (auth.ex:revoke_token/1). `revoked: true` was a literal and `token_id` echoed
       # the path param — neither could change if the update wrote nothing. Both
       # now descend from the returned row's own `revoked_at` stamp.
       {:ok, revoked} ->
