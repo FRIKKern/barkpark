@@ -219,7 +219,9 @@ jobs:
           JOB_NAME: "Refusal arm (short SECRET_KEY_BASE refuses at boot)"
           WORKFLOW_FILE: compose-smoke.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
 
   green-arm:
@@ -258,7 +260,9 @@ jobs:
           JOB_NAME: "Green arm (build, boot, in-container probes)"
           WORKFLOW_FILE: compose-smoke.yml
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/main-red-breaker.sh
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
 
   compose-gate:
