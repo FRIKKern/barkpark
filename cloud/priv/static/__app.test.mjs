@@ -4368,6 +4368,91 @@ test("D32: the SPA attention vocabulary matches attention_order.json", () => {
     "deploy_stalled must sit after unreported and before behind");
 });
 
+// ── the PREDICATE gets a cross-surface asserter too (dr-w25) ────────────────
+//
+// The D32 test above holds the SPA's RANK TABLE to attention_order.json. It says
+// nothing about classifyBp — a rung could keep its fixture rank forever and
+// still be unreachable, or reachable only through half its inputs. That is
+// exactly the defect this slice repairs: `behind` was reachable through
+// update_state and NOT through commit_ancestry, so a box the control plane had
+// measured 2,493 commits behind main classified `ok` and rendered live-green.
+//
+// The expected side is DERIVED from the fixture (states minus the named gap),
+// never a second hand-typed ladder: a state added to attention_order.json with
+// no witness here reds this test rather than scanning green.
+test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is reachable by commit ancestry", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
+  );
+  const SPA_GAP = ["strained", "filling"]; // same named gap the D32 test pins
+  const expected = fixture.states.map((st) => st.state).filter((k) => !SPA_GAP.includes(k));
+  assert.ok(expected.length >= 10,
+    "derived from a fixture carrying only " + expected.length + " classifiable states — an empty corpus would green every loop below");
+
+  const LIVE = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // One witness payload per fixture state, keyed BY THE FIXTURE'S NAMES.
+  const WITNESS = {
+    removal_failed: { deprovision_status: "failed" },
+    failed: { provision_status: "failed" },
+    suspended: { host: "h", suspended: true },
+    degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    unreported: { host: "h", last_seen_at: null },
+    deploy_stalled: { ...LIVE, queued_deploy_age_seconds: 420 },
+    behind: { ...LIVE, update_state: "behind" },
+    removing: { deprovision_status: "pending" },
+    provisioning: {},
+    ok: { ...LIVE },
+  };
+  assert.deepEqual(Object.keys(WITNESS).slice().sort(), expected.slice().sort(),
+    "a fixture state gained or lost a witness — the predicate and attention_order.json have drifted");
+
+  for (const state of expected) {
+    assert.equal(hooks.classifyBp(WITNESS[state]), state, state + " must be reachable from classifyBp");
+    const rank = fixture.states.find((st) => st.state === state).rank;
+    assert.equal(hooks.attentionRank(WITNESS[state]), rank,
+      state + ": classifyBp's witness ranks " + hooks.attentionRank(WITNESS[state]) + ", fixture says " + rank);
+  }
+
+  // THE ROW THIS SLICE REPAIRS — the production payload, verbatim: the control
+  // plane measured 2,493 commits behind main while the release-tag grade read
+  // `current` (no tag has been cut since 2026-07-08). Before this slice the
+  // SECOND source was invisible to the predicate and this box classified "ok".
+  const tagCurrentCommitBehind = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: 2493 };
+  assert.equal(hooks.classifyBp(tagCurrentCommitBehind), "behind",
+    "a box the plane measured behind main must not classify live-green because its release tag grades itself current");
+  assert.equal(hooks.attentionRank(tagCurrentCommitBehind),
+    fixture.states.find((st) => st.state === "behind").rank);
+  assert.equal(hooks.bucketOf(tagCurrentCommitBehind), "attention");
+
+  // …and the RENDERED heading an operator reads (criterion 1's paste).
+  const s = hooks.statusOf(tagCurrentCommitBehind);
+  assert.equal(s.label, "Update available");
+  assert.equal(s.role, "info");
+  // Not the false all-clear "A newer release is available": the detail names the
+  // disagreement, in the Go twin's phrasing (behindDetail).
+  assert.equal(s.detail, "2493 commits behind main · release-tag grade still reads current");
+
+  // The unmetered arm: ancestry behind, distance null — still `behind`, and the
+  // detail never fabricates a number.
+  const unmetered = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: null };
+  assert.equal(hooks.classifyBp(unmetered), "behind");
+  assert.equal(hooks.statusOf(unmetered).detail,
+    "behind main by an unmeasured number of commits · release-tag grade still reads current");
+
+  // NON-REGRESSION, both directions: ancestry `current` is not behind, an absent
+  // ancestry (older control plane) is not behind, and a release-tag behind keeps
+  // its pre-existing release sentence rather than inheriting the commit one.
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_ancestry: "current", commit_distance: 0 }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, commit_distance: 2493 }), "ok");
+  assert.equal(hooks.statusOf({ ...LIVE, update_state: "behind", update_latest_release: "1.2.3" }).detail, "→ v1.2.3");
+  // A box that is BOTH is still one rung, and the tag sentence wins (the UPDATE
+  // column already shows running → latest) — Go's precedence, verbatim.
+  assert.equal(hooks.statusOf({ ...LIVE, update_state: "behind", commit_ancestry: "behind", commit_distance: 7, update_latest_release: "1.2.3" }).detail, "→ v1.2.3");
+  // A non-live box is never re-ranked by commit ancestry — suspended outranks it.
+  assert.equal(hooks.classifyBp({ host: "h", suspended: true, commit_ancestry: "behind" }), "suspended");
+  assert.equal(hooks.classifyBp({ ...LIVE, last_seen_at: null, commit_ancestry: "behind" }), "unreported");
+});
+
 // ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
 
 test("jpf-w1: a 5-minute unclaimed queued deploy is deploy_stalled — warn, attention, age named", () => {
