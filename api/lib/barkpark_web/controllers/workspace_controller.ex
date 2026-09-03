@@ -658,6 +658,14 @@ defmodule BarkparkWeb.WorkspaceController do
     |> json(%{
       error: %{
         code: "import_constraint_violation",
+        # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
+        # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
+        # colliding key values, and that IS the deliverable: the only caller
+        # who can reach this arm is a GLOBAL admin (the router's
+        # `:require_admin` pipeline gates the whole import action) importing a
+        # bundle they supplied, who needs the constraint + values to repair it.
+        # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
+        # import 500'd with nothing but "exit status 8".
         message: Exception.message(e),
         details: %{
           pg_code: Atom.to_string(code),
