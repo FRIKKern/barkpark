@@ -63,8 +63,17 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   # missing alerts are filed as feature work, not left standing as offers.
   # Every atom here MUST have a producer — `__app.test.mjs`'s bidirectional
   # notification census reds the Console gate otherwise.
+  #
+  # cch-w29-bl — SEVEN. `deployment_refused` is the auto-deploy PREBUILT refusal
+  # (`Sites.AutoDeployWorker.refuse/1`). It lands in the SAME change as its
+  # producer, its console row, its render arms and its migration, because a
+  # toggle that reaches a person before its dispatcher does is exactly the
+  # promise-with-no-mechanism wave 30 deleted three columns to kill. It defaults
+  # ON: it is a FAILURE (a publish that did not deploy), and the moduledoc's
+  # rule above is failures-on / successes-off.
   @events ~w(provision_succeeded provision_failed
-             deployment_failed agent_reachable agent_unreachable
+             deployment_failed deployment_refused
+             agent_reachable agent_unreachable
              subscription_past_due)a
 
   schema "email_notification_settings" do
@@ -82,6 +91,7 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     field :provision_succeeded, :boolean, default: false
     field :provision_failed, :boolean, default: true
     field :deployment_failed, :boolean, default: true
+    field :deployment_refused, :boolean, default: true
     field :agent_reachable, :boolean, default: false
     field :agent_unreachable, :boolean, default: true
     field :subscription_past_due, :boolean, default: true

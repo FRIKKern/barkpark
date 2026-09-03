@@ -126,6 +126,30 @@ defmodule BarkparkCloud.Notifications.EventEmail do
        "A deployment for #{name(payload)} failed." <>
          "#{identity(payload)}#{cause_then_capture(payload)}"}
 
+  # cch-w29-bl — the auto-deploy PREBUILT refusal reaches the inbox.
+  #
+  # THE REMEDY IS NOT RE-TYPED HERE, and that is the whole point of the arm. The
+  # sentence a person must act on ("Ship new bytes with `bp cloud site deploy
+  # <site> --prebuilt <dir>`.") has exactly ONE owner —
+  # `Sites.AutoDeployWorker.refusal_detail/0`, the same string the worker writes
+  # into the deployment row's `detail` and `failure_reason`, which is what the
+  # console renders. It rides the dispatch payload as `:detail` and lands here
+  # through `detail/1`, so the inbox and the console cannot drift: a second copy
+  # of the remedy is a second thing to forget to update.
+  #
+  # `detail/1` and not `cause_then_capture/1`: this string is CONTROL-PLANE
+  # PROSE, not a provider capture, so there is no class to lead with — running it
+  # through `FailureCopy.humanize/1` would hand a failure taxonomy a sentence
+  # that has nothing to classify. `detail/1`'s `strip_ansi |> scrub` still runs
+  # (charter D354's order), which is a no-op on a constant the control plane
+  # authored and is kept rather than bypassed so this path cannot become the one
+  # unscrubbed reader of `:detail` in the email channel.
+  defp render(:deployment_refused, payload, _owner?),
+    do:
+      {"Deployment refused",
+       "A content publish for #{name(payload)} did not deploy — it was refused." <>
+         "#{identity(payload)}#{detail(payload)}"}
+
   defp render(:agent_reachable, payload, _owner?),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
 

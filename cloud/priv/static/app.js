@@ -3815,11 +3815,18 @@
   // (`Transactional.deliver_invite/1`), and the deployment-success terminal is
   // written by `Sites.Deploy.settle_live/2`, which legally re-reports live.
   // Every row below is bidirectionally census-pinned in __app.test.mjs: offer a
-  // seventh and the Console gate reds until a producer exists.
+  // row without a producer and the Console gate reds until one exists.
+  //
+  // cch-w29-bl — SEVEN NOW. `deployment_refused` is the auto-deploy PREBUILT
+  // refusal, and it is the census working in the OTHER direction: its producer
+  // (`Sites.AutoDeployWorker.refuse/1` → `Notifications.dispatch_site_event`)
+  // landed in the same change, and arm (b) reds until this row names it. This is
+  // not a promise ahead of a mechanism — it is the console catching up to one.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
+    ["deployment_refused", "Deployment refused"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
     ["subscription_past_due", "Subscription past due"]
