@@ -747,8 +747,13 @@ function paperBlock(themes = loadThemes()) {
   ];
   // The AIR scale (space.air): the beat an EVIDENCE block opens with. Emitted as
   // a ratio of `--tok-air-beat` rather than a resolved pixel, so the LAW ("evidence
-  // opens at 1.1-1.85x the paragraph beat") is what ships — retune the beat and the
-  // whole scale moves together instead of eight literals drifting apart.
+  // opens at 1.1-1.85x the ARTIFACT's air unit") is what ships — retune the unit and
+  // the whole scale moves together instead of eight literals drifting apart.
+  // `--tok-air-beat` is that ARTIFACT unit and not the reader's paragraph rhythm,
+  // which stays `--bp-para-margin-top: 12pt` (ruled 2026-09-02,
+  // task-741e0de1ddb3a482; the rig asserts the prose beat stays a clear step below
+  // the ladder's bottom rung). The token name is kept: renaming an emitted token
+  // ripples through every generated artifact for zero pixels.
   const a = tokens.space.air;
   const airVars = [
     `--tok-air-beat: ${a.beat}px;`,
