@@ -133,7 +133,20 @@ log "freshening the box to origin/main (full rebuild — this is the slow part)"
 "${SSH[@]}" bash -s <<'BAKE'
 set -euo pipefail
 cd /opt/barkpark
-timeout 120 git fetch origin --tags --prune
+# No tty on this ssh heredoc: without GIT_TERMINAL_PROMPT=0 a git that wants a
+# username blocks until the 120s timeout and reports only "timed out". The
+# failure arm names the git version because "could not read Username" is the
+# symptom BOTH of a credential problem and of the protocol-v2 refusal seen on
+# git 2.34.x boxes (deploy/cp-deploy.sh, PR #15634).
+export GIT_TERMINAL_PROMPT=0
+timeout 120 git fetch origin --tags --prune || {
+  echo "FATAL: git fetch origin --tags --prune failed on the bake box" >&2
+  echo "  git version      : $(git --version 2>&1)" >&2
+  echo "  protocol.version : $(git config --get protocol.version 2>/dev/null || echo 'unset/default')" >&2
+  echo "  A 'could not read Username' here can be the WIRE protocol, not credentials." >&2
+  echo "  Retry with: git -c protocol.version=0 fetch origin --tags --prune" >&2
+  exit 11
+}
 git -c core.hooksPath=/dev/null merge --ff-only origin/main
 timeout 2400 bash scripts/deploy-rebuild.sh
 
