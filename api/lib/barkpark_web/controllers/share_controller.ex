@@ -453,6 +453,25 @@ defmodule BarkparkWeb.ShareController do
   # for this seam specifically, by the "the chokepoint denies a malformed
   # workspace id" test in this controller's own suite. Re-adding a local uuid
   # dance here would teach the next reader that every caller must remember it.
+  # THE UN-TENANTED INSTALL IS UNSUPPORTED — no arm, on purpose
+  # (arpss-w8-followup-untenanted-install-share-tokens, ruled by main 2026-09-03).
+  #
+  # With ZERO workspaces `Auth.create_token/5` writes a token with a nil
+  # `workspace_id` and no membership row, so this predicate can never be true
+  # and all three token actions refuse. Measured on that shape (PR #15852,
+  # commit 9aaf69425): mint 422 "the workspace/project does not exist" (scope
+  # resolution runs BEFORE this predicate, so it is not a 403), list 200
+  # `{"tokens":[]}`, revoke 404 "token not found".
+  #
+  # The shape is unreachable on any supported boot, which is why nothing
+  # surfaces it: the Default Workspace is seeded by MIGRATION
+  # 20260527110200_backfill_default_tenancy (idempotent, unconditional, not a
+  # one-off task an operator can skip), every boot path migrates
+  # (`Barkpark.Release.migrate/0`, deploy/instance-deploy.sh, the Makefile), and
+  # deleting the Default Workspace removes its tokens rather than orphaning them
+  # (`api_tokens.workspace_id` is `:delete_all` since 20260527140000). Only an
+  # un-migrated DB produces it. Do NOT add an un-tenanted arm here: it would be
+  # dead code on every real install and a standing bypass on a tenanted one.
   defp workspace_admin?(conn, workspace_id),
     do: TenancyAuth.workspace_admin?(conn.assigns[:api_token], workspace_id)
 
