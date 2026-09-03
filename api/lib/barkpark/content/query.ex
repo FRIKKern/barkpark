@@ -657,8 +657,8 @@ defmodule Barkpark.Content.Query do
   #
   # WHY PROMOTING THE BARE SPELLING IS SAFE, and not the judgement call it looks
   # like: `type` is on `Barkpark.Content.Writer`'s `@reserved_in` list
-  # (writer.ex:1291) and `Map.drop`ped from `content` on EVERY write
-  # (writer.ex:1310), alongside `doc_id`, `title` and `status`. No document can
+  # (writer.ex:Writer.from_envelope/1, the `@reserved_in` list) and `Map.drop`ped
+  # from `content` on EVERY write in that same function, alongside `doc_id`, `title` and `status`. No document can
   # carry a `type` content key — verified by writing one and reading the row
   # back: `%{"_id" => "p1", "title" => "X", "type" => "park", "mood" => "sunny"}`
   # stores `content == %{"mood" => "sunny"}`. So there is no schemaless caller

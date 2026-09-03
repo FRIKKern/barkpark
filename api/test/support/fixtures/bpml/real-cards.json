@@ -1,0 +1,82 @@
+{
+  "blocks": [
+    {
+      "id": "dc-006",
+      "items": [
+        {
+          "text": "Never PATCH a published paper; createOrReplace + publish (one-batch ok); fields TOP-LEVEL; style=article; wall = desc >=20, 1-12 weighted distinct-strength registered tags; re-check the tag registry right before publish.",
+          "title": "D1 Authoring law",
+          "tone": "info"
+        },
+        {
+          "text": "Double-quote any label with structural characters — the 'no quotes' note is refuted by a parse-level proof on the live pinned version.",
+          "title": "D2 Mermaid labels",
+          "tone": "warn"
+        },
+        {
+          "text": "Every paper ends in a verdict block and carries >=1 terminal block with actually-run output; the slice gate enforces it mechanically.",
+          "title": "D3 Hollow papers bounce",
+          "tone": "ok"
+        },
+        {
+          "text": "guerrilla for read/measure, scratch boxes for destructive, prod never; diff by workspace_id, never raw counts.",
+          "title": "D4 Probe targets",
+          "tone": "warn"
+        },
+        {
+          "text": "Three enumerations (workspace_id scan + FK walk + string-keyed via slug map); exporter keys on workspace_id; completeness = information_schema + pg_constraint diff + count parity; NULL-dataset premise refuted, drifted-string vector is the real threat.",
+          "title": "D5+D6 Keystone constraints",
+          "tone": "info"
+        },
+        {
+          "text": "Router plug after ResolveWorkspace is the only gate covering content AND media; telemetry span is the free meter; registry.ex is pattern-only prior art.",
+          "title": "D7 Quota seam",
+          "tone": "info"
+        },
+        {
+          "text": "REFUTED as stated — no CDN, private cache-control on reads, ETag after the query, purge hits the consumer cache; media is the one cacheable family.",
+          "title": "D8 Edge cache",
+          "tone": "danger"
+        },
+        {
+          "text": "The honest metric is dump+restore cutover downtime — replication does not exist anywhere.",
+          "title": "D9 Live-migrate",
+          "tone": "info"
+        },
+        {
+          "text": "Self-provisions on a scratch box (no live box runs on_demand_tls); /v1/tls/ask is live on the CP; check_origin's static list is the named landmine.",
+          "title": "D10 Caddy probe",
+          "tone": "info"
+        },
+        {
+          "text": "4 rows / 81 ms / ~397 B, zero orphans — but no DELETE route and zero abuse controls; euro-0.12 is amortized VM cost only.",
+          "title": "D11 Playground",
+          "tone": "info"
+        },
+        {
+          "text": "No per-workspace dimension exists in either system; felix telemetry paper is disjoint; db_size closed at f5554231.",
+          "title": "D12 Telemetry",
+          "tone": "info"
+        },
+        {
+          "text": "Invoke ./dist/bp after cli-build; ledger sweeps use label= filters (offset is ignored; ~6-day window).",
+          "title": "D13 Tooling",
+          "tone": "warn"
+        },
+        {
+          "text": "Every paper links its trio claims both ways; keystone links felix-findings-security-tenancy; elasticity compass = shared-cells' own sentence.",
+          "title": "D14 Cross-links",
+          "tone": "ok"
+        },
+        {
+          "text": "Capstone ledger is authored at Review; 'bp hello' does not exist — onboarding measures the six real routes with bp whoami as stop-marker.",
+          "title": "D15+D16 Scope",
+          "tone": "info"
+        }
+      ],
+      "type": "cards"
+    }
+  ],
+  "paper": "perfect-plan-research-wave-2026-07-12",
+  "type": "cards"
+}
