@@ -117,4 +117,96 @@ has "$out" "INHERITED-FROM-MAIN" "14) no capture file => v1 behaviour preserved"
 has "$out" "SIGNATURE-UNVERIFIED" "14) and the notice admits the signature was not checked"
 has "$out" "RC=0" "14) rc 0"
 
+# ── 15-16. THE CAPTURE HALF (task-2dbe8808f2a6f7b5) ─────────────────────────
+# Arms 11-14 prove the signature clause DECIDES correctly once it has this PR's
+# error block. Arm 14 is why these two exist: for the whole of PR #15842 NO gate
+# step wrote the capture, so every LIVE verdict took arm 14's
+# SIGNATURE-UNVERIFIED path and behaved exactly like the step-name-only v1 the
+# 2026-09-03 miss came from. A shipped-inert discriminator is invisible to arms
+# 11-14 — they hand it the file. So arm 15 derives the gate steps from the
+# WORKFLOW TREE and asserts each one arms scripts/breaker-capture.sh.
+#
+# Derived, not listed: a hardcoded 9 in arm 10 reddened main when compose-smoke's
+# two arm jobs became one. A gate step is a step carrying the breaker's own
+# continue-on-error marker inside a workflow that has a Decide step, so a step
+# that becomes a gate step tomorrow is counted tomorrow with no edit here.
+gate_capture_audit() { # $1 = workflows dir -> "OK <n>" (rc 0) or "<m> of <n> … UNWIRED" (rc 1)
+  python3 - "$1" <<'AUDIT'
+import os, re, sys
+MARK = "main-red breaker: the Decide step below owns the verdict"
+ARM  = "scripts/breaker-capture.sh"
+d = sys.argv[1]
+gates = missing = 0
+for fn in sorted(os.listdir(d)):
+    if not fn.endswith((".yml", ".yaml")):
+        continue
+    lines = open(os.path.join(d, fn), errors="replace").read().split("\n")
+    if not any("main-red-breaker.sh" in l and "run:" in l for l in lines):
+        continue  # not one of the breaker workflows
+    for i, l in enumerate(lines):
+        if MARK not in l:
+            continue
+        gates += 1
+        j = i
+        while j < len(lines) and not re.match(r"(\s+)run:", lines[j]):
+            j += 1
+        if j >= len(lines):
+            print("MISSING %s:%d - gate step has no run: block" % (fn, i + 1)); missing += 1; continue
+        ind = len(re.match(r"(\s+)run:", lines[j]).group(1))
+        body, k = [lines[j]], j + 1
+        while k < len(lines) and (not lines[k].strip() or len(lines[k]) - len(lines[k].lstrip()) > ind):
+            body.append(lines[k]); k += 1
+        if not any(ARM in b for b in body):
+            name = next((lines[x].split("- name:")[1].strip() for x in range(i, max(i - 6, -1), -1) if "- name:" in lines[x]), "?")
+            print("MISSING %s:%d - gate step %r does not arm %s" % (fn, j + 1, name, ARM)); missing += 1
+print("OK %d gate step(s) arm the capture" % gates if not missing else "%d of %d gate step(s) UNWIRED" % (missing, gates))
+sys.exit(1 if missing or gates == 0 else 0)
+AUDIT
+}
+out="$(gate_capture_audit "$ROOT/.github/workflows" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then ok "15) every gate step of every breaker job arms the capture — $out"; else bad "15) unwired gate step(s): $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"; fi
+# 15b. MUTATION: strip ONE step's capture in a COPY of the tree. The audit must
+#      red and name it — a derivation that cannot fail is not a check.
+mut="$TMP/wf-mut"; rm -rf "$mut"; mkdir -p "$mut"; cp "$ROOT"/.github/workflows/*.yml "$mut/" 2>/dev/null
+victim="$(grep -ln 'main-red breaker: the Decide step below owns the verdict' "$mut"/*.yml 2>/dev/null | head -1)"
+if [ -n "$victim" ] && grep -q 'scripts/breaker-capture.sh' "$victim"; then
+  python3 - "$victim" <<'MUTATE'
+import sys
+p = sys.argv[1]; lines = open(p).read().split("\n")
+for i, l in enumerate(lines):
+    if "scripts/breaker-capture.sh" in l and "exec bash" in l:
+        del lines[i]; break
+open(p, "w").write("\n".join(lines))
+MUTATE
+  mout="$(gate_capture_audit "$mut" 2>&1)"; mrc=$?
+  if [ "$mrc" -ne 0 ]; then ok "15b) MUTATION: removing one gate step's capture reds the audit"; else bad "15b) MUTATION SURVIVED: audit green with a capture removed — $mout"; fi
+  has "$mout" "UNWIRED" "15b) and it names how many"
+else
+  bad "15b) could not build the mutation (no wired gate step found in $victim)"
+fi
+# 16. THE EXIT-CODE INVARIANT. A capture wrapper that swallows a red is worse
+#     than no capture, so breaker-capture.sh re-raises the step's status
+#     verbatim, and appends ONLY when the step failed: a GREEN tripwire
+#     self-test that prints the word FAIL would otherwise poison the signature
+#     set and turn a genuinely inherited red into the author's own.
+CAPSH="$ROOT/scripts/breaker-capture.sh"
+if [ -f "$CAPSH" ]; then
+  cap="$TMP/cap.txt"; : > "$cap"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "FAIL: planted red at docs/x.md:41"' 'exit 3' > "$TMP/red-step.sh"
+  o="$( (BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/red-step.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=3" "16) a failing step's exit code passes through UNCHANGED (3, not 0 and not 1)"
+  has "$o" "FAIL: planted red" "16) the step's own output still reaches the job log"
+  grep -q 'FAIL: planted red at docs/x.md:41' "$cap" && ok "16) the failing step's error block landed in the capture" || bad "16) capture empty after a red"
+  : > "$cap"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "tripwire OK — FAIL was never planted"' 'exit 0' > "$TMP/green-step.sh"
+  o="$( (BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/green-step.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=0" "16) a passing step still exits 0"
+  [ ! -s "$cap" ] && ok "16) a PASSING step writes nothing (green output cannot poison the signature)" || bad "16) a passing step polluted the capture: $(cat "$cap")"
+  : > "$cap"; printf '%s\n' '#!/usr/bin/env bash' 'echo "armed=${BREAKER_CAPTURE_ARMED:-unset}"' > "$TMP/armed-step.sh"
+  o="$(BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/armed-step.sh" 2>&1)"
+  has "$o" "armed=1" "16) the child sees BREAKER_CAPTURE_ARMED, so the workflow guard cannot recurse"
+else
+  bad "16) scripts/breaker-capture.sh is missing"
+fi
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
