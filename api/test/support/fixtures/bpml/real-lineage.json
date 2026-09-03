@@ -1,0 +1,72 @@
+{
+  "blocks": [
+    {
+      "id": "auto:sequence",
+      "nodes": [
+        {
+          "body": "paper · feat",
+          "overline": "31 May · 11:11 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/9cef6de54c96ad4980796582828a0b2f1de5e06e",
+          "title": "View↔Edit parity — per-block-type Edit CSS rules"
+        },
+        {
+          "body": "paper · fix",
+          "overline": "31 May · 09:32 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/98c52febff1636cca65f08745d57728bfb2897a7",
+          "title": "zero heading margins — block container owns rhythm"
+        },
+        {
+          "body": "render · fix",
+          "overline": "31 May · 09:24 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/01f78950993f8697f7f51b17577c3fdcc0574402",
+          "title": "make article-mode inline styles respect dark mode"
+        },
+        {
+          "body": "render · fix",
+          "overline": "31 May · 02:29 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/64b8d061093975e388a710216c26ae0a74861a43",
+          "title": "tolerate scalar inline nodes in compose_inline"
+        },
+        {
+          "body": "render · fix",
+          "overline": "31 May · 02:17 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/060bcf7a610fad4ec115422c6a9b56846fbafcd4",
+          "title": "parity gaps — callout 500, table empty cells, inline marks, semantic lists"
+        },
+        {
+          "body": "render · fix",
+          "overline": "31 May · 01:13 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/2f44786e6b0b5092cbf6f70a2dca657c173dafac",
+          "title": "real <p> for paragraph/ingress/byline in article mode + revert heading margins"
+        },
+        {
+          "body": "studio · fix",
+          "overline": "31 May · 01:03 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/dd41f33d4a1fd5b0e28c57e247a82667b1dab5f1",
+          "title": "render paper view in :article style — real h1/h2, not bold spans"
+        },
+        {
+          "body": "render · fix",
+          "overline": "31 May · 00:48 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/2fcca3acf9bcd2c36bd560b358fd7b0483f3930b",
+          "title": "match View pane heading typography to the Edit pane"
+        },
+        {
+          "body": "studio · feat",
+          "overline": "30 May · 20:58 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/6db69313248e5997bc5c3e0ecc94fb4d4daf0a84",
+          "title": "live edit-mode block updates via push_event → WC setter"
+        },
+        {
+          "body": "papers/intents · fix",
+          "overline": "30 May · 19:30 UTC",
+          "source": "https://github.com/FRIKKern/barkpark/commit/f430c09612e3e42cd87d6316346507b3a2cc22ce",
+          "title": "mark_processed returns 404 JSON for bad ids"
+        }
+      ],
+      "type": "lineage"
+    }
+  ],
+  "paper": "barkpark-changelog-2026-05",
+  "type": "lineage"
+}
