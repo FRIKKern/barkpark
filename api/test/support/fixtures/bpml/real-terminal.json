@@ -1,0 +1,159 @@
+{
+  "blocks": [
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ curl -sI https://guerrilla.barkpark.cloud/v1/data/query/production/post"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "HTTP/2 404"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "cache-control: max-age=0, private, must-revalidate"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "via: 1.1 Caddy"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "x-content-type-options: nosniff"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ curl -sI https://guerrilla.barkpark.cloud/api/schemas"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "HTTP/2 200"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "cache-control: max-age=0, private, must-revalidate"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "via: 1.1 Caddy"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ curl -sI https://guerrilla.barkpark.cloud/v1/capabilities"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "HTTP/2 200"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "cache-control: max-age=0, private, must-revalidate"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "etag: W/\"caps-d231ce6048068d4f\""
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "via: 1.1 Caddy"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "footer": "private + must-revalidate on every read path — a shared cache is explicitly forbidden from storing these",
+      "id": "block-10",
+      "live": false,
+      "title": "read headers · 2026-07-12 · curl -sI (guerrilla)",
+      "type": "terminal"
+    }
+  ],
+  "paper": "edge-cache-share",
+  "type": "terminal"
+}
