@@ -38,7 +38,7 @@ defmodule Barkpark.Release do
   # Inline rather than a `.sobelow-skips` row on purpose: a baseline entry is
   # pinned to a LINE, so any edit above the call silently kills the waiver and
   # the finding returns as new — which is exactly how the row this replaces
-  # (release.ex:23, RCE.CodeModule) died. The annotation binds by AST adjacency
+  # (the `RCE.CodeModule` row for `seed/0`) died. The annotation binds by AST adjacency
   # and survives line moves.
   # sobelow_skip ["RCE.CodeModule"]
   def seed do
