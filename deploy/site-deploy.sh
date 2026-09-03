@@ -680,7 +680,7 @@ if [ "$MODE" = selftest ]; then
   # 2026-09-03 at origin/main 0cb244bfb:
   #
   #   MIN  =  67  every optional block skipped (no python3/curl, no flock, no api/)
-  #   FULL = 391  all blocks run — this is what CI gets
+  #   FULL = 405  all blocks run — this is what CI gets
   #
   # FULL applies when BARKPARK_SELFTEST_REQUIRE_E2E=1, which is exactly the venue
   # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine self-test",
@@ -692,7 +692,7 @@ if [ "$MODE" = selftest ]; then
   # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
   # the same commit. A red here is either a missing block or an unraised floor.
   SELFTEST_FLOOR_MIN=67
-  SELFTEST_FLOOR_FULL=391
+  SELFTEST_FLOOR_FULL=405
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
