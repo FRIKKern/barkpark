@@ -1345,14 +1345,18 @@ $class"
     case "$class" in
       THROUGH)
         through=$((through + 1))
-        through_names="$through_names $bpath"
+        # THE SUMMARY NAMES LEDGER KEYS, THE COLUMN NAMES PATHS. Both ledgers
+        # are keyed by basename, so the two summary lists below stay basenames:
+        # a reader who takes a name from here and greps the ledger for it finds
+        # the row, and the table above is where the path lives.
+        through_names="$through_names $b"
         ;;
       IN-BEAM-REQUIRED) inbeam=$((inbeam + 1)) ;;
       DEAD-DECLARATION) dead=$((dead + 1)) ;;
       LIBRARY-MODULE) libmod=$((libmod + 1)) ;;
       UNDISPOSED)
         undisposed=$((undisposed + 1))
-        undisposed_names="$undisposed_names $bpath"
+        undisposed_names="$undisposed_names $b"
         ;;
       ERROR)
         errors=$((errors + 1))
