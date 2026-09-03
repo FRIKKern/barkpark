@@ -86,7 +86,22 @@ defmodule BarkparkCloud.Notifications.Withhold do
   # caller cannot reach the quiet path by inventing a name.
   @consented_reasons [:no_recipient_by_construction]
 
-  @reasons [:reap_alert_cap, :dispatch_crashed, :chat_enqueue_failed, :chat_channel_gone] ++
+  #
+  # cch-w31-bl: `:deployment_refusal_unrecorded`. `Sites.AutoDeployWorker.refuse/1`
+  # refuses a content publish and mints a `cancelled` deployment row as the
+  # console's trace of it. When that INSERT fails the transaction rolls back, the
+  # publish is still refused, and there is no row for the refusal alert to name —
+  # so the alert is not sent. Positioned to send, did not send, wrote nothing:
+  # the definition at the top of this moduledoc, exactly. It gets a name here so
+  # the person reads a `suppressed` row instead of watching their content never
+  # go live, silently, forever.
+  @reasons [
+             :reap_alert_cap,
+             :dispatch_crashed,
+             :chat_enqueue_failed,
+             :chat_channel_gone,
+             :deployment_refusal_unrecorded
+           ] ++
              @consented_reasons
 
   @type reason ::
@@ -94,6 +109,7 @@ defmodule BarkparkCloud.Notifications.Withhold do
           | :dispatch_crashed
           | :chat_enqueue_failed
           | :chat_channel_gone
+          | :deployment_refusal_unrecorded
           | :no_recipient_by_construction
 
   @doc """
@@ -143,6 +159,19 @@ defmodule BarkparkCloud.Notifications.Withhold do
     do:
       "Withheld: the chat channel this alert was routed to was disconnected before " <>
         "it could be sent, so it was not delivered there."
+
+  # CLOSED VOCABULARY, no interpolation — the changeset error that failed the
+  # insert never reaches this sentence. It names the DECISION (the publish was
+  # refused and did not deploy) and the ONE action that changes the outcome,
+  # which is the same action `Sites.AutoDeployWorker.refusal_detail/0` names on
+  # the deployment row a reader would have had if the insert had worked.
+  def label(:deployment_refusal_unrecorded),
+    do:
+      "Withheld: a content publish was REFUSED because this site's live release " <>
+        "was uploaded, and the refusal could not be recorded — so no alert was " <>
+        "sent about it and the publish is not in the deployment list. The content " <>
+        "did not go live. Ship new bytes with the prebuilt site deploy command to " <>
+        "publish them."
 
   def label(:no_recipient_by_construction),
     do:
