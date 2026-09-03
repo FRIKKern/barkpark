@@ -4,7 +4,7 @@ defmodule BarkparkWeb.AuthPasswordTest do
   `AuthGdprTest`'s shape for `/v1/auth/erase` — same re-auth pattern, same
   "does it actually take effect" style of assertion.
   """
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Accounts
 
@@ -17,14 +17,14 @@ defmodule BarkparkWeb.AuthPasswordTest do
   defp session_token(email) do
     {:ok, _u} = Accounts.register_user(%{email: email, password: @password})
 
-    build_conn()
+    scoped_conn()
     |> json_conn()
     |> post("/v1/auth/login", Jason.encode!(%{email: email, password: @password}))
     |> json_response(201)
     |> Map.fetch!("token")
   end
 
-  defp authed(token), do: build_conn() |> put_req_header("authorization", "Bearer #{token}")
+  defp authed(token), do: scoped_conn() |> put_req_header("authorization", "Bearer #{token}")
 
   describe "PATCH /v1/auth/password" do
     test "changes the password with current-password reauth, then the session is dead",
@@ -46,7 +46,7 @@ defmodule BarkparkWeb.AuthPasswordTest do
       assert authed(token) |> get("/v1/auth/me") |> json_response(401)
 
       # the old password no longer logs in...
-      assert build_conn()
+      assert scoped_conn()
              |> json_conn()
              |> post(
                "/v1/auth/login",
@@ -55,7 +55,7 @@ defmodule BarkparkWeb.AuthPasswordTest do
              |> json_response(401)
 
       # ...but the NEW one does.
-      assert build_conn()
+      assert scoped_conn()
              |> json_conn()
              |> post(
                "/v1/auth/login",
@@ -77,7 +77,7 @@ defmodule BarkparkWeb.AuthPasswordTest do
       # still alive, and the OLD password still works.
       assert authed(token) |> get("/v1/auth/me") |> json_response(200)
 
-      assert build_conn()
+      assert scoped_conn()
              |> json_conn()
              |> post(
                "/v1/auth/login",

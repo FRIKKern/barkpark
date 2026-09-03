@@ -6,7 +6,7 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
   except the compliance paths (/me, /logout, enrolment), and the gate opens
   the moment a factor is armed. With no requiring org: byte-identical.
   """
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).
@@ -22,7 +22,7 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
   defp post_json(conn, path, body), do: conn |> json_conn() |> post(path, Jason.encode!(body))
 
   defp authed(token),
-    do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+    do: scoped_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
 
   defp register_and_login!(conn, email) do
     post_json(conn, "/v1/auth/register", %{email: email, password: @password})

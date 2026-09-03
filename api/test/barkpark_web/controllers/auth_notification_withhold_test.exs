@@ -9,7 +9,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
   "the operator-visible record must differ". Both must hold at once, or the fix
   has either leaked account existence or achieved nothing.
   """
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   import Ecto.Query
 
@@ -59,7 +59,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
       user("known@example.com")
 
       known = post_json(conn, "/v1/auth/request-reset", %{email: "known@example.com"})
-      unknown = post_json(build_conn(), "/v1/auth/request-reset", %{email: "ghost@example.com"})
+      unknown = post_json(scoped_conn(), "/v1/auth/request-reset", %{email: "ghost@example.com"})
 
       assert known.status == unknown.status
       assert known.resp_body == unknown.resp_body
@@ -87,7 +87,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
       before = length(withhold_events())
 
       for n <- 1..10 do
-        post_json(build_conn(), "/v1/auth/request-magic-link", %{email: "ghost#{n}@example.com"})
+        post_json(scoped_conn(), "/v1/auth/request-magic-link", %{email: "ghost#{n}@example.com"})
       end
 
       # Consented: there is nobody the notification was withheld FROM, so there

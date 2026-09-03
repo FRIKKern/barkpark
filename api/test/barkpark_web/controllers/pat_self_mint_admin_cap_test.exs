@@ -64,7 +64,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
   | `api/priv/**` | — | **NO CALL EXISTS.** Zero hits. |
   | `create_personal_access_token/3` in `cloud/lib/barkpark_cloud/accounts.ex` | separate function in a separate OTP app (`BarkparkCloud.Accounts`), not this one | out of scope for this row; its own role gate is `pat_abilities_allowed?/2` in the same file |
   """
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures
@@ -94,7 +94,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
   # ruling governs. Returns {raw_token, personal_access_token_json}.
   defp self_mint(user) do
     conn =
-      build_conn()
+      scoped_conn()
       |> bearer(user_bearer(user))
       |> post("/v1/auth/tokens", %{"name" => uniq("cli")})
 
@@ -137,7 +137,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
       {raw, _pat} = self_mint(owner)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> bearer(raw)
         |> get("/v1/secrets/#{secret_name}")
 
@@ -165,7 +165,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
       assert pat["permissions"] == ["read"]
 
       conn =
-        build_conn()
+        scoped_conn()
         |> bearer(raw)
         |> get("/v1/secrets/#{secret_name}")
 
@@ -203,7 +203,7 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
                )
 
       body =
-        build_conn()
+        scoped_conn()
         |> bearer(raw)
         |> get("/v1/secrets/#{secret_name}")
         |> json_response(200)

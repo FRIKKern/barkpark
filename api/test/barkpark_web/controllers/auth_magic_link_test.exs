@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.AuthMagicLinkTest do
   @moduledoc "The passwordless magic-link HTTP surface (era-w2-passwordless)."
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.UserEmailToken
@@ -61,7 +61,7 @@ defmodule BarkparkWeb.AuthMagicLinkTest do
       token = issue_link("once@example.com")
 
       assert conn |> post_json("/v1/auth/magic-login", %{token: token}) |> json_response(201)
-      resp2 = post_json(build_conn(), "/v1/auth/magic-login", %{token: token})
+      resp2 = post_json(scoped_conn(), "/v1/auth/magic-login", %{token: token})
       assert json_response(resp2, 401)["error"]["code"] == "invalid_token"
     end
 

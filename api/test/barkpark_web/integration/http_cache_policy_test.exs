@@ -121,7 +121,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
     test "the one-time airdrop claim is never stored, even on the anonymous bounce" do
       # Anonymous → the /login bounce. `no_store/1` runs BEFORE the branch, so
       # this reaches the header without needing a real grant or a session.
-      conn = get(build_conn(), "/grant/not-a-real-token")
+      conn = get(scoped_conn(), "/grant/not-a-real-token")
 
       assert redirected_to(conn) =~ "/login"
       assert get_resp_header(conn, "cache-control") == @no_store
@@ -177,7 +177,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       file = insert_media_file!(ws, project, "media-ctl")
       use_s3_backend!()
 
-      conn = get(build_conn(), "/media/files/" <> file.path)
+      conn = get(scoped_conn(), "/media/files/" <> file.path)
 
       assert conn.status == 302
       assert [location] = get_resp_header(conn, "location")
@@ -219,7 +219,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
       use_s3_backend!()
 
-      conn = get(build_conn(), "/s/#{minted["token"]}")
+      conn = get(scoped_conn(), "/s/#{minted["token"]}")
 
       assert conn.status == 302
       assert get_resp_header(conn, "cache-control") == @redirect_policy
@@ -264,7 +264,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       # backend's serve decision, not a missing-file fallback.
       asset_id =
         BarkparkWeb.TicketsAttachmentsController.create(
-          assign(build_conn(), :ticket_key, key),
+          assign(scoped_conn(), :ticket_key, key),
           %{"id" => ticket, "file" => png_upload()}
         )
         |> json_response(201)
@@ -273,7 +273,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       use_s3_backend!()
 
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{"api_token" => operator})
         |> get("/v1/tickets/inbox/#{ticket}/attachments/#{asset_id}")
 

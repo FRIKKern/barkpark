@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.SamlControllerTest do
   @moduledoc "SAML SP HTTP surface — start redirect + ACS session mint + JIT."
-  use BarkparkWeb.ConnCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
   # TOTP codes come from the window-stable helper ONLY — a code minted inline
   # can expire in the gap before the server validates it (honest-gates S1).
@@ -217,14 +217,14 @@ defmodule BarkparkWeb.SamlControllerTest do
     setup_conn(i.cert_pem)
 
     # Bad base64 → 400, audited.
-    assert build_conn()
+    assert scoped_conn()
            |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => "!!!not-base64!!!"})
            |> json_response(400)
 
     # Forged signature (attacker key, victim connection) → 401, audited.
     attacker = idp()
 
-    assert build_conn()
+    assert scoped_conn()
            |> post("/v1/auth/saml/#{@slug}/acs", %{
              "SAMLResponse" =>
                signed_response("victim@samlctrl.com", attacker.key, attacker.cert_der)
@@ -323,7 +323,7 @@ defmodule BarkparkWeb.SamlControllerTest do
 
       # The IdP front-channels its signed LogoutRequest to our SLO endpoint.
       resp =
-        build_conn()
+        scoped_conn()
         |> post("/v1/auth/saml/#{@slug}/slo", %{
           "SAMLRequest" =>
             signed_logout_request("slo@samlctrl.com", i.key, i.cert_der, session_index: "idx-1")
@@ -375,7 +375,7 @@ defmodule BarkparkWeb.SamlControllerTest do
 
       attacker = idp()
 
-      assert build_conn()
+      assert scoped_conn()
              |> post("/v1/auth/saml/#{@slug}/slo", %{
                "SAMLRequest" =>
                  signed_logout_request("victim@samlctrl.com", attacker.key, attacker.cert_der,
@@ -402,7 +402,7 @@ defmodule BarkparkWeb.SamlControllerTest do
         |> Map.fetch!("token")
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{token}")
         |> delete("/v1/auth/logout")
         |> json_response(200)
@@ -428,7 +428,7 @@ defmodule BarkparkWeb.SamlControllerTest do
         |> Map.fetch!("token")
 
       body =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{token}")
         |> delete("/v1/auth/logout")
         |> json_response(200)
