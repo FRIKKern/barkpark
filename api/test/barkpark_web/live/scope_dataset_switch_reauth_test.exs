@@ -97,9 +97,7 @@ defmodule BarkparkWeb.Live.ScopeDatasetSwitchReauthTest do
       )
 
     # ONLY `production` is `:docs`-shared read-only. `staging` is not shared.
-    Barkpark.SharingFixtures.plant_shares!(
-      "#{ws.slug}/#{proj.slug}/#{@shared_dataset}:docs:read"
-    )
+    Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@shared_dataset}:docs:read")
 
     {:ok, conn: conn, ws: ws, proj: proj}
   end
