@@ -711,14 +711,27 @@ defmodule BarkparkCloud.Accounts do
   # update_all never raises on a zero-row match, so a token revoked between the
   # verify SELECT and this UPDATE is a harmless no-op — the return contract
   # (User | nil) is unaffected.
+  #
+  # FAIL-SOFT, in the same shape as `touch_pat_last_used/1`'s rescue. A zero-row
+  # match is a no-op, but the statement itself can still RAISE — a pool timeout,
+  # a dropped connection, a deadlock. Since the wave-8 fix this write runs inside
+  # a `Plug.Conn.register_before_send/2` callback, and an exception raised there
+  # ESCAPES `send_resp`: the request was already SERVED, and a transient DB
+  # hiccup while stamping "last seen" would convert that served 200 into a 500.
+  # The column answers "is this token dead?", never a billed count — so a failed
+  # stamp is logged and swallowed, never charged to the person's response.
   defp touch_last_used(hash, now) do
     cutoff = DateTime.add(now, -@session_last_used_throttle_seconds, :second)
 
-    from(t in UserToken,
-      where: t.token_hash == ^hash,
-      where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
-    )
-    |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    try do
+      from(t in UserToken,
+        where: t.token_hash == ^hash,
+        where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
+      )
+      |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    rescue
+      e -> Logger.warning("touch_session_last_used failed: #{inspect(e)}")
+    end
 
     :ok
   end
