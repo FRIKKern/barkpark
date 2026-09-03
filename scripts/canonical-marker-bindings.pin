@@ -45,6 +45,7 @@ slug-resolve	resolve_doc
 status-vocabulary	role_for_status
 studio-nav-model	default_top_menu_entries
 studio-scope-resolution	resolve_scope
+studio-shell-page-scroller	studio_page_scroll
 task-chip-resolve	resolve_wikilink
 task-claimable-statuses	claimable_statuses
 task-criteria-progress	progress
