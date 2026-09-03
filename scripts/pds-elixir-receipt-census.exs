@@ -3955,10 +3955,26 @@ defmodule PDS.Census do
       |> Enum.map(&Map.fetch!(&1, @evidence_depth))
       |> Enum.sort_by(&{&1.path, &1.line})
 
-    budget_only = at_ev.unrouted - length(still)
+    budget_only =
+      per_site
+      |> Enum.filter(&(unrouted?.(Map.fetch!(&1, @evidence_depth)) and not unrouted?.(Map.fetch!(&1, @route_depth))))
+      |> Enum.map(&Map.fetch!(&1, @evidence_depth))
+      |> Enum.sort_by(&{&1.path, &1.line})
 
     p("  UNROUTED SPLITS IN TWO, AND ONLY ONE HALF IS ABOUT THE CODE.")
-    p("      #{budget_only} of #{at_ev.unrouted} unrouted @#{@evidence_depth} ROUTE at @route_depth #{@route_depth} — the budget, not the code.")
+    p("      #{length(budget_only)} of #{at_ev.unrouted} unrouted @#{@evidence_depth} ROUTE at @route_depth #{@route_depth} — the budget, not the code:")
+
+    budget_only
+    |> Enum.group_by(& &1.path)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.each(fn {path, sites} ->
+      lines = sites |> Enum.map(&to_string(&1.line)) |> Enum.join(", ")
+      p("        #{short(path)}  :#{lines}  (#{length(sites)} site(s))")
+    end)
+
+    p("      PDS-D480 left these NOT EXPLAINED and named a third resolver blind spot as a")
+    p("      live possibility. They are the depth budget: every one of them reaches a Repo")
+    p("      verb once the route is allowed to close. That is the split, doing its job.")
     p("      #{length(still)} of #{at_ev.unrouted} are STILL unrouted at #{@route_depth}. THAT is the residual FINDING:")
 
     still
@@ -8581,6 +8597,54 @@ defmodule PDS.Census do
     # GONE the first time `unrouted` moved — loud rather than wrong, and still a red this
     # arm has no business printing.
     # The FAIL sentence carries the re-derivation command so the repair is one run.
+    # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
+    #
+    # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
+    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
+    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
+    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
+    # one-clause mutation and named in the output. A drift row rides along as the second
+    # half: killing a live edge cannot leave the population untouched.
+    #
+    # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
+    # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
+    # neither, so a mutant there would disable a resolution that resolved nothing — PDS-D541's
+    # unmutatability wearing a new name. Thirteen cases already ride `corpus: :repo`.
+    #
+    # THE ANCHOR IS SPLIT so the mut tuple does not match ITSELF; apply_mutation/2 refuses
+    # an ambiguous anchor and a literal that occurs twice IS one.
+    %{
+      name: "CAPTURE-EDGE-FIRES",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"defp capture_arity({:__block__, _, [n]}) when is_integer(n), " <> "do: n",
+         "defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: nil"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "the route relation closes at 6 on this run",
+        "FAIL  D448-DRIFT-REFUSES"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+    },
+    %{
+      name: "CONCAT-BINDS-THE-VARIABLE",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), " <> "do: a ++ b",
+         "defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), do: (a && b && nil)"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "the route relation closes at 6 on this run",
+        "FAIL  D448-DRIFT-REFUSES"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
     %{
       name: "D448-BASELINE-REFUSES",
       corpus: :repo,
