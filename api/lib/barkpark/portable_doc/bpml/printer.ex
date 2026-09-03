@@ -241,7 +241,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "cards"} = b, d) do
     items =
       Enum.map(Map.get(b, "items", []), fn i ->
-        "#{pad(d + 1)}<card#{attr_str(i, ["title", "tone"])}>" <>
+        "#{pad(d + 1)}<card#{attr_str(i, ["title", "tone", "href"])}>" <>
           "#{esc(plain_alias(i, ["text", "body"]) || "")}</card>"
       end)
 
@@ -321,7 +321,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
         "#{pad(d + 1)}<bar#{attr_str(bar, ["label", "value"])}/>"
       end)
 
-    wrap("bar-chart", attr_str(b, ["id", "values"]), bars, d)
+    wrap("bar-chart", attr_str(b, ["id", "title", "values"]), bars, d)
   end
 
   # `lineage` — dated nodes on a line (the jarl figure family). `source` is
@@ -472,13 +472,21 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   # One `<stat>` element — a `stats` item and a `stat-grid` item are THE SAME
   # shape (compose.ex renders both through one clause, `stat-grid` being the
-  # accepted alias), so they share one spelling. `caption`/`note` are the two
-  # attrs only the grid uses today; a `stats` item that grows one prints it
-  # rather than dropping it. A non-dict item takes the ONE typed refusal.
-  defp stat_item(%{} = i),
-    do:
-      "<stat#{attr_str(i, ["label", "value", "denom", "caption", "note"])}>" <>
-        "#{esc(Map.get(i, "body", ""))}</stat>"
+  # accepted alias), so they share one spelling.
+  #
+  # `caption` (4 items) and `note` (4) have NO place in this element and are
+  # not quietly dropped: the item refuses. Widening `<stat>`'s attribute row is
+  # a change to the published `/v1/capabilities` grammar contract (bpml.ex
+  # `vocabulary/0` — clients generate types off its digest), which is a
+  # deliberate decision someone should make on purpose, not a side effect of
+  # widening the kernel. Until then the honest answer is the typed refusal.
+  defp stat_item(%{} = i) do
+    if Map.get(i, "caption") in [nil, ""] and Map.get(i, "note") in [nil, ""] do
+      "<stat#{attr_str(i, ["label", "value", "denom"])}>#{esc(Map.get(i, "body", ""))}</stat>"
+    else
+      raise(UnprintableError.new(:block, "stat"))
+    end
+  end
 
   defp stat_item(_other), do: raise(UnprintableError.new(:block, "stat-grid"))
 

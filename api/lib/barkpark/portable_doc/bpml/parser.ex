@@ -29,7 +29,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h3" => ~w(id),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
-    "stat" => ~w(label value denom caption note),
+    "stat" => ~w(label value denom),
     # The grid/widget tier (task-3b08cbd8a16ad48e criterion 1) — the corpus's
     # biggest unspellable types and their child elements. `stat` above is
     # SHARED by <stats> and <stat-grid>: the renderer composes both through one
@@ -41,7 +41,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     # ONE `<card>` element, two positions: a `<cards>` grid item (title/tone +
     # a text body) and the standalone `card` WIDGET (id/tone/span + named
     # <slot> children). The tag's row is the union of both.
-    "card" => ~w(id title tone span),
+    "card" => ~w(id title tone span href),
     "slot" => ~w(name),
     "quote" => ~w(id cite),
     "terminal" => ~w(id title footer live),
@@ -52,7 +52,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "blockquote" => ~w(id cite),
     "toc" => ~w(id depth numbered),
     "entry" => ~w(level anchor),
-    "bar-chart" => ~w(id values),
+    "bar-chart" => ~w(id title values),
     "bar" => ~w(label value),
     "lineage" => ~w(id),
     "lineage-node" => ~w(title overline source),
@@ -380,6 +380,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           %{}
           |> put_attr("title", card_attrs)
           |> put_attr("tone", card_attrs)
+          |> put_attr("href", card_attrs)
           |> then(&if body == "", do: &1, else: Map.put(&1, "text", body))
 
         {:ok, item, cur}
@@ -567,6 +568,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       block =
         %{"type" => "bar-chart", "bars" => bars}
         |> put_attr("id", attrs)
+        |> put_attr("title", attrs)
         |> put_bool_attr("values", attrs)
 
       {:ok, block, cur}
@@ -720,8 +722,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # body→flat `text`), empty body dropped (the stats precedent).
   # ONE `<stat>` item, shared by `<stats>` and `<stat-grid>` — the renderer
   # composes both through a single clause (`t in ["stats", "stat-grid"]`), so
-  # one element spells both. `caption`/`note` are the two attrs only the grid
-  # uses today; a `stats` item that grows one reads it rather than dropping it.
+  # one element spells both. The grid's `caption`/`note` are NOT in this row:
+  # widening it changes the published /v1/capabilities grammar digest, so the
+  # printer refuses an item carrying them rather than dropping them silently.
   defp stat_item_builder(stat_attrs, sc, cur) do
     with {:ok, body, cur} <- tag_text("stat", sc, cur) do
       item =
@@ -729,8 +732,6 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> put_attr("value", stat_attrs)
         |> put_attr("label", stat_attrs)
         |> put_attr("denom", stat_attrs)
-        |> put_attr("caption", stat_attrs)
-        |> put_attr("note", stat_attrs)
         |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
       {:ok, item, cur}

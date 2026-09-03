@@ -1,0 +1,64 @@
+{
+  "blocks": [
+    {
+      "description": "Each week has its own argument: what moved, why it mattered, and where to read the complete edition.",
+      "id": "auto:archive-1",
+      "layout": "chapters",
+      "refs": [
+        {
+          "description": "Release failures became easier to see and understand, so a troubled rollout no longer looks healthy or mysteriously unfinished.",
+          "eyebrow": "Week 31 · 27 Jul–02 Aug",
+          "meta": "496 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-w31",
+          "title": "Barkpark Cloud makes releases easier to trust"
+        },
+        {
+          "description": "Terminal commands became clearer about what happened, what is still running, and what needs attention next.",
+          "eyebrow": "Week 32 · 03 Aug–09 Aug",
+          "meta": "452 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-w32",
+          "title": "The terminal explains everyday work more clearly"
+        },
+        {
+          "description": "Large pieces of work became easier to begin, follow, and hand over without losing the thread that explains why they exist.",
+          "eyebrow": "Week 33 · 10 Aug–16 Aug",
+          "meta": "40 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-w33",
+          "title": "Long-running work becomes easier to start and follow"
+        },
+        {
+          "description": "Missing or failed results now say what happened instead of dressing an error up as an empty or successful page.",
+          "eyebrow": "Week 34 · 17 Aug–23 Aug",
+          "meta": "715 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-w34",
+          "title": "Failures now explain what happened"
+        },
+        {
+          "description": "Release checks became harder to fool, including empty runs that once looked reassuring without proving anything.",
+          "eyebrow": "Week 35 · 24 Aug–30 Aug",
+          "meta": "209 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-w35",
+          "title": "Quality checks now refuse empty test runs"
+        },
+        {
+          "description": "Work focused on returning the full picture instead of something partial or misleading. People can trust that what they see is the whole story.",
+          "eyebrow": "Week 36 · 31 Aug–06 Sep",
+          "featured": true,
+          "meta": "115 verified changes",
+          "prefer_authored_copy": true,
+          "slug": "barkpark-changelog-2026-w36",
+          "title": "A bare-string was spread character by character, so the page never revalidated"
+        }
+      ],
+      "title": "August, week by week",
+      "type": "paper-links"
+    }
+  ],
+  "paper": "barkpark-changelog-2026-08",
+  "type": "paper-links"
+}
