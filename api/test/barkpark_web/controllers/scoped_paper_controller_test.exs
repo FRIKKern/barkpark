@@ -48,18 +48,12 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
   # Mirror sharing_test.exs's helper: stash a parsed :shares config for this
   # test only and restore the prior value on exit.
-  defp with_shares(env_string) do
-    prior = Application.get_env(:barkpark, :shares)
-    Application.put_env(:barkpark, :shares, Sharing.parse(env_string))
-
-    on_exit(fn ->
-      if is_nil(prior),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior)
-    end)
-
-    :ok
-  end
+  # arpss-w8: shares are planted as STORED rows via `Barkpark.SharingFixtures`,
+  # so `Sharing.refresh/0` — fired by add_share/remove_share, POST/DELETE
+  # /v1/shares and the Studio shares handlers — REBUILDS this fixture instead of
+  # ERASING it (a bare `put_env(:barkpark, :shares, …)` is in neither refresh
+  # input). Snapshots and restores `:shares_env` as well as `:shares`.
+  defp with_shares(env_string), do: Barkpark.SharingFixtures.plant_shares!(env_string)
 
   describe "GET /w/:ws/p/:project/papers/:slug — (a) shared :papers scope" do
     test "returns 200 and renders the paper for an anonymous caller", %{
@@ -158,8 +152,10 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       ws: ws,
       project: project
     } do
-      # No with_shares/1 call → :shares unset → Default-OFF. Reset any leakage.
-      Application.delete_env(:barkpark, :shares)
+      # No with_shares/1 call → Default-OFF. arpss-w8: clear_shares!/0 empties the
+      # env baseline AND every STORED row (a bare delete_env leaves rows that the
+      # next Sharing.refresh/0 puts straight back), and restores both keys.
+      Barkpark.SharingFixtures.clear_shares!()
       refute Sharing.active?()
 
       conn = get(conn, paper_path(ws, project, "shared-paper"))

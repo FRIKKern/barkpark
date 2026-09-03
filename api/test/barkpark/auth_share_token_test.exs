@@ -15,23 +15,23 @@ defmodule Barkpark.AuthShareTokenTest do
   alias Barkpark.Repo
 
   import Barkpark.TenancyFixtures
+  import Barkpark.SharingFixtures
   import Ecto.Query
 
   setup do
     ws = create_workspace!("edit-tok-ws")
     proj = create_project!(ws, "edit-tok-proj")
 
-    prior = Application.get_env(:barkpark, :shares)
-    on_exit(fn -> restore(prior) end)
+    snapshot_shares!()
 
     %{ws: ws, proj: proj, scope: "#{ws.slug}/#{proj.slug}/production"}
   end
 
-  defp restore(nil), do: Application.delete_env(:barkpark, :shares)
-  defp restore(v), do: Application.put_env(:barkpark, :shares, v)
-
-  defp share!(scope, spec),
-    do: Application.put_env(:barkpark, :shares, Sharing.parse("#{scope}:#{spec}"))
+  # Planted as a PERSISTED share (SharingFixtures), not a bare put_env: this
+  # suite's own subject fires `Sharing.refresh/0` (`remove_share/3`, and
+  # `revoke_share_tokens/3` lives on that path), which rebuilds `:shares` from
+  # `shares_env() ++ list_stored()` and ERASES anything planted only in the env.
+  defp share!(scope, spec), do: plant_shares!("#{scope}:#{spec}")
 
   # ── minting ───────────────────────────────────────────────────────────
 
