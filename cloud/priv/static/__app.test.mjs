@@ -19554,9 +19554,15 @@ test("cch-w31-s4: api()'s envelope is ADDITIVE — status 0 and network_error su
   // cch-w53-bl (env-var Option A, 2026-09-02) takes the pin 6 -> 5: one of the
   // four originals was envVarsFailureCopy's, deleted with the team env-var
   // feature. A branch that DISAPPEARS reds this — which is what it just did.
+  // cch-w36-bl (console-3-w26) takes it 5 -> 7: metricsFailureCopy and
+  // usageFailureCopy each GREW one. Both routes are total over a sick box, so
+  // their old status-blind default told a person whose network died that the
+  // instance "may be starting up"; a status-0 arm is the branch that stops it.
+  // The pin stays a ratchet on ADDITIONS — a branch that disappears still reds.
   const zeroBranches = [...src.matchAll(/^\s*if \(status === 0\)/gm)];
-  assert.equal(zeroBranches.length, 5,
-    "the three surviving original status-0 branches, faultCopy's arm, and operatorReadFault's (found " + zeroBranches.length + ")");
+  assert.equal(zeroBranches.length, 7,
+    "the three surviving original status-0 branches, faultCopy's arm, operatorReadFault's, " +
+    "and the metrics/usage arms (found " + zeroBranches.length + ")");
   assert.ok([...src.matchAll(/err === "network_error"/g)].length >= 2);
   // A non-JSON body still hands consumers an EMPTY data object (all 354 .data
   // reads unchanged) — the bytes now ride alongside as `text` instead of
@@ -25293,8 +25299,19 @@ test("cch-w74: the password 401 accusation keys on the invalid_current_password 
     "the accusation must be gated on r.data.error === \"invalid_current_password\"");
   // A slug-less 401 renders non-accusatory session copy — it states only what is
   // proven (the session is gone), never the password accusation.
-  assert.match(body, /: r\.status === 401\s*\n\s*\? "Your session has expired — sign in again\."/,
-    "a slug-less 401 must render honest session copy, never the password accusation");
+  //
+  // cch-w77-bl (console-3-w26) — THE SENTENCE MOVED TO ITS ONE OWNER, so this
+  // arm is now pinned BEHAVIOURALLY as well as textually. It used to match the
+  // literal inline here; that literal was the only copy in the file, which is
+  // why three sibling 2FA writers had nothing to read and rendered neutral
+  // operation-failed copy for the same 401. The protection is unchanged in
+  // strength: the call site is pinned by name AND the seam is asserted to answer
+  // exactly that sentence for a slug-less 401, so reverting either half reds.
+  assert.match(body, /: accountWriteFailureCopy\(r\.status, r\.data, "Couldn't update password\."\)/,
+    "a slug-less 401 must reach the one owner of the session sentence");
+  assert.equal(hooks.accountWriteFailureCopy(401, { error: "unauthorized" }, "Couldn't update password."),
+    "Your session has expired — sign in again.",
+    "…and that owner must still answer the honest session sentence, never the password accusation");
   // The accusation string appears EXACTLY once — no un-gated second copy leaks
   // back the conflation this slice deletes.
   assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
@@ -26518,4 +26535,228 @@ test("cch-w43-bl: loadInvite is no longer a THIRD /v1/me idiom, and the accept P
     "the SERVER's own answer is the first source for the team we joined");
   assert.ok(/preview && preview\.team && preview\.team\.id/.test(accept),
     "…with the preview as the stated fallback, because the 200 body's shape is the server's to change");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// console-3-w26 — THE COPY SEAM: no sentence may claim a state its status did
+// not establish, and the 401 sentence has exactly one owner.
+//
+// Three rows land here. Each block states the RE-DERIVED premise (measured on
+// origin/main at build time, not quoted from a filing) and then pins the fix by
+// a mutation the assertion must be able to lose to.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── cch-w36-bl · the wrong-cause arm ────────────────────────────────────────
+//
+// THE PREMISE, RE-DERIVED: `metricsFailureCopy` and `usageFailureCopy` are the
+// two named copy helpers on this file that took a status and had ONE typed arm
+// (404) plus a default that ASSERTS A CAUSE — "it may be starting up". Their
+// routes (GET /v1/barkparks/:id/metrics and .../usage) are `Auth.require_user`
+// + team-scoped and are TOTAL over a sick or silent box by their own headers:
+// a never-phoned-home instance is a normal 200. So no status either route can
+// produce means "starting up", and the sentence was false at every one of them
+// while sitting next to a Retry button a 5xx or a dead network cannot fix.
+//
+// The other eight named helpers were read and are NOT in this set: they either
+// classify by slug into sentences their payload proves (attachDomainFailureCopy,
+// siteCreateFailureCopy, siteDeleteFailureCopy, addSupportErrorCopy,
+// accountTwoFactorErrorCopy), delegate to faultCopy/friendly, which own the
+// 5xx/status-0 honesty law (siteThemeFailureCopy, meFailureCopy,
+// inviteFailureCopy), or already carry the typed arms (membersFailureCopy).
+test("cch-w36-bl: metricsFailureCopy/usageFailureCopy never claim a cause the status did not establish", () => {
+  for (const [name, noun] of [["metricsFailureCopy", "metrics"], ["usageFailureCopy", "usage"]]) {
+    const copy = hooks[name];
+    assert.equal(typeof copy, "function", name + " must be exported — an unexported arm is unpinnable");
+
+    // MUTATION TARGET (1): delete the status-0 arm and this reds. Nothing
+    // answered, so nothing about the instance was established.
+    assert.match(copy(0), /Network error/i, name + "(0) must name the transport, not the instance");
+    assert.ok(!/starting up/.test(copy(0)));
+
+    // MUTATION TARGET (2): delete the >=500 arm and this reds. A control-plane
+    // crash is not the instance booting.
+    assert.match(copy(500), /on our side/i, name + "(500) must own the fault");
+    assert.match(copy(503), /on our side/i);
+    assert.ok(!/starting up/.test(copy(500)));
+
+    // The 404 arm is UNCHANGED — the one no-existence-leak answer both routes
+    // give for wrong-team / absent / malformed id.
+    assert.equal(copy(404), "This instance isn't in your team, or has been removed.");
+
+    // MUTATION TARGET (3): restore the old default and this reds. The residual
+    // states the outcome and nothing else.
+    assert.ok(!/starting up/.test(copy(418)), name + " must not guess a cause on an unclassified status");
+    assert.match(copy(418), new RegExp("couldn't load " + noun, "i"));
+
+    // THE WHOLE-FUNCTION INVARIANT: no reachable status may say it.
+    for (const st of [0, 401, 403, 404, 409, 418, 422, 500, 502, 503]) {
+      assert.ok(!/starting up/.test(copy(st)),
+        name + "(" + st + ") still claims the instance may be starting up");
+      assert.equal(typeof copy(st), "string");
+    }
+  }
+});
+
+test("cch-w36-bl: the sentence is gone from app.js source, not merely shadowed", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // CODE ONLY — the `//` lines are stripped first, because the fix's own comment
+  // QUOTES the sentence it deleted (that quote is the record of what was wrong,
+  // and a guard that forbids naming a defect forbids explaining it).
+  const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  // MUTATION TARGET: re-add either helper's old default line and this reds.
+  assert.ok(!/it may be starting up/.test(code),
+    "no copy site may hedge a failure into an unproven boot");
+  // …and the guard is NOT vacuous: the string is still findable in the file.
+  assert.ok(/it may be starting up/.test(src),
+    "the stripper must not have eaten the file — the comment record still names it");
+});
+
+// ── cch-w77-bl · one owner of the 401 sentence ──────────────────────────────
+//
+// THE PREMISE, RE-DERIVED: an expired session answers 401 `unauthorized`, and
+// the ERRORS map has NO `unauthorized` key (grep the object above friendly()),
+// so friendly() falls through to each caller's fallback. The honest sentence
+// existed at exactly ONE site on origin/main — submitPasswordChange's
+// status-401 ternary (cch-w74) — and the sibling account writers rendered
+// neutral operation-failed copy for the same 401.
+//
+// THE SIBLING SET, DERIVED FROM CODE, NOT FROM THE FILING: every api() call in
+// the account region that passes `noBounce: true` AND renders copy on failure —
+// a bouncing 401 never renders anything, it re-renders login. That is FIVE
+// writers, not the three the row names: two-factor enroll, two-factor confirm,
+// recovery-codes regen, two-factor DISABLE (the row misses it), and the already
+// -fixed password change. `DELETE /v1/account/sessions` (revoke-all) is the
+// sixth noBounce call; it is included below by the same rule only if it renders
+// copy — it does not on this tree, so it is deliberately left.
+test("cch-w77-bl: the 401 sentence has ONE owner and it is what accountWriteFailureCopy returns", () => {
+  assert.equal(typeof hooks.accountWriteFailureCopy, "function");
+  assert.equal(hooks.sessionExpiredCopy, "Your session has expired — sign in again.");
+  // MUTATION TARGET: change the constant and every arm below moves with it —
+  // which is the point: there is nothing else to change.
+  assert.equal(hooks.accountWriteFailureCopy(401, { error: "unauthorized" }, "Couldn't do it."),
+    hooks.sessionExpiredCopy);
+  assert.equal(hooks.accountWriteFailureCopy(401, null, "Couldn't do it."), hooks.sessionExpiredCopy);
+  // ERRORS still has no `unauthorized` key, which is WHY this seam exists —
+  // friendly() alone renders the caller's neutral fallback for that 401.
+  assert.equal(hooks.friendly({ error: "unauthorized" }, "Couldn't do it."), "Couldn't do it.");
+  // Every NON-401 render is byte-for-byte friendly()'s, so no other copy moved.
+  for (const [status, data, fb] of [
+    [422, { error: "invalid_otp" }, "Couldn't confirm that code."],
+    [409, { error: "no_team" }, "Couldn't do it."],
+    [500, { error: "server_error" }, "Couldn't do it."],
+    [0, { error: "network_error" }, "Couldn't do it."],
+    [403, null, "Couldn't do it."],
+  ]) {
+    assert.equal(hooks.accountWriteFailureCopy(status, data, fb), hooks.friendly(data, fb),
+      "a " + status + " must render exactly what friendly() rendered before");
+  }
+});
+
+test("cch-w77-bl: all five account writers read the one owner — no second copy of the sentence", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // MUTATION TARGET: revert any ONE of these call sites to friendly(r.data, …)
+  // and its assertion reds. The fallbacks are quoted verbatim so a silent copy
+  // change is a red too.
+  for (const fallback of [
+    "Couldn't start two-factor setup.",
+    "Couldn't confirm that code.",
+    "Couldn't issue new recovery codes.",
+    "Couldn't turn two-factor off.",
+    "Couldn't update password.",
+  ]) {
+    assert.ok(src.includes('accountWriteFailureCopy(r.status, r.data, "' + fallback + '")'),
+      "the account writer with fallback " + JSON.stringify(fallback) + " must route through the 401 seam");
+    assert.ok(!src.includes('friendly(r.data, "' + fallback + '")'),
+      "…and must no longer call friendly() directly, which cannot see the status");
+  }
+  // The literal appears EXACTLY ONCE in the whole file: in the constant.
+  const hits = src.split("Your session has expired — sign in again.").length - 1;
+  assert.equal(hits, 1, "the 401 sentence must be written once; found " + hits + " occurrences");
+  assert.ok(/var SESSION_EXPIRED_COPY = "Your session has expired — sign in again\.";/.test(src),
+    "…and the one occurrence must be the owning declaration");
+
+  // The #12158 fix is intact: the slug arm still wins ahead of the seam, so a
+  // wrong current password is still accused and an expired session still is not.
+  const pw = appRegion(src, "  function submitPasswordChange(", "  // ----------------------------------------------------------- eye toggle");
+  const slug = pw.indexOf('r.data.error === "invalid_current_password"');
+  const seam = pw.indexOf("accountWriteFailureCopy(");
+  assert.ok(slug > 0 && seam > slug,
+    "invalid_current_password must be decided BEFORE the 401 seam, or a real wrong password reads as a dead session");
+  assert.ok(pw.includes('"Current password is wrong."'));
+});
+
+// ── cch-bl-tier-card · the lapsed trial's future tense ──────────────────────
+//
+// THE PREMISE, RE-DERIVED: tierCardHtml's free arm emitted
+// `<button class="btn" disabled>Yours when the trial ends</button>`
+// UNCONDITIONALLY, and the card is only reached with Free as a non-current tier
+// when the active plan is "trial" — including a trial whose window has already
+// closed (trial_days_remaining <= 0), for which "when the trial ends" dates a
+// past event in the future. `trialEnded` is the SAME predicate trialCardHtml and
+// trialTagline already read, so this is a fourth reader of a shipped clamp, not
+// a new trial-state source.
+test("cch-bl-tier-card: a LAPSED trial's Free button is not future tense; a live one is unchanged", () => {
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  assert.ok(free, "the catalog must carry the free tier");
+
+  const live = hooks.tierCardHtml(free, "trial", false, undefined, 9);
+  const lapsed = hooks.tierCardHtml(free, "trial", false, undefined, 0);
+
+  // days = 9 — the label is untouched, byte for byte, including for a NEGATIVE
+  // -to-positive boundary (1 is still a live trial).
+  assert.ok(live.includes(">Yours when the trial ends<"), "a live trial keeps its label");
+  assert.ok(hooks.tierCardHtml(free, "trial", false, undefined, 1).includes(">Yours when the trial ends<"));
+
+  // MUTATION TARGET: drop the trialEnded() branch and this reds — the future
+  // tense returns for a trial that has already ended.
+  assert.ok(!lapsed.includes("Yours when the trial ends"),
+    "days=0 must NOT promise a future end for a trial that has already ended");
+  assert.ok(!/when the trial ends|will end|once the trial ends/.test(lapsed),
+    "no future-tense clause about the trial ending may survive at days<=0");
+  assert.ok(lapsed.includes(">Your plan from here<"), "the lapsed label, verbatim");
+  assert.ok(lapsed.includes('class="btn" disabled'), "…still inert: there is no free checkout to offer");
+  assert.ok(!lapsed.includes('data-plan="free"'), "…and still unwired");
+  // It must NOT claim Free is already current: planFromSub answers "trial" for
+  // up to an hour after expiry, so this console has not measured that.
+  assert.ok(!lapsed.includes(">Current plan<"), "a lapsed trial is not yet on Free — do not say it is");
+
+  // -3 days (the worker has not run for a while) is the same lapsed state.
+  assert.equal(hooks.tierCardHtml(free, "trial", false, undefined, -3), lapsed);
+
+  // The lapsed label is no WIDER than the one the .tier-grid floor was measured
+  // against, so the geometry gate cannot be quietly re-cut by this copy. (The
+  // browser half is the tiers5 leg, which now renders BOTH labels.)
+  assert.ok("Your plan from here".length <= "Yours when the trial ends".length,
+    "a longer CTA would need the tier floor re-measured before it could ship");
+});
+
+test("cch-bl-tier-card: an unknown trial clock renders exactly what a 3-arg call rendered before", () => {
+  const free = hooks.planCatalog.filter((t) => t.plan === "free")[0];
+  const baseline = hooks.tierCardHtml(free, "trial", false);
+  // The tiers5 fixture in breakpoint-sweep.mjs calls tierCardHtml with THREE
+  // arguments; absence of a clock is not evidence a trial lapsed.
+  for (const clock of [undefined, null, "0", NaN, {}, "ended"]) {
+    assert.equal(hooks.tierCardHtml(free, "trial", false, undefined, clock), baseline,
+      "a non-numeric trial clock must not change the render (" + String(clock) + ")");
+  }
+  assert.ok(baseline.includes(">Yours when the trial ends<"));
+  // And every OTHER tier is blind to the clock entirely.
+  for (const t of hooks.planCatalog.filter((x) => !x.free)) {
+    assert.equal(hooks.tierCardHtml(t, "trial", false, undefined, 0),
+      hooks.tierCardHtml(t, "trial", false), t.plan + " must not read the trial clock");
+  }
+});
+
+test("cch-bl-tier-card: renderTiers threads the SAME trial field trialCardHtml reads", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "  function renderTiers(", "  function subscribe(");
+  // MUTATION TARGET: delete the thread and every real render falls back to the
+  // future tense — the fix would be reachable only from the test hook.
+  assert.ok(/subCache && typeof subCache\.trial_days_remaining === "number"/.test(region),
+    "the clock must come from the sub envelope's own field");
+  assert.ok(/tierCardHtml\(t, active, subscribed, capability, trialDays\)/.test(region),
+    "renderTiers must pass the clock through to the card");
+  assert.ok(appRegion(src, "  function trialCardHtml(", "  function renderTrial(")
+    .includes("sub.trial_days_remaining"),
+    "…and it must be the SAME field the trial card reads, not a second source");
 });

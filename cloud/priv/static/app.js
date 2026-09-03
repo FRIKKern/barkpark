@@ -563,6 +563,43 @@
     return friendly(data, fallback);
   }
 
+  // cch-w77-bl — THE ONE OWNER OF THE 401 SENTENCE, and why it is a seam rather
+  // than an ERRORS key.
+  //
+  // An expired session answers `401 {error: "unauthorized"}` (Auth.require_user),
+  // and ERRORS has NO `unauthorized` key — grep the map above: the slug is absent,
+  // so friendly() falls straight through to the caller's fallback and every
+  // account writer renders its own operation-failed sentence ("Couldn't start
+  // two-factor setup.") for a session that is simply gone. Uninformative, not
+  // false — but the honest sentence already exists, written once by cch-w74 for
+  // submitPasswordChange, and a second copy of it is how a sentence starts to
+  // drift.
+  //
+  // WHY NOT `unauthorized:` IN ERRORS: friendly() takes no status, so a curated
+  // key would fire at every one of its call sites across this file on any payload
+  // carrying that slug — including reads whose caller-designed sentence is more
+  // specific. WHY NOT A 401 ARM IN faultCopy(): faultCopy is the shared 5xx/0
+  // honesty law read by callers as far away as siteThemeFailureCopy and
+  // siteDeleteFailureCopy (which already writes its OWN, longer 401 sheet), so a
+  // 401 arm there would silently restate three unrelated screens' copy. The
+  // account writers are the measured population that needs it, so the seam is
+  // scoped to them by name.
+  //
+  // A SLUG ARM STILL WINS FIRST at its call site: submitPasswordChange keeps its
+  // `invalid_current_password` branch ahead of this call, because that 401 IS
+  // about the input and this sentence would be the false one there.
+  var SESSION_EXPIRED_COPY = "Your session has expired — sign in again.";
+
+  // The account writers' failure copy: the honest session sentence on a 401,
+  // otherwise byte-for-byte what friendly() rendered before. Every caller passes
+  // the SAME fallback it passed friendly(), so no non-401 render moves.
+  // Reachable only because every one of these calls sets `noBounce: true` — a
+  // bouncing call never renders a 401 at all, it re-renders the login screen.
+  function accountWriteFailureCopy(status, data, fallback) {
+    if (status === 401) return SESSION_EXPIRED_COPY;
+    return friendly(data, fallback);
+  }
+
   // cch-w34-s1 — THE COPY FOR A READ THAT FAILED, and why it is not bare
   // friendly()/faultCopy(). The shared ERRORS map keys the GENERIC `forbidden`
   // slug to a curated sentence (grep -n 'forbidden:' in the ERRORS object above
@@ -1575,7 +1612,7 @@
           a2fPaint({ phase: "enroll", uri: r.data.otpauth_uri, secret: r.data.secret });
           var f = $("#a2f-otp"); if (f) f.focus();
         } else {
-          a2fPaint({ phase: "off", error: friendly(r.data, "Couldn't start two-factor setup.") });
+          a2fPaint({ phase: "off", error: accountWriteFailureCopy(r.status, r.data, "Couldn't start two-factor setup.") });
         }
       });
     });
@@ -1607,7 +1644,7 @@
             return;
           }
           a2fPaint(Object.assign({}, pending, {
-            error: honest || friendly(r.data, "Couldn't confirm that code.")
+            error: honest || accountWriteFailureCopy(r.status, r.data, "Couldn't confirm that code.")
           }));
           var again = $("#a2f-otp"); if (again) { again.value = code; again.focus(); }
         });
@@ -1634,7 +1671,7 @@
       api("POST", "/v1/account/two-factor/recovery-codes", {}, { noBounce: true })
         .then(function (r) {
           if (r.ok && r.data && r.data.recovery_codes) a2fPaint({ phase: "codes", codes: r.data.recovery_codes });
-          else a2fPaint({ phase: "on", error: friendly(r.data, "Couldn't issue new recovery codes.") });
+          else a2fPaint({ phase: "on", error: accountWriteFailureCopy(r.status, r.data, "Couldn't issue new recovery codes.") });
         });
     });
 
@@ -1659,7 +1696,7 @@
               ctl.succeed();
               openAccountModal(); // straight back to the account screen, now Off
             } else {
-              ctl.fail(friendly(r.data, "Couldn't turn two-factor off."), "Try again",
+              ctl.fail(accountWriteFailureCopy(r.status, r.data, "Couldn't turn two-factor off."), "Try again",
                 function (again) { again.busy(); run(again); });
             }
           });
@@ -1709,10 +1746,24 @@
         // measured ~25s (per-heartbeat, not instant; never stronger than
         // measured), because a user watching another tab keep working for 20
         // seconds with no explanation reads "it didn't work". THE SENTENCE
-        // BELONGS TO THIS SHEET ONLY: per-row revoke (DELETE
-        // /v1/account/sessions/:id) does NOT end that device's stream
-        // (cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream)
-        // and must not inherit this claim.
+        // BELONGS TO THIS SHEET ONLY — but no longer because per-row revoke is
+        // weaker.
+        //
+        // CORRECTED (the SSE stream is now bound to its minting session): this
+        // comment used to say per-row revoke "does NOT end that device's
+        // stream", which was true when it was written and is FALSE now. The
+        // `user_tokens.session_token_id` column binds a stream to the session
+        // that minted its credential and `Router.sse_principal_live?/1` rechecks
+        // THAT row, so `DELETE /v1/account/sessions/:id` ends that one device's
+        // stream within one heartbeat — the same bound this sheet states, now
+        // per device. A stream with no binding (a ticket minted before the
+        // column existed) keeps the user-wide behaviour and drains within one
+        // ticket TTL.
+        //
+        // The sentence still belongs to THIS sheet only for a different reason:
+        // "Every other browser and device" is a claim about the BLAST RADIUS,
+        // which per-row revoke does not have. Its own row-scoped sentence lives
+        // at the [data-id] revoke handler in loadSessions.
         bodyHtml: "Every other browser and device is signed out. " +
           "Open screens elsewhere lose access within about a minute. " +
           "This device stays signed in, and anyone signed out can sign back in with their password.",
@@ -1891,6 +1942,17 @@
           b.textContent = "Revoking…";
           api("DELETE", "/v1/account/sessions/" + encodeURIComponent(b.getAttribute("data-id"))).then(function (r) {
             if (r.ok) {
+              // THE ROW-SCOPED SENTENCE, and the one place it is written: this is
+              // the only toast raised on a 2xx from DELETE
+              // /v1/account/sessions/:id. It was ALREADY true about the
+              // credential and was deliberately silent about the open stream,
+              // which per-row revoke could not end; that gap is closed —
+              // `Router.sse_principal_live?/1` rechecks the minting session row,
+              // so the device's stream also ends within one heartbeat. The
+              // sentence stands unchanged because it never claimed less or more
+              // than "can no longer use your account", and it deliberately still
+              // states no timing: the sheet above owns the one timing claim this
+              // screen makes.
               toast({ kind: "success", title: "Device signed out", body: "That session can no longer use your account." });
               loadSessions(); // repaints the whole list; this button goes with it
             } else {
@@ -1934,12 +1996,18 @@
           // feature's own "signed out everywhere" success path, whose new token
           // can 401 the very next submit). Accuse only on the proven slug; any
           // other 401 states only what is proven — the session is gone.
+          //
+          // cch-w77-bl — THAT SENTENCE NOW HAS ONE OWNER. The literal used to
+          // live here and only here; three sibling 2FA writers rendered neutral
+          // operation-failed copy on the same 401 because there was nothing to
+          // read it from. accountWriteFailureCopy holds it, and this arm reads
+          // it — the slug branch above still wins first, and the non-401 render
+          // is byte-identical (the seam calls the same friendly(r.data, …) with
+          // the same fallback).
           errEl.textContent =
             r.status === 401 && r.data && r.data.error === "invalid_current_password"
               ? "Current password is wrong."
-              : r.status === 401
-                ? "Your session has expired — sign in again."
-                : friendly(r.data, "Couldn't update password.");
+              : accountWriteFailureCopy(r.status, r.data, "Couldn't update password.");
           errEl.hidden = false;
         }
       });
@@ -18172,7 +18240,7 @@
   // cache, an older payload) renders exactly what it rendered before, and the
   // server still refuses the POST — this card is the disclosure, never the
   // enforcement.
-  function tierCardHtml(t, active, subscribed, capability) {
+  function tierCardHtml(t, active, subscribed, capability, trialDays) {
     var isCurrent = t.plan === active;
     var testMode = capability === "test_mode";
     var btn;
@@ -18185,7 +18253,30 @@
       // teams read Free as current). There is no free checkout to POST — the
       // server 422s plan_invalid — and "doing nothing" IS how a trial lands on
       // Free, so the honest action here is no action at all.
-      btn = '<button class="btn" disabled>Yours when the trial ends</button>';
+      //
+      // cch-w50 clamped the trial CARD's future tense and left this label — the
+      // fourth site — because it renders inside the geometry the tier-floor gate
+      // measures. THE TENSE IS THE DEFECT: on a LAPSED trial (trialEnded, i.e.
+      // trial_days_remaining <= 0, the same predicate trialCardHtml and
+      // trialTagline read) "when the trial ends" names a future event that has
+      // already happened.
+      //
+      // WHAT REPLACES IT, AND WHY NOT "Current plan": for up to an hour after
+      // expiry — until TrialExpiryWorker finalises the row — planFromSub still
+      // answers "trial", so this console has NOT measured Free as the current
+      // plan and must not say so. "Your plan from here" states the direction the
+      // team is already travelling without dating it and without promoting Free
+      // to current; it is also SHORTER than the string it replaces, so it cannot
+      // widen the CTA the .tier-grid floor was measured against (the tiers5 leg
+      // now renders and measures BOTH labels rather than assuming that).
+      //
+      // `trialDays` is OPTIONAL: an absent/non-numeric value is not evidence a
+      // trial lapsed, so it renders exactly what a 3-arg call rendered before —
+      // which is what breakpoint-sweep.mjs's tiers5 fixture and every existing
+      // test call.
+      btn = trialEnded(trialDays)
+        ? '<button class="btn" disabled>Your plan from here</button>'
+        : '<button class="btn" disabled>Yours when the trial ends</button>';
     } else if (testMode) {
       // Labelled, disabled, and NOT wired: no data-plan attribute means
       // renderTiers binds no click handler at all, so there is no path from
@@ -18222,7 +18313,13 @@
     // can upgrade (dwb-13); only a real paid plan routes changes to the portal.
     var subscribed = active !== "free" && active !== "trial";
     var capability = checkoutCapability();
-    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability); }).join("");
+    // The trial clock the Free card's tense depends on, read from the SAME field
+    // trialCardHtml reads (`sub.trial_days_remaining`); anything non-numeric
+    // stays undefined, which trialEnded() answers false for.
+    var trialDays = subCache && typeof subCache.trial_days_remaining === "number"
+      ? subCache.trial_days_remaining
+      : null;
+    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability, trialDays); }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
@@ -22634,10 +22731,29 @@
     return '<div class="fleet-body" aria-live="polite"><div class="loading">Loading usage&hellip;</div></div>';
   }
 
-  // Pure: honest human copy for a failed /usage fetch — never a dead spinner.
+  // cch-w36-bl — NO ARM MAY CLAIM A CAUSE THE STATUS DID NOT ESTABLISH.
+  //
+  // Re-derived against the route, not guessed: GET /v1/barkparks/:id/usage  
+  // is `Auth.require_user` + team-scoped, and its own header says it is TOTAL
+  // over a sick or silent box — "an instance that has never phoned home a beat
+  // is a normal 200 ... never a 500". So the only non-2xx answers it can give
+  // are 401 (expired session), 404 (wrong team / absent / malformed id — one
+  // no-existence-leak answer), a crash-envelope 5xx from the control plane, and
+  // api()'s status 0 when nothing answered at all. THERE IS NO STATUS AT WHICH
+  // "it may be starting up" IS TRUE — a starting instance answers 200. The old
+  // default said it for every one of them, next to a Retry button that a 5xx or
+  // a dead network cannot fix.
+  //
+  // Each arm below states only what its status proves. The 401 arm reads the
+  // one owner of that sentence (accountWriteFailureCopy's constant) rather than
+  // writing a second copy of it; note it is reachable only in the seam of a
+  // bounce, since this GET does not pass noBounce.
   function usageFailureCopy(status) {
+    if (status === 0) return ERRORS.network_error + " Retry in a moment.";
+    if (status === 401) return SESSION_EXPIRED_COPY;
     if (status === 404) return "This instance isn't in your team, or has been removed.";
-    return "We couldn't load usage for this instance — it may be starting up. Retry in a moment.";
+    if (status >= 500) return "Something broke on our side loading usage — not this instance. Retry in a moment.";
+    return "We couldn't load usage for this instance. Retry in a moment.";
   }
 
   function usageErrorHtml(status) {
@@ -23511,10 +23627,29 @@
     return '<div class="fleet-body metrics-body" aria-live="polite"><div class="loading">Loading metrics&hellip;</div></div>';
   }
 
-  // Pure: honest human copy for a failed /metrics fetch — never a dead spinner.
+  // cch-w36-bl — NO ARM MAY CLAIM A CAUSE THE STATUS DID NOT ESTABLISH.
+  //
+  // Re-derived against the route, not guessed: GET /v1/barkparks/:id/metrics
+  // is `Auth.require_user` + team-scoped, and its own header says it is TOTAL
+  // over a sick or silent box — "an instance that has never phoned home a beat
+  // is a normal 200 ... never a 500". So the only non-2xx answers it can give
+  // are 401 (expired session), 404 (wrong team / absent / malformed id — one
+  // no-existence-leak answer), a crash-envelope 5xx from the control plane, and
+  // api()'s status 0 when nothing answered at all. THERE IS NO STATUS AT WHICH
+  // "it may be starting up" IS TRUE — a starting instance answers 200. The old
+  // default said it for every one of them, next to a Retry button that a 5xx or
+  // a dead network cannot fix.
+  //
+  // Each arm below states only what its status proves. The 401 arm reads the
+  // one owner of that sentence (accountWriteFailureCopy's constant) rather than
+  // writing a second copy of it; note it is reachable only in the seam of a
+  // bounce, since this GET does not pass noBounce.
   function metricsFailureCopy(status) {
+    if (status === 0) return ERRORS.network_error + " Retry in a moment.";
+    if (status === 401) return SESSION_EXPIRED_COPY;
     if (status === 404) return "This instance isn't in your team, or has been removed.";
-    return "We couldn't load metrics for this instance — it may be starting up. Retry in a moment.";
+    if (status >= 500) return "Something broke on our side loading metrics — not this instance. Retry in a moment.";
+    return "We couldn't load metrics for this instance. Retry in a moment.";
   }
 
   function metricsErrorHtml(status) {
@@ -26528,6 +26663,14 @@
       archiveStoreSnapshot: archiveStoreSnapshot,
       archiveVisibilityNote: archiveVisibilityNote,
       archiveResidueLines: archiveResidueLines,
+      // cch-w36-bl / cch-w77-bl (console-3-w26) — the copy seam this slice
+      // fixed, exported so each arm is pinned DIRECTLY rather than through a
+      // screen that happens to call it. metricsFailureCopy had no export at all,
+      // so the wrong-cause 403/5xx/0 sentence it emitted was unreachable from
+      // every node guard in this repo.
+      metricsFailureCopy: metricsFailureCopy,
+      accountWriteFailureCopy: accountWriteFailureCopy,
+      sessionExpiredCopy: SESSION_EXPIRED_COPY,
       openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
       // cch-w31-bl — THE ROLE VOCABULARY, exported as DATA so the census can
       // diff the shipped set against Authz's own attribute text rather than
