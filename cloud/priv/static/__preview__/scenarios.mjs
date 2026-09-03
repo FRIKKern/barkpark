@@ -2843,6 +2843,23 @@ export const SCENARIOS = {
         { full_name: "acme/web", private: false },
         { full_name: "acme/internal-docs", private: true },
       ],
+      // cch-w48-bl — AND THE DEPLOYMENT FACT THE PICKER PRESUPPOSES. loadSite
+      // now consults GET /v1/github/installation's `configured` before offering
+      // #site-github at all, because on a deployment with NO GitHub App the
+      // control can only open a modal that says the feature does not exist —
+      // for an admin exactly as for a member.
+      //
+      // THIS IS NOT A FIXTURE ADDED TO KEEP A GREEN. Without it this scenario
+      // falls to the terminal `/v1/` 200 {} at the bottom of route(), whose body
+      // carries no `configured` key at all — the band reads "unknown", the door
+      // is honestly withheld, and every #site-github assertion in smoke.mjs goes
+      // red. That red is CORRECT for a deployment with no GitHub App; it is
+      // wrong for THIS scenario, which serves a site already linked to acme/web
+      // and a repo picker listing two repos. A site cannot be connected to a
+      // GitHub repo on a deployment that has no GitHub App, so `configured:true`
+      // is what this fixture was always implicitly claiming — it just had no
+      // route arm to say it through.
+      github: { connected: true, account_login: "acme-engineering", configured: true },
     },
   },
   // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before

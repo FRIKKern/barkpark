@@ -16387,7 +16387,10 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   // cch-w48-s2: the sixth argument is the authority band, and it FAILS CLOSED —
   // #site-github is admin-gated, so this pin (which asserts the control) names
   // "grant" explicitly. The closed arms have their own pins below.
-  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant");
+  // cch-w48-bl: the 10th argument is githubReadinessState()'s band and it too
+  // FAILS CLOSED — a pin that ASSERTS the button must now name a deployment
+  // where GitHub exists ("ready"), or the control is honestly withheld.
+  const html = hooks.siteDetailHtml(site, null, deployments, "acme.com", [], "grant", null, null, null, "ready");
   assert.match(html, /id="site-domains"/);            // the domains rungs mount
   assert.match(html, /id="deploy-rail-slot"/);        // the live rail slot survives
   // Scale: a read-only rail value — no input/select/toggle control for it (GR28).
@@ -16430,10 +16433,10 @@ test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admi
   // THE PAIRED POSITIVE CONTROL: the admin arm still emits exactly one control,
   // byte-identically. Without this, a siteDetailHtml that rendered NOTHING at
   // all would satisfy every negative assertion below.
-  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant");
+  const admin = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "ready");
   assert.equal((admin.match(/id="site-github"/g) || []).length, 1);
   assert.match(admin, /<button class="btn btn-ghost btn-sm" id="site-github" type="button"><span class="mono">acme\/site<\/span><\/button>/);
-  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant");
+  const adminBare = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant", null, null, null, "ready");
   assert.match(adminBare, /id="site-github" type="button">Connect GitHub repo<\/button>/);
 
   // MEMBER + UNCONNECTED → OMITTED ENTIRELY. D428's ONLY-clause: disable-and-
@@ -16474,6 +16477,91 @@ test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown a
   assert.match(absent, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
   // A garbage authority is not a grant either (only the literal "grant" is).
   assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
+});
+
+// ── cch-w48-bl: THE SECOND AXIS — IS GITHUB CONFIGURED ON THIS DEPLOYMENT ────
+//
+// cch-w48-s2 fenced #site-github on AUTHORITY and said in its own comment that
+// it deliberately did not gate on GitHub.configured?. On a deployment with no
+// GitHub App credential — which the live control plane is — that leaves an
+// ADMIN offered a button whose modal can only reach the 503 arm. The role fence
+// cannot see this: the refusal is the same for every actor, which is exactly
+// what makes it a DIFFERENT axis and not a stronger version of the same one.
+test("cch-w48-bl: githubReadinessFrom — only a 200 body carrying the BOOLEAN may claim a configuration state", () => {
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: true } }), "ready");
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: false } }), "unconfigured");
+  // A body without the key says NOTHING — an older control plane, or the
+  // preview corpus's benign empty 200. Not "unconfigured": that would be a
+  // determinate claim made out of an absence.
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: {} }), "unknown");
+  assert.equal(hooks.githubReadinessFrom({ ok: true, status: 200, data: { configured: "yes" } }), "unknown");
+  // Every failure class reads unknown — a 500, a 403 and a dead socket are not
+  // evidence about configuration (the rule cch-w67-s4 wrote into loadGithub).
+  assert.equal(hooks.githubReadinessFrom({ ok: false, status: 500, data: { error: "boom" } }), "unknown");
+  assert.equal(hooks.githubReadinessFrom({ ok: false, status: 0, transport: "offline" }), "unknown");
+  assert.equal(hooks.githubReadinessFrom(null), "unknown");
+});
+
+test("cch-w48-bl: siteDetailHtml withholds #site-github on an UNCONFIGURED deployment — for an ADMIN too", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
+
+  // THE ARM THAT DISTINGUISHES THIS FROM THE AUTHORITY FENCE: the actor is a
+  // team ADMIN — "grant" on the band cch-w48-s2 fenced — and the control is
+  // still withheld, because the deployment has no GitHub App at all.
+  const adminUnconfigured = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant",
+    null, null, null, "unconfigured");
+  assert.doesNotMatch(adminUnconfigured, /id="site-github"/);
+  assert.doesNotMatch(adminUnconfigured, /Connect GitHub repo/);
+  // No ghost and no invented sentence: the badges cluster carries no disabled
+  // button and no title, exactly as the member arms do.
+  assert.doesNotMatch(s2Badges(adminUnconfigured), /<button|disabled|title=/);
+  assert.doesNotMatch(adminUnconfigured, /not configured|isn't configured|admin on this team/i);
+  // …and the read-legal fact SURVIVES. site.github_repo came from a require_user
+  // GET; whether the App is wired up today says nothing about whether this site
+  // is linked, so deleting the repo name would destroy information the payload
+  // handed the person.
+  assert.match(adminUnconfigured, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+
+  // An UNCONNECTED site on an unconfigured deployment loses the whole control —
+  // there is no fact left to keep.
+  const adminBareUnconfigured = hooks.siteDetailHtml(S2_GH_SITE, null, [], "acme.com", [], "grant",
+    null, null, null, "unconfigured");
+  assert.doesNotMatch(adminBareUnconfigured, /site-github/);
+  assert.doesNotMatch(s2Badges(adminBareUnconfigured), /<button|disabled|title=/);
+
+  // A MEMBER on a CONFIGURED deployment is still refused by the role fence —
+  // the two axes are independent, and neither subsumes the other.
+  const memberReady = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "refuse",
+    null, null, null, "ready");
+  assert.doesNotMatch(memberReady, /id="site-github"/);
+
+  // PAIRED POSITIVE CONTROL, so the negatives above are not satisfied by an
+  // empty render: admin + ready is the one combination that opens the door.
+  const open = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant",
+    null, null, null, "ready");
+  assert.equal((open.match(/id="site-github"/g) || []).length, 1);
+});
+
+test("cch-w48-bl: the readiness argument FAILS CLOSED — unknown, garbage and an OMITTED argument all withhold", () => {
+  const connected = { ...S2_GH_SITE, github_repo: "acme/site" };
+  // "unknown" is the band while the one-shot read is in flight, and terminally
+  // after it failed. A readiness we cannot prove is not an offer.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "unknown"),
+    /id="site-github"/);
+  // Only the literal "ready" opens it.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant", null, null, null, "configured"),
+    /id="site-github"/);
+  // AN OMITTED ARGUMENT — a call site that never heard about this parameter —
+  // takes the closed arm. This is the OPPOSITE default from `authority`, and
+  // deliberately so: here the closed arm is the whole point of the term.
+  assert.doesNotMatch(
+    hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
+    /id="site-github"/);
+  // …and the chip survives every closed arm.
+  assert.match(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
+    /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
 });
 
 test("cch-w48-s2 (review): a /v1/me that lands LATE re-decides the site screen — the fence must not strand a real admin", () => {
@@ -26759,4 +26847,181 @@ test("cch-bl-tier-card: renderTiers threads the SAME trial field trialCardHtml r
   assert.ok(appRegion(src, "  function trialCardHtml(", "  function renderTrial(")
     .includes("sub.trial_days_remaining"),
     "…and it must be the SAME field the trial card reads, not a second source");
+});
+// ── cch-w45-bl · THE CONDUIT'S CATALOG ANSWER IS NO LONGER DECORATIVE ────────
+//
+// w45-s4 taught GET /v1/providers/capabilities to state the CATALOG capability
+// honestly. The READING side never asked: mountLaunchCatalog and
+// loadTheaterCatalog fetched /v1/providers/<kind>/catalog unconditionally, so
+// for a kind whose catalog bool is honestly FALSE the console mounted the panel
+// and discovered the truth as a 404 unknown_kind or a 502 — a request known in
+// advance to fail, and a capability answer doing no work on the surface that
+// most depends on it.
+//
+// THE THREE ARMS ARE DRIVEN, not read: the tests below run the REAL mounts
+// against a stubbed fetch and assert THE WIRE — whether GET …/catalog was
+// issued at all — because the rendered panel alone cannot tell "we skipped the
+// request" from "we made it and handled the 404".
+
+test("cch-w45-bl: catalogCapability — only an explicit false is a refusal; absence is 'unknown'", () => {
+  const payload = {
+    providers: {
+      hetzner: { tier: "prod", capabilities: { catalog: true }, gaps: {} },
+      azure: {
+        tier: "prod", capabilities: { catalog: false },
+        gaps: { catalog: "Azure doesn't publish a size-and-region catalog here yet." },
+      },
+      bare: { tier: "prod", capabilities: { catalog: false }, gaps: {} },
+    },
+  };
+  // Field-by-field, not deepEqual: the object is minted inside the node:vm
+  // realm, so its Object prototype is not this realm's and deepStrictEqual
+  // refuses a structurally identical answer.
+  assert.equal(hooks.catalogCapability(payload, "hetzner").state, "supported");
+  assert.equal(hooks.catalogCapability(payload, "hetzner").reason, "");
+  assert.equal(hooks.catalogCapability(payload, "azure").state, "unsupported");
+  assert.equal(hooks.catalogCapability(payload, "azure").reason,
+    "Azure doesn't publish a size-and-region catalog here yet.");
+  // A stated gap with no sentence is still a refusal — the console must not
+  // invent the reason, and the render arm has its own honest fallback.
+  assert.equal(hooks.catalogCapability(payload, "bare").state, "unsupported");
+  assert.equal(hooks.catalogCapability(payload, "bare").reason, "");
+  // UNKNOWN IS NOT A REFUSAL. A kind the conduit does not list (an older control
+  // plane, or a newly connectable kind), a payload that never arrived, and a
+  // shape we cannot read all proceed — withholding on any of them would be a
+  // determinate claim made out of an absence.
+  assert.equal(hooks.catalogCapability(payload, "cloudflare").state, "unknown");
+  assert.equal(hooks.catalogCapability(null, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({}, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({ providers: { hetzner: {} } }, "hetzner").state, "unknown");
+  assert.equal(hooks.catalogCapability({ providers: { hetzner: { capabilities: {} } } }, "hetzner").state, "unknown");
+});
+
+// The catalog slot + the container the wizard hands the mount. `isConnected` is
+// real state here: mountLaunchCatalog aborts on a detached slot, so a fakeNode
+// (isConnected === undefined) would make every assertion below vacuous.
+function catalogHost() {
+  const slot = fakeNode();
+  slot.isConnected = true;
+  const host = fakeNode();
+  host.querySelector = (sel) => (sel === ".launch-catalog" ? slot : null);
+  host.querySelectorAll = () => [];
+  return { host, slot };
+}
+
+test("cch-w45-bl: mountLaunchCatalog consults caps.catalog BEFORE fetching — and an unsupported kind is never asked", async () => {
+  const CAPS = {
+    providers: {
+      hetzner: { tier: "prod", capabilities: { catalog: true }, gaps: {} },
+      azure: {
+        tier: "prod", capabilities: { catalog: false },
+        gaps: { catalog: "Azure doesn't publish a size-and-region catalog here yet." },
+      },
+    },
+  };
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url).split("?")[0];
+    wire.push(p);
+    const body = p.indexOf("/capabilities") !== -1
+      ? CAPS
+      : { server_types: [{ slug: "cx22", cores: 2, ram_gb: 8, disk_gb: 40, monthly_price: 6 }],
+          regions: [{ slug: "fsn1", name: "Falkenstein" }], currency: "EUR" };
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    // ── the REFUSED kind: the conduit says catalog:false ────────────────────
+    const az = catalogHost();
+    hooks.mountLaunchCatalog(az.host, {}, "azure", "g1");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/azure/catalog") !== -1).length, 0,
+      "the mount issued GET /v1/providers/azure/catalog against a conduit that already said catalog:false — " +
+      "a request known in advance to fail; wire: " + JSON.stringify(wire));
+    // …and the SERVER's own gaps.catalog sentence is what renders, verbatim.
+    assert.match(az.slot.innerHTML, /Azure doesn&#39;t publish a size-and-region catalog here yet\./);
+    assert.doesNotMatch(az.slot.innerHTML, /Couldn't load/);
+    // No phantom selection is left behind for submit to send.
+    assert.equal(az.host._launchHosting.region, null);
+    assert.equal(az.host._launchHosting.server_type, null);
+
+    // ── the SUPPORTED kind: byte-for-byte the shipped path ──────────────────
+    const hz = catalogHost();
+    hooks.mountLaunchCatalog(hz.host, {}, "hetzner", "g2");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1,
+      "a catalog-capable kind must still be fetched exactly once; wire: " + JSON.stringify(wire));
+    assert.match(hz.slot.innerHTML, /cx22/);
+
+    // ── the UNKNOWN kind: not listed by the conduit, so NOT refused ─────────
+    const cf = catalogHost();
+    hooks.mountLaunchCatalog(cf.host, {}, "cloudflare", "g3");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/cloudflare/catalog") !== -1).length, 1,
+      "a kind the conduit does not list must still be fetched — an unknown answer is not a refusal; wire: " +
+      JSON.stringify(wire));
+
+    // ── ONE conduit read for all three mounts ───────────────────────────────
+    assert.equal(wire.filter((p) => p.indexOf("/v1/providers/capabilities") !== -1).length, 1,
+      "the capability answer must be read once per page life, not once per mount; wire: " + JSON.stringify(wire));
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("cch-w45-bl: the gate does not swallow the degraded states — a catalog-capable kind that 502s still says so", async () => {
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url).split("?")[0];
+    wire.push(p);
+    // The conduit answer is already cached from the test above (one read per
+    // page life), so only the catalog call reaches here — and it fails.
+    return Promise.resolve({
+      ok: false, status: 502,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ error: "catalog_unavailable" }),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    const hz = catalogHost();
+    hooks.mountLaunchCatalog(hz.host, {}, "hetzner", "g4");
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1);
+    assert.match(hz.slot.innerHTML, /catalog is unavailable right now/);
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("cch-w45-bl: loadTheaterCatalog asks the conduit too — a catalog-less kind gets no price request", async () => {
+  const wire = [];
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    wire.push(String(url).split("?")[0]);
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ server_types: [], regions: [] }),
+    });
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  try {
+    let ready = 0;
+    hooks.loadTheaterCatalog({ provider: "azure", server_type: "Standard_B2s" }, () => { ready += 1; });
+    await flushP();
+    assert.equal(wire.filter((p) => p.indexOf("/azure/catalog") !== -1).length, 0,
+      "the price line asked a kind the conduit says has no catalog; wire: " + JSON.stringify(wire));
+    // The waiter still resolves — an unpriceable answer omits the line, exactly
+    // as a 404/502 already did. The gate must not strand the caller.
+    assert.equal(ready, 1, "the onReady waiter was never called — the mount is stranded, not degraded");
+  } finally {
+    sandbox.fetch = realFetch;
+  }
 });
