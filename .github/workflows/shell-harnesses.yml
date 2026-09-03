@@ -652,6 +652,7 @@ jobs:
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
+          tooling-harnesses scripts/relandcheck-diff-producer.test.sh
           launcher-boot-selftest bin/barkpark
           launcher-boot-selftest scripts/barkpark-boot-selftest.sh
           workflow-portability scripts/workflow-portability-check.sh
