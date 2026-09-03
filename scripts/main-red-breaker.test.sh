@@ -46,4 +46,11 @@ out="$(run "$out_s2" pull_request "")"; has "$out" "Could not read main" "7) unr
 out="$( (export PATH="$TMP/bin:$PATH" STEP_OUTCOMES='not json' STEP_NAMES="$NAMES" JOB_NAME=j WORKFLOW_FILE=w.yml GITHUB_EVENT_NAME=pull_request; bash "$SUBJECT" 2>&1; echo "RC=$?") )"; has "$out" "CANNOT DECIDE" "8) unparsable outcomes cannot decide"; has "$out" "RC=2" "8) rc 2"
 # 9. the subject never names a required context
 for ctx in "Elixir gate" "Cloud gate" "Console gate" "PR references an active task"; do grep -qF "$ctx" "$SUBJECT" && bad "9) subject mentions required context '$ctx'" ; done; ok "9) subject names no required context"
+# 10. every Decide step in the wired workflows calls the script by ABSOLUTE path.
+#     Jobs with `defaults.run.working-directory: api` (sobelow, mix-audit) ran
+#     `bash scripts/main-red-breaker.sh` from api/ and died with exit 127 on
+#     main 0f6c9937 (2026-09-03 05:30Z) — a red the breaker itself caused.
+rel="$(grep -lE '^\s+run: bash scripts/main-red-breaker\.sh' "$ROOT"/.github/workflows/*.yml 2>/dev/null || true)"
+abs_n="$(grep -c 'GITHUB_WORKSPACE/scripts/main-red-breaker.sh' "$ROOT"/.github/workflows/*.yml 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')"
+if [ -z "$rel" ] && [ "$abs_n" -ge 9 ]; then ok "10) all $abs_n Decide steps call the script via \$GITHUB_WORKSPACE (no relative invocation)"; else bad "10) relative invocation present in: $rel (absolute count $abs_n)"; fi
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
