@@ -145,6 +145,24 @@ defmodule Barkpark.Content.Revisions do
     Revision
     |> where([r], r.rev == ^rev)
     |> scope_to_dataset(dataset, opts)
+    # WHY THIS ARM IS THE SAME ARM, not a new opening. `get_revision/3` (:103)
+    # and `list_revisions/4` (:68) already apply these exact three clauses —
+    # dataset, workspace-or-global, grants — verified line by line. This adds a
+    # new KEY (the rev hash) to an existing read; it widens nothing.
+    #
+    # NARROWING ONLY THIS ARM WOULD CLOSE NOTHING. Its only caller is
+    # `history_controller.ex:99`, which falls back here when the id is not a
+    # UUID, passing the SAME `opts` it hands `get_revision/3` five lines above.
+    # Fail-closing the hash path alone would make one controller answer one
+    # request shape two ways depending on whether the caller typed a UUID or a
+    # hash, while the UUID door stayed global — so anything made unreadable by
+    # hash stays readable by id. The confidentiality boundary is set by
+    # `get_revision/3`, not here.
+    #
+    # If the fail-open arm is wrong, it is wrong at all THREE call sites and at
+    # the UUID door too. That is a reachability review of its own, filed as a
+    # row rather than smuggled in behind the newest line.
+    # global-read: same clauses as get_revision/3; a new key on an existing read, and its one caller shares opts with the UUID door
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_grants(opts)
     |> order_by([r], desc: r.inserted_at)
