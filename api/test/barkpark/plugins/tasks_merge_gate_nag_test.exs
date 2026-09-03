@@ -107,8 +107,13 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
              "the warn fixture should carry the whole leading-form population"
 
       for %{"criterion" => text, "doc" => doc} <- cases do
-        assert [%{code: "merge_gate_unflagged"}] =
-                 warnings_for([%{"criterion" => text, "met" => false}]),
+        # A plain comparison, NOT `assert [%{code: ...}] = ...`: a pattern-match
+        # assert raises MatchError before assert/2 ever renders its message, so
+        # the failure would name no corpus case — the one thing a 40+-case loop
+        # must always report.
+        codes = Enum.map(warnings_for([%{"criterion" => text, "met" => false}]), & &1.code)
+
+        assert codes == ["merge_gate_unflagged"],
                "expected the nag to fire on #{doc}'s leading-form criterion: #{String.slice(text, 0, 90)}"
       end
     end

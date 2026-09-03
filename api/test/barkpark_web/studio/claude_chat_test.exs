@@ -899,6 +899,60 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
              "the mcp config outlived a teardown whose port close raised (charter D63)"
     end
 
+    # ── the overflow arm's twin of the same check-then-act (this PR) ─────────
+    #
+    # #13576 removed `if port in Port.list(), do: Port.close(port)` from
+    # terminate/2 (above) and left the IDENTICAL shape standing in the
+    # buffer-overflow arm of handle_info/2. CI caught it on 2026-08-24: the
+    # overflow test above got a :DOWN carrying
+    #
+    #   {:badarg, [{:erlang, :port_close, [#Port<0.536>]},
+    #              {ClaudeChat.Session, :handle_info, 2, claude_chat.ex}]}
+    #
+    # instead of {:claude_chat_error, :buffer_overflow, _}. The raise skipped
+    # the send to the sink AND turned the intended {:stop, :normal, _} into a
+    # crash, so the caller was told nothing at all.
+    #
+    # MEASURED CAVEAT — READ BEFORE TRUSTING THIS TEST, exactly the caveat the
+    # terminate twin above records about itself. I RAN the mutation: restoring
+    # `if port in Port.list(), do: Port.close(port)` here leaves this test
+    # GREEN. An already-closed port is not in `Port.list()`, so the old check
+    # suppresses its own close and never raises. This test therefore does NOT
+    # discriminate the check-then-act, and no green here may be read as
+    # evidence that the fix is present.
+    #
+    # The defect's actual state — port ALIVE at the membership test, DEAD by
+    # the close — is not constructible from a test: that window is the race,
+    # and the stub exits at the moment the cap fires, which is why it surfaced
+    # once in weeks as a rerun-green rather than on demand. The evidence for
+    # the fix is the recorded CI stack (2026-08-24, badarg from
+    # :erlang.port_close inside handle_info/2) plus #13576's identical finding
+    # on terminate/2 — NOT this assertion.
+    #
+    # What this test DOES buy, and why it stays: it pins the post-fix
+    # behaviour — with the close now always attempted, a dead port must still
+    # produce {:stop, :normal, port: nil} and a named error at the sink rather
+    # than a crash. That path is unreachable under the old shape and is
+    # exercised on every run under the new one.
+    test "a buffer overflow still names itself when the port close raises" do
+      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
+      Port.close(port)
+
+      # Precondition: this port is the raising kind.
+      refute port in Port.list()
+      assert_raise ArgumentError, fn -> Port.close(port) end
+
+      cap = ClaudeChat.max_buffer_bytes()
+      chunk = String.duplicate("x", cap + 1)
+
+      state = %{port: port, buffer: "", sink: self(), stderr_path: nil}
+
+      assert {:stop, :normal, %{port: nil}} =
+               ClaudeChat.Session.handle_info({port, {:data, chunk}}, state)
+
+      assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 100
+    end
+
     # Bounded poll (10ms x rounds) for the capture file's creation.
     defp await_file(_path, 0), do: false
 

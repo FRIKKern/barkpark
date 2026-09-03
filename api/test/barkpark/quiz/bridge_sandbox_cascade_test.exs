@@ -242,8 +242,11 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
   defp applying?(stack) do
     Enum.any?(stack, fn
-      {Barkpark.Quiz.Bridge, name, _, _} -> name |> Atom.to_string() |> String.contains?("apply_now")
-      _ -> false
+      {Barkpark.Quiz.Bridge, name, _, _} ->
+        name |> Atom.to_string() |> String.contains?("apply_now")
+
+      _ ->
+        false
     end)
   end
 
