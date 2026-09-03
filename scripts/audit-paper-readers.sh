@@ -174,16 +174,28 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   # command failed AND its stderr carries the server's internal_error envelope.
   # A CLI failure for any other reason (bad render, empty body, auth, usage)
   # is never retried.
+  # The CLI leg fails three distinguishable ways and the witness used to record
+  # only `cli:{ok:false}` for all three — widthcheck on an empty file reports
+  # 0/0, so a failed command and an empty render left byte-identical evidence
+  # and the 2026-08-28 / 2026-09-02 reds could not be told apart after the fact
+  # (both healed on the next run, cause unrecoverable). The fields below are
+  # PURELY additive witness: `cli_ok` is computed exactly as before.
   cli_reader_ok=false
+  cli_exit=0
+  cli_attempts=0
   for cli_delay in 0 0.25 1 4; do
     [[ "$cli_delay" == 0 ]] || sleep "$cli_delay"
-    if "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
-      paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err"; then
+    cli_attempts=$((cli_attempts + 1))
+    "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
+      paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err"
+    cli_exit=$?
+    if ((cli_exit == 0)); then
       [[ -s "$tmp/cli" ]] && cli_reader_ok=true
       break
     fi
     grep -q '"code":"internal_error"' "$tmp/cli.err" 2>/dev/null || break
   done
+  cli_stderr="$(head -c 600 "$tmp/cli.err" 2>/dev/null)" || cli_stderr=""
 
   tui_metrics="$("$tmp/widthcheck" "$tmp/cli" 80)"
   tui_max_display_width="$(jq -r '.max_display_width' <<<"$tui_metrics")"
@@ -191,6 +203,16 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   cli_ok=false
   if [[ "$cli_reader_ok" == true && "$tui_overflow_lines" == "0" ]]; then
     cli_ok=true
+  fi
+  # Which clause said no — reported in the same precedence the gate applies.
+  if ((cli_exit != 0)); then
+    cli_arm="command_failed"
+  elif [[ "$cli_reader_ok" != true ]]; then
+    cli_arm="empty_output"
+  elif [[ "$cli_ok" != true ]]; then
+    cli_arm="tui_overflow"
+  else
+    cli_arm="ok"
   fi
 
   email_bytes="$(wc -c <"$tmp/email" | tr -d ' ')"
@@ -221,12 +243,16 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
     --argjson email_bytes "$email_bytes" \
     --argjson source_ok "$source_ok" \
     --argjson cli_ok "$cli_ok" \
+    --argjson cli_exit "$cli_exit" \
+    --arg cli_arm "$cli_arm" \
+    --argjson cli_attempts "$cli_attempts" \
+    --arg cli_stderr "$cli_stderr" \
     --argjson gui_content "$gui_content" \
     --argjson email_content "$email_content" \
     --argjson tui_max_display_width "$tui_max_display_width" \
     --argjson tui_overflow_lines "$tui_overflow_lines" \
     --argjson ok "$ok" \
-    '{id:$id,ok:$ok,gui:{status:$gui_code,content:$gui_content},email:{status:$email_code,bytes:$email_bytes,content:$email_content},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
+    '{id:$id,ok:$ok,gui:{status:$gui_code,content:$gui_content},email:{status:$email_code,bytes:$email_bytes,content:$email_content},source:{status:$source_code,kind:$source_kind,valid:$source_ok},cli:{ok:$cli_ok,exit:$cli_exit,arm:$cli_arm,attempts:$cli_attempts,stderr:$cli_stderr},tui:{max_display_width:$tui_max_display_width,overflow_lines:$tui_overflow_lines}}' \
     >>"$results"
 done
 

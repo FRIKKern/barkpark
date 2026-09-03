@@ -36,6 +36,17 @@ if [[ " $* " == *" paper view "* && " $* " == *" --profile none "* ]]; then
     printf '%s\n' '{"error":{"code":"internal_error","message":"server error (fixture)"},"ok":false}' >&2
     exit 8
   fi
+  # Non-transport CLI failure: a real exit code and a stderr envelope that is
+  # NOT internal_error, so the retry loop must not touch it.
+  if [[ "${BP_FIXTURE_CLI_FAIL:-}" == "1" ]]; then
+    printf '%s\n' '{"error":{"code":"not_found","message":"paper view exploded (fixture)"},"ok":false}' >&2
+    exit 3
+  fi
+  # The shape the 2026-09-02 red could have been and the witness could not say:
+  # a clean exit with nothing on stdout.
+  if [[ "${BP_FIXTURE_CLI_EMPTY:-}" == "1" ]]; then
+    exit 0
+  fi
   if [[ "${BP_FIXTURE_WIDE:-}" == "1" ]]; then
     printf '%081d\n' 0
     exit 0
@@ -147,7 +158,9 @@ jq -e '
     .tui.max_display_width <= 80 and .tui.overflow_lines == 0 and
     .gui.content.body_found and .gui.content.meaningful and
     .email.content.body_found and .email.content.meaningful and
-    .email.content.links_valid and .email.content.invalid_links == 0
+    .email.content.links_valid and .email.content.invalid_links == 0 and
+    .cli.ok and .cli.arm == "ok" and .cli.exit == 0 and .cli.attempts == 1 and
+    .cli.stderr == ""
   )
 ' \
   "$tmp/result.json" >/dev/null
@@ -161,8 +174,59 @@ fi
 
 jq -e '
   .ok == false and .failed == 2 and
-  all(.failures[]; .tui.max_display_width == 81 and .tui.overflow_lines == 1)
+  all(.failures[];
+    .tui.max_display_width == 81 and .tui.overflow_lines == 1 and
+    .cli.ok == false and .cli.arm == "tui_overflow" and .cli.exit == 0
+  )
 ' "$tmp/wide-result.json" >/dev/null
+
+# ── The CLI leg must NAME which clause said no ────────────────────────────────
+# paper-readers.yml went red on 2026-08-28 (run 33194662611) and 2026-09-02
+# (run 33615074664) with a witness that said only `cli:{ok:false}` plus
+# `tui:{max_display_width:0,overflow_lines:0}` — the reading a failed command
+# and an empty-but-successful render produce IDENTICALLY. Both healed on the
+# next scheduled run, so the cause is now unrecoverable. These two fixtures
+# hold the witness to telling them apart.
+if PATH="$tmp:$PATH" BP_FIXTURE_CLI_FAIL=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-fail-result.json"; then
+  printf 'a failing bp paper view unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .cli.ok == false and .cli.arm == "command_failed" and
+    .cli.exit == 3 and .cli.attempts == 1 and
+    (.cli.stderr | contains("paper view exploded (fixture)")) and
+    .tui.max_display_width == 0 and .tui.overflow_lines == 0
+  )
+' "$tmp/cli-fail-result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_CLI_EMPTY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/cli-empty-result.json"; then
+  printf 'an empty bp paper view render unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .cli.ok == false and .cli.arm == "empty_output" and
+    .cli.exit == 0 and .cli.attempts == 1 and .cli.stderr == "" and
+    .tui.max_display_width == 0 and .tui.overflow_lines == 0
+  )
+' "$tmp/cli-empty-result.json" >/dev/null
+
+# The two reds above are indistinguishable in the OLD witness and must stay
+# distinguishable in this one: same tui metrics, different arm.
+if [[ "$(jq -r '.failures[0].arm // .failures[0].cli.arm' "$tmp/cli-fail-result.json")" == \
+  "$(jq -r '.failures[0].arm // .failures[0].cli.arm' "$tmp/cli-empty-result.json")" ]]; then
+  printf 'a failed CLI command and an empty CLI render report the same arm\n' >&2
+  exit 1
+fi
 
 if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY_BODY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   BP_AUDIT_BASE_URL="https://fixture.invalid" \
@@ -281,6 +345,10 @@ PATH="$tmp:$PATH" BP_FIXTURE_FLAKY_500=1 BP_FIXTURE_CLI_FLAKY=1 \
   exit 1
 }
 jq -e '.ok and .failed == 0 and all(.results[]; .gui.status == 200 and .cli.ok)' \
+  "$tmp/flaky-result.json" >/dev/null
+# …and the witness says the leg was retried, so a green that cost three tries
+# is no longer indistinguishable from a green that cost one.
+jq -e '[.results[] | select(.cli.attempts >= 2 and .cli.arm == "ok")] | length >= 1' \
   "$tmp/flaky-result.json" >/dev/null
 
 # 2. A PERSISTENT internal_error 500 must still FAIL — the retry gives up and
