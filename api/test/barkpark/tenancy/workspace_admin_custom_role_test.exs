@@ -45,7 +45,12 @@ defmodule Barkpark.Tenancy.WorkspaceAdminCustomRoleTest do
   @dataset "production"
 
   defp workspace(slug) do
-    {:ok, w} = Tenancy.create_workspace(%{slug: "#{slug}-#{System.unique_integer([:positive])}", name: "WS"})
+    {:ok, w} =
+      Tenancy.create_workspace(%{
+        slug: "#{slug}-#{System.unique_integer([:positive])}",
+        name: "WS"
+      })
+
     w
   end
 
@@ -280,7 +285,9 @@ defmodule Barkpark.Tenancy.WorkspaceAdminCustomRoleTest do
       assert role.workspace_id == nil
 
       {:ok, _} =
-        Repo.insert(RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: "admin"}))
+        Repo.insert(
+          RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: "admin"})
+        )
 
       u = user("global-lead")
       {:ok, _} = TenancyAuth.create_membership(ws_a.id, u.id, "global-lead", "user")

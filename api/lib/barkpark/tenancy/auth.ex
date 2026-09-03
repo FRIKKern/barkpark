@@ -482,7 +482,8 @@ defmodule Barkpark.Tenancy.Auth do
   # for enforcement, so a tenant can never redefine `admin`/`member` (via a
   # workspace- or global-scoped row of the same name) to escalate OR to weaken
   # the fail-safe. A custom name resolves purely from its DB rows.
-  defp granted_actions(role, workspace_id), do: granted_actions(role, workspace_id, :inherit_global)
+  defp granted_actions(role, workspace_id),
+    do: granted_actions(role, workspace_id, :inherit_global)
 
   # THE ONE ROLE RESOLVER. The `case` ORDER is the shadowing tripwire: the
   # built-in map is consulted BEFORE any DB read, in every scope, so a tenant
