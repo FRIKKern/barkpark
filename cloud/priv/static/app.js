@@ -4277,8 +4277,18 @@
 
   // ── DOM mounts (browser + smoke verified) ────────────────────────────────────
 
+  // cch-w31-bl: the LAST of the four boolean owner|admin predicates to stop
+  // re-deriving the role set from string literals. Same conversion
+  // providerCanWrite (cch-w41-bl) and canManageOnboarding (cch-w42-s1) already
+  // took, for the same reason and with the same shape: the server states this
+  // exact fact on the wire (`team_authority.admin`, resolved from the very
+  // module the notification-settings gate calls), so re-deriving it here was
+  // the console inventing an answer it was already being told. Boolean stays
+  // boolean (D439) — "grant" is the only true, so loading/failed/stale/refuse
+  // all fail CLOSED to the member surface exactly as the old meCache-falsy read
+  // did on its two states.
   function notifCanManage() {
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
 
   function loadNotifications() {
@@ -16137,14 +16147,51 @@
   // read is NOT an answer about the link — it used to render "This invitation
   // isn't valid any more" on the UNAUTHENTICATED landing AND consume the parked
   // token, so a wifi blip destroyed a working invitation.
-  function inviteLandingState(previewStatus, preview, me, nowMs) {
+  //
+  // cch-w43-bl adds the fifth and sixth facts this decision was getting wrong:
+  // WHICH memberships it reads, and what it does when it could not read them.
+  function inviteLandingState(previewStatus, preview, me, nowMs, meBand) {
     if (previewStatus === 404) return "invalid";
     if (!preview || !preview.team) {
       return previewStatus >= 200 && previewStatus < 300 ? "invalid" : "check_failed";
     }
     if (preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
-    if (me && me.team && me.team.slug && preview.team.slug === me.team.slug) return "already_member";
+    // cch-w43-bl — THE ACCOUNT READ IS A BAND, NOT A NULLABLE. `me === null`
+    // used to carry two different facts at once: "the server says you belong to
+    // no team" and "we could not ask". The second was answered as "confirm" —
+    // so a 500 or an offline /v1/me ASSERTED you are not already a member and
+    // sold you a Join button for a team you may already be in. A read that did
+    // not land decides nothing about your memberships: the landing takes the
+    // shipped recoverable state, which keeps the parked token and offers the
+    // re-check. `undefined` is the legacy four-argument shape, usable only by a
+    // caller that already holds the answer; loadInvite passes meState() itself.
+    if (meBand !== undefined && meBand !== "loaded") return "check_failed";
+    // cch-w43-bl — EVERY membership the envelope carries, not the ONE pinned
+    // team. /v1/me emits `teams` for exactly this purpose (the server's own
+    // comment at that key: "a user who accepted an invite into a second team is
+    // otherwise stranded on their oldest (signup) team"), and POST
+    // /v1/invitations/accept is a plain user route with no admin gate — so an
+    // ordinary member of team B who happened to be pinned to team A was shown
+    // the JOIN screen for a team they were already in, and the accept then
+    // answered against a membership that already existed.
+    if (inviteMembershipSlugs(me).indexOf(preview.team.slug) !== -1) return "already_member";
     return "confirm";
+  }
+
+  // Pure: every team slug the /v1/me envelope says this account belongs to —
+  // the pinned `team` AND every row of `teams`. The pinned team is included on
+  // purpose: it is a membership too, and reading `teams` alone would make the
+  // decision depend on a key that older envelopes did not send (fail-open) when
+  // the whole point of this fix is that a missing fact never grants.
+  function inviteMembershipSlugs(me) {
+    var out = [];
+    function add(slug) {
+      if (slug && out.indexOf(String(slug)) === -1) out.push(String(slug));
+    }
+    add(me && me.team && me.team.slug);
+    var list = (me && me.teams) || [];
+    for (var i = 0; i < list.length; i++) add(list[i] && list[i].slug);
+    return out;
   }
 
   // Pure: the terminal state an accept POST result lands on. The server folds
@@ -16302,9 +16349,17 @@
     ]).then(function (res) {
       if (seq !== inviteLoadSeq || currentView() !== "invite") return;
       var pr = res[0];
-      var me = res[1].ok ? res[1].data : null;
+      // cch-w43-bl — NOT A THIRD /v1/me IDIOM. This read used to land in a
+      // local variable: no band, no pin capture, no fault retained, and a
+      // failure indistinguishable from "you belong to no team". It now goes
+      // through absorbMe — the ONE place a /v1/me answer becomes cached state,
+      // success OR failure — so meState() is the band this landing decides on,
+      // meTeamPin is captured exactly as it is everywhere else, and the account
+      // this screen reasons about is the same object every other surface reads.
+      absorbMe(res[1]);
+      var me = meCache;
       var preview = pr.ok ? pr.data : null;
-      var state = inviteLandingState(pr.status, preview, me, Date.now());
+      var state = inviteLandingState(pr.status, preview, me, Date.now(), meState());
       renderInviteState(box, state, token, preview, me);
     });
   }
@@ -16348,6 +16403,21 @@
       if (currentView() !== "invite") return;
       if (r.status === 200) {
         clearParkedInvite();
+        // cch-w43-bl — PIN THE TEAM WE JUST JOINED. Until now the accept never
+        // wrote bp.active-team at all, so "You're in" was followed by a
+        // dashboard still scoped to the OLD team — the exact stranding /v1/me's
+        // `teams` key exists to end, reproduced by the console that was meant to
+        // end it, and with no way out while the team switcher is unreachable on
+        // a fresh account. The SERVER's own answer wins; the preview is only the
+        // fallback, because the shape of a 200 body is the server's to change.
+        // Written BEFORE clearMe()/loadMe() so api() sends the new team on the
+        // re-read — it reads this key on every request.
+        var joinedTeamId = (r.data && r.data.team_id) ||
+          (r.data && r.data.team && r.data.team.id) ||
+          (preview && preview.team && preview.team.id) || null;
+        if (joinedTeamId) {
+          try { localStorage.setItem("bp.active-team", String(joinedTeamId)); } catch (e) {}
+        }
         // The team roster (and possibly the account's team) changed.
         clearMe(); // cch-w36-s3: the error flags travel with the cache
         // cch-w12-s1: the Who axis is derived from that roster, so the cached
@@ -16635,6 +16705,15 @@
     // FAIL CLOSED on loading/failed — the cost of a false offer here is a full
     // form fill plus a provider detour and THEN a 403 (unlike the PLAN step's
     // launchCheckoutAuthority, which fails OPEN by shipped design).
+    // cch-w47-s1-fu — "stale" lands HERE, on the not-grant arm, and takes the
+    // unknown exit rather than the refusal card: the pin moved, so the cached
+    // answer is not about this team, and neither a form nor a determinate "you
+    // can't" is honest about a question nobody has asked yet. The retry below
+    // re-drives /v1/me, whose absorb RE-TAKES the pin — so the exit this arm
+    // ships is the one that actually resolves the band. The four OFFER sites
+    // (the scope menu, both header buttons, the ⌘K palette) branch on
+    // `=== "refuse"` and are untouched on "stale" on purpose: a stale answer
+    // must not delete controls, only withhold the form behind them.
     var authority = launchAuthority();
     launchMount = { container: container, opts: opts, band: authority };
     if (authority !== "grant") {
@@ -17260,7 +17339,11 @@
   // `require_primary_team_owner`, stricter than every other settings gate. The
   // client signal is /v1/me's top-level `role` string (3-role vocab). Pure so a
   // node test pins the gate; the DOM branch reads it via billingIsOwner().
-  function billingCanManage(role) { return role === "owner"; }
+  // cch-w31-bl: the owner literal is CONSOLE_OWNER_ROLES now — the same one
+  // declaration the census diffs against Authz's `team_owner?/2`. Signature,
+  // arity and answer are unchanged; this is the fifth copy of a server role
+  // table losing its independence, not a gate moving.
+  function billingCanManage(role) { return actorRoleIn(role, CONSOLE_OWNER_ROLES); }
   function billingIsOwner() { return !!(meCache && billingCanManage(meCache.role)); }
 
   // Pure: does the team hold a REAL paid subscription (a catalog plan that isn't
@@ -18027,6 +18110,64 @@
     return "loading";
   }
 
+  // ── THE ROLE VOCABULARY — ONE DECLARATION, MIRRORED FROM THE SERVER ───────
+  // cch-w31-bl. The console used to re-declare the owner|admin set at every
+  // site that needed it: notifCanManage, instanceAdminAuthority and
+  // launchAuthority each inlined the same two-limb owner|admin equality test
+  // against meCache.role, and billingCanManage inlined the owner-only one —
+  // four hand-copies of two server tables (Authz's `@admin_roles` and its
+  // `team_owner?/2`) with nothing linking any copy to either. (The literals are
+  // not restated in this comment on purpose: the census's ban is a grep any
+  // reviewer can run, and prose that quotes the banned form muddies its read.)
+  // A console that decides what a person
+  // may do from a hand-copied role set is one server-side policy change away
+  // from offering an action the API will refuse — or hiding one it would
+  // allow — and neither failure had a guard.
+  //
+  // These two arrays are the ONLY role literals on the ACTOR-AUTHORITY axis in
+  // this file, and __app.test.mjs's role-vocabulary census diffs them against
+  // the attribute text in cloud/lib/barkpark_cloud/accounts/authz.ex — two
+  // independent sources, so adding a role to the server's ladder alone reds
+  // instead of shipping green. The census's second arm then forbids ANY
+  // `=== "owner"` / `=== "admin"` comparison against an actor role ANYWHERE in
+  // this file, which is what makes a fifth hand-rolled copy reddable BY NAME
+  // rather than merely discouraged. Set membership (never `===` against a
+  // literal) is why that arm can be an outright ban and not an allowlist that
+  // waves the eighth entry through because seven already sit above it.
+  //
+  // ROLES, NOT CAPABILITIES (GR9), and NOT the roster axis. Where the SERVER
+  // states the authority itself — /v1/me's `team_authority` — read that instead
+  // (teamAuthorityState below, and the four boolean predicates already built on
+  // it). This vocabulary exists for the two bands whose routes are judged
+  // against `meCache.role`, for the owner-only billing gate, and for the
+  // census. The members band's equality reads on a roster row's own `.role`
+  // are a DIFFERENT axis — a TARGET row's role inside a roster, ranked
+  // against the server's own ladder in assignableRoles/memberRoleRank — and are
+  // deliberately outside both this vocabulary and the census's ban.
+  var CONSOLE_ADMIN_ROLES = ["owner", "admin"];   // mirrors Authz `@admin_roles`
+  var CONSOLE_OWNER_ROLES = ["owner"];            // mirrors Authz `team_owner?/2`
+
+  // The ONE place a role string is tested against a role set in this file.
+  // A non-string role (nil on the wire for a teamless account) is never a
+  // member of anything — an unknown role is not a role of admin. Searchable by
+  // the words a reader types for it: owner, admin, admin_roles, canManage,
+  // isOwner, isAdmin, role literal. It carries no @canonical marker of its own
+  // — the capability that OWNS the authority answer already has one, on
+  // instanceAdminAuthority below, and this is that answer's vocabulary.
+  function actorRoleIn(role, roles) {
+    return typeof role === "string" && roles.indexOf(role) !== -1;
+  }
+
+  // cch-w47-s1-fu — THE PIN TEST, ONE OWNER. Two bands ask the same falsifiable
+  // question (teamAuthorityState and launchAuthority), and a second inlined
+  // copy of it is the same class of defect the vocabulary above just closed.
+  // TRUE when the pin the cached answer was fetched under is no longer the pin
+  // live now. Null-vs-null (a console that never switched teams) is FALSE — a
+  // band that cries wolf on every cold boot is a band nobody can act on.
+  function meTeamPinMoved() {
+    return localStorage.getItem("bp.active-team") !== meTeamPin;
+  }
+
   // The team authority the SERVER states, as a five-valued band — never a
   // boolean. /v1/me now carries `team_authority` {team_id, role, admin, owner},
   // resolved server-side from Authz and nil exactly when the account is
@@ -18055,7 +18196,7 @@
     // resolve_team/2 DEGRADES to the primary team when the pin names a team the
     // caller doesn't belong to, so a bare mismatch cries wolf. The falsifiable
     // fact is the pin the answer was fetched under vs the pin live NOW.
-    if (localStorage.getItem("bp.active-team") !== meTeamPin) return "stale";
+    if (meTeamPinMoved()) return "stale";
     return ta.admin ? "grant" : "refuse";
   }
 
@@ -18087,10 +18228,17 @@
   // membersContext() — re-derive it with:
   //   grep -n 'function membersContext' cloud/priv/static/app.js
   //
+  // cch-w31-bl: the role SET is no longer restated here — it is the one
+  // CONSOLE_ADMIN_ROLES declaration, censused against Authz's own attribute.
+  // The BAND is deliberately unchanged: still three-valued, still
+  // unknown/grant/refuse, still answered from `meCache.role` rather than from
+  // team_authority, for the two-axis reason spelled out above. Deduplicating a
+  // literal is not a licence to move a band.
+  //
   // @canonical capability:console-authority-predicate aka:role,canManage,isOwner,isAdmin,meCache.role
   function instanceAdminAuthority() {
     if (meState() !== "loaded") return "unknown";
-    return (meCache.role === "owner" || meCache.role === "admin") ? "grant" : "refuse";
+    return actorRoleIn(meCache.role, CONSOLE_ADMIN_ROLES) ? "grant" : "refuse";
   }
 
   // cch-w47-s1 — THE LAUNCH BAND, and it is a NEW sibling on purpose. Widening
@@ -18101,6 +18249,7 @@
   //
   //   "loading" · /v1/me never asked, or still in flight
   //   "failed"  · the read answered with a fault — NOT the same as a refusal
+  //   "stale"   · the pin moved under the answer (cch-w47-s1-fu, below)
   //   "grant"   · the server will accept POST /v1/launch on this team
   //   "refuse"  · it will not, and a role grant is the remedy
   //
@@ -18111,10 +18260,26 @@
   // The role read mirrors instanceAdminAuthority's exactly, and is correct for
   // this route for the same reason: api() pins x-barkpark-team on every authed
   // request including /v1/me, so meCache.role IS the role go_live will judge.
+  // cch-w47-s1-fu — THE STALE BAND, and why this band needed the fifth value
+  // that teamAuthorityState() has carried since wave 42. Folding a moved pin
+  // into whatever role the STALE answer happened to carry sells the wrong
+  // answer in BOTH directions: in the window between a team switch and the
+  // reload, an owner-on-team-A pinned to team-B was still offered Launch (and a
+  // member-on-A pinned to B was still refused it) for a team the cached answer
+  // says nothing about. The console reloads on its own switch, so the window is
+  // small — but a second tab never reloads at all, and nothing here listens for
+  // the `storage` event, so THAT tab holds a stale answer for its whole page
+  // life while api() re-reads the pin and sends the new team on every request.
+  //
+  // It is checked BEFORE the role read, not after: the role read's answer is
+  // exactly the thing a moved pin invalidates. And it is a band value rather
+  // than a refusal, because "refuse" is a DETERMINATE no that deletes the offer
+  // and offers no retry — a stale answer has earned neither.
   function launchAuthority() {
     var state = meState();
     if (state !== "loaded") return state === "failed" ? "failed" : "loading";
-    return (meCache.role === "owner" || meCache.role === "admin") ? "grant" : "refuse";
+    if (meTeamPinMoved()) return "stale";
+    return actorRoleIn(meCache.role, CONSOLE_ADMIN_ROLES) ? "grant" : "refuse";
   }
 
   // Honest copy for the failed read, classified from the retained fault the
@@ -26011,6 +26176,23 @@
       // click, so its gate could not be driven by a test at all — which is how
       // it stayed actor-only for a whole wave after the row went rank-relative.
       openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
+      // cch-w31-bl — THE ROLE VOCABULARY, exported as DATA so the census can
+      // diff the shipped set against Authz's own attribute text rather than
+      // re-typing it here (a re-typed literal pins itself and catches nothing).
+      // Copies, so a test that mutates its handle cannot mutate the console's.
+      consoleAdminRoles: CONSOLE_ADMIN_ROLES.slice(),
+      consoleOwnerRoles: CONSOLE_OWNER_ROLES.slice(),
+      actorRoleIn: actorRoleIn,
+      // cch-w47-s1-fu — the ONE pin test both bands ask, plus the two header
+      // offer sites' own repaint, so "the offer sites do NOT move on stale" is
+      // asserted by DRIVING them rather than by reading the source that emits
+      // them. (repaintLaunchAuthority wraps this one and three more surfaces;
+      // the offer claim is about these two buttons alone.)
+      meTeamPinMoved: meTeamPinMoved,
+      refreshLaunchOffers: refreshLaunchOffers,
+      // cch-w43-bl — the invite landing's membership set, node-pinned on its
+      // own rather than only through the state machine that consumes it.
+      inviteMembershipSlugs: inviteMembershipSlugs,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,

@@ -25643,3 +25643,414 @@ test("cch-w45 (D439): assignableRoles' return type is unchanged — still an arr
   assert.deepEqual([...hooks.assignableRoles("member")], []);
   assert.equal(hooks.assignableRoles.length, 1, "arity 1 — the ACTOR axis, unchanged");
 });
+
+// ── cch-w31-bl: THE ROLE-VOCABULARY CENSUS ──────────────────────────────────
+//
+// THE LAW: A CONSOLE THAT DECIDES WHAT A PERSON MAY DO FROM A HAND-COPIED ROLE
+// SET IS ONE SERVER-SIDE POLICY CHANGE AWAY FROM OFFERING AN ACTION THE API
+// WILL REFUSE — OR HIDING ONE IT WOULD ALLOW — AND NEITHER FAILURE HAS A GUARD.
+//
+// Wave 31 slice 3 built the role-agreement census on the ELIXIR side
+// (test/barkpark_cloud/accounts/role_agreement_census_test.exs). The JS half is
+// outside anything ExUnit can see, and it was left unpaid: app.js restated the
+// owner|admin set at four independent sites, none of which was linked to the
+// server table it was copied from.
+//
+// TWO INDEPENDENT SOURCES, WHICH IS THE WHOLE POINT. The LEFT side is the
+// SHIPPED console — the vocabulary app.js actually exports at runtime, read out
+// of the evaluated IIFE, not re-typed here (a re-typed literal pins itself and
+// catches nothing). The RIGHT side is the SERVER's own text: Authz's
+// `@admin_roles` attribute and `team_owner?/2`'s literal, parsed out of
+// cloud/lib/barkpark_cloud/accounts/authz.ex. Neither side can be edited into
+// agreement by touching the other, so adding a role to one ladder alone reds.
+//
+// IT REFUSES RATHER THAN PASSING. If the attribute or the clause cannot be
+// found, ARM A fails with a REFUSED message instead of deriving an empty set
+// and greening — the worst failure a census can have is going quiet at exactly
+// the moment the file it reads was restructured.
+//
+// ARM B IS WHY A FIFTH COPY CANNOT COME BACK. The vocabulary is tested by SET
+// MEMBERSHIP (actorRoleIn), never by `===` against a literal, so the ban can be
+// absolute: ANY `=== "owner"` / `=== "admin"` / `=== "member"` comparison
+// against an ACTOR role anywhere in app.js is a violation, reported by the name
+// of the function that holds it. That is a rule, not an allowlist — an
+// allowlist's eighth entry gets waved through by the seven above it.
+//
+// WHAT ARM B DELIBERATELY DOES NOT COVER, and why it is not a hole: the MEMBERS
+// band compares a TARGET row's role (`r.role`, `ctx.role`, `actorRole`,
+// `targetRole`) against the server's ranked ladder in assignableRoles /
+// memberRoleRank / canChangeMemberRole. That is a different axis with its own
+// server table (TeamMembership `@ranks`) and its own cross-layer census on the
+// Elixir side; folding it in here would make one rule answer two questions.
+
+const AUTHZ_EX_URL = new URL("../../lib/barkpark_cloud/accounts/authz.ex", import.meta.url);
+
+// Blank JS line- and block-comments so a comparison merely QUOTED in a comment
+// is not censused as code. String BODIES are kept on purpose: the role literals
+// this census hunts live inside them, and blanking strings would blind the arm
+// to the exact thing it exists to find. Length is preserved, so every index
+// into the blanked text is an index into the original.
+function w31BlankComments(src) {
+  const out = src.split("");
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === "/" && n === "/") {
+      while (i < src.length && src[i] !== "\n") { out[i] = " "; i++; }
+    } else if (c === "/" && n === "*") {
+      const end = src.indexOf("*/", i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      for (; i < stop; i++) if (src[i] !== "\n") out[i] = " ";
+    } else if (c === '"' || c === "'") {
+      i++;
+      while (i < src.length && src[i] !== c) { if (src[i] === "\\") i++; i++; }
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+// The last `function NAME(` opened at or above `at`. app.js is one IIFE of
+// indented top-level functions, so this attributes a hit to the function a
+// reader would have to open to fix it — a name, never a line citation.
+function w31EnclosingFn(src, at) {
+  const re = /\n\s*function\s+([A-Za-z0-9_$]+)\s*\(/g;
+  let name = "(module top level)";
+  let m;
+  while ((m = re.exec(src))) {
+    if (m.index >= at) break;
+    name = m[1];
+  }
+  return name;
+}
+
+// An ACTOR-role receiver is one of exactly three spellings, and app.js has no
+// fourth way to reach the signed-in person's role: `meCache.role` (the cache),
+// `me.role` (an envelope passed in), or the bare parameter `role` (the shape
+// billingCanManage used). The lookbehinds are what keep a ROSTER row's
+// `r.role` / `ctx.role` — a different axis — out of the census.
+const W31_ACTOR_ROLE_CMP =
+  /(meCache\.role|(?<![.\w$])me\.role|(?<![.\w$])role)\s*(===|!==)\s*"(owner|admin|member)"/g;
+
+function w31ActorRoleHits(src) {
+  const code = w31BlankComments(src);
+  const hits = [];
+  W31_ACTOR_ROLE_CMP.lastIndex = 0;
+  let m;
+  while ((m = W31_ACTOR_ROLE_CMP.exec(code))) {
+    hits.push({ fn: w31EnclosingFn(code, m.index), text: m[0] });
+  }
+  return hits;
+}
+
+function w31AuthzLadders() {
+  const src = fs.readFileSync(AUTHZ_EX_URL, "utf8");
+  const admin = /^\s*@admin_roles\s+~w\(([^)]*)\)/m.exec(src);
+  assert.ok(admin,
+    "REFUSED: `@admin_roles ~w(...)` was not found in accounts/authz.ex. A census that cannot read " +
+    "its server side must refuse, never derive an empty set and green.");
+  const owner = /def\s+team_owner\?\([^)]*\),\s*do:\s*role\([^)]*\)\s*==\s*"([a-z_]+)"/.exec(src);
+  assert.ok(owner,
+    "REFUSED: `team_owner?/2`'s role literal was not found in accounts/authz.ex.");
+  return { admin: admin[1].trim().split(/\s+/), owner: [owner[1]] };
+}
+
+test("cch-w31-bl ARM A: the console's role vocabulary IS the server's — and neither side was typed here", () => {
+  const server = w31AuthzLadders();
+  assert.ok(Array.isArray(hooks.consoleAdminRoles) && hooks.consoleAdminRoles.length > 0,
+    "the shipped console must expose its admin role set as DATA, or there is no left side to census");
+  assert.deepEqual([...hooks.consoleAdminRoles].sort(), [...server.admin].sort(),
+    "the console's admin role set must equal Authz's @admin_roles — adding a role to one ladder " +
+    "alone is exactly the drift this census exists to red on");
+  assert.deepEqual([...hooks.consoleOwnerRoles].sort(), [...server.owner].sort(),
+    "the console's owner-only set must equal team_owner?/2's own literal");
+
+  // The predicate that consumes them is set membership, and it fails closed on
+  // a role we do not have (nil on the wire for a teamless account).
+  assert.equal(hooks.actorRoleIn("owner", hooks.consoleAdminRoles), true);
+  assert.equal(hooks.actorRoleIn("member", hooks.consoleAdminRoles), false);
+  assert.equal(hooks.actorRoleIn(null, hooks.consoleAdminRoles), false, "an unknown role is not a role of admin");
+  assert.equal(hooks.actorRoleIn(undefined, hooks.consoleOwnerRoles), false);
+
+  // …and the four shipped predicates still answer what the ladders say, so the
+  // agreement above is not agreement between two dead constants.
+  assert.equal(hooks.billingCanManage("owner"), true);
+  assert.equal(hooks.billingCanManage("admin"), false, "billing WRITES are owner-only — the admin limb must stay out");
+  assert.equal(hooks.billingCanManage("member"), false);
+});
+
+test("cch-w31-bl ARM B: no hand-rolled actor-role literal survives anywhere in app.js", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const hits = w31ActorRoleHits(src);
+  assert.deepEqual(hits, [],
+    "every one of these re-declares the server's role table inside a function that could have asked " +
+    "the ONE vocabulary instead: " + JSON.stringify(hits));
+});
+
+test("cch-w31-bl ARM B CAN LOSE: a fifth hand-rolled copy is named by the function that holds it", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // THE MUTATION, applied to a COPY of the real shipped source — never to the
+  // tree. This is the exact fifth copy the row describes: a fresh predicate
+  // that re-types the owner|admin set instead of asking the vocabulary.
+  const anchor = "  function actorRoleIn(role, roles) {";
+  assert.ok(src.includes(anchor), "the mutation anchor must exist EXACTLY ONCE, or this proof proves nothing");
+  assert.equal(src.split(anchor).length - 1, 1, "…exactly once");
+  const mutant = src.replace(anchor,
+    "  function w31MutantCanManage() {\n" +
+    "    return !!(meCache && (meCache.role === \"owner\" || meCache.role === \"admin\"));\n" +
+    "  }\n" + anchor);
+  assert.notEqual(mutant, src, "the mutation must have APPLIED — an unapplied mutation is not a catch");
+
+  const hits = w31ActorRoleHits(mutant);
+  assert.equal(hits.length, 2, "both limbs of the copy are censused, not just the first");
+  for (const h of hits) {
+    assert.equal(h.fn, "w31MutantCanManage",
+      "the census must name the FUNCTION a reader has to open, not a location that drifts");
+  }
+
+  // …and the same scanner is not merely allergic to that one spelling: the
+  // billingCanManage shape (a bare `role` parameter) and a passed envelope
+  // (`me.role`) are censused too, while a ROSTER row's `r.role` is not.
+  const control = [
+    'function fifthCopy(role) { return role === "owner"; }',
+    'function sixthCopy(me) { return me.role !== "member"; }',
+    'function rosterRow(r) { return r.role === "owner"; }',
+    'function targetRow(ctx) { return ctx.role === "owner"; }',
+  ].join("\n");
+  const controlHits = w31ActorRoleHits("\n" + control);
+  assert.deepEqual(controlHits.map((h) => h.fn), ["fifthCopy", "sixthCopy"],
+    "the three actor spellings are censused; the roster axis (r.role / ctx.role) is deliberately not");
+
+  // A comparison merely QUOTED in a comment is prose, not code.
+  assert.deepEqual(w31ActorRoleHits('\nfunction commentOnly() {\n  // meCache.role === "owner"\n  return 1;\n}\n'), []);
+});
+
+// ── cch-w47-s1-fu: THE LAUNCH BAND'S STALE ARM ──────────────────────────────
+
+test("cch-w47-s1-fu: launchAuthority carries a STALE band — a moved pin is not a role answer", async () => {
+  await withTeamPin(async (store) => {
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, W47_OWNER);
+    assert.equal(hooks.launchAuthority(), "grant", "control: fetched under t1, answered for t1");
+
+    // THE CROSS-TAB RACE, verbatim (the same one teamAuthorityState models):
+    // another tab writes the pin and reloads ITSELF. Nothing here listens for
+    // `storage` and loadMe() is not called on a route change, so this tab
+    // otherwise keeps selling t1's launch authority for its whole page life
+    // while api() sends t2 on every request.
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.launchAuthority(), "stale",
+      "MUTATION TARGET: collapse the pin test back into the role read and this line is the red");
+    assert.notEqual(hooks.launchAuthority(), "grant",
+      "above all it is not a GRANT for a team this cached answer never described");
+
+    store.setItem("bp.active-team", "t1");
+    assert.equal(hooks.launchAuthority(), "grant", "back under its own pin, the cached answer is current again");
+
+    // BOTH DIRECTIONS. The row names the mirror case explicitly: a member on A
+    // pinned to B was still REFUSED. A stale refusal is not a refusal either.
+    hooks.clearMe();
+    store.setItem("bp.active-team", "t1");
+    await driveMe(200, W47_MEMBER);
+    assert.equal(hooks.launchAuthority(), "refuse", "control: a real member on their own pin is refused");
+    store.setItem("bp.active-team", "t2");
+    assert.equal(hooks.launchAuthority(), "stale", "…and the same answer under a moved pin is not that refusal");
+
+    // The SIBLING is untouched (D439): instanceAdminAuthority still answers its
+    // own three values, and never grew a fifth.
+    assert.ok(["unknown", "grant", "refuse"].includes(hooks.instanceAdminAuthority()),
+      "the shipped predicate must NOT have been widened along with the band");
+  });
+});
+
+test("cch-w47-s1-fu: absorbMe RE-TAKES the pin, so a switch that reloads is never instantly stale", async () => {
+  await withTeamPin(async (store) => {
+    // Never switched: null at absorb, null now. The cold case must NOT read
+    // stale — a band that cries wolf on every fresh boot is unactionable.
+    await driveMe(200, W47_OWNER);
+    assert.equal(hooks.launchAuthority(), "grant", "a console that never switched teams is never stale");
+    hooks.clearMe();
+    store.setItem("bp.active-team", "t9");
+    await driveMe(200, W47_OWNER);
+    assert.equal(hooks.launchAuthority(), "grant", "a re-absorb under the new pin is current, not instantly stale");
+  });
+});
+
+test("cch-w47-s1-fu: the FORM seam fails CLOSED on stale with the shipped exit — and the offer sites do not move", async () => {
+  const savedDoc = sandbox.document;
+  const dom = launchDom();
+  try {
+    sandbox.document = dom.document;
+    await withTeamPin(async (store) => {
+      store.setItem("bp.active-team", "t1");
+      await driveMe(200, W47_OWNER);
+      const granted = launchContainer();
+      hooks.launchFlow(granted.el, { runway: true });
+      assert.match(granted.el.innerHTML, /class="launch-form"/, "control: under its own pin the owner gets the form");
+
+      store.setItem("bp.active-team", "t2");
+      const stale = launchContainer();
+      hooks.launchFlow(stale.el, { runway: true });
+      const html = stale.el.innerHTML;
+      assert.ok(html.indexOf("launch-form") === -1, "fail CLOSED: the whole form is withheld under a moved pin");
+      assert.ok(html.indexOf('type="submit"') === -1, "…no submit");
+      assert.ok(html.indexOf("seg-btn") === -1, "…and no provider tabs still selling it");
+      assert.ok(html.includes(hooks.meRetryHtml()), "the SHIPPED exit, verbatim — not a second retry idiom");
+      assert.equal(html.split("data-me-retry").length - 1, 1, "exactly ONE of it");
+      // NOT the determinate refusal card: "ask a team admin to give you that
+      // role" is a claim about an answer we do not hold for this team.
+      assert.ok(html.indexOf("admin role on this team") === -1,
+        "a moved pin must not be dressed up as the server's own refusal");
+
+      // THE FOUR OFFER SITES DO NOT MOVE. They branch on `=== "refuse"`, so a
+      // stale answer withholds the FORM and leaves every control standing.
+      dom.nodes["#overview-launch"].hidden = false;
+      dom.nodes["#fleet-launch"].hidden = false;
+      hooks.refreshLaunchOffers();
+      assert.equal(dom.nodes["#overview-launch"].hidden, false, "a stale answer must not delete a control");
+      assert.equal(dom.nodes["#fleet-launch"].hidden, false);
+
+      // POSITIVE CONTROL — without it the two lines above are a dead call. A
+      // DETERMINATE refusal really does hide both buttons here.
+      hooks.clearMe();
+      store.setItem("bp.active-team", "t1");
+      await driveMe(200, W47_MEMBER);
+      hooks.refreshLaunchOffers();
+      assert.equal(dom.nodes["#overview-launch"].hidden, true,
+        "positive control: a real refusal hides them, so the survival above is a fact");
+      assert.equal(dom.nodes["#fleet-launch"].hidden, true);
+    });
+  } finally {
+    sandbox.document = savedDoc;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w47-s1-fu: every launchAuthority() call site is either the FORM seam or a refuse-only offer test", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const code = w31BlankComments(src);
+  // The three seams that may read the whole band: the mount that withholds the
+  // form, its repaint, and the /new step's own offer builder.
+  const SEAMS = new Set(["launchFlow", "repaintLaunchAuthority", "renderNewLaunch"]);
+  const re = /launchAuthority\(\)/g;
+  const sites = [];
+  let m;
+  while ((m = re.exec(code))) {
+    // The DECLARATION is not a call site: `function launchAuthority()` matches
+    // the same text and would name itself as an offer that moves.
+    if (/function\s+$/.test(code.slice(Math.max(0, m.index - 12), m.index))) continue;
+    sites.push({
+      fn: w31EnclosingFn(code, m.index),
+      refuseOnly: /^launchAuthority\(\)\s*(===|!==)\s*"refuse"/.test(code.slice(m.index, m.index + 44)),
+    });
+  }
+  assert.ok(sites.length >= 6, "sanity: the band has call sites at all (found " + sites.length + ")");
+  const moved = sites.filter((s) => !s.refuseOnly && !SEAMS.has(s.fn));
+  assert.deepEqual(moved, [],
+    "an offer site that reads the band as anything but `=== \"refuse\"` would CHANGE on 'stale' — " +
+    "and a stale answer must never delete a control: " + JSON.stringify(moved));
+});
+
+// ── cch-w43-bl: THE INVITE LANDING READS EVERY MEMBERSHIP ───────────────────
+
+const W43_PREVIEW_B = { team: { id: "tb", name: "Northwind", slug: "northwind" }, email: "ada@acme.com", role: "admin" };
+// Pinned to team A, but the envelope carries the membership in team B too —
+// exactly the account POST /v1/invitations/accept mints, and exactly the shape
+// /v1/me added `teams` for.
+const W43_ME_PINNED_A = {
+  role: "owner",
+  team: { id: "ta", name: "Acme Inc", slug: "acme" },
+  teams: [
+    { id: "ta", name: "Acme Inc", slug: "acme", role: "owner" },
+    { id: "tb", name: "Northwind", slug: "northwind", role: "member" },
+  ],
+  user: { id: "u1", email: "ada@acme.com" },
+};
+const W43_ME_ONE_TEAM = {
+  role: "owner",
+  team: { id: "ta", name: "Acme Inc", slug: "acme" },
+  teams: [{ id: "ta", name: "Acme Inc", slug: "acme", role: "owner" }],
+  user: { id: "u1", email: "ada@acme.com" },
+};
+
+test("cch-w43-bl: already_member is decided against EVERY membership, not the one pinned team", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+
+  // THE ASSERTION THAT IS RED ON MAIN. Pinned to acme, invited to northwind,
+  // already a member of northwind — main compares `preview.team.slug ===
+  // me.team.slug`, sees acme !== northwind, and paints the JOIN screen for a
+  // team this person is already in.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, W43_ME_PINNED_A, now, "loaded"), "already_member",
+    "MUTATION TARGET: revert to the single pinned-team comparison and THIS line is the red");
+
+  // The pinned team is still a membership: the shipped case must not regress.
+  assert.equal(
+    hooks.inviteLandingState(200, { team: { slug: "acme", name: "Acme Inc" } }, W43_ME_PINNED_A, now, "loaded"),
+    "already_member", "the PINNED team is a membership too");
+
+  // …and a genuine stranger still gets the Join screen, or the fix is
+  // always-already-a-member, which would ship green on the line above.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, W43_ME_ONE_TEAM, now, "loaded"), "confirm",
+    "positive control: an account that is NOT in the invited team is still offered the join");
+
+  // The membership set itself, pinned directly rather than only through the
+  // state machine that consumes it.
+  assert.deepEqual([...hooks.inviteMembershipSlugs(W43_ME_PINNED_A)].sort(), ["acme", "northwind"]);
+  assert.deepEqual([...hooks.inviteMembershipSlugs(null)], [], "no envelope is no memberships, never a crash");
+  assert.deepEqual([...hooks.inviteMembershipSlugs({ team: { slug: "solo" } })], ["solo"],
+    "an envelope WITHOUT teams[] still contributes its pinned team — reading teams[] alone would fail open");
+});
+
+test("cch-w43-bl: a /v1/me that did NOT land decides nothing — it never reads as 'not already a member'", () => {
+  const now = Date.parse("2026-01-01T00:00:00Z");
+  // On main this is "confirm": a 500 on the account read ASSERTED you are not a
+  // member and sold you the Join button.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, null, now, "failed"), "check_failed",
+    "a failed account read is not an answer about your memberships");
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, null, now, "loading"), "check_failed",
+    "…and neither is one still in flight");
+  // check_failed is the RECOVERABLE state: it keeps the parked token and its
+  // action re-checks. It must not have decayed into the dead-link copy.
+  const html = hooks.inviteStateHtml("check_failed", { team: "Northwind" });
+  assert.match(html, /data-invite-act="recheck"/, "the state the band lands on must still offer the re-check");
+  assert.ok(html.indexOf("isn't valid any more") === -1, "a failed account read must not kill the link");
+
+  // A LOADED envelope with no team is a determinate 'you belong to nothing' and
+  // still confirms — the band is the discriminator, not the envelope's nullity.
+  assert.equal(hooks.inviteLandingState(200, W43_PREVIEW_B, null, now, "loaded"), "confirm");
+
+  // The preview's own determinate answers still win over the account band: a
+  // dead link is dead whether or not we could read the account.
+  assert.equal(hooks.inviteLandingState(404, null, null, now, "failed"), "invalid");
+  assert.equal(hooks.inviteLandingState(200, { ...W43_PREVIEW_B, expires_at: "2020-01-01T00:00:00Z" }, W43_ME_ONE_TEAM, now, "loaded"),
+    "expired");
+});
+
+test("cch-w43-bl: loadInvite is no longer a THIRD /v1/me idiom, and the accept PINS the team it joined", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  const load = appRegion(src, "  function loadInvite(", "  function renderInviteState(");
+  assert.ok(load.includes("absorbMe(res[1])"),
+    "the account read must go through the ONE absorb — a local variable has no band, no pin and no retained fault");
+  assert.ok(!/var me = res\[1\]\.ok \? res\[1\]\.data : null/.test(load),
+    "…and the old two-valued local must be GONE, not merely shadowed");
+  assert.ok(/inviteLandingState\(pr\.status, preview, me, Date\.now\(\), meState\(\)\)/.test(load),
+    "the landing must decide on the BAND the absorb produced, not on the envelope's nullity");
+
+  const accept = appRegion(src, "  function submitInviteAccept(", "  function showAuthInviteBanner(");
+  assert.ok(/localStorage\.setItem\("bp\.active-team", String\(joinedTeamId\)\)/.test(accept),
+    "MUTATION TARGET: delete the pin write and this line is the red — without it 'You're in' is " +
+    "followed by a dashboard still scoped to the OLD team");
+  const pin = accept.indexOf('localStorage.setItem("bp.active-team"');
+  const reload = accept.indexOf("loadMe();");
+  assert.ok(pin > 0 && reload > pin,
+    "the pin must be written BEFORE the re-read — api() reads it on every request, so the order is the fix");
+  assert.ok(/r\.data && r\.data\.team_id/.test(accept),
+    "the SERVER's own answer is the first source for the team we joined");
+  assert.ok(/preview && preview\.team && preview\.team\.id/.test(accept),
+    "…with the preview as the stated fallback, because the 200 body's shape is the server's to change");
+});
