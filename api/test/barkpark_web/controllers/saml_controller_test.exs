@@ -454,7 +454,7 @@ defmodule BarkparkWeb.SamlControllerTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           body =
-            build_conn()
+            scoped_conn()
             |> post("/v1/auth/saml/#{@slug}/acs", %{
               "SAMLResponse" =>
                 signed_response("victim@samlctrl.com", attacker.key, attacker.cert_der)
@@ -485,7 +485,7 @@ defmodule BarkparkWeb.SamlControllerTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           body =
-            build_conn()
+            scoped_conn()
             |> post("/v1/auth/saml/#{@slug}/slo", %{
               "SAMLRequest" =>
                 signed_logout_request("victim@samlctrl.com", attacker.key, attacker.cert_der,
