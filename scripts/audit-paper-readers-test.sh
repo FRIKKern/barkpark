@@ -82,6 +82,19 @@ if [[ -n "${BP_FIXTURE_COUNT_DIR:-}" ]]; then
   count=$(( $(cat "$count_file" 2>/dev/null || printf 0) + 1 ))
   printf '%s' "$count" >"$count_file"
 fi
+# NO-ANSWER transport failure on the GUI edge: curl produces `%{http_code}` 000
+# and a transport exit code, exactly the shape run 33740962470 recorded as
+# `gui:{status:0}` for one paper out of 1050. FLAKY fails attempt 1 only;
+# PERSISTENT never heals. `${BP_FIXTURE_TRANSPORT_EXIT:-7}` lets one fixture
+# drive both a retryable class and an excluded one (6, DNS) through the same
+# path, so the exclusion list is tested, not just asserted in a comment.
+if [[ "$url" != */email && "$url" != */source ]]; then
+  if [[ "${BP_FIXTURE_TRANSPORT_FLAKY:-}" == "1" && "$count" -le 1 ]] ||
+    [[ "${BP_FIXTURE_TRANSPORT_PERSISTENT:-}" == "1" ]]; then
+    printf '000'
+    exit "${BP_FIXTURE_TRANSPORT_EXIT:-7}"
+  fi
+fi
 # Transport flake: the server's per-request internal_error 500 (dropped DB
 # connection). FLAKY heals on the third try; PERSISTENT never does.
 if [[ "${BP_FIXTURE_FLAKY_500:-}" == "1" && "$count" -le 2 ]] ||
@@ -160,7 +173,11 @@ jq -e '
     .email.content.body_found and .email.content.meaningful and
     .email.content.links_valid and .email.content.invalid_links == 0 and
     .cli.ok and .cli.arm == "ok" and .cli.exit == 0 and .cli.attempts == 1 and
-    .cli.stderr == ""
+    .cli.stderr == "" and
+    .gui.arm == "ok" and .gui.exit == 0 and .gui.first_exit == 0 and
+    .gui.attempts == 1 and
+    .email.arm == "ok" and .email.exit == 0 and .email.attempts == 1 and
+    .source.arm == "ok" and .source.exit == 0 and .source.attempts == 1
   )
 ' \
   "$tmp/result.json" >/dev/null
@@ -291,9 +308,17 @@ if PATH="$tmp:$PATH" BP_FIXTURE_STALLED=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   exit 1
 fi
 
+# The stall is a curl exit 28 with `%{http_code}` 000. It is retried (28 is in
+# the transport class) but never heals, so the LAST answer stands and the paper
+# still FAILS — and the witness now names the arm and the exit code instead of
+# leaving a bare `status: 0` nobody can act on.
 jq -e '
   .ok == false and .failed == 2 and
-  all(.failures[]; .email.status == 0 and .email.content.body_found == false)
+  all(.failures[];
+    .email.status == 0 and .email.content.body_found == false and
+    .email.arm == "timeout" and .email.exit == 28 and
+    .email.first_exit == 28 and .email.attempts == 4
+  )
 ' "$tmp/stalled-result.json" >/dev/null
 
 # HTTP 422 on the GUI route with an otherwise-perfect body. The audit's status
@@ -314,7 +339,8 @@ jq -e '
   .ok == false and .failed == 2 and
   all(.failures[];
     .gui.status == 422 and
-    (.gui.content.body_found | not) and (.gui.content.meaningful | not)
+    (.gui.content.body_found | not) and (.gui.content.meaningful | not) and
+    .gui.arm == "http" and .gui.exit == 0 and .gui.attempts == 1
   )
 ' "$tmp/gui-422-result.json" >/dev/null
 
@@ -384,5 +410,85 @@ for count_file in "$tmp/counts-422"/https___fixture_invalid_papers_blocks_paper 
     exit 1
   fi
 done
+
+# ── Narrow transport retry (no HTTP answer at all) ────────────────────────────
+# 2026-09-03, scheduled run 33740962470: ONE paper of 1050 failed with
+# `gui:{status:0, body_found:false}` while its email and source edges answered
+# 200 and its CLI leg was clean; the same URL answered 200 in 0.2s by hand
+# minutes later. status 0 is curl's `%{http_code}` 000 — NO HTTP answer, so
+# there is nothing to be loud about — and the old witness could not even say
+# which transport failure it was, because `|| true` discarded the exit code.
+# These fixtures hold the new behaviour to both halves: name it, and retry it
+# on the same narrow terms as the internal_error 500.
+
+# 4. A transport failure on attempt 1 followed by a 200 must PASS, and the
+#    witness must say it cost two attempts and what it survived.
+mkdir "$tmp/counts-transport-flaky"
+PATH="$tmp:$PATH" BP_FIXTURE_TRANSPORT_FLAKY=1 \
+  BP_FIXTURE_COUNT_DIR="$tmp/counts-transport-flaky" \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/transport-flaky-result.json" || {
+  printf 'a one-off transport failure was not retried to green\n' >&2
+  exit 1
+}
+jq -e '
+  .ok and .failed == 0 and
+  all(.results[];
+    .gui.status == 200 and .gui.arm == "ok" and .gui.exit == 0 and
+    .gui.first_exit == 7 and .gui.attempts == 2
+  )
+' "$tmp/transport-flaky-result.json" >/dev/null
+
+# 5. A PERSISTENT transport failure must still FAIL, with the arm named and the
+#    exit code recorded. An outage is not a flake.
+if PATH="$tmp:$PATH" BP_FIXTURE_TRANSPORT_PERSISTENT=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/transport-persistent-result.json"; then
+  printf 'a persistent transport failure unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .gui.status == 0 and .gui.arm == "transport_failed" and
+    .gui.exit == 7 and .gui.first_exit == 7 and .gui.attempts == 4 and
+    (.gui.content.body_found | not)
+  )
+' "$tmp/transport-persistent-result.json" >/dev/null
+
+# 6. A curl exit code OUTSIDE the transport class is NOT retried. 6 is
+#    "couldn't resolve host": a broken base URL is persistent by nature, and
+#    retrying it would only delay a config fault we must see. One attempt.
+if PATH="$tmp:$PATH" BP_FIXTURE_TRANSPORT_PERSISTENT=1 BP_FIXTURE_TRANSPORT_EXIT=6 \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/transport-dns-result.json"; then
+  printf 'an unresolvable host unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .gui.status == 0 and .gui.arm == "transport_failed" and
+    .gui.exit == 6 and .gui.attempts == 1
+  )
+' "$tmp/transport-dns-result.json" >/dev/null
+
+# 7. A hollow 200 is an ANSWER, not a transport failure: refused on the content
+#    clause, fetched exactly once. Together with fixture 3 (the 422) this is
+#    the whole "everything that carried an HTTP status stays as loud as before"
+#    claim, checked rather than asserted.
+if PATH="$tmp:$PATH" BP_FIXTURE_EMPTY_BODY=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/hollow-200-retry-result.json"; then
+  printf 'a hollow 200 unexpectedly passed (retry-count run)\n' >&2
+  exit 1
+fi
+jq -e '
+  .ok == false and .failed == 2 and
+  all(.failures[];
+    .gui.status == 200 and .gui.arm == "ok" and .gui.attempts == 1 and
+    (.gui.content.meaningful | not)
+  )
+' "$tmp/hollow-200-retry-result.json" >/dev/null
 
 printf 'paper reader audit fixture: PASS\n'
