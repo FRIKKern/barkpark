@@ -13,7 +13,7 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Repo
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope}
   alias Barkpark.Content.Scope
-  alias Barkpark.Tasks.{Criteria, QueueGate}
+  alias Barkpark.Tasks.{Close, Criteria, QueueGate}
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -1172,7 +1172,79 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|"null", "nil" or "-"). A close attributed to it reads as a real close to every downstream gate. | <>
         ~s|Pass the worker that actually holds the claim.|
 
+  # THE STATUS-POSITION REFUSAL (dr-w14 / lead-ledger). `bp task close <id>
+  # <worker> <epoch> "<a whole sentence>"` parses that sentence as the LIFECYCLE
+  # STATUS, so the server refuses `invalid_lifecycle:<the whole sentence>` — a
+  # token that names the mistake without ever naming the fix. The gate does NOT
+  # widen (only done/cancelled/blocked close a task); the SENTENCE does: when the
+  # rejected value cannot be a status at all — it carries whitespace, or it is
+  # far longer than any status — say plainly that the reason belongs in a LATER
+  # positional, and print the corrected command.
+  def criteria_hint({:invalid_lifecycle, status}, :close) do
+    allowed = Enum.join(Close.closed_lifecycle_statuses(), ", ")
+
+    if reason_shaped?(status) do
+      ~s|that is a close REASON sitting in the STATUS position: `bp task close <id> <worker> <epoch>` | <>
+        ~s|takes the lifecycle status 4th (#{allowed}) and the reason 5th. Nothing was written. | <>
+        ~s|Re-run: bp task close <id> <worker> <epoch> done "<your reason>"|
+    else
+      ~s|#{inspect(to_string(status))} is not a close status — a close ends a task #{allowed}. | <>
+        ~s|Nothing was written. Re-run: bp task close <id> <worker> <epoch> done "<why>"|
+    end
+  end
+
   def criteria_hint(_reason, _surface), do: nil
+
+  # A value that could never be a lifecycle status: it carries whitespace, or it
+  # is longer than any of them by a wide margin. Both shapes say "this is prose",
+  # and prose in the status slot is a close reason that missed its positional.
+  @reason_shaped_min_length 24
+  defp reason_shaped?(status) when is_binary(status),
+    do: String.match?(status, ~r/\s/) or String.length(status) > @reason_shaped_min_length
+
+  defp reason_shaped?(_status), do: false
+
+  @doc """
+  The wrong-epoch 409's remedy sentence (dr-w14-bl-fenced-off-409-is-mute).
+
+  `fenced_off` used to ship as a bare `{"ok":false,"reason":"fenced_off"}`: the
+  caller was told its epoch was wrong and never told which epoch is right, so
+  recovery took a re-read the refusal never asked for. `current_epoch` is read
+  off the row on the refusal path and named here; `nil` (the row lost its claim
+  between the refusal and the re-read) falls back to naming the re-read.
+  """
+  @spec fence_hint(atom() | tuple(), atom(), integer() | nil) :: String.t() | nil
+  def fence_hint(:fenced_off, surface, current_epoch)
+      when is_integer(current_epoch) and surface in [:close, :stamp] do
+    ~s|this claim is at epoch #{current_epoch}, not the one you passed — every `bp task pulse` ADVANCES | <>
+      ~s|the epoch, so a claim-time value is stale after the first heartbeat. Nothing was written. | <>
+      ~s|Re-run on the current epoch: bp task #{surface} <id> <worker> #{current_epoch}|
+  end
+
+  def fence_hint(:fenced_off, surface, _current_epoch) when surface in [:close, :stamp] do
+    ~s|the epoch you passed is not the one this claim carries, and every `bp task pulse` ADVANCES it. | <>
+      ~s|Nothing was written. Re-read the current epoch and re-run on it: | <>
+      ~s|bp task get <id> -o json -> .doc.claim.epoch, then bp task #{surface} <id> <worker> <that epoch>|
+  end
+
+  def fence_hint(_reason, _surface, _current_epoch), do: nil
+
+  @doc """
+  The edited-under-you 409's remedy sentence
+  (pds-bl-close-409-hint-promises-absent-fields).
+
+  The body has always carried `current_rev` + `changed_fields` at the top level
+  — what it never carried is the command that consumes them, so the operator
+  read two values and still had to go find the recovery. Name it here, with the
+  rev already substituted, so the refusal body alone is enough.
+  """
+  @spec drift_hint(String.t(), [String.t()]) :: String.t()
+  def drift_hint(current_rev, changed_fields) do
+    ~s|the task's brief changed under your claim (#{Enum.join(changed_fields, ", ")}), so this close would | <>
+      ~s|seal work described differently from what you read. Nothing was written. Re-read it, reconcile | <>
+      ~s|those fields, then close pinning the rev in this body: | <>
+      ~s|bp task close <id> <worker> <epoch> --set observed_rev=#{current_rev}|
+  end
 
   # ─── Success help[] (axi-s4 R5 — a success TEACHES the next command) ──────
   #
