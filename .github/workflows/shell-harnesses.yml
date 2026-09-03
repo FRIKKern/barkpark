@@ -484,7 +484,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shell-harnesses-${{ github.ref }}
+  group: shell-harnesses-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the suite dark
   # (never-cancel-main-check.sh D12). The guard is a no-op on PRs (github.ref is
   # never refs/heads/main there) and strictly never-cancel on main.

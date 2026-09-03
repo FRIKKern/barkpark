@@ -120,7 +120,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: required-checks-drift-${{ github.ref }}
+  group: required-checks-drift-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Mirror elixir.yml: cancel superseded PR runs, never cancel main.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 

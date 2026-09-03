@@ -20,7 +20,7 @@ on:
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
   # PR runs.
-  group: sdk-tests-${{ github.ref }}
+  group: sdk-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

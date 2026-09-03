@@ -84,7 +84,7 @@ permissions:
   checks: read
 
 concurrency:
-  group: stale-verdict-watch-${{ github.ref }}
+  group: stale-verdict-watch-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the watch dark.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
