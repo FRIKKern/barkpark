@@ -40,6 +40,7 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Plugins.Bulldocs.ReadableBody
   alias Barkpark.PortableDoc.BodyWalk
 
   # Resolved at RUNTIME, deliberately not frozen into an attribute.
@@ -66,9 +67,17 @@ defmodule Barkpark.Plugins.Bulldocs do
     %{
       # In-list order is load-bearing and dispatcher-pinned (hooks_test.exs,
       # charter D7): the template shape gate first, the hollow-body quality
-      # gate second. Hooks never mutate the payload, so the hollow gate always
-      # sees the pristine write.
-      before_save: [&validate_paper_template/1, &reject_hollow_published_save/1],
+      # gate second, the unreadable-body producer gate third. Hooks never
+      # mutate the payload, so each gate sees the pristine write. The producer
+      # gate goes LAST deliberately: the two gates above answer questions about
+      # a block list, so when both have passed and this one still refuses, the
+      # write demonstrably carried no block list at all — the refusal message
+      # is never ambiguous with theirs.
+      before_save: [
+        &validate_paper_template/1,
+        &reject_hollow_published_save/1,
+        &reject_unreadable_paper_body/1
+      ],
       before_publish: [&reject_hollow_paper_publish/1]
     }
   end
@@ -108,6 +117,27 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   defp reject_hollow_published_save(_payload), do: :ok
+
+  # Quality gate hook #4 — THE PRODUCER GATE
+  # (dr-w24-bl-paper-writer-accepts-unreadable-bodies). A paper write whose body
+  # `Content.Papers.reader_source/3` cannot classify is refused HERE, before any
+  # row exists: `Writer.create_after_dedup/6` and `upsert_after_gate/6` both fire
+  # :before_save ahead of every insert/update, so a halt is side-effect-free (no
+  # partial write — the trap task-e89f4a9ed2f5ce0b names on the publish wall).
+  #
+  # The predicate is the READER's own promotion, not a retyped shape list — see
+  # `ReadableBody`'s moduledoc for what it deliberately does not decide.
+  # DRAFTS ARE GATED TOO, unlike the hollow gate above: an unreadable body is a
+  # shape error at birth, and every one of the 68 measured rows was born through
+  # this door as a draft.
+  defp reject_unreadable_paper_body(%{doc: %{"type" => "paper"} = doc}) do
+    case ReadableBody.classify(doc["content"]) do
+      :ok -> :ok
+      {:error, :unreadable_body} -> {:halt, ReadableBody.message()}
+    end
+  end
+
+  defp reject_unreadable_paper_body(_payload), do: :ok
 
   defp published_surface_write?(doc) do
     doc_id = doc["doc_id"] || doc["_id"]

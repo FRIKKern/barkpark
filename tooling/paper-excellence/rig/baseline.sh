@@ -30,9 +30,15 @@ if [ ${#SLUGS[@]} -eq 0 ]; then
   # table whose ink pins to the band's left edge while its box stays centred. All
   # three are measured and none asserted, so it is the fixture an open finding
   # gets closed against.
+  #
+  # stat-partial-row joined with the slab remedy (task-0098ba55d2642545, charter
+  # D36) and is the SECOND authored fixture: two eleven-stat strips (a prime
+  # count, so the last row is partial at every band width — 8+3 @1280, 9+2
+  # @1920) and the `statRemainder` probe has an empty track to stand on. No
+  # published paper leaves a partial row, which is why the slab shipped unseen.
   SLUGS=(design-probe eight-minute-erasure heggemsnes-act hobby-hardening-capstone \
          mechanical-spacing-doctrine paper-excellence-wave-2026-08-12 \
-         portabledoc-showcase)
+         portabledoc-showcase stat-partial-row)
 fi
 
 mkdir -p "$OUT_DIR" "$WORK"

@@ -711,14 +711,27 @@ defmodule BarkparkCloud.Accounts do
   # update_all never raises on a zero-row match, so a token revoked between the
   # verify SELECT and this UPDATE is a harmless no-op — the return contract
   # (User | nil) is unaffected.
+  #
+  # FAIL-SOFT, in the same shape as `touch_pat_last_used/1`'s rescue. A zero-row
+  # match is a no-op, but the statement itself can still RAISE — a pool timeout,
+  # a dropped connection, a deadlock. Since the wave-8 fix this write runs inside
+  # a `Plug.Conn.register_before_send/2` callback, and an exception raised there
+  # ESCAPES `send_resp`: the request was already SERVED, and a transient DB
+  # hiccup while stamping "last seen" would convert that served 200 into a 500.
+  # The column answers "is this token dead?", never a billed count — so a failed
+  # stamp is logged and swallowed, never charged to the person's response.
   defp touch_last_used(hash, now) do
     cutoff = DateTime.add(now, -@session_last_used_throttle_seconds, :second)
 
-    from(t in UserToken,
-      where: t.token_hash == ^hash,
-      where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
-    )
-    |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    try do
+      from(t in UserToken,
+        where: t.token_hash == ^hash,
+        where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
+      )
+      |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    rescue
+      e -> Logger.warning("touch_session_last_used failed: #{inspect(e)}")
+    end
 
     :ok
   end
@@ -2039,6 +2052,77 @@ defmodule BarkparkCloud.Accounts do
   end
 
   def revoke_personal_access_token(_user, _token_id), do: {:error, :not_found}
+
+  @doc """
+  Every PAT minted against `team`, newest first, with `:user` preloaded — the
+  TEAM-ADMIN read that `list_personal_access_tokens/1` (per-user, caller-scoped)
+  cannot serve.
+
+  Why a second list function and not an option on the first: the caller-scoped
+  read answers "what have *I* minted"; this one answers "what programmatic
+  credentials can act on *this team*", and the two have different authorities
+  (a session user vs. a team admin) and different blast radii. Keeping them
+  apart means the per-user query can never be widened by a stray option.
+
+  TEAM-SCOPED ON PURPOSE (`team_id == team`, never `user_id`): a member may hold
+  PATs on several teams, and a row from another team appearing in this list
+  would be a tenancy leak, not a feature. Includes revoked rows — the tombstone
+  is the point of an admin view.
+  """
+  @spec list_team_personal_access_tokens(Team.t() | binary()) :: [UserToken.t()]
+  def list_team_personal_access_tokens(team) do
+    tid = team_id(team)
+
+    from(t in UserToken,
+      where: t.team_id == ^tid and t.context == "pat",
+      order_by: [desc: t.inserted_at, desc: t.id],
+      preload: [:user]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Revoke (stamp `revoked_at` on) ONE PAT minted against `team`, whoever holds
+  it — the admin-side kill switch for a member's leaked credential. Idempotent.
+
+  The fence is `team_id == team` (plus `context == "pat"`), NOT `user_id`: this
+  is the whole point of the function, and it is also its whole blast radius. A
+  token id belonging to another team, a non-PAT row, a non-UUID string, or
+  nothing at all is the SAME `{:error, :not_found}` the caller-scoped
+  `revoke_personal_access_token/2` returns — a 404 shape, so an admin cannot
+  probe another team's token ids for existence.
+
+  Returns `{:ok, token}` with `:user` preloaded so the caller can name the
+  holder in an audit row without a second read.
+  """
+  @spec revoke_team_personal_access_token(Team.t() | binary(), binary()) ::
+          {:ok, UserToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def revoke_team_personal_access_token(team, token_id) when is_binary(token_id) do
+    tid = team_id(team)
+
+    # A non-UUID token_id would make the get_by cast raise → 500; guard it to the
+    # not_found (404) branch, exactly as revoke_personal_access_token/2 does.
+    case Repo.uuid_or_nil(token_id) &&
+           Repo.get_by(UserToken, id: token_id, team_id: tid, context: "pat") do
+      nil ->
+        {:error, :not_found}
+
+      %UserToken{revoked_at: nil} = token ->
+        token
+        |> Ecto.Changeset.change(revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
+        |> Repo.update()
+        |> case do
+          {:ok, updated} -> {:ok, Repo.preload(updated, :user)}
+          other -> other
+        end
+
+      %UserToken{} = token ->
+        # Already revoked — idempotent.
+        {:ok, Repo.preload(token, :user)}
+    end
+  end
+
+  def revoke_team_personal_access_token(_team, _token_id), do: {:error, :not_found}
 
   @doc """
   Verify a presented PAT `plaintext`. Returns `{user, token}` when the row

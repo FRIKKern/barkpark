@@ -131,7 +131,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: crown-reconcile-${{ github.ref }}
+  group: crown-reconcile-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the reconciler dark.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 

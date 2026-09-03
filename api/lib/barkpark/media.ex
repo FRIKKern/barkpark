@@ -6,6 +6,7 @@ defmodule Barkpark.Media do
   alias Barkpark.Content
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Delivery.{Cdn, Events}
+  alias Barkpark.Media.Probe
   alias Barkpark.Media.Storage.{MediaFile, ObjectKey}
   alias Barkpark.Plugins.Media.Assets
 
@@ -73,14 +74,30 @@ defmodule Barkpark.Media do
 
     # SECURITY — server-derived MIME + validate-before-persist.
     #
-    # PART 1 (behavior-preserving): the stored `mime_type` is derived from the
-    # filename the SAME way the serve path derives it (`MIME.from_path` — see
-    # media_controller serve + media/probe.ex), NOT taken from the client-supplied
-    # multipart `content_type`. A legit upload carries the real extension
-    # (pixel.png, book.xml), so the derived type is byte-identical to what the
-    # client claimed and to what serving already returns — only a header LIE can
-    # no longer set the persisted mime. Size is read from the TEMP file (identical
-    # bytes to the copy) so nothing is written until every check below passes.
+    # PART 1: the stored `mime_type` is SERVER-DERIVED — never taken from the
+    # client-supplied multipart `content_type`. A header LIE cannot set the
+    # persisted mime (stored-XSS defence; default asset visibility is public).
+    # Size is read from the TEMP file (identical bytes to the copy) so nothing
+    # is written until every check below passes.
+    #
+    # PART 1b — CONTENT SNIFFING, task-57ee9fff4aae9217 finding #4. The
+    # derivation used to be `MIME.from_path(original_name)` ALONE, which made
+    # the FILENAME the only evidence. Gyldendal's 816 source assets were all
+    # named `remote.axd` by an old .NET image handler, so real PNGs and JPEGs
+    # were persisted — and therefore served — as `application/octet-stream`,
+    # and 515 uploads were unrenderable in a browser. Note that "serve the
+    # stored mimeType" alone would have fixed NOTHING: the stored value was
+    # already octet-stream. The evidence has to be the BYTES.
+    #
+    # `Probe.sniff_mime/2` reads the leading bytes and falls back to
+    # `MIME.from_path/1` for anything it does not positively recognise, so
+    # every upload whose content is unknown keeps exactly the type it had
+    # before. The client's header is STILL never consulted — sniffing reads
+    # what was actually uploaded — and `neutralize_dangerous_mime/1` still
+    # runs in `MediaFile.changeset/2`, so a sniffed `image/svg+xml` is
+    # collapsed to octet-stream at write just as an honestly-named `.svg` is.
+    # Both defences hold, and the sniff makes the XSS one STRICTER: a hostile
+    # SVG named `pixel.png` used to be persisted as `image/png`.
     #
     # PART 2 (config-gated, OFF by default): `validate_upload/3` reads an optional
     # allowlist + size cap from app config. Unset/empty = allow-all (today's
@@ -94,7 +111,7 @@ defmodule Barkpark.Media do
     # :storage_unavailable} — an enveloped 503 — instead of an uncaught raise
     # → bare 500. On ANY failure after the write we remove the (possibly
     # partial) blob so a rejected upload never orphans bytes.
-    mime_type = MIME.from_path(original_name)
+    mime_type = Probe.sniff_mime(temp_path, MIME.from_path(original_name))
 
     # ORDER IS LOAD-BEARING (task-918106d49c62563e): the scope resolves BEFORE
     # any byte is written, because the blob key is DERIVED from the resolved

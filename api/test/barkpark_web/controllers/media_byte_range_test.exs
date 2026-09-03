@@ -16,7 +16,7 @@ defmodule BarkparkWeb.MediaByteRangeTest do
     * no Range header still answers 200 with everything;
     * every answer advertises `accept-ranges: bytes`.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Storage.MediaFile

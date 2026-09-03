@@ -17,7 +17,7 @@ defmodule BarkparkWeb.ChatHostEnrollTypeTest do
   A wrong-TYPE token must land on the SAME clean 401 the absent-key arm
   already returns.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.ChatHosts
   alias Barkpark.Tenancy

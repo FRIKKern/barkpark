@@ -190,6 +190,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # block render path reads it to render each block in `:article` palette.
       # Non-article papers leave it false → email default, chrome unchanged.
       |> assign(:article?, paper_article?(paper))
+      |> assign(:wide?, paper_wide?(paper))
       |> assign(:html, source_html(reader_source))
       # P6.U2 goal-path rail: events for this paper's goal (empty when no
       # goal_id / no events → the rail is not rendered, article unchanged).
@@ -706,12 +707,21 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_goal_id(_), do: nil
 
-  # Legacy `article-wide` documents retain the article palette while sharing
-  # the same measured prose shell as every other article Paper.
+  # `article-wide` documents share the article palette AND open the shell to
+  # the evidence band (`.bp-paper-shell--wide`, bulldocs.html.heex): a
+  # scorecard, matrix or dashboard paper improves with width the way a table
+  # does, and the 660px reading measure was shrinking its tables into
+  # thumbnails. Prose inside a wide paper still keeps its measure (the shell
+  # rule caps p/h/list at 72ch); only the evidence blocks fill the width.
   defp paper_article?(%{content: content}),
     do: Map.get(content || %{}, "style") in ["article", "article-wide"]
 
   defp paper_article?(_), do: false
+
+  defp paper_wide?(%{content: content}),
+    do: Map.get(content || %{}, "style") == "article-wide"
+
+  defp paper_wide?(_), do: false
 
   # Render opts threaded into every block render. Article papers carry
   # `style: :article`; the empty map keeps the email default byte-unchanged.
@@ -1049,6 +1059,7 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:found, false)
         |> assign(:source_error, nil)
         |> assign(:article?, false)
+        |> assign(:wide?, false)
         |> assign(:paper_link_refs, [])
         |> assign_linked_sections(nil, socket.assigns[:dataset])
 
@@ -1080,6 +1091,7 @@ defmodule BarkparkWeb.BulldocsLive do
             )
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
+            |> assign(:wide?, paper_wide?(paper))
             |> assign(:block_mode, true)
             |> assign(:found, true)
             |> assign(:source_error, nil)
@@ -1092,6 +1104,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:html, html)
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
+            |> assign(:wide?, paper_wide?(paper))
             |> assign(:block_mode, false)
             |> assign(:found, true)
             |> assign(:source_error, nil)
@@ -1104,6 +1117,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:html, "")
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
+            |> assign(:wide?, paper_wide?(paper))
             |> assign(:block_mode, false)
             |> assign(:found, false)
             |> assign(:source_error, reason)
@@ -1149,7 +1163,8 @@ defmodule BarkparkWeb.BulldocsLive do
     <main class={[
       "bp-paper-shell",
       @article? && "bp-paper-surface",
-      @article? && "bp-paper-article"
+      @article? && "bp-paper-article",
+      @wide? && "bp-paper-shell--wide"
     ]}>
       <%!-- Sentinel: rendered once at mount, OUTSIDE the streamed/re-assigned
             container. It survives a handle_info DOM diff but would be torn

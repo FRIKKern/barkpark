@@ -205,8 +205,11 @@ export const Figure = Node.create({
       // fallback name, and it is invisible while the control is hidden).
       captionInput.setAttribute("aria-label", "figure caption");
       captionInput.setAttribute("contenteditable", "false");
-      // Inline styles mirroring the reader <figcaption> inline styles (compose.ex
-      // figure_html:924) + an input reset. The stylesheet carries the same values via
+      // Inline styles mirroring the reader <figcaption>, which since
+      // papers/captions-floor is styled by ONE class (.bp-figcaption in
+      // paper-surface.css) rather than by inline styles: serif, ROMAN, 0.9rem/1.45,
+      // --paper-ink-soft. An <input> inherits none of that, so the values are copied
+      // here + an input reset. The stylesheet carries the same values via
       // .bp-canvas-figure-caption-input; the inline copy holds before CSS loads.
       captionInput.style.display = "block";
       captionInput.style.width = "100%";
@@ -216,10 +219,10 @@ export const Figure = Node.create({
       captionInput.style.padding = "0";
       captionInput.style.margin = "0";
       captionInput.style.color = "var(--paper-ink-soft, #6a6a6a)";
-      captionInput.style.fontStyle = "italic";
       captionInput.style.fontSize = "0.9rem";
+      captionInput.style.lineHeight = "1.45";
       captionInput.style.fontFamily =
-        "system-ui, -apple-system, 'SF Pro Text', sans-serif";
+        "var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif)";
       figcaption.appendChild(captionInput);
       dom.appendChild(figcaption);
 

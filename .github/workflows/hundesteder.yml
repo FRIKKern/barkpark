@@ -56,7 +56,7 @@ on:
       - ".github/workflows/hundesteder.yml"
 
 concurrency:
-  group: hundesteder-${{ github.ref }}
+  group: hundesteder-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
   # superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

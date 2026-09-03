@@ -1386,6 +1386,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate reader_paper_html(socket, paper), to: Paper
+  defdelegate editor_body_html(html), to: Paper
 
   @doc false
   defdelegate write_denied?(socket), to: Paper

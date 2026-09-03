@@ -21,7 +21,7 @@ defmodule BarkparkWeb.SearchSettingsFailClosedTest do
   RED before the fix: the nil-token PUT below returned 200 (writing Default)
   instead of 422.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

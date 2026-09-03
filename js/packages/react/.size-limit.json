@@ -7,9 +7,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc renderer — client entry (dist/index.mjs) (measured 24.45 KB; +0.64 KB for related Paper cards with authored/live metadata; +11 B for the chat card header's min-width/overflow-wrap parity guard)",
+  "name": "PortableDoc renderer — client entry (dist/index.mjs) (measured 24.45 KB; +0.64 KB for related Paper cards with authored/live metadata; +11 B for the chat card header's min-width/overflow-wrap parity guard; +0.1 KB for the chip inline node, the verdict pill scorecard cells carry)",
   "path": "dist/index.mjs",
-  "limit": "24.56 KB",
+  "limit": "24.66 KB",
   "gzip": true
  },
  {

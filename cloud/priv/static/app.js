@@ -8751,6 +8751,14 @@
   // where a mutation to a total fiction left the suite byte-identical (zero
   // detection). POST /v1/barkparks/:id/domain emits, on failure:
   //   409 taken / 409 already_attaching       — the attach conflicts on the wire
+  //   409 already_attached {custom_host, detail} — THIS instance already answers on a
+  //        different host; the re-attach is refused rather than overwriting it
+  //        (cch-w54-bl). Console-UNREACHABLE by the offer gate below — renderInstance
+  //        only paints "Attach domain" when `!bp.custom_host` — but the arm is written
+  //        anyway: the gate is a stale-render away from being wrong (a peer attaches,
+  //        this tab still shows the button), and an unarmed slug does not degrade to
+  //        silence, it degrades to friendly()'s "Something went wrong" for a refusal
+  //        whose whole value is naming the host in the way.
   //   422 domain_not_pointed {expected_ip, observed}  — the ONE slug carrying a remedy
   //   422 invalid_domain                       — bad domain syntax
   //   422 instance_no_origin {detail}          — box has no origin yet; relay the sentence
@@ -8772,6 +8780,16 @@
 
     if (code === "taken") return "That domain is already in use.";
     if (code === "already_attaching") return "An attach is already running.";
+    // Relay the plane's own sentence — it names the host that is in the way,
+    // which is the only actionable part of this refusal. Server-derived string,
+    // rendered via textContent by the caller (never markup).
+    if (code === "already_attached") {
+      if (typeof data.detail === "string" && data.detail) return data.detail;
+      if (typeof data.custom_host === "string" && data.custom_host) {
+        return "This instance already answers on " + data.custom_host + ".";
+      }
+      return "This instance already has a domain attached.";
+    }
 
     if (status === 422) {
       if (code === "domain_not_pointed") {
@@ -17748,7 +17766,73 @@
   // "suspended — not deleted" sentence, which cch-w54-s5 retired for promising an
   // actor no production path reaches — a pointer left naming a retracted promise
   // is the same defect one layer down, so it is retracted here in the same PR.)
-  function trialCardHtml(sub) {
+  // ── cch-w50-s5 · THE REMINDER SCHEDULE, DECLARED ONCE ─────────────────────
+  //
+  // These two numerals are the CLIENT half of a cross-layer mirror. The server
+  // owns the schedule: TrialExpiryWorker's @three_days / @one_day thresholds
+  // select who gets a notice, and `TrialExpiryWorker.notice_thresholds_days/0`
+  // is the public accessor that states them. Until this slice the console
+  // re-typed "3 days and 1 day" into a sentence and NOTHING connected the two —
+  // grep for "3 days and 1 day" in __app.test.mjs returned zero hits, so the
+  // sentence could be edited to any numerals with the console suite green, and
+  // moving the server threshold left this promise silently false.
+  //
+  // Declared as DATA, not prose, so `billing_client_mirror_test.exs` can read it
+  // BY RUNNING (node:vm over the shipped file, via `__trial_reminder_dump.mjs`)
+  // and compare it to the server accessor. A regex over this source text would
+  // not be a pin; a value the mirror can call is.
+  var TRIAL_NOTICE_DAYS = [3, 1];
+
+  // "3 days and 1 day" — COMPOSED from the array, never typed. The singular is
+  // derived too, so a schedule of [1] cannot render "1 days".
+  function trialNoticePhrase(days) {
+    var parts = (days || []).map(function (n) { return n === 1 ? "1 day" : n + " days"; });
+    if (parts.length === 0) return "";
+    if (parts.length === 1) return parts[0];
+    return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+  }
+
+  // ── THE MUTE STATE IS THREE-VALUED, AND THIS READ FAILS CLOSED ────────────
+  //
+  // `alerts_enabled` reaches this file through exactly ONE door: GET
+  // /v1/notifications/settings, whose sole success path is renderNotifications,
+  // which is what populates `notifCache`. renderBilling fetches the SUBSCRIPTION
+  // and nothing else. So a person landing directly on /billing has
+  // `notifCache === null` and this console has never asked whether the team's
+  // alerts are on.
+  //
+  // The naive guard — `notifCache && notifCache.alerts_enabled === false` — is
+  // FALSE in exactly that state, i.e. it KEEPS the reminder promise for a team
+  // whose alerts are muted and whose worker (TrialExpiryWorker.receivable?/1)
+  // will send nothing. An unpopulated cache is not evidence that alerts are on.
+  // So UNKNOWN is its own state and it SOFTENS the sentence; only a settings
+  // payload that positively says `alerts_enabled: true` earns the flat promise.
+  function trialAlertsState(notif) {
+    if (!notif || typeof notif.alerts_enabled !== "boolean") return "unknown";
+    return notif.alerts_enabled ? "on" : "muted";
+  }
+
+  // The reminder line, one model for all three mute states. Every numeral comes
+  // from `schedule`; there is no day count typed into any of these sentences.
+  function trialReminderCopy(state, schedule) {
+    var phrase = trialNoticePhrase(schedule || TRIAL_NOTICE_DAYS);
+
+    if (state === "muted") {
+      return "Your team has alerts muted, so no trial reminder will be sent. Turn alerts back on in Notifications for the " +
+        phrase + " heads-up.";
+    }
+
+    if (state === "on") {
+      return "We'll remind you " + phrase + " before the trial ends.";
+    }
+
+    // UNKNOWN — conditional, because this console has not read the team's alert
+    // settings and must not promise mail on their behalf.
+    return "If your team's alerts are on, we'll remind you " + phrase +
+      " before the trial ends. Check Notifications to be sure.";
+  }
+
+  function trialCardHtml(sub, alerts) {
     var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
     var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
     var chipOpen = days !== null && days <= 3
@@ -17771,7 +17855,8 @@
         '<p class="trial-cta">' +
           (ended ? "Pick a plan below to launch a new instance." : "Pick a plan below to keep it.") +
         "</p>" +
-        (ended ? "" : "<p class=\"plan-meta dim\">We'll remind you 3 days and 1 day before the trial ends.</p>") +
+        (ended ? "" : '<p class="plan-meta dim">' +
+          trialReminderCopy(alerts || trialAlertsState(notifCache), TRIAL_NOTICE_DAYS) + "</p>") +
       "</div>";
   }
 
@@ -23466,13 +23551,59 @@
       }).join("");
   }
 
+  // Pure: the authority THE ROLE DIALOG OPENS UNDER, re-derived at OPEN TIME.
+  //
+  // cch-w45 — THE STALE-CTX PATH, and why the answer is not "trust the paint".
+  // wireMembersPanel attaches a direct listener per button over the `ctx` that
+  // was live when membersPanelHtml ran, and loadMembers (the only thing that
+  // repaints those buttons) is called on view entry and after member WRITES —
+  // never on a /v1/me or team_authority refresh. So an actor demoted while the
+  // Members panel is open keeps a screen full of live buttons over a captured
+  // ctx that states authority they no longer hold.
+  //
+  // `live` is membersContext()'s answer NOW: null unless the band is determinate
+  // (grant/refuse), which is precisely "we have a newer fact". When it is
+  // determinate AND names the same team, it WINS over the captured ctx. When it
+  // is not (loading / failed / stale / teamless), there is no newer fact to
+  // prefer, so the captured ctx stands and the server stays the backstop — the
+  // members band's own rule, a reason to have no opinion is not a refusal.
+  //
+  // The TARGET role is re-derived too. `currentRole` comes off the DOM
+  // (data-role), which is the stale half by construction; on your OWN row the
+  // server compares against your RESOLVED role, so self takes actorRole.
+  function roleModalAuthority(ctx, live, userId, currentRole) {
+    var base = ctx || {};
+    var src = (live && String(live.teamId) === String(base.teamId)) ? live : base;
+    var actorRole = src.role;
+    var actorId = src.userId;
+    var isSelf = actorId != null && String(actorId) !== "" &&
+      String(userId) === String(actorId);
+    return {
+      actorRole: actorRole,
+      targetRole: isSelf ? actorRole : currentRole,
+      isSelf: isSelf,
+    };
+  }
+
   // Change role: PATCH /v1/teams/:id/members/:user_id {role}.
+  //
+  // cch-w45 — THE WRITE SITE IS RANK-RELATIVE, matching the row. This gate was
+  // `assignableRoles(ctx.role).length`: the ACTOR-TIER question, arity 1, in
+  // front of update_member_role_as/4, which is a RELATION over (actor, target)
+  // — can_grant? AND (self? OR outranks?), strict `>`, with NO owner escape
+  // hatch (`Accounts.update_member_role_as/4`). Wave 44 made the ROW rank-relative and left
+  // this site actor-only, so the only thing keeping an owner off a PEER OWNER's
+  // row (a 403 :forbidden) was that memberRowHtml declined to draw the button —
+  // a rendering accident, not a gate, and the paint outlives the authority (see
+  // roleModalAuthority above). The dialog now asks canChangeMemberRole, the same
+  // predicate the row asks and the one __binding_census.mjs already pins for
+  // this PATCH — the pin named the fix before the call site made it true.
   function openRoleModal(ctx, userId, email, currentRole) {
-    // The actor-tier gate stays here (a member can assign nothing, so the
-    // dialog must not open at all); the OPTION LIST is roleModalOptionsHtml's,
-    // which owns the no-match placeholder.
-    if (!assignableRoles(ctx.role).length) return;
-    var opts = roleModalOptionsHtml(ctx.role, currentRole);
+    var auth = roleModalAuthority(ctx, membersContext(), userId, currentRole);
+    if (!canChangeMemberRole(auth.actorRole, auth.targetRole, auth.isSelf)) return;
+    // The OPTION LIST is roleModalOptionsHtml's, which owns the no-match
+    // placeholder — fed the re-derived pair, never the captured/DOM one.
+    var opts = roleModalOptionsHtml(auth.actorRole, auth.targetRole);
     openModal(
       '<h2 class="modal-title" id="modal-title">Change role</h2>' +
       '<p class="modal-sub">Set the team role for <b>' + esc(email || "this member") + "</b>.</p>" +
@@ -25875,6 +26006,11 @@
       // missing else arm (lifted out of init() so a harness can press it) and
       // the role dialog's no-match option list.
       membersInviteClick: membersInviteClick, roleModalOptionsHtml: roleModalOptionsHtml,
+      // cch-w45: the PATCH write site itself, plus the open-time authority it
+      // now re-derives. openRoleModal was reachable from NOTHING but a DOM
+      // click, so its gate could not be driven by a test at all — which is how
+      // it stayed actor-only for a whole wave after the row went rank-relative.
+      openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml, memberInitials: memberInitials,
       removeMemberFailureCopy: removeMemberFailureCopy, inviteFailureCopy: inviteFailureCopy,
@@ -26127,6 +26263,13 @@
       trialEnded: trialEnded,
       trialTagline: trialTagline,
       trialCardHtml: trialCardHtml,
+      // cch-w50-s5: the reminder schedule as DATA (the client half of the
+      // cross-layer mirror in billing_client_mirror_test.exs) plus the
+      // three-valued mute read and the copy model it drives.
+      trialNoticeDays: TRIAL_NOTICE_DAYS.slice(),
+      trialNoticePhrase: trialNoticePhrase,
+      trialAlertsState: trialAlertsState,
+      trialReminderCopy: trialReminderCopy,
       tierCardHtml: tierCardHtml,
       checkoutCapability: checkoutCapability,
       testModeDisclosure: TEST_MODE_DISCLOSURE,

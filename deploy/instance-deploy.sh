@@ -464,7 +464,16 @@ else
   # is drift to discard, and this also subsumes the old `git checkout -- .` for
   # committed build artifacts. Divergence is surfaced (logged), not swallowed.
   log "git fetch origin main + reset --hard (post-merge hook suppressed — this script IS the deploy)"
-  git -c core.hooksPath=/dev/null fetch origin main || { log "fetch origin main failed"; exit 11; }
+  # GIT_TERMINAL_PROMPT=0: this runs over ssh with no tty, so a git that decides
+  # it needs a username would otherwise BLOCK on the prompt instead of failing.
+  # The failure arm names the git version because "could not read Username" is
+  # the symptom BOTH of a credential problem and of the protocol-v2 refusal seen
+  # on git 2.34.x boxes (deploy/cp-deploy.sh, PR #15634) — the message must say
+  # which reading is even possible, not leave the operator to guess.
+  GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null fetch origin main || {
+    log "fetch origin main failed — git $(git --version 2>&1 | awk '{print $3}'), protocol.version=$(git config --get protocol.version 2>/dev/null || echo 'unset/default'); a 'could not read Username' here can be the WIRE protocol, not credentials — retry with: git -c protocol.version=0 fetch origin main"
+    exit 11
+  }
   if ! git merge-base --is-ancestor HEAD FETCH_HEAD 2>/dev/null; then
     log "WARNING: box HEAD $(git rev-parse --short HEAD) has DIVERGED from origin/main (a commit was made on the box, or main was rewritten) — discarding local divergence and converging to origin/main"
   fi

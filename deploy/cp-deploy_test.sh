@@ -23,9 +23,14 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/cp-deploy.sh"
 fails=0
+# checks_ran: how many assertions actually EXECUTED. A shell harness can print
+# ALL PASS having run ZERO checks — an early `exit 0`, an outermost skip, a
+# mis-set guard — and exit 0 is then indistinguishable from a real green. The
+# floor at the bottom of this file turns that vacuum into a red.
+checks_ran=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
-check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
+check() { checks_ran=$((checks_ran + 1)); if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
 echo "cp-deploy control-url pin (dwb-16)"
 
@@ -293,13 +298,53 @@ done
 exit 0
 EOF
 
+  # Fake systemctl. The PROVISIONER unit is drivable independently of every
+  # other unit this script touches (caddy reload, daemon-reload, the bake
+  # timer): PROV_RESTART_RC makes `systemctl restart barkpark-provisioner`
+  # exit non-zero, PROV_IS_ACTIVE sets what `is-active` answers for it. Both
+  # arms matter — a restart can return 0 and the unit still land in `failed`
+  # (the exact shape a crash-on-boot worker produces), and that is the arm the
+  # old `log "provisioner: $(systemctl is-active ...)"` printed and ignored.
+  # PROV_RECOVER_ON_RESTORE flips the unit healthy once the PREVIOUS binary has
+  # been reinstalled, so the restore arm is observable rather than assumed.
   cat > "$dir/systemctl" <<'EOF'
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$SYSCTLLOG"
+prov=0
+for a in "$@"; do case "$a" in barkpark-provisioner) prov=1 ;; esac; done
 case "${1:-}" in
-  is-active) echo active ;;
+  is-active)
+    if [ "$prov" = 1 ]; then
+      if [ "${PROV_RECOVER_ON_RESTORE:-0}" = 1 ] && [ -f "$DSTATE/prov.restored" ]; then
+        echo active
+      else
+        echo "${PROV_IS_ACTIVE:-active}"
+      fi
+    else
+      echo active
+    fi ;;
   is-enabled) echo enabled ;;
+  restart)
+    if [ "$prov" = 1 ]; then
+      if [ "${PROV_RECOVER_ON_RESTORE:-0}" = 1 ] && [ -f "$DSTATE/prov.restored" ]; then exit 0; fi
+      exit "${PROV_RESTART_RC:-0}"
+    fi ;;
+  status) echo "\u25cf ${2:-unit} - fake unit"; echo "Active: ${PROV_IS_ACTIVE:-active}" ;;
 esac
+exit 0
+EOF
+
+  # Fake install(1): records what landed at the provisioner path so the harness
+  # can tell "the NEW binary was installed" from "the PREVIOUS one was restored"
+  # — the restore arm is the whole point of the failure path.
+  cat > "$dir/install" <<'EOF'
+#!/usr/bin/env bash
+args=(); for a in "$@"; do case "$a" in -m|0755|0644) ;; *) args+=("$a") ;; esac; done
+src="${args[0]:-}"; dst="${args[1]:-}"
+case "$dst" in
+  *barkpark-provisioner) case "$src" in *.bak) : > "$DSTATE/prov.restored" ;; esac ;;
+esac
+[ -n "$src" ] && [ -n "$dst" ] && /usr/bin/install -m 0755 "$src" "$dst" 2>/dev/null
 exit 0
 EOF
 
@@ -330,12 +375,25 @@ EOF
   chmod +x "$dir"/*
 }
 
-# caddyfile <upstream>  — a REAL, caddy-valid control-plane front.
-caddyfile() { printf 'barkpark.cloud {\n\treverse_proxy %s\n}\n' "$1" > "$CADDY"; }
+# caddyfile <upstream>  — a REAL, caddy-valid control-plane front, PLUS a
+# second site on an unrelated upstream (:9100). The flip is a file-wide
+# `sed s/localhost:<active>/localhost:<target>/g`, so anything else the
+# Caddyfile proxies is inside its blast radius; the static engine's harness
+# guards exactly this with its :4010 / :4020 rows and cp-deploy's fixture had
+# no second upstream at all, so no collateral-scope row could exist here.
+# The control-plane block stays FIRST — upstream() reads `head -1`.
+caddyfile() {
+  {
+    printf 'barkpark.cloud {\n\treverse_proxy %s\n}\n' "$1"
+    printf 'metrics.barkpark.cloud {\n\treverse_proxy localhost:9100\n}\n'
+  } > "$CADDY"
+}
+collateral_intact() { [ "$(grep -c 'reverse_proxy localhost:9100' "$CADDY")" = 1 ]; }
 
 # setup_flip <upstream> [blue_port] [green_port]
 setup_flip() {
   cleanup_flip
+  PROV_ARG=""   # each case opts IN to the provisioner block; never inherited
   FTMP="$(mktemp -d "${TMPDIR:-/tmp}/cp-deploy-flip.XXXXXX")"
   APPDIR="$FTMP/opt/barkpark"; FAKEBIN="$FTMP/bin"; DSTATE="$FTMP/dstate"
   CADDY="$FTMP/etc/caddy/Caddyfile"
@@ -361,11 +419,22 @@ run_flip() {
       BARKPARK_CADDYFILE="$CADDY" \
       BARKPARK_DEPLOY_LOCK="$FTMP/deploy.lock" \
       BARKPARK_PROVISIONER_UNIT="$FTMP/nonexistent-provisioner.service" \
+      BARKPARK_PROVISIONER_BIN="$FTMP/usr-local-bin-barkpark-provisioner" \
       DOCKERLOG="$DOCKERLOG" GITLOG="$GITLOG" SYSCTLLOG="$SYSCTLLOG" DSTATE="$DSTATE" \
-      "$@" bash "$SCRIPT" > "$FTMP/out.log" 2>&1
+      "$@" bash "$SCRIPT" ${PROV_ARG:+"$PROV_ARG"} > "$FTMP/out.log" 2>&1
   echo "$?"
 }
 
+# The provisioner block only runs when the CD workflow passes a cross-built
+# binary as $1. Every case above leaves PROV_ARG empty (the "no provisioner
+# binary passed" path); the provisioner cases set it.
+with_provisioner() {
+  PROV_ARG="$FTMP/barkpark-provisioner.new"
+  printf '#!/bin/sh\nexit 0\n' > "$PROV_ARG"; chmod +x "$PROV_ARG"
+  printf 'OLD-PROVISIONER\n' > "$FTMP/usr-local-bin-barkpark-provisioner"
+}
+
+PROV_ARG=""
 upstream() { grep -oE 'reverse_proxy [^ ]+' "$CADDY" | head -1 | awk '{print $2}'; }
 
 # ---- Case 1: a healthy deploy flips blue(:4100) -> green(:4101) and retires blue
@@ -376,6 +445,18 @@ check "healthy: Caddy upstream moved to :4101"   "[ \"\$(upstream)\" = 'localhos
 check "healthy: Caddyfile still caddy-valid"     "caddy validate --config '$CADDY' >/dev/null 2>&1"
 check "healthy: green slot booted"               "[ -f '$DSTATE/running.4101' ]"
 check "healthy: old blue slot retired AFTER the flip" "[ ! -f '$DSTATE/running.4100' ]"
+# COLLATERAL SCOPE — the analogue of the static engine's ":4010 / :4020
+# untouched" rows (instance-deploy_test.sh:365,373). The flip is a file-wide
+# `sed s/localhost:$ACTIVE_PORT/localhost:$TARGET_PORT/g` over the WHOLE
+# Caddyfile, so every other site the box fronts is inside its blast radius: a
+# pattern widened to `localhost:` , a port typo'd to a prefix another site
+# shares, or a rewrite moved off the anchored port would rewrite them too and
+# nothing else in this file would notice. cp-deploy's fixture had exactly ONE
+# upstream, so no assertion here could distinguish "flipped the slot" from
+# "flipped everything".
+check "healthy: the unrelated :9100 upstream survived the flip sed, exactly once" "collateral_intact"
+check "healthy: exactly one slot upstream in the file (the flip rewrote one line, not many)" \
+  "[ \"\$(grep -c 'localhost:410[01]' '$CADDY')\" = '1' ]"
 
 # ---- Case 2: the PUBLIC post-flip probe fails -> flip REVERTED, old slot kept
 # ROOT CAUSE this guards: this curl was captured into $code, logged, and never
@@ -394,6 +475,7 @@ check "public probe fails: caddy reloaded on the way back" "[ \"\$(grep -c 'syst
 check "public probe fails: the LIVE blue slot was NEVER stopped" "[ -f '$DSTATE/running.4100' ]"
 check "public probe fails: the unproven green slot was removed" "[ ! -f '$DSTATE/running.4101' ]"
 check "public probe fails: checkout reset back"  "grep -q 'reset --hard' '$GITLOG'"
+check "public probe fails: the unrelated :9100 upstream survived the revert sed too" "collateral_intact"
 
 # ---- Case 3: the flip sed matches NOTHING -> refused before anything is retired
 # A Caddyfile whose upstream is spelled 127.0.0.1:<port> (or any form without
@@ -658,6 +740,162 @@ setup_flip localhost:4100
 rc="$(run_flip BARKPARK_EXPECT_DOCKER_MAJOR=29)"
 check "docker version: the expectation is overridable" "[ '$rc' = '0' ]"
 
+# ---- Case 19: the GIT WIRE PROTOCOL PIN on the pull (the 2026-09-02 outage).
+# barkpark-cp runs git 2.34.1, whose protocol-v2 ref-listing parse fails against
+# GitHub with "could not read Username" + "expected flush after ref listing";
+# v0 and v1 both succeed from the same box. Every control-plane deploy from
+# ~15:22Z died at this pull while the instance job (git 2.43) stayed green.
+# Nothing in CI can reach that box, so this is a STATIC assertion — which is
+# exactly why it must be anchored to the pull line itself and not to the file:
+# a file-wide `grep -q protocol.version` would stay green if the pin migrated
+# to a comment, or to some other git call, and the deploy would strand again.
+# shellcheck disable=SC2034  # read inside check's eval strings below, which shellcheck does not follow
+PULL_LINE="$(grep '^git .*pull --ff-only origin main' "$SCRIPT")"
+check "found the control-plane pull line" "[ -n \"\$PULL_LINE\" ]"
+one_pull_line() { [ "$(grep -c '^git .*pull --ff-only origin main' "$SCRIPT")" = 1 ]; }
+check "exactly one such pull line exists (this assertion hides no sibling)" "one_pull_line"
+check "the pull pins the wire protocol to v0 ON THE PULL ITSELF" \
+  "case \"\$PULL_LINE\" in *'-c protocol.version=0'*) true ;; *) false ;; esac"
+check "the pull still suppresses the post-merge hook (the pin did not displace it)" \
+  "case \"\$PULL_LINE\" in *'-c core.hooksPath=/dev/null'*) true ;; *) false ;; esac"
+check "the pull is still --ff-only (the pin did not weaken the fast-forward guard)" \
+  "case \"\$PULL_LINE\" in *'--ff-only'*) true ;; *) false ;; esac"
+# The signature is recorded NEXT TO the pin so a future reader who cannot
+# reproduce it from a modern box does not delete the pin as cargo cult.
+check "the failing signature is recorded in the script (the auth-prompt line)" \
+  "grep -q \"could not read Username for 'https://github.com'\" '$SCRIPT'"
+check "the failing signature is recorded in the script (the ref-listing line)" \
+  "grep -q 'expected flush after ref listing' '$SCRIPT'"
+check "the box's git version is recorded next to the pin" \
+  "grep -q 'git 2.34.1' '$SCRIPT'"
+
+# ===========================================================================
+# THE PROVISIONER RESTART GATE
+# (dr-w20-bl-provisioner-restart-cannot-fail-the-deploy / dr-w19 criterion 2)
+#
+# ROOT CAUSE these guard: cp-deploy.sh is `set -uo pipefail` with NO -e. The
+# restart ran with no `||` and no rc test, and the whole verdict was
+# `log "provisioner: $(systemctl is-active barkpark-provisioner)"` — a line
+# that PRINTS the word `failed` and then falls through to `log DONE` and exit
+# 0. Provisioning IS the control plane's product, so a green deploy could ship
+# a box that cannot create a single instance, and deploy.yml's smoke (a curl of
+# `/`) cannot see it.
+#
+# The block only runs when a provisioner binary is passed as $1 (the CD
+# workflow scps a cross-built one), which is why every case above — none of
+# which passes one — never reached it. with_provisioner arms that path.
+# ===========================================================================
 echo
+echo "cp-deploy provisioner restart gate (dr-w20-bl-provisioner-restart-cannot-fail-the-deploy)"
+
+# ---- Case 20: provisioner comes back active -> the deploy is a normal exit 0
+setup_flip localhost:4100
+with_provisioner
+rc="$(run_flip)"
+check "provisioner ok: exit 0"                    "[ '$rc' = '0' ]"
+check "provisioner ok: the restart ran"           "grep -q '^systemctl restart barkpark-provisioner\$' '$SYSCTLLOG'"
+check "provisioner ok: the state is logged WITH the restart rc" \
+  "grep -q 'provisioner: active (restart rc=0)' '$FTMP/out.log'"
+check "provisioner ok: the deploy still reports DONE" "grep -q 'DONE — control plane slot' '$FTMP/out.log'"
+check "provisioner ok: nothing was restored"      "[ ! -f '$DSTATE/prov.restored' ]"
+check "provisioner ok: the flip stands"           "[ \"\$(upstream)\" = 'localhost:4101' ]"
+
+# ---- Case 21: THE FILED DEFECT. `systemctl restart` returns 0 but the unit
+# lands in `failed` — a worker that crashes on boot. This is the exact arm the
+# old code printed and ignored.
+# FAIL-BEFORE (main): rc 0, the log carries the literal line
+# `[cp-deploy …] provisioner: failed`, and the very next line is
+# `DONE — control plane slot green live at …`.
+setup_flip localhost:4100
+with_provisioner
+rc="$(run_flip PROV_IS_ACTIVE=failed)"
+check "provisioner failed: exit 18 (NOT 0 — a dead worker cannot ride a green deploy)" "[ '$rc' = '18' ]"
+check "provisioner failed: the failure is named, not merely interpolated" \
+  "grep -q 'PROVISIONER FAILED TO COME BACK' '$FTMP/out.log'"
+check "provisioner failed: the log states the run is red while the slot IS live" \
+  "grep -q 'IS LIVE and was NOT rolled back' '$FTMP/out.log'"
+check "provisioner failed: the previous binary was restored" "[ -f '$DSTATE/prov.restored' ]"
+check "provisioner failed: the worker was restarted again after the restore" \
+  "[ \"\$(grep -c '^systemctl restart barkpark-provisioner\$' '$SYSCTLLOG')\" -ge 2 ]"
+check "provisioner failed: the unit's status is dumped for the human" \
+  "grep -q '\\[provisioner\\]' '$FTMP/out.log'"
+# The flip is NOT unwound: it was proven publicly healthy before this step and
+# the old slot is already retired. Failing the RUN is the whole remedy.
+check "provisioner failed: the proven flip was NOT unwound"  "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "provisioner failed: the new slot is still serving"    "[ -f '$DSTATE/running.4101' ]"
+check "provisioner failed: the script did NOT print DONE"    "! grep -q 'DONE — control plane slot' '$FTMP/out.log'"
+
+# ---- Case 22: the OTHER arm — `systemctl restart` itself exits non-zero (the
+# unit file is broken, the binary is not executable). Under `set -uo pipefail`
+# with no -e this returned control to the script with nothing recorded at all.
+setup_flip localhost:4100
+with_provisioner
+rc="$(run_flip PROV_RESTART_RC=1 PROV_IS_ACTIVE=failed)"
+check "restart rc!=0: exit 18"                    "[ '$rc' = '18' ]"
+check "restart rc!=0: the rc is in the log"       "grep -q 'restart rc=1' '$FTMP/out.log'"
+check "restart rc!=0: the previous binary was restored" "[ -f '$DSTATE/prov.restored' ]"
+check "restart rc!=0: no DONE"                    "! grep -q 'DONE — control plane slot' '$FTMP/out.log'"
+
+# ---- Case 23: the restore WORKS — the previous binary boots. The run is still
+# red (a deploy that could not ship its worker did not succeed), but the box is
+# left with a LIVE provisioner rather than a dead one.
+setup_flip localhost:4100
+with_provisioner
+rc="$(run_flip PROV_IS_ACTIVE=failed PROV_RECOVER_ON_RESTORE=1)"
+check "restore recovers: still exit 18 (the run does not claim success)" "[ '$rc' = '18' ]"
+check "restore recovers: the recovered state is logged" \
+  "grep -q 'provisioner after restoring the previous binary: active' '$FTMP/out.log'"
+
+# ---- Case 24: no binary passed -> the block is skipped entirely and a deploy
+# that never touched the worker is not held to the worker's health. This is the
+# path every OTHER case in this file takes, asserted here so a future change
+# that makes the gate unconditional reds.
+setup_flip localhost:4100
+rc="$(run_flip PROV_IS_ACTIVE=failed)"
+check "no binary passed: exit 0 even with a failed unit" "[ '$rc' = '0' ]"
+check "no binary passed: the skip is stated"      "grep -q 'no provisioner binary passed' '$FTMP/out.log'"
+check "no binary passed: no provisioner restart was issued" \
+  "! grep -q '^systemctl restart barkpark-provisioner\$' '$SYSCTLLOG'"
+
+# ---- Static: the restart's result is TESTED, not interpolated into a log.
+# Anchored at the script, so deleting the gate and going back to the one-liner
+# reds here even if the harness fakes drift.
+check "the script tests the restart rc rather than firing it bare" \
+  "grep -q 'systemctl restart \"\$PROV_UNIT_NAME\" || restart_rc=' '$SCRIPT'"
+check "exactly one provisioner restart-with-rc-capture exists (this hides no sibling)" \
+  "[ \"\$(grep -c 'systemctl restart \"\$PROV_UNIT_NAME\" || restart_rc=' '$SCRIPT')\" = '1' ]"
+check "the script exits non-zero on a provisioner that did not come back" \
+  "grep -q 'exit 18' '$SCRIPT'"
+
+# ---- Static: the documented rollback recipe RECREATES, it does not `docker
+# start` (gr-blk-cp-deploy-rollback-stale-env criterion 0). `docker start`
+# replays the env baked into the container at creation time, so a rollback onto
+# a slot older than a cloud/.env change silently serves the old env.
+echo
+echo "cp-deploy documented rollback recipe (gr-blk-cp-deploy-rollback-stale-env)"
+check "the recipe no longer teaches 'docker start it'" \
+  "! grep -q 'reload caddy,\$' '$SCRIPT'"
+check "the recipe recreates the container" \
+  "grep -q -- '--force-recreate' '$SCRIPT'"
+check "the recipe re-exports cloud/.env first (the same door the deploy uses)" \
+  "grep -q 'set -a; . cloud/.env; set +a          # the same export the deploy uses' '$SCRIPT'"
+check "the recipe retags the rollback image (both slots are :latest in compose)" \
+  "grep -q 'docker tag cloud-control_plane:rollback cloud-control_plane:latest' '$SCRIPT'"
+check "the script still saves that rollback tag before the pull" \
+  "grep -q '^docker tag cloud-control_plane:latest cloud-control_plane:rollback' '$SCRIPT'"
+
+echo
+# NON-VACUITY FLOOR. Asserted BEFORE the verdict: `fails -eq 0` is satisfied
+# just as well by a run that executed nothing at all. The floor is a lower
+# bound, never an exact total — checks are added over time and an exact count
+# would red on every addition, which trains people to bump the number instead
+# of reading it.
+MIN_CHECKS=125
+echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
+if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
+  echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"
+  fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"

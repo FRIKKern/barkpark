@@ -15,6 +15,11 @@ on:
       - "package.json"
       - ".github/workflows/typedoc.yml"
 
+concurrency:
+  # per-ref on PRs (a new push evicts the superseded run), per-sha on main.
+  group: typedoc-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   generate:
     name: Generate reference
@@ -22,15 +27,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # cache: pnpm needs pnpm on PATH first, hence the reorder above
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install JS workspace deps
         working-directory: js

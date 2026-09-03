@@ -89,41 +89,11 @@ fi
 # landed (2026-09-02). SHRINK ONLY: fix a workflow, delete its line. Adding a
 # line to silence a NEW workflow defeats the gate; fix the workflow instead.
 GRANDFATHERED="$(cat <<'LEDGER'
-astro-finder-drift.yml
-astro-search-finder-test.yml
-bp-graph-drift.yml
-breakglass-watch.yml
-ci.yml
 cli-release.yml
-cloud.yml
-compose-smoke.yml
-connectors.yml
-console-harness.yml
-create-quickstart-smoke.yml
-crown-reconcile.yml
 deploy.yml
-grip-suite.yml
-hundesteder.yml
-js-tests.yml
 landed-mark.yml
-mobile.yml
-paper-editor.yml
-pdrender-wasm.yml
-plugin-node.yml
-pr-meta.yml
 release-artifact.yml
 release.yml
-required-checks-drift.yml
-research-coverage-suite.yml
-scaffy-catalog-drift.yml
-sdk-tests.yml
-search-starter-smoke.yml
-sheet-grid-js.yml
-shell-harnesses.yml
-stale-verdict-watch.yml
-studio-journey-smoke.yml
-web-fork-drift.yml
-windows-smoke.yml
 LEDGER
 )"
 # deploy.yml and landed-mark.yml are listed for a DIFFERENT reason than the
@@ -458,7 +428,16 @@ selftest() {
 
   # (6) THE RATCHET. A ledger name that is per-sha now must red with "delete
   #     that line", so the ledger cannot rot into a blanket waiver.
-  local d6="$tmp/r6"; write_wf "$d6" "ci.yml" "$PERSHA" "$GUARD"
+  # Cases 6-8 need a name that IS in the ledger. It used to be hardcoded as
+  # ci.yml; the ledger shrank past it on 2026-09-03 and the selftest went red
+  # for the wrong reason. Take the first ledger line instead, so the cases
+  # follow the ratchet down; when the ledger is empty they are vacuous by
+  # construction and say so (delete them with the ledger).
+  local lname; lname="$(head -1 <<<"$GRANDFATHERED")"
+  if [ -z "$lname" ]; then
+    ok "ledger is EMPTY — cases 6-8 (ratchet on a ledger name) are vacuous by construction; delete them"
+  else
+  local d6="$tmp/r6"; write_wf "$d6" "$lname" "$PERSHA" "$GUARD"
   rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d6" bash "$0" 2>&1)" || rc=$?
   if [ "$rc" -eq 1 ] && grep -q 'still named in the GRANDFATHERED ledger' <<<"$out"; then
     ok "a fixed workflow still in the ledger REDS — the ledger can only shrink"
@@ -467,9 +446,9 @@ selftest() {
   fi
 
   # (7) A ledger name that is STILL evictable is tolerated, and says so out loud.
-  local d7="$tmp/r7"; write_wf "$d7" "ci.yml" "$PERREF" "$GUARD"
+  local d7="$tmp/r7"; write_wf "$d7" "$lname" "$PERREF" "$GUARD"
   rc=0; out="$(MAIN_CONCURRENCY_ROOT="$d7" bash "$0" 2>&1)" || rc=$?
-  if [ "$rc" -eq 0 ] && grep -q '^GRANDFATHERED ci.yml' <<<"$out"; then
+  if [ "$rc" -eq 0 ] && grep -q "^GRANDFATHERED $lname" <<<"$out"; then
     ok "a still-evictable ledger entry is reported as GRANDFATHERED, not silently dropped"
   else
     bad "a ledger entry must be reported, not hidden (rc=$rc)" "$(head -3 <<<"$out" | tr '\n' ' ')"
@@ -478,11 +457,12 @@ selftest() {
   # (8) MAIN_CONCURRENCY_TARGETS ignores the ledger: a file named explicitly is
   #     judged on shape alone, which is what PART C of
   #     deploy-concurrency-check.test.sh relies on.
-  rc=0; out="$(MAIN_CONCURRENCY_TARGETS="$d7/ci.yml" bash "$0" 2>&1)" || rc=$?
+  rc=0; out="$(MAIN_CONCURRENCY_TARGETS="$d7/$lname" bash "$0" 2>&1)" || rc=$?
   if [ "$rc" -eq 1 ]; then
     ok "an explicitly targeted ledger name still REDS (explicit mode ignores the ledger)"
   else
     bad "explicit mode must ignore the ledger (rc=$rc)" "$(head -3 <<<"$out" | tr '\n' ' ')"
+  fi
   fi
 
   # (9) A missing discovery root is a refusal, never a pass.

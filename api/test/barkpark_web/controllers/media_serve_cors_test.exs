@@ -54,7 +54,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
   tests stay green across that mutation, which is exactly the invariant they
   pin (the mount touches ONLY the four GETs).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Media.Blobstore

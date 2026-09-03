@@ -22,7 +22,7 @@ defmodule BarkparkWeb.WorkspaceSingletonSlugHttpTest do
   rather than trusting that a changeset error happens to render as 422.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

@@ -24,7 +24,7 @@ defmodule BarkparkWeb.ChatHostControllerTest do
       only honest guard is the one that reds when the rule is spelled by hand
       again.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

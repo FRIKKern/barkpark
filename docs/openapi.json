@@ -166,6 +166,7 @@
                   "precondition_failed",
                   "quota_exceeded",
                   "rate_limited",
+                  "replay_unavailable",
                   "rev_mismatch",
                   "runtime_capacity",
                   "runtime_unavailable",
@@ -12183,6 +12184,75 @@
           }
         ],
         "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/tasks/{doc_id}/renew": {
+      "post": {
+        "operationId": "task.renew",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Buy a claimed row grace while an OPEN pull request names it: stamps a bounded, self-expiring content.claim.lease_extension the TTL sweeper honours. NON-HOLDER — no worker_id, no epoch, and the epoch is NOT bumped, so a lead's stamp/close CAS is undisturbed. Requires a live in_progress claim (409 not_claimed otherwise) and is capped from the first grant (409 extension_cap_reached). --state closed|merged clears the grace it bought.",
         "tags": [
           "task"
         ],

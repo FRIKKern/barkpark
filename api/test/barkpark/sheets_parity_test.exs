@@ -581,6 +581,113 @@ defmodule Barkpark.SheetsParityTest do
            "cells.ex @engine_errors drifted from Engine.error_values/0 — update the local mirror"
   end
 
+  # ── THE TYPESCRIPT MIRRORS, LOCKED FROM A CONTEXT THAT CAN BLOCK ─────────────
+  #
+  # The two TS surfaces below cannot call `Engine.error_values/0`, so each keeps
+  # a local `ERROR_VALUES` set. Each already has a guard in its OWN suite — the
+  # react one in `js/packages/react/tests/sheet-error-vocabulary.test.ts`, the
+  # mobile one in `apps/mobile/__tests__/sheetErrorVocabulary.test.ts` — and
+  # those guards are good: they read the shared fixture and assert both
+  # directions.
+  #
+  # They are also not enough on their own, and this is not a hypothesis. On
+  # 2026-09-02 PR #15374 added `#NAME?` engine-side, the react guard went RED on
+  # main (run 33650238539: 2 failed of 617, `missing '#NAME?'`), and the merge
+  # landed anyway — because `js-tests.yml` publishes no context in
+  # `.github/required-checks.json`. For about a day `#NAME?` rendered as plain
+  # black text through @barkpark/react. The guard fired and could not stop it.
+  #
+  # These two assertions close the direction that actually bit. A PR that adds a
+  # code engine-side touches `api/`, so `mix test` runs, so the REQUIRED and
+  # deliberately-unfiltered Elixir gate goes red here — on a context that CAN
+  # block. The opposite direction (someone edits only the .ts file) stays covered
+  # by each package's own guard, which always triggers because its own tree is in
+  # its workflow's paths filter.
+  #
+  # Deliberately a source read, not an import: Elixir cannot evaluate TypeScript,
+  # and a mirror that a build step could satisfy is not the thing being locked.
+  # `error_values_literal!/1` REFUSES rather than returning [] when it cannot
+  # find the set — an extractor that silently yields nothing would make this
+  # whole lock vacuous the first time someone reformats the file.
+  # The two paths are LITERAL on purpose. An earlier draft built them by
+  # concatenating a module attribute onto Path.expand/2, and
+  # scripts/elixir-path-escape-check.sh could not resolve them — it reported OK
+  # while two undeclared cross-tree reads sat in the suite. A read the ratchet
+  # cannot see is worse than one it rejects, so both are spelled out here and
+  # both are declared in ELIXIR_TEST_ONLY_PATHS. Declaring them also makes the
+  # lock bidirectional: editing either .ts file now dispatches the Elixir suite,
+  # so the mirror cannot drift from EITHER side without a required context going
+  # red. Two exact files, not globs — the whole tree would be far more CI than
+  # this buys.
+  test "the @barkpark/react ERROR_VALUES mirror equals Engine.error_values/0" do
+    codes =
+      Path.expand("../../../js/packages/react/src/blocks/sheet.ts", __DIR__)
+      |> error_values_literal!("js/packages/react/src/blocks/sheet.ts")
+
+    assert_mirror_equals_engine(codes, "js/packages/react/src/blocks/sheet.ts")
+  end
+
+  test "the mobile sheet block's ERROR_VALUES mirror equals Engine.error_values/0" do
+    codes =
+      Path.expand("../../../apps/mobile/src/papers/portabledoc/blocks/sheet.tsx", __DIR__)
+      |> error_values_literal!("apps/mobile/src/papers/portabledoc/blocks/sheet.tsx")
+
+    assert_mirror_equals_engine(codes, "apps/mobile/src/papers/portabledoc/blocks/sheet.tsx")
+  end
+
+  defp assert_mirror_equals_engine(codes, rel) do
+    assert Enum.sort(codes) == Enum.sort(Engine.error_values()),
+           "#{rel} ERROR_VALUES drifted from Engine.error_values/0.\n" <>
+             "  only in the TS mirror: #{inspect(codes -- Engine.error_values())}\n" <>
+             "  only in the engine:    #{inspect(Engine.error_values() -- codes)}\n" <>
+             "Engine.error_values/0 is the source of truth; the TS mirror follows it. " <>
+             "The fix is to edit #{rel} until it matches the engine, in the SAME PR " <>
+             "as the engine change.\n" <>
+             "Do NOT make this green by deleting the code from Engine.error_values/0, " <>
+             "by trimming this assertion, or by moving the literal somewhere the " <>
+             "extractor stops finding it. This is the ONLY guard on that file that " <>
+             "runs in a context which CAN block a merge — the package's own vitest " <>
+             "runs under js-tests, which publishes no required check, so it fires and " <>
+             "is ignored. Silencing it here ships error cells as plain black text, " <>
+             "which is exactly what #15374 did for about a day."
+  end
+
+  # Pull the `ERROR_VALUES = new Set([...])` members out of a TS source file.
+  # REFUSES with the path when the shape it depends on is gone, so a refactor
+  # that moves the literal fails LOUDLY instead of quietly matching nothing — a
+  # silently-empty extractor is how a lock of this kind rots.
+  defp error_values_literal!(path, rel) do
+    src = File.read!(path)
+
+    body =
+      case Regex.run(~r/ERROR_VALUES\s*=\s*new Set\(\s*\[(.*?)\]/s, src) do
+        [_, body] ->
+          body
+
+        _ ->
+          flunk(
+            "#{rel}: could not find an `ERROR_VALUES = new Set([...])` literal. " <>
+              "If it was renamed or restructured, update this extractor — do NOT " <>
+              "delete the assertion, it is the only lock on this mirror that runs " <>
+              "in a required context."
+          )
+      end
+
+    codes =
+      ~r/['"]([^'"]+)['"]/
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, code] -> code end)
+
+    if codes == [],
+      do:
+        flunk(
+          "#{rel}: found the ERROR_VALUES literal but extracted zero codes — " <>
+            "the extractor is broken and this lock would be vacuous."
+        )
+
+    codes
+  end
+
   # Behavioural half of the same lock: the marks each surface actually stamps
   # (walk.ex → red/bold inline; cells.ex → `sheet-err` class) cover exactly the
   # engine vocabulary. This proves the mirror is WIRED, not merely present.

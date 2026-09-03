@@ -11,7 +11,7 @@ defmodule BarkparkWeb.TasksMoveTest do
     * bare-id resolution (subject + new parent) works.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
 

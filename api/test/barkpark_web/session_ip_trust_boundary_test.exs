@@ -179,7 +179,7 @@ defmodule BarkparkWeb.SessionIpTrustBoundaryTest do
       register!("issuer-relay-b@example.com")
 
       listed =
-        build_conn()
+        scoped_conn()
         |> from(@direct_peer, @client_ip)
         |> api_login("issuer-relay-b@example.com")
 

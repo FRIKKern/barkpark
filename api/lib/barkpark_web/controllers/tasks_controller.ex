@@ -159,7 +159,11 @@ defmodule BarkparkWeb.TasksController do
 
       :full ->
         counts = Params.batch_edge_counts(docs)
-        Enum.map(docs, &Params.render_doc_with_counts(&1, counts))
+        # task-3e0eda896a247776: the SAME batched grouped query the brief card
+        # runs — the full card used to omit `child_count` entirely, so the
+        # DEFAULT view of the ledger answered "no children" for every epic root.
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_doc_with_counts(&1, counts, child_counts))
     end
   end
 
@@ -218,9 +222,11 @@ defmodule BarkparkWeb.TasksController do
 
           :full ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
+            child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(sealed_in_progress, &Params.render_doc_with_counts(&1, counts)),
-             Enum.map(sealed_ready, &Params.render_doc_with_counts(&1, counts))}
+            render = &Params.render_doc_with_counts(&1, counts, child_counts)
+
+            {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
         end
 
       events = if view == :brief, do: Enum.take(events, 5), else: events
@@ -503,9 +509,17 @@ defmodule BarkparkWeb.TasksController do
 
         # Field-visibility seal (fail-closed): the doc AND its child summaries
         # are rendered off content-redacted docs under the request's caller.
+        # task-3e0eda896a247776: `child_count` rides INSIDE `doc` as well as at
+        # the top level. `children` is already the authoritative list here, so
+        # the inner field is keyed off the SAME `length(children)` the envelope
+        # reports — one query, one number, and `doc.child_count` now means the
+        # same thing on `bp task get` as it does on a `bp task ls` / `ready`
+        # card. The top-level key is UNCHANGED for the readers already on it.
+        child_counts = %{Params.strip_draft_prefix(doc.doc_id) => length(children)}
+
         json(conn, %{
           ok: true,
-          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts),
+          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts, child_counts),
           children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
           child_count: length(children)
         })
@@ -740,8 +754,24 @@ defmodule BarkparkWeb.TasksController do
       # task) so rail_changed reflects only concurrent actors, not this close.
       baseline_rev = pre_write_rail_rev(task, conn)
 
-      case Tasks.close(task.id, worker_id, opts) do
-        {:ok, %Document{} = doc} ->
+      case Barkpark.Tasks.Close.close_with_receipt(task.id, worker_id, opts) do
+        # THE REPLAY (task-17224f58d3bda3bd). This worker's close already
+        # landed; the response it got for it did not come back. Answer 200 with
+        # the stored row and say so in one field, so a caller can tell "my write
+        # landed earlier" from "my write landed just now" without a re-read —
+        # and, above all, so it stops reading a landed write as a failure.
+        {:ok, %Document{} = doc, :already_closed} ->
+          json(
+            conn,
+            close_response(doc, worker_id, conn)
+            |> Map.put(:already_closed, true)
+            |> Map.put(
+              :message,
+              "already closed by #{worker_id} — this call changed nothing and the stored close_reason is unchanged"
+            )
+          )
+
+        {:ok, %Document{} = doc, :closed} ->
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
@@ -771,11 +801,16 @@ defmodule BarkparkWeb.TasksController do
             ok: false,
             reason: "doc_changed_since_claim",
             current_rev: current_rev,
-            changed_fields: changed_fields
+            changed_fields: changed_fields,
+            # pds-bl-close-409-hint-promises-absent-fields: the two VALUES were
+            # always here; the COMMAND that consumes them was not, so a caller
+            # read `current_rev` off the body and still went looking for the
+            # recovery. Naming it here is what makes the body self-sufficient.
+            message: Params.drift_hint(current_rev, changed_fields)
           })
 
         {:error, reason} ->
-          conflict(conn, reason, :close)
+          conflict(conn, reason, :close, fence_extras(conn, doc_id, reason))
       end
     else
       {:error, :missing, field} ->
@@ -1007,7 +1042,12 @@ defmodule BarkparkWeb.TasksController do
   # Body/query (the bp CLI rides flags as query params): worker_id +
   # observed_epoch (positional in bp), criterion=<index>, then EXACTLY one of
   #   met=true      + evidence=<non-empty> → flip the lock, evidence or nothing
-  #   miss=true     + note=<non-empty>     → honest attempt, met never flips
+  #   miss=true     + note=<non-empty>     → honest attempt, met never flips. On
+  #                                          a DONE/CANCELLED row this is the
+  #                                          ONE accepted verb (plus withdraw),
+  #                                          and it also needs
+  #                                          observed_rev=<the rev you read>;
+  #                                          met=true stays not_in_progress.
   #   withdraw=true + note=<non-empty>     → LOWER the lock (D745): met→false,
   #                                          evidence preserved, a signed
   #                                          withdrawals[] record appended. On a
@@ -1047,7 +1087,7 @@ defmodule BarkparkWeb.TasksController do
           # The criteria-grain conflicts ride an actionable `message` (D56): a
           # guard that refuses without saying what to type is a guard agents
           # route around.
-          conflict(conn, reason, :stamp)
+          conflict(conn, reason, :stamp, fence_extras(conn, doc_id, reason))
       end
     else
       {:error, :missing, field} ->
@@ -1108,11 +1148,15 @@ defmodule BarkparkWeb.TasksController do
   # 409 envelope: the reason token stays the machine-readable contract; a
   # criteria-grain reason ALSO carries a top-level `message` telling the caller
   # exactly what to pass next (the bp CLI prints it in place of the token).
-  defp conflict(conn, reason, surface) do
-    body = %{ok: false, reason: Params.reason_to_string(reason)}
+  defp conflict(conn, reason, surface, extra \\ %{}) do
+    body = Map.merge(%{ok: false, reason: Params.reason_to_string(reason)}, extra)
+
+    message =
+      Params.criteria_hint(reason, surface) ||
+        Params.fence_hint(reason, surface, Map.get(extra, :current_epoch))
 
     body =
-      case Params.criteria_hint(reason, surface) do
+      case message do
         nil -> body
         message -> Map.put(body, :message, message)
       end
@@ -1121,6 +1165,27 @@ defmodule BarkparkWeb.TasksController do
     |> put_status(:conflict)
     |> json(body)
   end
+
+  # dr-w14-bl-fenced-off-409-is-mute: `fenced_off` is the one close/stamp
+  # refusal whose remedy needs a number the caller CANNOT compute — the epoch
+  # the row carries now (a `bp task pulse` advances it, so the epoch handed out
+  # at claim time is stale after the first heartbeat). Read it back on the
+  # refusal path ONLY, so the 409 body names it (`current_epoch`) alongside the
+  # command that spends it, and the caller recovers without the re-read the bare
+  # token silently demanded. `fenced_off` always implies a live claim
+  # (`Tasks.Close.check_fencing/2` — no claim closes cleanly), so the lookup
+  # normally hits; a miss just degrades to the re-read sentence.
+  defp fence_extras(conn, doc_id, :fenced_off) do
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, %Document{content: %{"claim" => %{"epoch" => epoch}}}} when is_integer(epoch) ->
+        %{current_epoch: epoch}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp fence_extras(_conn, _doc_id, _reason), do: %{}
 
   # ─── POST /v1/tasks/:doc_id/pulse ───────────────────────────────────────
   # Now-line heartbeat + lease renewal in one atomic write (Tasks.Pulse; see
@@ -1182,6 +1247,66 @@ defmodule BarkparkWeb.TasksController do
 
   defp check_now_length(text) when byte_size(text) <= @pulse_now_max_bytes, do: :ok
   defp check_now_length(_), do: {:error, :now_too_long}
+
+  # ─── POST /v1/tasks/:doc_id/renew ───────────────────────────────────────
+  # The NON-HOLDER lease extension (Tasks.Renew — its moduledoc carries the
+  # decision, the rejected alternative, and the blast radius). Body shape:
+  #   { "pr": 15234, "state": "open" | "closed" | "merged", "reason": "open_pr" }
+  # `pr` is REQUIRED: an extension with no named reason is a blank cheque, and
+  # the clear is pr-matched so PR #2 closing cannot cancel PR #1's grace.
+  # NO worker_id and NO observed_epoch — the caller is CI, which can never hold
+  # the claim; that is the whole point of the verb, and it is why the epoch is
+  # not bumped (a bump would stale every lead's stamp/close CAS).
+
+  def renew(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, pr} <- parse_pr(params["pr"]),
+         {:ok, state} <- parse_pr_state(params["state"]),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        [pr: pr, state: state]
+        |> Params.put_opt(:reason, params["reason"])
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.renew_lease_by_id(task.id, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :invalid_pr} ->
+        bad_request(conn, "pr is required and must be a positive integer")
+
+      {:error, :invalid_state} ->
+        bad_request(conn, ~s|state must be one of "open", "closed", "merged"|)
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # `pr` arrives as an int (JSON body) or a string (`--pr 15234` through
+  # generic manifest dispatch / the query form). Absent is a 400, not a
+  # default: see the comment above.
+  defp parse_pr(n) when is_integer(n) and n > 0, do: {:ok, n}
+
+  defp parse_pr(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> {:ok, n}
+      _ -> {:error, :invalid_pr}
+    end
+  end
+
+  defp parse_pr(_), do: {:error, :invalid_pr}
+
+  # Absent state means "open" — the renew is the common call, the clear is the
+  # one a caller has to ask for by name.
+  defp parse_pr_state(nil), do: {:ok, "open"}
+  defp parse_pr_state(s) when s in ["open", "closed", "merged"], do: {:ok, s}
+  defp parse_pr_state(_), do: {:error, :invalid_state}
 
   # `criterion` arrives as an int (JSON body) or a string (`--criterion 2`
   # through generic dispatch / query form). Absent → {:ok, nil} (a plain
@@ -2119,10 +2244,44 @@ defmodule BarkparkWeb.TasksController do
   # Single-doc fetch by exact doc_id string, scoped to workspace + project.
   # Everything is a task — the single `type == "task"` filter covers root
   # tasks (goals), phases, and leaf work-tasks.
+  #
+  # ── THE DATASET COLLISION (task-0c30e7b99ad87cec) ───────────────────────
+  #
+  # `documents` is unique on `(doc_id, type, dataset_id)` — NOT on
+  # `(doc_id, type)` (migration 20260527134000_flip_uniqueness_to_dataset_id).
+  # One task doc_id may therefore live in TWO datasets inside a single
+  # workspace/project, and this reader carries no dataset discriminator (by
+  # design: `bp task get <id>` names no dataset). Before this change the read
+  # was a bare `Repo.one/1`, so that shape raised `Ecto.MultipleResultsError`
+  # → a 500 on EVERY call, forever, for a row the ready queue happily lists:
+  # a listing that serves ids its own by-id reader cannot resolve. Measured on
+  # guerrilla 2026-09-02: `bp task ready` served `akbr-feedback-2026-08-epic`
+  # TWICE in one page (once per dataset) and three consecutive `bp task get`
+  # calls returned `internal_error`. An agent reads that as transient and
+  # retries blindly forever — the failure this row was filed for.
+  #
+  # The repair is the rule the CANONICAL slug resolver already spells
+  # (`Barkpark.Content.Graph.resolve_doc/3`, `@canonical capability:slug-resolve`):
+  # order deterministically, then `LIMIT 1`. This function is a fork of that
+  # resolver that kept the scoping and dropped the `limit(1)`. The order is
+  # TOTAL — published-first, then `dataset`, then `id` — so the same call
+  # returns the same row on every request and across every pooled connection;
+  # a partial order would trade a 500 for a silently-alternating answer, which
+  # is the worse defect (see queue.ex's `id` tiebreak, same reasoning).
+  #
+  # A `LIMIT 1` here can only ever CHANGE the outcome for a doc_id that has
+  # more than one row in scope — the shape that used to raise. A doc_id with
+  # exactly one row (every ordinary task) reads byte-identically.
   defp fetch_task_exact(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task"
+        where: d.doc_id == ^doc_id and d.type == "task",
+        order_by: [
+          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
+          asc: d.dataset,
+          asc: d.id
+        ],
+        limit: 1
       )
 
     query =

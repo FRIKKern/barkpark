@@ -1181,15 +1181,15 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@code, %{style: :article})
 
       assert html =~ "<pre"
-      # Parchment background, terracotta left-border, horizontal scroll —
-      # now emitted through `var(--paper-*, hex)` for dark-mode theming.
+      # A --paper-bg-deep slab, horizontal scroll — emitted through
+      # `var(--paper-*, hex)` for dark-mode theming.
       assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
-      # S8 (au-eg): geometry is token-bound (--bp-codeblock-*); the code bar is a
-      # reading-character cue (TUI twin ReadingAccent), so its accent now binds the
-      # terracotta --paper-reading-accent (color.reading-accent), not the evergreen
-      # chrome --paper-accent.
-      assert html =~
-               "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925)"
+      # task-ddb1e0ab09a62466: NO left bar. The 3px terracotta reading-accent bar
+      # (S8) marked a code block while the reader body was painted --paper-bg-deep
+      # and the slab was invisible; the body now stands on --paper-bg, the slab is
+      # the mark, and the bar is gone from all three parity files.
+      refute html =~ "border-left"
+      refute html =~ "--bp-codeblock-accent-w"
 
       assert html =~ "font-size:var(--bp-codeblock-size, 0.9rem)"
       assert html =~ "overflow-x:auto"
@@ -1256,7 +1256,6 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_block(@code, %{style: :article}) ==
                ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;| <>
                  ~s|border-radius:var(--bp-codeblock-radius, 0);| <>
-                 ~s|border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);| <>
                  ~s|color:var(--paper-ink, #15211d);| <>
                  ~s|padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
                  ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);| <>
@@ -1641,7 +1640,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_diagram
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto"><pre class="mermaid">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">The three-stage pipeline</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto"><pre class="mermaid">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption class="bp-figcaption">The three-stage pipeline</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><pre style="background:#f3f4f6;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:0.9em;overflow:auto;white-space:pre-wrap">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">The three-stage pipeline</div></figure>|
@@ -1651,7 +1650,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_asciicast
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div><figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">A terminal walkthrough</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><a href="https://example.com/casts/demo.cast">Terminal recording</a><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">A terminal walkthrough</div></figure>|
@@ -1661,7 +1660,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_figure
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><p>The figure body.</p><figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">Figure with a captioned child</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><p>The figure body.</p><figcaption class="bp-figcaption">Figure with a captioned child</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><p>The figure body.</p><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">Figure with a captioned child</div></figure>|
@@ -1681,10 +1680,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_filetree
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note" style="color: var(--ok);"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note" style="color: var(--fg-dim);"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note" style="color: var(--danger);"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
+               ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note" style="color: var(--ok);"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note" style="color: var(--paper-ink-soft);"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note" style="color: var(--danger);"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
 
       assert Render.render_block(input, %{style: :email}) ==
-               ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note" style="color: var(--ok);"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note" style="color: var(--fg-dim);"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note" style="color: var(--danger);"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
+               ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note" style="color: var(--ok);"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note" style="color: var(--paper-ink-soft);"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note" style="color: var(--danger);"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
     end
   end
 

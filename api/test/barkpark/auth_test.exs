@@ -117,6 +117,49 @@ defmodule Barkpark.AuthTest do
     end
   end
 
+  # A USER-shaped login ticket carries the email its consume JIT-provisions.
+  # `consume_login_ticket/1` burns the single-use row FIRST, so an address the
+  # registration changeset would reject used to mint a 201 ticket and then make
+  # `Sso.find_or_create_user/1` raise (500) with the ticket permanently spent.
+  # The refusal belongs at the mint, in the existing no-oracle error shape.
+  describe "mint_login_ticket/2 — user_email format" do
+    test "a malformed user_email is refused with {:error, :unauthorized}" do
+      raw = "mlt-bad-" <> Ecto.UUID.generate()
+      insert_token(raw, %{permissions: ["read", "admin"]})
+
+      assert Auth.mint_login_ticket(raw, user_email: "not-an-email") ==
+               {:error, :unauthorized}
+
+      assert Auth.mint_login_ticket(raw, user_email: "has space@example.com") ==
+               {:error, :unauthorized}
+
+      # ...and no ticket row was written for the refused mint.
+      assert Barkpark.Repo.aggregate(Barkpark.Auth.LoginTicket, :count) == 0
+    end
+
+    test "a well-formed user_email mints and consumes end to end" do
+      raw = "mlt-good-" <> Ecto.UUID.generate()
+      insert_token(raw, %{permissions: ["read", "admin"]})
+
+      assert {:ok, ticket} = Auth.mint_login_ticket(raw, user_email: "someone@example.com")
+      assert String.starts_with?(ticket, "bplt_")
+
+      assert Auth.consume_login_ticket(ticket) ==
+               {:ok, {:user, "someone@example.com", raw}}
+
+      # single-use still holds
+      assert Auth.consume_login_ticket(ticket) == {:error, :invalid}
+    end
+
+    test "a token-shaped ticket (no user_email) is unaffected" do
+      raw = "mlt-plain-" <> Ecto.UUID.generate()
+      insert_token(raw)
+
+      assert {:ok, ticket} = Auth.mint_login_ticket(raw)
+      assert Auth.consume_login_ticket(ticket) == {:ok, raw}
+    end
+  end
+
   # nil-permissions guard (omhr). has_permission?/2 evaluated `permission in
   # token.permissions`; a token with nil permissions raised ArgumentError
   # instead of denying. Reachable from RequireAdmin + media-access checks.

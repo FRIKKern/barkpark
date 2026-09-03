@@ -167,6 +167,44 @@ const INGRESS_RATIO_TOL = 0.01;
 const INGRESS_PROBE_TEXT =
   "The rig measures what the reader sees: rules, air over a rule, and a column held to its measure — 0123456789.";
 
+// ── THE PROSE BEAT vs THE AIR LADDER (task-741e0de1ddb3a482, ruled 2026-09-02)
+//
+// The reader has TWO vertical rhythms and they are not competing measurements of
+// one thing:
+//
+//   * the PROSE beat — `--bp-para-margin-top: 12pt` (16px), paragraph to
+//     paragraph, owned by type.reading;
+//   * the AIR ladder — `space.air`, how much room an EVIDENCE block takes before
+//     it starts, expressed as ratios of the benchmark artifact's 22px AIR UNIT
+//     (`--tok-air-beat`), whose bottom rung is code at 1.1x = 24.2px.
+//
+// The open question #11630 left behind was whether the reader's prose beat should
+// rise to 22 so the ladder's anchor and the reader's rhythm are one number. The
+// ruling is NO, and this arm is what makes the ruling load-bearing instead of
+// prose in a comment:
+//
+//   at a 16px prose beat, paragraph -> evidence steps 24.2 - 16 = 8.2px. A reader
+//   sees that. At 22 the step is 2.2px — the evidence would open at the same
+//   distance as the next sentence, and the air would stop saying anything. Worse,
+//   paragraph-to-paragraph (22) would exceed heading-to-paragraph (16), so a
+//   heading would sit CLOSER to its own first paragraph than two paragraphs sit
+//   to each other.
+//
+// So the invariant is a CLEARANCE, not an equality: the prose beat must stay a
+// clear step BELOW the ladder's bottom rung. Both sides are read off the RENDERED
+// page — the paragraph's own computed top margin (the reader wraps every block in
+// a div, so margins do not collapse and the paragraph's top margin IS the gap)
+// and a probe resolving `--bp-air-code` inside the real surface. Reading the
+// token text out of the sheet instead would pass for any value the sheet happened
+// to hold, which is the vacuous shape this rig exists to refuse.
+//
+// 6px, not 0: an assertion at `<` alone would still pass at 24.1 vs 24.2, a step
+// no eye resolves, and would let the beat drift up to the rung without ever
+// reddening. 6px is under the 8.2px the ruling ships (so the arm is not pinned to
+// today's exact numbers and a small retune of either side does not red it) and
+// far above the 2.2px the rejected option would produce.
+const PROSE_BEAT_CLEARANCE_PX = 6;
+
 // ── MARGINAL-COLOR-AS-VERDICT (charter D5/D21) — the tone census ─────────────
 // The eight-device crown's "marginal color as verdict" device ALREADY SHIPS on
 // the existing tone tokens: a callout's or card's verdict is carried by the
@@ -732,6 +770,48 @@ async function main() {
             });
           }
 
+          // ── the partial last row (task-0098ba55d2642545, charter D36) ──────
+          // A strip whose cell count is not a multiple of its track count leaves
+          // EMPTY tracks in its last row, and whatever the container paints shows
+          // there. The hairline grid used to be a rule-tinted container ground
+          // seen through 1px gaps, so the remainder rendered as a solid slab — a
+          // geometry no published fixture happened to hit. Measured per strip:
+          // the empty-track count, and when there are any, what an element probe
+          // at the CENTRE of the first empty track hits and that element's
+          // background. A slab is the strip's own container hit with a tinted
+          // background; the remedy leaves it transparent. Asserted below.
+          // ONLY a strip with TWO OR MORE rows can have one: `auto-fit`
+          // collapses a track that is empty in EVERY row, so a single row of 4
+          // cells over 8 tracks stretches the 4 to full width and there is no
+          // remainder to probe (design-probe, measured 2026-09-02 — the probe
+          // point landed outside the strip). With a full row above, the empty
+          // tracks of the last row are occupied above and stay open.
+          // `elementFromPoint` needs viewport coordinates, so the strip is
+          // scrolled into view for the probe and the page is scrolled back — a
+          // full-page capture is unaffected by scroll position.
+          const statRemainder = statStrips.map((el, i) => {
+            const cells = [...el.children].filter((c) => c.classList.contains("bp-stat"));
+            const tracks = statTracks[i];
+            const remainder = tracks > 0 && cells.length > tracks ? (tracks - (cells.length % tracks)) % tracks : 0;
+            const out = { tracks, cells: cells.length, emptyTracks: remainder, probe: null };
+            if (remainder === 0) return out;
+            el.scrollIntoView({ block: "center" });
+            const last = cells[cells.length - 1].getBoundingClientRect();
+            // The gap is 1px; the first empty track starts one gap after the last cell.
+            const x = last.right + 1 + last.width / 2;
+            const y = last.top + last.height / 2;
+            const hit = document.elementFromPoint(x, y);
+            const describe = (n) =>
+              n ? n.tagName.toLowerCase() + (n.classList.length ? "." + [...n.classList].join(".") : "") : null;
+            out.probe = {
+              hit: describe(hit),
+              hitIsStrip: hit === el,
+              hitBackground: hit ? getComputedStyle(hit).backgroundColor : null,
+            };
+            window.scrollTo(0, 0);
+            return out;
+          });
+
           return {
             wrapper: true,
             classes: main.className,
@@ -758,6 +838,7 @@ async function main() {
             h2Px,
             statTracks,
             statTracksNote,
+            statRemainder,
             docOverflow: round(document.documentElement.scrollWidth - document.documentElement.clientWidth),
             clientWidth: document.documentElement.clientWidth,
           };
@@ -961,6 +1042,150 @@ async function main() {
           );
         }
         assertions += (seen.ingressPresent ? 2 : 0) + (seen.statTracks === null ? 0 : 1);
+        // The partial last row must be page ground, not a slab. Anti-vacuity
+        // first: a strip WITH empty tracks must yield a probe — a probe that
+        // silently skipped the geometry it was built for is the vacuous green.
+        // Then the hit: the strip's own transparent container. A cell or a kilde
+        // there means the geometry was mis-measured; a tinted container is the
+        // slab (rgba(0, 0, 0, 0) is what Chromium reports for `transparent`).
+        // Red-before (2026-09-02): with `background: var(--paper-rule)` restored
+        // on `.bp-paper-surface .bp-stats`, stat-partial-row reds here —
+        // "the container's background is rgb(221, 231, 226), not transparent"
+        // (light, evergreen pin) — and goes green again once it is removed.
+        for (const s of seen.statRemainder ?? []) {
+          if (s.emptyTracks === 0) continue;
+          if (!s.probe) {
+            fail(`${cell}: a .bp-stats strip has ${s.emptyTracks} empty track(s) in its last row but the remainder probe yielded nothing — the slab arm went vacuous`);
+          }
+          if (!s.probe.hitIsStrip) {
+            fail(
+              `${cell}: the remainder probe (${s.cells} cells over ${s.tracks} tracks, ${s.emptyTracks} empty) hit ` +
+                `${s.probe.hit ?? "nothing"}, not the strip's own container — the empty-track geometry was mis-measured`,
+            );
+          }
+          if (s.probe.hitBackground !== "rgba(0, 0, 0, 0)") {
+            fail(
+              `${cell}: the partial last row of a .bp-stats strip (${s.cells} cells over ${s.tracks} tracks, ` +
+                `${s.emptyTracks} empty) paints as a slab — the container's background is ${s.probe.hitBackground}, ` +
+                `not transparent. The seams belong to the CELLS (paper-surface.css \`.bp-stats .bp-stat\`), ` +
+                `never to a container ground the empty tracks would show`,
+            );
+          }
+          assertions += 3;
+        }
+
+        // ── the prose-beat clearance, per cell ────────────────────────────
+        // A SECOND evaluate, deliberately: its two numbers are asserted but are
+        // NOT folded into `seen` and therefore not into report.json. They are a
+        // RELATION between two tokens, true or false on its own terms, and every
+        // committed baseline predates this arm — adding report keys would red
+        // `--check` on all seven fixtures for a measurement that has not moved.
+        // The numbers are printed on the cell's own line instead, so the arm is
+        // visible in a run rather than only in its silence.
+        const rhythm = await page.evaluate(() => {
+          const main = document.querySelector("main.bp-paper-article");
+          const body = main.querySelector("#paper-body") || main;
+          const round2 = (n) => Math.round(n * 100) / 100;
+
+          // A PROSE paragraph is a top-level one. The reader wraps every block of
+          // the stream in its own classless div, so the walk up from a paragraph
+          // to #paper-body must pass through nothing but those wrappers: the
+          // first classed ancestor, or any non-div, means the paragraph belongs to
+          // a COMPONENT and carries that component's rhythm, not the page's.
+          //
+          // This predicate is the arm's scar. The first version of it was
+          // `#paper-body p` with `!p.className`, which also swept the paragraphs
+          // inside `.bp-steps__body` (4.8px each) — enough of them on
+          // heggemsnes-act to drag the MEDIAN to 4.8px. That reported a 19.4px
+          // clearance and passed, measuring something that was never the prose
+          // beat. The cross-check below is what turns that class of mistake into
+          // a red instead of a comfortable number.
+          const isProse = (el) => {
+            if (el.className) return false;
+            let n = el.parentElement;
+            while (n && n !== body) {
+              if (n.tagName !== "DIV" || n.className) return false;
+              n = n.parentElement;
+            }
+            return n === body;
+          };
+
+          // The prose beat AS RENDERED. The div-per-block wrapping means sibling
+          // margins never collapse, so a paragraph's own computed top margin is
+          // exactly the gap the eye measures. Median, so one odd paragraph cannot
+          // move it.
+          const tops = [...body.querySelectorAll("p")]
+            .filter((el) => isProse(el) && el.getBoundingClientRect().height > 0)
+            .map((el) => parseFloat(getComputedStyle(el).marginTop))
+            .filter((n) => Number.isFinite(n) && n > 0)
+            .sort((a, b) => a - b);
+          const proseBeat = tops.length ? round2(tops[Math.floor(tops.length / 2)]) : null;
+
+          // Both tokens AS THE PAGE RESOLVES THEM — probes inside the real
+          // surface, so each resolves through the same cascade a real block would,
+          // and neither number is parsed out of a stylesheet (a sheet-read passes
+          // for whatever the sheet happens to say, which is the vacuous shape this
+          // rig refuses). The air probe also means the arm does not depend on this
+          // fixture happening to contain a code block.
+          const probe = (prop) => {
+            const el = document.createElement("div");
+            el.style.cssText = "position:absolute;visibility:hidden;margin-top:var(" + prop + ")";
+            main.appendChild(el);
+            const v = round2(parseFloat(getComputedStyle(el).marginTop));
+            el.remove();
+            return v;
+          };
+
+          return {
+            proseBeat,
+            paraToken: probe("--bp-para-margin-top"),
+            airCode: probe("--bp-air-code"),
+            clearance: proseBeat === null ? null : round2(probe("--bp-air-code") - proseBeat),
+            samples: tops.length,
+          };
+        });
+
+        // Non-vacuity, three ways. Each of these would make the comparison below
+        // trivially true, which is the failure mode this whole file is written
+        // against.
+        if (rhythm.proseBeat === null) {
+          fail(
+            `${cell}: no top-level prose paragraph with a top margin — the prose beat went ` +
+              `unmeasured, so the clearance against the air ladder is unproven`,
+          );
+        }
+        if (!(rhythm.airCode > 0)) {
+          fail(
+            `${cell}: --bp-air-code resolves to ${rhythm.airCode}px — the air ladder is not ` +
+              `reaching this surface, so there is no rung to hold the prose beat below`,
+          );
+        }
+        // THE INSTRUMENT CHECK. The beat measured off real paragraphs must BE the
+        // beat the token declares. If a DOM change moves the article stream out
+        // from under the predicate above, this reds — naming both numbers —
+        // instead of quietly reporting some component's rhythm and passing on it.
+        if (Math.abs(rhythm.proseBeat - rhythm.paraToken) > 0.5) {
+          fail(
+            `${cell}: the paragraphs measure a ${rhythm.proseBeat}px beat while ` +
+              `--bp-para-margin-top resolves to ${rhythm.paraToken}px (${rhythm.samples} sampled). ` +
+              `The selector is no longer reading the article's own prose — it is reading a ` +
+              `component's rhythm, and every clearance below it would be measured against the ` +
+              `wrong thing.`,
+          );
+        }
+        if (!(rhythm.proseBeat < rhythm.airCode - PROSE_BEAT_CLEARANCE_PX)) {
+          fail(
+            `${cell}: the prose beat measures ${rhythm.proseBeat}px against a ${rhythm.airCode}px ` +
+              `code air — a step of ${rhythm.clearance}px, under the ` +
+              `${PROSE_BEAT_CLEARANCE_PX}px clearance the ruling requires.\n` +
+              `      The paragraph beat must stay a CLEAR step below the air ladder's bottom rung, ` +
+              `or an evidence block opens at the same distance as the next sentence and the air stops ` +
+              `saying anything. Ruled 2026-09-02 (task-741e0de1ddb3a482): the prose beat stays 12pt/16px ` +
+              `and space.air.beat stays the ARTIFACT's 22px air unit — see the space.air note in ` +
+              `design/tokens.json and the air-scale comment in paper-surface.css.`,
+          );
+        }
+        assertions += 4;
 
         // The capture itself is a place a false green hides: Playwright's JPEG
         // encoder writes a ZERO-BYTE file (no throw, no warning) when a
@@ -1015,6 +1240,8 @@ async function main() {
             `h2 ${seen.h2Px.fontSize ?? "n/a"}/${seen.h2Px.fontWeight ?? "n/a"}, ` +
             `stat tracks ${seen.statTracks ? seen.statTracks.join("/") : "n/a"}, ` +
             `doc overflow ${seen.docOverflow}px, ${seen.paragraphs} paragraphs, ` +
+            `prose beat ${rhythm.proseBeat}px under ${rhythm.airCode}px code air ` +
+            `(${rhythm.clearance}px clear, ${rhythm.samples} sampled), ` +
             `${blocked} off-host requests blocked, ${DEVICE_SCALE_FACTOR}x, ${bytes} B`,
         );
         await context.close();

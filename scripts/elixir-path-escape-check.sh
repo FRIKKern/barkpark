@@ -204,10 +204,19 @@ scripts/prod-build-cache-guard.sh'
 #   api/assets/sheet-grid/**  <- api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs
 #                                System.cmd("node", [__*.test.mjs], cd: api/assets/sheet-grid) (#15196);
 #                                redundant with api/** in the compile set, declared per task-509410 crit 4.
+#   web/components/**  <- api/test/barkpark_web/live/sheets_cf_live_matrix_receipt_test.exs
+#   web/lib/**            transpiles web/components/sheet-grid.tsx with the repo's own
+#   web/node_modules/**   TypeScript and renderToStaticMarkup's it (#15435). Declared as the
+#                         three EXACT subdirs the test names, never the bare `web` tree: a
+#                         change to web/app/** cannot break it, so it must not run the suite.
+#                         node_modules is gitignored and can never be a changed path — it is
+#                         declared because the test PROBES it (react-dom, typescript) and an
+#                         undeclared existing read reds this gate on any tree that installed it.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 api/assets/sheet-grid/**
+apps/mobile/src/papers/portabledoc/blocks/sheet.tsx
 cloud/test/**
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
@@ -219,6 +228,7 @@ internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
 scripts/check-deployyml-filters.sh
@@ -234,6 +244,9 @@ scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
 web/__tests__/**
+web/components/**
+web/lib/**
+web/node_modules/**
 web/public/assets/bp-paper-editor.css
 web/public/bp-paper-editor.bundle.js'
 

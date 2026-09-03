@@ -13,7 +13,7 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
   it). Proved NON-VACUOUSLY — the grantee both SEES the in-scope row and is DENIED
   the out-of-scope one on the same live HTTP surface.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
   import Barkpark.AccessFixtures

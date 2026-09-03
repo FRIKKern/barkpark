@@ -42,6 +42,7 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
   here would be the copy that later goes stale and disagrees with it. See the
   pointer comment below the last `describe` block.
   """
+  # sync: resets Barkpark.RateLimiter; :barkpark_rate_limiter is a :named_table — whole-node state
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.RateLimiterSandbox

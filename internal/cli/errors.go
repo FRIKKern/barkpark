@@ -291,6 +291,7 @@ var codeExit = map[string]int{
 	"invalid_deploy_mode":     exitValidation, // 400, sites/deploy_request.ex (site deploy mode)
 	"session_restarting":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (crash loop — RETRY)
 	"session_start_failed":    exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
+	"replay_unavailable":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (exactly-once ring unreadable; batch NOT applied — RETRY)
 }
 
 // codeExitNotWireBucketable names the members of known_codes/0 that are

@@ -13,7 +13,7 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Repo
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope}
   alias Barkpark.Content.Scope
-  alias Barkpark.Tasks.{Criteria, QueueGate}
+  alias Barkpark.Tasks.{Close, Criteria, QueueGate}
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -578,11 +578,36 @@ defmodule BarkparkWeb.TasksController.Params do
   def strip_draft_prefix(doc_id) when is_binary(doc_id),
     do: DraftId.published_id(doc_id)
 
-  # Augment the base render_doc map with the three count fields the
+  # Augment the base render_doc map with the four count fields the
   # `bp task` list/ready shapes carry (dependency_count + dependent_count
   # from batch_edge_counts; comment_count fixed at 0 until the comment
-  # substrate ships — TODO: wire when comment substrate exists).
-  def render_doc_with_counts(%Document{} = doc, counts) do
+  # substrate ships — TODO: wire when comment substrate exists;
+  # `child_count` from `batch_child_counts/2`, the SAME producer the brief
+  # card uses).
+  #
+  # ── ONE FIELD, ONE PLACE (task-3e0eda896a247776) ────────────────────────
+  #
+  # `child_count` used to answer THREE different things depending on which
+  # door a reader walked through:
+  #
+  #     GET /v1/tasks?view=brief   docs[].child_count        the real number
+  #     GET /v1/tasks   (default)  ABSENT                    -> reads as 0
+  #     GET /v1/tasks/:doc_id      TOP-LEVEL child_count,    -> doc.child_count
+  #                                absent from `doc`            reads as 0
+  #
+  # The fleet's standing triage heuristic is "skip a row with a high
+  # child_count — an epic parent is not lane-sized". Two of the three doors
+  # answer 0 for a `doc.child_count` read, so an epic ROOT passes that filter
+  # as a leaf: measured on guerrilla, `task-57451a6ce0a0505e` carries 189
+  # children and its 160 shards were swept toward a bulk-cancel list twice on
+  # exactly this misread. Emitting the field on the full card and INSIDE `doc`
+  # (`show` keeps its top-level copy for the readers already on it) makes
+  # `doc.child_count` one number with one meaning on every reader.
+  #
+  # `child_counts` defaults to `%{}` so the pre-existing arity-2 call sites
+  # keep compiling and keep their exact shape plus a `child_count: 0`; every
+  # caller inside this app passes the real map.
+  def render_doc_with_counts(%Document{} = doc, counts, child_counts \\ %{}) do
     {dep_count, dependent_count} = Map.get(counts, doc.id, {0, 0})
 
     doc
@@ -590,6 +615,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> Map.put(:dependency_count, dep_count)
     |> Map.put(:dependent_count, dependent_count)
     |> Map.put(:comment_count, 0)
+    |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
   end
 
   # C2: a lightweight child summary — just enough to render the rail without
@@ -999,10 +1025,33 @@ defmodule BarkparkWeb.TasksController.Params do
   def criteria_hint(:observed_rev_required, :stamp),
     do:
       ~s|this row carries no live claim (it is closed, cancelled or released), so there is no epoch to fence | <>
-        ~s|a withdrawal against. Pin the rev you read instead: re-read with `bp task get <id> -o json`, take | <>
-        ~s|.doc.rev, and re-run the withdrawal with --observed-rev <rev>. Nothing was written. A withdrawal | <>
-        ~s|never touches the seal, the close_reason or the original evidence — it lowers the met flag and | <>
-        ~s|appends a signed record naming who withdrew it and why.|
+        ~s|a withdrawal or a post-close --miss against. Pin the rev you read instead: re-read with | <>
+        ~s|`bp task get <id> -o json`, take .doc.rev, and re-run with --observed-rev <rev>. Nothing was | <>
+        ~s|written. Neither verb touches the seal, the close_reason or the original evidence: a withdrawal | <>
+        ~s|lowers the met flag and appends a signed record naming who withdrew it and why, and a --miss | <>
+        ~s|appends an attempt while PINNING met to whatever it already was.|
+
+  # THE POST-CLOSE REFUSAL (task-d68754135a6a9f66). This is the message that
+  # decides whether a closer reaches for the sanctioned instrument or for a raw
+  # /v1/data/mutate — the substitution that pasted one evidence blob across
+  # every remaining criterion on ~43-57 rows. It therefore has to name the verb
+  # that DOES work here and the exact flags it needs, not just the wall.
+  def criteria_hint({:not_in_progress, status}, :stamp) when status in ["done", "cancelled"],
+    do:
+      ~s|this row is #{status} — its verdict is sealed by close, so --met is refused here permanently: a | <>
+        ~s|met-flip after close rewrites the claim the close sealed AND overwrites the criterion's evidence. | <>
+        ~s|Nothing was written. What DOES work on a sealed row is the append-only pair: --miss --note "..." | <>
+        ~s|records an honest observation (it pins met to its stored value and touches neither evidence nor | <>
+        ~s|the criterion text), and --withdraw --note "..." lowers a met flag review has refuted. Both need | <>
+        ~s|the rev you read instead of an epoch: `bp task get <id> -o json`, take .doc.rev, pass | <>
+        ~s|--observed-rev <rev>. Do NOT patch criteria through /v1/data/mutate — that leaves no attribution | <>
+        ~s|and is what this instrument exists to replace.|
+
+  def criteria_hint({:not_in_progress, status}, :stamp),
+    do:
+      ~s|this row is #{status}, not in_progress — a stamp writes under a LIVE claim. Nothing was written. | <>
+        ~s|Claim it first (`bp task claim <id> <worker>`) and stamp with the epoch that returns. The | <>
+        ~s|post-close --miss / --withdraw exemption applies only to a done or cancelled row.|
 
   def criteria_hint(:criterion_not_met, :stamp),
     do:
@@ -1123,7 +1172,79 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|"null", "nil" or "-"). A close attributed to it reads as a real close to every downstream gate. | <>
         ~s|Pass the worker that actually holds the claim.|
 
+  # THE STATUS-POSITION REFUSAL (dr-w14 / lead-ledger). `bp task close <id>
+  # <worker> <epoch> "<a whole sentence>"` parses that sentence as the LIFECYCLE
+  # STATUS, so the server refuses `invalid_lifecycle:<the whole sentence>` — a
+  # token that names the mistake without ever naming the fix. The gate does NOT
+  # widen (only done/cancelled/blocked close a task); the SENTENCE does: when the
+  # rejected value cannot be a status at all — it carries whitespace, or it is
+  # far longer than any status — say plainly that the reason belongs in a LATER
+  # positional, and print the corrected command.
+  def criteria_hint({:invalid_lifecycle, status}, :close) do
+    allowed = Enum.join(Close.closed_lifecycle_statuses(), ", ")
+
+    if reason_shaped?(status) do
+      ~s|that is a close REASON sitting in the STATUS position: `bp task close <id> <worker> <epoch>` | <>
+        ~s|takes the lifecycle status 4th (#{allowed}) and the reason 5th. Nothing was written. | <>
+        ~s|Re-run: bp task close <id> <worker> <epoch> done "<your reason>"|
+    else
+      ~s|#{inspect(to_string(status))} is not a close status — a close ends a task #{allowed}. | <>
+        ~s|Nothing was written. Re-run: bp task close <id> <worker> <epoch> done "<why>"|
+    end
+  end
+
   def criteria_hint(_reason, _surface), do: nil
+
+  # A value that could never be a lifecycle status: it carries whitespace, or it
+  # is longer than any of them by a wide margin. Both shapes say "this is prose",
+  # and prose in the status slot is a close reason that missed its positional.
+  @reason_shaped_min_length 24
+  defp reason_shaped?(status) when is_binary(status),
+    do: String.match?(status, ~r/\s/) or String.length(status) > @reason_shaped_min_length
+
+  defp reason_shaped?(_status), do: false
+
+  @doc """
+  The wrong-epoch 409's remedy sentence (dr-w14-bl-fenced-off-409-is-mute).
+
+  `fenced_off` used to ship as a bare `{"ok":false,"reason":"fenced_off"}`: the
+  caller was told its epoch was wrong and never told which epoch is right, so
+  recovery took a re-read the refusal never asked for. `current_epoch` is read
+  off the row on the refusal path and named here; `nil` (the row lost its claim
+  between the refusal and the re-read) falls back to naming the re-read.
+  """
+  @spec fence_hint(atom() | tuple(), atom(), integer() | nil) :: String.t() | nil
+  def fence_hint(:fenced_off, surface, current_epoch)
+      when is_integer(current_epoch) and surface in [:close, :stamp] do
+    ~s|this claim is at epoch #{current_epoch}, not the one you passed — every `bp task pulse` ADVANCES | <>
+      ~s|the epoch, so a claim-time value is stale after the first heartbeat. Nothing was written. | <>
+      ~s|Re-run on the current epoch: bp task #{surface} <id> <worker> #{current_epoch}|
+  end
+
+  def fence_hint(:fenced_off, surface, _current_epoch) when surface in [:close, :stamp] do
+    ~s|the epoch you passed is not the one this claim carries, and every `bp task pulse` ADVANCES it. | <>
+      ~s|Nothing was written. Re-read the current epoch and re-run on it: | <>
+      ~s|bp task get <id> -o json -> .doc.claim.epoch, then bp task #{surface} <id> <worker> <that epoch>|
+  end
+
+  def fence_hint(_reason, _surface, _current_epoch), do: nil
+
+  @doc """
+  The edited-under-you 409's remedy sentence
+  (pds-bl-close-409-hint-promises-absent-fields).
+
+  The body has always carried `current_rev` + `changed_fields` at the top level
+  — what it never carried is the command that consumes them, so the operator
+  read two values and still had to go find the recovery. Name it here, with the
+  rev already substituted, so the refusal body alone is enough.
+  """
+  @spec drift_hint(String.t(), [String.t()]) :: String.t()
+  def drift_hint(current_rev, changed_fields) do
+    ~s|the task's brief changed under your claim (#{Enum.join(changed_fields, ", ")}), so this close would | <>
+      ~s|seal work described differently from what you read. Nothing was written. Re-read it, reconcile | <>
+      ~s|those fields, then close pinning the rev in this body: | <>
+      ~s|bp task close <id> <worker> <epoch> --set observed_rev=#{current_rev}|
+  end
 
   # ─── Success help[] (axi-s4 R5 — a success TEACHES the next command) ──────
   #
@@ -1387,7 +1508,9 @@ defmodule BarkparkWeb.TasksController.Params do
   # fails closed exactly as raising it does). The bp CLI sends flags as query strings ("true",
   # "0"); curl sends typed JSON — both shapes are accepted. Exactly one of
   # met/miss; --met REQUIRES non-empty evidence (evidence or nothing, D3);
-  # --miss REQUIRES a non-empty note (an honest attempt has words).
+  # --miss REQUIRES a non-empty note (an honest attempt has words). --miss is
+  # ALSO the one verb accepted on a DONE / CANCELLED row (with --observed-rev),
+  # because it pins met and writes no evidence; --met never is.
   # `criterion_text` is the OPTIONAL 0-based/off-by-one guard: the criterion's
   # expected stored text, threaded into the stamp's criteria-grain CAS so a
   # wrong (in-range) index is rejected (`:criteria_mismatch`) instead of

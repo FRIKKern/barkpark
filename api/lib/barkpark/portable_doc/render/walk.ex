@@ -136,6 +136,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
+  def walk(%{"kind" => "PdChip"} = n, _width, pal), do: chip(n, pal)
   def walk(%{"kind" => "PdValueref"} = n, _width, pal), do: valueref(n, pal)
 
   def walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
@@ -210,7 +211,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # external Pd JSON, so an open `"class"` pass-through would let any document
   # claim arbitrary paper-surface classes (class injection). Compose stamps
   # these as FIXED literals (compose_section_stack); anything else stays inert.
-  @box_class_whitelist ~w(bp-section--framed)
+  @box_class_whitelist ~w(bp-section--framed bp-section--wide)
 
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -922,6 +923,44 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     href = escape_html("/tags/" <> URI.encode(raw, &URI.char_unreserved?/1))
 
     tag_node_html(href, name, pal)
+  end
+
+  # Verdict chip (PdChip — inline `chip` node). `:article` carries the
+  # `.bp-chip` family the surface styles from the `--bp-tone-*` pairs; the
+  # email/default leg inlines the SAME tone pair through `Util.tone_palette/1`
+  # so a chip reads identically in a digest. An unknown tone degrades to
+  # neutral (never info — a verdict that failed to parse must not look like
+  # an informational one). The note is a block under the chip in the article
+  # and a soft trailing span inline in email.
+  @chip_tones ~w(success warning danger info neutral)
+
+  defp chip(n, pal) do
+    tone = if Map.get(n, "tone") in @chip_tones, do: Map.get(n, "tone"), else: "neutral"
+    strong? = Map.get(n, "strong") == true
+    text = escape_html(Map.get(n, "text") || "")
+    note = escape_html(Map.get(n, "note") || "")
+    chip_html(tone, strong?, text, note, pal)
+  end
+
+  defp chip_html(tone, strong?, text, note, %{style: :article}) do
+    strong_cls = if strong?, do: " bp-chip--strong", else: ""
+    note_html = if note == "", do: "", else: ~s(<span class="bp-chip__note">#{note}</span>)
+
+    ~s(<span class="bp-chip bp-chip--#{tone}#{strong_cls}"><i class="bp-chip__dot"></i>#{text}</span>) <>
+      note_html
+  end
+
+  defp chip_html(tone, strong?, text, note, _pal) do
+    %{bg: bg, fg: fg} = Barkpark.PortableDoc.Render.Util.tone_palette(tone)
+    {bg, fg} = if strong?, do: {fg, "#ffffff"}, else: {bg, fg}
+
+    note_html =
+      if note == "",
+        do: "",
+        else: ~s( <span style="color:#6b7280;font-size:0.85em">#{note}</span>)
+
+    ~s(<span style="display:inline-block;background:#{bg};color:#{fg};padding:1px 8px;border-radius:999px;font-size:0.85em;font-weight:600">#{text}</span>) <>
+      note_html
   end
 
   # Stage 2: `:article` carries `bp-tag` (the pill chip, styled by

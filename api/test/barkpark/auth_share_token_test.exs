@@ -139,6 +139,53 @@ defmodule Barkpark.AuthShareTokenTest do
       assert {:error, :unauthorized} = Auth.verify_token(raw)
     end
 
+    # revoke_share_tokens/3 was a bare Repo.update_all: it stamped revoked_at
+    # (so verify_token rejected, which is all the test above asserts) while
+    # skipping revoke_token/1's audit emit entirely. Killing a standing
+    # credential with no audit row is the gap; this asserts the row per token.
+    test "emits a token/token_revoked audit row per revoked share token", %{
+      ws: ws,
+      proj: proj,
+      scope: scope
+    } do
+      share!(scope, "docs:edit")
+
+      {:ok, {_raw_a, token_a}} =
+        Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"])
+
+      {:ok, {_raw_b, token_b}} =
+        Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"])
+
+      assert {:ok, 2} = Auth.revoke_share_tokens(ws.slug, proj.slug, "production")
+
+      events =
+        Repo.all(
+          from(e in Barkpark.Audit.Event,
+            where: e.category == "token" and e.action == "token_revoked"
+          )
+        )
+
+      assert length(events) == 2
+      assert Enum.sort(Enum.map(events, & &1.subject)) == Enum.sort([token_a.id, token_b.id])
+    end
+
+    test "is idempotent — a repeat revoke revokes nothing and audits nothing", %{
+      ws: ws,
+      proj: proj,
+      scope: scope
+    } do
+      share!(scope, "docs:edit")
+      {:ok, {_raw, _}} = Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"])
+
+      assert {:ok, 1} = Auth.revoke_share_tokens(ws.slug, proj.slug, "production")
+      assert {:ok, 0} = Auth.revoke_share_tokens(ws.slug, proj.slug, "production")
+
+      assert Repo.aggregate(
+               from(e in Barkpark.Audit.Event, where: e.action == "token_revoked"),
+               :count
+             ) == 1
+    end
+
     test "removing the share hard-revokes its edit tokens", %{ws: ws, proj: proj, scope: scope} do
       {:ok, _} = Sharing.add_share("#{scope}:docs:edit")
       {:ok, {raw, _}} = Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"])

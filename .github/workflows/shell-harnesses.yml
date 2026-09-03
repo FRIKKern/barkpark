@@ -160,6 +160,9 @@ on:
       - "tooling/task-obsession/reland_loudfail.test.sh"
       - "tooling/task-obsession/fixtures/*.json"
       - ".github/workflows/reland-check.yml"
+      - "scripts/relandcheck-diff-producer.test.sh"
+      - "scripts/main-red-breaker.sh"
+      - "scripts/main-red-breaker.test.sh"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -303,6 +306,8 @@ on:
       - "scripts/task-lease-renew.sh"
       - "scripts/task-lease-renew.test.sh"
       - ".github/workflows/task-lease-renew.yml"
+      - "scripts/task-lease-sweep.sh"
+      - "scripts/task-lease-sweep.test.sh"
   push:
     branches: [main]
     paths:
@@ -365,6 +370,9 @@ on:
       - "tooling/task-obsession/reland_loudfail.test.sh"
       - "tooling/task-obsession/fixtures/*.json"
       - ".github/workflows/reland-check.yml"
+      - "scripts/relandcheck-diff-producer.test.sh"
+      - "scripts/main-red-breaker.sh"
+      - "scripts/main-red-breaker.test.sh"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -477,12 +485,14 @@ on:
       - "scripts/task-lease-renew.sh"
       - "scripts/task-lease-renew.test.sh"
       - ".github/workflows/task-lease-renew.yml"
+      - "scripts/task-lease-sweep.sh"
+      - "scripts/task-lease-sweep.test.sh"
 
 permissions:
   contents: read
 
 concurrency:
-  group: shell-harnesses-${{ github.ref }}
+  group: shell-harnesses-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the suite dark
   # (never-cancel-main-check.sh D12). The guard is a no-op on PRs (github.ref is
   # never refs/heads/main there) and strictly never-cancel on main.
@@ -650,6 +660,9 @@ jobs:
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
+          tooling-harnesses scripts/relandcheck-diff-producer.test.sh
+          tooling-harnesses scripts/main-red-breaker.sh
+          tooling-harnesses scripts/main-red-breaker.test.sh
           launcher-boot-selftest bin/barkpark
           launcher-boot-selftest scripts/barkpark-boot-selftest.sh
           workflow-portability scripts/workflow-portability-check.sh
@@ -675,6 +688,8 @@ jobs:
           pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
           task-lease-renew scripts/task-lease-renew.sh
           task-lease-renew scripts/task-lease-renew.test.sh
+          task-lease-renew scripts/task-lease-sweep.sh
+          task-lease-renew scripts/task-lease-sweep.test.sh
           task-lease-renew .github/workflows/task-lease-renew.yml
           task-lease-renew scripts/pr-task-gate.sh
           landed-mark scripts/landed-mark.sh
@@ -1251,6 +1266,22 @@ jobs:
           # The sim reads reland-check.yml itself, so PyYAML is load-bearing here.
           python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
           bash tooling/task-obsession/reland_loudfail.test.sh
+      - name: relandcheck-diff-producer.test.sh syntax check
+        run: bash -n scripts/relandcheck-diff-producer.test.sh
+      - name: reland-check.yml's changed-file producer keeps quote-bearing paths and rename sources
+        # The step body is EXTRACTED from reland-check.yml and EXECUTED against
+        # real git fixtures, so this cannot drift into a paraphrase of what CI
+        # runs. Case 4 restores the PRE-FIX producer on a copy and proves both
+        # false-green shapes reappear — the harness has been shown to lose.
+        # PyYAML is load-bearing: the harness exits 2 (HARNESS-UNAVAILABLE,
+        # never a pass) without it, so install rather than skip.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash scripts/relandcheck-diff-producer.test.sh
+      - name: main-red-breaker.sh syntax + harness (stub curl + fixtures, no network)
+        run: |
+          bash -n scripts/main-red-breaker.sh
+          bash scripts/main-red-breaker.test.sh
       - name: fleet-run verdict matrix
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check
@@ -1546,8 +1577,12 @@ jobs:
         run: |
           bash -n scripts/task-lease-renew.sh
           bash -n scripts/task-lease-renew.test.sh
+          bash -n scripts/task-lease-sweep.sh
+          bash -n scripts/task-lease-sweep.test.sh
       - name: every response class lands on its verdict (stub curl, no network)
         run: bash scripts/task-lease-renew.test.sh
+      - name: the 20-min sweep drives the whole chain per open PR (stub curl + stub gh, no network)
+        run: bash scripts/task-lease-sweep.test.sh
 
   landed-mark:
     needs: [changes]

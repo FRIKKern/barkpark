@@ -29,7 +29,7 @@ defmodule BarkparkWeb.SearchSynonymsFailClosedTest do
   (`bpb-search-intel-record-insights-pipeline-align`) is merged; the lead
   verifies it at merge.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Barkpark.TenancyFixtures
 

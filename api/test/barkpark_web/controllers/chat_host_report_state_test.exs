@@ -8,7 +8,7 @@ defmodule BarkparkWeb.ChatHostReportStateTest do
   /v1/chat-host/events: stale_fence / lease_expired → 409, no lease → 422,
   bad vocabulary → 422 before the store is ever touched.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 

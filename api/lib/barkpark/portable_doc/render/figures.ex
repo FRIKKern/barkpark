@@ -15,29 +15,29 @@ defmodule Barkpark.PortableDoc.Render.Figures do
 
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
-  # The code-block bar is a reading-character cue (its TUI twin is
-  # `Theme.CodeBar`/`ReadingAccent`), so it draws on the article reading accent —
-  # the terracotta `--paper-reading-accent`, tokenized in `TokensGen` and threaded
-  # through the palette (charter D8). Compile-time bound from `Palettes` (same as
-  # `@font_mono`) so the fallback hex stays sourced, never a re-typed literal.
-  @reading_accent Barkpark.PortableDoc.Render.Palettes.article_reading_accent()
-
   # ── article block HTML emission (code / section divider) ───────────────────
 
-  # A single styled `<pre>` code block for article mode: monospace, cool
-  # near-white `--paper-bg-deep` ground, a 3px **terracotta** left-border (the
-  # reading accent, `var(--paper-reading-accent, #a23925)`), padding, and
-  # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
-  # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
+  # A single styled `<pre>` code block for article mode: monospace, a set-in
+  # `--paper-bg-deep` slab on the `--paper-bg` page, padding, and horizontal
+  # scroll on overflow. No left bar: the 3px terracotta reading-accent bar was
+  # drawn while the page and the slab shared one colour (bulldocs painted the
+  # body with --paper-bg-deep) and the bar was all that marked a code block; the
+  # reader now stands on --paper-bg, the slab itself is the mark, and the rule
+  # ladder already carries evidence (task-ddb1e0ab09a62466, lead taste ruling).
+  # The value is HTML-escaped (the `<pre>` shows source verbatim, so no Mermaid
+  # `pre.mermaid` selector concern here).
   def code_block_html(value) do
-    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid #{@reading_accent};color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
       ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
       ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end
 
   # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
-  # rule. The glyph sits in an inline-block box with the parchment page colour
-  # as its background, masking the rule that runs behind it across the column.
+  # rule. The glyph sits in an inline-block box with the PAGE colour as its
+  # background, masking the rule that runs behind it across the column — so it
+  # paints `--paper-bg`, the token the reader body and the Studio surface stand
+  # on. It painted `--paper-bg-deep` while the reader body did too; once the
+  # page moved to `--paper-bg` a deep mask would read as a tile around the §.
   #
   # The `bp-section-divider` class carries NO styling here — every value stays
   # inline, and view_edit_parity_test.exs §8 still compares those inline
@@ -52,7 +52,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   def section_divider_html do
     ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
       ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
-      ~s|background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
+      ~s|background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
   end
 
   # ── diagram / figure HTML emission ─────────────────────────────────────────
@@ -98,14 +98,25 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   #
   # The canonical paper-article figure for a Mermaid diagram. Article mode: a
   # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
-  # is muted/italic with the bold "Figure N." run-in. Email mode degrades to the
+  # carries the bold "Figure N." run-in and is styled by ONE class,
+  # `.bp-figcaption` (paper-surface.css, mirrored on both editor surfaces and
+  # gated by view_edit_parity_test.exs §2/§5). Email mode degrades to the
   # caption line + the source as a plain code block (Mermaid never runs there).
+  #
+  # THE CAPTION IS A CLASS, NOT AN INLINE STYLE (papers/captions-floor). It used
+  # to be ~200 bytes of inline `color/font-style/font-size/font-family/max-width`
+  # repeated at THREE emit sites, and the third copy (asciicast, below) had
+  # drifted to a BARE HEX where its siblings read `var(--paper-ink-soft, …)` —
+  # 2.97:1 on the dark ground, a contrast FAIL the token-reading copies did not
+  # have (7.05:1). One class cannot drift from itself. The :email/default
+  # clauses keep their inline styles: an email client has no stylesheet to carry
+  # a class, so their hex fallbacks are load-bearing and stay.
   def diagram_html(source, caption, :article) do
     cap =
       if caption == "" do
         ""
       else
-        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
+        ~s|<figcaption class="bp-figcaption">#{figcaption_inner(caption)}</figcaption>|
       end
 
     ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">| <>
@@ -135,7 +146,9 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # point the PaperMermaid hook's `runAsciicast()` upgrades into a live player
   # at runtime. The cast URL is carried in `data-cast-src` via `safe_url` (scheme
   # allowlist + attribute escape). The figcaption reuses diagram_html's article
-  # styling. Email / default mode: no player runtime — degrade to a plain link.
+  # class, `.bp-figcaption` — this is the site that had drifted to a hard-coded
+  # ink hex (2.97:1 on dark) while its two siblings read the soft-ink token.
+  # Email / default mode: no player runtime — degrade to a plain link.
   #
   # `poster` is the block's OPTIONAL resting frame — the asciinema-player
   # `poster` option, an npt timestamp (`"npt:1:23"`) or `"end"`. A recording
@@ -155,10 +168,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       if caption == "" do
         ""
       else
-        # `~s|…|`, not `~s(…)`: the caption measure is a `var(…)` read, and a
-        # paren-delimited sigil ends at the first `)` — the same reason the
-        # diagram figcaption above already uses the pipe form.
-        ~s|<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
+        ~s|<figcaption class="bp-figcaption">#{figcaption_inner(caption)}</figcaption>|
       end
 
     poster_attr =

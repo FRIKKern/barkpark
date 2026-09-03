@@ -138,6 +138,8 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
       PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      GET     /v1/teams/:id/tokens admin  list every PAT minted against the team (holder named; no secrets)
+      DELETE  /v1/teams/:id/tokens/:token_id admin  revoke a team member's PAT (foreign id → 404)
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
       POST    /v1/invitations/accept user    accept an invitation (join the team)
       POST    /v1/billing/checkout owner     open a hosted Checkout Session → {checkout_url}
@@ -4672,7 +4674,11 @@ defmodule BarkparkCloud.Web.Router do
   # 409 taken when the host is already claimed by a site domain / another
   # instance's custom_host (exact, or nesting under a different team's host) /
   # a provisioning FQDN; 409 already_attaching while a previous attach is still
-  # in flight (the one-active-job-per-kind partial index).
+  # in flight (the one-active-job-per-kind partial index); 409 already_attached
+  # {custom_host, detail} when THIS instance already answers on a different
+  # host — a re-attach is refused, never an overwrite, because an overwrite
+  # strands the previous host's A record on a live box (cch-w54-bl). Attaching
+  # the SAME host again is still a 202 (the failed-attach recovery path).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
   # privileged infra, like self-update above — require_primary_team_admin halts
@@ -4774,6 +4780,24 @@ defmodule BarkparkCloud.Web.Router do
           {:error, _changeset} ->
             json(conn, 422, %{error: "invalid"})
         end
+
+      # cch-w54-bl: this instance already answers on a DIFFERENT host. The
+      # persist is refused rather than overwritten — overwriting strands the
+      # previous host's A record on a live, billed box and drops the only
+      # pointer the plane had to it. There is no detach verb on this surface to
+      # sequence instead, so the refusal names the host that is in the way.
+      # Re-attaching the SAME host still succeeds (the failed-job recovery
+      # path) and never reaches this arm.
+      {:error, {:already_attached, existing}} ->
+        json(conn, 409, %{
+          error: "already_attached",
+          custom_host: existing,
+          detail:
+            "This instance already answers on #{existing}. Attaching a different " <>
+              "domain would leave #{existing}'s DNS record pointing at a live box " <>
+              "with nothing tracking it, so the attach is refused. Re-attaching " <>
+              "#{existing} itself is still allowed."
+        })
 
       {:error, :taken} ->
         json(conn, 409, %{error: "taken"})
@@ -6186,6 +6210,12 @@ defmodule BarkparkCloud.Web.Router do
               actor_user_id: user.id,
               action: "token.minted",
               target_type: "token",
+              # ssw10: the metadata here is a PLACEHOLDER, overwritten by the
+              # `target_fun` below off the PERSISTED row. `attrs.abilities` is the
+              # REQUESTED list and `UserToken.normalize_abilities/1` has not run
+              # yet, so recording it here would have the issuance log claim a grant
+              # the credential does not hold. `Accounts.audit/3` merges
+              # `target_fun.(result)` OVER `base_attrs`, so the key is replaced.
               metadata: %{name: attrs.name, abilities: attrs.abilities}
             },
             fn ->
@@ -6194,7 +6224,9 @@ defmodule BarkparkCloud.Web.Router do
                 other -> other
               end
             end,
-            fn {_plaintext, pat} -> %{target_id: pat.id} end
+            fn {_plaintext, pat} ->
+              %{target_id: pat.id, metadata: mint_audit_metadata(attrs, pat)}
+            end
           )
 
         case audit_mint do
@@ -6249,6 +6281,82 @@ defmodule BarkparkCloud.Web.Router do
         {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
       end
     end
+  end
+
+  ## Team-scoped PAT visibility (admin) — the OTHER half of the surface above.
+  ##
+  ## Everything above this comment is CALLER-scoped: a PAT is listable and
+  ## revocable by exactly one principal, its holder. That made a still-current
+  ## member's leaked credential un-killable by anyone else — a team owner could
+  ## not even ENUMERATE the programmatic credentials that act on their team, let
+  ## alone kill one, and PATs may be minted with no expiry at all. The
+  ## membership-scoped eviction (`revoke_team_pats/2`, on removal / demotion)
+  ## covers only a MEMBERSHIP CHANGE; these two routes cover the leak with the
+  ## membership intact.
+  ##
+  ## Same session-only firewall (they ride `with_team_role/3`, which calls
+  ## `Auth.require_user/2`), same 404-no-leak convention as the caller-scoped
+  ## routes: a foreign team is 404 (never 403 — do not confirm it exists) and a
+  ## token id from another team is 404, not a 403 that would confirm the id.
+
+  # GET /v1/teams/:id/tokens → 200 {tokens: [...]} — every PAT minted against
+  # THIS team, whoever holds it, newest first. admin+ (a plain member gets 403;
+  # a non-member / nonexistent team gets 404). Carries the holder (user_id +
+  # email) so an admin can act on the row; NEVER a hash and never a plaintext.
+  get "/v1/teams/:id/tokens" do
+    with_team_role(conn, "admin", fn conn, team ->
+      tokens = Accounts.list_team_personal_access_tokens(team)
+      json(conn, 200, %{tokens: Enum.map(tokens, &team_pat_json/1)})
+    end)
+  end
+
+  # DELETE /v1/teams/:id/tokens/:token_id → 200 {ok: true} — an admin kills a
+  # team member's PAT (idempotent). A token id belonging to another team is the
+  # same 404 as a nonexistent one.
+  #
+  # The audit action is `token.revoked`, the SAME verb the caller-scoped revoke
+  # writes — one act, one verb; the admin case is distinguished by metadata
+  # (`admin_revoke: true` plus the holder), not by a second word for the same
+  # thing. That keeps the closed vocabulary in cloud/priv/audit-actions.json
+  # (and the console label generated from it) unchanged.
+  delete "/v1/teams/:id/tokens/:token_id" do
+    with_team_role(conn, "admin", fn conn, team ->
+      audit_revoke =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "token.revoked",
+            target_type: "token",
+            target_id: conn.path_params["token_id"]
+          },
+          fn ->
+            Accounts.revoke_team_personal_access_token(team, conn.path_params["token_id"])
+          end,
+          fn token ->
+            %{
+              metadata: %{
+                admin_revoke: true,
+                name: token.name,
+                user_id: token.user_id,
+                email: token.user && token.user.email
+              }
+            }
+          end
+        )
+
+      case audit_revoke do
+        {:ok, _token} ->
+          push_event(team.id, "audit")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
+    end)
   end
 
   # POST /v1/billing/checkout {plan} → 200 {checkout_url} — open a hosted
@@ -10890,8 +10998,16 @@ defmodule BarkparkCloud.Web.Router do
   # wave 13 S2: each step's "detail" is a REMOTE capture (an ssh stderr fold, a
   # provider body) and reaches a person's screen verbatim, so it is scrubbed at
   # this boundary. The stored row keeps the raw bytes for ops.
+  #
+  # cchi-w26 / D310 tail: scrubbing is not the whole boundary. `app.js` paints the
+  # HUMANIZED `provision_error` as the timeline's failureDetail while the step
+  # rows directly beneath it carried raw provider jargon — one event, two stories,
+  # the exact asymmetry wave 26 S3 closed in the provision_failed email. A bare
+  # `FailureCopy.humanize/1` is the WRONG remedy here (and `Sites.Deploy`'s `stage_caption/2` moduledoc
+  # says so): it REPLACES the narration, and this payload holds the only copy of
+  # it. `class_then_capture/1` emits BOTH.
   defp merge_provision_steps(map, %{steps: steps}) when is_list(steps),
-    do: Map.put(map, :provision_steps, Enum.map(steps, &scrub_entry(&1, "detail")))
+    do: Map.put(map, :provision_steps, Enum.map(steps, &class_then_capture_entry(&1, "detail")))
 
   defp merge_provision_steps(map, _), do: Map.put(map, :provision_steps, [])
 
@@ -10900,10 +11016,50 @@ defmodule BarkparkCloud.Web.Router do
   # on presence without an existence check.
   #
   # wave 13 S2: console lines are raw remote output — scrubbed here, raw in the DB.
+  # cchi-w26 / D310 tail: same both-not-either fold as the step details above.
   defp merge_provision_console(map, %{console: console}) when is_list(console),
-    do: Map.put(map, :provision_console, Enum.map(console, &scrub_entry(&1, "line")))
+    do: Map.put(map, :provision_console, Enum.map(console, &class_then_capture_entry(&1, "line")))
 
   defp merge_provision_console(map, _), do: Map.put(map, :provision_console, [])
+
+  # cchi-w26 / task-3b59e1ea682c03a1 (charter D310): CLASS ALONGSIDE CAPTURE, the
+  # shape `Notifications.EventEmail.cause_then_capture/1` already ships.
+  #
+  # A provision step's `detail` and a console `line` are the ONLY copy of the
+  # worker's narration on this payload — there is no sibling key holding the raw
+  # bytes, which is why `Sites.Deploy.stage_caption/2` (classify-or-scrub) is
+  # right on a deploy stage and wrong here: it would destroy the narration waves
+  # 12-14 built. So this fold emits the class AND keeps the capture, in one
+  # string, in the element group the person is already looking at.
+  #
+  # An entry whose capture does NOT classify is BYTE-IDENTICAL to what this
+  # boundary shipped before (`FailureCopy.raw/1` = strip_ansi |> scrub), so no
+  # existing narration moves.
+  defp class_then_capture_entry(%{} = entry, key) do
+    case Map.fetch(entry, key) do
+      {:ok, value} when is_binary(value) -> Map.put(entry, key, class_then_capture(value))
+      _ -> entry
+    end
+  end
+
+  defp class_then_capture_entry(entry, _key), do: entry
+
+  # STRIP FIRST, THEN CLASSIFY — the same order `cause_then_capture/1` documents
+  # and for the same load-bearing reason. `humanize/1` ends `scrub |> strip_ansi`,
+  # so on its PASS-THROUGH arm (an unclassified capture returns itself) it scrubs
+  # colourised bytes — the leaky order. Feeding it an already-stripped capture
+  # makes that arm land on exactly `capture`, which keeps the `^capture` equal-arm
+  # below firing (a colourised unclassified capture would otherwise fall to the
+  # `cause` arm and print the leaky pass-through paragraph ABOVE the clean one).
+  defp class_then_capture(value) do
+    stripped = FailureCopy.strip_ansi(value)
+    capture = FailureCopy.scrub(stripped)
+
+    case FailureCopy.humanize(stripped) do
+      ^capture -> capture
+      cause -> "#{cause} — #{capture}"
+    end
+  end
 
   # wave 13 S2: redact secret-shaped substrings in the string-valued keys of a
   # step/console entry. No-ops on a non-map entry and on a non-binary value, so a
@@ -12384,6 +12540,31 @@ defmodule BarkparkCloud.Web.Router do
 
   defp valid_repo_name?(_), do: false
 
+  # ssw10: what the `token.minted` audit row records — read off the PERSISTED
+  # row, never off the request.
+  #
+  # `UserToken.normalize_abilities/1` is the server-side authority on ability
+  # EXCLUSIVITY: a mint asking for `["write", "deploy"]` stores `["deploy"]`, and
+  # `["read", "root"]` stores `["root"]`. Recording `attrs.abilities` wrote an
+  # issuance record for a grant that never existed — on the one surface an
+  # incident review reads to answer "what was this credential allowed to do".
+  #
+  # The collapse is also NAMED rather than silently absorbed: when the stored
+  # list is narrower than the requested one, the row carries the requested list
+  # and the dropped abilities alongside the granted one. Both keys are ABSENT
+  # when nothing was dropped, so an ordinary mint's row is unchanged.
+  defp mint_audit_metadata(attrs, pat) do
+    granted = pat.abilities || []
+    requested = attrs.abilities || []
+    dropped = Enum.uniq(requested -- granted)
+
+    base = %{name: attrs.name, abilities: granted}
+
+    if dropped == [],
+      do: base,
+      else: Map.merge(base, %{requested_abilities: requested, dropped_abilities: dropped})
+  end
+
   # The non-secret PAT shape for the dashboard's API-tokens view. NEVER emits
   # token_hash and NEVER the plaintext (the plaintext is returned once, only in
   # the POST /v1/tokens mint response). `revoked_at` non-nil renders as a
@@ -12398,6 +12579,17 @@ defmodule BarkparkCloud.Web.Router do
       revoked_at: t.revoked_at,
       inserted_at: t.inserted_at
     }
+  end
+
+  # The admin (team-scoped) PAT shape: `pat_json/1` plus WHO HOLDS IT. An admin
+  # list is useless without the holder — "revoke this one" needs a name attached
+  # — and the two extra fields are already visible to any admin through
+  # GET /v1/teams/:id/members. Still NEVER a token_hash and never a plaintext.
+  defp team_pat_json(t) do
+    t
+    |> pat_json()
+    |> Map.put(:user_id, t.user_id)
+    |> Map.put(:email, t.user && t.user.email)
   end
 
   # Map the requested expiry to a bounded day-count (or nil = never). The set

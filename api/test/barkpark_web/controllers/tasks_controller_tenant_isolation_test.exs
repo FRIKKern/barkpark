@@ -18,7 +18,7 @@ defmodule BarkparkWeb.TasksControllerTenantIsolationTest do
   caller from handing a raw doc_id straight to the unscoped by-PK fetch; this
   proves the current scoped path refuses the crossing.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content, TenancyFixtures}
 

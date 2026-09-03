@@ -44,7 +44,7 @@ on:
       - ".github/workflows/connectors.yml"
 
 concurrency:
-  group: connectors-${{ github.ref }}
+  group: connectors-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
   # superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -195,9 +195,15 @@ jobs:
           POSTGRES_DB: postgres
         ports:
           - 5432:5432
+        # --health-interval 2s, not the 10s default: `Waiting for all services
+        # to be ready` was measured at 15.5 s (elixir Test) and 13.6 s (cloud
+        # test) while pg_isready answers in ~3 s — that wait is poll
+        # granularity, not postgres. Same health command, polled sooner.
+        # (Comments cannot live inside the folded `>-` block below: they would
+        # be passed to docker as literal arguments.)
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
           --health-retries 5
 

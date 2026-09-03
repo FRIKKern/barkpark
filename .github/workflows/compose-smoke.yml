@@ -42,7 +42,7 @@ on:
     branches: [main]
 
 concurrency:
-  group: compose-smoke-${{ github.ref }}
+  group: compose-smoke-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Cancel superseded PR runs, but NEVER cancel main (the cloud.yml lesson:
   # fast push cadence otherwise starves the suite).
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -71,9 +71,39 @@ jobs:
           # D34). This job ONLY — the arms keep the merge ref: they must test
           # the merged result. `github.sha` is the fallback for push events.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Full history: the PR base sha must be resolvable locally for the
-          # three-dot diff.
+          # FULL HISTORY, BLOBLESS. These two options are ORTHOGONAL and this
+          # job needs both — DEPTH and FILTER are different axes, and confusing
+          # them is exactly how this was first written and reverted (run
+          # 33691239048, three of four dispatchers red on `PR base <sha> and
+          # HEAD share NO common ancestor`).
+          #
+          # `fetch-depth: 0` — REQUIRED, do not drop it. The PR base sha must be
+          # resolvable locally for the three-dot diff below, and a three-dot
+          # diff resolves the MERGE BASE; a shallow history cannot compute one,
+          # and this step treats an unresolvable base as a hard failure rather
+          # than emit a verdict. Dropping this line does NOT leave "whatever the
+          # filter gives you": actions/checkout then applies its DEFAULT depth
+          # of 1, and a depth-1 clone — blobless or not — has no merge base.
+          # `fetch-depth: 2` does not rescue it either; that trick works on jobs
+          # sitting on `refs/pull/N/merge`, where HEAD^1 IS the base, and this
+          # job deliberately is not one of those (see the `ref:` note above).
+          #
+          # `filter: blob:none` — the actual saving, and it is NOT shallowness.
+          # A blobless partial clone fetches every commit and every tree and
+          # omits only blob CONTENTS. `git diff --name-only` reads trees, not
+          # blobs, so the commit graph, the merge base and the path set below
+          # are unchanged BY CONSTRUCTION rather than by benchmark.
+          #
+          # THE DERIVATION, NOT A BARE NUMBER — a committed figure with no
+          # command attached is exactly the thing that silently rots. Re-run it:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # It clones this repo both ways at FULL depth, compares the three-dot
+          # changed-path sets by SORTED CHECKSUM, and refuses to report a pass
+          # if a sample is empty on both sides (two empty sets match, which
+          # would be vacuous). Read 2026-09-03: full clone 138 s / .git 791 MB,
+          # blobless 34 s / .git 189 MB, 5 sampled PRs IDENTICAL on both sides.
           fetch-depth: 0
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set
@@ -161,25 +191,11 @@ jobs:
           echo "verdict: smoke=${smoke}"
           echo "smoke=${smoke}" >> "$GITHUB_OUTPUT"
 
-  refusal-arm:
-    # THE MUTATION ARM: proves the boot refusal fires. A gate whose green arm
-    # is its only arm cannot fail on the trap it exists for (Plug's floor is
-    # lazy) — this arm is what makes the gate able to fail.
-    name: Refusal arm (short SECRET_KEY_BASE refuses at boot)
-    needs: changes
-    if: needs.changes.outputs.smoke == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Refusal arm (container exit + log anchor, never HTTP)
-        run: bash scripts/compose-smoke.sh refusal
-
   green-arm:
     # Build → boot → healthy → in-container probes. Also carries the two cheap
     # truth checks (they fail fast, before the ~2-5 min image build): the env
     # census over both runtime roots and the D23 blessing-word grep.
-    name: Green arm (build, boot, in-container probes)
+    name: Smoke arms (census, green boot, refusal boot — one image build)
     needs: changes
     if: needs.changes.outputs.smoke == 'true'
     runs-on: ubuntu-latest
@@ -187,11 +203,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Env census (both runtime roots)
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh census
       - name: Blessing-word grep (D23 — hedge word is "experimental")
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh blessing-grep
       - name: Green arm (compose up → healthy → exec wget /api/schemas + /login)
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh green
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      # The refusal arm used to be its OWN job and rebuilt the image on a second
+      # runner (~182 s per fire, no BuildKit cache across runners). Running it here,
+      # after the green arm, its `compose build api` is a cache hit on the layers the
+      # green build just produced (task-3713272ca8fd3110: one build per fire).
+      - name: Refusal arm (container exit + log anchor, never HTTP)
+        id: s4
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        run: bash scripts/compose-smoke.sh refusal
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Env census (both runtime roots)\", \"s2\": \"Blessing-word grep (D23 \u2014 hedge word is \\\"experimental\\\")\", \"s3\": \"Green arm (compose up \u2192 healthy \u2192 exec wget /api/schemas + /login)\", \"s4\": \"Refusal arm (container exit + log anchor, never HTTP)\"}"
+          JOB_NAME: "Smoke arms (census, green boot, refusal boot — one image build)"
+          WORKFLOW_FILE: compose-smoke.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
 
   compose-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
@@ -209,13 +261,12 @@ jobs:
     # rendered on ≥2 settled heads.
     name: Compose smoke
     if: always()
-    needs: [changes, refusal-arm, green-arm]
+    needs: [changes, green-arm]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
         env:
           R_CHANGES: ${{ needs.changes.result }}
-          R_REFUSAL: ${{ needs.refusal-arm.result }}
           R_GREEN: ${{ needs.green-arm.result }}
           O_SMOKE: ${{ needs.changes.outputs.smoke }}
         run: |
@@ -274,7 +325,6 @@ jobs:
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
           decide "changes (dispatcher)" "${R_CHANGES}" "NEVER"
-          decide "refusal-arm"          "${R_REFUSAL}" "${O_SMOKE}"
           decide "green-arm"            "${R_GREEN}"   "${O_SMOKE}"
 
           echo

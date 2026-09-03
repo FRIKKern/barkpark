@@ -46,7 +46,7 @@ on:
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
-  group: paper-editor-${{ github.ref }}
+  group: paper-editor-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Never cancel main; collapse superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -64,6 +64,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: api/assets/paper-editor/package-lock.json
 
       - name: Install (pinned via lockfile)
         run: npm ci

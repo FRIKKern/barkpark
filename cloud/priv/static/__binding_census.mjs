@@ -2175,6 +2175,271 @@ if (dupes.length) {
   console.log("  sibling already claims is NOT discovered here. Anti-decay bookkeeping, never discovery.");
 }
 
+// (2l) THE NULL-PIN DECAY ARM — PLUMBING DERIVED BY EXECUTION (charter D428).
+//
+//      THE STRUCTURAL DEFECT IT CLOSES. (2g) is a filter over
+//      `PIN.filter((r) => r.predicate && !declaresFn(r.predicate))` — the
+//      `r.predicate &&` drops every `predicate: null` row BEFORE the check
+//      runs. So its decay is ONE-DIRECTIONAL BY CONSTRUCTION: a non-null pin
+//      that rots is caught, and a null pin that becomes FALSE — i.e. SOMEBODY
+//      SHIPS A GUARD, which is this epic's entire purpose — is invisible to it
+//      and to every other arm that keys on `predicate` being truthy. Every
+//      slice this epic merges made the census a little more false, silently.
+//      (2i) closed that in the fix direction for rows that pin a `fence`; this
+//      arm closes it for D428's seven WITHOUT trusting the pin at all, by
+//      going and asking the shipped code.
+//
+//      THE DERIVATION IS AN EXECUTION, NOT A GREP. app.js is booted in a vm
+//      exactly as __app.test.mjs boots it (document.readyState "loading", so
+//      init() never binds), its pure models are taken off __bpTestHook, and
+//      each of D428's seven verbs is rendered TWICE — once with the authority
+//      answer "grant" and once with "refuse". The row's own MOUNT HOOK (the
+//      attribute or id the wiring binds on) must be PRESENT on grant and
+//      WITHHELD on refuse. That answer is `derived_plumbed`, and the arm
+//      requires
+//
+//          derived_plumbed === (pin.predicate !== null)
+//
+//      in BOTH directions. It is the DISAGREEMENT that reds, never a column
+//      reaching N (charter D430).
+//
+//      THE FILING'S OWN MECHANISM WAS RE-DERIVED, AND HALF OF IT WAS FALSE.
+//      The row prescribed "check arity >= 3 and that it echoes `authority`".
+//      That holds for exactly one of the three models — lifecycleActionsModel
+//      takes (capPayload, bp, authority, authorityState) and echoes the answer
+//      back on the model. instanceHeaderHtml and updatePanelHtml both take
+//      (bp, authority): arity 2, authority plumbed as the LAST parameter, and
+//      neither echoes it as a field. An arity test would have manufactured six
+//      false reds against a console that is correctly fenced. Rendering the
+//      offer and reading the hook is the shape that survives contact, and it
+//      is strictly stronger: it measures whether the answer CHANGES THE OFFER.
+//
+//      THE ROW'S CITED LIVE RED IS ALSO STALE, AND SAYING SO IS THE POINT. It
+//      quotes a census printing `DELETE /v1/barkparks/:*  ELEVATED! NONE — a
+//      member can click it` for runDecommission. That row now pins the
+//      instanceAdminAuthority band with a fence, and the derivation agrees
+//      with it. So this arm is GREEN on arrival, as an anti-decay ratchet
+//      should be — its losability is proven by MUTATION in both directions
+//      (see the two mutations named in the slice's PR), not by a standing red.
+//
+//      ── LIMITS OF THIS ARM. TWO, AND THE NEXT READER INHERITS THEM ────────
+//
+//      LIMIT A — IT IS A RATCHET UNDER REVIEW DISCIPLINE, NOT A PROOF. A
+//      builder can still green it by writing `predicate: null` back onto a
+//      corrected row. That edit is self-incriminating — it declares a shipped
+//      guard gone — but it IS a string edit, and nothing here can stop it.
+//
+//      LIMIT B — IT DERIVES FROM THE MODEL ONLY AND CANNOT SEE A SEVERED
+//      MOUNT. A mount that passes a literal "grant" into the model renders the
+//      hook, passes this arm, and passes __app.test.mjs. Only smoke's
+//      panel-overview-member scenario — a real member actor, rendering the
+//      real page — catches that class. THE MEMBER-ACTOR SCENARIO STAYS THE
+//      FENCE for it; this arm is anti-decay bookkeeping beside it, never
+//      instead of it.
+//
+//      NOT RUN IN A FIXTURE MODE. The fixture files are hand-written call-site
+//      shapes, not a bootable console — executing one would prove nothing and
+//      throw. The argv override is honoured, so a mutation driver can still
+//      point this arm at a patched COPY of app.js.
+if (!FIXTURE_MODE) {
+  // The seven D428 names, and for each the model that decides its offer plus
+  // the mount hook the wiring binds on. `bp` is the smallest instance shape
+  // that reaches the offer at all — a fixture that does not reach it would
+  // report "withheld" for grant AND refuse, which is indistinguishable from a
+  // fence, so each probe is checked for reaching its own hook on grant first.
+  const LIVE_BOX = { id: "bp-1", name: "acme", host: "acme.example.com", provider: "hetzner", slug: "acme" };
+  const withBox = (over) => Object.assign({}, LIVE_BOX, over);
+
+  const D428_PROBES = [
+    { fn: "runDecommission", hook: "data-life-verb",
+      render: (h, a) => h.lifecycleActionRowHtml(h.lifecycleActionsModel(undefined, LIVE_BOX, a)),
+      needs: ["lifecycleActionRowHtml", "lifecycleActionsModel"] },
+    { fn: "removeInstance", hook: "inst-remove-retry",
+      render: (h, a) => h.instanceHeaderHtml(withBox({ deprovision_status: "failed" }), a),
+      needs: ["instanceHeaderHtml"] },
+    { fn: "updateInstance", hook: "inst-update",
+      render: (h, a) => h.instanceHeaderHtml(withBox({ update_state: "behind", update_latest_release: "1.2.3" }), a),
+      needs: ["instanceHeaderHtml"] },
+    { fn: "attachDomain", hook: "inst-domain",
+      render: (h, a) => h.instanceHeaderHtml(LIVE_BOX, a),
+      needs: ["instanceHeaderHtml"] },
+    { fn: "rollbackInstance", hook: "data-rollback",
+      render: (h, a) => h.updatePanelHtml(LIVE_BOX, a),
+      needs: ["updatePanelHtml"] },
+    { fn: "patchAutoupdate", hook: "data-au",
+      render: (h, a) => h.updatePanelHtml(withBox({ channel: "stable" }), a),
+      needs: ["updatePanelHtml"] },
+  ];
+
+  // THE SHORTER LIST, NOT THE LONGER ONE. D428 names SEVEN and this arm derives
+  // six. The seventh is named here with its reason rather than quietly absent,
+  // because an unexplained gap in a seven-row law is the same fail-open shape
+  // (2g) had. It is a RATCHET IN BOTH DIRECTIONS: adding an entry reds, and so
+  // does an entry that becomes derivable — export its model and this list must
+  // shrink in the same commit.
+  const D428_UNDERIVABLE = [
+    { fn: "retryInstance",
+      why: "its two offer sites are the timeline's docked retry and the verify note's reprovision " +
+           "control. Both are drawn by adminWriteControlHtml from inside DOM mounts that READ the " +
+           "band themselves rather than taking the answer as a parameter, so there is no authority " +
+           "argument to vary and nothing to render twice. adminWriteControlHtml — the function that " +
+           "actually withholds the hook — is the one that would make this derivable, and it is not " +
+           "on the hook. Export it and this entry moves into D428_PROBES.",
+      // The name whose ABSENCE from the hook is the reason. The two mounts ARE
+      // exported and deliberately not listed: exporting a mount changes nothing
+      // here, because a mount that reads the band internally still takes no
+      // answer to vary. It is the DECIDE function that unblocks this row.
+      absent_hooks: ["adminWriteControlHtml"] },
+  ];
+
+  const D428_SEVEN = D428_PROBES.map((p) => p.fn).concat(D428_UNDERIVABLE.map((p) => p.fn));
+  if (D428_SEVEN.length !== 7) {
+    die2([
+      "FAIL(2l): D428 names seven elevated lifecycle verbs and this arm accounts for " + D428_SEVEN.length + ".",
+      "  Derived and underivable together must sum to the charter's seven. A verb that left the",
+      "  charter leaves this arm in the same commit, with the charter row that removed it named.",
+    ]);
+  }
+
+  // Boot app.js the way __app.test.mjs does: `readyState: "loading"` keeps
+  // DOMContentLoaded from ever firing, so init() never binds and nothing here
+  // touches the network or a timer.
+  const hooks = {};
+  let bootError = null;
+  try {
+    const vm = (await import("node:vm")).default;
+    const noop = () => {};
+    const inertEl = {
+      addEventListener: noop, removeEventListener: noop, setAttribute: noop, removeAttribute: noop,
+      classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+      style: {}, hidden: false, value: "", innerHTML: "", textContent: "",
+      querySelector: () => null, querySelectorAll: () => [],
+    };
+    const storage = { getItem: () => null, setItem: noop, removeItem: noop };
+    const sandbox = {
+      __bpTestHook(h) { Object.assign(hooks, h); },
+      document: {
+        readyState: "loading",
+        addEventListener: noop, removeEventListener: noop,
+        querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+        createElement: () => ({ ...inertEl }),
+        documentElement: { ...inertEl, getAttribute: () => null },
+        body: { ...inertEl, appendChild: noop },
+      },
+      window: { addEventListener: noop, removeEventListener: noop, open: () => null,
+        matchMedia: () => ({ matches: false, addEventListener: noop }) },
+      location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+      localStorage: storage, sessionStorage: storage, navigator: {},
+      URL: URL, URLSearchParams: URLSearchParams,
+      fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+      EventSource: function () { return { addEventListener: noop, close: noop }; },
+      setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+      console,
+    };
+    sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(src, sandbox);
+  } catch (e) {
+    bootError = e;
+  }
+
+  if (bootError || !Object.keys(hooks).length) {
+    die2([
+      "FAIL(2l): app.js could not be executed, so authority plumbing cannot be DERIVED.",
+      "  This arm is the only thing in this census that asks the shipped code a question instead",
+      "  of reading a pin. A boot that throws is not a pass — it is the arm going blind, which is",
+      "  exactly the fail-open shape it exists to remove.",
+      "",
+      "  " + (bootError ? String(bootError.message).slice(0, 200) : "__bpTestHook was never called"),
+    ]);
+  }
+
+  const complaints = [];
+
+  for (const probe of D428_PROBES) {
+    const pin = PIN.filter((r) => r.fn === probe.fn)[0];
+    if (!pin) {
+      complaints.push(`  ${probe.fn} — D428 names this verb and no PIN row carries it.`);
+      continue;
+    }
+    const missing = probe.needs.filter((n) => typeof hooks[n] !== "function");
+    if (missing.length) {
+      complaints.push(
+        `  ${probe.fn} — its model(s) left __bpTestHook: ${missing.join(", ")}. The plumbing can no ` +
+        "longer be derived, so this arm cannot vouch for the row either way. Re-export, or move the " +
+        "row to D428_UNDERIVABLE with the reason.");
+      continue;
+    }
+
+    let onGrant, onRefuse, renderError = null;
+    try {
+      onGrant = String(probe.render(hooks, "grant"));
+      onRefuse = String(probe.render(hooks, "refuse"));
+    } catch (e) {
+      renderError = e;
+    }
+    if (renderError) {
+      complaints.push(`  ${probe.fn} — rendering its offer threw: ${String(renderError.message).slice(0, 160)}`);
+      continue;
+    }
+
+    // NON-VACUITY, FIRST. A fixture that no longer reaches the offer renders
+    // the hook on NEITHER answer, which reads exactly like a fence. Without
+    // this the whole arm could go quietly green on a shape change.
+    if (!onGrant.includes(probe.hook)) {
+      complaints.push(
+        `  ${probe.fn} — the probe never reached its own offer: the mount hook \`${probe.hook}\` is ` +
+        "absent even on `grant`. A probe that cannot render the control cannot tell a fence from a " +
+        "shape change, so this reds rather than passing. Fix the probe's instance fixture, or rename " +
+        "the hook here in the same commit the console renamed it.");
+      continue;
+    }
+
+    const derived_plumbed = !onRefuse.includes(probe.hook);
+    const pinned_predicated = pin.predicate !== null && pin.predicate !== undefined;
+
+    if (derived_plumbed !== pinned_predicated) {
+      complaints.push(
+        `  ${probe.fn} — DERIVED plumbed: ${derived_plumbed}, PIN predicated: ${pinned_predicated}. ` +
+        (derived_plumbed
+          ? `The console WITHHOLDS \`${probe.hook}\` on a refusal — the guard is SHIPPED — and the pin ` +
+            "still says this row has no predicate. This is the direction (2g) could never see: the " +
+            "row reads as an unguarded affordance over a console that guards it. Re-pin the row."
+          : `The console still emits \`${probe.hook}\` on a refusal — a refused member gets the mount ` +
+            "hook — and the pin claims a predicate. Either the fence was severed or the pin was " +
+            "always wishful. Restore the fence, or set the row's predicate to null and say why."));
+    }
+  }
+
+  for (const row of D428_UNDERIVABLE) {
+    const nowPresent = row.absent_hooks.filter((n) => typeof hooks[n] === "function");
+    if (nowPresent.length) {
+      complaints.push(
+        `  ${row.fn} — listed as UNDERIVABLE, but ${nowPresent.join(", ")} is on __bpTestHook now. The ` +
+        "reason this row was excused has stopped being true. Move it into D428_PROBES with a hook and " +
+        "a fixture; the excused list only ever gets SHORTER.");
+    }
+  }
+
+  if (complaints.length) {
+    die2([
+      "FAIL(2l): derived authority plumbing disagrees with the pin.",
+      "  Each line below is a DISAGREEMENT between what app.js does when it is handed a refusal and",
+      "  what the PIN row says about it. Neither side is privileged — read the console, then fix",
+      "  whichever half is lying.",
+      "",
+      ...complaints,
+    ]);
+  }
+
+  console.log("");
+  console.log(`(2l) authority plumbing DERIVED BY EXECUTION for ${D428_PROBES.length} of D428's seven: ` +
+    "each offer rendered on `grant` and on `refuse`, and the mount hook's presence agrees with the pin.");
+  console.log(`     ${D428_UNDERIVABLE.length} excused and named (${D428_UNDERIVABLE.map((r) => r.fn).join(", ")}) — that list only shrinks.`);
+  console.log("     LIMIT: the model only. A severed MOUNT passing a literal \"grant\" renders the hook and");
+  console.log("     passes here — smoke's member-actor scenario stays the fence for that class.");
+}
+
 // (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).
 //
 //      The header at the top of this file asserts, flatly, that NO LINE NUMBER

@@ -635,6 +635,38 @@ stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
 # SELF-TEST — fixtures in a tmpdir; proves the real primitives, no npm/caddy.
 # ---------------------------------------------------------------------------
 if [ "$MODE" = selftest ]; then
+  # -------------------------------------------------------------------------
+  # SELF-TEST FLOOR — two LITERAL, COMMITTED constants (task-7843c92e00b0a13a).
+  #
+  # The verdict below used to be `[ "$FAILS" -eq 0 ]` and nothing else, so a run
+  # that executed three checks and a run that executed 391 both printed
+  # `[selftest] PASS`. Three blocks in this file drop out on a toolchain/tree
+  # condition (python3+curl for the HEALTH probes and the engine e2e, a real
+  # flock(1) for the fleet admission gate, api/lib/barkpark/sites/deploy_runner.ex
+  # for the DeployRunner doctrine rows). Each one is already a HARD failure when
+  # BARKPARK_SELFTEST_REQUIRE_E2E=1 — but a block can also vanish for a reason
+  # nobody wrote a guard for (a refactor drops an `if`, a fixture stops being
+  # created, an `exit 0` lands mid-suite). The floor catches THAT class: a suite
+  # that stopped running rows must not report PASS.
+  #
+  # The numbers are LITERALS, never derived from the run — a floor computed from
+  # the same run is exactly the vacuity it is meant to catch. Measured
+  # 2026-09-03 at origin/main 0cb244bfb:
+  #
+  #   MIN  =  67  every optional block skipped (no python3/curl, no flock, no api/)
+  #   FULL = 391  all blocks run — this is what CI gets
+  #
+  # FULL applies when BARKPARK_SELFTEST_REQUIRE_E2E=1, which is exactly the venue
+  # .github/workflows/deploy-harnesses.yml runs ("Site deploy engine self-test",
+  # env BARKPARK_SELFTEST_REQUIRE_E2E: "1", ubuntu-latest: python3, curl and
+  # util-linux flock all present, api/ checked out). There is no platform branch
+  # inside this self-test, so under that flag the row count is deterministic.
+  # MIN applies to a bare laptop run, where the SKIPs are honest.
+  #
+  # ADD rows -> raise the literal in the SAME commit. Remove rows -> lower it in
+  # the same commit. A red here is either a missing block or an unraised floor.
+  SELFTEST_FLOOR_MIN=67
+  SELFTEST_FLOOR_FULL=391
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -2329,6 +2361,16 @@ GATENPM
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # The floor (see SELFTEST_FLOOR_* at the top of this block). `FAILED (1)` is
+  # the shape internal/cli/cloud_site_preflight.go recognises as terminal.
+  if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_FULL"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_FULL (BARKPARK_SELFTEST_REQUIRE_E2E=1: every block is required here)"
+  else
+    SELFTEST_FLOOR="$SELFTEST_FLOOR_MIN"
+    SELFTEST_FLOOR_NAME="SELFTEST_FLOOR_MIN (bare run: the optional blocks may skip honestly)"
+  fi
+  [ "$TESTS" -ge "$SELFTEST_FLOOR" ] || { echo "[selftest] FAILED (1) - only $TESTS checks ran, the floor is $SELFTEST_FLOOR from $SELFTEST_FLOOR_NAME: a block went missing, and a suite that stopped running rows must not report PASS. If rows were removed on purpose, lower the literal in the same commit."; exit 1; }
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
   echo "[selftest] PASS"
   exit 0

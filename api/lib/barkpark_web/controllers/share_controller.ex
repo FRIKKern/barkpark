@@ -195,6 +195,16 @@ defmodule BarkparkWeb.ShareController do
       not is_binary(surfaces) or surfaces == "" ->
         unprocessable(conn, "surfaces is required (comma list of papers,docs,media)")
 
+      # SHAPE GUARD, alongside its two siblings. `access` is the only create
+      # attribute that reached `do_create/4` unshaped, and it is INTERPOLATED
+      # into the `"scope:surfaces:access"` spec string there — so a JSON body
+      # sending it as an object raised `Protocol.UndefinedError` (String.Chars
+      # is not implemented for Map) and a list of objects raised
+      # `ArgumentError`, both 500s. Every other malformed attribute on this
+      # action is a 422; this arm makes the third one agree.
+      not is_binary(access) ->
+        unprocessable(conn, "access must be read or edit")
+
       true ->
         case scope_workspace(scope) do
           {:ok, ws_id} ->
@@ -398,7 +408,7 @@ defmodule BarkparkWeb.ShareController do
   defp do_revoke(conn, token_id) do
     case Barkpark.Auth.revoke_token(token_id) do
       # RECEIPT LAW (pds w39): `Auth.revoke_token/1` returns the UPDATED row
-      # (auth.ex:200-226). `revoked: true` was a literal and `token_id` echoed
+      # (auth.ex:revoke_token/1). `revoked: true` was a literal and `token_id` echoed
       # the path param — neither could change if the update wrote nothing. Both
       # now descend from the returned row's own `revoked_at` stamp.
       {:ok, revoked} ->

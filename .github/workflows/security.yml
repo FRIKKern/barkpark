@@ -305,23 +305,39 @@ jobs:
             ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Fetch deps
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: mix deps.get
 
-      - name: Install libvips (the app compile Sobelow triggers pulls the vix NIF)
-        run: sudo apt-get update && sudo apt-get install -y libvips-dev
-        working-directory: .
+      # NO apt libvips-dev HERE. Same mechanism cb298518f (#13083) established
+      # for the elixir.yml Test job, which compiles the whole app: the repo sets
+      # no VIX_COMPILATION_MODE, so vix runs in its default
+      # PRECOMPILED_NIF_AND_LIBVIPS mode and the NIF arrives prebuilt with
+      # libvips bundled. Nothing in this job links the system libvips-dev this
+      # step installed: a Sobelow job log (run job 100433615028) shows the apt
+      # taking 33 s (update 6 s + 70 MB install 27 s) and ZERO `Compiling N
+      # files` lines afterwards.
+      #
+      # If system libvips is ever genuinely needed here, prefer caching the
+      # .deb over re-adding a cold `apt-get update && install`.
 
       - name: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         # A newly introduced insecure pattern is not in the reviewed baseline and
         # reds this advisory job. Never regenerate/commit the baseline on a dev
         # toolchain; the matched-toolchain artifact below is for human review.
         run: mix sobelow --skip --exit Low
 
       - name: Reconcile baseline on the pinned CI toolchain
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: always()
         run: bash scripts/sobelow-baseline-reconcile.sh "${{ runner.temp }}/sobelow-baseline-reconcile"
 
       - name: Fresh-finding guard can lose (selftest first, like its two siblings below)
+        id: s4
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         # The guard's --selftest plants both of its own disarm mutants (probe
         # name grep neutered; transition assertion removed) and proves each
         # reds the fixtures. sobelow-inline-overlap-check.sh and
@@ -331,10 +347,14 @@ jobs:
         run: bash scripts/sobelow-fresh-finding-guard.sh --selftest
 
       - name: Prove a fresh String.to_atom finding still reds
+        id: s5
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         if: always()
         run: bash scripts/sobelow-fresh-finding-guard.sh
 
       - name: Anchor-token table still matches the Sobelow detector modules
+        id: s6
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         # The blocking staleness ratchet carries a GENERATED detector→token
         # table so it can run with no deps. This is the only job with a real
         # Sobelow checkout, so it is the only place the table can be proven
@@ -355,6 +375,23 @@ jobs:
           # itself. include-hidden-files keeps the reconciled baseline in the artifact.
           include-hidden-files: true
           if-no-files-found: error
+
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)\", \"s3\": \"Reconcile baseline on the pinned CI toolchain\", \"s4\": \"Fresh-finding guard can lose (selftest first, like its two siblings below)\", \"s5\": \"Prove a fresh String.to_atom finding still reds\", \"s6\": \"Anchor-token table still matches the Sobelow detector modules\"}"
+          JOB_NAME: "Sobelow static analysis (regression gate, baseline .sobelow-skips)"
+          WORKFLOW_FILE: security.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
   # which IS this job's rendered check-run context and IS a committed exclusion
@@ -406,12 +443,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Selftest (the overlap + binding ratchets must be able to fail)
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-inline-overlap-check.sh --selftest
 
       - name: No baseline entry duplicates an inline waiver, and every annotation is bound to its def
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-inline-overlap-check.sh
 
       - name: Selftest (the staleness ratchet must be able to fail)
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
 
       # BLOCKING as of wave 24 — the residue is zero, measured by execution.
@@ -451,7 +494,26 @@ jobs:
       # deleting ONE row proven live (DOS.StringToAtom, content/validation.ex:
       # 109) raises the count to 33, and restoring it returns it to 32.
       - name: Every baseline entry still points at a construct of its own type
+        id: s4
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-baseline-staleness-check.sh
+
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Selftest (the overlap + binding ratchets must be able to fail)\", \"s2\": \"No baseline entry duplicates an inline waiver, and every annotation is bound to its def\", \"s3\": \"Selftest (the staleness ratchet must be able to fail)\", \"s4\": \"Every baseline entry still points at a construct of its own type\"}"
+          JOB_NAME: "Sobelow baseline does not swallow its own inline waivers (blocking)"
+          WORKFLOW_FILE: security.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
   # spec-authority: advisory-ok — same standing as the job above, for the same
   # reason. The `(blocking)` token is inside the JOB name, which IS this job's
@@ -533,10 +595,31 @@ jobs:
           elixir-version: "1.18.1"
 
       - name: Selftest (the fingerprint ratchet must be able to fail)
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-baseline-fingerprint-check.sh --selftest
 
       - name: Every reconstructible baseline row still hashes to its stored fingerprint
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash api/scripts/sobelow-baseline-fingerprint-check.sh
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Selftest (the fingerprint ratchet must be able to fail)\", \"s2\": \"Every reconstructible baseline row still hashes to its stored fingerprint\"}"
+          JOB_NAME: "Sobelow baseline rows still hash to their own fingerprint (blocking)"
+          WORKFLOW_FILE: security.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
 
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)
@@ -578,15 +661,36 @@ jobs:
             ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Fetch deps
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: mix deps.get
 
       - name: mix deps.audit (scans mix.lock against the advisory DB)
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         # esaml GHSA-4g2h-vm7x-747c is the ONE suppressed advisory: no patched
         # release exists (all ≤ 4.6.0 affected) and the XXE is neutralised by
         # OTP 27+'s xmerl entity-disabling default (this runner + prod). Every
         # other CVE must be fixed by a bump, never ignored — drop the esaml id
         # the moment upstream ships a fix.
         run: mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"mix deps.audit (scans mix.lock against the advisory DB)\"}"
+          JOB_NAME: "Dependency CVE audit (mix_audit over mix.lock, blocking)"
+          WORKFLOW_FILE: security.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        # absolute path: jobs with defaults.run.working-directory (api/) ran the
+        # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
 
   security-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──

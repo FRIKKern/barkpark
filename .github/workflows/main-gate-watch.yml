@@ -154,6 +154,31 @@ jobs:
             *) echo "::error::main-gate-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 
+      # ── task-6f18e71a351f8081 A: a stale control plane is a RED CHECK, not an output ──
+      # deploy.yml's convergence job deliberately exits 0 and leaves the scream to
+      # report-convergence-failure (an issue). The census of 2026-09-03 showed the
+      # control plane 49 commits behind main for a day with every check green. This
+      # step asks the live box what it serves and reds when it is STRANDED behind
+      # the newest deploy-relevant commit on main. ~2 s, one curl, one git fetch.
+      - name: Does the control plane serve the newest deploy-relevant main?
+        if: always()
+        run: |
+          set -uo pipefail
+          git fetch --no-tags --quiet origin main || { echo "::warning::could not fetch origin/main — UNCHECKED, not green"; exit 0; }
+          tip="$(git rev-parse --verify --quiet FETCH_HEAD^{commit})" || tip=""
+          body="$(curl -sS --max-time 15 https://barkpark.cloud/health 2>/dev/null)" || body=""
+          served="$(printf '%s' "$body" | jq -r '.git_sha // empty' 2>/dev/null)" || served=""
+          if [ -z "$tip" ] || [ -z "$served" ]; then
+            echo "::warning::the control plane did not say what it serves (or main was unreadable) — UNCHECKED, not green"; exit 0
+          fi
+          bash scripts/deploy-convergence-check.sh converged --label "control plane (barkpark.cloud)" --target cp \
+            --served "$served" --tip "$tip" --grace-seconds 900
+          case $? in
+            0) echo "control plane: converged (serves ${served:0:10}, main tip ${tip:0:10})" ;;
+            1) echo "::error::CONTROL PLANE STRANDED — barkpark.cloud serves ${served:0:10}, main's newest deploy-relevant commit is newer (tip ${tip:0:10}). Every merge since is not in production."; exit 1 ;;
+            *) echo "::warning::the convergence comparison refused — UNCHECKED, not green" ;;
+          esac
+
   main-gate-watch-harness:
     name: Main gate watch harness
     if: github.event_name == 'pull_request'

@@ -16,16 +16,25 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
   ## Census (reconciled by the wave's verify pass)
 
-  `grep -rn 'put_resp_header("cache-control"' api/lib` finds ELEVEN sites. Two
-  are already pinned elsewhere and are deliberately NOT re-pinned here:
+  `grep -rn 'put_resp_header("cache-control"' api/lib` finds THIRTEEN sites
+  (reconciled again by `het-bl-sharelink-local-cache-policy`, which ADDED one —
+  see section 5b — and found the count had drifted from ELEVEN meanwhile).
+  THREE are already pinned elsewhere and are deliberately NOT re-pinned here:
 
-    * `media/delivery/urls.ex:58` — the immutable rendition policy, pinned by
+    * `media/delivery/urls.ex` — the immutable rendition policy, pinned by
       `BarkparkWeb.Integration.MediaDeliveryTest`. It is ALSO in flight in this
       wave's visibility-aware media-cache slice, which owns it.
-    * `session_controller.ex:436` — pinned by the session-controller suite.
+    * `session_controller.ex` — pinned by the session-controller suite.
+    * `plugs/paper_revision_headers.ex` — the revision-validator policy, pinned
+      by `BarkparkWeb.PaperRevisionHeadersTest` with the same full-list equality
+      on BOTH the 200 and its 304 replay.
 
-  The other NINE are this file's charge. SIX are pinned below. THREE are an
+  The other TEN are this file's charge. SEVEN are pinned below. THREE are an
   HONEST, NAMED GAP — see "Unreachable in ConnCase".
+
+  Section headers below carry the line numbers they were written against; those
+  drift and are NOT the index — the describe string names the action, and that
+  is what a reader should match on.
 
   ## Unreachable in ConnCase (documented, not skipped)
 
@@ -69,6 +78,10 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
   @no_store ["no-store"]
   @redirect_policy ["private, max-age=0, must-revalidate"]
+  # The same literal on a 200 that sends bytes (share-link LOCAL branch,
+  # section 5b) — one policy, two names, so neither assertion reads as a
+  # copy of the other by accident.
+  @private_policy @redirect_policy
 
   # The presigned-redirect branches (`{:redirect, url}` from
   # `Blobstore.serve_strategy/2`) only exist under an object-storage backend.
@@ -121,7 +134,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
     test "the one-time airdrop claim is never stored, even on the anonymous bounce" do
       # Anonymous → the /login bounce. `no_store/1` runs BEFORE the branch, so
       # this reaches the header without needing a real grant or a session.
-      conn = get(build_conn(), "/grant/not-a-real-token")
+      conn = get(scoped_conn(), "/grant/not-a-real-token")
 
       assert redirected_to(conn) =~ "/login"
       assert get_resp_header(conn, "cache-control") == @no_store
@@ -177,7 +190,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       file = insert_media_file!(ws, project, "media-ctl")
       use_s3_backend!()
 
-      conn = get(build_conn(), "/media/files/" <> file.path)
+      conn = get(scoped_conn(), "/media/files/" <> file.path)
 
       assert conn.status == 302
       assert [location] = get_resp_header(conn, "location")
@@ -219,10 +232,57 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
 
       use_s3_backend!()
 
-      conn = get(build_conn(), "/s/#{minted["token"]}")
+      conn = get(scoped_conn(), "/s/#{minted["token"]}")
 
       assert conn.status == 302
       assert get_resp_header(conn, "cache-control") == @redirect_policy
+    end
+  end
+
+  # ── 5b. share_link_controller.ex {:file, full} — private, max-age=0, … ─────
+
+  describe "GET /s/:token for a MEDIA link under the LOCAL (default) backend" do
+    test "the 200 that sends the bytes states the SAME private policy as its redirect sibling",
+         %{conn: conn} do
+      # The sibling pin above (section 5) covers the object-storage `{:redirect,
+      # url}` arm. This one covers the `{:file, full}` arm, which used to send
+      # the bytes with NO `cache-control` at all — the same anonymous capability
+      # URL got a different, unstated storage policy purely because of which
+      # backend was configured. No `use_s3_backend!/0` here: that IS the
+      # difference between the two tests.
+      admin = "cache-policy-sl-local-" <> Integer.to_string(System.unique_integer([:positive]))
+
+      {:ok, admin_tok} =
+        Auth.create_token(admin, "cache-policy-sl-local", "production", ["read", "write", "admin"])
+
+      ws = create_workspace!("cache-policy-ws-#{System.unique_integer([:positive])}")
+      project = create_project!(ws, "cache-policy-proj-#{System.unique_integer([:positive])}")
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
+      file = insert_media_file!(ws, project, "share-link-local")
+
+      minted =
+        conn
+        |> bearer(admin)
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/shares/links", %{
+          "scope" => "#{ws.slug}/#{project.slug}/production",
+          "kind" => "media",
+          "ref_id" => file.id
+        })
+        |> json_response(201)
+
+      conn = get(scoped_conn(), "/s/#{minted["token"]}")
+
+      # A 200 with the real bytes — the LOCAL branch actually ran.
+      assert conn.status == 200
+      assert response(conn, 200) == "PNG-BYTES"
+
+      # FULL-LIST equality, the file's convention: a second, weaker
+      # `cache-control` appended downstream must red this, not hide behind hd/1.
+      assert get_resp_header(conn, "cache-control") == @private_policy
+
+      # The stored-XSS seal on this branch is unchanged by the policy addition.
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
     end
   end
 
@@ -264,7 +324,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       # backend's serve decision, not a missing-file fallback.
       asset_id =
         BarkparkWeb.TicketsAttachmentsController.create(
-          assign(build_conn(), :ticket_key, key),
+          assign(scoped_conn(), :ticket_key, key),
           %{"id" => ticket, "file" => png_upload()}
         )
         |> json_response(201)
@@ -273,7 +333,7 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       use_s3_backend!()
 
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{"api_token" => operator})
         |> get("/v1/tickets/inbox/#{ticket}/attachments/#{asset_id}")
 

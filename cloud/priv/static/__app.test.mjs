@@ -16822,8 +16822,19 @@ test("cch-w50: NON-VACUITY CONTROL — a RUNNING trial keeps every retracted str
     "the running trial still gets the backed teardown warning");
   assert.ok(owner.includes("Pick a plan below to keep it."),
     "and the RATIFIED CTA, verbatim (task-2ed0ea068f37345d)");
-  assert.ok(owner.includes("We'll remind you 3 days and 1 day before the trial ends."),
-    "and the reminder promise the worker actually keeps");
+  // cch-w50-s5 — the reminder promise is now THREE-valued on the team's mute
+  // state, so the running trial's card is asserted per state rather than as one
+  // unconditional sentence. The default (one-argument) call is the UNKNOWN arm:
+  // renderBilling never fetches /v1/notifications/settings, so on a direct
+  // /billing landing notifCache is null and the console has not earned the flat
+  // promise. Both numerals still have to be there in every arm — that is the
+  // half the worker really keeps.
+  assert.ok(owner.includes("3 days and 1 day before the trial ends"),
+    "the reminder promise the worker actually keeps, with both scheduled numerals");
+  assert.ok(owner.includes("If your team's alerts are on"),
+    "and the default arm is CONDITIONAL — an unread notifCache is not evidence alerts are on");
+  assert.ok(hooks.trialCardHtml(running, "on").includes("We'll remind you 3 days and 1 day before the trial ends."),
+    "with alerts KNOWN on, the flat promise is made verbatim");
   assert.ok(member.includes("When the trial ends, the instance is torn down."),
     "the member twin keeps the warning half too (cch-w55-s3)");
 
@@ -20845,6 +20856,55 @@ test("cch-w40-bl: the per-slug truth table — every arm relays what the plane m
   // before the POST, so the server never emits domain_required to this arm. It is
   // classified in the source comment above attachDomainFailureCopy and given NO
   // copy of its own — asserting a sentence for it would pin an unreachable path.
+});
+
+// ── cch-w54-bl: the re-attach refusal (409 already_attached) ────────────────
+//
+// POST /v1/barkparks/:id/domain now REFUSES a second, different host instead of
+// overwriting custom_host and stranding the previous host's A record on a live
+// box. The console's side of that ruling is TWO facts, both pinned below:
+//
+//   1. renderInstance offers "Attach domain" only when `!bp.custom_host`
+//      (`lc.live && !bp.custom_host`), so the console already agrees with a
+//      refusal — it never offers the click the plane now rejects. That gate is
+//      the C2 reconciliation: an OVERWRITE would have been the thing the UI
+//      disagreed with.
+//   2. the arm exists anyway. The gate is one stale render away from being
+//      wrong (a peer attaches a domain while this tab holds the old fleet
+//      read), and an unarmed slug does not degrade to silence — friendly()
+//      answers "Something went wrong", burning a refusal whose entire value is
+//      naming the host in the way.
+test("cch-w54-bl: already_attached relays the plane's sentence — the host in the way is never dropped", () => {
+  const f = hooks.attachDomainFailureCopy;
+
+  const detail =
+    "This instance already answers on host-a.barkpark.cloud. Attaching a different " +
+    "domain would leave host-a.barkpark.cloud's DNS record pointing at a live box " +
+    "with nothing tracking it, so the attach is refused. Re-attaching " +
+    "host-a.barkpark.cloud itself is still allowed.";
+
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud", detail }),
+    detail,
+    "the server's detail sentence is relayed verbatim — one screen, one dialect");
+
+  // detail absent (an older plane / a trimmed body): the host still reaches the
+  // person. Falling to friendly() here would drop the only actionable fact.
+  assert.equal(
+    f(409, { error: "already_attached", custom_host: "host-a.barkpark.cloud" }),
+    "This instance already answers on host-a.barkpark.cloud.");
+
+  // Neither field present — still a NAMED refusal, never the generic.
+  const bare = f(409, { error: "already_attached" });
+  assert.equal(bare, "This instance already has a domain attached.");
+  assert.equal(bare.indexOf("Something went wrong"), -1);
+
+  // MUTATION: delete the already_attached branch from attachDomainFailureCopy
+  // and all three assertions above red — the first two on the relayed sentence,
+  // the third on friendly()'s generic.
+  assert.notEqual(f(409, { error: "already_attached", custom_host: "h.barkpark.cloud" }),
+    "That domain is already in use.",
+    "already_attached must not be confused with `taken` — taken is ANOTHER surface holding the host");
 });
 
 test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
@@ -25281,4 +25341,305 @@ test("bpBase declares every key barkpark_json serializes", async () => {
     ". A key no fixture declares is a key no fixture can override, so no instrument here can ever drive it. " +
     "Add each to bpBase with the SERVER's default (the Ecto schema's for a column-backed key, null for the " +
     "serializer's UNMEASURED contract) — never a value the control plane would not send.");
+});
+
+// ── cch-w50-s5 · THE TRIAL REMINDER'S NUMERALS, AND WHO ACTUALLY GETS ONE ────
+//
+// Two defects, one sentence. The billing screen rendered "We'll remind you 3
+// days and 1 day before the trial ends." and:
+//
+//   1. NOTHING PINNED THE NUMERALS. `grep "3 days and 1 day" __app.test.mjs`
+//      returned rc=1, zero hits — the sentence could be edited to any pair of
+//      numbers with this whole suite green, and the server's real schedule
+//      (TrialExpiryWorker's @three_days / @one_day) could move without it. The
+//      schedule is now DATA (`trialNoticeDays`), composed into the sentence,
+//      and mirrored against the server accessor in billing_client_mirror_test.exs.
+//
+//   2. IT PROMISED MAIL A MUTED TEAM WILL NEVER GET. `alerts_enabled` reaches
+//      this file through exactly one door — GET /v1/notifications/settings,
+//      whose sole success path is renderNotifications, which is what populates
+//      notifCache. renderBilling fetches the SUBSCRIPTION and nothing else. So
+//      a person landing directly on /billing has notifCache === null and this
+//      console has never asked. The naive guard —
+//      `notifCache && notifCache.alerts_enabled === false` — is FALSE in that
+//      state, i.e. it KEEPS the promise for a muted team, whose worker
+//      (TrialExpiryWorker.receivable?/1) will send nothing. UNKNOWN is its own
+//      state and it softens.
+//
+// MUTATION-PROVED (run before commit, red output in the PR body):
+//   * `TRIAL_NOTICE_DAYS = [5, 1]` reds the mirror's here-declared list on BOTH
+//     sides and reds "the schedule is DATA" below.
+//   * deleting the numerals from the rendered sentence reds the mirror's
+//     "THE NUMERALS REACH THE SENTENCE" arm against @pinned_notice_days.
+//   * `trialAlertsState` weakened to the naive `notifCache && ... === false`
+//     shape (i.e. unknown → "on") reds the fail-closed test below.
+
+test("cch-w50-s5: the reminder schedule is DATA, and the sentence is composed from it", () => {
+  // Compared as JSON: the array crosses a node:vm realm boundary, so its
+  // prototype is not this realm's Array and deepEqual reads that as a mismatch.
+  assert.equal(JSON.stringify(Array.from(hooks.trialNoticeDays)), "[3,1]",
+    "the console's schedule — mirrored against TrialExpiryWorker.notice_thresholds_days/0");
+
+  // The phrase is BUILT, so a schedule change moves the sentence with it and
+  // the singular can never render as "1 days".
+  assert.equal(hooks.trialNoticePhrase([3, 1]), "3 days and 1 day");
+  assert.equal(hooks.trialNoticePhrase([1]), "1 day");
+  assert.equal(hooks.trialNoticePhrase([7]), "7 days");
+  assert.equal(hooks.trialNoticePhrase([7, 3, 1]), "7 days, 3 days and 1 day");
+  assert.equal(hooks.trialNoticePhrase([]), "");
+
+  // NON-VACUITY: the composition really is what reaches the card. A hypothetical
+  // schedule renders its own numerals, not the shipped ones.
+  const odd = hooks.trialReminderCopy("on", [9, 2]);
+  assert.ok(odd.includes("9 days and 2 days"), "the copy renders the schedule it is handed: " + odd);
+  assert.ok(!odd.includes("3 days"), "and not a numeral typed into the sentence");
+});
+
+test("cch-w50-s5: the mute read FAILS CLOSED — unknown softens, it does not promise", () => {
+  // The three-valued read. Only a settings payload that positively says
+  // alerts_enabled: true earns the flat promise.
+  assert.equal(hooks.trialAlertsState(null), "unknown",
+    "notifCache is null on a direct /billing landing — renderBilling never fetches settings");
+  assert.equal(hooks.trialAlertsState(undefined), "unknown");
+  assert.equal(hooks.trialAlertsState({}), "unknown", "a settings envelope without the key is not consent");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: null }), "unknown");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: "true" }), "unknown", "a string is not the boolean");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: true }), "on");
+  assert.equal(hooks.trialAlertsState({ alerts_enabled: false }), "muted");
+
+  // THE DEFECT, stated as an assertion: the unknown arm must not make the
+  // promise, because it is false for exactly the team that cannot see it.
+  const unknown = hooks.trialReminderCopy("unknown", hooks.trialNoticeDays);
+  assert.ok(!unknown.includes("We'll remind you 3 days"),
+    "UNKNOWN made the flat promise — this is the naive check: " + unknown);
+  assert.ok(unknown.includes("If your team's alerts are on"),
+    "UNKNOWN states its own condition rather than asserting or denying delivery");
+  assert.ok(unknown.includes("3 days and 1 day"),
+    "and still names the schedule, so the person knows what they are checking for");
+
+  const muted = hooks.trialReminderCopy("muted", hooks.trialNoticeDays);
+  assert.ok(!muted.includes("We'll remind you"), "a muted team is promised nothing");
+  assert.ok(muted.includes("alerts muted"), "the mute is named, so it can be acted on");
+  assert.ok(muted.includes("Notifications"), "and the screen that undoes it is named");
+
+  const on = hooks.trialReminderCopy("on", hooks.trialNoticeDays);
+  assert.equal(on, "We'll remind you 3 days and 1 day before the trial ends.",
+    "the flat promise survives for the ONE state that earns it — without this the guard above passes for the wrong reason");
+});
+
+test("cch-w50-s5: the trial CARD carries the mute state through to the rendered sentence", () => {
+  const running = { plan: "trial", status: "active", trial_days_remaining: 9 };
+
+  const dflt = hooks.trialCardHtml(running);
+  const on = hooks.trialCardHtml(running, "on");
+  const muted = hooks.trialCardHtml(running, "muted");
+
+  // The default (no second argument) is the UNKNOWN arm in this sandbox, where
+  // notifCache is null — the same state a direct /billing landing produces.
+  assert.ok(dflt.includes("If your team's alerts are on"),
+    "the default card softens: " + dflt);
+  assert.ok(on.includes("We'll remind you 3 days and 1 day before the trial ends."));
+  assert.ok(muted.includes("alerts muted"));
+  assert.equal(new Set([dflt, on, muted]).size, 3,
+    "three mute states must render three cards — otherwise the state is not reaching the copy");
+
+  // The cch-w50 clamp is untouched: an ENDED trial gets no reminder line in any
+  // mute state, because there is no future notice left to qualify.
+  for (const state of ["unknown", "on", "muted"]) {
+    const ended = hooks.trialCardHtml({ plan: "trial", status: "active", trial_days_remaining: 0 }, state);
+    assert.ok(!/remind you|alerts muted|alerts are on/.test(ended),
+      state + ": the ended card promises and qualifies nothing — the reminder line is gone outright");
+  }
+});
+
+// ── cch-w45 · THE ROLE DIALOG'S WRITE SITE IS RANK-RELATIVE ─────────────────
+//
+// Wave 44 made the members ROW rank-relative (canChangeMemberRole, mirroring
+// Accounts.update_member_role_as/4 — can_grant? AND (self? OR outranks?), a
+// strict `>` with NO owner escape hatch) and left the WRITE SITE actor-only:
+// openRoleModal opened on `assignableRoles(ctx.role).length`, the ACTOR-TIER
+// question, arity 1, in front of a RELATION. The only thing keeping an owner
+// off a PEER OWNER's row was that memberRowHtml declined to draw the button —
+// a rendering accident, not a gate, and one that the paint outlives:
+// wireMembersPanel binds per-button over a CAPTURED ctx and loadMembers repaints
+// only on view entry and after member writes, never on an authority refresh.
+//
+// AND IT WAS UNDRIVABLE. openRoleModal was reachable from nothing but a DOM
+// click; it is on the __bpTestHook seam now, so this gate has an exit code.
+
+function roleModalDom() {
+  const mk = (id) => ({
+    id, innerHTML: "", hidden: true, textContent: "", value: "", disabled: false,
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = {
+    "#modal-root": mk("modal-root"),
+    "#modal-body": mk("modal-body"),
+    ".modal-x": mk("modal-x"),
+    "#role-submit": mk("role-submit"),
+    "#role-select": mk("role-select"),
+  };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  return {
+    nodes,
+    // Did the dialog MOUNT? openModal writes #modal-body.innerHTML, so an empty
+    // body after the call is a refusal — the same signal the operator sees.
+    opened: () => nodes["#modal-body"].innerHTML !== "",
+    restore() {
+      sandbox.document.querySelector = prevQS;
+      sandbox.document.getElementById = prevGE;
+    },
+  };
+}
+
+// The server matrix, verbatim from update_member_role_as/4: an owner may
+// re-role an admin and a member and THEMSELF, and may NOT re-role a PEER OWNER
+// (strict `>`, no hatch — remove_member_as/3 has one, this verb does not).
+const OWNER_CTX = { teamId: "t1", role: "owner", userId: "u-me" };
+
+test("cch-w45: openRoleModal REFUSES the owner-acting-on-peer-owner cell", () => {
+  hooks.clearMe(); // no live /v1/me → membersContext() is null → the captured ctx stands
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-peer", "peer@x.io", "owner");
+    assert.equal(dom.opened(), false,
+      "an owner may not change a PEER OWNER's role — update_member_role_as/4 " +
+      "answers {:error, :forbidden} (`Accounts.update_member_role_as/4`, strict `>`), so the dialog " +
+      "must not open. It opened, which means the gate is still the actor-only " +
+      "assignableRoles(ctx.role).length check.");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: openRoleModal OPENS on the owner-acting-on-admin cell", () => {
+  hooks.clearMe();
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), true, "owner outranks admin — the server accepts this write");
+    assert.match(dom.nodes["#modal-body"].innerHTML, /Change role/);
+    assert.match(dom.nodes["#modal-body"].innerHTML, /admin@x\.io/);
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: openRoleModal agrees with canChangeMemberRole on every cell", () => {
+  hooks.clearMe();
+  const roles = ["owner", "admin", "member"];
+  for (const actorRole of roles) {
+    for (const targetRole of roles) {
+      for (const isSelf of [false, true]) {
+        const ctx = { teamId: "t1", role: actorRole, userId: "u-me" };
+        const targetId = isSelf ? "u-me" : "u-other";
+        // On the SELF row the server compares against the actor's resolved
+        // role, which is what memberRowHtml stamps into data-role.
+        const domRole = isSelf ? actorRole : targetRole;
+        const dom = roleModalDom();
+        try {
+          hooks.openRoleModal(ctx, targetId, "x@x.io", domRole);
+          const want = hooks.canChangeMemberRole(actorRole, domRole, isSelf);
+          assert.equal(dom.opened(), want,
+            `${actorRole} → ${domRole}${isSelf ? " (self)" : ""}: dialog ` +
+            `${dom.opened() ? "opened" : "refused"}, predicate says ${want}`);
+        } finally {
+          dom.restore();
+        }
+      }
+    }
+  }
+  // Non-vacuity: the matrix above must contain BOTH verdicts, or it proves nothing.
+  const verdicts = new Set();
+  for (const a of roles) for (const t of roles) verdicts.add(hooks.canChangeMemberRole(a, t, false));
+  assert.equal(verdicts.size, 2, "the matrix must contain a grant AND a refusal");
+});
+
+test("cch-w45: the STALE-CTX path — a demotion mid-panel refuses at OPEN time", async () => {
+  // wireMembersPanel captured `ctx` when the panel painted; loadMembers is
+  // called on view entry and after member WRITES, never on a /v1/me refresh. So
+  // the captured ctx below still says "owner" while the server now says member.
+  // roleModalAuthority re-derives from membersContext() at open time, and a
+  // DETERMINATE live band wins over the paint.
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const dom = roleModalDom();
+  sandbox.fetch = () => Promise.resolve({
+    ok: true, status: 200,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve({
+      user: { id: "u-me", email: "me@x.io" },
+      team: { id: "t1", name: "T" },
+      // The demotion: the server's resolved authority is `member` now.
+      team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+    }),
+  });
+  try {
+    hooks.clearMe();
+    await hooks.loadMe();
+    assert.equal(hooks.teamAuthorityState(), "refuse", "the live band must be determinate");
+    assert.equal(hooks.membersContext().role, "member", "the live read must carry the demotion");
+    // The captured ctx is the stale one — it still claims owner.
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), false,
+      "the demoted actor's stale buttons must not open the dialog — the live " +
+      "team_authority says member, and a member can assign nothing");
+  } finally {
+    dom.restore();
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w45: an INDETERMINATE live band never becomes a false refusal", () => {
+  // loading / failed / stale / teamless → membersContext() is null, i.e. no
+  // NEWER fact. There is nothing to prefer over the paint, so the captured ctx
+  // stands and the server is the backstop. Failing closed here would withhold a
+  // control the server honours — this epic's own class running backwards.
+  hooks.clearMe(); // "loading"
+  assert.equal(hooks.membersContext(), null);
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), true, "an unknown band is not a refusal");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: roleModalAuthority prefers the live read only for the SAME team", () => {
+  const live = { teamId: "t2", role: "member", userId: "u-me" };
+  const a = hooks.roleModalAuthority(OWNER_CTX, live, "u-admin", "admin");
+  assert.equal(a.actorRole, "owner", "a live read for another team says nothing about this one");
+  const same = hooks.roleModalAuthority(OWNER_CTX, { ...live, teamId: "t1" }, "u-admin", "admin");
+  assert.equal(same.actorRole, "member", "same team → the live read wins");
+  // Self re-derives the TARGET off the actor, never the DOM's data-role.
+  const self = hooks.roleModalAuthority(OWNER_CTX, null, "u-me", "member");
+  // (field-wise: the object is minted inside the vm realm, so deepEqual's
+  // prototype check would red on a correct value.)
+  assert.equal(self.actorRole, "owner");
+  assert.equal(self.targetRole, "owner", "self takes the ACTOR's role, not the DOM's data-role");
+  assert.equal(self.isSelf, true);
+});
+
+test("cch-w45 (D439): assignableRoles' return type is unchanged — still an array", () => {
+  // D439 is binding: the rank-relativity lives in the SIBLING
+  // (canChangeMemberRole), never inside assignableRoles, which stays the honest
+  // actor-tier gate for its other three call sites.
+  for (const role of ["owner", "admin", "member", "nonsense", undefined]) {
+    const out = hooks.assignableRoles(role);
+    assert.ok(Array.isArray(out), `assignableRoles(${role}) must return an array`);
+    assert.ok(out.every((r) => typeof r === "string"));
+  }
+  // (spread across the realm boundary — the vm's Array.prototype is not ours.)
+  assert.deepEqual([...hooks.assignableRoles("owner")], ["owner", "admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("admin")], ["admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("member")], []);
+  assert.equal(hooks.assignableRoles.length, 1, "arity 1 — the ACTOR axis, unchanged");
 });

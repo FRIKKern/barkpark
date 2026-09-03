@@ -327,10 +327,29 @@ defmodule BarkparkWeb.ShareLinkController do
                response_content_disposition: disposition
              ) do
           {:file, full} ->
+            # ONE POLICY FOR BOTH BRANCHES (het-bl-sharelink-local-cache-policy).
+            # This branch used to set NO `cache-control` of its own, while its
+            # `{:redirect, url}` sibling below stated `private, max-age=0,
+            # must-revalidate` — so the same anonymous URL got its policy from
+            # whichever media backend happened to be configured. Deleting the
+            # line below does NOT produce a header-less response: the adapter
+            # default `max-age=0, private, must-revalidate` fills in (that is
+            # the exact RED the pin prints). Nearly the same meaning, a
+            # different string, and chosen by nobody — an UNSTATED policy on a
+            # public response is the class this epic exists to end. It is deliberately NOT routed
+            # through `Delivery.put_file_cache_headers/3` the way
+            # `MediaController.serve/2` is: that helper keys on the ASSET
+            # DOCUMENT's `bp_visibility` (`Access.visibility(doc)`), and no such
+            # doc is in scope here — this path resolves a bare `%MediaFile{}`
+            # row from the LINK's own scope. Even with one, `public` there means
+            # a 24h SHARED-cache store, and `/s/:token` is a bearer capability:
+            # a revoked link whose bytes sit in an intermediary keeps answering.
+            # So: the sibling's literal, verbatim, never a third string.
             conn
             |> put_resp_content_type(MediaFile.serve_content_type(mime))
             |> put_resp_header("x-content-type-options", "nosniff")
             |> put_resp_header("content-disposition", disposition)
+            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
             |> send_file(200, full)
 
           {:redirect, url} ->
@@ -395,12 +414,25 @@ defmodule BarkparkWeb.ShareLinkController do
 
   @doc "GET /v1/shares/links?scope=&kind=&ref_type=&ref_id= — list an item's links."
   def list(conn, params) do
-    with {:ok, {ws, proj, _dataset}} <- scope_triple(params["scope"]),
+    with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_workspace_admin(conn, workspace.id),
-         %Tenancy.Project{} <- Tenancy.get_project(ws, proj),
+         %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params) do
-      links = Links.list_for(workspace.id, kind, ref_type, ref_id) |> Enum.map(&link_json/1)
+      # THE SCOPE PARAMETER IS THE ANSWER'S SCOPE. `project` and `dataset` were
+      # parsed and validated here and then DROPPED, so the listing filtered on
+      # workspace alone: a link minted for the same `ref_id` in a SIBLING
+      # project (or another dataset) of the same workspace came back under a
+      # scope that does not name it, each row carrying its live `/s/<token>`
+      # url. Not cross-tenant — the caller is a proven workspace admin — but
+      # the response contradicted its own request.
+      links =
+        Links.list_for(workspace.id, kind, ref_type, ref_id,
+          project_id: project.id,
+          dataset: dataset
+        )
+        |> Enum.map(&link_json/1)
+
       json(conn, %{links: links})
     else
       # Explicit, ahead of the catch-all — without it the denial is 422 and the

@@ -22,7 +22,7 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
   defp post_json(conn, path, body), do: conn |> json_conn() |> post(path, Jason.encode!(body))
 
   defp authed(token),
-    do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+    do: scoped_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
 
   defp register_and_login!(conn, email) do
     post_json(conn, "/v1/auth/register", %{email: email, password: @password})

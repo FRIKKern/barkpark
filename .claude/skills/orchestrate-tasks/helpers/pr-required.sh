@@ -3,7 +3,7 @@
 # `gh pr checks` renders cancelled/queued in the same column as fail; this reads check-runs for the
 # PR's current head and prints one line per required context with its real status/conclusion.
 #
-# CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …") is ALWAYS THE LAST LINE.
+# CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …" / "CONFLICTING: 4/4 … DIRTY") is ALWAYS THE LAST LINE. MERGEABLE now also means not DIRTY.
 # Callers do `| tail -1`. Anything appended after it silently swaps what every wrapper reads
 # (measured 2026-09-02: an EARLY RED section appended here made a lane's watcher report a job
 # name where the verdict should be, and would have stopped the merge sweep merging anything).
@@ -35,6 +35,9 @@ if [ -z "$SHA" ]; then
   echo "CANNOT READ: pr #$PR head sha unreadable over BOTH GraphQL and REST — this is NOT a verdict, and NOT 0/4. Check \`gh auth status\` and \`gh api rate_limit\`; GraphQL empties before REST does."
   exit 3
 fi
+# MERGE STATE: four green checks do NOT mean the PR can merge; a DIRTY branch is refused by GitHub regardless.
+# Read mergeable_state over REST (one call) so the LAST LINE never says MERGEABLE for a conflicting branch.
+MSTATE=$(gh api "repos/$REPO/pulls/$PR" --jq '.mergeable_state // "-"' 2>/dev/null || echo "-")
 if ! RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
   --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.started_at // "-")"' 2>/dev/null); then
   echo "CANNOT READ: check-runs for $REPO@${SHA:0:10} could not be fetched — this is NOT a verdict, and NOT 0/4."
@@ -55,5 +58,16 @@ printf '%s\n' "$RUNS" | awk -F'\t' '$3=="failure"{print $1}' \
   | grep -viE 'advisory' | grep -vE "^($REQ)$" | sort -u \
   | sed 's/^/  RED non-required job (blocks the aggregate ONLY if it is in elixir.yml needs; security.yml reds do NOT): /'
 
+# ABSENT vs FAILED: a required context with NO check run on this head (its dispatcher was cancelled, or the run
+# was evicted) reads as "3/4" exactly like a failing one, and needs the OPPOSITE remedy (re-fire the dispatcher /
+# update-branch, not fix the code). Name the absent ones explicitly, before the verdict.
+ABSENT=$(printf '%s\n' "$REQ" | tr '|' '\n' | while read -r ctx; do printf '%s\n' "$RUNS" | grep -qF "$ctx	" || printf '%s; ' "$ctx"; done)
+# An aggregator's check run is not created until its run is scheduled, so "no check run yet" on a head whose
+# workflow run is still queued/in_progress is PENDING, not absent. Only call it ABSENT when nothing is running.
+if [ -n "$ABSENT" ]; then
+  LIVE=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=50" --jq '[.workflow_runs[]|select(.status!="completed")]|length' 2>/dev/null || echo 0)
+  if [ "${LIVE:-0}" -gt 0 ]; then echo "  PENDING required context (no check run yet, but $LIVE workflow run(s) still queued/in_progress on this head — wait, do not re-fire): ${ABSENT%; }"; ABSENT=""
+  else echo "  ABSENT required context (no check run on this head and nothing running — re-fire with: gh api -X PUT repos/$REPO/pulls/$PR/update-branch): ${ABSENT%; }"; fi
+fi
 printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | sort -t$'\t' -k1,1 -k4,4r | awk -F'\t' '!seen[$1]++' \
-  | awk -F'\t' -v sha="$SHA" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
+  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" -v absent="$ABSENT" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge\n",substr(sha,1,10); else if(ok<4 && absent!="") printf "NOT YET: %d/4 required green on %s (%d ABSENT — re-fire, do not debug)\n",ok,substr(sha,1,10),4-n; else printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
