@@ -471,6 +471,26 @@ FIX
     fail=$((fail+1)); echo "  FAIL v1c got '$vc', expected '1 1' — cancelled-prior reruns are being counted as flakes, which inflates the rate exactly when the queue is deep"
   fi
 
+  # v1d — THE LIVE PATH ENRICHES. v1c's fixture lines already CARRY prior_concl,
+  # so v1c never executes enrich_prior at all — a harness that proves a property
+  # on one path leaves every other path unproven. Measured 2026-09-03
+  # (task-089b46ad36be9e8d): the live path printed rerun_after_cancel 0 while
+  # nine of nine cited cloud/console/elixir rerun-greens were reruns of
+  # CANCELLED attempts, because the env assignment for the python enrichment
+  # sat AFTER the command and reached it as argv, so os.environ raised, stderr
+  # was discarded, and the un-enriched line fell through. This arm drives the
+  # REAL enrich_prior with gh stubbed, so the arm cannot go dark again.
+  local vd
+  vd=$(gh() { printf 'cancelled\n'; }
+       printf '%s\n' '{"wf":"live.yml","sha":"iii111","concl":"success","created":"2026-09-01T10:00:00Z","pr":16,"id":11,"attempt":2,"prior":"https://api.github.com/repos/o/r/actions/runs/11/attempts/1"}' \
+         | enrich_prior \
+         | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline()).get("prior_concl"))' 2>/dev/null)
+  if [ "$vd" = "cancelled" ]; then
+    pass=$((pass+1)); echo "  ok   v1d enrich_prior attaches prior_concl on the LIVE path (gh stubbed, real function)"
+  else
+    fail=$((fail+1)); echo "  FAIL v1d got '$vd', expected 'cancelled' — the live path drops the prior conclusion, so every cancelled-prior rerun is booked as a flake"
+  fi
+
   # v2 — and the discriminator works the other way: a green on a LATER sha of
   # the same PR is a catch CANDIDATE. If v1 and v2 both passed for the same
   # reason (everything classed as flake) the audit would be useless.
@@ -612,7 +632,9 @@ enrich_prior() {
     if [ -n "$url" ]; then
       concl=$(gh api "$url" --jq '.conclusion' 2>/dev/null)
       if [ -n "$concl" ]; then
-        printf '%s\n' "$line" | python3 -c 'import json,sys,os;o=json.load(sys.stdin);o["prior_concl"]=os.environ["C"];print(json.dumps(o))' C="$concl" 2>/dev/null && continue
+        # C= goes BEFORE the command: after it, it is argv, os.environ raises, and
+        # the un-enriched line falls through silently (v1d guards this).
+        printf '%s\n' "$line" | C="$concl" python3 -c 'import json,sys,os;o=json.load(sys.stdin);o["prior_concl"]=os.environ["C"];print(json.dumps(o))' 2>/dev/null && continue
       fi
     fi
     printf '%s\n' "$line"
