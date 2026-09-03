@@ -529,7 +529,7 @@
  * pinned by view_edit_parity_test.exs, and drift here IS View<->Edit drift. */
 .bp-paper-editor-body > h2 {
   margin-top: var(--bp-section-beat);
-  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
 }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
@@ -574,22 +574,22 @@
  * Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the reader binds — never
  * hand-copy hex. Keep BYTE-IDENTICAL with the root.html.heex copy (view_edit_parity_test
  * §2 guards drift vs the reader). */
-.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
-.bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
-.bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
+.bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+.bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
+.bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
+.bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
 /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose column
  * exactly like .bp-table (the reader's three breakout classes). Values byte-copied from
  * paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart` (view_edit_parity_test.exs
  * §2 guards drift — pe-w2-parity-widening). Keep BYTE-IDENTICAL with the root.html.heex
  * copy. */
-.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; overflow: hidden; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 /* The stat grid's seams are drawn per CELL, not by a container ground (the
  * partial-last-row slab, task-0098ba55d2642545 — paper-surface.css carries the
  * reasoning). Cell rules are parity-INVISIBLE (`.bp-stat` is not a parity
  * element); mirrored here for visual parity, byte-identical with the reader's
  * `.bp-paper-surface .bp-stats .bp-stat` and the root.html.heex copy. */
-.bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; box-shadow: 1px 0 0 0 var(--paper-rule), 0 1px 0 0 var(--paper-rule); }
-.bp-paper-editor-body .bp-stats .bp-stat::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 1px; height: 1px; background: var(--paper-rule); }
+.bp-paper-editor-body .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
 .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 /* THE ONE FIGCAPTION mirror. The reader styles every article <figcaption> through ONE
  * class (paper-surface.css `.bp-paper-surface .bp-figcaption`) instead of the ~200 bytes

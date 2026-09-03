@@ -407,7 +407,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
 
   test "heatmap without mode/flags renders the legacy grid byte-for-byte (pinned)" do
     assert DataViz.heatmap_html(%{"type" => "heatmap", "cells" => [[1, 0]]}) ==
-             ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:repeat(2,minmax(10px,28px))">| <>
+             ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:repeat(2,minmax(10px,44px))">| <>
                ~s|<i class="bp-heat__c" style="--i:1.000" title="1"></i>| <>
                ~s|<i class="bp-heat__c" style="--i:0.000" title="0"></i>| <>
                ~s|</div><div class="bp-heat__legend">less | <>

@@ -473,7 +473,23 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface > #paper-body > h2,
 .bp-paper-surface > #paper-body > div:not([class]) > h2 {
   margin-top: var(--bp-section-beat);
-  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
+  padding-top: var(--bp-section-gap);
+}
+/* The SAME device for a level-2 heading that OPENS a `section` container. The
+   container is one box deeper than a bare block (stream item, then the box div
+   compose_section_stack/2 emits), so the two legs above stop one level short of
+   it on the live reader; compose drops the container's rule pair when its first
+   child is a heading precisely so this heading can carry the boundary alone.
+   `:first-child` is load-bearing: an h2 later in the box is a sub-argument, not
+   a boundary. The `.bp-section--wide` legs cover the classed box. Same three
+   declarations, read from the same tokens (view_edit_parity_test.exs §9 pins the
+   bare legs; this one has no Edit twin because the canvas has no section box). */
+.bp-paper-surface > #paper-body > div:not([class]) > div:not([class]) > h2:first-child,
+.bp-paper-surface > #paper-body > .bp-section--wide > h2:first-child,
+.bp-paper-surface > #paper-body > div:not([class]) > .bp-section--wide > h2:first-child {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
   padding-top: var(--bp-section-gap);
 }
 /* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
@@ -722,7 +738,7 @@ html[data-theme="dark"] .bp-paper-body {
    At 360 the band expression collapses to `100%`, so the cap becomes the column
    and a wide table returns to scrolling inside it — the doc-overflow contract is
    unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
-.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
+.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
 /* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
    Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
    whose cells resolve through a caller-supplied map, so without one it falls back
@@ -748,14 +764,9 @@ html[data-theme="dark"] .bp-paper-body {
    was drawing the same line the head of a section draws, in the middle of an
    argument (see the rule ladder above; the artifact's own `th` is
    `1px solid var(--rule)`). */
-.bp-paper-surface .bp-table__th {
-  border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left;
-  text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
-  color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
-}
-.bp-paper-surface .bp-table__td {
-  border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top;
-}
+.bp-paper-surface .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; text-align: left; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 600; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); background: var(--paper-bg-deep); white-space: nowrap; }
+.bp-paper-surface .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
+.bp-paper-surface .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
 
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
@@ -1549,7 +1560,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    indexed class — author data never carries color. */
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 0.75rem; }
 
-.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 6px; min-width: 130px; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 14px 16px; margin: 1.4rem 0; vertical-align: top; }
 /* A VALUE IS ONE THING AND MUST RENDER AS ONE THING — `nowrap`, a size that
    fits, and a contained overflow.
 
@@ -1598,10 +1609,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    never sizes its own box (the grid track does), so the min-content behaviour
    `.bp-stat__v` needs is not required, and the weaker declaration is the one
    that cannot move a layout. */
-.bp-paper-surface .bp-stat__l { font-size: 0.75rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
-.bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
+.bp-paper-surface .bp-stat__l { order: 2; font-size: 0.75rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
+.bp-paper-surface .bp-stat__bar { order: 1; height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin: 2px 0 0; }
 .bp-paper-surface .bp-stat__bar i { display: block; height: 100%; border-radius: 3px; background: var(--paper-accent); }
-.bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }
+.bp-paper-surface .bp-stat__spark { order: 4; width: 100%; height: 26px; margin-top: 4px; }
 .bp-paper-surface .bp-stat__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
 /* The stat strip BREAKS OUT to the evidence band. This is the clearest case for
@@ -1640,9 +1651,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    prime, so the last row is partial at every band width (8+3 @1280, 9+2
    @1920). Container and cell rules are mirrored on both editor twins
    (`.bp-paper-editor-body .bp-stats` / `… .bp-stat`). */
-.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; overflow: hidden; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
-.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; box-shadow: 1px 0 0 0 var(--paper-rule), 0 1px 0 0 var(--paper-rule); }
-.bp-paper-surface .bp-stats .bp-stat::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 1px; height: 1px; background: var(--paper-rule); }
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; position: relative; }
 
 .bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-gauge__t { font-weight: 700; margin-bottom: 8px; }
@@ -1654,12 +1664,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-gauge__n { font-size: 0.75rem; color: var(--paper-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28%; }
 .bp-paper-surface .bp-gauge__note { font-size: 0.75rem; color: var(--paper-ink-soft); }
 
-.bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: inline-block; }
+.bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: block; width: fit-content; max-width: var(--bp-evidence-width, 100%); margin-inline: var(--bp-evidence-pull, 0px); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; overflow-x: auto; }
 .bp-paper-surface .bp-heat__grid { display: grid; gap: 4px; align-items: center; }
 .bp-paper-surface .bp-heat__c { aspect-ratio: 1; min-height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--paper-accent) calc(var(--i, 0) * 88%), var(--paper-rule)); }
 .bp-paper-surface .bp-heat__rl, .bp-paper-surface .bp-heat__cl { font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-heat__rl { padding-right: 8px; text-align: right; }
-.bp-paper-surface .bp-heat__cl { text-align: center; }
+.bp-paper-surface .bp-heat__cl { text-align: center; white-space: normal; overflow-wrap: anywhere; line-height: 1.15; align-self: end; padding-bottom: 2px; }
 .bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.75rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-heat__legend .bp-heat__c { width: 10px; flex: none; }
 
@@ -1737,7 +1747,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    small mono «kilde» stamp under the figure. Units are always their own span
    beside the display-string number, never fused into it. */
 .bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
-.bp-paper-surface .bp-stat__body { font-size: 0.75rem; color: var(--paper-ink-soft); line-height: 1.45; }
+.bp-paper-surface .bp-stat__body { order: 3; font-size: 0.75rem; color: var(--paper-ink-soft); line-height: 1.45; }
 
 .bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
@@ -1751,7 +1761,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    Under a partial last row the seam therefore stops where the cells stop and
    the stamp sits on open ground — the grid ends where the data ends. The
    padding-top gives the stamp its air below the seam. */
-.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; padding-top: 8px; }
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; padding-top: 0; }
 
 .bp-paper-surface .bp-duel { margin: 1.4rem 0; }
 /* jf-w1-engine-narrow-dark-fixes: self-contain horizontally, the same three
