@@ -236,6 +236,7 @@ scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
 web/__tests__/**
+web/lib/sheets.ts
 web/public/assets/bp-paper-editor.css
 web/public/bp-paper-editor.bundle.js'
 
