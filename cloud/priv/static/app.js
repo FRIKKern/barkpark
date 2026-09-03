@@ -2084,6 +2084,114 @@
     return String(bp.name || bp.slug || bp.id || "");
   }
 
+  // ---- The archive-store answer the console ALREADY fetched ----------------
+  // GET /v1/archives is the one read that answers the two questions the
+  // lifecycle surfaces were each guessing at: is object storage wired for THIS
+  // console, and does this team hold any bundle at all. loadArchives asked it
+  // and threw the answer away, so the instance rail taught
+  // `bp cloud instance archive` on the same screen where the archives panel had
+  // just rendered archives-note--unconfigured, and the decommission sheet told
+  // every team about a residue most of them do not have.
+  //
+  // FOUR STATES, AND "unknown" IS A REAL ONE. A read that has not happened or
+  // has FAILED must never read as an absence - narrowing copy on a non-answer
+  // is the same manufactured-certainty defect this epic keeps killing, so every
+  // consumer below falls back to the blanket, unnarrowed copy on it.
+  //   "unknown"        -> not read yet, or in flight
+  //   "failed"         -> the read errored; we know nothing
+  //   "not_configured" -> the server said the store is not wired for this console
+  //   "loaded"         -> rows IS the truth
+  var archiveStore = { state: "unknown", rows: [] };
+  var archiveStoreInFlight = false;
+
+  // Pure projection of an archivesModel into the store answer. Keyed on the
+  // MODEL rather than the raw payload on purpose: the unconfigured
+  // discrimination then has exactly ONE implementation (archivesModel's exact
+  // match on ARCHIVES_UNCONFIGURED_MSG) instead of a second copy of that string
+  // here that nothing keeps in step.
+  function archiveStoreFromModel(model) {
+    if (!model || model.loading) return { state: "unknown", rows: [] };
+    if (model.notConfigured) return { state: "not_configured", rows: [] };
+    if (model.error) return { state: "failed", rows: [] };
+    return { state: "loaded", rows: (model.rows || []).slice() };
+  }
+
+  // The module answer, read by the rail's paint sites and the decommission
+  // sheet. A getter rather than the var itself so no consumer retains a stale
+  // object across the fetch that replaces it.
+  function archiveStoreSnapshot() { return archiveStore; }
+
+  // The two verbs whose usefulness DEPENDS on the store: archive writes a
+  // bundle, resurrect reads one. adopt / audit / pause / decommission touch no
+  // bundle at all and are deliberately left untouched by the store answer.
+  var ARCHIVE_STORE_VERBS = { archive: true, resurrect: true };
+
+  // The one sentence those two chips owe an operator whose console cannot see
+  // the store. IT IS ABOUT VISIBILITY, NOT FAILURE, and that distinction is
+  // load-bearing rather than tactful: `bp cloud instance archive` writes with
+  // the OPERATOR'S own object-storage credentials, while this control plane
+  // reads with the deployment's (HETZNER_S3_ACCESS_KEY / BARKPARK_BUNDLE_BUCKET
+  // in runtime.exs). An unconfigured control plane therefore does NOT prove the
+  // command fails - claiming that would mint a NEW false statement to retire an
+  // old one. What it proves is that this console will never show you the
+  // result. Empty on every other store state: an unread or failed store is not
+  // evidence the store is missing.
+  function archiveVisibilityNote(verb, store) {
+    if (!ARCHIVE_STORE_VERBS[verb]) return "";
+    if (!store || store.state !== "not_configured") return "";
+    return "Archive storage isn't configured for this console - the command still runs with your own " +
+      "object-storage credentials, but the bundle won't show up in Archives here.";
+  }
+
+  // The archive-residue consequence line(s) for THIS teardown, from the store
+  // answer the console holds. Returns an ARRAY so the "we know nothing" arm and
+  // the narrowed arm are one call site in the sheet.
+  //
+  //   unknown / failed / not_configured -> THE BLANKET SENTENCE, unchanged. See
+  //     the four-state comment above: a non-answer is not an absence.
+  //   loaded, no bundles -> NOTHING. A team that has never archived anything is
+  //     no longer told about a residue it does not have.
+  //   loaded, bundles -> the blanket sentence PLUS whether one of them came
+  //     from THIS instance - the fact the one irreversible click actually
+  //     wants, and it needs no new route: the archives payload is already on
+  //     the client.
+  //
+  // THE RETENTION HALF IS SERVER-OWNED AND STAYS. The 30 days and the daily
+  // sweep are Workers.ArchiveRetentionWorker's real behaviour (cch-w54-bl), not
+  // an invented window; this slice makes the sentence CONDITIONAL, it does not
+  // re-open the question of what the sentence says.
+  function archiveResidueLines(store, bp) {
+    var blanket = "Any archive bundle this team has already made stays in object storage for 30 days after the " +
+      "instance it came from was torn down; a daily sweep deletes it after that. While this team still has an " +
+      "instance, its most recent bundle is kept.";
+    if (!store || store.state !== "loaded") return [blanket];
+    var rows = store.rows || [];
+    if (!rows.length) return [];
+    return [blanket, instanceBundleLine(rows, bp)];
+  }
+
+  // Does THIS instance have a bundle among the team's? Matched on the identity
+  // the archives payload actually carries - the bundle's slug (what the CLI
+  // named when it wrote it) and its fqdn - against the instance's own name and
+  // host. No new field and no server round trip.
+  function instanceBundleLine(rows, bp) {
+    bp = bp || {};
+    var name = String(bp.name || "");
+    var host = String(bp.host || "");
+    var mine = rows.filter(function (r) {
+      if (!r) return false;
+      if (name && (String(r.slug) === name || String(r.fqdn) === name)) return true;
+      return !!(host && String(r.fqdn) === host);
+    });
+    if (mine.length) {
+      return "This instance has an archive bundle" +
+        (mine[0].createdLabel ? " (archived " + mine[0].createdLabel + ")" : "") +
+        " - it outlives this teardown for the window above, and you can resurrect from it.";
+    }
+    return "None of this team's archive bundles was made from " + (name || "this instance") +
+      ", so there is nothing here to resurrect it from.";
+  }
+
   // Whether the workspace shows the lifecycle action row at all. It owns teardown
   // wherever the old bare Remove button used to sit (live/host boxes + a failed
   // provision), and stays hidden for the transient in-flight states the header
@@ -2154,7 +2262,14 @@
   // no second spelling of the read's state is minted here. Absent — every
   // existing 2- and 3-arg call site — it reads as still-checking, which is
   // byte-identical to the shipped model apart from the exit added below.
-  function lifecycleActionsModel(capPayload, bp, authority, authorityState) {
+  // cch-w51-bl / cch-archive-residue - THE FIFTH ARGUMENT IS THE ARCHIVE-STORE
+  // ANSWER (archiveStoreSnapshot()), and it exists because the rail taught
+  // Archive and Resurrect on the very screen where the console had ALREADY been
+  // told the store is not wired. Absent - every existing 2-, 3- and 4-arg call
+  // site - it reads as "unknown", which emits no note at all and is
+  // byte-identical to the shipped model. That default is also the honest one: a
+  // store we have not asked about is not a store we know is missing.
+  function lifecycleActionsModel(capPayload, bp, authority, authorityState, store) {
     bp = bp || {};
     authority = authority || "grant";
     var authorityFailed = authority === "unknown" && authorityState === "failed";
@@ -2181,8 +2296,24 @@
     var actions = LIFECYCLE_VERBS.map(function (v) {
       if (v.verb === "decommission") return decommission;
       if (caps[v.verb] === true) {
-        return { verb: v.verb, label: v.label, mode: "cli",
-          cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) };
+        // cch-w47-bl - THE CHIP CARRIES --provider. `kind` is the SAME value
+        // this model already computed above (bp.provider || "hetzner"), not a
+        // re-derivation and not a hardcoded default. Without it, an azure box's
+        // archive / resurrect / audit / pause chip was a bare
+        // `bp cloud instance <verb> <name>`, and both Go resolvers
+        // (instanceProviderKind and splitProviderFlag) floor an absent provider
+        // to hetzner - so the command resolved against the WRONG provider's
+        // credentials for an azure box. The archives panel next door already
+        // got this right (resurrectCommand appends " --provider <kind>"); this
+        // makes the same console agree with itself.
+        var chip = { verb: v.verb, label: v.label, mode: "cli",
+          cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) + " --provider " + kind };
+        // cch-w51-bl: and the two store-coupled verbs say what an unconfigured
+        // console can and cannot show them. Set ONLY on a determinate
+        // not_configured read (see archiveVisibilityNote).
+        var storeNote = archiveVisibilityNote(v.verb, store);
+        if (storeNote) chip.storeNote = storeNote;
+        return chip;
       }
       var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : "";
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
@@ -2226,11 +2357,32 @@
       // Capability true but console-unwired: the verb label + the exact command
       // chip (screens/02: one boxed row per verb, copy affordance on the chip).
       return '<div class="inst-life-cli"><span class="inst-life-verb">' + esc(a.label) + "</span>" +
-        cliChipHtml(a.cli) + "</div>";
+        cliChipHtml(a.cli) +
+        // cch-w51-bl: the store caveat rides the chip it qualifies, in the
+        // reason grammar the disabled arm already uses (no new class, no new
+        // CSS). Absent on every other store state, so a chip is never annotated
+        // from a non-answer.
+        (a.storeNote ? '<span class="inst-life-reason inst-life-note--warn">' + esc(a.storeNote) + "</span>" : "") +
+        "</div>";
     }
     // Capability false: disabled control carrying the SERVER-OWNED gap reason.
     // JS never invents copy — an absent reason shows the label alone.
-    return '<div class="inst-life-disabled"><button class="btn btn-sm" type="button" disabled' +
+    // cch-w46-bl - THE REFUSED ARM CARRIES THE SAME data-life-verb AS THE LIVE
+    // ONE. It used to emit a bare `<button class="btn btn-sm" type="button"
+    // disabled>`, so ONE verb had TWO identities depending on whether it was
+    // offered or refused: a rendered-state hook table needed two keys for one
+    // control, and identity fell back to first-data-attribute-wins, which
+    // minted the generic colliding key `button.btn` and made the dead-row guard
+    // FLAP across a mutation (reverting decommission's guard stopped
+    // `button.btn` matching, and it red as a dead row - noise, not signal).
+    // The attribute is inert on a disabled control: every paint site selects
+    // `[data-life-verb="decommission"]`, and decommission is never rendered
+    // through this arm as a CLI chip - its refused arm is the same disabled
+    // arm, which is exactly the control that WANTS one stable identity.
+    // Scoped to lifecycleActionHtml on purpose: adminWriteControlHtml has its
+    // own hookless disabled arm and is NOT this row's business.
+    return '<div class="inst-life-disabled"><button class="btn btn-sm" type="button" data-life-verb="' +
+      esc(a.verb) + '" disabled' +
       (a.reason ? ' title="' + esc(a.reason) + '"' : "") + ">" + esc(a.label) + "</button>" +
       (a.reason ? '<span class="inst-life-reason">' + esc(a.reason) + "</span>" : "") + "</div>";
   }
@@ -2610,6 +2762,16 @@
         '<button class="btn btn-ghost btn-sm" type="button" data-archives-retry>Retry</button></div>';
     }
     if (!model.rows.length) {
+      // cch-w47-bl RULED THIS FLAGLESS CHIP OUT OF SCOPE, and here is the
+      // reason rather than an omission: `<name>` is a PLACEHOLDER, not an
+      // instance. This is a generic hint on a panel that is empty by
+      // definition, so there is no `bp` in scope and no provider kind to
+      // compute — appending a flag here would mean inventing one, which is the
+      // very defect the lifecycle chip fix removes. The instance rail's chips,
+      // which DO have a provider in scope, carry --provider; a reader who
+      // copies this hint has to substitute the name anyway and is on the CLI's
+      // own resolver, which prompts. Fix it by giving the empty state a real
+      // instance, not by guessing a kind.
       return '<div class="archives-note"><p>No archives yet. Archive an instance with ' +
         cliChipHtml("bp cloud instance archive <name>") +
         " to keep a portable, cross-provider bundle you can resurrect on Hetzner or Azure.</p></div>";
@@ -7056,10 +7218,36 @@
       // answer; a still-unknown answer at this point omits the button (fail
       // closed on a destroy-tier verb).
       var model = archivesModel(r.data, instanceAdminAuthority());
+      // cch-w51-bl / cch-archive-residue: KEEP THE ANSWER. This read already
+      // knew whether the store is wired and whether this team holds a bundle;
+      // it painted the panel and threw both facts away, so the lifecycle rail
+      // on the same screen went on teaching Archive beside an
+      // archives-note--unconfigured, and the decommission sheet had nothing to
+      // narrow its residue sentence with.
+      archiveStore = archiveStoreFromModel(model);
       panel.innerHTML = archivesPanelHtml(model);
       var retry = panel.querySelector("[data-archives-retry]");
       if (retry) retry.addEventListener("click", loadArchives);
       wireArchiveResurrect(panel, model);
+    });
+  }
+
+  // THE INSTANCE ROUTE NEVER RAN loadArchives, so the store answer the rail and
+  // the decommission sheet want was never on the client at the one irreversible
+  // click. This is that read, taken ONCE per session and only when we do not
+  // already hold an answer. It is a NARROWING, never a gate: every consumer is
+  // honest with or without it (an unresolved or failed read keeps the blanket
+  // copy and offers the chips uncaveated), so nothing waits on it and a failure
+  // costs nothing. `after` repaints the rail if the answer lands after paint.
+  function ensureArchiveStore(after) {
+    if (archiveStore.state !== "unknown" || archiveStoreInFlight) return;
+    archiveStoreInFlight = true;
+    api("GET", "/v1/archives").then(function (r) {
+      archiveStoreInFlight = false;
+      // The SAME projection loadArchives uses — archivesModel owns the
+      // unconfigured discrimination, and there is no second copy of it here.
+      archiveStore = archiveStoreFromModel(archivesModel(r.data));
+      if (after) after();
     });
   }
 
@@ -8381,14 +8569,19 @@
     // frame 1 /v1/me is usually already in (loadMe fires at shell boot, long
     // before this route's capability read) — but when it is not, the rail says
     // "checking", never "refused".
-    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp, instanceAdminAuthority(), meState()));
+    paintLifecycleActions(box, bp,
+      lifecycleActionsModel(undefined, bp, instanceAdminAuthority(), meState(), archiveStoreSnapshot()));
+    // cch-w51-bl: and ask the store, once, so the two store-coupled chips and
+    // the decommission sheet are answering from a read instead of a guess.
+    ensureArchiveStore(repaintLifecycleAuthority);
     api("GET", "/v1/providers/capabilities").then(function (r) {
       if (!box.isConnected && box.isConnected !== undefined) return; // navigated away
       // 404 (conduit not deployed yet) / 5xx / network → null → the honest
       // "capabilities unavailable" + Retry state, decommission still live.
       var payload = r && r.ok && r.data ? r.data : null;
       lifecycleRail = { bp: bp, caps: payload };
-      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp, instanceAdminAuthority(), meState()));
+      paintLifecycleActions(box, bp,
+        lifecycleActionsModel(payload, bp, instanceAdminAuthority(), meState(), archiveStoreSnapshot()));
     });
   }
 
@@ -8424,7 +8617,8 @@
     var box = $("#inst-lifecycle-actions");
     if (!box) return;
     paintLifecycleActions(box, lifecycleRail.bp,
-      lifecycleActionsModel(lifecycleRail.caps, lifecycleRail.bp, instanceAdminAuthority(), meState()));
+      lifecycleActionsModel(lifecycleRail.caps, lifecycleRail.bp, instanceAdminAuthority(), meState(),
+        archiveStoreSnapshot()));
   }
 
   function paintLifecycleActions(box, bp, model) {
@@ -8435,8 +8629,13 @@
     // loadMe now repaints this surface from BOTH arms (repaintLifecycleAuthority
     // above), so wireMeRetry only re-paints when the read still did not land.
     wireMeRetry(box, repaintLifecycleAuthority);
+    // cch-w46-bl: the refused arm now carries the SAME data-life-verb as the
+    // live one (one verb, one identity), so this mount stops treating the
+    // ATTRIBUTE as the offer and asks the real question instead. A disabled
+    // control gets no handler at all — belt to the browser's own braces, which
+    // never dispatch a click on a disabled button.
     var decomm = box.querySelector('[data-life-verb="decommission"]');
-    if (decomm) decomm.addEventListener("click", function () { confirmDecommission(bp); });
+    if (decomm && !decomm.disabled) decomm.addEventListener("click", function () { confirmDecommission(bp); });
   }
 
   // cch-w57-s3: the ONE discriminator this modal needs — is `bp.custom_host` a
@@ -8497,9 +8696,13 @@
       lines.push(ext + " is your own DNS record — Barkpark Cloud never held it. The IP behind it goes back to " +
         "Hetzner, which hands that address to someone else, and we can't repoint the record for you.");
     }
-    lines.push("Any archive bundle this team has already made stays in object storage for 30 days after the " +
-      "instance it came from was torn down; a daily sweep deletes it after that. While this team still has an " +
-      "instance, its most recent bundle is kept.");
+    // cch-archive-residue: the residue sentence is no longer BLANKET. It is
+    // derived from GET /v1/archives — the read this console already makes — so
+    // a team that has never archived anything is not told about a residue it
+    // does not have, and a team that HAS one is told whether one of them came
+    // from this very box. An unread or failed read keeps the blanket sentence
+    // verbatim: see archiveResidueLines.
+    archiveResidueLines(archiveStoreSnapshot(), bp).forEach(function (l) { lines.push(l); });
     lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
       "your last instance.");
     lines.push(live
@@ -26175,6 +26378,23 @@
       // now re-derives. openRoleModal was reachable from NOTHING but a DOM
       // click, so its gate could not be driven by a test at all — which is how
       // it stayed actor-only for a whole wave after the row went rank-relative.
+      // console-3/lifecycle-batch (cch-w51-bl, cch-archive-residue,
+      // cch-w47-bl, cch-w46-bl): the archive-store answer the lifecycle rail
+      // and the decommission sheet now BOTH consult, plus the two pure helpers
+      // that turn it into copy. Exported because the defect all three rows
+      // share is a NON-answer read as an absence — only a test that drives
+      // every store state (unknown / failed / not_configured / loaded) can
+      // prove the unknown arm still says the blanket sentence, and no existing
+      // export reaches the store at all.
+      // lifecycleActionHtml itself joins them: the disabled-arm identity fix
+      // (cch-w46-bl) is invisible through lifecycleActionRowHtml alone, which
+      // routes pause to the foot and decommission to the live slot — the ONE
+      // refused arm it renders is whatever the payload happens to refuse.
+      lifecycleActionHtml: lifecycleActionHtml,
+      archiveStoreFromModel: archiveStoreFromModel,
+      archiveStoreSnapshot: archiveStoreSnapshot,
+      archiveVisibilityNote: archiveVisibilityNote,
+      archiveResidueLines: archiveResidueLines,
       openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
       // cch-w31-bl — THE ROLE VOCABULARY, exported as DATA so the census can
       // diff the shipped set against Authz's own attribute text rather than

@@ -9843,7 +9843,7 @@ test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER r
   const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
   // capability true but console-unwired → CLI affordance with the exact command.
   assert.equal(byVerb.archive.mode, "cli");
-  assert.equal(byVerb.archive.cli, "bp cloud instance archive web");
+  assert.equal(byVerb.archive.cli, "bp cloud instance archive web --provider hetzner");
   assert.equal(byVerb.audit.mode, "cli");
   // capability false → disabled, carrying Hetzner's OWN gap reason verbatim.
   assert.equal(byVerb.pause.mode, "disabled");
@@ -9866,7 +9866,7 @@ test("S11b: azure model — the one false verb is disabled with its SERVER reaso
   // synthetic payload: see "JS never invents a reason" below and the GR71
   // default_gap test above. Here the honest truth is a CLI affordance.
   assert.equal(byVerb.audit.mode, "cli");
-  assert.equal(byVerb.audit.cli, "bp cloud instance audit az1");
+  assert.equal(byVerb.audit.cli, "bp cloud instance audit az1 --provider azure");
   // pause is a capability here → a CLI affordance, not disabled.
   assert.equal(byVerb.pause.mode, "cli");
 });
@@ -9899,6 +9899,216 @@ test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled re
   assert.match(html, /Hetzner has no pause primitive\./); // server-owned reason
   assert.match(html, /data-life-verb="decommission"/); // the live, wired verb
   assert.match(html, /btn-danger/);
+});
+
+// ══ console-3/lifecycle-batch ════════════════════════════════════════════════
+// FOUR ROWS, ONE REGION. Each block below states the premise it re-derived on
+// origin/main and the mutation that reds it.
+
+// ── cch-w47-bl: the CLI chip names the provider it resolves against ────────
+// PREMISE (re-derived by symbol on origin/main): lifecycleActionsModel built
+// `cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp)` and
+// lifecycleCliName returns name/slug/id only — no flag anywhere. The provider
+// was already in scope as `kind`. Both Go resolvers floor an absent provider to
+// hetzner, so on azure EVERY cli chip resolved against the wrong credentials.
+test("cch-w47-bl: EVERY mode:cli chip names the provider — derived from the model's own kind, on both providers", () => {
+  // SIBLING SET, DERIVED not listed: every verb LIFECYCLE_VERBS offers (the
+  // exported lifecycleVerbs mirror) that this payload turns into a chip. If a
+  // verb is added to the constant it lands here automatically.
+  for (const [bp, kind] of [
+    [{ provider: "hetzner", host: "h", name: "web" }, "hetzner"],
+    [{ provider: "azure", host: "h", name: "az1" }, "azure"],
+    [{ host: "h", name: "legacy" }, "hetzner"], // no provider → the hetzner lane, named explicitly
+  ]) {
+    const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
+    const chips = plain(m.actions).filter((a) => a.mode === "cli");
+    assert.ok(chips.length > 0, kind + " produced no cli chip at all — this assertion would be vacuous");
+    assert.equal(m.kind, kind);
+    for (const a of chips) {
+      assert.equal(a.cli, "bp cloud instance " + a.verb + " " + bp.name + " --provider " + kind,
+        a.verb + " on " + kind + " must name its provider");
+    }
+    // …and NO chip is left flagless — the shape, not just the sampled verbs.
+    assert.equal(chips.filter((a) => !a.cli.includes(" --provider ")).length, 0);
+  }
+});
+
+test("cch-w47-bl: the flag is the model's kind, not a re-derivation — an unknown provider names ITSELF or nothing", () => {
+  // A provider the payload does not carry degrades before any chip is built, so
+  // there is no arm where a chip could name a kind the model did not compute.
+  const gone = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "gcp", host: "h", name: "web" });
+  assert.equal(gone.kind, "gcp");
+  assert.equal(plain(gone.actions).filter((a) => a.mode === "cli").length, 0);
+});
+
+// ── cch-w46-bl: one verb, ONE identity, offered or refused ─────────────────
+// PREMISE (re-derived by symbol): lifecycleActionHtml's live arm emitted
+// data-life-verb; its disabled arm emitted a bare
+// `<button class="btn btn-sm" type="button" disabled>` with no hook at all, so
+// the same verb had two identities and a rendered-state hook table needed two
+// keys for one control.
+test("cch-w46-bl: the REFUSED lifecycle arm carries the same data-life-verb as the live one", () => {
+  // SIBLING SET, DERIVED: every disabled arm lifecycleActionHtml can emit — one
+  // per verb the constant declares, driven through the render itself rather
+  // than through a hand-listed set.
+  for (const verb of hooks.lifecycleVerbs) {
+    const html = hooks.lifecycleActionHtml({ verb, label: verb, mode: "disabled", reason: "" });
+    assert.match(html, /class="inst-life-disabled"/, verb + " must still use the shipped wrapper");
+    assert.match(html, new RegExp('data-life-verb="' + verb + '"'),
+      verb + "'s refused arm has no hook identity — it is `button.btn` to any hook table");
+    assert.match(html, /disabled/, verb + " must stay disabled");
+  }
+});
+
+test("cch-w46-bl: the identity is STABLE across the offer/refuse mutation — same key, both arms", () => {
+  // THE MEASURED CONSEQUENCE, reproduced: identify each arm the way a hook
+  // table does (first data-attribute wins) and check the key does not move when
+  // the same verb flips from offered to refused.
+  const key = (html) => (html.match(/data-([\w-]+)="([^"]*)"/) || []).slice(1).join("=");
+  const live = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "live", resourceName: "web" });
+  const refused = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "disabled", reason: "nope" });
+  assert.equal(key(live), "life-verb=decommission");
+  assert.equal(key(refused), "life-verb=decommission");
+  assert.equal(key(live), key(refused), "one verb must have ONE identity whether it is offered or refused");
+  // And the refused arm is still refused — the identity is not an offer.
+  assert.match(refused, /disabled/);
+  assert.doesNotMatch(refused, /btn-danger/);
+});
+
+// ── cch-w51-bl: the chips consult the store answer the console already has ──
+// PREMISE (re-derived by symbol): LIFECYCLE_VERBS is a flat constant and
+// lifecycleActionsModel referenced no archive-store state at all, while
+// loadArchives had already painted archives-note--unconfigured on the same
+// fleet screen. The console held the answer in its DOM and nowhere else.
+const ARCH_UNCONFIGURED = { ok: false, error: "Archive storage isn't configured for this deployment." };
+
+test("cch-w51-bl: archiveStoreFromModel projects each archivesModel state — and a NON-answer stays unknown", () => {
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel(undefined)).state, "unknown");
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED)).state, "not_configured");
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel({})).state, "failed"); // transport / catch-all
+  assert.equal(hooks.archiveStoreFromModel(hooks.archivesModel({ ok: true, archives: [] })).state, "loaded");
+  const loaded = hooks.archiveStoreFromModel(hooks.archivesModel({
+    ok: true, archives: [{ fqdn: "web.example", slug: "web", source_provider: "hetzner", created_at: "2026-01-01T00:00:00Z" }],
+  }));
+  assert.equal(loaded.state, "loaded");
+  assert.equal(loaded.rows.length, 1);
+  assert.equal(loaded.rows[0].slug, "web");
+});
+
+test("cch-w51-bl GUARD: no Archive/Resurrect chip is offered UNCAVEATED while the console holds a not_configured store", () => {
+  const store = hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED));
+  assert.equal(store.state, "not_configured", "the guard is vacuous unless this arm really is the unconfigured one");
+  const bp = { provider: "hetzner", host: "h", name: "web" };
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded", store);
+  // SIBLING SET, DERIVED: the store-coupled verbs are the ones whose chip HTML
+  // must carry the caveat — read off the model, not hand-listed.
+  const offered = plain(m.actions).filter((a) => a.mode === "cli" && (a.verb === "archive" || a.verb === "resurrect"));
+  assert.ok(offered.length > 0, "no archive/resurrect chip was offered at all — the guard would be vacuous");
+  for (const a of offered) {
+    assert.ok(a.storeNote, a.verb + " is offered with no store caveat while the store answered not_configured");
+    const chip = hooks.lifecycleActionHtml(a);
+    assert.match(chip, /inst-life-reason inst-life-note--warn/, a.verb + "'s caveat must RENDER, not just sit on the model");
+    assert.match(chip, /show up in Archives here/, a.verb + " must name the VISIBILITY consequence");
+  }
+  // THE COPY IS ABOUT VISIBILITY, NEVER FAILURE — the credentials differ, so a
+  // claim that the command fails would be a NEW false statement.
+  const note = hooks.archiveVisibilityNote("archive", store);
+  assert.match(note, /still runs with your own/);
+  assert.doesNotMatch(note, /will fail|won't work|cannot archive|unavailable/i);
+  // And the chip still TEACHES the command — the caveat qualifies it, it does
+  // not remove the affordance.
+  assert.match(hooks.lifecycleActionHtml(offered[0]), /bp cloud instance archive web --provider hetzner/);
+});
+
+test("cch-w51-bl GUARD, THE OTHER DIRECTION: a loaded / failed / unknown store annotates NOTHING", () => {
+  const bp = { provider: "hetzner", host: "h", name: "web" };
+  for (const [label, store] of [
+    ["unknown (never read)", { state: "unknown", rows: [] }],
+    ["unknown (no arg at all)", undefined],
+    ["failed", hooks.archiveStoreFromModel(hooks.archivesModel({}))],
+    ["loaded", hooks.archiveStoreFromModel(hooks.archivesModel({ ok: true, archives: [] }))],
+  ]) {
+    const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded", store);
+    const chips = plain(m.actions).filter((a) => a.mode === "cli");
+    assert.equal(chips.filter((a) => a.storeNote).length, 0,
+      label + " must annotate no chip — an unread or working store is not an unconfigured one");
+    assert.equal(hooks.lifecycleActionRowHtml(m).includes("won't show up in Archives"), false, label);
+  }
+  // A non-store verb is never annotated even on the unconfigured answer.
+  const unconf = hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED));
+  for (const verb of ["adopt", "audit", "pause", "decommission"]) {
+    assert.equal(hooks.archiveVisibilityNote(verb, unconf), "", verb + " does not touch a bundle and must stay silent");
+  }
+});
+
+test("cch-w51-bl: the 5th argument is an ADD — the shipped 2/3/4-arg call sites are byte-identical", () => {
+  const bp = { provider: "azure", host: "h", name: "az1" };
+  const four = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded"));
+  const five = hooks.lifecycleActionRowHtml(
+    hooks.lifecycleActionsModel(CAP_PAYLOAD, bp, "grant", "loaded", { state: "unknown", rows: [] }));
+  assert.equal(four, five, "an absent store argument must render exactly like an unknown one");
+});
+
+// ── cch-archive-residue: the decommission sheet's residue line ─────────────
+// PREMISE (re-derived by symbol): confirmDecommission pushed the archive-residue
+// sentence with an unconditional lines.push and read no archives at confirm
+// time — loadArchives cached nothing and the instance route never ran it.
+test("cch-archive-residue: a team with NO bundles is not told about a residue it does not have", () => {
+  const store = hooks.archiveStoreFromModel(hooks.archivesModel({ ok: true, archives: [] }));
+  assert.equal(store.state, "loaded", "vacuity check: this arm must really be the determinate empty read");
+  // (length, not deepEqual: the array comes back from the vm realm, whose
+  // Array is a different constructor than this file's.)
+  assert.equal(hooks.archiveResidueLines(store, { name: "web" }).length, 0);
+});
+
+test("cch-archive-residue: an UNKNOWN or FAILED read keeps the blanket sentence — a non-answer is never an absence", () => {
+  for (const [label, store] of [
+    ["never read", { state: "unknown", rows: [] }],
+    ["no store at all", undefined],
+    ["read FAILED", hooks.archiveStoreFromModel(hooks.archivesModel({}))],
+    ["store not configured", hooks.archiveStoreFromModel(hooks.archivesModel(ARCH_UNCONFIGURED))],
+  ]) {
+    const lines = hooks.archiveResidueLines(store, { name: "web" });
+    assert.equal(lines.length, 1, label + " must keep exactly the blanket sentence");
+    assert.match(lines[0], /Any archive bundle this team has already made/, label);
+    // The SERVER-OWNED retention fact survives (ArchiveRetentionWorker really
+    // does sweep daily at 30 days) — this slice conditions the sentence, it
+    // does not rewrite it.
+    assert.match(lines[0], /30 days/, label);
+    assert.match(lines[0], /its most recent bundle is kept/, label);
+  }
+});
+
+test("cch-archive-residue / cch-w51-bl: a loaded store names whether THIS instance has a bundle", () => {
+  const withMine = hooks.archiveStoreFromModel(hooks.archivesModel({
+    ok: true,
+    archives: [
+      { fqdn: "web.example", slug: "web", source_provider: "hetzner", created_at: "2026-01-01T00:00:00Z" },
+      { fqdn: "api.example", slug: "api", source_provider: "azure", created_at: "2026-01-02T00:00:00Z" },
+    ],
+  }));
+  const mine = hooks.archiveResidueLines(withMine, { name: "web", host: "web.example" });
+  assert.equal(mine.length, 2);
+  assert.match(mine[1], /This instance has an archive bundle/);
+  assert.match(mine[1], /resurrect from it/);
+  // …and the NEGATIVE side, so the sentence is a discriminator and not decoration.
+  const notMine = hooks.archiveResidueLines(withMine, { name: "shop", host: "shop.example" });
+  assert.equal(notMine.length, 2);
+  assert.match(notMine[1], /None of this team's archive bundles was made from shop/);
+  assert.doesNotMatch(notMine[1], /This instance has an archive bundle/);
+  // NO INVENTED NUMBER anywhere: the only window named is the 30 days the
+  // ArchiveRetentionWorker actually applies.
+  for (const line of mine.concat(notMine)) {
+    const windows = line.match(/\b\d+\s*(day|days|week|weeks|month|months)\b/gi) || [];
+    assert.ok(windows.every((w) => /^30\s*days$/i.test(w)), "invented window: " + JSON.stringify(windows));
+  }
+});
+
+test("console-3/lifecycle-batch: every new pure helper is exported", () => {
+  for (const name of ["archiveStoreFromModel", "archiveStoreSnapshot", "archiveVisibilityNote",
+    "archiveResidueLines", "lifecycleActionHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
 });
 
 test("S11b: the loading + unavailable renders show their honest states", () => {
@@ -20146,20 +20356,43 @@ test("cch-w38-s1: the authority answer is THREE-VALUED and reads /v1/me's state,
   hooks.clearMe();
 });
 
+// cch-w46-bl RE-POINTED THESE ORACLES, AND THE RE-POINT IS THE POINT. Every
+// assertion below used the PRESENCE of `data-life-verb="decommission"` as its
+// proxy for "a live, click-wired destroy verb" — true only while the refused
+// arm had no hook identity at all. cch-w46-bl gives the refused arm the SAME
+// data-life-verb (one verb, ONE identity, offered or refused), so the proxy
+// would silently start reporting a refusal as an offer. The oracle moves to
+// bytes only the LIVE arm can emit — its `data-life-name` companion, which
+// lifecycleActionHtml writes in the mode==="live" branch and nowhere else — and
+// the mount agrees: paintLifecycleActions now binds only when the control is
+// not `disabled`. Weaker proxy replaced by a stronger one, in the same diff
+// that made the weaker one wrong.
+const LIVE_DECOMM = 'data-life-verb="decommission" data-life-name=';
+
+test("cch-w46-bl: LIVE_DECOMM discriminates the two arms — the oracle these tests rest on is not vacuous", () => {
+  const live = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "live", resourceName: "web" });
+  const refused = hooks.lifecycleActionHtml({ verb: "decommission", label: "Decommission", mode: "disabled", reason: "no" });
+  assert.ok(live.includes(LIVE_DECOMM), "the live arm must match the oracle");
+  assert.ok(!refused.includes(LIVE_DECOMM), "the refused arm must NOT — otherwise every absence assertion below is vacuous");
+  assert.ok(refused.includes('data-life-verb="decommission"'), "…while still carrying the shared identity");
+});
+
 test("cch-w38-s1: THE RAIL RENDERS ALL THREE — refused carries the SERVER's sentence, unknown carries none", () => {
   const refused = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse"));
   // The remedy: a DISABLED control that is still THERE, plus the one sentence
   // that repairs it — FORBIDDEN_ROLE_COPY.admin, byte-identical to what the
   // server's own 403 renders through friendly(). No new copy is minted here.
   assert.match(refused, /inst-life-disabled/);
-  assert.ok(refused.includes('<button class="btn btn-sm" type="button" disabled title="' + W38_ADMIN_SENTENCE + '">Decommission</button>'),
+  assert.ok(refused.includes('<button class="btn btn-sm" type="button" data-life-verb="decommission" disabled title="' + W38_ADMIN_SENTENCE + '">Decommission</button>'),
     "the refused verb is a disabled control, titled with the server's sentence");
   assert.ok(refused.includes('<span class="inst-life-reason">' + W38_ADMIN_SENTENCE + "</span>"),
     "…and the sentence is VISIBLE in the shipped reason span, not hover-only");
   // THE PART THE [^>]* ASSERTION AT :11858 CANNOT SEE: no click hook, no
   // destroy-tier styling, no typed-confirm ellipsis promising a modal.
-  assert.ok(refused.indexOf('data-life-verb="decommission"') === -1,
-    "a verb the server will refuse gets NO click hook — paintLifecycleActions binds on this attribute");
+  assert.ok(refused.indexOf(LIVE_DECOMM) === -1,
+    "a verb the server will refuse gets NO live control — paintLifecycleActions binds only a non-disabled one");
+  assert.match(refused, /data-life-verb="decommission" disabled/,
+    "…and cch-w46-bl: it carries the SAME identity as the live arm, disabled");
   assert.ok(refused.indexOf("btn-danger") === -1, "and no destroy-tier styling");
   assert.ok(refused.indexOf("Decommission&hellip;") === -1, "and no ellipsis promising a confirm modal");
   assert.ok(refused.includes("Manage this instance via the bp CLI"), "the rail is never HIDDEN from a member (D428)");
@@ -20173,7 +20406,7 @@ test("cch-w38-s1: THE RAIL RENDERS ALL THREE — refused carries the SERVER's se
     "unknown states the truth: we are still checking");
   assert.ok(unknown.indexOf(W38_ADMIN_SENTENCE) === -1,
     "a role we do not know is NOT a role of member — no refusal sentence on an unanswered read");
-  assert.ok(unknown.indexOf('data-life-verb="decommission"') === -1,
+  assert.ok(unknown.indexOf(LIVE_DECOMM) === -1,
     "…and the destroy verb is not live while the answer is outstanding");
   assert.match(unknown, /inst-life-disabled/);
 
@@ -20194,11 +20427,11 @@ test("cch-w38-s1: the loading and unavailable frames carry the authority too —
   // shipped decommission LIVE unconditionally. They are the frames a member
   // actually sees first, so they are the frames most able to lie.
   const frame1 = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(undefined, W38_BP, "refuse"));
-  assert.ok(frame1.indexOf('data-life-verb="decommission"') === -1, "frame 1 does not offer a refused verb");
+  assert.ok(frame1.indexOf(LIVE_DECOMM) === -1, "frame 1 does not offer a refused verb");
   assert.ok(frame1.includes(W38_ADMIN_SENTENCE), "…and it explains why, from frame 1");
 
   const unavailable = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(null, W38_BP, "refuse"));
-  assert.ok(unavailable.indexOf('data-life-verb="decommission"') === -1, "nor does the conduit-failed frame");
+  assert.ok(unavailable.indexOf(LIVE_DECOMM) === -1, "nor does the conduit-failed frame");
   assert.match(unavailable, /data-life-retry/, "…and that frame keeps its own Retry — the authority note never eats a recovery");
 
   // The model carries the decision so the DOM mount cannot fork it.
@@ -20278,8 +20511,8 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
   const OFFERS = [
     { verb: "runDecommission", route: "POST /v1/instances/:id/lifecycle", where: "the CLI rail",
       render: (a) => hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, a)),
-      live: 'data-life-verb="decommission"',
-      dead: '<button class="btn btn-sm" type="button" disabled title="' + S + '">Decommission</button>' },
+      live: LIVE_DECOMM,
+      dead: '<button class="btn btn-sm" type="button" data-life-verb="decommission" disabled title="' + S + '">Decommission</button>' },
 
     { verb: "rollbackInstance", route: "POST /v1/barkparks/:id/rollback", where: "the Updates panel",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
@@ -20502,8 +20735,14 @@ function railDom() {
       this.controls = {};
       if (this._html.indexOf("data-me-retry") !== -1) this.controls["[data-me-retry]"] = mk("me");
       if (this._html.indexOf("data-life-retry") !== -1) this.controls["[data-life-retry]"] = mk("life");
+      // cch-w46-bl: the refused arm now carries data-life-verb too, so this
+      // stub stops treating the ATTRIBUTE as the control and mirrors the DOM —
+      // querySelector answers the element either way, and `disabled` is what
+      // paintLifecycleActions actually reads before it binds.
       if (this._html.indexOf('data-life-verb="decommission"') !== -1) {
-        this.controls['[data-life-verb="decommission"]'] = mk("decommission");
+        const ctl = mk("decommission");
+        ctl.disabled = this._html.indexOf('data-life-verb="decommission" data-life-name=') === -1;
+        this.controls['[data-life-verb="decommission"]'] = ctl;
       }
     },
     isConnected: true,
@@ -20613,7 +20852,7 @@ test("cch-w46-s3: a /v1/me that succeeds LATE repaints the rail — on the USAGE
     }));
     // The strand's starting point: the rail painted while the answer was out.
     assert.ok(before.length > 0, "the rail painted");
-    assert.ok(before.indexOf('data-life-verb="decommission"') === -1,
+    assert.ok(before.indexOf(LIVE_DECOMM) === -1,
       "an unknown authority offers no destroy verb");
     assert.match(before, /data-me-retry/, "…but it does offer the way out");
 
@@ -20622,7 +20861,7 @@ test("cch-w46-s3: a /v1/me that succeeds LATE repaints the rail — on the USAGE
     const after = dom.el.innerHTML;
     assert.notEqual(after, before,
       "B2 must not be byte-identical to B1 — on main it is (" + before.length + " bytes), which is the whole defect");
-    assert.match(after, /data-life-verb="decommission"/,
+    assert.ok(after.includes(LIVE_DECOMM),
       "the owner's rail comes alive without a reload");
     assert.ok(after.indexOf("data-me-retry") === -1, "…and the exit retires with the question it answered");
     assert.ok(after.indexOf("Checking capabilities") === -1);
@@ -20661,7 +20900,7 @@ test("cch-w46-s3: a /v1/me that FAILS late repaints too, and its Retry re-drives
     btn.click();
     await settle();
     assert.equal(owner.count("/v1/me"), 1, "one click, one fresh authority read");
-    assert.match(dom.el.innerHTML, /data-life-verb="decommission"/,
+    assert.ok(dom.el.innerHTML.includes(LIVE_DECOMM),
       "…and the answer it fetched paints, without a page reload");
   } finally {
     Object.assign(sandbox, { fetch: saved.fetch, document: saved.document });

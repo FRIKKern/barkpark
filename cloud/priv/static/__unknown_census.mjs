@@ -126,6 +126,19 @@ const EXPECT = [
   { f: "loadArchives", p: '"/v1/archives"', v: "guarded",
     proof: [/archivesModel\(r\.data, instanceAdminAuthority\(\)\)/],
     why: "archivesModel owns the honest error + Retry arm (route bodies both 200 and 502)" },
+  // cch-w51-bl / cch-archive-residue: the instance route's one-shot store read.
+  // `sanctioned` and not `guarded`: a failure here collapses into the state the
+  // module already starts in — "unknown" — and every consumer of that state is
+  // the UNNARROWED one (the decommission sheet keeps its blanket residue
+  // sentence, the Archive/Resurrect chips render with no caveat). Nothing is
+  // blanked, nothing is faked, and no error surface exists to guard: the read
+  // narrows copy when it lands and is silent when it does not. The proof pins
+  // the projection itself, because the failure mode that matters is not an
+  // unhandled error — it is somebody making a determinate state out of a read
+  // that did not answer.
+  { f: "ensureArchiveStore", p: '"/v1/archives"', v: "sanctioned",
+    proof: [/archiveStore = archiveStoreFromModel\(archivesModel\(r\.data\)\)/],
+    why: "a failed read stays 'unknown', which is exactly the blanket/uncaveated copy the surfaces already ship" },
   { f: "loadOverview", p: '"/v1/barkparks"', v: "guarded",
     proof: [/markRefreshStale\(\)/],
     why: "full-load failure paints the error state; a background failure marks staleness, never blanks" },
