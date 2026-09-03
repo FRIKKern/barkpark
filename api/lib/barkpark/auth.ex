@@ -53,25 +53,6 @@ defmodule Barkpark.Auth do
     end
   end
 
-  @doc """
-  Resolve a raw bearer to its `ApiToken` id, or nil.
-
-  The IDENTITY half of `verify_token/1` — same WHERE clause, same fail-closed
-  `kind == "api"` boundary, no `%ApiToken{}` handed to the caller. Exists for
-  `BarkparkWeb.Plugs.RateLimit`, which needs a stable per-credential key and
-  nothing else, and which registers this alongside `Scim.resolve_token_id/1`
-  as one entry in its resolver list.
-  """
-  @spec verify_token_id(binary()) :: binary() | nil
-  def verify_token_id(raw_token) when is_binary(raw_token) do
-    case verify_token(raw_token) do
-      {:ok, %ApiToken{id: id}} -> id
-      _ -> nil
-    end
-  end
-
-  def verify_token_id(_), do: nil
-
   # ── dwb-7: single-use login handoff tickets ─────────────────────────────
 
   @doc """
