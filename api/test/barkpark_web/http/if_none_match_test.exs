@@ -38,8 +38,8 @@ defmodule BarkparkWeb.Http.IfNoneMatchTest do
     {"empty entries are dropped, not matched", [~s(, , "abc123")], @etag, true},
     {"a header of nothing but separators never matches", [", ,"], @etag, false},
     {"an empty header line never matches", [""], @etag, false},
-    {"UNQUOTED bare validator does NOT match (the quotes are part of the tag)",
-     ["abc123"], @etag, false},
+    {"UNQUOTED bare validator does NOT match (the quotes are part of the tag)", ["abc123"], @etag,
+     false},
     {"surrounding whitespace is trimmed", [~s(   "abc123"   )], @etag, true},
     {"a quoted tag does not match a DIFFERENT quoting", [~s('abc123')], @etag, false}
   ]

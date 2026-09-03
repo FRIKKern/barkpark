@@ -1785,7 +1785,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       "W/" <> strong = weak
 
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> put_req_header("if-none-match", strong)
         |> get("/v1/capabilities")
@@ -1798,7 +1798,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
 
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> put_req_header("if-none-match", etag)
         |> get("/v1/capabilities")
@@ -1811,7 +1811,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       _ = conn
 
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> put_req_header("if-none-match", ~s(W/"caps-deadbeefdeadbeef"))
         |> get("/v1/capabilities")
@@ -1825,10 +1825,14 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
 
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{@token}")
         |> then(fn c ->
-          %{c | req_headers: c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]}
+          %{
+            c
+            | req_headers:
+                c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+          }
         end)
         |> get("/v1/capabilities")
 

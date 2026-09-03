@@ -73,7 +73,10 @@ defmodule BarkparkWeb.OpenApiControllerTest do
     resp =
       build_conn()
       |> then(fn c ->
-        %{c | req_headers: c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]}
+        %{
+          c
+          | req_headers: c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+        }
       end)
       |> get("/v1/openapi.json")
 

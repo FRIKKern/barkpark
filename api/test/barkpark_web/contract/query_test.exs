@@ -449,7 +449,11 @@ defmodule BarkparkWeb.Contract.QueryTest do
       resp =
         conn
         |> then(fn c ->
-          %{c | req_headers: c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]}
+          %{
+            c
+            | req_headers:
+                c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+          }
         end)
         |> get("/v1/data/query/test/post")
 
