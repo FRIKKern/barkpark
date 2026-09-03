@@ -25451,3 +25451,195 @@ test("cch-w50-s5: the trial CARD carries the mute state through to the rendered 
       state + ": the ended card promises and qualifies nothing — the reminder line is gone outright");
   }
 });
+
+// ── cch-w45 · THE ROLE DIALOG'S WRITE SITE IS RANK-RELATIVE ─────────────────
+//
+// Wave 44 made the members ROW rank-relative (canChangeMemberRole, mirroring
+// Accounts.update_member_role_as/4 — can_grant? AND (self? OR outranks?), a
+// strict `>` with NO owner escape hatch) and left the WRITE SITE actor-only:
+// openRoleModal opened on `assignableRoles(ctx.role).length`, the ACTOR-TIER
+// question, arity 1, in front of a RELATION. The only thing keeping an owner
+// off a PEER OWNER's row was that memberRowHtml declined to draw the button —
+// a rendering accident, not a gate, and one that the paint outlives:
+// wireMembersPanel binds per-button over a CAPTURED ctx and loadMembers repaints
+// only on view entry and after member writes, never on an authority refresh.
+//
+// AND IT WAS UNDRIVABLE. openRoleModal was reachable from nothing but a DOM
+// click; it is on the __bpTestHook seam now, so this gate has an exit code.
+
+function roleModalDom() {
+  const mk = (id) => ({
+    id, innerHTML: "", hidden: true, textContent: "", value: "", disabled: false,
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    setAttribute() {}, removeAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [], focus() {},
+  });
+  const nodes = {
+    "#modal-root": mk("modal-root"),
+    "#modal-body": mk("modal-body"),
+    ".modal-x": mk("modal-x"),
+    "#role-submit": mk("role-submit"),
+    "#role-select": mk("role-select"),
+  };
+  const prevQS = sandbox.document.querySelector;
+  const prevGE = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) => nodes[sel] || null;
+  sandbox.document.getElementById = (id) => nodes["#" + id] || null;
+  return {
+    nodes,
+    // Did the dialog MOUNT? openModal writes #modal-body.innerHTML, so an empty
+    // body after the call is a refusal — the same signal the operator sees.
+    opened: () => nodes["#modal-body"].innerHTML !== "",
+    restore() {
+      sandbox.document.querySelector = prevQS;
+      sandbox.document.getElementById = prevGE;
+    },
+  };
+}
+
+// The server matrix, verbatim from update_member_role_as/4: an owner may
+// re-role an admin and a member and THEMSELF, and may NOT re-role a PEER OWNER
+// (strict `>`, no hatch — remove_member_as/3 has one, this verb does not).
+const OWNER_CTX = { teamId: "t1", role: "owner", userId: "u-me" };
+
+test("cch-w45: openRoleModal REFUSES the owner-acting-on-peer-owner cell", () => {
+  hooks.clearMe(); // no live /v1/me → membersContext() is null → the captured ctx stands
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-peer", "peer@x.io", "owner");
+    assert.equal(dom.opened(), false,
+      "an owner may not change a PEER OWNER's role — update_member_role_as/4 " +
+      "answers {:error, :forbidden} (`Accounts.update_member_role_as/4`, strict `>`), so the dialog " +
+      "must not open. It opened, which means the gate is still the actor-only " +
+      "assignableRoles(ctx.role).length check.");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: openRoleModal OPENS on the owner-acting-on-admin cell", () => {
+  hooks.clearMe();
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), true, "owner outranks admin — the server accepts this write");
+    assert.match(dom.nodes["#modal-body"].innerHTML, /Change role/);
+    assert.match(dom.nodes["#modal-body"].innerHTML, /admin@x\.io/);
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: openRoleModal agrees with canChangeMemberRole on every cell", () => {
+  hooks.clearMe();
+  const roles = ["owner", "admin", "member"];
+  for (const actorRole of roles) {
+    for (const targetRole of roles) {
+      for (const isSelf of [false, true]) {
+        const ctx = { teamId: "t1", role: actorRole, userId: "u-me" };
+        const targetId = isSelf ? "u-me" : "u-other";
+        // On the SELF row the server compares against the actor's resolved
+        // role, which is what memberRowHtml stamps into data-role.
+        const domRole = isSelf ? actorRole : targetRole;
+        const dom = roleModalDom();
+        try {
+          hooks.openRoleModal(ctx, targetId, "x@x.io", domRole);
+          const want = hooks.canChangeMemberRole(actorRole, domRole, isSelf);
+          assert.equal(dom.opened(), want,
+            `${actorRole} → ${domRole}${isSelf ? " (self)" : ""}: dialog ` +
+            `${dom.opened() ? "opened" : "refused"}, predicate says ${want}`);
+        } finally {
+          dom.restore();
+        }
+      }
+    }
+  }
+  // Non-vacuity: the matrix above must contain BOTH verdicts, or it proves nothing.
+  const verdicts = new Set();
+  for (const a of roles) for (const t of roles) verdicts.add(hooks.canChangeMemberRole(a, t, false));
+  assert.equal(verdicts.size, 2, "the matrix must contain a grant AND a refusal");
+});
+
+test("cch-w45: the STALE-CTX path — a demotion mid-panel refuses at OPEN time", async () => {
+  // wireMembersPanel captured `ctx` when the panel painted; loadMembers is
+  // called on view entry and after member WRITES, never on a /v1/me refresh. So
+  // the captured ctx below still says "owner" while the server now says member.
+  // roleModalAuthority re-derives from membersContext() at open time, and a
+  // DETERMINATE live band wins over the paint.
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const dom = roleModalDom();
+  sandbox.fetch = () => Promise.resolve({
+    ok: true, status: 200,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve({
+      user: { id: "u-me", email: "me@x.io" },
+      team: { id: "t1", name: "T" },
+      // The demotion: the server's resolved authority is `member` now.
+      team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+    }),
+  });
+  try {
+    hooks.clearMe();
+    await hooks.loadMe();
+    assert.equal(hooks.teamAuthorityState(), "refuse", "the live band must be determinate");
+    assert.equal(hooks.membersContext().role, "member", "the live read must carry the demotion");
+    // The captured ctx is the stale one — it still claims owner.
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), false,
+      "the demoted actor's stale buttons must not open the dialog — the live " +
+      "team_authority says member, and a member can assign nothing");
+  } finally {
+    dom.restore();
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+    hooks.clearMe();
+  }
+});
+
+test("cch-w45: an INDETERMINATE live band never becomes a false refusal", () => {
+  // loading / failed / stale / teamless → membersContext() is null, i.e. no
+  // NEWER fact. There is nothing to prefer over the paint, so the captured ctx
+  // stands and the server is the backstop. Failing closed here would withhold a
+  // control the server honours — this epic's own class running backwards.
+  hooks.clearMe(); // "loading"
+  assert.equal(hooks.membersContext(), null);
+  const dom = roleModalDom();
+  try {
+    hooks.openRoleModal(OWNER_CTX, "u-admin", "admin@x.io", "admin");
+    assert.equal(dom.opened(), true, "an unknown band is not a refusal");
+  } finally {
+    dom.restore();
+  }
+});
+
+test("cch-w45: roleModalAuthority prefers the live read only for the SAME team", () => {
+  const live = { teamId: "t2", role: "member", userId: "u-me" };
+  const a = hooks.roleModalAuthority(OWNER_CTX, live, "u-admin", "admin");
+  assert.equal(a.actorRole, "owner", "a live read for another team says nothing about this one");
+  const same = hooks.roleModalAuthority(OWNER_CTX, { ...live, teamId: "t1" }, "u-admin", "admin");
+  assert.equal(same.actorRole, "member", "same team → the live read wins");
+  // Self re-derives the TARGET off the actor, never the DOM's data-role.
+  const self = hooks.roleModalAuthority(OWNER_CTX, null, "u-me", "member");
+  // (field-wise: the object is minted inside the vm realm, so deepEqual's
+  // prototype check would red on a correct value.)
+  assert.equal(self.actorRole, "owner");
+  assert.equal(self.targetRole, "owner", "self takes the ACTOR's role, not the DOM's data-role");
+  assert.equal(self.isSelf, true);
+});
+
+test("cch-w45 (D439): assignableRoles' return type is unchanged — still an array", () => {
+  // D439 is binding: the rank-relativity lives in the SIBLING
+  // (canChangeMemberRole), never inside assignableRoles, which stays the honest
+  // actor-tier gate for its other three call sites.
+  for (const role of ["owner", "admin", "member", "nonsense", undefined]) {
+    const out = hooks.assignableRoles(role);
+    assert.ok(Array.isArray(out), `assignableRoles(${role}) must return an array`);
+    assert.ok(out.every((r) => typeof r === "string"));
+  }
+  // (spread across the realm boundary — the vm's Array.prototype is not ours.)
+  assert.deepEqual([...hooks.assignableRoles("owner")], ["owner", "admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("admin")], ["admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("member")], []);
+  assert.equal(hooks.assignableRoles.length, 1, "arity 1 — the ACTOR axis, unchanged");
+});
