@@ -676,14 +676,20 @@ defmodule PDS.Census do
     # read back because nothing is stored. Exactly the class prose's case.
     {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController",
      :validate, :status_only_receipt},
-    # BPML working-copy sync (masterplan W3): renders real `ok: true` receipts, but
-    # they live in sync_apply/6 → sync_persist/6 — one and two helpers below the
-    # routed action, past the register's stated ONE-HOP relation. The class prose's
-    # literal case: the receipt exists and "does not spell the key [where] the lens
-    # greps". The sync cycle IS read back end-to-end in
-    # bulldocs_bpml_api_test.exs ("pull, edit the file, push, converge").
-    {:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
-     :sync, :status_only_receipt},
+    # THE ONE ROW ROUTED-DISPOSITION-UNSHADOWED FOUND ON MERGED MAIN, AND ITS DELETION.
+    # `{:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
+    # :sync, :status_only_receipt}` stood here, and its own comment said the receipts "live
+    # in sync_apply/6 -> sync_persist/6 — one and two helpers below the routed action, past
+    # the register's stated ONE-HOP relation". THE FIRST HOP IS INSIDE THE RELATION: `sync`
+    # calls sync_apply/6 LOCALLY, the register carries a row for that def, and this census
+    # disposes the member JUDGED on every run — it has done so since the row was written.
+    # The row therefore claimed an exclusion the derivation was already contradicting, and
+    # NOTHING SAW IT: EXCLUDED counted 190 while the table held 191 rows, because the cond's
+    # JUDGED > EXCLUDED precedence swallowed it. That is exactly the D2 shape this slice's
+    # arm exists to name, found by the arm on its first run over the real tree — so the
+    # arm's first catch is a row that had been silently wrong on main, not a fixture.
+    # DELETED RATHER THAN RE-CLASSED: a judged member needs no @routed_excluded entry, and
+    # keeping one would leave the same contradiction under a different class name.
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
@@ -700,6 +706,25 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/D566).
+    # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
+    # it stays in `status_only_receipt` with this comment rather than being moved, because
+    # the class's CURRENT prose is TRUE of it and the reason it is excluded is a limit of
+    # the JUDGED RELATION, not an absence of a receipt:
+    #   site_deploy_controller.ex emits a LITERAL `ok: true` inside `defp start/2`, reached
+    #   at DEPTH 2 — trigger -> do_trigger -> start. dispose_routed/4's relation is ONE HOP
+    #   (the action's own span, or a def the action calls locally), so a receipt two helpers
+    #   deep reads as EXCLUDED. That is the stated limit at dispose_routed/4, and this row
+    #   is its single live instance on this tree.
+    # SO THE CLASS SENTENCE IS EXACT AND THE ROW IS HONEST: the action "reaches no `ok:
+    # true` receipt THIS LENS keys on" — THIS LENS, at one hop. What would be false about
+    # it is wave 38's retired clause ("claims success by STATUS alone"): this route does not
+    # claim success by status, it emits the literal key two hops down. That clause is
+    # already retired from the class prose above; this comment is the row-level record so
+    # nobody has to re-run the BFS to learn which member the retirement was about.
+    # WIDENING THE RELATION TO DEPTH 2 IS REFUSED (and this row is the whole case for the
+    # refusal): it buys exactly this ONE member and imports unbounded FALSE JUDGED through
+    # shared render/fallback helpers that every branch reaches, error branches included.
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
@@ -4005,6 +4030,20 @@ defmodule PDS.Census do
   # A name this pass retires is not guessed: the tuple keeps `"?"` and the row DECLINES.
   # Declining is a smaller lie than inlining a binding that may not hold, and the selftest
   # plants exactly that nested rebind to prove the two behaviours differ.
+  #
+  # THE SECOND LIMIT, NAMED HERE BECAUSE AN UNDISCLOSED LIMIT INSIDE A FIX IS THIS EPIC'S
+  # OWN DISEASE. This pass runs on `register_routes/1`'s body, and plugin_route_specs/1
+  # applies it BEFORE both the literal walk and follow_route_delegation/2 — so a delegating
+  # callback whose OWN body binds an alias to a variable is covered. What is NOT covered is
+  # the DELEGATE'S body: follow_route_delegation/2 resolves `Routes.all()` to that def and
+  # hands its raw AST to route_specs/1 without a substitution pass, so a `var = Alias`
+  # binding inside the delegate resolves to `"?"` and its route DECLINES. That is EMPTY
+  # today and the emptiness is derived, not assumed — onixedit/routes.ex is the only
+  # delegate target in the tree and it holds zero `=` bindings — but it is a LIVE second
+  # instance of the same shape, and it is written down here rather than left dark. The
+  # repair, when a delegate first binds one, is one call: inline_alias_bindings/1 on `b`
+  # inside follow_route_delegation/2's flat_map. It is not made now because a resolver
+  # arm with no member to resolve is an unfalsifiable arm.
   defp inline_alias_bindings(body) do
     stmts = block_stmts(body)
 
@@ -4208,6 +4247,28 @@ defmodule PDS.Census do
       |> Enum.filter(fn {_k, n} -> n > 1 end)
       |> Enum.map(&elem(&1, 0))
 
+    # THE THIRD CONTRADICTION THE TABLE CAN CARRY, AND THE ONE NOTHING SAW (PDS-D556).
+    # `orphans` catches a row naming NO live member; `dupes` catches a key carrying two
+    # rows. Neither can see a row that names a member the SAME RUN disposed JUDGED or
+    # ROSTERED: the cond above has precedence JUDGED > ROSTERED > EXCLUDED, so such a row
+    # is SWALLOWED — the member takes its derived label, EXCLUDED does not move, the key
+    # is live so it is not an orphan, and the row is unique so it is not a dupe. MEASURED
+    # ON MERGED MAIN: plant {:post, "/v1/paperflow/papers", "BarkparkWeb.BulldocsIngestController",
+    # :ingest, :status_only_receipt} — a member this lens JUDGES — and the census prints
+    # PASS ROUTED-POPULATION-COMPLETE, EXCLUDED UNMOVED while the table holds one row more,
+    # UNDISPOSED 0, CENSUS OK, exit 0. NOT ONE NUMBER MOVES. The exclusion table could be
+    # grown over judged members with zero observable effect on any printed figure or any
+    # arm, which is a table that cannot be audited by reading the run.
+    #
+    # DERIVED, NOT SNAPSHOTTED. Both inputs are already in scope here — the labels this
+    # cond just assigned, and the committed map it read to assign them — so this costs one
+    # comprehension and no new committed data, which is what keeps it un-rottable.
+    shadowed =
+      for {key, verdict, _} <- disposed,
+          verdict in [:judged, :rostered],
+          Map.has_key?(committed, key),
+          do: {key, verdict, Map.fetch!(committed, key)}
+
     # ---- THE JUDGMENT-COVERAGE LADDER, TAKEN EXACTLY ONCE, HERE -------------------
     #
     # THE TOP RUNG IS A UNION AND MUST NEVER BE A SUM. leg_a and leg_b are two
@@ -4272,6 +4333,7 @@ defmodule PDS.Census do
       undisposed: for({k, :undisposed, _} <- disposed, do: k),
       orphans: orphans,
       dupes: dupes,
+      shadowed: shadowed,
       classes: Enum.frequencies(for {_k, :excluded, c} <- disposed, do: c)
     }
   end
@@ -5078,7 +5140,31 @@ defmodule PDS.Census do
     end)
 
     p("    UNDISPOSED #{pad(length(disp.undisposed))}  <- ROUTED-POPULATION-COMPLETE reds on this")
+    p("    SHADOWED  #{pad(length(disp.shadowed))}  <- ROUTED-DISPOSITION-UNSHADOWED reds on this. NOT a")
+    p("                  disposition class and NOT part of the sum below: it counts members")
+    p("                  the cond disposed JUDGED or ROSTERED that ALSO carry a committed")
+    p("                  exclusion row — rows the precedence SWALLOWS, which is why every")
+    p("                  number on this page can be identical with the table one row larger.")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    p("")
+    p("  JUDGED FRACTION #{disp.ladder.judged_coverage}/#{length(d.population)} — the share of the routed write")
+    p("  surface this lens has JUDGED (disposed JUDGED or ROSTERED) — PRINTED, NEVER GATED")
+    wrap(
+      "IT IS NOT A THRESHOLD AND MUST NEVER BECOME ONE, and the reason is a measurement, " <>
+        "not a preference (PDS-D563). Over 95 api/lib commits this fraction MOVED 9 times " <>
+        "(once per 10.6 commits), and all 8 of the movers that moved the DENOMINATOR were " <>
+        "plain FEATURE commits that touched no receipt at all: a route added is a routed " <>
+        "member added, so an honest feature lowers this fraction the instant it lands. A " <>
+        "thresholded or non-decreasing arm over this line would have redded five times in " <>
+        "eleven days on work that broke nothing. THE NUMERATOR IS THE HALF THAT RATCHETS: " <>
+        "judged never decreased across all 95 commits and ROSTERED held at 7 throughout, " <>
+        "which is why a numerator floor is the only shape that could ever be honest here " <>
+        "— and even that is not shipped, because D454 stands. What this line buys is that " <>
+        "the coverage of the judgment can no longer be an unstated number a reader has to " <>
+        "divide two other lines to find.",
+      "    "
+    )
 
     p("")
     lad = disp.ladder
@@ -6555,9 +6641,38 @@ defmodule PDS.Census do
             else: Enum.map_join(blind, ", ", fn {n, a, l} -> "#{n}/#{a}:#{l}" end)
       end
 
+    # THE ARM PRINTS THE DEPARTURE CASE IT CANNOT CATCH, IN ITS PASS SENTENCE (PDS-D556).
+    # Departure decomposes into three cases and this arm owns exactly ONE of them:
+    #   D1  a receipt vanishes and no row is added  -> already reds as UNDISPOSED ARRIVAL.
+    #   D2  a row is planted over a still-judged member -> THIS ARM. Free, derived.
+    #   D3  the judgment is lost AND the row added in ONE commit -> the member is disposed
+    #       EXCLUDED, honestly, by a table that names it. The contradiction exists only
+    #       BETWEEN TWO CHECKOUTS, and a build-free ONE-CHECKOUT lens structurally cannot
+    #       read history. SHADOWED 0 THEREFORE DOES NOT MEAN "NO DEPARTURES" — and a reader
+    #       who takes it that way can only be stopped by prose, so the prose ships in the
+    #       PASS sentence rather than in a comment nobody runs.
+    # ARRIVAL SEMANTICS, NEVER A COUNT: the predicate is `shadowed == []` and the failure
+    # text NAMES THE QUADS. An honest table edit — a row added over an undisposed member,
+    # a row removed — cannot red this, because no number is compared to anything.
+    shadow_why =
+      if disp.shadowed == [] do
+        "no committed disposition row names a member this run disposed JUDGED or ROSTERED — the #{length(@routed_excluded)}-row table and the #{disp.judged + disp.rostered} derived judgment(s) do not overlap · BLIND SHAPE, PRINTED: this catches a member judged AND excluded AT THE SAME TIME (D2). It CANNOT catch a judgment lost and an exclusion row added in ONE commit (D3) — that departure leaves a contradiction only in HISTORY, and a build-free one-checkout lens cannot read history. SHADOWED 0 IS NOT \"NO DEPARTURES\""
+      else
+        Enum.join(
+          Enum.map(Enum.take(disp.shadowed, 6), fn {{m, p, mod, a}, verdict, c} ->
+            "SHADOWED DISPOSITION #{m} #{p} -> #{mod}.#{a} [#{c}] — this run disposed it #{String.upcase(to_string(verdict))}, so the row is SWALLOWED by the cond's precedence and moves no printed number"
+          end) ++
+            [
+              "the exclusion table is claiming a member the derivation judges; one of the two is wrong and neither says so"
+            ],
+          " · "
+        )
+      end
+
     [
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
-      {"LENS-CAN-MISS", resolved != [], lens_why}
+      {"LENS-CAN-MISS", resolved != [], lens_why},
+      {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
     ] ++ derivation_checks(d) ++ liveview_checks(d)
   end
 
@@ -7378,6 +7493,105 @@ defmodule PDS.Census do
       expect: ["Keyed on {module, live_session}. 3 routed module(s) resolve to a"],
       refute: ["Keyed on {module, live_session}. 2 routed module(s) resolve to a"],
       proves: "the `?` decline is load-bearing: without it the fold credits a live_session to a spec whose module this lens cannot name, and the printed routed-module count goes 2 -> 3 on a corpus whose openable routed modules never changed"
+    },
+    # THE ALIAS RESOLVER GETS ITS OWN MUTANT (PDS-D562). inline_alias_bindings/1 is the
+    # clause that reclaimed the two Sheets write routes from the retired
+    # `action_not_in_corpus` class, and until this case existed it was a RESOLVER WITH NO
+    # MUTANT — exactly the quietly-rotting shape this epic distrusts, and one whose
+    # rot is INVISIBLE in the shipped numbers (a retired binding does not red anything on
+    # the real tree; it silently re-labels two members).
+    #
+    # IT PROVES THE JOIN BY NAME, WHICH IS THE WHOLE POINT. The fixture plugin binds
+    # `ops_mod = Barkpark.Filler.PluginOpsLive` at the top of register_routes/1 and spells
+    # its route with the VARIABLE, and a committed disposition row names the RESOLVED
+    # module. Retire the substitution (bind_counts/1 can never equal 99) and that one route
+    # splits in two directions AT ONCE: the live member arrives as `?.index` with no
+    # disposition, and the committed row that named the resolved module now names nothing
+    # live. BOTH halves are asserted, because either alone could be produced by something
+    # other than the substitution — together they can only mean the module name moved from
+    # `Barkpark.Filler.PluginOpsLive` to `?`, which IS the resolution, observed by name.
+    %{
+      name: "ROUTE-ALIAS-BINDING-RESOLVES",
+      corpus: :full,
+      argv: [],
+      # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+      # an ambiguous anchor, and a mut literal that occurs twice is exactly that.
+      mut:
+        {"Map.get(counts, name, " <> "0) == 1", "Map.get(counts, name, " <> "0) == 99"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-POPULATION-COMPLETE",
+        "UNDISPOSED ARRIVAL live /plugins/ops-live -> ?.index",
+        "ORPHANED DISPOSITION live /plugins/ops-live -> Barkpark.Filler.PluginOpsLive.index"
+      ],
+      refute: ["PASS  ROUTED-POPULATION-COMPLETE"],
+      proves: "a route module bound to a LOCAL VARIABLE is resolved to its fully-qualified alias before route_specs/1 reads the tuple: retire the substitution and the same route arrives as `?.index` while the committed row naming Barkpark.Filler.PluginOpsLive.index is orphaned — the two halves name the resolved module and the unresolved one in the SAME run"
+    },
+    # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
+    #
+    # THE CORPUS IS THE REPO, AND THAT IS THE WHOLE COST STORY. The arm's predicate reads
+    # `verdict in [:judged, :rostered]`, and BOTH labels are DERIVED — a member is judged
+    # because this run found a receipt the register keys, rostered because it found a
+    # @roster anchor. Over the synthetic tree neither label exists for a member the
+    # shipped @routed_excluded also names, so a mutant there would run a check that
+    # returned [] before and [] after — PDS-D541's unmutatability, wearing a new arm's
+    # name. The read-only REPO corpus already exists for exactly this scope problem (13
+    # cases ride it), so no seventh corpus is built: the brief's "third selftest corpus
+    # carrying one file at a live @register path" would flip register_scope/1 to :real
+    # over a synthetic tree and red FOUR unrelated arms, and the case would then have to
+    # borrow an exit code it did not earn. HERE IT EARNS IT, and the earning is ASSERTED,
+    # not assumed: each case requires `PASS  ROUTED-POPULATION-COMPLETE` and
+    # `PASS  LENS-CAN-MISS` in the SAME output as its own FAIL, so exit 1 can only be this
+    # arm's. That is strictly more than the brief asked for and strictly less fixture.
+    #
+    # NOTHING SHIPPED MOVES. Both mutants ADD one @routed_excluded row over a member the
+    # real tree already disposes JUDGED (or ROSTERED). The cond's precedence swallows it,
+    # so EXCLUDED does not move, the derivation partition's total does not move, and the
+    # @rederived baseline does not move — which is the DEFECT restated as a fixture: the
+    # only observable the plant has is the arm this slice adds.
+    #
+    # ONE CASE PER BRANCH, AND EACH CAUGHT BY ITS OWN. Mutating the predicate to
+    # `[:rostered]` leaves SHADOWED-ROW-OVER-ROSTERED green and reds SHADOWED-ROW-OVER-JUDGED
+    # by name; mutating it to `[:judged]` does the mirror. With only one of the two cases
+    # the corresponding half of the predicate is a live arm with no mutant on it — this
+    # epic's failure mode inside its own selftest.
+    %{
+      name: "SHADOWED-ROW-OVER-JUDGED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},",
+         "{:post, \"/v1/paperflow/papers\", \"BarkparkWeb.BulldocsIngestController\", :ingest, :status_only_receipt},\n    " <>
+           "{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DISPOSITION-UNSHADOWED",
+        "SHADOWED DISPOSITION post /v1/paperflow/papers -> BarkparkWeb.BulldocsIngestController.ingest",
+        "this run disposed it JUDGED",
+        "PASS  ROUTED-POPULATION-COMPLETE",
+        "PASS  LENS-CAN-MISS"
+      ],
+      refute: ["PASS  ROUTED-DISPOSITION-UNSHADOWED"],
+      proves: "the JUDGED branch of the predicate is live: an exclusion row planted over a member this run disposes JUDGED reds the new arm BY QUAD while every neighbouring arm stays PASS — the shape that on origin/main moved not one printed number"
+    },
+    %{
+      name: "SHADOWED-ROW-OVER-ROSTERED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},",
+         "{:post, \"/v1/chat-host/events\", \"BarkparkWeb.ChatHostController\", :event, :status_only_receipt},\n    " <>
+           "{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DISPOSITION-UNSHADOWED",
+        "SHADOWED DISPOSITION post /v1/chat-host/events -> BarkparkWeb.ChatHostController.event",
+        "this run disposed it ROSTERED",
+        "PASS  ROUTED-POPULATION-COMPLETE",
+        "PASS  LENS-CAN-MISS"
+      ],
+      refute: ["PASS  ROUTED-DISPOSITION-UNSHADOWED"],
+      proves: "the ROSTERED branch is live and is NOT reachable through the JUDGED one: the planted row names a member disposed ROSTERED by a @roster anchor, and the arm reds naming that quad and that label"
     },
     # THE LADDER'S TOP RUNG, AND THE ONLY DISCRIMINATOR THAT EXISTS FOR IT (wave 45).
     # OVERLAP is 0 on today's tree, so `leg_a + leg_b` and Enum.count(MapSet.union(..))
