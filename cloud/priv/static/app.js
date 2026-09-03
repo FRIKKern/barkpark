@@ -17748,7 +17748,73 @@
   // "suspended — not deleted" sentence, which cch-w54-s5 retired for promising an
   // actor no production path reaches — a pointer left naming a retracted promise
   // is the same defect one layer down, so it is retracted here in the same PR.)
-  function trialCardHtml(sub) {
+  // ── cch-w50-s5 · THE REMINDER SCHEDULE, DECLARED ONCE ─────────────────────
+  //
+  // These two numerals are the CLIENT half of a cross-layer mirror. The server
+  // owns the schedule: TrialExpiryWorker's @three_days / @one_day thresholds
+  // select who gets a notice, and `TrialExpiryWorker.notice_thresholds_days/0`
+  // is the public accessor that states them. Until this slice the console
+  // re-typed "3 days and 1 day" into a sentence and NOTHING connected the two —
+  // grep for "3 days and 1 day" in __app.test.mjs returned zero hits, so the
+  // sentence could be edited to any numerals with the console suite green, and
+  // moving the server threshold left this promise silently false.
+  //
+  // Declared as DATA, not prose, so `billing_client_mirror_test.exs` can read it
+  // BY RUNNING (node:vm over the shipped file, via `__trial_reminder_dump.mjs`)
+  // and compare it to the server accessor. A regex over this source text would
+  // not be a pin; a value the mirror can call is.
+  var TRIAL_NOTICE_DAYS = [3, 1];
+
+  // "3 days and 1 day" — COMPOSED from the array, never typed. The singular is
+  // derived too, so a schedule of [1] cannot render "1 days".
+  function trialNoticePhrase(days) {
+    var parts = (days || []).map(function (n) { return n === 1 ? "1 day" : n + " days"; });
+    if (parts.length === 0) return "";
+    if (parts.length === 1) return parts[0];
+    return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+  }
+
+  // ── THE MUTE STATE IS THREE-VALUED, AND THIS READ FAILS CLOSED ────────────
+  //
+  // `alerts_enabled` reaches this file through exactly ONE door: GET
+  // /v1/notifications/settings, whose sole success path is renderNotifications,
+  // which is what populates `notifCache`. renderBilling fetches the SUBSCRIPTION
+  // and nothing else. So a person landing directly on /billing has
+  // `notifCache === null` and this console has never asked whether the team's
+  // alerts are on.
+  //
+  // The naive guard — `notifCache && notifCache.alerts_enabled === false` — is
+  // FALSE in exactly that state, i.e. it KEEPS the reminder promise for a team
+  // whose alerts are muted and whose worker (TrialExpiryWorker.receivable?/1)
+  // will send nothing. An unpopulated cache is not evidence that alerts are on.
+  // So UNKNOWN is its own state and it SOFTENS the sentence; only a settings
+  // payload that positively says `alerts_enabled: true` earns the flat promise.
+  function trialAlertsState(notif) {
+    if (!notif || typeof notif.alerts_enabled !== "boolean") return "unknown";
+    return notif.alerts_enabled ? "on" : "muted";
+  }
+
+  // The reminder line, one model for all three mute states. Every numeral comes
+  // from `schedule`; there is no day count typed into any of these sentences.
+  function trialReminderCopy(state, schedule) {
+    var phrase = trialNoticePhrase(schedule || TRIAL_NOTICE_DAYS);
+
+    if (state === "muted") {
+      return "Your team has alerts muted, so no trial reminder will be sent. Turn alerts back on in Notifications for the " +
+        phrase + " heads-up.";
+    }
+
+    if (state === "on") {
+      return "We'll remind you " + phrase + " before the trial ends.";
+    }
+
+    // UNKNOWN — conditional, because this console has not read the team's alert
+    // settings and must not promise mail on their behalf.
+    return "If your team's alerts are on, we'll remind you " + phrase +
+      " before the trial ends. Check Notifications to be sure.";
+  }
+
+  function trialCardHtml(sub, alerts) {
     var days = typeof sub.trial_days_remaining === "number" ? sub.trial_days_remaining : null;
     var chip = days === null ? "Free trial" : days <= 0 ? "Trial ended" : days + (days === 1 ? " day left" : " days left");
     var chipOpen = days !== null && days <= 3
@@ -17771,7 +17837,8 @@
         '<p class="trial-cta">' +
           (ended ? "Pick a plan below to launch a new instance." : "Pick a plan below to keep it.") +
         "</p>" +
-        (ended ? "" : "<p class=\"plan-meta dim\">We'll remind you 3 days and 1 day before the trial ends.</p>") +
+        (ended ? "" : '<p class="plan-meta dim">' +
+          trialReminderCopy(alerts || trialAlertsState(notifCache), TRIAL_NOTICE_DAYS) + "</p>") +
       "</div>";
   }
 
@@ -26127,6 +26194,13 @@
       trialEnded: trialEnded,
       trialTagline: trialTagline,
       trialCardHtml: trialCardHtml,
+      // cch-w50-s5: the reminder schedule as DATA (the client half of the
+      // cross-layer mirror in billing_client_mirror_test.exs) plus the
+      // three-valued mute read and the copy model it drives.
+      trialNoticeDays: TRIAL_NOTICE_DAYS.slice(),
+      trialNoticePhrase: trialNoticePhrase,
+      trialAlertsState: trialAlertsState,
+      trialReminderCopy: trialReminderCopy,
       tierCardHtml: tierCardHtml,
       checkoutCapability: checkoutCapability,
       testModeDisclosure: TEST_MODE_DISCLOSURE,
