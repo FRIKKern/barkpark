@@ -54,6 +54,7 @@
 # USAGE
 #   bash scripts/ci-measure.sh --since 2026-08-30 --until 2026-09-02
 #   bash scripts/ci-measure.sh --since … --until … --json          # machine-readable
+#   bash scripts/ci-measure.sh --breaker --since 2026-09-03        # main-red breaker value
 #   bash scripts/ci-measure.sh --selftest                          # fixtures, no network
 #   CI_MEASURE_FIXTURE=<file> bash scripts/ci-measure.sh --since … --until …
 #
@@ -62,6 +63,10 @@
 set -uo pipefail
 
 REPO="${CI_MEASURE_REPO:-FRIKKern/barkpark}"
+# Absolute, so --breaker can reach .github/workflows and main-red-breaker.sh from
+# any cwd — the relative form exited 127 on main 0f6c9937 for exactly this reason.
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+BREAKER_JOBS_TSV=""
 
 # CONCURRENCY LEDGER — one line per date range, oldest first. A reading is only
 # comparable with another at the SAME ceiling. Add a line when the plan changes;
@@ -82,6 +87,7 @@ while [ $# -gt 0 ]; do
     --selftest) MODE=selftest; shift ;;
     --census) MODE=census; shift ;;
     --value-audit) MODE=value; shift ;;
+    --breaker) MODE=breaker; shift ;;
     -h|--help) usage ;;
     *) echo "ci-measure: unknown argument '$1'" >&2; usage ;;
   esac
@@ -704,6 +710,195 @@ FIX
     fail=$((fail+1)); echo "  FAIL p5 runs=$p_bad, expected 2 — an unreadable date is being treated as proof of age"
   fi
 
+  # ── b1..b7 THE MAIN-RED BREAKER MEASUREMENT ──────────────────────────────
+  # EVERY fixture below is a RAW line: workflow YAML as committed, a job-log
+  # excerpt as the logs endpoint returns it, and jobs-endpoint rows. None of
+  # them carries a derived field, so none of them can pass by arriving already
+  # answered — that is the v1c blind spot this whole block is shaped against.
+
+  # b1 — THE JOB LIST IS DERIVED, NOT TYPED. Two Decide steps in one file, plus
+  # a job with no Decide step that must NOT appear.
+  mkdir -p "$tmp/wf"
+  cat > "$tmp/wf/go-format.yml" <<'FIX'
+jobs:
+  gofmt:
+    name: gofmt -l (advisory)
+    steps:
+      - name: gofmt
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        run: gofmt -l .
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"gofmt\"}"
+          JOB_NAME: "gofmt -l (advisory)"
+          WORKFLOW_FILE: go-format.yml
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+  gofmt-ceiling:
+    name: gofmt drift ceiling (blocking)
+    steps:
+      - name: ceiling
+        id: s1
+        continue-on-error: true
+        run: exit 0
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        env:
+          STEP_NAMES: "{\"s1\": \"ceiling\"}"
+          JOB_NAME: "gofmt drift ceiling (blocking)"
+          WORKFLOW_FILE: go-format.yml
+        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+  unrelated:
+    name: A job with no breaker at all
+    steps:
+      - name: something
+        run: exit 0
+FIX
+  local b_jobs
+  b_jobs=$(BREAKER_WORKFLOWS="$tmp/wf" breaker_jobs 2>/dev/null | tr '\n' '|')
+  if [ "$b_jobs" = "go-format.yml	gofmt -l (advisory)|go-format.yml	gofmt drift ceiling (blocking)|" ]; then
+    pass=$((pass+1)); echo "  ok   b1 the breaker job list is DERIVED from the workflow YAML (2 jobs, and the job without a Decide step is not among them)"
+  else
+    fail=$((fail+1)); echo "  FAIL b1 derived '$b_jobs' — a typed list would go stale the day a ninth breaker job lands, and a wrong list silently zeroes a row"
+  fi
+
+  # b2 — AND AN EMPTY DERIVATION REFUSES. A workflows dir with no Decide step
+  # must not yield a confident table of zeroes.
+  mkdir -p "$tmp/wf-empty"
+  cat > "$tmp/wf-empty/other.yml" <<'FIX'
+jobs:
+  plain:
+    name: No breaker here
+    steps:
+      - name: run
+        run: exit 0
+FIX
+  if BREAKER_WORKFLOWS="$tmp/wf-empty" breaker_jobs >/dev/null 2>&1; then
+    fail=$((fail+1)); echo "  FAIL b2 an empty derivation succeeded — every count downstream would be a truthful-looking zero"
+  else
+    pass=$((pass+1)); echo "  ok   b2 a workflows dir with no Decide step REFUSES (exit 1) instead of printing zeroes"
+  fi
+
+  # b3 — THE VERDICT IS READ FROM A RAW LOG LINE, the exact sentence
+  # main-red-breaker.sh emits. A FAIL log of the same job must read NONE, or the
+  # AFTER count would be "every breaker job that ran".
+  local b_inh b_fail
+  b_inh=$(printf '%s\n' \
+    '2026-09-03T09:12:44.1Z ##[group]Run bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"' \
+    '2026-09-03T09:12:45.9Z main-red-breaker: INHERITED-FROM-MAIN — '"'"'Doc budgets + anchors'"'"' failed only on step(s) main'"'"'s newest completed run (31999001) already fails: citation guard;' \
+    | breaker_verdict)
+  b_fail=$(printf '%s\n' \
+    '2026-09-03T09:12:45.9Z main-red-breaker: FAIL — '"'"'Doc budgets + anchors'"'"' failed on a step main does not: budget check;' \
+    | breaker_verdict)
+  if [ "$b_inh" = "INHERITED-FROM-MAIN" ] && [ "$b_fail" = "NONE" ]; then
+    pass=$((pass+1)); echo "  ok   b3 a RAW job log reads INHERITED-FROM-MAIN, and a FAIL log of the same job reads NONE (the two verdicts discriminate)"
+  else
+    fail=$((fail+1)); echo "  FAIL b3 inherited='$b_inh' fail='$b_fail' — expected 'INHERITED-FROM-MAIN' and 'NONE'"
+  fi
+
+  # b4 — THE LIVE ENRICHMENT PATH RUNS, with gh stubbed. The row fed in carries
+  # NO verdict, so the count is zero unless breaker_after_enrich actually calls
+  # the logs endpoint and parses what comes back. This is the v1d lesson applied
+  # before the bug rather than after it: a fixture that arrives pre-enriched
+  # leaves this function unexecuted while every number still looks right.
+  local b_live
+  b_live=$(gh() { printf '%s\n' 'main-red-breaker: INHERITED-FROM-MAIN — job x failed only on step(s) main already fails: y;'; }
+           printf '%s\n' '{"arm":"AFTER","day":"2026-09-03","wf":"doc-gates.yml","job":"Doc budgets + anchors","run_id":31999,"job_id":420001,"conclusion":"success"}' \
+             | breaker_after_enrich \
+             | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline()).get("verdict"))' 2>/dev/null)
+  if [ "$b_live" = "INHERITED-FROM-MAIN" ]; then
+    pass=$((pass+1)); echo "  ok   b4 breaker_after_enrich attaches the verdict on the LIVE path (gh stubbed, real function, raw row in)"
+  else
+    fail=$((fail+1)); echo "  FAIL b4 got '$b_live' — the live path drops the verdict, so the AFTER column reads 0 on a day the breaker fired"
+  fi
+
+  # b5 — THE BEFORE ARM REPLAYS scripts/main-red-breaker.sh. Ours ⊆ main's, so
+  # the gating script itself says INHERITED. Nothing here reimplements that rule.
+  cat > "$tmp/before-inherited.jsonl" <<'FIX'
+{"kind":"main_jobs","wf":"doc-gates.yml","run_id":31000001,"created":"2026-09-01T00:00:00Z","body":{"jobs":[{"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"citation guard","conclusion":"failure"},{"name":"EXIT-trap selftest","conclusion":"failure"}]}]}}
+{"kind":"pr_red","arm":"BEFORE","day":"2026-09-01","wf":"doc-gates.yml","job":"Doc budgets + anchors","run_id":31000099,"created":"2026-09-01T10:00:00Z","steps":[{"name":"checkout","conclusion":"success"},{"name":"citation guard","conclusion":"failure"}]}
+FIX
+  local b_before
+  b_before=$(breaker_before_classify < "$tmp/before-inherited.jsonl" \
+              | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline()).get("verdict"))' 2>/dev/null)
+  if [ "$b_before" = "INHERITED-FROM-MAIN" ]; then
+    pass=$((pass+1)); echo "  ok   b5 a historical red whose failing step main already fails replays as INHERITED — decided by main-red-breaker.sh itself, not a second copy of the rule"
+  else
+    fail=$((fail+1)); echo "  FAIL b5 got '$b_before' — the BEFORE window would count zero and the whole comparison would read as 'the breaker changed nothing'"
+  fi
+
+  # b6 — AND THE DISCRIMINATOR HOLDS. The same job, the same main run, one step
+  # main does NOT fail: not inherited. Without this, b5 could pass because the
+  # replay says INHERITED to everything.
+  cat > "$tmp/before-own.jsonl" <<'FIX'
+{"kind":"main_jobs","wf":"doc-gates.yml","run_id":31000001,"created":"2026-09-01T00:00:00Z","body":{"jobs":[{"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"citation guard","conclusion":"failure"}]}]}}
+{"kind":"pr_red","arm":"BEFORE","day":"2026-09-01","wf":"doc-gates.yml","job":"Doc budgets + anchors","run_id":31000100,"created":"2026-09-01T10:00:00Z","steps":[{"name":"citation guard","conclusion":"failure"},{"name":"doc budget check","conclusion":"failure"}]}
+FIX
+  local b_own
+  b_own=$(breaker_before_classify < "$tmp/before-own.jsonl" \
+           | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline()).get("verdict"))' 2>/dev/null)
+  if [ "$b_own" = "NONE" ]; then
+    pass=$((pass+1)); echo "  ok   b6 a red on a step main does NOT fail is not inherited — the BEFORE arm discriminates instead of waving everything through"
+  else
+    fail=$((fail+1)); echo "  FAIL b6 got '$b_own', expected NONE — the BEFORE count would swallow the author's own reds and overstate the breaker's value"
+  fi
+
+  # b7 — END TO END. Both fixtures through the real mode: one BEFORE, one AFTER,
+  # the run ids printed, and the number of logs read DISCLOSED. A per-log sample
+  # whose sample size is not on the page is a guess wearing a number.
+  cat > "$tmp/after-e2e.jsonl" <<'FIX'
+{"arm":"AFTER","day":"2026-09-03","wf":"doc-gates.yml","job":"Doc budgets + anchors","run_id":31999,"job_id":420001,"conclusion":"success"}
+FIX
+  local b_e2e b_ids b_logs
+  b_e2e=$(gh() { printf '%s\n' 'main-red-breaker: INHERITED-FROM-MAIN — job failed only on step(s) main already fails: citation guard;'; }
+          BREAKER_WORKFLOWS="$tmp/wf" \
+          CI_MEASURE_BREAKER_AFTER_FIXTURE="$tmp/after-e2e.jsonl" \
+          CI_MEASURE_BREAKER_BEFORE_FIXTURE="$tmp/before-inherited.jsonl" \
+          SINCE=2026-09-03 UNTIL=2026-09-03 breaker_mode 2>/dev/null)
+  b_ids=$(printf '%s\n' "$b_e2e" | grep -c '31000099\|31999' || true)
+  b_logs=$(printf '%s\n' "$b_e2e" | grep -c '1 job logs read' || true)
+  if printf '%s\n' "$b_e2e" | grep -q '^TOTAL' \
+     && [ "$(printf '%s\n' "$b_e2e" | awk '/^TOTAL/{print $2, $3}')" = "1 1" ] \
+     && [ "$b_ids" -ge 2 ] && [ "$b_logs" = "1" ]; then
+    pass=$((pass+1)); echo "  ok   b7 the table reports BEFORE 1 / AFTER 1, names both run ids, and discloses '1 job logs read'"
+  else
+    fail=$((fail+1)); echo "  FAIL b7 totals '$(printf '%s\n' "$b_e2e" | awk '/^TOTAL/{print $2, $3}')' idlines=$b_ids logline=$b_logs — a count with no run ids behind it cannot be walked back, and an undisclosed log budget hides how much of the day was actually read"
+  fi
+
+
+  # b8 — THE ZERO THAT LOOKED LIKE AN ANSWER. This is the live bug caught by the
+  # first real run of this mode, promoted to an arm: 642 PR runs in the window,
+  # every collector emitting nothing (gh rejected an --arg flag it does not have,
+  # 2>/dev/null ate the message), and a clean "BEFORE 0 / AFTER 0" printed with a
+  # straight face. A window with runs in it and no jobs examined must REFUSE.
+  local b_guard_rc b_guard_out
+  b_guard_out=$(printf '%s\n' \
+    '{"__pop__":true,"arm":"AFTER","day":"2026-09-03","runs":642}' \
+    '{"__pop__":true,"arm":"BEFORE","day":"2026-09-02","runs":504}' \
+    '{"__logs__":true,"read":0,"budget":160}' \
+    | breaker_report 2026-09-03 2026-09-03 2026-09-02 2026-09-02 2>&1)
+  b_guard_rc=$?
+  if [ "$b_guard_rc" != "0" ] && printf '%s' "$b_guard_out" | grep -q 'REFUSES'; then
+    pass=$((pass+1)); echo "  ok   b8 642 sampled PR runs with ZERO jobs examined REFUSES (exit $b_guard_rc) instead of printing a tidy 0/0"
+  else
+    fail=$((fail+1)); echo "  FAIL b8 exit=$b_guard_rc — a broken collector prints as 'the breaker neutralises nothing', which is the exact false answer this mode exists to avoid"
+  fi
+
+  # b9 — AND THE REFUSAL DISCRIMINATES. The same shape with jobs actually
+  # examined must still print its table, or b8 would just be "never report".
+  local b_ok_rc
+  printf '%s\n' \
+    '{"__pop__":true,"arm":"AFTER","day":"2026-09-03","runs":642}' \
+    '{"__logs__":true,"read":3,"budget":160}' \
+    '{"arm":"AFTER","day":"2026-09-03","job":"Doc budgets + anchors","run_id":31999,"verdict":"NONE"}' \
+    | breaker_report 2026-09-03 2026-09-03 2026-09-02 2026-09-02 >/dev/null 2>&1
+  b_ok_rc=$?
+  if [ "$b_ok_rc" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   b9 a window that WAS read reports normally (exit 0) even when the count is genuinely zero — the guard fires on the instrument, not on the answer"
+  else
+    fail=$((fail+1)); echo "  FAIL b9 exit=$b_ok_rc — the guard refuses a real measured zero, which would make a working breaker unreportable"
+  fi
   echo
   echo "SELFTEST: $pass passed, $fail failed."
   [ "$fail" -eq 0 ]
@@ -964,11 +1159,384 @@ VPY
   return $rc
 }
 
+# ---------------------------------------------------------------------------
+# --breaker — DID THE MAIN-RED BREAKER NEUTRALISE ANYTHING? (task-3f0fff73fdf57a2d,
+# for the parent task-e638b950726fea51 c2.)
+#
+# THE TWO NUMBERS, and why they are not the same measurement:
+#
+#   AFTER   PR check-runs of the breaker jobs whose "Decide (main-red breaker …)"
+#           step printed INHERITED-FROM-MAIN. This verdict exists ONLY in the job
+#           LOG — the job is green either way, so no list endpoint can see it and
+#           no `conclusion` field distinguishes it. One log read per job, against
+#           a 5,000/hour core budget, so this arm is SAMPLED and every table says
+#           how many logs it read. A count with no log budget behind it would be
+#           a guess wearing a number.
+#
+#   BEFORE  PR reds of the SAME jobs, in an equal-length window before the
+#           breaker, whose failing step names main's newest completed run at the
+#           time already failed on. This is the 631/1,207 step-equality method.
+#
+# THE BEFORE ARM DOES NOT REIMPLEMENT THAT RULE — it REPLAYS it. Each historical
+# red is fed to scripts/main-red-breaker.sh itself through the two hooks the
+# script already has (STEP_OUTCOMES/STEP_NAMES, MAIN_RED_BREAKER_FIXTURE), and
+# whatever that script says is the answer. A second copy of "ours is a subset of
+# main's failed steps" living here would be free to drift from the copy that
+# actually gates CI, and then the before/after comparison would be between two
+# different rules — which is the one way this table could be confidently wrong.
+#
+# THE NINE / THE EIGHT. The approval says nine breaker jobs; the workflows on
+# main at 6c98c245a declare EIGHT Decide steps (security.yml x4, doc-gates.yml,
+# go-format.yml x2, compose-smoke.yml). The list is DERIVED here and printed, so
+# the table is right whichever number is right, and a ninth job added tomorrow
+# appears without an edit to this script.
+# ---------------------------------------------------------------------------
+
+# breaker_jobs — the (workflow file, job name) pairs that run the breaker,
+# read out of the workflows themselves. JOB_NAME in the Decide step's env IS the
+# rendered check-run name (the breaker matches main's job on it), so this is the
+# same string the API returns — no second naming convention to keep in sync.
+breaker_jobs() {
+  local dir="${BREAKER_WORKFLOWS:-$SCRIPT_DIR/../.github/workflows}"
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'BPY'
+import os, re, sys
+d = sys.argv[1]
+out = []
+for fn in sorted(os.listdir(d)):
+    if not fn.endswith((".yml", ".yaml")): continue
+    lines = open(os.path.join(d, fn), encoding="utf-8", errors="replace").read().splitlines()
+    i = 0
+    while i < len(lines):
+        if re.match(r'\s*- name:\s*Decide \(main-red breaker', lines[i]):
+            job = wf = ""
+            j = i + 1
+            while j < len(lines) and not re.match(r'\s*- name:', lines[j]):
+                m = re.match(r'\s*JOB_NAME:\s*"(.*)"\s*$', lines[j])
+                if m: job = m.group(1)
+                m = re.match(r'\s*WORKFLOW_FILE:\s*"?([\w.-]+)"?\s*$', lines[j])
+                if m: wf = m.group(1)
+                j += 1
+            if job and wf: out.append((wf, job))
+            i = j; continue
+        i += 1
+BPY
+  # The DERIVATION must never silently return nothing: an empty list would make
+  # every count below a truthful-looking zero. Refuse instead.
+  cat >> "$pyf" <<'BPY'
+if not out:
+    print("ci-measure: --breaker derived ZERO breaker jobs from %s — the Decide-step shape changed; refusing to print a table of zeroes" % d, file=sys.stderr)
+    raise SystemExit(1)
+for wf, job in out:
+    print("%s\t%s" % (wf, job))
+BPY
+  python3 "$pyf" "$dir"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
+# breaker_verdict — RAW job log on stdin, the Decide step's verdict on stdout.
+# The breaker prints exactly one of two sentence openings and this reads for
+# them; anything else is NONE (the job never reached a verdict, or was green).
+breaker_verdict() {
+  if grep -q 'main-red-breaker: INHERITED-FROM-MAIN' ; then
+    echo INHERITED-FROM-MAIN
+  else
+    echo NONE
+  fi
+}
+
+# breaker_after_enrich — THE LIVE PATH. RAW job rows in (as the jobs endpoint
+# projects them, carrying NO verdict), rows out with "verdict" attached from the
+# job's log. This is the arm that has to be driven with gh stubbed: a fixture
+# that already carries `verdict` would leave this function unexecuted while every
+# count still looked right (the v1c blind spot, and the reason v1d exists).
+# BUDGET: one API call per row, capped, and the cap is reported not hidden.
+breaker_after_enrich() {
+  local budget="${BREAKER_LOG_BUDGET:-160}" read_n=0 line jid log verdict
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    jid=$(printf '%s' "$line" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("job_id",""))' 2>/dev/null)
+    if [ -z "$jid" ] || [ "$read_n" -ge "$budget" ]; then
+      printf '%s\n' "$line" | V=UNREAD python3 -c 'import json,sys,os;o=json.load(sys.stdin);o["verdict"]=os.environ["V"];print(json.dumps(o))' 2>/dev/null \
+        || printf '%s\n' "$line"
+      continue
+    fi
+    log=$(gh api "repos/$REPO/actions/jobs/$jid/logs" 2>/dev/null)
+    read_n=$(( read_n + 1 ))
+    verdict=$(printf '%s' "$log" | breaker_verdict)
+    # V= goes BEFORE the command — after it, it is argv, os.environ raises, and
+    # the un-enriched row falls through silently. (The v1d lesson, verbatim.)
+    printf '%s\n' "$line" | V="$verdict" python3 -c 'import json,sys,os;o=json.load(sys.stdin);o["verdict"]=os.environ["V"];print(json.dumps(o))' 2>/dev/null \
+      || printf '%s\n' "$line"
+  done
+  echo "{\"__logs__\":true,\"read\":$read_n,\"budget\":$budget}"
+}
+
+# breaker_before_classify — RAW rows in, one "inherited" verdict per historical
+# red out, decided by scripts/main-red-breaker.sh ITSELF.
+#   {"kind":"pr_red", …,"steps":[{"name":…,"conclusion":…}]}
+#   {"kind":"main_jobs","wf":…,"run_id":…,"created":…,"body":{"jobs":[…]}}
+# Both shapes are the API's own projections. The classifier pairs each red with
+# the NEWEST main_jobs row for the same workflow created at or before it — which
+# is what the breaker reads live ("main's newest COMPLETED run").
+breaker_before_classify() {
+  local tmpd; tmpd="$(mktemp -d)"
+  local breaker="${BREAKER_SCRIPT:-$SCRIPT_DIR/main-red-breaker.sh}"
+  cat > "$tmpd/in.jsonl"
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'BPY'
+import json, sys
+mains, reds = [], []
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except json.JSONDecodeError: continue
+    (mains if o.get("kind") == "main_jobs" else reds).append(o)
+mains.sort(key=lambda m: m.get("created") or "")
+for r in reds:
+    if r.get("kind") != "pr_red": continue
+    cand = [m for m in mains if m.get("wf") == r.get("wf")
+            and (m.get("created") or "") <= (r.get("created") or "")]
+    m = cand[-1] if cand else None
+    failed = [s.get("name") for s in (r.get("steps") or [])
+              if s.get("conclusion") == "failure" and s.get("name")]
+    print(json.dumps({
+        "row": r,
+        "outcomes": {("s%d" % i): {"outcome": "failure"} for i, _ in enumerate(failed, 1)},
+        "names": {("s%d" % i): n for i, n in enumerate(failed, 1)},
+        "main_body": (m or {}).get("body") or {"jobs": []},
+        "main_run": (m or {}).get("run_id"),
+    }))
+BPY
+  python3 "$pyf" "$tmpd/in.jsonl" > "$tmpd/paired.jsonl"
+  rm -f "$pyf"
+  local n=0 pl
+  while IFS= read -r pl; do
+    [ -z "$pl" ] && continue
+    n=$(( n + 1 ))
+    printf '%s' "$pl" | python3 -c 'import json,sys;o=json.load(sys.stdin);open(sys.argv[1],"w").write(json.dumps(o["main_body"]))' "$tmpd/main-$n.json"
+    local outc nams job wf out
+    outc=$(printf '%s' "$pl" | python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["outcomes"]))')
+    nams=$(printf '%s' "$pl" | python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["names"]))')
+    job=$(printf '%s' "$pl"  | python3 -c 'import json,sys;print(json.load(sys.stdin)["row"]["job"])')
+    wf=$(printf '%s' "$pl"   | python3 -c 'import json,sys;print(json.load(sys.stdin)["row"]["wf"])')
+    # THE REPLAY. The gating script decides; this mode only records what it said.
+    out=$(STEP_OUTCOMES="$outc" STEP_NAMES="$nams" JOB_NAME="$job" WORKFLOW_FILE="$wf" \
+          GITHUB_EVENT_NAME=pull_request MAIN_RED_BREAKER_FIXTURE="$tmpd/main-$n.json" \
+          GITHUB_STEP_SUMMARY=/dev/null bash "$breaker" 2>/dev/null)
+    local v; v=$(printf '%s' "$out" | breaker_verdict)
+    printf '%s' "$pl" | V="$v" python3 -c 'import json,sys,os;o=json.load(sys.stdin)["row"];o["verdict"]=os.environ["V"];print(json.dumps(o))'
+  done < "$tmpd/paired.jsonl"
+  rm -rf "$tmpd"
+}
+
+# breaker_report — enriched rows (both arms) in, ONE table out: per job, per day,
+# BEFORE count and AFTER count, the window boundaries, and the run ids behind
+# every count. Run ids are the point: a count nobody can walk back to is not a
+# measurement.
+breaker_report() {
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'BPY'
+import json, sys, collections
+a_since, a_until, b_since, b_until = sys.argv[1:5]
+counts = collections.defaultdict(lambda: {"BEFORE": [], "AFTER": []})
+jobs_seen = []
+logs_read = logs_budget = 0
+pop = collections.Counter()
+examined = collections.Counter()
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except json.JSONDecodeError: continue
+    if o.get("__logs__"):
+        logs_read += o.get("read", 0); logs_budget = max(logs_budget, o.get("budget", 0)); continue
+    if o.get("__pop__"):
+        pop[(o["arm"], o["day"])] += o.get("runs", 0); continue
+    examined[o.get("arm")] += 1
+    if o.get("verdict") != "INHERITED-FROM-MAIN": continue
+    counts[(o.get("job"), o.get("day"))][o.get("arm")].append(str(o.get("run_id")))
+
+# THE ZERO THAT LOOKS LIKE AN ANSWER. The first live run of this mode printed a
+# tidy "BEFORE 0 / AFTER 0" over 642 sampled PR runs, and the number was not a
+# finding — `gh api` had rejected an `--arg` flag it does not have, 2>/dev/null
+# ate the message, and every collector emitted nothing. A day with runs in it and
+# ZERO rows examined is a broken instrument, never a quiet day, so it refuses.
+for arm in ("AFTER", "BEFORE"):
+    npop = sum(v for (a, _), v in pop.items() if a == arm)
+    if npop and not examined[arm]:
+        print("ci-measure: --breaker REFUSES — the %s window holds %d PR runs of the breaker "
+              "workflows and ZERO of their jobs came back. That is a collector failure, not a "
+              "quiet window; a 0 printed here would read as 'the breaker neutralises nothing'."
+              % (arm, npop), file=sys.stderr)
+        raise SystemExit(1)
+if examined["AFTER"] and not logs_read:
+    print("ci-measure: --breaker REFUSES — %d AFTER job(s) were examined and NO job log was read. "
+          "The INHERITED-FROM-MAIN verdict exists only in the log, so an AFTER count with zero "
+          "log reads behind it is structurally zero." % examined["AFTER"], file=sys.stderr)
+    raise SystemExit(1)
+
+print("CI BREAKER MEASUREMENT — how many PR reds the main-red breaker neutralises")
+print("AFTER  = a PR check-run whose Decide step printed INHERITED-FROM-MAIN (read from the job LOG).")
+print("BEFORE = a PR red of the same job whose failing steps main's newest completed run already failed,")
+print("         decided by REPLAYING scripts/main-red-breaker.sh over the historical red (631/1,207 method).")
+print()
+print(f"AFTER  window {a_since}..{a_until}")
+print(f"BEFORE window {b_since}..{b_until}   (same length)")
+print(f"AFTER arm is PER-LOG and SAMPLED: {logs_read} job logs read (budget {logs_budget}).")
+print("BEFORE arm reads no logs: step conclusions come from the jobs endpoint.")
+print()
+print(f"{'breaker job':<62}{'day':<12}{'BEFORE':>7}{'AFTER':>7}")
+keys = sorted(counts.keys(), key=lambda k: (k[1] or "", k[0] or ""))
+tb = ta = 0
+for job, day in keys:
+    c = counts[(job, day)]
+    tb += len(c["BEFORE"]); ta += len(c["AFTER"])
+    print(f"{(job or '?')[:60]:<62}{day:<12}{len(c['BEFORE']):>7}{len(c['AFTER']):>7}")
+if not keys:
+    print("(no INHERITED-FROM-MAIN verdict in either window — see the run-id block for what was sampled)")
+print(f"{'TOTAL':<62}{'':<12}{tb:>7}{ta:>7}")
+print()
+print("RUN IDS BEHIND EACH COUNT")
+for job, day in keys:
+    c = counts[(job, day)]
+    for arm in ("BEFORE", "AFTER"):
+        if c[arm]:
+            print(f"  {arm:<6} {day} {job[:52]:<54} {','.join(c[arm])}")
+if pop:
+    print()
+    print("SAMPLED FROM (list-endpoint totals, exact):")
+    for (arm, day), n in sorted(pop.items()):
+        print(f"  {arm:<6} {day}  {n} PR runs of the breaker workflows")
+BPY
+  python3 "$pyf" "$@"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
+# breaker_fetch_after / breaker_fetch_before — the LIVE collectors. Each emits
+# only RAW-shaped rows; all judgement happens downstream in the two classifiers
+# above, so the fixtures in the selftest are the same lines these produce.
+breaker_fetch_after() {
+  local d="$1" until="$2" wf job take i
+  while :; do
+    while IFS=$'\t' read -r wf job; do
+      [ -z "$wf" ] && continue
+      local total ids rid
+      total=$(gh api "repos/$REPO/actions/workflows/$wf/runs?event=pull_request&created=$d&per_page=1" --jq '.total_count' 2>/dev/null) || total=0
+      [ -z "$total" ] && total=0
+      echo "{\"__pop__\":true,\"arm\":\"AFTER\",\"day\":\"$d\",\"runs\":$total}"
+      [ "$total" -eq 0 ] && continue
+      take="${BREAKER_SAMPLE:-12}"; [ "$total" -lt "$take" ] && take="$total"
+      ids=$(gh api "repos/$REPO/actions/workflows/$wf/runs?event=pull_request&created=$d&per_page=100" --jq '.workflow_runs[].id' 2>/dev/null | head -n "$take")
+      for rid in $ids; do
+        # `gh api` has NO --arg (it is jq's flag, not gh's) — a job name with a
+        # space, a paren or a dash cannot be inlined into --jq safely, so the
+        # body comes back whole and REAL jq does the selection. The first live
+        # run of this mode printed a clean 0/0 table because gh rejected --arg
+        # and 2>/dev/null ate the message; arm b8 now refuses that table.
+        gh api "repos/$REPO/actions/runs/$rid/jobs?per_page=100" 2>/dev/null \
+          | jq -c --arg j "$job" --arg d "$d" --arg wf "$wf" \
+              '.jobs[] | select(.name == $j) | {arm:"AFTER", day:$d, wf:$wf, job:.name, run_id:.run_id, job_id:.id, conclusion:.conclusion}' 2>/dev/null
+      done
+    done < "$BREAKER_JOBS_TSV"
+    [ "$d" = "$until" ] && break
+    d=$(python3 -c "import datetime,sys;print((datetime.date.fromisoformat(sys.argv[1])+datetime.timedelta(days=1)).isoformat())" "$d")
+    [ "$d" \> "$until" ] && break
+  done
+}
+
+breaker_fetch_before() {
+  local d="$1" until="$2" wf job
+  # main's completed push runs, once per workflow for the whole window; the jobs
+  # body is fetched only for the runs a red actually pairs with.
+  local seen_main="" mrid
+  while :; do
+    while IFS=$'\t' read -r wf job; do
+      [ -z "$wf" ] && continue
+      local total ids rid
+      total=$(gh api "repos/$REPO/actions/workflows/$wf/runs?event=pull_request&status=failure&created=$d&per_page=1" --jq '.total_count' 2>/dev/null) || total=0
+      [ -z "$total" ] && total=0
+      echo "{\"__pop__\":true,\"arm\":\"BEFORE\",\"day\":\"$d\",\"runs\":$total}"
+      [ "$total" -eq 0 ] && continue
+      local take="${BREAKER_SAMPLE:-12}"; [ "$total" -lt "$take" ] && take="$total"
+      ids=$(gh api "repos/$REPO/actions/workflows/$wf/runs?event=pull_request&status=failure&created=$d&per_page=100" --jq '.workflow_runs[].id' 2>/dev/null | head -n "$take")
+      for rid in $ids; do
+        gh api "repos/$REPO/actions/runs/$rid/jobs?per_page=100" 2>/dev/null \
+          | jq -c --arg j "$job" --arg d "$d" --arg wf "$wf" \
+              '.jobs[] | select(.name == $j and .conclusion == "failure") | {kind:"pr_red", arm:"BEFORE", day:$d, wf:$wf, job:.name, run_id:.run_id, created:.started_at, steps:[.steps[]? | {name, conclusion}]}' 2>/dev/null
+      done
+      # main's newest completed push run at the START of this day, one per
+      # (workflow, day). The breaker reads "newest completed"; replaying against
+      # the run that was newest THEN is the faithful reconstruction available
+      # from the API, and it is stated rather than assumed.
+      case " $seen_main " in *" $wf@$d "*) continue ;; esac
+      seen_main="$seen_main $wf@$d"
+      mrid=$(gh api "repos/$REPO/actions/workflows/$wf/runs?branch=main&event=push&status=completed&created=<=${d}T23:59:59Z&per_page=1" --jq '.workflow_runs[0].id // empty' 2>/dev/null)
+      [ -z "$mrid" ] && continue
+      gh api "repos/$REPO/actions/runs/$mrid/jobs?per_page=100" 2>/dev/null \
+        | WF="$wf" D="$d" RID="$mrid" python3 -c 'import json,sys,os;print(json.dumps({"kind":"main_jobs","wf":os.environ["WF"],"run_id":int(os.environ["RID"]),"created":os.environ["D"]+"T00:00:00Z","body":json.load(sys.stdin)}))' 2>/dev/null
+    done < "$BREAKER_JOBS_TSV"
+    [ "$d" = "$until" ] && break
+    d=$(python3 -c "import datetime,sys;print((datetime.date.fromisoformat(sys.argv[1])+datetime.timedelta(days=1)).isoformat())" "$d")
+    [ "$d" \> "$until" ] && break
+  done
+}
+
+breaker_mode() {
+  local tmpd; tmpd="$(mktemp -d)"
+  BREAKER_JOBS_TSV="$tmpd/jobs.tsv"
+  breaker_jobs > "$BREAKER_JOBS_TSV" || { rm -rf "$tmpd"; return 1; }
+  echo "BREAKER JOBS DERIVED FROM ${BREAKER_WORKFLOWS:-.github/workflows} ($(wc -l < "$BREAKER_JOBS_TSV" | tr -d ' ') jobs, not typed):"
+  sed 's/^/  /' "$BREAKER_JOBS_TSV"
+  echo
+
+  local a_since a_until b_since b_until
+  a_since="$SINCE"; a_until="${UNTIL:-$(date -u +%F)}"
+  # The BEFORE window is the SAME LENGTH, ending the day before AFTER starts.
+  read -r b_since b_until <<EOF
+$(python3 -c '
+import datetime, sys
+a = datetime.date.fromisoformat(sys.argv[1]); b = datetime.date.fromisoformat(sys.argv[2])
+n = (b - a).days + 1
+end = a - datetime.timedelta(days=1)
+print((end - datetime.timedelta(days=n - 1)).isoformat(), end.isoformat())' "$a_since" "$a_until")
+EOF
+
+  {
+    if [ -n "${CI_MEASURE_BREAKER_AFTER_FIXTURE:-}" ]; then
+      breaker_after_enrich < "$CI_MEASURE_BREAKER_AFTER_FIXTURE"
+    else
+      breaker_fetch_after "$a_since" "$a_until" > "$tmpd/after.raw"
+      grep '"__pop__"' "$tmpd/after.raw" || true
+      grep -v '"__pop__"' "$tmpd/after.raw" | breaker_after_enrich
+    fi
+    if [ -n "${CI_MEASURE_BREAKER_BEFORE_FIXTURE:-}" ]; then
+      breaker_before_classify < "$CI_MEASURE_BREAKER_BEFORE_FIXTURE"
+    else
+      breaker_fetch_before "$b_since" "$b_until" > "$tmpd/before.raw"
+      grep '"__pop__"' "$tmpd/before.raw" || true
+      grep -v '"__pop__"' "$tmpd/before.raw" | breaker_before_classify
+    fi
+  } | breaker_report "$a_since" "$a_until" "$b_since" "$b_until"
+  local rc=$?
+  rm -rf "$tmpd"
+  return $rc
+}
+
 if [ "$MODE" = value ]; then
   [ -n "$SINCE" ] || { echo "ci-measure: --value-audit needs --since" >&2; usage; }
   value_audit; exit $?
 fi
 
+if [ "$MODE" = breaker ]; then
+  [ -n "$SINCE" ] || { echo "ci-measure: --breaker needs --since (the AFTER window start)" >&2; usage; }
+  breaker_mode; exit $?
+fi
 if [ "$MODE" = census ]; then
   [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --census needs --since and --until" >&2; usage; }
   census; exit $?
