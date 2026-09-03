@@ -20,16 +20,42 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
   Both halves must hold. A nag that never fires and a nag that never shuts up
   are the same defect wearing different clothes.
   """
-  # async: false ON PURPOSE. `capture_log/1` is VM-global: while this module's
-  # "stays silent" corpus loop refutes the nag string, ANY concurrently running
-  # async test that saves a leading MERGE-GATED criterion logs that same string
-  # into this capture, and the refute blames whichever corpus case is in flight
-  # (main-green PR #15043 red twice on it, 2026-09-02, with a case the
-  # leading-only regex cannot match). Sync modules run after all async ones.
+  # async: false ON PURPOSE, and THE TWO CORPUS LOOPS DO NOT READ THE LOG.
+  #
+  # `capture_log/1` is VM-global. #15043 made this module sync because a
+  # concurrently running ASYNC test that saved a leading MERGE-GATED criterion
+  # logged that same string into this capture, and the corpus refute blamed
+  # whichever case happened to be in flight. That closed test-vs-test
+  # interference — sync modules run after all async ones — but NOT
+  # process-vs-test: long-lived application processes (the StudioChat blocked
+  # sweeper, Oban workers, webhook retries) keep logging during the sync phase
+  # and land in the same capture. Four CI reds are that residue, each naming a
+  # DIFFERENT innocent corpus case and each green on rerun with no code change:
+  #
+  #   2026-08-24 11:40  pds-w1-crown-proof
+  #   2026-08-31 21:02  ji-w1-rig-pipeline-gates
+  #   2026-09-01 01:24  cch-w49-bl-merge-gated-stamp-guard-fires-on-any-mention
+  #   2026-09-01 03:46  cch-w61-bl-the-merge-gate-attestation-names-the-wrong-required-set
+  #
+  # (The 01:24 and 03:46 job logs carry `blocked-notification sweeper: sweep
+  # failed` and `retry: ... Req.TransportError` inside the same window — the
+  # foreign writers, caught in the act.)
+  #
+  # THE FIX IS THE CHANNEL, NOT THE SCHEDULE. `Content.Warnings` is a
+  # PROCESS-DICTIONARY accumulator (warnings.ex: `Process.put/2`), and
+  # `warn_unflagged_merge_gates/1` (tasks.ex) emits the Logger line and
+  # `Warnings.put/3` together in one `if`. The hook runs synchronously in THIS
+  # process, so a drain is an exact read of whether the nag fired for THIS
+  # criterion — no other process can write into it, in either direction. The
+  # two whole-corpus loops below therefore assert on the drain. The
+  # single-criterion tests keep their log assertions: they pin the journal
+  # copy's wording, they are not corpus-sized, and the parity of the two
+  # channels is itself asserted in "the nag rides the ADVISORY CHANNEL".
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
+  alias Barkpark.Content.Warnings
   alias Barkpark.Plugins.Tasks
 
   @fixture Path.join(__DIR__, "../../support/fixtures/merge_gate_wording.json")
@@ -50,6 +76,15 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
   end
 
   defp log_for(criteria), do: capture_log(fn -> assert :ok = save(criteria) end)
+
+  # The race-free read: reset the per-process accumulator, drive the hook in
+  # THIS process, drain. capture_log/1 still wraps the save so the journal copy
+  # does not spray the suite's output — nothing asserts on what it returns.
+  defp warnings_for(criteria) do
+    Warnings.reset()
+    capture_log(fn -> assert :ok = save(criteria) end)
+    Warnings.drain()
+  end
 
   describe "the nag FIRES on the unambiguous leading form" do
     test "a leading MERGE-GATED criterion with no flag warns and still saves" do
@@ -72,9 +107,8 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
              "the warn fixture should carry the whole leading-form population"
 
       for %{"criterion" => text, "doc" => doc} <- cases do
-        log = log_for([%{"criterion" => text, "met" => false}])
-
-        assert log =~ "merge_gate",
+        assert [%{code: "merge_gate_unflagged"}] =
+                 warnings_for([%{"criterion" => text, "met" => false}]),
                "expected the nag to fire on #{doc}'s leading-form criterion: #{String.slice(text, 0, 90)}"
       end
     end
@@ -113,9 +147,7 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
              "the silence fixture should carry the whole non-leading population"
 
       for %{"criterion" => text, "doc" => doc} <- cases do
-        log = log_for([%{"criterion" => text, "met" => false}])
-
-        refute log =~ "carry no `merge_gate: true`",
+        assert [] == warnings_for([%{"criterion" => text, "met" => false}]),
                "the nag fired on a NON-leading criterion (#{doc}) — widening the pattern nags " <>
                  "authors whose criterion was never a gate: #{String.slice(text, 0, 90)}"
       end

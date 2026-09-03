@@ -182,10 +182,15 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
 
       System.monotonic_time(:millisecond) > deadline ->
         flunk("""
-        Barkpark.Quiz.Bridge never entered a query within #{@mid_query_timeout_ms}ms.
+        Barkpark.Quiz.Bridge never entered a query FROM apply_now/3 within
+        #{@mid_query_timeout_ms}ms.
 
         The repro can no longer observe the defect. Do NOT treat this as a fix:
-        check that handle_info/2 still reads per bound pin, and raise @pins.
+        check that handle_info/2 still reads per bound pin through apply_now/3,
+        and raise @pins. If apply_now/3 was renamed or lost its rescue clause
+        (which is what keeps its frame on the stack), teach applying?/1 the new
+        symbol rather than relaxing the barrier back to "any socket read" —
+        that weaker barrier is what made this test flake.
         """)
 
       true ->
@@ -193,18 +198,53 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
     end
   end
 
+  # THE BARRIER MUST PROVE THE STATE THE ASSERTIONS CLAIM, NOT A WEAKER ONE.
+  #
+  # This predicate used to answer true for a Postgrex/prim_inet frame ALONE.
+  # That is "the Bridge is inside some socket read" — which a DBConnection
+  # checkout handshake or an idle ping satisfies without `apply_now/3` being
+  # anywhere on the stack. stop_owner/3 then landed on a connection-level read,
+  # Postgrex logged a disconnect that named the Bridge with a stack that had no
+  # `apply_now` frame, and the THIRD assertion failed while the first two
+  # passed. That is exactly the recorded CI shape — four reds, all identical,
+  # all `assert log =~ "apply_now"`, all green on rerun with no code change:
+  #
+  #   2026-08-23 15:16 · 2026-08-23 19:06 · 2026-08-24 09:53 · 2026-08-31 23:13
+  #
+  # (Sibling row task-1114657f292c59c8 predicted a DBConnection checkout
+  # timeout under a contended shared test database. The failure bodies refute
+  # it: not one names a checkout, a queue, or a timeout. The disconnect fired
+  # every time — only the frame it carried was a coin flip.)
+  #
+  # Requiring `apply_now` here makes the precondition equal the postcondition,
+  # so the stop lands inside the read the test is about. The @pins loop is
+  # ~entirely apply_now, so the barrier is reached just as fast; and
+  # `apply_now/3` carries a rescue/catch, so it is compiled with a try frame
+  # and CANNOT be tail-call eliminated off the stack while the read runs.
+  # flunk-on-timeout is unchanged: a repro that stops reproducing still reds.
   defp in_query?(pid) do
     case Process.info(pid, :current_stacktrace) do
       {:current_stacktrace, stack} ->
-        Enum.any?(stack, fn
-          {Postgrex.Protocol, _, _, _} -> true
-          {:prim_inet, :recv0, _, _} -> true
-          _ -> false
-        end)
+        socket_read?(stack) and applying?(stack)
 
       nil ->
         false
     end
+  end
+
+  defp socket_read?(stack) do
+    Enum.any?(stack, fn
+      {Postgrex.Protocol, _, _, _} -> true
+      {:prim_inet, :recv0, _, _} -> true
+      _ -> false
+    end)
+  end
+
+  defp applying?(stack) do
+    Enum.any?(stack, fn
+      {Barkpark.Quiz.Bridge, name, _, _} -> name |> Atom.to_string() |> String.contains?("apply_now")
+      _ -> false
+    end)
   end
 
   # The Bridge is a boot-time singleton whose `bindings` map NOTHING in the suite
