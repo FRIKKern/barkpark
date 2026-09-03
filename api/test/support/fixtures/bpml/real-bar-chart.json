@@ -1,0 +1,62 @@
+{
+  "blocks": [
+    {
+      "bars": [
+        {
+          "label": "Jan",
+          "value": 0
+        },
+        {
+          "label": "Feb",
+          "value": 0
+        },
+        {
+          "label": "Mar",
+          "value": 0
+        },
+        {
+          "label": "Apr",
+          "value": 223
+        },
+        {
+          "label": "May",
+          "value": 419
+        },
+        {
+          "label": "Jun",
+          "value": 782
+        },
+        {
+          "label": "Jul",
+          "value": 3120
+        },
+        {
+          "label": "Aug",
+          "value": 1669
+        },
+        {
+          "label": "Sep",
+          "value": 0
+        },
+        {
+          "label": "Oct",
+          "value": 0
+        },
+        {
+          "label": "Nov",
+          "value": 0
+        },
+        {
+          "label": "Dec",
+          "value": 0
+        }
+      ],
+      "id": "auto:monthly-cadence",
+      "title": "Monthly cadence · 2026",
+      "type": "bar-chart",
+      "values": true
+    }
+  ],
+  "paper": "barkpark-changelog-2026",
+  "type": "bar-chart"
+}

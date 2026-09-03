@@ -1,0 +1,16 @@
+{
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Wave Session Card epic — the AGENT-DETAIL round. User ask: 'let me see what the running subagents are about / working on'. Wave 1 (s1-s5) + Wave 2 (s3 + real-fixtures #3909 + workflow-sse #3910) are ALL MERGED and LIVE; this round drills the workflow card down one more level to per-agent detail. (1) wsc-ad-gui — Studio rail workflow_agent rows EXPAND to show each agent's promptPreview / lastToolName+lastToolSummary / resultPreview, intermingled with the claimed-task pulse; add a NEW pure workflow_agent_detail/1 fold, fixture-mirrored (Go+Elixir parity like workflow_summary/1). (2) wsc-ad-tui — the s5 below-composer panel gains a THIRD level: Enter on an agent row -> that agent's detail pane. rail_put_workflow stores workflow nodes VERBATIM — promptPreview/lastTool*/resultPreview are ALREADY persisted in every rail_snapshot, just unrendered, so this is PURE PRESENTATION. Thinking text is NEVER on the wire (encrypted signature) — render 'thinking' as brief + tool line + task pulse, NEVER a labeled thinking block. Quality bar Kinsta/Vercel honest-and-quiet; live proofs use DISPOSABLE sessions only."
+        }
+      ],
+      "id": "block-4",
+      "type": "quote"
+    }
+  ],
+  "paper": "wsc-wave-2026-07-17-ad",
+  "type": "quote"
+}
