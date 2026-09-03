@@ -59,6 +59,7 @@ jobs:
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           dirty=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
           if [ -n "$dirty" ]; then
             echo "::warning::gofmt drift in:"; echo "$dirty"
@@ -109,11 +110,15 @@ jobs:
       - name: Enforce the gofmt drift ceiling
         id: s1
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash scripts/go-format-drift-ceiling.sh
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-format-drift-ceiling.sh
       - name: Ceiling self-test (tripwire — prove the gate can fail)
         id: s2
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        run: bash scripts/go-format-drift-ceiling.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/go-format-drift-ceiling.sh --selftest
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries

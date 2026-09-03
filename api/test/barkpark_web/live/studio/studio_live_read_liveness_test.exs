@@ -46,15 +46,13 @@ defmodule BarkparkWeb.Studio.StudioLiveReadLivenessTest do
     priv_ws = create_workspace!("live-priv-#{System.unique_integer([:positive])}")
     priv_proj = create_project!(priv_ws, "live-priv-proj")
 
-    prior = Application.get_env(:barkpark, :shares)
-    Application.put_env(:barkpark, :shares, [])
-    on_exit(fn -> restore(:shares, prior) end)
+    # arpss-w8: refresh-proof Default-OFF baseline. A bare `put_env(:shares, [])`
+    # is undone by the next Sharing.refresh/0 (which this suite CAN reach through
+    # the forged `shares-add` events), and it never snapshots :shares_env.
+    Barkpark.SharingFixtures.clear_shares!()
 
     {:ok, conn: conn, ws: priv_ws, proj: priv_proj}
   end
-
-  defp restore(key, nil), do: Application.delete_env(:barkpark, key)
-  defp restore(key, val), do: Application.put_env(:barkpark, key, val)
 
   defp desk_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
 

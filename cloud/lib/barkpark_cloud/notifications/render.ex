@@ -97,6 +97,18 @@ defmodule BarkparkCloud.Notifications.Render do
         {"Deployment failed",
          "A deployment for #{site} failed.#{identity(payload)}#{cause(payload)}", :error}
 
+      # cch-w29-bl: the auto-deploy PREBUILT refusal. `cause/1`, not a re-typed
+      # sentence: the remedy the console shows is
+      # `Sites.AutoDeployWorker.refusal_detail/0`, it rides the payload as
+      # `:detail`, and this arm renders THAT — so the chat channel, the inbox and
+      # the deployment row can never disagree about what the person should do.
+      # `:warning`, never `:info`: `channels/discord.ex` paints `:info` GREEN, and
+      # a publish that did not deploy is not good news.
+      "deployment_refused" ->
+        {"Deployment refused",
+         "A content publish for #{site} did not deploy — it was refused." <>
+           "#{identity(payload)}#{cause(payload)}", :warning}
+
       "agent_unreachable" ->
         {"Site unreachable", "#{site} stopped responding to health checks.", :warning}
 

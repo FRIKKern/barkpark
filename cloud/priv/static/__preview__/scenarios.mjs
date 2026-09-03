@@ -1921,7 +1921,7 @@ const stBlocked = deployment({
   branch: "main",
   // The humanized born-failed github-push copy exactly as FailureCopy.humanize
   // emits it at the JSON boundary (the client re-map is idempotent on it).
-  failure_reason: "GitHub pushes are recorded but can’t be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.",
+  failure_reason: "This push predates GitHub source builds and can’t be built yet — push again to build this commit, or deploy it with bp deploy.",
   inserted_at: tMinus(90000),
   updated_at: tMinus(90000),
 });
@@ -2168,7 +2168,10 @@ const siteStatesDomains = {
 // the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
 //
-// SIX, NOT NINE (wave 30 S1). `deployment_succeeded`, `member_invited` and
+// SEVEN AS OF cch-w29-bl, and it was SIX, NOT NINE before that (wave 30 S1).
+// `deployment_refused` is the auto-deploy PREBUILT refusal: column, producer and
+// console row all landed together, so the fixture seeds it too.
+// `deployment_succeeded`, `member_invited` and
 // `token_expiring` were dropped from `EmailSettings` end to end — no column, no
 // producer, no toggle. A fixture that still seeded them was claiming to be
 // backend-true while describing a backend that no longer exists, which is the
@@ -2176,11 +2179,12 @@ const siteStatesDomains = {
 // census guards app.js but has no reach into this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
+  "deployment_refused",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
-const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "agent_unreachable", "subscription_past_due"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "agent_unreachable", "subscription_past_due"];
 function notifSettings(over) {
   const base = {
     transport: "instance",
@@ -5426,7 +5430,7 @@ export function route(name, method, path, state) {
   // the exact request the Activity chip row has always sent.
   if (p === "/v1/audit") {
     // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
-    // does. Auth.require_primary_team_admin answers this route with
+    // does. Auth.require_current_team_admin answers this route with
     // `forbidden(conn, required: "admin", scope: "team")` — "team", NOT
     // "primary_team": cch-w37-s3 renamed the label because the gate reads
     // conn.assigns[:current_team] (resolve_team/2 honours the x-barkpark-team

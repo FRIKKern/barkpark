@@ -67,6 +67,7 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --sites    # + every emitted site, one per line
 #   elixir scripts/pds-elixir-receipt-census.exs --files-from FILE   # corpus-refusal rehearsal
 #   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
+#   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys # STDOUT: the EXCLUSION anchor, TSV, one line per @routed_excluded row
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
 #   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
@@ -551,6 +552,16 @@ defmodule PDS.Census do
     # member it had. inline_alias_bindings/1 resolves them; both rows are now JUDGED and
     # the class has no members. A disposition class whose prose no longer describes
     # anything is deleted rather than kept warm for a member that may never arrive.
+    # A CENSUS OF A DEFECT MUST COUNT ITS OWN CURES (PDS-D706). Without this class a
+    # route REPAIRED to a computed `ok:` reads exactly like a route that never had a
+    # receipt: it falls out of the `ok: true` lens, out of JUDGED, and lands in
+    # `status_only_receipt` — a class whose prose describes an UNEXAMINED receipt. The
+    # instrument would then charge its highest price for the one change this epic exists
+    # to cause. This class names the departure as a REPAIR, and it is deliberately NOT
+    # `status_only_receipt`: a row here says a human read the repaired receipt and found
+    # it derived from the store, which is the opposite of unexamined.
+    repaired_computed_receipt:
+      "2026-09-03 (PDS wave 49, PDS-D706): the routed action HAD a `ok: true` / `\"ok\" => true` literal this lens keyed on, and a REPAIR replaced it with a computed value derived from the store (the honest shape `api/lib/barkpark/plugins/sheets/session.ex:707` has always had and which this lens has NEVER been able to see). The member left the literal population BY BEING FIXED. It is EXCLUDED because the lens is textual and cannot read a computed `ok:` without dataflow — `ok: not is_nil(id)` and `ok: user.is_admin` are indistinguishable to an AST lens, and widening to computed values would reintroduce the guess the census forbids (the precedent is this file's own \"PURE-ECHO 0 DETECTED — not separable from UNCLASSIFIED without dataflow; not guessed\"). Each row here names a repair, so a success this census CAUSED stops reading as a measurement going missing.",
     selftest_fixture:
       "2026-08-02 (PDS wave 38): a synthetic member that exists ONLY in the --selftest corpus (module Barkpark.Filler.M1, written by write_corpus!/2 and absent from the real tree). Carried on purpose: without a committed row the row->member direction of ROUTED-POPULATION-COMPLETE has nothing to go red on, and the TWO rows share one {module, action} pair so the quad key is asked to discriminate on every selftest run."
   }
@@ -676,14 +687,20 @@ defmodule PDS.Census do
     # read back because nothing is stored. Exactly the class prose's case.
     {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController",
      :validate, :status_only_receipt},
-    # BPML working-copy sync (masterplan W3): renders real `ok: true` receipts, but
-    # they live in sync_apply/6 → sync_persist/6 — one and two helpers below the
-    # routed action, past the register's stated ONE-HOP relation. The class prose's
-    # literal case: the receipt exists and "does not spell the key [where] the lens
-    # greps". The sync cycle IS read back end-to-end in
-    # bulldocs_bpml_api_test.exs ("pull, edit the file, push, converge").
-    {:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
-     :sync, :status_only_receipt},
+    # THE ONE ROW ROUTED-DISPOSITION-UNSHADOWED FOUND ON MERGED MAIN, AND ITS DELETION.
+    # `{:post, "/v1/plugins/bulldocs/papers/:slug/sync", "BarkparkWeb.BulldocsIngestController",
+    # :sync, :status_only_receipt}` stood here, and its own comment said the receipts "live
+    # in sync_apply/6 -> sync_persist/6 — one and two helpers below the routed action, past
+    # the register's stated ONE-HOP relation". THE FIRST HOP IS INSIDE THE RELATION: `sync`
+    # calls sync_apply/6 LOCALLY, the register carries a row for that def, and this census
+    # disposes the member JUDGED on every run — it has done so since the row was written.
+    # The row therefore claimed an exclusion the derivation was already contradicting, and
+    # NOTHING SAW IT: EXCLUDED counted 190 while the table held 191 rows, because the cond's
+    # JUDGED > EXCLUDED precedence swallowed it. That is exactly the D2 shape this slice's
+    # arm exists to name, found by the arm on its first run over the real tree — so the
+    # arm's first catch is a row that had been silently wrong on main, not a fixture.
+    # DELETED RATHER THAN RE-CLASSED: a judged member needs no @routed_excluded entry, and
+    # keeping one would leave the same contradiction under a different class name.
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
@@ -700,6 +717,25 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/D566).
+    # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
+    # it stays in `status_only_receipt` with this comment rather than being moved, because
+    # the class's CURRENT prose is TRUE of it and the reason it is excluded is a limit of
+    # the JUDGED RELATION, not an absence of a receipt:
+    #   site_deploy_controller.ex emits a LITERAL `ok: true` inside `defp start/2`, reached
+    #   at DEPTH 2 — trigger -> do_trigger -> start. dispose_routed/4's relation is ONE HOP
+    #   (the action's own span, or a def the action calls locally), so a receipt two helpers
+    #   deep reads as EXCLUDED. That is the stated limit at dispose_routed/4, and this row
+    #   is its single live instance on this tree.
+    # SO THE CLASS SENTENCE IS EXACT AND THE ROW IS HONEST: the action "reaches no `ok:
+    # true` receipt THIS LENS keys on" — THIS LENS, at one hop. What would be false about
+    # it is wave 38's retired clause ("claims success by STATUS alone"): this route does not
+    # claim success by status, it emits the literal key two hops down. That clause is
+    # already retired from the class prose above; this comment is the row-level record so
+    # nobody has to re-run the BFS to learn which member the retirement was about.
+    # WIDENING THE RELATION TO DEPTH 2 IS REFUSED (and this row is the whole case for the
+    # refusal): it buys exactly this ONE member and imports unbounded FALSE JUDGED through
+    # shared render/fallback helpers that every branch reaches, error branches included.
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
@@ -832,6 +868,177 @@ defmodule PDS.Census do
     {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
   ]
+
+  # ---------------------------------------- the exclusion anchors (PDS-D585)
+  #
+  # THE FRESHNESS DISCIPLINE THE 8-ROW ROSTER ALREADY HAD, GIVEN TO THE EXCLUSION TABLE.
+  # Committed data, keyed on the SAME quad @routed_excluded uses, generated BY RUN with
+  # `--exclusion-keys` and read back — never typed. Each value is
+  # {anchor_mfa, clause_count, def_fp}, where def_fp is the ORDER-SENSITIVE fold of the
+  # per-clause roster_def_fp/1 over the action's clauses in LINE ORDER
+  # (exclusion_def_fp/1 states why order is load-bearing).
+  #
+  # ONLY THE ROWS THAT RESOLVE ARE HERE, AND THE HOLE IS PRINTED RATHER THAN PADDED. A
+  # row that resolves to no def carries NO entry — an anchor invented for a def nobody
+  # can open is the over-claim this census exists to name — and the run prints the
+  # uncovered count, its breakdown and the resulting coverage fraction on every census.
+  #
+  # THE REPAIR WHEN A ROW GOES STALE IS TO RE-DERIVE, NEVER TO RE-TYPE:
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and amend the moved rows in the SAME commit as the change that moved them, with the
+  # exclusion prose re-read against the def it now names.
+  @exclusion_anchors %{
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create} => {"BarkparkWeb.MemberController.create/2", 1, "92306071"},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update} => {"BarkparkWeb.MemberController.update/2", 1, "98799982"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "29471808"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "53244686"},
+    {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
+    {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "96936068"},
+    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "32386685"},
+    {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
+    {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "54697721"},
+    {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "41987025"},
+    {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "31540449"},
+    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "100313143"},
+    {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
+    {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
+    {:delete, "/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
+    {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
+    {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete} => {"BarkparkWeb.ShareController.delete/2", 1, "18318765"},
+    {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
+    {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
+    {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "100313143"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
+    {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke} => {"BarkparkWeb.ChatHostController.revoke/2", 1, "131654882"},
+    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update} => {"BarkparkWeb.ScimGroupsController.update/2", 1, "36940354"},
+    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update} => {"BarkparkWeb.ScimUsersController.update/2", 1, "39755110"},
+    {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update} => {"BarkparkWeb.ChatController.update/2", 1, "57469860"},
+    {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update} => {"BarkparkWeb.V1.MediaController.update/2", 1, "92180591"},
+    {:post, "/api/documents/:type", "BarkparkWeb.LegacyController", :create} => {"BarkparkWeb.LegacyController.create/2", 1, "48201604"},
+    {:post, "/v1/plugins/bulldocs/papers/validate", "BarkparkWeb.BulldocsIngestController", :validate} => {"BarkparkWeb.BulldocsIngestController.validate/2", 1, "93045567"},
+    {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision} => {"BarkparkWeb.PlaygroundController.provision/2", 1, "81349479"},
+    {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create} => {"BarkparkWeb.WorkspaceController.create/2", 1, "102261027"},
+    {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import} => {"BarkparkWeb.WorkspaceController.import/2", 1, "44060553"},
+    {:post, "/api/workspaces/:workspace_slug/projects", "BarkparkWeb.WorkspaceController", :create_project} => {"BarkparkWeb.WorkspaceController.create_project/2", 1, "18548149"},
+    {:post, "/auth/reset/:token", "BarkparkWeb.SessionController", :reset_submit} => {"BarkparkWeb.SessionController.reset_submit/2", 2, "81707339"},
+    {:post, "/login", "BarkparkWeb.SessionController", :create} => {"BarkparkWeb.SessionController.create/2", 2, "7347773"},
+    {:post, "/login/account", "BarkparkWeb.SessionController", :account} => {"BarkparkWeb.SessionController.account/2", 2, "107095426"},
+    {:post, "/login/magic", "BarkparkWeb.SessionController", :magic_request} => {"BarkparkWeb.SessionController.magic_request/2", 2, "29283936"},
+    {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa} => {"BarkparkWeb.SessionController.mfa/2", 1, "126433771"},
+    {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request} => {"BarkparkWeb.SessionController.reset_request/2", 2, "114539261"},
+    {:post, "/media/upload", "BarkparkWeb.MediaController", :upload} => {"BarkparkWeb.MediaController.upload/2", 2, "101512734"},
+    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create} => {"BarkparkWeb.ScimGroupsController.create/2", 1, "126989276"},
+    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create} => {"BarkparkWeb.ScimUsersController.create/2", 1, "114979114"},
+    {:post, "/v1/access", "BarkparkWeb.AccessController", :mint} => {"BarkparkWeb.AccessController.mint/2", 1, "83944541"},
+    {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
+    {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
+    {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
+    {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},
+    {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login} => {"BarkparkWeb.AuthController.login/2", 2, "133988271"},
+    {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create} => {"BarkparkWeb.LoginTicketController.create/2", 1, "18892729"},
+    {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login} => {"BarkparkWeb.AuthController.magic_login/2", 2, "16122217"},
+    {:post, "/v1/auth/mfa/enroll", "BarkparkWeb.AuthController", :mfa_enroll} => {"BarkparkWeb.AuthController.mfa_enroll/2", 2, "10292509"},
+    {:post, "/v1/auth/register", "BarkparkWeb.AuthController", :register} => {"BarkparkWeb.AuthController.register/2", 2, "126301787"},
+    {:post, "/v1/auth/saml/:org_slug/slo", "BarkparkWeb.SamlController", :slo} => {"BarkparkWeb.SamlController.slo/2", 2, "84774978"},
+    {:post, "/v1/auth/sso/route", "BarkparkWeb.SsoRoutingController", :route} => {"BarkparkWeb.SsoRoutingController.route/2", 2, "131600103"},
+    {:post, "/v1/auth/tokens", "BarkparkWeb.AuthController", :create_token} => {"BarkparkWeb.AuthController.create_token/2", 1, "88765698"},
+    {:post, "/v1/auth/webauthn/login", "BarkparkWeb.WebauthnController", :login} => {"BarkparkWeb.WebauthnController.login/2", 2, "92158519"},
+    {:post, "/v1/auth/webauthn/login/challenge", "BarkparkWeb.WebauthnController", :login_challenge} => {"BarkparkWeb.WebauthnController.login_challenge/2", 1, "116840622"},
+    {:post, "/v1/auth/webauthn/register/challenge", "BarkparkWeb.WebauthnController", :register_challenge} => {"BarkparkWeb.WebauthnController.register_challenge/2", 1, "132055338"},
+    {:post, "/v1/auth/webauthn/step-up/challenge", "BarkparkWeb.WebauthnController", :step_up_challenge} => {"BarkparkWeb.WebauthnController.step_up_challenge/2", 1, "48343508"},
+    {:post, "/v1/chat-host/enroll", "BarkparkWeb.ChatHostController", :enroll} => {"BarkparkWeb.ChatHostController.enroll/2", 2, "37842751"},
+    {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat} => {"BarkparkWeb.ChatHostController.heartbeat/2", 1, "116850088"},
+    {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate} => {"BarkparkWeb.ChatHostController.rotate/2", 1, "66505558"},
+    {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create} => {"BarkparkWeb.ChatController.create/2", 1, "102474247"},
+    {:post, "/v1/chat/sessions/:id/answer", "BarkparkWeb.ChatController", :answer} => {"BarkparkWeb.ChatController.answer/2", 1, "133125244"},
+    {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive} => {"BarkparkWeb.ChatController.archive/2", 1, "104476556"},
+    {:post, "/v1/chat/sessions/:id/attachments", "BarkparkWeb.ChatAttachmentController", :create} => {"BarkparkWeb.ChatAttachmentController.create/2", 1, "78424610"},
+    {:post, "/v1/chat/sessions/:id/state", "BarkparkWeb.ChatHostController", :report_state} => {"BarkparkWeb.ChatHostController.report_state/2", 2, "49665720"},
+    {:post, "/v1/chat/sessions/:id/unarchive", "BarkparkWeb.ChatController", :unarchive} => {"BarkparkWeb.ChatController.unarchive/2", 1, "57640065"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment} => {"BarkparkWeb.CycleFleetController.create_assignment/2", 1, "67647520"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result} => {"BarkparkWeb.CycleFleetController.create_result/2", 1, "59839797"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open} => {"BarkparkWeb.CycleFleetController.open/2", 1, "76612497"},
+    {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
+    {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
+    {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
+    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
+    {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
+    {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym} => {"BarkparkWeb.SearchController.promote_search_synonym/2", 1, "49650472"},
+    {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create} => {"BarkparkWeb.FleetSupportTokenController.create/2", 1, "10356438"},
+    {:post, "/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
+    {:post, "/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
+    {:post, "/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member} => {"BarkparkWeb.V1.MediaCollectionsController.add_member/2", 1, "13667306"},
+    {:post, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share} => {"BarkparkWeb.V1.MediaCollectionsController.share/2", 1, "46171050"},
+    {:post, "/v1/media/:dataset/processing/:id/callback", "BarkparkWeb.V1.MediaProcessingController", :callback} => {"BarkparkWeb.V1.MediaProcessingController.callback/2", 1, "86282624"},
+    {:post, "/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym} => {"BarkparkWeb.V1.MediaController.create_search_synonym/2", 1, "72413520"},
+    {:post, "/v1/media/:dataset/search/synonyms/promote", "BarkparkWeb.V1.MediaController", :promote_search_synonym} => {"BarkparkWeb.V1.MediaController.promote_search_synonym/2", 1, "104509558"},
+    {:post, "/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload} => {"BarkparkWeb.V1.MediaController.upload/2", 2, "73136586"},
+    {:post, "/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create} => {"BarkparkWeb.TicketKeysController.create/2", 1, "107985811"},
+    {:post, "/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause} => {"BarkparkWeb.TicketKeysController.pause/2", 1, "22920551"},
+    {:post, "/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate} => {"BarkparkWeb.TicketKeysController.rotate/2", 1, "32961374"},
+    {:post, "/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause} => {"BarkparkWeb.TicketKeysController.unpause/2", 1, "95854297"},
+    {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert} => {"BarkparkWeb.SchemaController.upsert/2", 1, "130638547"},
+    {:post, "/v1/shares", "BarkparkWeb.ShareController", :create} => {"BarkparkWeb.ShareController.create/2", 1, "79903332"},
+    {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint} => {"BarkparkWeb.ShareLinkController.mint/2", 1, "80845768"},
+    {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token} => {"BarkparkWeb.ShareController.mint_token/2", 1, "22269926"},
+    {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident} => {"BarkparkWeb.StatusController.create_incident/2", 1, "31495109"},
+    {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident} => {"BarkparkWeb.StatusController.resolve_incident/2", 1, "110488227"},
+    {:post, "/v1/tickets/:id/attachments", "BarkparkWeb.TicketsAttachmentsController", :create} => {"BarkparkWeb.TicketsAttachmentsController.create/2", 2, "72508355"},
+    {:post, "/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create} => {"BarkparkWeb.WebhookController.create/2", 1, "116405086"},
+    {:post, "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay} => {"BarkparkWeb.WebhookController.replay/2", 1, "129409722"},
+    {:post, "/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable} => {"BarkparkWeb.WebhookController.reenable/2", 1, "19461935"},
+    {:post, "/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate} => {"BarkparkWeb.WebhookController.rotate/2", 1, "104898539"},
+    {:post, "/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send} => {"BarkparkWeb.WebhookController.test_send/2", 1, "64939389"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/chat/tokens", "BarkparkWeb.ChatTokenController", :create} => {"BarkparkWeb.ChatTokenController.create/2", 1, "20654694"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment} => {"BarkparkWeb.CycleFleetController.create_assignment/2", 1, "67647520"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result} => {"BarkparkWeb.CycleFleetController.create_result/2", 1, "59839797"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open} => {"BarkparkWeb.CycleFleetController.open/2", 1, "76612497"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote", "BarkparkWeb.CycleFleetController", :promote} => {"BarkparkWeb.CycleFleetController.promote/2", 1, "102701554"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine", "BarkparkWeb.CycleFleetController", :quarantine} => {"BarkparkWeb.CycleFleetController.quarantine/2", 1, "48912053"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate", "BarkparkWeb.CycleFleetController", :activate_release_gate} => {"BarkparkWeb.CycleFleetController.activate_release_gate/2", 1, "68001488"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage", "BarkparkWeb.CycleFleetController", :stage_release_paper} => {"BarkparkWeb.CycleFleetController.stage_release_paper/2", 1, "16663024"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate} => {"BarkparkWeb.CycleFleetController.admit_open_release_gate/2", 1, "114476231"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback} => {"BarkparkWeb.CycleFleetController.rollback/2", 1, "3466593"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction} => {"BarkparkWeb.SearchController.correction/2", 1, "19866096"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout} => {"BarkparkWeb.V1.MediaController.checkout/2", 1, "12930699"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout} => {"BarkparkWeb.V1.MediaController.undo_checkout/2", 1, "124774745"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member} => {"BarkparkWeb.V1.MediaCollectionsController.add_member/2", 1, "13667306"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share} => {"BarkparkWeb.V1.MediaCollectionsController.share/2", 1, "46171050"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym} => {"BarkparkWeb.V1.MediaController.create_search_synonym/2", 1, "72413520"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload} => {"BarkparkWeb.V1.MediaController.upload/2", 2, "73136586"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create} => {"BarkparkWeb.TicketKeysController.create/2", 1, "107985811"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause} => {"BarkparkWeb.TicketKeysController.pause/2", 1, "22920551"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate} => {"BarkparkWeb.TicketKeysController.rotate/2", 1, "32961374"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause} => {"BarkparkWeb.TicketKeysController.unpause/2", 1, "95854297"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert} => {"BarkparkWeb.SchemaController.upsert/2", 1, "130638547"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens", "BarkparkWeb.TokenController", :create} => {"BarkparkWeb.TokenController.create/2", 1, "63995921"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create} => {"BarkparkWeb.WebhookController.create/2", 1, "116405086"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay} => {"BarkparkWeb.WebhookController.replay/2", 1, "129409722"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable} => {"BarkparkWeb.WebhookController.reenable/2", 1, "19461935"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate} => {"BarkparkWeb.WebhookController.rotate/2", 1, "104898539"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send} => {"BarkparkWeb.WebhookController.test_send/2", 1, "64939389"},
+    {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment} => {"BarkparkWeb.ChatHostController.create_enrollment/2", 1, "99965870"},
+    {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob} => {"BarkparkWeb.MediaController.put_blob/2", 1, "79434187"},
+    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace} => {"BarkparkWeb.ScimGroupsController.replace/2", 1, "41824804"},
+    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace} => {"BarkparkWeb.ScimUsersController.replace/2", 1, "43223419"},
+    {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings} => {"BarkparkWeb.SearchController.update_search_settings/2", 1, "27744156"},
+    {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings} => {"BarkparkWeb.V1.MediaController.update_search_settings/2", 1, "91283761"},
+    {:put, "/v1/plugins/settings/:plugin_name", "BarkparkWeb.PluginSettingsController", :update} => {"BarkparkWeb.PluginSettingsController.update/2", 2, "131262955"},
+    {:put, "/v1/secrets/:name", "BarkparkWeb.SecretController", :update} => {"BarkparkWeb.SecretController.update/2", 2, "112646268"},
+    {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update} => {"BarkparkWeb.WebhookController.update/2", 1, "54387880"},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update} => {"BarkparkWeb.SecretController.update/2", 2, "112646268"},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update} => {"BarkparkWeb.WebhookController.update/2", 1, "54387880"}
+  }
 
   # ------------------------------------------------------------- declared register
   #
@@ -1893,12 +2100,41 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- entrypoint
 
+  # THE RECORD-TIME GROUP SIZE, DERIVED FROM THE REGISTER ITSELF (PDS-D706). The register
+  # is COMPLETE by construction — one row per emitted site at record time — so the number
+  # of ROWS sharing a {path, mfa} IS the number of sites that group held when the rows
+  # were recorded. No new committed field, nothing to keep in sync, and it cannot rot
+  # independently of the table it describes.
+  @register_group_sizes Enum.frequencies_by(@register, fn r ->
+                          {elem(r.key, 0), elem(r.key, 1)}
+                        end)
+
+  # THE RETIRED ROWS. A row carries `retired: "<prose>"` when its site LEFT the literal
+  # population BY REPAIR — the receipt now computes `ok:` from the store, so no `ok: true`
+  # literal remains for the four-field key to match. The row keeps its bought verdict as
+  # HISTORY and satisfies REGISTER-COMPLETE without a re-key.
+  defp retired_rows, do: Enum.filter(@register, &Map.has_key?(&1, :retired))
+
+  # WHICH POPULATION ROW THE REPAIRED SITE WAS IN, RECORDED AT RETIREMENT TIME. Measured,
+  # not assumed: the first scratch repair of pulse_controller.ex:58 moved FOUR rows, not
+  # three — textual, ast-literal, emitted AND write-routed — because the departing site
+  # was write-routed. Which of write/read/unrouted a given repair vacates is a property of
+  # the SITE, so it cannot be derived once the site is gone; the retiring commit records
+  # it, and REGISTER-RETIRED-STAYS-RETIRED refuses a retired row that does not.
+  @retired_routes [:write, :read, :unrouted]
+
+  defp retired_route_counts,
+    do: retired_rows() |> Enum.frequencies_by(&Map.get(&1, :retired_route))
+
+  defp retired_route_n(key), do: Map.get(retired_route_counts(), key, 0)
+
   def main(argv) do
     case parse_args(argv) do
       {:error, msgs} -> refuse_args(msgs)
       %{selftest?: true} -> selftest()
       %{citations?: true} -> citations_run()
       %{keys?: true} = opts -> keys_run(opts)
+      %{exclusion_keys?: true} = opts -> exclusion_keys_run(opts)
       opts -> census(opts)
     end
   end
@@ -1910,7 +2146,14 @@ defmodule PDS.Census do
     do:
       parse_args(
         argv,
-        %{sites?: false, keys?: false, selftest?: false, citations?: false, files_from: nil},
+        %{
+          sites?: false,
+          keys?: false,
+          exclusion_keys?: false,
+          selftest?: false,
+          citations?: false,
+          files_from: nil
+        },
         []
       )
 
@@ -1918,6 +2161,9 @@ defmodule PDS.Census do
   defp parse_args([], _opts, bad), do: {:error, Enum.reverse(bad)}
   defp parse_args(["--sites" | rest], o, bad), do: parse_args(rest, %{o | sites?: true}, bad)
   defp parse_args(["--keys" | rest], o, bad), do: parse_args(rest, %{o | keys?: true}, bad)
+
+  defp parse_args(["--exclusion-keys" | rest], o, bad),
+    do: parse_args(rest, %{o | exclusion_keys?: true}, bad)
   defp parse_args(["--selftest" | rest], o, bad), do: parse_args(rest, %{o | selftest?: true}, bad)
 
   defp parse_args(["--citations" | rest], o, bad),
@@ -1937,7 +2183,7 @@ defmodule PDS.Census do
     p("REFUSED: UNKNOWN ARGUMENT")
     Enum.each(msgs, &p("  " <> &1))
     p("")
-    p("  accepted: --sites · --files-from FILE · --keys · --citations · --selftest")
+    p("  accepted: --sites · --files-from FILE · --keys · --exclusion-keys · --citations · --selftest")
     p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
     System.halt(2)
   end
@@ -3198,6 +3444,23 @@ defmodule PDS.Census do
     end)
 
     row("EMITTED success claims", length(emitted), nil, :emitted)
+
+    # THE CONSERVED DENOMINATOR (PDS-D706). A census of a defect must count its own
+    # cures, or every success it causes reads as a measurement going missing. A
+    # status-descending repair — the one change this epic exists to cause — removes an
+    # `ok: true` literal, so `textual`, `ast-literal` and `emitted` each fall by one and
+    # the drift arm reads the FIX as a disappearance. The retired register rows are the
+    # ledger of those departures, so the arm compares emitted + retired-by-repair and a
+    # repair stops costing a red. THE ARM KEEPS ITS TEETH: a genuine ARRIVAL adds a
+    # literal without adding a retired row, so the conserved total still moves and still
+    # reds. Conservation is NOT suppression — it is the difference between "one fewer
+    # claim exists" and "one claim was fixed", which the raw count cannot tell apart.
+    retired = length(retired_rows())
+    p(String.pad_trailing("  CONSERVED  emitted #{length(emitted)} + retired-by-repair #{retired}", 48) <> String.pad_leading(to_string(length(emitted) + retired), 4))
+    p("      the FOUR rows a repair moves — textual, AST-literal, EMITTED and the route")
+    p("      row the departing site sat in — are compared against the baseline WITH the")
+    p("      retired count added back, so a fix is not a drift. Nothing else is")
+    p("      conserved, and an ARRIVAL adds no retired row, so the arm keeps its teeth.")
     p("")
   end
 
@@ -3599,8 +3862,24 @@ defmodule PDS.Census do
 
     {rows, _taken} =
       Enum.map_reduce(@register, MapSet.new(), fn r, taken ->
-        case Map.get(live, r.key) do
-          nil ->
+        retired? = Map.has_key?(r, :retired)
+
+        case {Map.get(live, r.key), retired?} do
+          # A RETIRED ROW WHOSE SITE IS BACK is a contradiction, and it gets its own arm
+          # rather than a silent re-adoption: the row says the literal LEFT by repair, and
+          # the tree says it is here. One of the two is wrong and neither says so.
+          {s, true} when not is_nil(s) ->
+            {{r, :resurrected, s}, taken}
+
+          # THE RETIRED FORM (PDS-D706). It resolves to NOTHING and that is CORRECT: the
+          # site left the literal population by being fixed. It is neither an orphan (an
+          # orphan is a row that judges nothing and never said so) nor a re-key — the
+          # bought verdict stays readable as history, and REGISTER-COMPLETE is satisfied
+          # WITHOUT touching the four-field key.
+          {nil, true} ->
+            {{r, :retired, nil}, taken}
+
+          {nil, false} ->
             {path, mfa, _, _} = r.key
 
             cands =
@@ -3610,12 +3889,28 @@ defmodule PDS.Census do
                 &(MapSet.member?(exact, site_key(&1)) or MapSet.member?(taken, site_key(&1)))
               )
 
+            # THE NEIGHBOUR FENCE (PDS-D706), AND IT IS PROVED, NOT SUSPECTED. Repairing
+            # search_controller.ex:337 while editing its sibling at :340 re-pointed the
+            # register key recorded for :337 onto the receipt at :340 — honestly DEMOTED,
+            # which is the mitigation, but the row now names the wrong receipt and the
+            # bought judgment has changed hands. The fallback is sound only where the
+            # group held ONE site at record time; where it held more, "the unique
+            # remaining candidate" is an artifact of which sibling was edited first.
+            # REFUSE the re-point there and let the row ORPHAN, which is loud and true.
+            # FREE ON THE SOLO POPULATION by construction: a group of one cannot trip it.
             case cands do
-              [s] -> {{r, :stale, s}, MapSet.put(taken, site_key(s))}
-              _ -> {{r, :orphan, nil}, taken}
+              [s] ->
+                if Map.get(@register_group_sizes, {path, mfa}, 1) > 1 do
+                  {{r, :orphan, nil}, taken}
+                else
+                  {{r, :stale, s}, MapSet.put(taken, site_key(s))}
+                end
+
+              _ ->
+                {{r, :orphan, nil}, taken}
             end
 
-          s ->
+          {s, false} ->
             {{r, :live, s}, taken}
         end
       end)
@@ -3673,10 +3968,35 @@ defmodule PDS.Census do
       end)
 
       p("")
+      report_register_retired(Enum.filter(rows, &(&1.status == :retired)))
       report_register_stale(stale)
       report_register_tags(rows)
       report_register_prose(rows)
     end
+  end
+
+  # THE CURE, KEPT AS HISTORY. A retired row resolves to no site BY DESIGN — the receipt
+  # was repaired to a computed `ok:` and left the literal population — so without this
+  # block the bought judgment would simply stop being printed and the repair would read,
+  # once more, as a measurement going missing. The verdict and basis are printed EXACTLY
+  # as their author committed them: nothing here re-derives, demotes or edits a verdict.
+  defp report_register_retired([]), do: :ok
+
+  defp report_register_retired(retired) do
+    p("  RETIRED BY REPAIR (#{length(retired)}) — the site left the `ok: true` population by being")
+    p("  FIXED. REGISTER-COMPLETE is satisfied WITHOUT a re-key, the population row each")
+    p("  repair vacated is added back to the conserved denominator, and the verdict below")
+    p("  is the one its author bought, kept as history rather than deleted with the site.")
+
+    Enum.each(retired, fn r ->
+      {path, mfa, hh, fp} = r.key
+      p("      #{short(path)}  #{mfa}")
+      p("        recorded #{hh}/#{fp} · vacated the #{Map.get(r, :retired_route, "?")}-routed population row")
+      p("        BOUGHT VERDICT #{r.verdict} / #{r.basis} — STANDS, as history")
+      wrap(Map.get(r, :retired, "(no retirement note recorded)"), "        ")
+    end)
+
+    p("")
   end
 
   defp report_register_stale([]), do: :ok
@@ -4005,6 +4325,20 @@ defmodule PDS.Census do
   # A name this pass retires is not guessed: the tuple keeps `"?"` and the row DECLINES.
   # Declining is a smaller lie than inlining a binding that may not hold, and the selftest
   # plants exactly that nested rebind to prove the two behaviours differ.
+  #
+  # THE SECOND LIMIT, NAMED HERE BECAUSE AN UNDISCLOSED LIMIT INSIDE A FIX IS THIS EPIC'S
+  # OWN DISEASE. This pass runs on `register_routes/1`'s body, and plugin_route_specs/1
+  # applies it BEFORE both the literal walk and follow_route_delegation/2 — so a delegating
+  # callback whose OWN body binds an alias to a variable is covered. What is NOT covered is
+  # the DELEGATE'S body: follow_route_delegation/2 resolves `Routes.all()` to that def and
+  # hands its raw AST to route_specs/1 without a substitution pass, so a `var = Alias`
+  # binding inside the delegate resolves to `"?"` and its route DECLINES. That is EMPTY
+  # today and the emptiness is derived, not assumed — onixedit/routes.ex is the only
+  # delegate target in the tree and it holds zero `=` bindings — but it is a LIVE second
+  # instance of the same shape, and it is written down here rather than left dark. The
+  # repair, when a delegate first binds one, is one call: inline_alias_bindings/1 on `b`
+  # inside follow_route_delegation/2's flat_map. It is not made now because a resolver
+  # arm with no member to resolve is an unfalsifiable arm.
   defp inline_alias_bindings(body) do
     stmts = block_stmts(body)
 
@@ -4208,6 +4542,28 @@ defmodule PDS.Census do
       |> Enum.filter(fn {_k, n} -> n > 1 end)
       |> Enum.map(&elem(&1, 0))
 
+    # THE THIRD CONTRADICTION THE TABLE CAN CARRY, AND THE ONE NOTHING SAW (PDS-D556).
+    # `orphans` catches a row naming NO live member; `dupes` catches a key carrying two
+    # rows. Neither can see a row that names a member the SAME RUN disposed JUDGED or
+    # ROSTERED: the cond above has precedence JUDGED > ROSTERED > EXCLUDED, so such a row
+    # is SWALLOWED — the member takes its derived label, EXCLUDED does not move, the key
+    # is live so it is not an orphan, and the row is unique so it is not a dupe. MEASURED
+    # ON MERGED MAIN: plant {:post, "/v1/paperflow/papers", "BarkparkWeb.BulldocsIngestController",
+    # :ingest, :status_only_receipt} — a member this lens JUDGES — and the census prints
+    # PASS ROUTED-POPULATION-COMPLETE, EXCLUDED UNMOVED while the table holds one row more,
+    # UNDISPOSED 0, CENSUS OK, exit 0. NOT ONE NUMBER MOVES. The exclusion table could be
+    # grown over judged members with zero observable effect on any printed figure or any
+    # arm, which is a table that cannot be audited by reading the run.
+    #
+    # DERIVED, NOT SNAPSHOTTED. Both inputs are already in scope here — the labels this
+    # cond just assigned, and the committed map it read to assign them — so this costs one
+    # comprehension and no new committed data, which is what keeps it un-rottable.
+    shadowed =
+      for {key, verdict, _} <- disposed,
+          verdict in [:judged, :rostered],
+          Map.has_key?(committed, key),
+          do: {key, verdict, Map.fetch!(committed, key)}
+
     # ---- THE JUDGMENT-COVERAGE LADDER, TAKEN EXACTLY ONCE, HERE -------------------
     #
     # THE TOP RUNG IS A UNION AND MUST NEVER BE A SUM. leg_a and leg_b are two
@@ -4272,6 +4628,7 @@ defmodule PDS.Census do
       undisposed: for({k, :undisposed, _} <- disposed, do: k),
       orphans: orphans,
       dupes: dupes,
+      shadowed: shadowed,
       classes: Enum.frequencies(for {_k, :excluded, c} <- disposed, do: c)
     }
   end
@@ -4363,6 +4720,245 @@ defmodule PDS.Census do
   defp action_defs(index, module, action) do
     segs = module |> String.split(".") |> Enum.map(&String.to_atom/1)
     Map.get(index.by_key, {segs, action}, [])
+  end
+
+  # ---------------------------------------- the exclusion anchor (PDS-D585)
+  #
+  # WHY THIS EXISTS. #9112 gave the 8-row @roster `anchor_mfa` + `def_fp` precisely so a
+  # verdict cannot outlive its defect. The exclusion table got NOTHING: every row was a
+  # bare 5-tuple, so a repair landing UNDER a stale exclusion row could not red, and the
+  # committed prose kept describing a receipt that had already been fixed. The anchor
+  # below is the roster's discipline, one table over.
+  #
+  # IT REUSES roster_def_fp/1 AND NOTHING ELSE. A second normaliser would make two tables
+  # that drift apart under one edit to fp/1 or drop_meta/1; there is exactly one spelling
+  # of "this def, normalised", and editing it re-keys the roster's 8 rows and these rows
+  # in the same commit, which is the property that makes the re-key visible.
+  #
+  # THE FOLD IS ORDER-SENSITIVE, AND THAT IS A DECISION, NOT AN ACCIDENT. The roster never
+  # needed one: it resolves a LITERAL to the narrowest enclosing def, unique by
+  # construction. A routed {module, action} is NOT unique — a multi-head controller action
+  # resolves to several clauses — so the anchor folds the per-clause fingerprints IN LINE
+  # ORDER. Clause order is Elixir semantics (the first matching head wins), so two clauses
+  # SWAPPED is a real behavioural change and MUST move the fingerprint; a set-hash or a
+  # sorted fold would call that edit a no-op. The cost is that a pure re-ordering reds as
+  # loudly as a rewrite, which is the correct direction for an anchor whose whole job is
+  # to refuse to certify a def it has not seen.
+  defp exclusion_defs(index, mod, action),
+    do: index |> action_defs(mod, action) |> Enum.sort_by(& &1.line)
+
+  defp exclusion_def_fp([]), do: nil
+
+  defp exclusion_def_fp(defs),
+    do: defs |> Enum.map(&roster_def_fp/1) |> :erlang.phash2() |> to_string()
+
+  # {quad, anchor_mfa, clause_count, def_fp, file} — the row the emitter prints and the
+  # freshness arms compare. A row that resolves to NO def gets `-` in three fields and a
+  # clause_count of 0: it is NAMED as uncovered rather than absorbed, which is the whole
+  # point of printing the coverage hole.
+  defp exclusion_anchor(index, module_files, {m, p, mod, a, class}) do
+    defs = exclusion_defs(index, mod, a)
+
+    %{
+      quad: {m, p, mod, a},
+      class: class,
+      anchor_mfa: if(defs == [], do: "-", else: label(hd(defs))),
+      clause_count: length(defs),
+      def_fp: exclusion_def_fp(defs) || "-",
+      file: Map.get(module_files, mod, "-"),
+      in_corpus?: Map.has_key?(module_files, mod)
+    }
+  end
+
+  defp exclusion_anchors(parsed, index),
+    do: Enum.map(@routed_excluded, &exclusion_anchor(index, module_file_index(parsed), &1))
+
+  # DELETE/REVOKE IS THE NARROW ARM'S SCOPE, DERIVED FROM THE ACTION NAME AND NEVER TYPED
+  # AS A ROW LIST. A hand list of "the seventeen" rots the first time a delete route is
+  # added or renamed; a stem test moves with the table.
+  @exclusion_narrow_stems ~w(delete revoke destroy purge)
+
+  defp exclusion_narrow?(%{quad: {_m, _p, _mod, a}}) when is_atom(a) and not is_nil(a),
+    do: Enum.any?(@exclusion_narrow_stems, &String.starts_with?(to_string(a), &1))
+
+  defp exclusion_narrow?(_), do: false
+
+  # STDOUT IS TSV AND NOTHING ELSE — same contract as --keys, so `cut` and `wc -l` mean
+  # what they say and the one-line summary goes to STDERR.
+  defp exclusion_keys_run(opts) do
+    files = corpus(opts)
+    guard_corpus!(files, false)
+
+    parsed = Enum.map(files, &parse_file/1)
+    index = build_index(parsed)
+    rows = exclusion_anchors(parsed, index)
+
+    Enum.each(rows, fn r ->
+      {m, p, mod, a} = r.quad
+
+      IO.puts(
+        Enum.join(
+          [m, p, mod, inspect(a), r.anchor_mfa, r.clause_count, r.def_fp, r.file],
+          "\t"
+        )
+      )
+    end)
+
+    no_def = Enum.count(rows, &(&1.clause_count == 0))
+    multi = Enum.count(rows, &(&1.clause_count > 1))
+
+    IO.puts(
+      :stderr,
+      "exclusion-keys #{length(rows)} row(s) · #{no_def} resolve to NO def · #{multi} multi-clause (fold REQUIRED) · #{Enum.count(rows, &exclusion_narrow?/1)} delete/revoke · normaliser #{@key_normaliser}"
+    )
+
+    System.halt(0)
+  end
+
+  # -- EXCLUSION ANCHOR FRESHNESS: one derivation, two arms -------------------
+  #
+  # TWO ARMS OVER ONE DERIVATION, AND THE SPLIT IS THE WHOLE RULING (PDS-D585). The
+  # measurement that decided it was a REPLAY over the real commit window, not a
+  # preference: the WIDE set moves on ordinary feature churn inside an excluded def
+  # several times a week, so a hard arm over it would be switched off inside a
+  # fortnight — it DEMOTES AND NAMES in the printed block, exactly the shape
+  # ROSTER-VERDICT-FRESH uses, and it never edits a committed row. The NARROW set (the
+  # delete/revoke anchors, where a repair landing under a stale exclusion is the
+  # epic's headline defect) is rare enough to gate, so it REDS.
+  #
+  # SCOPED BY THE SAME PREDICATE THE REGISTER ARMS USE. The synthetic selftest tree
+  # carries none of the real controllers and its own fixture modules carry no committed
+  # anchor, so an unconditional arm would red the selftest on its own commit — and, worse,
+  # the `:repaired` corpus deliberately REWRITES six echo actions, which is a moved anchor
+  # by construction. THAT is why the mutants proving this arm can go red census the REPO
+  # (`corpus: :repo`): an arm proven only where it is scoped out is proven nowhere.
+  defp exclusion_freshness(parsed, index),
+    do: Enum.map(exclusion_anchors(parsed, index), &Map.put(&1, :state, exclusion_state(&1)))
+
+  defp exclusion_state(%{in_corpus?: false}), do: {:out_of_scope, []}
+
+  defp exclusion_state(r) do
+    case {Map.get(@exclusion_anchors, r.quad), r.clause_count} do
+      {nil, 0} ->
+        {:no_def, []}
+
+      {nil, _} ->
+        {:unanchored,
+         ["resolves to #{r.clause_count} clause(s) and carries NO committed anchor — re-derive with --exclusion-keys"]}
+
+      {{mfa, _cc, _fp}, 0} ->
+        {:vanished, ["the anchored def #{mfa} resolves to NO clause in this corpus"]}
+
+      {{mfa, cc, fp}, _} ->
+        moved =
+          [
+            if(mfa != r.anchor_mfa, do: "anchor_mfa moved #{mfa} -> #{r.anchor_mfa}"),
+            if(cc != r.clause_count, do: "clause_count moved #{cc} -> #{r.clause_count}"),
+            if(fp != r.def_fp, do: "def_fp moved #{fp} -> #{r.def_fp}")
+          ]
+          |> Enum.reject(&is_nil/1)
+
+        if moved == [], do: {:fresh, []}, else: {:stale, moved}
+    end
+  end
+
+  @exclusion_unfresh [:stale, :unanchored, :vanished]
+
+  defp exclusion_tag(%{state: {t, _}}), do: t
+  defp exclusion_why(%{state: {_, why}}), do: Enum.join(why, " · ")
+
+  defp exclusion_quad_label(%{quad: {m, p, mod, a}}), do: "#{m} #{p} -> #{mod}.#{inspect(a)}"
+
+  # THE COVERAGE HOLE IS PRINTED OR THIS SHIPS NOTHING. A slice that says "the exclusion
+  # table is now freshness-checked" without printing the rows it CANNOT key commits this
+  # epic's exact over-claim one lens down, so the breakdown and the fraction are OUTPUT,
+  # never PR prose.
+  defp report_exclusion_freshness(rows) do
+    by = Enum.group_by(rows, &exclusion_tag/1)
+    n = fn t -> length(Map.get(by, t, [])) end
+    out_of_scope = n.(:out_of_scope)
+    no_def = n.(:no_def)
+    in_scope = length(rows) - out_of_scope
+    anchored = in_scope - no_def
+    unfresh = Enum.filter(rows, &(exclusion_tag(&1) in @exclusion_unfresh))
+    narrow = Enum.filter(rows, &exclusion_narrow?/1)
+    narrow_anchored = Enum.count(narrow, &(exclusion_tag(&1) not in [:out_of_scope, :no_def]))
+
+    no_def_classes =
+      by
+      |> Map.get(:no_def, [])
+      |> Enum.frequencies_by(& &1.class)
+      |> Enum.sort()
+      |> Enum.map_join(", ", fn {c, k} -> "#{k} #{c}" end)
+
+    p("  EXCLUSION-ANCHOR FRESHNESS — the #{length(@roster)}-row roster's discipline, given to the")
+    p("  #{length(@routed_excluded)}-row exclusion table. Every anchor RE-DERIVED this run: anchor_mfa,")
+    p("  clause_count and an ORDER-SENSITIVE fold of the per-clause def fingerprints.")
+    p("    rows          #{pad(length(@routed_excluded))}")
+    p("    OUT OF SCOPE  #{pad(out_of_scope)}  module absent from this corpus — judged neither way")
+    p("    NO DEF        #{pad(no_def)}  in-corpus row whose {module, action} resolves to no def:")
+    p("                       #{if no_def_classes == "", do: "none", else: no_def_classes}")
+    p("                       A LiveView route names {Module, :action-or-nil} and its writes")
+    p("                       live in handle_event/3 — there is no {Controller, action} def to")
+    p("                       fingerprint. These need a DIFFERENT anchor kind and are NAMED")
+    p("                       here with 0 defs rather than absorbed into a coverage figure.")
+    p("    ANCHORED      #{pad(anchored)}  committed {anchor_mfa, clause_count, def_fp}")
+    p("      FRESH       #{pad(n.(:fresh))}")
+    p("      STALE       #{pad(n.(:stale))}  demoted-and-named below; NEVER rewritten in the file")
+    p("      UNANCHORED  #{pad(n.(:unanchored))}  an arriving row with no committed anchor")
+    p("      VANISHED    #{pad(n.(:vanished))}  the anchored def resolves to no clause any more")
+    p("    COVERAGE      #{anchored}/#{in_scope} = #{lv_pct(anchored, in_scope)} of IN-SCOPE rows carry an anchor")
+    p("    MULTI-CLAUSE  #{pad(Enum.count(rows, &(&1.clause_count > 1)))}  rows whose action resolves to more than one clause —")
+    p("                       the fold is REQUIRED for these, and an edit to the SECOND clause")
+    p("                       moves the fingerprint where a first-clause-only anchor cannot")
+    p("    NARROW ARM    #{pad(narrow_anchored)}  anchored delete/revoke row(s) of #{length(narrow)} narrow row(s) —")
+    p("                       EXCLUSION-ANCHORS-FRESH REDS on these. The WIDE set above is")
+    p("                       PRINTED ONLY: measured over the real commit window it moves on")
+    p("                       ordinary feature churn inside an excluded def, and a hard arm")
+    p("                       over it would be switched off inside a fortnight.")
+
+    Enum.each(unfresh, fn r ->
+      p("      EXCLUSION UNRE-DERIVED  #{exclusion_quad_label(r)} [#{r.class}]#{if exclusion_narrow?(r), do: "  (NARROW)", else: ""}")
+      p("               #{exclusion_why(r)}")
+      p("               the class prose above was written against a def that no longer exists")
+      p("               in that shape — a human owes this row a re-derivation; this block")
+      p("               never edits a committed row and never assigns a disposition")
+    end)
+
+    p("")
+  end
+
+  defp exclusion_freshness_check(rows) do
+    narrow = Enum.filter(rows, &exclusion_narrow?/1)
+    fresh = Enum.count(narrow, &(exclusion_tag(&1) == :fresh))
+    bad = Enum.filter(narrow, &(exclusion_tag(&1) in @exclusion_unfresh))
+
+    # 0-OF-N IS NOT A PASS, the same refusal ROSTER-VERDICT-FRESH makes: an arm that
+    # certifies an empty set is the vacuous green this epic exists to refuse, and it is
+    # exactly what a broken resolver produces.
+    vacuous? = fresh == 0 and bad == []
+
+    why =
+      cond do
+        vacuous? ->
+          "NOT ONE of #{length(narrow)} delete/revoke exclusion row(s) resolved to an anchored def, so this arm certified an EMPTY SET — the resolver, not the table, is what failed"
+
+        bad != [] ->
+          "#{length(bad)} of #{length(narrow)} delete/revoke exclusion row(s) no longer name the def they were committed against — " <>
+            Enum.map_join(Enum.take(bad, 4), " || ", fn r ->
+              "STALE EXCLUSION #{exclusion_quad_label(r)} [#{r.class}] — #{exclusion_why(r)}"
+            end) <>
+            if(length(bad) > 4,
+              do: " || (+#{length(bad) - 4} more, all listed in the block above)",
+              else: ""
+            ) <>
+            " — a repair landing UNDER a stale exclusion row is the defect this arm exists to catch: RE-READ the class prose against the def it now names and re-derive with `--exclusion-keys` in the SAME commit"
+
+        true ->
+          "#{fresh} delete/revoke exclusion row(s) still name the def they were committed against — anchor_mfa, clause_count AND the order-sensitive clause fold all re-derived this run, never transcribed. BLIND SHAPE, STATED: the fold is SAME-DEF, so a repair confined to a CALLEE of the excluded action moves no byte inside the action's own clauses and this arm prints PASS through it — and the WIDE set is printed, never gated, so a stale row outside the delete/revoke stems demotes in the block above without reddening anything"
+      end
+
+    {"EXCLUSION-ANCHORS-FRESH", not vacuous? and bad == [], why}
   end
 
   # ------------------------------------- derivation partition (PDS wave 40)
@@ -5078,7 +5674,31 @@ defmodule PDS.Census do
     end)
 
     p("    UNDISPOSED #{pad(length(disp.undisposed))}  <- ROUTED-POPULATION-COMPLETE reds on this")
+    p("    SHADOWED  #{pad(length(disp.shadowed))}  <- ROUTED-DISPOSITION-UNSHADOWED reds on this. NOT a")
+    p("                  disposition class and NOT part of the sum below: it counts members")
+    p("                  the cond disposed JUDGED or ROSTERED that ALSO carry a committed")
+    p("                  exclusion row — rows the precedence SWALLOWS, which is why every")
+    p("                  number on this page can be identical with the table one row larger.")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    p("")
+    p("  JUDGED FRACTION #{disp.ladder.judged_coverage}/#{length(d.population)} — the share of the routed write")
+    p("  surface this lens has JUDGED (disposed JUDGED or ROSTERED) — PRINTED, NEVER GATED")
+    wrap(
+      "IT IS NOT A THRESHOLD AND MUST NEVER BECOME ONE, and the reason is a measurement, " <>
+        "not a preference (PDS-D563). Over 95 api/lib commits this fraction MOVED 9 times " <>
+        "(once per 10.6 commits), and all 8 of the movers that moved the DENOMINATOR were " <>
+        "plain FEATURE commits that touched no receipt at all: a route added is a routed " <>
+        "member added, so an honest feature lowers this fraction the instant it lands. A " <>
+        "thresholded or non-decreasing arm over this line would have redded five times in " <>
+        "eleven days on work that broke nothing. THE NUMERATOR IS THE HALF THAT RATCHETS: " <>
+        "judged never decreased across all 95 commits and ROSTERED held at 7 throughout, " <>
+        "which is why a numerator floor is the only shape that could ever be honest here " <>
+        "— and even that is not shipped, because D454 stands. What this line buys is that " <>
+        "the coverage of the judgment can no longer be an unstated number a reader has to " <>
+        "divide two other lines to find.",
+      "    "
+    )
 
     p("")
     lad = disp.ladder
@@ -5128,6 +5748,10 @@ defmodule PDS.Census do
     p("        right now. NOTHING BELOW IS EVIDENCE THAT THE :stale ARM WORKS.")
 
     p("")
+    exfresh = exclusion_freshness(parsed, index)
+    report_exclusion_freshness(exfresh)
+
+    p("")
     deriv = derivation_partition(disp, index)
     report_derivation_partition(deriv, Map.get(disp.classes, @derivation_class, 0))
 
@@ -5139,7 +5763,11 @@ defmodule PDS.Census do
     p("")
     lv = report_liveview_population(lives, parsed, index)
 
-    d |> Map.put(:disposition, disp) |> Map.put(:derivation, deriv) |> Map.put(:liveview, lv)
+    d
+    |> Map.put(:disposition, disp)
+    |> Map.put(:derivation, deriv)
+    |> Map.put(:liveview, lv)
+    |> Map.put(:exclusion, %{rows: exfresh, scope: register_scope(classified)})
   end
 
   # THE PARTITION, PRINTED IN FULL. Every row prints the producing call NAME it was
@@ -6555,11 +7183,48 @@ defmodule PDS.Census do
             else: Enum.map_join(blind, ", ", fn {n, a, l} -> "#{n}/#{a}:#{l}" end)
       end
 
+    # THE ARM PRINTS THE DEPARTURE CASE IT CANNOT CATCH, IN ITS PASS SENTENCE (PDS-D556).
+    # Departure decomposes into three cases and this arm owns exactly ONE of them:
+    #   D1  a receipt vanishes and no row is added  -> already reds as UNDISPOSED ARRIVAL.
+    #   D2  a row is planted over a still-judged member -> THIS ARM. Free, derived.
+    #   D3  the judgment is lost AND the row added in ONE commit -> the member is disposed
+    #       EXCLUDED, honestly, by a table that names it. The contradiction exists only
+    #       BETWEEN TWO CHECKOUTS, and a build-free ONE-CHECKOUT lens structurally cannot
+    #       read history. SHADOWED 0 THEREFORE DOES NOT MEAN "NO DEPARTURES" — and a reader
+    #       who takes it that way can only be stopped by prose, so the prose ships in the
+    #       PASS sentence rather than in a comment nobody runs.
+    # ARRIVAL SEMANTICS, NEVER A COUNT: the predicate is `shadowed == []` and the failure
+    # text NAMES THE QUADS. An honest table edit — a row added over an undisposed member,
+    # a row removed — cannot red this, because no number is compared to anything.
+    shadow_why =
+      if disp.shadowed == [] do
+        "no committed disposition row names a member this run disposed JUDGED or ROSTERED — the #{length(@routed_excluded)}-row table and the #{disp.judged + disp.rostered} derived judgment(s) do not overlap · BLIND SHAPE, PRINTED: this catches a member judged AND excluded AT THE SAME TIME (D2). It CANNOT catch a judgment lost and an exclusion row added in ONE commit (D3) — that departure leaves a contradiction only in HISTORY, and a build-free one-checkout lens cannot read history. SHADOWED 0 IS NOT \"NO DEPARTURES\""
+      else
+        Enum.join(
+          Enum.map(Enum.take(disp.shadowed, 6), fn {{m, p, mod, a}, verdict, c} ->
+            "SHADOWED DISPOSITION #{m} #{p} -> #{mod}.#{a} [#{c}] — this run disposed it #{String.upcase(to_string(verdict))}, so the row is SWALLOWED by the cond's precedence and moves no printed number"
+          end) ++
+            [
+              "the exclusion table is claiming a member the derivation judges; one of the two is wrong and neither says so"
+            ],
+          " · "
+        )
+      end
+
     [
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
-      {"LENS-CAN-MISS", resolved != [], lens_why}
-    ] ++ derivation_checks(d) ++ liveview_checks(d)
+      {"LENS-CAN-MISS", resolved != [], lens_why},
+      {"ROUTED-DISPOSITION-UNSHADOWED", disp.shadowed == [], shadow_why}
+    ] ++ exclusion_freshness_checks(d) ++ derivation_checks(d) ++ liveview_checks(d)
   end
+
+  # SCOPED OUT ON THE SYNTHETIC TREE, exactly like the register and roster arms — see
+  # the comment on exclusion_freshness/2 for why an unconditional arm would red the
+  # selftest on its own commit, and why the mutants for this arm census the REPO.
+  defp exclusion_freshness_checks(%{exclusion: %{scope: :real, rows: rows}}),
+    do: [exclusion_freshness_check(rows)]
+
+  defp exclusion_freshness_checks(_), do: []
 
   # A RELATION, NEVER A THRESHOLD (PDS wave 40). This arm asserts that the partition
   # DISPOSES ITS OWN CLASS EXACTLY ONCE — the sum of the eight classes equals the
@@ -7210,6 +7875,96 @@ defmodule PDS.Census do
       expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
       proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
+    # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
+    # is scoped to the real corpus by the same predicate the register and roster arms
+    # use, so a mutant over the synthetic tree would be proven exactly where the arm is
+    # switched off (PDS-D541). Nothing below writes to api/lib: each case perturbs the
+    # COMMITTED side of the comparison, which is the only side a selftest may edit.
+    %{
+      name: "EXCLUSION-DEF-FP-MOVED",
+      corpus: :repo,
+      argv: [],
+      # A repair landing UNDER a stale exclusion row — the defect this arm exists to
+      # catch. Perturbing the recorded fingerprint is that divergence seen from the
+      # other side: recorded fold vs re-derived fold, on a DELETE row, which is the
+      # narrow arm's scope and therefore a hard red.
+      mut: {", 1, " <> "\"29471808\"}", ", 1, \"29471808-perturbed\"}"},
+      exit: 1,
+      expect: [
+        "FAIL  EXCLUSION-ANCHORS-FRESH",
+        "STALE EXCLUSION",
+        "BarkparkWeb.MemberController.:delete",
+        "def_fp moved"
+      ],
+      proves: "an exclusion row whose anchored def CHANGED reds BY NAME on the delete/revoke arm — the staleness the 182-row table could not have on any run before this one, because it carried no anchor at all"
+    },
+    %{
+      name: "EXCLUSION-FOLD-IS-THE-ANCHOR",
+      corpus: :repo,
+      argv: [],
+      # THE MULTI-CLAUSE FOLD, PROVEN LOAD-BEARING FROM THE INSTRUMENT SIDE. Folding only
+      # the FIRST clause is exactly the anchor a naive implementation would ship: it is
+      # BYTE-IDENTICAL on every single-clause row and re-keys only the multi-clause ones,
+      # so the mutation is a clean read on the fold and on nothing else. It is also the
+      # ONE case that proves the WIDE arm's SHAPE — not one multi-clause row is a
+      # delete/revoke, so the run DEMOTES AND NAMES them and still exits 0. A wide arm
+      # that hard-failed would break this case, which is what keeps the ruling honest.
+      mut:
+        {"do: defs |> Enum.map(&roster" <> "_def_fp/1)",
+         "do: defs |> Enum.take(1) |> Enum.map(&roster_def_fp/1)"},
+      exit: 0,
+      expect: ["CENSUS OK", "EXCLUSION UNRE-DERIVED", "def_fp moved", "PASS  EXCLUSION-ANCHORS-FRESH"],
+      proves: "the per-clause fold is what the multi-clause rows are keyed on — dropping to the first clause moves their fingerprints — AND the wide set demotes-and-names at exit 0 rather than hard-failing, which is the ruling the commit-window replay bought"
+    },
+    %{
+      name: "EXCLUSION-NARROW-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-N SHAPE, one table over from ROSTER-FRESH-NOT-VACUOUS. An empty narrow
+      # set makes every comparison unreachable, which is how a freshness arm certifies
+      # nothing at exit 0 while printing PASS.
+      mut: {"@exclusion_narrow_stems ~w(delete" <> " revoke destroy purge)", "@exclusion_narrow_stems ~w()"},
+      exit: 1,
+      expect: ["FAIL  EXCLUSION-ANCHORS-FRESH", "certified an EMPTY SET"],
+      proves: "a narrow set that selects NOTHING reds instead of passing 0-of-0 — an arm that certifies an empty set is the vacuous green this epic refuses"
+    },
+    # THE SELF-ERASING LENS (PDS-D706). Both cases census the REPO: the register arms are
+    # scoped to the corpus the register's paths live in, so a mutant over the synthetic
+    # tree would be proven exactly where the arm is switched off (PDS-D541). Neither case
+    # writes to api/lib.
+    %{
+      name: "REGISTER-FENCE-IS-LIVE",
+      corpus: :repo,
+      argv: [],
+      # THE FENCE, PROVEN REACHABLE RATHER THAN ASSUMED. It refuses the single-candidate
+      # re-point when the row's {path, mfa} group held MORE THAN ONE site at record time,
+      # and it costs nothing on today's tree because every basis-stale row sits in a solo
+      # group. Widening the threshold to fence the SOLO groups too turns exactly those
+      # honest demotions into ORPHANS — which is the only way to see, from inside the
+      # instrument, that the group-size test is what admits them and not an accident.
+      mut:
+        {"if Map.get(@register_group_sizes, {path, mfa}, 1) " <> "> 1 do",
+         "if Map.get(@register_group_sizes, {path, mfa}, 1) > 0 do"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-COMPLETE", "ORPHANED ROW", "register row(s) name NO emitted site"],
+      proves: "the record-time group-size fence is LIVE on the fallback path — the demotions that pass today pass BECAUSE their group held one site, so the fence is what stands between a bought verdict and its neighbour's receipt"
+    },
+    %{
+      name: "REGISTER-RETIRED-RESURRECTION-REDS",
+      corpus: :repo,
+      argv: [],
+      # THE RETIRED FORM'S TEETH, ON A TREE WITH ZERO RETIRED ROWS. The arm's job is to
+      # refuse a row that says "the literal left by repair" while the literal is right
+      # there — a reverted repair must not inherit the verdict the repair bought. Treating
+      # every register row as retired is the cheapest way to put a live site under a
+      # retired key, and it reds on the branch that would otherwise be unreachable until
+      # the first real repair lands.
+      mut:
+        {"retired? = Map.has_key?(r, " <> ":retired)", "retired? = Map.has_key?(r, :verdict)"},
+      exit: 1,
+      expect: ["FAIL  REGISTER-RETIRED-STAYS-RETIRED", "RESURRECTED"],
+      proves: "a RETIRED row whose site is live again reds by name instead of quietly re-adopting the site — the retired form cannot be used as a suppression switch"
+    },
     # THE ONE-HOP JOIN (PDS wave 41), AND WHY ITS CORPUS IS THE REPO. The join's whole
     # subject is a HOP between two real defs, and the synthetic tree's controllers respond
     # in their own bodies — a fixture would exercise the code and prove nothing about it.
@@ -7378,6 +8133,105 @@ defmodule PDS.Census do
       expect: ["Keyed on {module, live_session}. 3 routed module(s) resolve to a"],
       refute: ["Keyed on {module, live_session}. 2 routed module(s) resolve to a"],
       proves: "the `?` decline is load-bearing: without it the fold credits a live_session to a spec whose module this lens cannot name, and the printed routed-module count goes 2 -> 3 on a corpus whose openable routed modules never changed"
+    },
+    # THE ALIAS RESOLVER GETS ITS OWN MUTANT (PDS-D562). inline_alias_bindings/1 is the
+    # clause that reclaimed the two Sheets write routes from the retired
+    # `action_not_in_corpus` class, and until this case existed it was a RESOLVER WITH NO
+    # MUTANT — exactly the quietly-rotting shape this epic distrusts, and one whose
+    # rot is INVISIBLE in the shipped numbers (a retired binding does not red anything on
+    # the real tree; it silently re-labels two members).
+    #
+    # IT PROVES THE JOIN BY NAME, WHICH IS THE WHOLE POINT. The fixture plugin binds
+    # `ops_mod = Barkpark.Filler.PluginOpsLive` at the top of register_routes/1 and spells
+    # its route with the VARIABLE, and a committed disposition row names the RESOLVED
+    # module. Retire the substitution (bind_counts/1 can never equal 99) and that one route
+    # splits in two directions AT ONCE: the live member arrives as `?.index` with no
+    # disposition, and the committed row that named the resolved module now names nothing
+    # live. BOTH halves are asserted, because either alone could be produced by something
+    # other than the substitution — together they can only mean the module name moved from
+    # `Barkpark.Filler.PluginOpsLive` to `?`, which IS the resolution, observed by name.
+    %{
+      name: "ROUTE-ALIAS-BINDING-RESOLVES",
+      corpus: :full,
+      argv: [],
+      # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+      # an ambiguous anchor, and a mut literal that occurs twice is exactly that.
+      mut:
+        {"Map.get(counts, name, " <> "0) == 1", "Map.get(counts, name, " <> "0) == 99"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-POPULATION-COMPLETE",
+        "UNDISPOSED ARRIVAL live /plugins/ops-live -> ?.index",
+        "ORPHANED DISPOSITION live /plugins/ops-live -> Barkpark.Filler.PluginOpsLive.index"
+      ],
+      refute: ["PASS  ROUTED-POPULATION-COMPLETE"],
+      proves: "a route module bound to a LOCAL VARIABLE is resolved to its fully-qualified alias before route_specs/1 reads the tuple: retire the substitution and the same route arrives as `?.index` while the committed row naming Barkpark.Filler.PluginOpsLive.index is orphaned — the two halves name the resolved module and the unresolved one in the SAME run"
+    },
+    # ROUTED-DISPOSITION-UNSHADOWED, ONE CASE PER BRANCH OF ITS PREDICATE (PDS-D556).
+    #
+    # THE CORPUS IS THE REPO, AND THAT IS THE WHOLE COST STORY. The arm's predicate reads
+    # `verdict in [:judged, :rostered]`, and BOTH labels are DERIVED — a member is judged
+    # because this run found a receipt the register keys, rostered because it found a
+    # @roster anchor. Over the synthetic tree neither label exists for a member the
+    # shipped @routed_excluded also names, so a mutant there would run a check that
+    # returned [] before and [] after — PDS-D541's unmutatability, wearing a new arm's
+    # name. The read-only REPO corpus already exists for exactly this scope problem (13
+    # cases ride it), so no seventh corpus is built: the brief's "third selftest corpus
+    # carrying one file at a live @register path" would flip register_scope/1 to :real
+    # over a synthetic tree and red FOUR unrelated arms, and the case would then have to
+    # borrow an exit code it did not earn. HERE IT EARNS IT, and the earning is ASSERTED,
+    # not assumed: each case requires `PASS  ROUTED-POPULATION-COMPLETE` and
+    # `PASS  LENS-CAN-MISS` in the SAME output as its own FAIL, so exit 1 can only be this
+    # arm's. That is strictly more than the brief asked for and strictly less fixture.
+    #
+    # NOTHING SHIPPED MOVES. Both mutants ADD one @routed_excluded row over a member the
+    # real tree already disposes JUDGED (or ROSTERED). The cond's precedence swallows it,
+    # so EXCLUDED does not move, the derivation partition's total does not move, and the
+    # @rederived baseline does not move — which is the DEFECT restated as a fixture: the
+    # only observable the plant has is the arm this slice adds.
+    #
+    # ONE CASE PER BRANCH, AND EACH CAUGHT BY ITS OWN. Mutating the predicate to
+    # `[:rostered]` leaves SHADOWED-ROW-OVER-ROSTERED green and reds SHADOWED-ROW-OVER-JUDGED
+    # by name; mutating it to `[:judged]` does the mirror. With only one of the two cases
+    # the corresponding half of the predicate is a live arm with no mutant on it — this
+    # epic's failure mode inside its own selftest.
+    %{
+      name: "SHADOWED-ROW-OVER-JUDGED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},",
+         "{:post, \"/v1/paperflow/papers\", \"BarkparkWeb.BulldocsIngestController\", :ingest, :status_only_receipt},\n    " <>
+           "{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DISPOSITION-UNSHADOWED",
+        "SHADOWED DISPOSITION post /v1/paperflow/papers -> BarkparkWeb.BulldocsIngestController.ingest",
+        "this run disposed it JUDGED",
+        "PASS  ROUTED-POPULATION-COMPLETE",
+        "PASS  LENS-CAN-MISS"
+      ],
+      refute: ["PASS  ROUTED-DISPOSITION-UNSHADOWED"],
+      proves: "the JUDGED branch of the predicate is live: an exclusion row planted over a member this run disposes JUDGED reds the new arm BY QUAD while every neighbouring arm stays PASS — the shape that on origin/main moved not one printed number"
+    },
+    %{
+      name: "SHADOWED-ROW-OVER-ROSTERED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},",
+         "{:post, \"/v1/chat-host/events\", \"BarkparkWeb.ChatHostController\", :event, :status_only_receipt},\n    " <>
+           "{:post, \"/v1/selftest-fixture-" <> "close\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTED-DISPOSITION-UNSHADOWED",
+        "SHADOWED DISPOSITION post /v1/chat-host/events -> BarkparkWeb.ChatHostController.event",
+        "this run disposed it ROSTERED",
+        "PASS  ROUTED-POPULATION-COMPLETE",
+        "PASS  LENS-CAN-MISS"
+      ],
+      refute: ["PASS  ROUTED-DISPOSITION-UNSHADOWED"],
+      proves: "the ROSTERED branch is live and is NOT reachable through the JUDGED one: the planted row names a member disposed ROSTERED by a @roster anchor, and the arm reds naming that quad and that label"
     },
     # THE LADDER'S TOP RUNG, AND THE ONLY DISCRIMINATOR THAT EXISTS FOR IT (wave 45).
     # OVERLAP is 0 on today's tree, so `leg_a + leg_b` and Enum.count(MapSet.union(..))
@@ -8281,15 +9135,29 @@ defmodule PDS.Census do
     # THE EIGHT POPULATION ROWS, DERIVED ONCE AND READ TWICE — by the arm that refuses a
     # drift and by the block that prints them. Two lists would be two lenses wearing one
     # name, which is the defect this file exists to refuse.
+    # THE CONSERVED ROWS, MEASURED RATHER THAN GUESSED (PDS-D706). The first scratch
+    # repair proved a status-descending fix moves FOUR of the eight rows, not three:
+    # textual -1, ast -1, emitted -1 AND the route row the departing site sat in (-1 on
+    # write-routed for pulse_controller.ex:58). The first three are conserved for every
+    # retired row; the fourth is conserved on the row the retiring commit RECORDED, which
+    # is why `retired_route` is a required field. The four rows a repair never touches —
+    # phantom and consumer — are left alone: conserving a number no repair moves would be
+    # suppression. An ARRIVAL adds a literal and NO retired row, so it still moves the
+    # conserved totals and still reds.
+    retired_n = length(retired_rows())
+
     drift_rows = [
-      {"textual", textual, :textual},
-      {"ast-literal", length(ast_sites), :ast},
+      {"textual", textual + retired_n, :textual},
+      {"ast-literal", length(ast_sites) + retired_n, :ast},
       {"phantom", length(phantoms), :phantom},
       {"consumer", length(consumers), :consumer},
-      {"emitted", length(emitted), :emitted},
-      {"write-routed", Enum.count(classified, & &1.write?), :write},
-      {"read-routed", Enum.count(classified, &(not &1.write? and &1.read?)), :read},
-      {"unrouted", Enum.count(classified, &(not &1.write? and not &1.read?)), :unrouted}
+      {"emitted", length(emitted) + retired_n, :emitted},
+      {"write-routed", Enum.count(classified, & &1.write?) + retired_route_n(:write), :write},
+      {"read-routed",
+       Enum.count(classified, &(not &1.write? and &1.read?)) + retired_route_n(:read), :read},
+      {"unrouted",
+       Enum.count(classified, &(not &1.write? and not &1.read?)) + retired_route_n(:unrouted),
+       :unrouted}
     ]
 
     # EVERY ARM RENDERS ITS OWN FAIL SENTENCE. One `why` for both branches is how a RED
@@ -8351,6 +9219,8 @@ defmodule PDS.Census do
     p("  `elixir scripts/pds-elixir-receipt-census.exs` from the repo root and amend")
     p("  @rederived WITH the lens and the engine in the same commit (PDS-D448a, PDS-D678).")
     p("  #{length(rederived_rows())} row(s) re-derived at wave 47, #{map_size(@rederived) - length(rederived_rows())} inherited from PDS-D448's wave-33 figures.")
+    p("  CONSERVED: textual, ast-literal, emitted (+#{retired_n}) and the recorded route row")
+    p("  of each retired repair (write +#{retired_route_n(:write)} · read +#{retired_route_n(:read)} · unrouted +#{retired_route_n(:unrouted)}) — a repair is not a drift; an arrival is.")
     p("")
     Enum.each(drift_rows, fn {label, got, key} -> drift(label, got, key) end)
     p("")
@@ -8840,6 +9710,7 @@ defmodule PDS.Census do
       :real ->
         [
           register_complete(classified),
+          register_retired_intact(classified),
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
           roster_check(parsed)
@@ -8856,8 +9727,13 @@ defmodule PDS.Census do
     row_keys = Enum.map(@register, & &1.key)
     row_freq = Enum.frequencies(row_keys)
 
-    covered = MapSet.new(for {_r, st, s} <- resolved, st in [:live, :stale], do: site_key(s))
+    covered =
+      MapSet.new(
+        for {_r, st, s} <- resolved, st in [:live, :stale, :resurrected], do: site_key(s)
+      )
+
     demoted = Enum.count(resolved, fn {_r, st, _s} -> st == :stale end)
+    retired = Enum.count(resolved, fn {_r, st, _s} -> st == :retired end)
 
     unjudged = Enum.reject(site_keys, &MapSet.member?(covered, &1))
     orphaned = for {r, :orphan, _s} <- resolved, do: r.key
@@ -8867,7 +9743,15 @@ defmodule PDS.Census do
 
     why =
       if ok? do
+        # THE ROW->SITE DIRECTION COUNTS RETIRED ROWS AS SATISFIED, and the sentence says
+        # so rather than hiding them in a total: a retired row is a row whose site was
+        # REPAIRED away, which is the outcome this census exists to cause.
         "#{length(row_keys)} row(s) <-> #{length(site_keys)} emitted site(s), both directions, no duplicate key" <>
+          if(retired > 0,
+            do:
+              " (#{retired} RETIRED BY REPAIR — resolving to no site is CORRECT for those, and their bought verdicts stay readable above)",
+            else: ""
+          ) <>
           if(demoted > 0, do: " (#{demoted} demoted to basis_stale — reported, never a red)", else: "")
       else
         Enum.join(
@@ -8884,6 +9768,45 @@ defmodule PDS.Census do
       end
 
     {"REGISTER-COMPLETE", ok?, why}
+  end
+
+  # A RETIRED ROW THAT RESOLVES AGAIN IS A CONTRADICTION, NEVER A QUIET RE-ADOPTION. The
+  # row asserts a repair happened; a live site under its exact key asserts the literal is
+  # back. Re-adopting the row would let a REVERTED repair inherit the verdict the repair
+  # bought, which is the same "verdict outliving its defect" this file chases everywhere
+  # else. It also keeps the retired form from becoming a suppression switch: a row cannot
+  # be retired to silence a site that is still there.
+  defp register_retired_intact(classified) do
+    back = for {r, :resurrected, _s} <- resolve_register(classified), do: r
+    n = length(retired_rows())
+
+    # THE CONSERVATION IS ONLY AS GOOD AS THE FIELD IT READS. A retired row with no
+    # `retired_route` silently conserves nothing on the route rows, which is a repair
+    # reading as a drift again — the exact defect this form exists to remove.
+    fieldless = Enum.reject(retired_rows(), &(Map.get(&1, :retired_route) in @retired_routes))
+
+    why =
+      cond do
+        back != [] ->
+          "#{length(back)} RETIRED row(s) resolve to a LIVE emitted site again — the row says the literal left by repair and the tree says it is back: " <>
+            Enum.map_join(back, " · ", fn r ->
+              "RESURRECTED #{short(elem(r.key, 0))} #{elem(r.key, 1)} — retired as: #{Map.get(r, :retired, "(no retirement note recorded)")}"
+            end) <>
+            " — a reverted repair must NOT inherit the verdict the repair bought; un-retire the row with a re-derivation, or re-land the repair"
+
+        fieldless != [] ->
+          "#{length(fieldless)} retired row(s) carry no valid `retired_route` (one of #{inspect(@retired_routes)}): " <>
+            Enum.map_join(fieldless, " · ", &"#{short(elem(&1.key, 0))} #{elem(&1.key, 1)}") <>
+            " — without it the route population row is not conserved and the repair reads as a drift again"
+
+        n == 0 ->
+          "0 retired row(s) — the set is EMPTY today and this arm SAYS SO rather than printing a green over nothing; it arms the moment a repair retires its first row"
+
+        true ->
+          "#{n} retired row(s) resolve to no emitted site, which is what RETIRED means, and each records the population row its repair vacated"
+      end
+
+    {"REGISTER-RETIRED-STAYS-RETIRED", back == [] and fieldless == [], why}
   end
 
   # NOT "the row's line still carries a success pair" (PDS-D521): the pair occurs on 11

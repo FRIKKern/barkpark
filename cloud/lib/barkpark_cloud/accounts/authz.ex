@@ -15,8 +15,8 @@ defmodule BarkparkCloud.Accounts.Authz do
   single entry point. It has ZERO callers in `cloud/lib` (tests only).
   Production reads the very same table through four other functions —
   `team_admin?/2` (`Web.Auth.require_team_admin/2`,
-  `require_primary_team_admin/1`, and the inline `cond`s in `router.ex`),
-  `team_owner?/2` (`require_team_owner/2`, `require_primary_team_owner/1`),
+  `require_current_team_admin/1`, and the inline `cond`s in `router.ex`),
+  `team_owner?/2` (`require_team_owner/2`, `require_current_team_owner/1`),
   `role/2` (PAT minting, `Accounts.create_personal_access_token/3`) and
   `can_grant?/3` (`Accounts.add_member_as/4`, `update_member_role_as/4`).
   A reader who hardens only `authorize/3` hardens nothing that runs.
@@ -44,7 +44,7 @@ defmodule BarkparkCloud.Accounts.Authz do
       by `test/barkpark_cloud/web/router_team_switcher_test.exs:72`, which loops
       `[foreign.id, "not-a-uuid", ""]`. (2) Every gate nil-checks
       `:current_team` before calling in (`gate_role/4`,
-      `require_primary_team_admin/1`, `require_primary_team_owner/1`, and each
+      `require_current_team_admin/1`, `require_current_team_owner/1`, and each
       inline `Accounts.team_admin?` `cond` in `router.ex`). (3)
       `Accounts.invite_member/4` and `update_member_role_as/4` pattern-match
       `%Team{}` in their heads, and `with_team_role/3` resolves path params

@@ -538,8 +538,8 @@ defmodule BarkparkCloud.Web.Auth do
   body — one condition, one status. On success the conn passes through with
   `:current_team` already assigned by `require_user/2`.
   """
-  @spec require_primary_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
-  def require_primary_team_admin(conn) do
+  @spec require_current_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
+  def require_current_team_admin(conn) do
     conn = require_user(conn, [])
 
     cond do
@@ -560,7 +560,7 @@ defmodule BarkparkCloud.Web.Auth do
   @doc """
   Require that the authed user is the OWNER of the CURRENTLY SELECTED team — the
   billing gate (checkout / portal / cancel). The narrower twin of
-  `require_primary_team_admin/1`, and it answers the same three conditions the
+  `require_current_team_admin/1`, and it answers the same three conditions the
   same way: 401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
   "team"}` if the user has no team; 403 `{forbidden, required: "owner", scope:
   "team"}` if a member/admin but not the owner — a missing grant is an authority
@@ -571,8 +571,8 @@ defmodule BarkparkCloud.Web.Auth do
   `scope: "team"` on every refusal. On success the conn passes through with
   `:current_team` already assigned by `require_user/2`.
   """
-  @spec require_primary_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
-  def require_primary_team_owner(conn) do
+  @spec require_current_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
+  def require_current_team_owner(conn) do
     conn = require_user(conn, [])
 
     cond do

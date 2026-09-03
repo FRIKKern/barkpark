@@ -59,7 +59,6 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
 
   setup %{conn: conn} do
     prev_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
-    prior_shares = Application.get_env(:barkpark, :shares)
 
     # The canvas default, pinned rather than inherited — an HTML-only paper
     # renders the read-only raw arm under BOTH settings, and pinning keeps the
@@ -71,11 +70,10 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
         nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
         v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
       end
-
-      if is_nil(prior_shares),
-        do: Application.delete_env(:barkpark, :shares),
-        else: Application.put_env(:barkpark, :shares, prior_shares)
     end)
+
+    # arpss-w8: snapshots :shares AND :shares_env (Sharing.refresh/0 reads both).
+    Barkpark.SharingFixtures.snapshot_shares!()
 
     # A NON-default workspace: the Default workspace is an open public-demo in
     # test and that arm is offered BEFORE the share arm, so a share on Default
@@ -83,11 +81,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
     ws = create_workspace!("anon-html-#{System.unique_integer([:positive])}")
     proj = create_project!(ws, "anon-html-proj")
 
-    Application.put_env(
-      :barkpark,
-      :shares,
-      Sharing.parse("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
-    )
+    Barkpark.SharingFixtures.plant_shares!("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")
 
     seed_paper_schema!(ws, proj)
     # The publish wall reads the tag REGISTRY of this dataset, and

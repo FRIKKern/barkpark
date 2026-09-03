@@ -866,7 +866,10 @@ async function assertLateMeRepaintsTheRail() {
       "authority is still read at paint time only. Note the tab: reloadInstanceView() refuses #usage, so a seam " +
       "routed through it passes on Overview and fails here.");
   }
-  if (after.indexOf('data-life-verb="decommission"') === -1) {
+  // cch-w46-bl: the refused arm carries data-life-verb too now, so the LIVE
+  // oracle is the `data-life-name` companion only the mode==="live" branch of
+  // lifecycleActionHtml emits.
+  if (after.indexOf('data-life-verb="decommission" data-life-name=') === -1) {
     broken.push("the landed answer (an owner) did not restore the live destroy verb — the repaint fired but " +
       "painted the wrong model");
   }
@@ -2954,7 +2957,8 @@ const EXPECTATIONS = {
       }
       assert.ok(card.includes("bills for as long as it exists"), "the foot renders the conduit's own pause sentence");
       assert.ok(!card.includes("archive it instead"), "the foot never prescribes archiving as a way to stop paying (cch-w55-s2)");
-      assert.ok(card.includes('data-life-verb="decommission"'), "the typed-confirm Decommission anchors the foot");
+      assert.ok(card.includes('data-life-verb="decommission" data-life-name='),
+        "the typed-confirm Decommission anchors the foot — LIVE, not the refused arm that now shares its identity");
       // The golden-path verify card fills its slot off the events feed
       // (no verify event in the fixture → the honest never-run invite).
       const vf = reg.get("instance-verify").innerHTML || "";
@@ -3029,6 +3033,31 @@ const EXPECTATIONS = {
         "the sheet named a window the sweep does not apply: " + JSON.stringify(windows));
       assert.ok(sheet.includes("stays behind"),
         "the finality line must be about the row, with the residue named beside it");
+
+      // ── cch-archive-residue: THE NON-DETERMINATE ARM, ASSERTED ───────────
+      // Every sentence above is the BLANKET one, and it is correct HERE for a
+      // reason worth pinning: this scenario carries no `archives` fixture, so
+      // the instance route's one-shot GET /v1/archives falls to the harness
+      // catch-all and archivesModel reads it as an error. The console does NOT
+      // know whether this team holds a bundle — and an unresolved or failed
+      // read must never be rendered as an absence. Both halves are asserted so
+      // the branch cannot go vacuous by the store quietly resolving one day.
+      assert.equal(hooks.archiveStoreSnapshot().state, "failed",
+        "this leg proves the NON-determinate arm; the store answered '" +
+        hooks.archiveStoreSnapshot().state + "' instead, so the blanket assertions above prove nothing about it");
+      assert.equal(hooks.archiveResidueLines(hooks.archiveStoreSnapshot(), { name: bp.name }).length, 1,
+        "a failed store read must still push exactly the blanket residue sentence");
+      // …and the OTHER branch, so the conditional is a discriminator rather
+      // than a sentence that happens to always fire: a DETERMINATE empty read
+      // drops it, and a determinate loaded read narrows it to this box.
+      assert.equal(hooks.archiveResidueLines({ state: "loaded", rows: [] }, { name: bp.name }).length, 0,
+        "a team the store says holds NO bundles must not be told about a residue it does not have");
+      const withBundle = hooks.archiveResidueLines(
+        { state: "loaded", rows: [{ slug: bp.name, fqdn: bp.name + ".example", createdLabel: "2d ago" }] },
+        { name: bp.name });
+      assert.equal(withBundle.length, 2, "a team WITH a bundle keeps the blanket sentence and gains the per-instance one");
+      assert.ok(withBundle[1].includes("This instance has an archive bundle"),
+        "…and the destroy tier says whether THIS instance has one; got: " + withBundle[1]);
       // THE CONDITIONAL, BOTH WAYS. The fixture instance carries NO custom host
       // (derived, never typed), so the DNS sentence must be absent here…
       const inst = ctx.state.barkparks[0];
@@ -3126,7 +3155,22 @@ const EXPECTATIONS = {
       // And the live affordance is GONE: no click hook, no danger button. This
       // assertion names the attribute the mount binds on, so an added
       // `disabled` cannot slip past it the way a [^>]* window would.
-      assert.ok(!card.includes('data-life-verb="decommission"'), "no click hook is wired for a verb the server will refuse");
+      // cch-w46-bl: ONE VERB, ONE IDENTITY. The refused arm now carries the same
+      // data-life-verb as the live one, so the ABSENCE OF THE ATTRIBUTE is no
+      // longer the right question — and it was always a proxy for the question
+      // that actually matters, which is asked directly here instead: the only
+      // decommission control on this member's card is disabled, and pressing it
+      // dispatches NOTHING. That is a strictly stronger assertion than the
+      // string check it replaces (which a wired-but-attribute-renamed control
+      // would have passed).
+      const memberDecomm = reg.get("inst-lifecycle-actions").querySelectorAll('[data-life-verb="decommission"]');
+      assert.equal(memberDecomm.length, 1,
+        "the member's rail must carry exactly one decommission control — the disable-and-explain arm; got " + memberDecomm.length);
+      assert.equal(memberDecomm[0].disabled, true, "and it must be DISABLED");
+      assert.equal(memberDecomm[0].click(), 0,
+        "a member's decommission control dispatched a handler — the teardown is reachable");
+      assert.ok(!card.includes('data-life-verb="decommission" data-life-name='),
+        "no LIVE decommission is rendered for a verb the server will refuse");
       assert.ok(!card.includes("btn-danger"), "the destroy-tier styling goes with the destroy-tier affordance");
       // NOT a checking state: /v1/me answered, and it said member.
       assert.ok(!card.includes("Checking capabilities"), "an ANSWERED /v1/me is not a checking state");
@@ -3134,7 +3178,7 @@ const EXPECTATIONS = {
       // ── cch-w45-s5: and the rail is not the only place the screen was
       // selling this member a 403. Measured on the PRE-FIX tree by booting THIS
       // scenario: #instance-body carried a LIVE `id="inst-domain"` button and a
-      // LIVE `data-rollback="1"` button, both against require_primary_team_admin
+      // LIVE `data-rollback="1"` button, both against require_current_team_admin
       // routes, while every read the screen makes is `user`. Same remedy, same
       // sentence, same grammar — asserted on the BODY, not the CLI card.
       const body = (reg.get("instance-body") || {}).innerHTML || "";
@@ -3148,7 +3192,7 @@ const EXPECTATIONS = {
         "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
       // cch-w47-s2: FOUR, not two — the same screen was also offering this
       // member the autoupdate policy toggles (patch /v1/barkparks/:id/autoupdate,
-      // require_primary_team_admin). With bpBase carrying the CP's real policy
+      // require_current_team_admin). With bpBase carrying the CP's real policy
       // block, `autoupdateActions` offers Pause + Pin on this row, and
       // adminWriteControlHtml emits ONE wrapper PER control: domain + rollback +
       // pause + pin = 4. Add Support takes the OMIT arm (D514) and adds none.

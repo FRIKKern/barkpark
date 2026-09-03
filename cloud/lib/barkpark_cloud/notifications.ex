@@ -82,8 +82,15 @@ defmodule BarkparkCloud.Notifications do
 
   # Failure events that fan to EVERY enabled chat channel by default until the team
   # customizes the matrix (failures opt-out, successes opt-in — Coolify's rule).
-  @chat_default_on ~w(provision_failed deployment_failed agent_unreachable
-                      subscription_past_due)
+  #
+  # cch-w29-bl: `deployment_refused` joins them under the same rule — a content
+  # publish that did not deploy is a failure, and a Slack-only team that is
+  # never told is the silence this epic exists to kill. It has a checkbox behind
+  # it (the `email_notification_settings.deployment_refused` column landed in the
+  # same change), so D342(d)'s objection to a column-less per-event mute does not
+  # apply.
+  @chat_default_on ~w(provision_failed deployment_failed deployment_refused
+                      agent_unreachable subscription_past_due)
 
   # Events that ignore `event_routes` and always fan to every enabled chat channel.
   #

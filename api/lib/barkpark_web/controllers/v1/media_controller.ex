@@ -370,7 +370,14 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn) do
       case Media.upload(upload, dataset, scope_opts(conn)) do
         {:ok, file} ->
-          doc = Media.asset_doc_for_file(file, dataset)
+          # INLINE METADATA (task-57ee9fff4aae9217 #13). altText / caption /
+          # tags / title / description used to cost one extra PATCH per FIELD
+          # after the upload; a 816-asset import paid that four times over.
+          # The same allowlist the `update/2` action uses applies here —
+          # `Media.patch_asset_metadata/3` runs everything through
+          # `pick_metadata/1` (@metadata_fields), so a multipart part named
+          # `path` or `mimeType` still cannot touch a blob column.
+          doc = apply_upload_metadata(file, params, dataset)
 
           conn
           |> put_status(:created)
@@ -395,6 +402,50 @@ defmodule BarkparkWeb.V1.MediaController do
     |> put_status(:bad_request)
     |> json(%{error: Map.delete(env, :status)})
   end
+
+  # Patch the just-created `mediaAsset` doc with any inline metadata the
+  # multipart carried, and return the document the receipt should render.
+  #
+  # FAIL-SOFT ON PURPOSE: the BYTES are already persisted and the row is
+  # committed, so a metadata patch that fails must not turn a successful upload
+  # into an error the client reads as "nothing was stored" — it would retry and
+  # duplicate the blob. The receipt then renders the unpatched document, which
+  # states plainly that the metadata did not land.
+  defp apply_upload_metadata(file, params, dataset) do
+    case upload_metadata(params) do
+      metadata when map_size(metadata) == 0 ->
+        Media.asset_doc_for_file(file, dataset)
+
+      metadata ->
+        case Media.patch_asset_metadata(file, metadata, dataset) do
+          {:ok, doc} -> doc
+          _ -> Media.asset_doc_for_file(file, dataset)
+        end
+    end
+  end
+
+  # `metadata` as a nested object (JSON clients) or the flat multipart parts
+  # (`altText=…`, `tags=a,b,c`). `tags` arrives as ONE string over multipart —
+  # a comma-separated string is split, a repeated part already arrives as a
+  # list and is left alone.
+  defp upload_metadata(params) do
+    params
+    |> metadata_params()
+    |> Map.take(Media.metadata_fields())
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+    |> Map.new()
+    |> normalize_tags()
+  end
+
+  defp normalize_tags(%{"tags" => tags} = metadata) when is_binary(tags) do
+    Map.put(
+      metadata,
+      "tags",
+      tags |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    )
+  end
+
+  defp normalize_tags(metadata), do: metadata
 
   def update(conn, %{"dataset" => dataset, "id" => id} = params) do
     metadata = metadata_params(params)

@@ -1853,6 +1853,81 @@ async function legCssom(rep) {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE TIER-CTA TENSE PROBE — billing-trial only, inside the committed job.
+// ─────────────────────────────────────────────────────────────────────────────
+//  cch-bl-tier-card-free-button-still-future-tense-for-a-lapsed-trial.
+//
+//  WHY IT LIVES IN legRender AND NOT IN THE tiers5 LEG: `tier-floor-render` in
+//  console-harness.yml invokes `--render --widths 901 --cell billing-trial`, and
+//  the tiers5 leg is invoked by NO workflow (its own header says so). The row
+//  requires the geometry gate to MEASURE the new lapsed-trial label rather than
+//  be waved past it, so the measurement has to be reachable from the command CI
+//  actually runs.
+//
+//  WHAT IT MEASURES: the billing-trial scenario carries a LIVE trial, so the
+//  screen the generic probe measured shows only "Yours when the trial ends".
+//  This probe re-renders the SHIPPED three-plan catalog into the REAL
+//  #billing-tiers under the REAL app.css twice — once with the live clock and
+//  once with a lapsed one (trialDays 0) — and asks the same question of both:
+//  does any CTA clip? Same splice technique the tiers5 leg uses, same stated
+//  LIMIT: it proves LAYOUT, never behaviour (splicing bypasses renderTiers, so
+//  no click handler is wired).
+//
+//  NON-VACUITY IS CHECKED, NOT ASSUMED: it refuses unless the two passes really
+//  produced two DIFFERENT Free labels. A probe that renders the same label twice
+//  and reports "no clipping" would certify the lapsed label without ever having
+//  drawn it — the exact way a geometry gate goes blind.
+function tierLabelProbeJs() {
+  return `(function(){
+  var hooks = globalThis.__bpHooks;
+  if (!hooks || typeof hooks.tierCardHtml !== 'function' || !Array.isArray(hooks.planCatalog))
+    return { refused: '__bpTestHook delivered no tierCardHtml/planCatalog — app.js\\'s export tail changed shape, so the tier CTA tense is measuring nothing' };
+  var grid = document.querySelector('#billing-tiers');
+  if (!grid || grid.hidden) return { refused: '#billing-tiers is absent or hidden — the billing screen never populated' };
+  var catalog = hooks.planCatalog;
+  var freeCount = catalog.filter(function (t) { return t.free; }).length;
+  if (freeCount !== 1) return { refused: 'the shipped catalog carries ' + freeCount + ' free tier(s); this probe asks about exactly one' };
+  var passes = [];
+  [['live', undefined], ['lapsed', 0]].forEach(function (pair) {
+    grid.innerHTML = catalog.map(function (t) {
+      return hooks.tierCardHtml(t, 'trial', false, undefined, pair[1]);
+    }).join('');
+    var cards = grid.querySelectorAll('.tier');
+    var btns = grid.querySelectorAll('.tier .btn');
+    var freeBtn = grid.querySelector('.tier-free .btn');
+    var clipped = [];
+    Array.prototype.forEach.call(btns, function (b) {
+      if (b.scrollWidth > b.clientWidth) {
+        var tier = b.closest('.tier');
+        clipped.push({
+          plan: tier ? (tier.querySelector('.tier-name') || {}).textContent : '?',
+          sw: b.scrollWidth, cw: b.clientWidth, text: (b.textContent || '').trim(),
+        });
+      }
+    });
+    passes.push({
+      tense: pair[0],
+      cards: cards.length,
+      btns: btns.length,
+      freeLabel: freeBtn ? (freeBtn.textContent || '').trim() : null,
+      freeW: freeBtn ? Math.round(freeBtn.scrollWidth) : null,
+      boxW: freeBtn ? Math.round(freeBtn.clientWidth) : null,
+      clipped: clipped,
+    });
+  });
+  for (var i = 0; i < passes.length; i++) {
+    if (passes[i].cards !== catalog.length || passes[i].btns !== catalog.length)
+      return { refused: 'the ' + passes[i].tense + ' pass rendered ' + passes[i].cards + ' cards / ' + passes[i].btns + ' buttons for a ' + catalog.length + '-plan catalog — a card with no control makes this measurement vacuous' };
+    if (!passes[i].freeLabel)
+      return { refused: 'the ' + passes[i].tense + ' pass rendered no .tier-free CTA at all' };
+  }
+  if (passes[0].freeLabel === passes[1].freeLabel)
+    return { refused: 'both passes rendered the SAME Free CTA (' + JSON.stringify(passes[0].freeLabel) + ') — the lapsed-trial label was never drawn, so a clean verdict here would certify a label nothing measured' };
+  return { passes: passes };
+})()`;
+}
+
 async function legRender(rep) {
   const widthFilter = valOf("--widths");
   const cellFilter = valOf("--cell");
@@ -1901,6 +1976,7 @@ async function legRender(rep) {
       out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x18 = 900 renders (11.0 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 2700 (32.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
+    const tierCtaF = [], tierCtaSeen = [];
     const bgSeen = new Map();
     const t0 = Date.now();
     let done = 0;
@@ -1914,6 +1990,14 @@ async function legRender(rep) {
       for (const width of widths) {
         const { targetId, sessionId } = await openCell();
         try {
+          // cch-bl-tier-card — the hook receiver for the tier-CTA tense probe
+          // below, installed BEFORE app.js parses and ONLY for the cell that
+          // uses it (an accessor, not an assignment: see TIERS5_HOOK_TAP for the
+          // measured reason mock.js would otherwise overwrite it). Every other
+          // cell renders exactly as it did before.
+          if (cell.name === "billing-trial") {
+            await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
+          }
           await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
           // A FRESH `?theme=` LOAD PER CELL, NEVER A RUNTIME ATTRIBUTE FLIP.
           // A flip leaves the console lying about itself — a verifier measured
@@ -2000,6 +2084,17 @@ async function legRender(rep) {
               q3f.push({ cell: cell.name, theme, width, height, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
             }
           }
+          // ── the tier-CTA tense probe (billing-trial only) ────────────────
+          if (cell.name === "billing-trial") {
+            const tl = await evalJs(sessionId, tierLabelProbeJs());
+            if (tl.refused) {
+              return die(`billing-trial/${theme}@${width}: tier CTA tense probe — ${tl.refused}`);
+            }
+            for (const pass of tl.passes) {
+              tierCtaSeen.push({ theme, width, tense: pass.tense, label: pass.freeLabel, w: pass.freeW, box: pass.boxW });
+              for (const c of pass.clipped) tierCtaF.push({ theme, width, tense: pass.tense, ...c });
+            }
+          }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
         } finally {
           await closeCell(targetId);
@@ -2081,9 +2176,25 @@ async function legRender(rep) {
     }
     for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}/${n.theme}@${n.width}: ${n.sel} shows a ${n.cue}px ${n.axis === "x" ? "horizontal" : n.axis === "y" ? "vertical" : "edge"} cue while it FITS on ${n.axis === "both" ? "BOTH axes" : `${n.axis}`} (w ${n.sw}/${n.cw}, h ${n.sh}/${n.ch})\n`);
 
-    const failed = q1f.length + q2f.length + q3f.length;
+    // THE TIER CTA IN BOTH TENSES — printed whether it passes or not, for the
+    // reason the Q3 line gives: a number that appears only on failure reads the
+    // same as a probe that stopped looking.
+    if (tierCtaSeen.length) {
+      const byTense = new Map();
+      for (const t of tierCtaSeen) {
+        const w = byTense.get(t.tense);
+        if (!w || t.w > w.w) byTense.set(t.tense, t);
+      }
+      out(`   ✓ tier CTA — ${tierCtaSeen.length} Free-tier CTA measurement(s) across both trial tenses: ` +
+        [...byTense].map(([tense, t]) => `${tense} "${t.label}" widest ${t.w}px in a ${t.box}px box [@${t.width}/${t.theme}]`).join(" · ") + `\n`);
+    }
+    for (const f of tierCtaF) {
+      out(`   ✗ TIER CTA CLIPPED  billing-trial/${f.theme}@${f.width} (${f.tense} trial): ${String(f.plan).trim()} "${f.text}" ${f.sw}>${f.cw}\n`);
+    }
+
+    const failed = q1f.length + q2f.length + q3f.length + tierCtaF.length;
     if (failed) {
-      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length}) — exit 1\n`);
+      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length} · tier CTA ${tierCtaF.length}) — exit 1\n`);
       return 1;
     }
     out(`\n>> verdict    clean across ${total} cells — exit 0\n`);

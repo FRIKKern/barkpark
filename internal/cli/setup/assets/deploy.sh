@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# task-466aef17f2085404: this runs UNATTENDED over `ssh … 'bash -s'` with no tty.
+# Without GIT_TERMINAL_PROMPT=0 a git that wants a username (a private $REPO, an
+# expired token, git 2.34's protocol-v2 refusal — task-8a523f080fa406d2) HANGS on
+# a prompt nobody can answer until the ssh session dies, and the only trace is a
+# bare non-zero exit. Fail, never hang — and say WHICH call failed and why it
+# probably did. Every git network call below goes through bp_git; a test scans
+# this file for clone/pull/fetch and reds on one that does not.
+export GIT_TERMINAL_PROMPT=0
+# bp_git BEGIN
+bp_git() {
+  if ! git "$@"; then
+    echo "!! git $1 failed (GIT_TERMINAL_PROMPT=0, so no credentials were asked for): $*" >&2
+    echo "   likely cause: credentials (a private remote or an expired token) or the remote is unreachable." >&2
+    return 1
+  fi
+}
+# bp_git END
+
 # Barkpark — Server deployment
 #
 # Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL directly on the server.
@@ -96,7 +114,7 @@ echo "   Database: $DB_NAME (user: $DB_USER)"
 # ── 3. ASDF + Erlang + Elixir ───────────────────────────────────────────────
 echo ">> Erlang + Elixir (via ASDF)..."
 if [ ! -d /root/.asdf ]; then
-  git clone https://github.com/asdf-vm/asdf.git /root/.asdf --branch v0.14.0
+  bp_git clone https://github.com/asdf-vm/asdf.git /root/.asdf --branch v0.14.0
   echo '. /root/.asdf/asdf.sh' >> /root/.bashrc
 fi
 export PATH="/root/.asdf/bin:/root/.asdf/shims:$PATH"
@@ -140,9 +158,9 @@ echo "   $(go version)"
 # ── 5. Clone repo ────────────────────────────────────────────────────────────
 echo ">> Cloning repo..."
 if [ -d "$APP_DIR" ]; then
-  cd "$APP_DIR" && git pull
+  cd "$APP_DIR" && bp_git pull
 else
-  git clone "$REPO" "$APP_DIR"
+  bp_git clone "$REPO" "$APP_DIR"
   cd "$APP_DIR"
 fi
 

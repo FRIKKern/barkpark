@@ -439,6 +439,17 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  The `mediaAsset` fields `patch_asset_metadata/3` will accept.
+
+  Public so an HTTP edge can ask "does this request carry any metadata at all?"
+  WITHOUT keeping a second copy of the allowlist that could drift from this one
+  (the v1 upload receipt, task-57ee9fff4aae9217 #13). It is the allowlist
+  `pick_metadata/1` applies — it does not authorise anything on its own.
+  """
+  @spec metadata_fields() :: [String.t()]
+  def metadata_fields, do: @metadata_fields
+
+  @doc """
   Patch metadata on the linked `mediaAsset` document. Creates the asset
   document if missing. Does not mutate blob fields (`fileInfo`, `mediaFileId`).
   """

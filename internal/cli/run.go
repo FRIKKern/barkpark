@@ -483,6 +483,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// minutes. Silent on every envelope without a `lease` object, so no
 		// other verb's receipt changes (tasks_lease.go).
 		emitClaimLease(out, respBody)
+		// A ruling the row ALREADY carries (content.disposition_reason), shouted
+		// at claim time so a dispatcher cannot miss it. Verb-keyed (claim/next),
+		// stderr in every output mode, silent on a row with no ruling
+		// (tasks_ruling.go).
+		emitTaskRuling(out, cmd, respBody)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
@@ -2295,6 +2300,12 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 			out.outf("%s", string(payload))
 		}
 	case "table":
+		// `bp task get` only: the row's title and, directly under it, the
+		// recorded disposition + disposition_reason — above the key/value dump
+		// where the whole `doc` object collapses into one truncated cell. No-op
+		// for every other verb and for a row carrying no ruling
+		// (tasks_ruling.go).
+		emitTaskGetRulingHeader(out, cmd, payload)
 		renderTable(out, payload)
 		emitWarnings(out, payload)
 		emitNotices(out, payload)

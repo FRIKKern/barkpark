@@ -294,8 +294,8 @@ const src = fs.readFileSync(APP, "utf8");
 
 const A_USER = "Auth.require_user";
 const A_TADMIN = "Auth.require_team_admin";
-const A_PTADMIN = "Auth.require_primary_team_admin";
-const A_PTOWNER = "Auth.require_primary_team_owner";
+const A_PTADMIN = "Auth.require_current_team_admin";
+const A_PTOWNER = "Auth.require_current_team_owner";
 const A_OPERATOR = "Auth.require_platform_operator";
 const A_USER_OR_PAT = "Auth.require_user_or_pat";
 const A_ABILITY = "Auth.require_ability";
@@ -377,7 +377,7 @@ const PIN = [
   { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
 
   // ── instance detail — the console's densest unpredicated cluster
-  { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits data-life-verb only on the live arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
+  { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits the LIVE arm's `data-life-name` companion only on that arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). cch-w46-bl RE-POINTED THE HOOK: the refused arm now carries the same `data-life-verb` as the live one (one verb, ONE identity, offered or refused), so bare `data-life-verb` stopped discriminating the two arms and the probe below moved to `data-life-verb=\"decommission\" data-life-name=`, which lifecycleActionHtml writes in the mode===\"live\" branch alone; paintLifecycleActions also binds only a non-disabled control now. Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
   { fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "mountInstanceTimeline", "runVerifyNow"], "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): TWO offer sites, both now drawn by adminWriteControlHtml — the timeline's docked [data-tl-retry] and the verify note's [data-vf-reprovision] — so the mount hook is withheld on refuse and on unknown. Read THREE times because the two sites have three entries: instanceOverviewHtml threads loadInstance's answer, the SSE repaint lands in mountInstanceTimeline, and the no_admin_token note is painted from runVerifyNow" },
   { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml's removal-failed arm offers #inst-remove-retry only on a grant; refuse/unknown render the disabled control with no mount hook. Second call site on the same route as runDecommission's, and now fenced on the same band" },
   { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml offers the behind-box CTA #inst-update only on a grant. The modal buttons behind it (#update-go, #update-force) are POST-offer and stay unfenced by design — the same shape as rollbackInstance's confirm" },
@@ -412,7 +412,7 @@ const PIN = [
   { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
   { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
-  { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_primary_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
+  { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_current_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
   { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
   // cch-w48-s2, pinned here in review: BOTH of these routes are reached ONLY
@@ -436,6 +436,7 @@ const PIN = [
 
   { fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
   { fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "bootEmailConfirm", verb: "POST", route: "/v1/auth/verify-email", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "cch-w53-bl-the-emailed-confirmation-link-has-no-client: pre-session by construction — the emailed single-use token IS the credential and the route takes no session, so a logged-out click must reach the same answer as a logged-in one. No predicate is possible or wanted: the console cannot know whether a token is live, and withholding the hop would recreate the dead flow this row closed" },
 
   // ── the /new flow (a second, parallel console surface)
   { fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
@@ -1118,7 +1119,13 @@ if (unresolved.length) {
 // they called, so `total`, `elevated` and `predicated` each fall by exactly two
 // (both rows were elevated AND predicated on assignableRoles). `unpredicated`
 // does NOT move — neither row was in it.
-const EXPECT = { total: 79, elevated: 39, predicated: 34, unpredicated: 5 };
+// 79 → 80 (cch-w53-bl-the-emailed-confirmation-link-has-no-client): ONE new write
+// call site, bootEmailConfirm → POST /v1/auth/verify-email. The other three
+// numbers are UNCHANGED and that is the load-bearing part of this bump: the row
+// is pre-session, so it adds nothing to `elevated` and therefore nothing to
+// `predicated`/`unpredicated`. A bump that moved `unpredicated` would mean the
+// console had grown an affordance the server can refuse — this one did not.
+const EXPECT = { total: 80, elevated: 39, predicated: 34, unpredicated: 5 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -2251,7 +2258,10 @@ if (!FIXTURE_MODE) {
   const withBox = (over) => Object.assign({}, LIVE_BOX, over);
 
   const D428_PROBES = [
-    { fn: "runDecommission", hook: "data-life-verb",
+    // cch-w46-bl: the LIVE arm's own bytes, not the shared identity. See the
+    // pin's note above — a bare `data-life-verb` is now emitted by BOTH arms,
+    // so probing it would have reported a refused, disabled ghost as an offer.
+    { fn: "runDecommission", hook: 'data-life-verb="decommission" data-life-name=',
       render: (h, a) => h.lifecycleActionRowHtml(h.lifecycleActionsModel(undefined, LIVE_BOX, a)),
       needs: ["lifecycleActionRowHtml", "lifecycleActionsModel"] },
     { fn: "removeInstance", hook: "inst-remove-retry",

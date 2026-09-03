@@ -244,7 +244,7 @@
     // PROVES. This key used to read "Only the team owner can manage billing."
     // (GR36, written when the billing writes were the only refusals that reached
     // it). Three waves of fences moved the ground under it: the billing gate
-    // itself (Auth.require_primary_team_owner) sends `required: "owner"`, so
+    // itself (Auth.require_current_team_owner) sends `required: "owner"`, so
     // forbiddenEvidenceCopy wins there and this string is now STRUCTURALLY
     // UNREACHABLE from every billing screen — it could only ever render where it
     // was FALSE. Measured on origin/main: friendly({error:"forbidden",
@@ -390,7 +390,7 @@
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
   //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
-  //     require_primary_team_admin reads conn.assigns[:current_team], which
+  //     require_current_team_admin reads conn.assigns[:current_team], which
   //     resolve_team fills from the x-barkpark-team header — so the label used
   //     to say "primary_team" even when a SECOND team refused an owner of their
   //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
@@ -560,6 +560,43 @@
       if (TRANSPORT_COPY[transport]) return TRANSPORT_COPY[transport];
       return friendly(data, transportCopy(transport));
     }
+    return friendly(data, fallback);
+  }
+
+  // cch-w77-bl — THE ONE OWNER OF THE 401 SENTENCE, and why it is a seam rather
+  // than an ERRORS key.
+  //
+  // An expired session answers `401 {error: "unauthorized"}` (Auth.require_user),
+  // and ERRORS has NO `unauthorized` key — grep the map above: the slug is absent,
+  // so friendly() falls straight through to the caller's fallback and every
+  // account writer renders its own operation-failed sentence ("Couldn't start
+  // two-factor setup.") for a session that is simply gone. Uninformative, not
+  // false — but the honest sentence already exists, written once by cch-w74 for
+  // submitPasswordChange, and a second copy of it is how a sentence starts to
+  // drift.
+  //
+  // WHY NOT `unauthorized:` IN ERRORS: friendly() takes no status, so a curated
+  // key would fire at every one of its call sites across this file on any payload
+  // carrying that slug — including reads whose caller-designed sentence is more
+  // specific. WHY NOT A 401 ARM IN faultCopy(): faultCopy is the shared 5xx/0
+  // honesty law read by callers as far away as siteThemeFailureCopy and
+  // siteDeleteFailureCopy (which already writes its OWN, longer 401 sheet), so a
+  // 401 arm there would silently restate three unrelated screens' copy. The
+  // account writers are the measured population that needs it, so the seam is
+  // scoped to them by name.
+  //
+  // A SLUG ARM STILL WINS FIRST at its call site: submitPasswordChange keeps its
+  // `invalid_current_password` branch ahead of this call, because that 401 IS
+  // about the input and this sentence would be the false one there.
+  var SESSION_EXPIRED_COPY = "Your session has expired — sign in again.";
+
+  // The account writers' failure copy: the honest session sentence on a 401,
+  // otherwise byte-for-byte what friendly() rendered before. Every caller passes
+  // the SAME fallback it passed friendly(), so no non-401 render moves.
+  // Reachable only because every one of these calls sets `noBounce: true` — a
+  // bouncing call never renders a 401 at all, it re-renders the login screen.
+  function accountWriteFailureCopy(status, data, fallback) {
+    if (status === 401) return SESSION_EXPIRED_COPY;
     return friendly(data, fallback);
   }
 
@@ -1575,7 +1612,7 @@
           a2fPaint({ phase: "enroll", uri: r.data.otpauth_uri, secret: r.data.secret });
           var f = $("#a2f-otp"); if (f) f.focus();
         } else {
-          a2fPaint({ phase: "off", error: friendly(r.data, "Couldn't start two-factor setup.") });
+          a2fPaint({ phase: "off", error: accountWriteFailureCopy(r.status, r.data, "Couldn't start two-factor setup.") });
         }
       });
     });
@@ -1607,7 +1644,7 @@
             return;
           }
           a2fPaint(Object.assign({}, pending, {
-            error: honest || friendly(r.data, "Couldn't confirm that code.")
+            error: honest || accountWriteFailureCopy(r.status, r.data, "Couldn't confirm that code.")
           }));
           var again = $("#a2f-otp"); if (again) { again.value = code; again.focus(); }
         });
@@ -1634,7 +1671,7 @@
       api("POST", "/v1/account/two-factor/recovery-codes", {}, { noBounce: true })
         .then(function (r) {
           if (r.ok && r.data && r.data.recovery_codes) a2fPaint({ phase: "codes", codes: r.data.recovery_codes });
-          else a2fPaint({ phase: "on", error: friendly(r.data, "Couldn't issue new recovery codes.") });
+          else a2fPaint({ phase: "on", error: accountWriteFailureCopy(r.status, r.data, "Couldn't issue new recovery codes.") });
         });
     });
 
@@ -1659,7 +1696,7 @@
               ctl.succeed();
               openAccountModal(); // straight back to the account screen, now Off
             } else {
-              ctl.fail(friendly(r.data, "Couldn't turn two-factor off."), "Try again",
+              ctl.fail(accountWriteFailureCopy(r.status, r.data, "Couldn't turn two-factor off."), "Try again",
                 function (again) { again.busy(); run(again); });
             }
           });
@@ -1709,10 +1746,24 @@
         // measured ~25s (per-heartbeat, not instant; never stronger than
         // measured), because a user watching another tab keep working for 20
         // seconds with no explanation reads "it didn't work". THE SENTENCE
-        // BELONGS TO THIS SHEET ONLY: per-row revoke (DELETE
-        // /v1/account/sessions/:id) does NOT end that device's stream
-        // (cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream)
-        // and must not inherit this claim.
+        // BELONGS TO THIS SHEET ONLY — but no longer because per-row revoke is
+        // weaker.
+        //
+        // CORRECTED (the SSE stream is now bound to its minting session): this
+        // comment used to say per-row revoke "does NOT end that device's
+        // stream", which was true when it was written and is FALSE now. The
+        // `user_tokens.session_token_id` column binds a stream to the session
+        // that minted its credential and `Router.sse_principal_live?/1` rechecks
+        // THAT row, so `DELETE /v1/account/sessions/:id` ends that one device's
+        // stream within one heartbeat — the same bound this sheet states, now
+        // per device. A stream with no binding (a ticket minted before the
+        // column existed) keeps the user-wide behaviour and drains within one
+        // ticket TTL.
+        //
+        // The sentence still belongs to THIS sheet only for a different reason:
+        // "Every other browser and device" is a claim about the BLAST RADIUS,
+        // which per-row revoke does not have. Its own row-scoped sentence lives
+        // at the [data-id] revoke handler in loadSessions.
         bodyHtml: "Every other browser and device is signed out. " +
           "Open screens elsewhere lose access within about a minute. " +
           "This device stays signed in, and anyone signed out can sign back in with their password.",
@@ -1891,6 +1942,17 @@
           b.textContent = "Revoking…";
           api("DELETE", "/v1/account/sessions/" + encodeURIComponent(b.getAttribute("data-id"))).then(function (r) {
             if (r.ok) {
+              // THE ROW-SCOPED SENTENCE, and the one place it is written: this is
+              // the only toast raised on a 2xx from DELETE
+              // /v1/account/sessions/:id. It was ALREADY true about the
+              // credential and was deliberately silent about the open stream,
+              // which per-row revoke could not end; that gap is closed —
+              // `Router.sse_principal_live?/1` rechecks the minting session row,
+              // so the device's stream also ends within one heartbeat. The
+              // sentence stands unchanged because it never claimed less or more
+              // than "can no longer use your account", and it deliberately still
+              // states no timing: the sheet above owns the one timing claim this
+              // screen makes.
               toast({ kind: "success", title: "Device signed out", body: "That session can no longer use your account." });
               loadSessions(); // repaints the whole list; this button goes with it
             } else {
@@ -1934,12 +1996,18 @@
           // feature's own "signed out everywhere" success path, whose new token
           // can 401 the very next submit). Accuse only on the proven slug; any
           // other 401 states only what is proven — the session is gone.
+          //
+          // cch-w77-bl — THAT SENTENCE NOW HAS ONE OWNER. The literal used to
+          // live here and only here; three sibling 2FA writers rendered neutral
+          // operation-failed copy on the same 401 because there was nothing to
+          // read it from. accountWriteFailureCopy holds it, and this arm reads
+          // it — the slug branch above still wins first, and the non-401 render
+          // is byte-identical (the seam calls the same friendly(r.data, …) with
+          // the same fallback).
           errEl.textContent =
             r.status === 401 && r.data && r.data.error === "invalid_current_password"
               ? "Current password is wrong."
-              : r.status === 401
-                ? "Your session has expired — sign in again."
-                : friendly(r.data, "Couldn't update password.");
+              : accountWriteFailureCopy(r.status, r.data, "Couldn't update password.");
           errEl.hidden = false;
         }
       });
@@ -2084,6 +2152,114 @@
     return String(bp.name || bp.slug || bp.id || "");
   }
 
+  // ---- The archive-store answer the console ALREADY fetched ----------------
+  // GET /v1/archives is the one read that answers the two questions the
+  // lifecycle surfaces were each guessing at: is object storage wired for THIS
+  // console, and does this team hold any bundle at all. loadArchives asked it
+  // and threw the answer away, so the instance rail taught
+  // `bp cloud instance archive` on the same screen where the archives panel had
+  // just rendered archives-note--unconfigured, and the decommission sheet told
+  // every team about a residue most of them do not have.
+  //
+  // FOUR STATES, AND "unknown" IS A REAL ONE. A read that has not happened or
+  // has FAILED must never read as an absence - narrowing copy on a non-answer
+  // is the same manufactured-certainty defect this epic keeps killing, so every
+  // consumer below falls back to the blanket, unnarrowed copy on it.
+  //   "unknown"        -> not read yet, or in flight
+  //   "failed"         -> the read errored; we know nothing
+  //   "not_configured" -> the server said the store is not wired for this console
+  //   "loaded"         -> rows IS the truth
+  var archiveStore = { state: "unknown", rows: [] };
+  var archiveStoreInFlight = false;
+
+  // Pure projection of an archivesModel into the store answer. Keyed on the
+  // MODEL rather than the raw payload on purpose: the unconfigured
+  // discrimination then has exactly ONE implementation (archivesModel's exact
+  // match on ARCHIVES_UNCONFIGURED_MSG) instead of a second copy of that string
+  // here that nothing keeps in step.
+  function archiveStoreFromModel(model) {
+    if (!model || model.loading) return { state: "unknown", rows: [] };
+    if (model.notConfigured) return { state: "not_configured", rows: [] };
+    if (model.error) return { state: "failed", rows: [] };
+    return { state: "loaded", rows: (model.rows || []).slice() };
+  }
+
+  // The module answer, read by the rail's paint sites and the decommission
+  // sheet. A getter rather than the var itself so no consumer retains a stale
+  // object across the fetch that replaces it.
+  function archiveStoreSnapshot() { return archiveStore; }
+
+  // The two verbs whose usefulness DEPENDS on the store: archive writes a
+  // bundle, resurrect reads one. adopt / audit / pause / decommission touch no
+  // bundle at all and are deliberately left untouched by the store answer.
+  var ARCHIVE_STORE_VERBS = { archive: true, resurrect: true };
+
+  // The one sentence those two chips owe an operator whose console cannot see
+  // the store. IT IS ABOUT VISIBILITY, NOT FAILURE, and that distinction is
+  // load-bearing rather than tactful: `bp cloud instance archive` writes with
+  // the OPERATOR'S own object-storage credentials, while this control plane
+  // reads with the deployment's (HETZNER_S3_ACCESS_KEY / BARKPARK_BUNDLE_BUCKET
+  // in runtime.exs). An unconfigured control plane therefore does NOT prove the
+  // command fails - claiming that would mint a NEW false statement to retire an
+  // old one. What it proves is that this console will never show you the
+  // result. Empty on every other store state: an unread or failed store is not
+  // evidence the store is missing.
+  function archiveVisibilityNote(verb, store) {
+    if (!ARCHIVE_STORE_VERBS[verb]) return "";
+    if (!store || store.state !== "not_configured") return "";
+    return "Archive storage isn't configured for this console - the command still runs with your own " +
+      "object-storage credentials, but the bundle won't show up in Archives here.";
+  }
+
+  // The archive-residue consequence line(s) for THIS teardown, from the store
+  // answer the console holds. Returns an ARRAY so the "we know nothing" arm and
+  // the narrowed arm are one call site in the sheet.
+  //
+  //   unknown / failed / not_configured -> THE BLANKET SENTENCE, unchanged. See
+  //     the four-state comment above: a non-answer is not an absence.
+  //   loaded, no bundles -> NOTHING. A team that has never archived anything is
+  //     no longer told about a residue it does not have.
+  //   loaded, bundles -> the blanket sentence PLUS whether one of them came
+  //     from THIS instance - the fact the one irreversible click actually
+  //     wants, and it needs no new route: the archives payload is already on
+  //     the client.
+  //
+  // THE RETENTION HALF IS SERVER-OWNED AND STAYS. The 30 days and the daily
+  // sweep are Workers.ArchiveRetentionWorker's real behaviour (cch-w54-bl), not
+  // an invented window; this slice makes the sentence CONDITIONAL, it does not
+  // re-open the question of what the sentence says.
+  function archiveResidueLines(store, bp) {
+    var blanket = "Any archive bundle this team has already made stays in object storage for 30 days after the " +
+      "instance it came from was torn down; a daily sweep deletes it after that. While this team still has an " +
+      "instance, its most recent bundle is kept.";
+    if (!store || store.state !== "loaded") return [blanket];
+    var rows = store.rows || [];
+    if (!rows.length) return [];
+    return [blanket, instanceBundleLine(rows, bp)];
+  }
+
+  // Does THIS instance have a bundle among the team's? Matched on the identity
+  // the archives payload actually carries - the bundle's slug (what the CLI
+  // named when it wrote it) and its fqdn - against the instance's own name and
+  // host. No new field and no server round trip.
+  function instanceBundleLine(rows, bp) {
+    bp = bp || {};
+    var name = String(bp.name || "");
+    var host = String(bp.host || "");
+    var mine = rows.filter(function (r) {
+      if (!r) return false;
+      if (name && (String(r.slug) === name || String(r.fqdn) === name)) return true;
+      return !!(host && String(r.fqdn) === host);
+    });
+    if (mine.length) {
+      return "This instance has an archive bundle" +
+        (mine[0].createdLabel ? " (archived " + mine[0].createdLabel + ")" : "") +
+        " - it outlives this teardown for the window above, and you can resurrect from it.";
+    }
+    return "None of this team's archive bundles was made from " + (name || "this instance") +
+      ", so there is nothing here to resurrect it from.";
+  }
+
   // Whether the workspace shows the lifecycle action row at all. It owns teardown
   // wherever the old bare Remove button used to sit (live/host boxes + a failed
   // provision), and stays hidden for the transient in-flight states the header
@@ -2154,7 +2330,14 @@
   // no second spelling of the read's state is minted here. Absent — every
   // existing 2- and 3-arg call site — it reads as still-checking, which is
   // byte-identical to the shipped model apart from the exit added below.
-  function lifecycleActionsModel(capPayload, bp, authority, authorityState) {
+  // cch-w51-bl / cch-archive-residue - THE FIFTH ARGUMENT IS THE ARCHIVE-STORE
+  // ANSWER (archiveStoreSnapshot()), and it exists because the rail taught
+  // Archive and Resurrect on the very screen where the console had ALREADY been
+  // told the store is not wired. Absent - every existing 2-, 3- and 4-arg call
+  // site - it reads as "unknown", which emits no note at all and is
+  // byte-identical to the shipped model. That default is also the honest one: a
+  // store we have not asked about is not a store we know is missing.
+  function lifecycleActionsModel(capPayload, bp, authority, authorityState, store) {
     bp = bp || {};
     authority = authority || "grant";
     var authorityFailed = authority === "unknown" && authorityState === "failed";
@@ -2181,8 +2364,24 @@
     var actions = LIFECYCLE_VERBS.map(function (v) {
       if (v.verb === "decommission") return decommission;
       if (caps[v.verb] === true) {
-        return { verb: v.verb, label: v.label, mode: "cli",
-          cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) };
+        // cch-w47-bl - THE CHIP CARRIES --provider. `kind` is the SAME value
+        // this model already computed above (bp.provider || "hetzner"), not a
+        // re-derivation and not a hardcoded default. Without it, an azure box's
+        // archive / resurrect / audit / pause chip was a bare
+        // `bp cloud instance <verb> <name>`, and both Go resolvers
+        // (instanceProviderKind and splitProviderFlag) floor an absent provider
+        // to hetzner - so the command resolved against the WRONG provider's
+        // credentials for an azure box. The archives panel next door already
+        // got this right (resurrectCommand appends " --provider <kind>"); this
+        // makes the same console agree with itself.
+        var chip = { verb: v.verb, label: v.label, mode: "cli",
+          cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) + " --provider " + kind };
+        // cch-w51-bl: and the two store-coupled verbs say what an unconfigured
+        // console can and cannot show them. Set ONLY on a determinate
+        // not_configured read (see archiveVisibilityNote).
+        var storeNote = archiveVisibilityNote(v.verb, store);
+        if (storeNote) chip.storeNote = storeNote;
+        return chip;
       }
       var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : "";
       return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
@@ -2226,11 +2425,32 @@
       // Capability true but console-unwired: the verb label + the exact command
       // chip (screens/02: one boxed row per verb, copy affordance on the chip).
       return '<div class="inst-life-cli"><span class="inst-life-verb">' + esc(a.label) + "</span>" +
-        cliChipHtml(a.cli) + "</div>";
+        cliChipHtml(a.cli) +
+        // cch-w51-bl: the store caveat rides the chip it qualifies, in the
+        // reason grammar the disabled arm already uses (no new class, no new
+        // CSS). Absent on every other store state, so a chip is never annotated
+        // from a non-answer.
+        (a.storeNote ? '<span class="inst-life-reason inst-life-note--warn">' + esc(a.storeNote) + "</span>" : "") +
+        "</div>";
     }
     // Capability false: disabled control carrying the SERVER-OWNED gap reason.
     // JS never invents copy — an absent reason shows the label alone.
-    return '<div class="inst-life-disabled"><button class="btn btn-sm" type="button" disabled' +
+    // cch-w46-bl - THE REFUSED ARM CARRIES THE SAME data-life-verb AS THE LIVE
+    // ONE. It used to emit a bare `<button class="btn btn-sm" type="button"
+    // disabled>`, so ONE verb had TWO identities depending on whether it was
+    // offered or refused: a rendered-state hook table needed two keys for one
+    // control, and identity fell back to first-data-attribute-wins, which
+    // minted the generic colliding key `button.btn` and made the dead-row guard
+    // FLAP across a mutation (reverting decommission's guard stopped
+    // `button.btn` matching, and it red as a dead row - noise, not signal).
+    // The attribute is inert on a disabled control: every paint site selects
+    // `[data-life-verb="decommission"]`, and decommission is never rendered
+    // through this arm as a CLI chip - its refused arm is the same disabled
+    // arm, which is exactly the control that WANTS one stable identity.
+    // Scoped to lifecycleActionHtml on purpose: adminWriteControlHtml has its
+    // own hookless disabled arm and is NOT this row's business.
+    return '<div class="inst-life-disabled"><button class="btn btn-sm" type="button" data-life-verb="' +
+      esc(a.verb) + '" disabled' +
       (a.reason ? ' title="' + esc(a.reason) + '"' : "") + ">" + esc(a.label) + "</button>" +
       (a.reason ? '<span class="inst-life-reason">' + esc(a.reason) + "</span>" : "") + "</div>";
   }
@@ -2610,6 +2830,16 @@
         '<button class="btn btn-ghost btn-sm" type="button" data-archives-retry>Retry</button></div>';
     }
     if (!model.rows.length) {
+      // cch-w47-bl RULED THIS FLAGLESS CHIP OUT OF SCOPE, and here is the
+      // reason rather than an omission: `<name>` is a PLACEHOLDER, not an
+      // instance. This is a generic hint on a panel that is empty by
+      // definition, so there is no `bp` in scope and no provider kind to
+      // compute — appending a flag here would mean inventing one, which is the
+      // very defect the lifecycle chip fix removes. The instance rail's chips,
+      // which DO have a provider in scope, carry --provider; a reader who
+      // copies this hint has to substitute the name anyway and is on the CLI's
+      // own resolver, which prompts. Fix it by giving the empty state a real
+      // instance, not by guessing a kind.
       return '<div class="archives-note"><p>No archives yet. Archive an instance with ' +
         cliChipHtml("bp cloud instance archive <name>") +
         " to keep a portable, cross-provider bundle you can resurrect on Hetzner or Azure.</p></div>";
@@ -3653,11 +3883,18 @@
   // (`Transactional.deliver_invite/1`), and the deployment-success terminal is
   // written by `Sites.Deploy.settle_live/2`, which legally re-reports live.
   // Every row below is bidirectionally census-pinned in __app.test.mjs: offer a
-  // seventh and the Console gate reds until a producer exists.
+  // row without a producer and the Console gate reds until one exists.
+  //
+  // cch-w29-bl — SEVEN NOW. `deployment_refused` is the auto-deploy PREBUILT
+  // refusal, and it is the census working in the OTHER direction: its producer
+  // (`Sites.AutoDeployWorker.refuse/1` → `Notifications.dispatch_site_event`)
+  // landed in the same change, and arm (b) reds until this row names it. This is
+  // not a promise ahead of a mechanism — it is the console catching up to one.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
+    ["deployment_refused", "Deployment refused"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
     ["subscription_past_due", "Subscription past due"]
@@ -6196,7 +6433,18 @@
     // field on an older CP must not read as stalled).
     if (live && typeof bp.queued_deploy_age_seconds === "number" &&
         bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
-    if (live && bp.update_state === "behind") return "behind";     // 9
+    // dr-w25: TWO independent sources can say `behind`, and until this slice the
+    // console read only the weaker one. `update_state` is the box's RELEASE-TAG
+    // self-grade; `commit_ancestry` is the control plane's own compare of the
+    // sha the box serves against main (see behindByCommits below). A box pinned
+    // at the newest tag grades itself `current` however far main runs ahead — so
+    // a row reading commit_ancestry "behind" + update_state "current" rendered
+    // live-green here while the SAME payload's commit column said 2,493 behind.
+    // Ported byte-for-byte from the Go twin's predicate (cloud_status_cmd.go
+    // attentionStatus: `live && (b.UpdateState == "behind" || behindByCommits(b))`)
+    // — same rung, same label, same bucket; it simply stops missing the boxes
+    // whose release-tag grade cannot express the gap.
+    if (live && (bp.update_state === "behind" || behindByCommits(bp))) return "behind"; // 9
     if (removing) return "removing";                              // 10
     if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
     return "ok";                                                // 12
@@ -6347,7 +6595,17 @@
     // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
     // and says the fact that makes the wait a problem.
     if (kind === "deploy_stalled") return { role: "warn", label: "Deploy stalled", detail: "Deploy queued " + Math.floor(bp.queued_deploy_age_seconds / 60) + "m — no builder claimed it" };
-    if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    // dr-w25 / Go attentionDetail: a row behind by its RELEASE TAG explains
+    // itself (the UPDATE column already shows running → latest), so it keeps the
+    // release sentence. A row behind BY COMMITS does NOT — its tag grade is
+    // sitting on the same row saying `current` — so commitBehindDetail names the
+    // disagreement, verbatim Go phrasing, instead of the false all-clear
+    // "A newer release is available" over a box no release can describe.
+    if (kind === "behind") {
+      var commitWhy = commitBehindDetail(bp);
+      if (commitWhy && bp.update_state !== "behind") return { role: "info", label: "Update available", detail: commitWhy };
+      return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
+    }
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
@@ -6450,6 +6708,9 @@
   //     → "" — the segment collapses out entirely, byte-identical to before.
   // `== null` (never truthiness) is what keeps a MEASURED zero rendering
   // "even" instead of collapsing into the unmetered arm.
+  // dr-w25: behindByCommits is no longer display-only — classifyBp's `behind`
+  // rung reads it too, so a box whose tag grade says `current` can never render
+  // live-green while the plane's own compare says it is behind main.
   var COMMIT_DISTANCE_UNMETERED = "UNMETERED";
   function behindByCommits(bp) {
     return String((bp && bp.commit_ancestry) || "").trim() === "behind";
@@ -7056,10 +7317,36 @@
       // answer; a still-unknown answer at this point omits the button (fail
       // closed on a destroy-tier verb).
       var model = archivesModel(r.data, instanceAdminAuthority());
+      // cch-w51-bl / cch-archive-residue: KEEP THE ANSWER. This read already
+      // knew whether the store is wired and whether this team holds a bundle;
+      // it painted the panel and threw both facts away, so the lifecycle rail
+      // on the same screen went on teaching Archive beside an
+      // archives-note--unconfigured, and the decommission sheet had nothing to
+      // narrow its residue sentence with.
+      archiveStore = archiveStoreFromModel(model);
       panel.innerHTML = archivesPanelHtml(model);
       var retry = panel.querySelector("[data-archives-retry]");
       if (retry) retry.addEventListener("click", loadArchives);
       wireArchiveResurrect(panel, model);
+    });
+  }
+
+  // THE INSTANCE ROUTE NEVER RAN loadArchives, so the store answer the rail and
+  // the decommission sheet want was never on the client at the one irreversible
+  // click. This is that read, taken ONCE per session and only when we do not
+  // already hold an answer. It is a NARROWING, never a gate: every consumer is
+  // honest with or without it (an unresolved or failed read keeps the blanket
+  // copy and offers the chips uncaveated), so nothing waits on it and a failure
+  // costs nothing. `after` repaints the rail if the answer lands after paint.
+  function ensureArchiveStore(after) {
+    if (archiveStore.state !== "unknown" || archiveStoreInFlight) return;
+    archiveStoreInFlight = true;
+    api("GET", "/v1/archives").then(function (r) {
+      archiveStoreInFlight = false;
+      // The SAME projection loadArchives uses — archivesModel owns the
+      // unconfigured discrimination, and there is no second copy of it here.
+      archiveStore = archiveStoreFromModel(archivesModel(r.data));
+      if (after) after();
     });
   }
 
@@ -7994,7 +8281,7 @@
   // cch-w45-s5 — THE OFFER-TIME AUTHORITY OF THE TWO MEMBER-REACHABLE INSTANCE
   // WRITES. POST /v1/barkparks/:id/domain (attachDomain) and POST
   // /v1/barkparks/:id/rollback (rollbackInstance) are both
-  // require_primary_team_admin server-side, while EVERY read this screen makes
+  // require_current_team_admin server-side, while EVERY read this screen makes
   // is `user` — so a plain member painted the instance in full and both writes
   // answered 403 on click. Measured, not assumed: booting the committed
   // panel-overview-member scenario served BOTH controls live.
@@ -8112,7 +8399,7 @@
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
-    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_primary_team_admin,
+    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_current_team_admin,
     // so the OFFER is authority-gated too — a member gets the disabled control
     // and the server's own sentence instead of a 403 after the modal.
     // D437: the still-checking arm carries the page's ONE shipped exit
@@ -8381,14 +8668,19 @@
     // frame 1 /v1/me is usually already in (loadMe fires at shell boot, long
     // before this route's capability read) — but when it is not, the rail says
     // "checking", never "refused".
-    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp, instanceAdminAuthority(), meState()));
+    paintLifecycleActions(box, bp,
+      lifecycleActionsModel(undefined, bp, instanceAdminAuthority(), meState(), archiveStoreSnapshot()));
+    // cch-w51-bl: and ask the store, once, so the two store-coupled chips and
+    // the decommission sheet are answering from a read instead of a guess.
+    ensureArchiveStore(repaintLifecycleAuthority);
     api("GET", "/v1/providers/capabilities").then(function (r) {
       if (!box.isConnected && box.isConnected !== undefined) return; // navigated away
       // 404 (conduit not deployed yet) / 5xx / network → null → the honest
       // "capabilities unavailable" + Retry state, decommission still live.
       var payload = r && r.ok && r.data ? r.data : null;
       lifecycleRail = { bp: bp, caps: payload };
-      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp, instanceAdminAuthority(), meState()));
+      paintLifecycleActions(box, bp,
+        lifecycleActionsModel(payload, bp, instanceAdminAuthority(), meState(), archiveStoreSnapshot()));
     });
   }
 
@@ -8424,7 +8716,8 @@
     var box = $("#inst-lifecycle-actions");
     if (!box) return;
     paintLifecycleActions(box, lifecycleRail.bp,
-      lifecycleActionsModel(lifecycleRail.caps, lifecycleRail.bp, instanceAdminAuthority(), meState()));
+      lifecycleActionsModel(lifecycleRail.caps, lifecycleRail.bp, instanceAdminAuthority(), meState(),
+        archiveStoreSnapshot()));
   }
 
   function paintLifecycleActions(box, bp, model) {
@@ -8435,8 +8728,13 @@
     // loadMe now repaints this surface from BOTH arms (repaintLifecycleAuthority
     // above), so wireMeRetry only re-paints when the read still did not land.
     wireMeRetry(box, repaintLifecycleAuthority);
+    // cch-w46-bl: the refused arm now carries the SAME data-life-verb as the
+    // live one (one verb, one identity), so this mount stops treating the
+    // ATTRIBUTE as the offer and asks the real question instead. A disabled
+    // control gets no handler at all — belt to the browser's own braces, which
+    // never dispatch a click on a disabled button.
     var decomm = box.querySelector('[data-life-verb="decommission"]');
-    if (decomm) decomm.addEventListener("click", function () { confirmDecommission(bp); });
+    if (decomm && !decomm.disabled) decomm.addEventListener("click", function () { confirmDecommission(bp); });
   }
 
   // cch-w57-s3: the ONE discriminator this modal needs — is `bp.custom_host` a
@@ -8497,9 +8795,13 @@
       lines.push(ext + " is your own DNS record — Barkpark Cloud never held it. The IP behind it goes back to " +
         "Hetzner, which hands that address to someone else, and we can't repoint the record for you.");
     }
-    lines.push("Any archive bundle this team has already made stays in object storage for 30 days after the " +
-      "instance it came from was torn down; a daily sweep deletes it after that. While this team still has an " +
-      "instance, its most recent bundle is kept.");
+    // cch-archive-residue: the residue sentence is no longer BLANKET. It is
+    // derived from GET /v1/archives — the read this console already makes — so
+    // a team that has never archived anything is not told about a residue it
+    // does not have, and a team that HAS one is told whether one of them came
+    // from this very box. An unread or failed read keeps the blanket sentence
+    // verbatim: see archiveResidueLines.
+    archiveResidueLines(archiveStoreSnapshot(), bp).forEach(function (l) { lines.push(l); });
     lines.push("Billing does not stop here. The subscription belongs to the team; cancel it on Billing if this was " +
       "your last instance.");
     lines.push(live
@@ -8701,7 +9003,7 @@
   // (decision 25 — a failed confirm never dies into a toast): terminal refusals
   // (rollbackRefusalTerminal) offer Close, transient ones Try again.
   //
-  // NO noBounce: this route is session-gated (require_primary_team_admin), so a 401
+  // NO noBounce: this route is session-gated (require_current_team_admin), so a 401
   // is a genuinely-expired session that SHOULD bounce to login. noBounce is ONLY
   // for the worker-gated fleet-banner probe (loadFleetRollout above) where a plain
   // session token 401s by design.
@@ -9921,7 +10223,7 @@
     if (acts.policy) {
       // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
       // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
-      // Auth.require_primary_team_admin — and they were appended with no
+      // Auth.require_current_team_admin — and they were appended with no
       // authority argument at all, so a plain member was offered four writes the
       // server answers 403. Same seam, same grammar: the live `data-au` mount
       // hook exists on the grant arm only (D428/D439).
@@ -9936,7 +10238,7 @@
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
     // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
-    // /v1/barkparks/:id/rollback is require_primary_team_admin, and this button
+    // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
     // authority-gated (no exit here: the page's one [data-me-retry] rides the
@@ -14032,7 +14334,7 @@
           // carries ["root"], so require_ability can never refuse one and
           // Registry.get_team_site filters on TENANCY only — no role read exists
           // anywhere on that path. Gating it on instanceAdminAuthority (the
-          // INSTANCE Decommission's band, require_primary_team_admin — a
+          // INSTANCE Decommission's band, require_current_team_admin — a
           // strictly higher tier) would withhold a control the server honours.
           '<button class="btn btn-danger btn-sm" id="site-delete" type="button">Delete</button></div></div>' +
       '<div class="detail-grid">' +
@@ -14179,8 +14481,10 @@
   // the call site, so escaping is unchanged).
   // dwb-webhook-deploy-artifact-gap (interim): the ONE predicate for the
   // born-failed GitHub-push family — a push conjures a deployment the builder
-  // can't run yet (needs the gh-1 App integration), so the CP marks it born-
-  // failed. Shared by failureCopy (what to say) and failureTone (how to paint
+  // could not run at the time — LEGACY rows, born failed before the router's
+  // `github_build_available?/1` became a real repo-present predicate; source
+  // builds have arrived, but no retro-build moves the rows already written.
+  // Shared by failureCopy (what to say) and failureTone (how to paint
   // it) so the two can never drift apart. FailureCopy.humanize on the Elixir
   // side maps the raw machine reason to human copy at the JSON boundary, so the
   // client usually already RECEIVES the human string — match a substring
@@ -14204,7 +14508,7 @@
   function failureCopy(reason) {
     if (!reason) return reason;
     if (isGithubPushBlocked(reason))
-      return "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+      return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
       return "This site has no build source yet. Connect a repo or run bp deploy.";
     if (reason.indexOf("artifact_url is empty") !== -1 ||
@@ -17128,7 +17432,7 @@
 
   // cch-w36-s1 — THE LAUNCH/CHECKOUT AUTHORITY SEAM. Two authorities disagree by
   // design: launching is TEAM-ADMIN (go_live's inline gate) while paying is
-  // OWNER-only (Auth.require_primary_team_owner). So the 402 paywall hands a
+  // OWNER-only (Auth.require_current_team_owner). So the 402 paywall hands a
   // team ADMIN a checkout door the server has already decided to refuse — the
   // console must not advertise it. The billing page already knows this shape
   // (renderTiers folds to renderBillingReadOnly for a non-owner); these two plan
@@ -17336,7 +17640,7 @@
   function activePlan() { return planFromSub(subCache); }
 
   // GR36: billing WRITES (Stripe portal + cancel) are owner-only —
-  // `require_primary_team_owner`, stricter than every other settings gate. The
+  // `require_current_team_owner`, stricter than every other settings gate. The
   // client signal is /v1/me's top-level `role` string (3-role vocab). Pure so a
   // node test pins the gate; the DOM branch reads it via billingIsOwner().
   // cch-w31-bl: the owner literal is CONSOLE_OWNER_ROLES now — the same one
@@ -17962,7 +18266,7 @@
   // cache, an older payload) renders exactly what it rendered before, and the
   // server still refuses the POST — this card is the disclosure, never the
   // enforcement.
-  function tierCardHtml(t, active, subscribed, capability) {
+  function tierCardHtml(t, active, subscribed, capability, trialDays) {
     var isCurrent = t.plan === active;
     var testMode = capability === "test_mode";
     var btn;
@@ -17975,7 +18279,30 @@
       // teams read Free as current). There is no free checkout to POST — the
       // server 422s plan_invalid — and "doing nothing" IS how a trial lands on
       // Free, so the honest action here is no action at all.
-      btn = '<button class="btn" disabled>Yours when the trial ends</button>';
+      //
+      // cch-w50 clamped the trial CARD's future tense and left this label — the
+      // fourth site — because it renders inside the geometry the tier-floor gate
+      // measures. THE TENSE IS THE DEFECT: on a LAPSED trial (trialEnded, i.e.
+      // trial_days_remaining <= 0, the same predicate trialCardHtml and
+      // trialTagline read) "when the trial ends" names a future event that has
+      // already happened.
+      //
+      // WHAT REPLACES IT, AND WHY NOT "Current plan": for up to an hour after
+      // expiry — until TrialExpiryWorker finalises the row — planFromSub still
+      // answers "trial", so this console has NOT measured Free as the current
+      // plan and must not say so. "Your plan from here" states the direction the
+      // team is already travelling without dating it and without promoting Free
+      // to current; it is also SHORTER than the string it replaces, so it cannot
+      // widen the CTA the .tier-grid floor was measured against (the tiers5 leg
+      // now renders and measures BOTH labels rather than assuming that).
+      //
+      // `trialDays` is OPTIONAL: an absent/non-numeric value is not evidence a
+      // trial lapsed, so it renders exactly what a 3-arg call rendered before —
+      // which is what breakpoint-sweep.mjs's tiers5 fixture and every existing
+      // test call.
+      btn = trialEnded(trialDays)
+        ? '<button class="btn" disabled>Your plan from here</button>'
+        : '<button class="btn" disabled>Yours when the trial ends</button>';
     } else if (testMode) {
       // Labelled, disabled, and NOT wired: no data-plan attribute means
       // renderTiers binds no click handler at all, so there is no path from
@@ -18012,7 +18339,13 @@
     // can upgrade (dwb-13); only a real paid plan routes changes to the portal.
     var subscribed = active !== "free" && active !== "trial";
     var capability = checkoutCapability();
-    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability); }).join("");
+    // The trial clock the Free card's tense depends on, read from the SAME field
+    // trialCardHtml reads (`sub.trial_days_remaining`); anything non-numeric
+    // stays undefined, which trialEnded() answers false for.
+    var trialDays = subCache && typeof subCache.trial_days_remaining === "number"
+      ? subCache.trial_days_remaining
+      : null;
+    grid.innerHTML = PLAN_CATALOG.map(function (t) { return tierCardHtml(t, active, subscribed, capability, trialDays); }).join("");
 
     grid.querySelectorAll("[data-plan]").forEach(function (b) {
       b.addEventListener("click", function () { subscribe(b.getAttribute("data-plan"), b); });
@@ -18216,7 +18549,7 @@
   //     router.ex:10812-10815). Proven by a live probe: an admin pinned on team
   //     A writing team B gets 403 {scope:"team"}; a member pinned on B writing
   //     A gets 200.
-  //   * everything else → Auth.require_primary_team_admin/owner reads
+  //   * everything else → Auth.require_current_team_admin/owner reads
   //     :current_team, which resolve_team/2 fills FROM x-barkpark-team
   //     (auth.ex:122-130, :405-421). Its NAME lies ("primary"); its BEHAVIOUR
   //     agrees with meCache.
@@ -19698,6 +20031,106 @@
       '<span class="wordmark-text">Barkpark <b>Cloud</b></span></div>' +
       '<p class="auth-foot dim">Signing you in…</p>';
     center.appendChild(el);
+  }
+
+  // ====================================================== EMAIL CONFIRMATION
+  // cch-w53-bl-the-emailed-confirmation-link-has-no-client — THE CLIENT HALF OF
+  // A FLOW THAT SHIPPED WITH ONLY ITS SERVER HALF.
+  //
+  // `Accounts.confirm_url/1` mails <dashboard>/?confirm=<token>, and the route
+  // that honours it has existed the whole time: POST /v1/auth/verify-email ->
+  // Accounts.confirm_user/1 sets confirmed_at and burns every live confirm
+  // token. What was missing was THIS: nothing under cloud/priv read ?confirm=
+  // or called that route, so clicking the emailed link landed you on the
+  // dashboard and nothing happened. The control plane was mailing a promise no
+  // code kept — the dead-flow shape, not an unbuilt seam.
+  //
+  // TWO RULES, both borrowed from bootOAuth directly below:
+  //
+  //   1. SCRUB FIRST, AND BY REPLACE. The token is single-use and it is sitting
+  //      in the address bar. It comes out of the URL — and out of the history
+  //      entry, so a Back press cannot resurrect it — BEFORE a byte goes on the
+  //      wire. Only the `confirm` key is dropped; a link that also carried
+  //      ?checkout= or ?billing= keeps them, because those have their own
+  //      readers on this same boot.
+  //
+  //   2. A FAILED VERIFY IS NOT A FAILED LOGIN. Confirming an address is
+  //      orthogonal to holding a session: a spent, expired or forged token must
+  //      never touch the session, never route to the sign-in screen, and never
+  //      borrow "Sign-in failed". It is an outcome reported on whatever screen
+  //      the person already landed on. Getting this wrong would turn a stale
+  //      bookmark into an apparent sign-out.
+  //
+  // NOT A NEW GATE. `confirmed_at` gates no authority anywhere in cloud/lib
+  // today — GET /v1/me reports it as `user.confirmed` and nothing reads that —
+  // so this makes an already-shipped flow honest rather than adding a wall.
+  // That is also why the outcome is a toast and not a screen: nothing the
+  // person can do next depends on it.
+
+  // Pure: the ?confirm= token out of a location.search string, or null. A
+  // malformed query degrades to null — never a throw on the boot path.
+  function confirmTokenFromSearch(search) {
+    var params;
+    try { params = new URLSearchParams(search || ""); }
+    catch (e) { return null; }
+    var token = (params.get("confirm") || "").trim();
+    return token === "" ? null : token;
+  }
+
+  // Drop ONLY the confirm key from the address bar, preserving every other
+  // parameter, the path and the fragment. replaceState, never pushState.
+  function scrubConfirmParam() {
+    if (typeof history === "undefined" || !history.replaceState) return;
+    var kept = (location.search || "").replace(/^\?/, "").split("&").filter(function (kv) {
+      return kv !== "" && kv.split("=")[0] !== "confirm";
+    });
+    var qs = kept.length ? "?" + kept.join("&") : "";
+    history.replaceState(null, "", (location.pathname || "/") + qs + (location.hash || ""));
+  }
+
+  // Pure: fold the verify-email response into the toast to show. THREE
+  // outcomes, and not one of them says anything about signing in.
+  //   200        — confirmed.
+  //   422        — the route's single opaque invalid_token: already used,
+  //                expired, or revoked. Named as spent, with the way to get a
+  //                fresh one, because there is nothing the person can retry.
+  //   anything   — a transport or server fault. Says only what is true: we
+  //                could not check right now, nothing else changed.
+  function emailConfirmOutcome(r) {
+    if (r && r.ok) {
+      return { kind: "success", title: "Email confirmed",
+        body: "Thanks — this address is verified." };
+    }
+    if (r && r.status === 422) {
+      return { kind: "info", title: "That confirmation link is spent",
+        body: "It was already used, or it expired. Send yourself a fresh one from Settings → Account." };
+    }
+    return { kind: "info", title: "We couldn't confirm this address just now",
+      body: "Nothing else changed. Open the link again in a moment." };
+  }
+
+  // The boot reader. Not an emailed confirm landing → `done()` on the spot, so
+  // a normal boot costs nothing.
+  function bootEmailConfirm(done) {
+    done = typeof done === "function" ? done : function () {};
+    var token = confirmTokenFromSearch(location.search);
+    if (!token) { done(); return; }
+
+    scrubConfirmParam();
+
+    api("POST", "/v1/auth/verify-email", { token: token }, { noAuth: true }).then(function (r) {
+      // noAuth on purpose: the token IS the credential (the route takes no
+      // session), and a logged-out person clicking the link must get the same
+      // answer as a logged-in one.
+      toast(emailConfirmOutcome(r));
+      done();
+    }).catch(function () {
+      // api() resolves its own rejections, so this covers a throw INSIDE the
+      // handler above. Report the neutral outcome and get out of the way —
+      // never leave the boot half-run over an email confirmation.
+      toast(emailConfirmOutcome(null));
+      done();
+    });
   }
 
   // The boot gate. Runs ONCE, from init(), in place of the bare `render()` — it
@@ -22324,10 +22757,29 @@
     return '<div class="fleet-body" aria-live="polite"><div class="loading">Loading usage&hellip;</div></div>';
   }
 
-  // Pure: honest human copy for a failed /usage fetch — never a dead spinner.
+  // cch-w36-bl — NO ARM MAY CLAIM A CAUSE THE STATUS DID NOT ESTABLISH.
+  //
+  // Re-derived against the route, not guessed: GET /v1/barkparks/:id/usage  
+  // is `Auth.require_user` + team-scoped, and its own header says it is TOTAL
+  // over a sick or silent box — "an instance that has never phoned home a beat
+  // is a normal 200 ... never a 500". So the only non-2xx answers it can give
+  // are 401 (expired session), 404 (wrong team / absent / malformed id — one
+  // no-existence-leak answer), a crash-envelope 5xx from the control plane, and
+  // api()'s status 0 when nothing answered at all. THERE IS NO STATUS AT WHICH
+  // "it may be starting up" IS TRUE — a starting instance answers 200. The old
+  // default said it for every one of them, next to a Retry button that a 5xx or
+  // a dead network cannot fix.
+  //
+  // Each arm below states only what its status proves. The 401 arm reads the
+  // one owner of that sentence (accountWriteFailureCopy's constant) rather than
+  // writing a second copy of it; note it is reachable only in the seam of a
+  // bounce, since this GET does not pass noBounce.
   function usageFailureCopy(status) {
+    if (status === 0) return ERRORS.network_error + " Retry in a moment.";
+    if (status === 401) return SESSION_EXPIRED_COPY;
     if (status === 404) return "This instance isn't in your team, or has been removed.";
-    return "We couldn't load usage for this instance — it may be starting up. Retry in a moment.";
+    if (status >= 500) return "Something broke on our side loading usage — not this instance. Retry in a moment.";
+    return "We couldn't load usage for this instance. Retry in a moment.";
   }
 
   function usageErrorHtml(status) {
@@ -23201,10 +23653,29 @@
     return '<div class="fleet-body metrics-body" aria-live="polite"><div class="loading">Loading metrics&hellip;</div></div>';
   }
 
-  // Pure: honest human copy for a failed /metrics fetch — never a dead spinner.
+  // cch-w36-bl — NO ARM MAY CLAIM A CAUSE THE STATUS DID NOT ESTABLISH.
+  //
+  // Re-derived against the route, not guessed: GET /v1/barkparks/:id/metrics
+  // is `Auth.require_user` + team-scoped, and its own header says it is TOTAL
+  // over a sick or silent box — "an instance that has never phoned home a beat
+  // is a normal 200 ... never a 500". So the only non-2xx answers it can give
+  // are 401 (expired session), 404 (wrong team / absent / malformed id — one
+  // no-existence-leak answer), a crash-envelope 5xx from the control plane, and
+  // api()'s status 0 when nothing answered at all. THERE IS NO STATUS AT WHICH
+  // "it may be starting up" IS TRUE — a starting instance answers 200. The old
+  // default said it for every one of them, next to a Retry button that a 5xx or
+  // a dead network cannot fix.
+  //
+  // Each arm below states only what its status proves. The 401 arm reads the
+  // one owner of that sentence (accountWriteFailureCopy's constant) rather than
+  // writing a second copy of it; note it is reachable only in the seam of a
+  // bounce, since this GET does not pass noBounce.
   function metricsFailureCopy(status) {
+    if (status === 0) return ERRORS.network_error + " Retry in a moment.";
+    if (status === 401) return SESSION_EXPIRED_COPY;
     if (status === 404) return "This instance isn't in your team, or has been removed.";
-    return "We couldn't load metrics for this instance — it may be starting up. Retry in a moment.";
+    if (status >= 500) return "Something broke on our side loading metrics — not this instance. Retry in a moment.";
+    return "We couldn't load metrics for this instance. Retry in a moment.";
   }
 
   function metricsErrorHtml(status) {
@@ -23379,6 +23850,14 @@
   // The console MAY answer this because the roster it renders IS the whole
   // roster: GET /v1/teams/:id/members maps list_team_members/1 with no limit and
   // no offset, so `members` is complete in the same frame — not a page.
+  //
+  // THAT PREMISE IS HELD BY A TEST, not by this sentence:
+  // BarkparkCloud.Web.RouterMembersRosterCompletenessTest
+  // (cloud/test/barkpark_cloud/web/router_members_roster_completeness_test.exs)
+  // reds if the route pages or if list_team_members/1 grows a limit/offset, and
+  // names this predicate in its failure message. Read it before touching either
+  // side: they are one contract (cch-w45-bl-no-tripwire-on-the-members-roster-
+  // completeness-premise).
   //
   // Every arm below is a REASON TO HAVE NO OPINION, and no opinion means OFFER.
   // A predicate that fails CLOSED on a roster it cannot read would withhold a
@@ -24840,6 +25319,15 @@
     var activateTheme = $("#activate-theme-toggle");
     if (activateTheme) activateTheme.addEventListener("click", toggleTheme);
 
+    // cch-w53-bl-the-emailed-confirmation-link-has-no-client: an emailed
+    // ?confirm= landing is resolved on this same boot. DELIBERATELY NOT CHAINED
+    // in front of bootOAuth — confirming an address is orthogonal to signing in,
+    // so it must not delay the first paint, and a slow or failing verify must
+    // not hold the screen (which is one of the ways it would start looking like
+    // a sign-in failure). It scrubs the token synchronously before its own hop,
+    // so the two boot readers cannot see each other's parameters.
+    bootEmailConfirm();
+
     // The ONLY call-site edit in this file: an OAuth landing is resolved (code
     // exchanged for a session) BEFORE the first paint, then render() runs exactly
     // as it always did. render() itself stays synchronous and its other 8 call
@@ -25715,6 +26203,15 @@
       // the one-shot flag.
       oauthReturnFromHash: oauthReturnFromHash, bootOAuth: bootOAuth,
       handleOAuthReturn: handleOAuthReturn,
+      // cch-w53-bl-the-emailed-confirmation-link-has-no-client — the client half
+      // of the emailed ?confirm= link. Same three-part shape as the OAuth gate
+      // above: the pure reader, the pure outcome classifier, and the boot path
+      // itself (scrub by REPLACE before the hop, POST the token, report an
+      // outcome that never mentions signing in) — driven end-to-end in node
+      // against a stubbed fetch, because the defect this closes was the ABSENCE
+      // of a network hop and only a drive can see that.
+      confirmTokenFromSearch: confirmTokenFromSearch,
+      emailConfirmOutcome: emailConfirmOutcome, bootEmailConfirm: bootEmailConfirm,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,
@@ -26175,6 +26672,31 @@
       // now re-derives. openRoleModal was reachable from NOTHING but a DOM
       // click, so its gate could not be driven by a test at all — which is how
       // it stayed actor-only for a whole wave after the row went rank-relative.
+      // console-3/lifecycle-batch (cch-w51-bl, cch-archive-residue,
+      // cch-w47-bl, cch-w46-bl): the archive-store answer the lifecycle rail
+      // and the decommission sheet now BOTH consult, plus the two pure helpers
+      // that turn it into copy. Exported because the defect all three rows
+      // share is a NON-answer read as an absence — only a test that drives
+      // every store state (unknown / failed / not_configured / loaded) can
+      // prove the unknown arm still says the blanket sentence, and no existing
+      // export reaches the store at all.
+      // lifecycleActionHtml itself joins them: the disabled-arm identity fix
+      // (cch-w46-bl) is invisible through lifecycleActionRowHtml alone, which
+      // routes pause to the foot and decommission to the live slot — the ONE
+      // refused arm it renders is whatever the payload happens to refuse.
+      lifecycleActionHtml: lifecycleActionHtml,
+      archiveStoreFromModel: archiveStoreFromModel,
+      archiveStoreSnapshot: archiveStoreSnapshot,
+      archiveVisibilityNote: archiveVisibilityNote,
+      archiveResidueLines: archiveResidueLines,
+      // cch-w36-bl / cch-w77-bl (console-3-w26) — the copy seam this slice
+      // fixed, exported so each arm is pinned DIRECTLY rather than through a
+      // screen that happens to call it. metricsFailureCopy had no export at all,
+      // so the wrong-cause 403/5xx/0 sentence it emitted was unreachable from
+      // every node guard in this repo.
+      metricsFailureCopy: metricsFailureCopy,
+      accountWriteFailureCopy: accountWriteFailureCopy,
+      sessionExpiredCopy: SESSION_EXPIRED_COPY,
       openRoleModal: openRoleModal, roleModalAuthority: roleModalAuthority,
       // cch-w31-bl — THE ROLE VOCABULARY, exported as DATA so the census can
       // diff the shipped set against Authz's own attribute text rather than

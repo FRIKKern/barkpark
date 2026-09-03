@@ -25,7 +25,11 @@
 #                                             itself the red is MAIN'S STATE and
 #                                             must never be waved through.
 #   main's newest COMPLETED run of this workflow has a job of the same name
-#   whose failed step names are a SUPERSET of ours (non-empty)
+#   whose failed step names are a SUPERSET of ours (non-empty). MAIN'S FAILED
+#   GATE STEPS ARE NOT IN THE JOBS API: a `continue-on-error: true` step reports
+#   `conclusion: success` even when it failed, so they are recovered from the
+#   breaker's own verdict line in main's job log, and a name recovered that way
+#   inherits ONLY on a VERIFIED signature (see LOG_DERIVED below).
 #                                          -> exit 0, notice INHERITED-FROM-MAIN
 #                                             naming main's run id and steps
 #   otherwise (main green, main red on a different step, main unreadable,
@@ -148,6 +152,54 @@ for j in d.get("jobs") or []:
                 print(s.get("name"))
 open(sys.argv[3], "w").write(jid)
 PY
+cp "$TMPD/mains.txt" "$TMPD/mains-api.txt"
+
+# Main's job log. Fetched HERE, before the step-name comparison, because it
+# carries main's failed GATE step names as well as its signature (below).
+MAIN_LOG="$TMPD/main-job.log"; : > "$MAIN_LOG"
+if [ -n "${MAIN_RED_BREAKER_LOG_FIXTURE:-}" ]; then
+  cp -- "$MAIN_RED_BREAKER_LOG_FIXTURE" "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
+elif [ -z "${MAIN_RED_BREAKER_FIXTURE:-}" ] && [ -s "$TMPD/mainjob.id" ]; then
+  curl -sSL --max-time 20 "${auth[@]}" "${API}/actions/jobs/$(cat "$TMPD/mainjob.id")/logs" -o "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
+fi
+
+# WHY THE JOBS API IS NOT ENOUGH — MEASURED 2026-09-03 (task-2dbe8808f2a6f7b5).
+# Every gate step carries `continue-on-error: true`, and the runner reports such
+# a step as `"conclusion": "success"` even when it failed (only its `outcome` is
+# `failure`, and `outcome` is not in the jobs API). So the loop above — which
+# keys on conclusion — can only ever see the Decide step on main. Run
+# 33788784458 job 100759983487 ('Doc budgets + anchors'): 33 gate steps, all
+# `conclusion: success`, one `failure`, the Decide step. The step-name clause
+# therefore ALWAYS found a step "main does not fail on" and exited 1 one clause
+# before the signature test could run. On PR #15854's own doc-gates job
+# (100761669105) that printed:
+#
+#   FAIL — 'Doc budgets + anchors' failed on a step main does not: Code-comment
+#   citation guard (fails this job). (Main run 33788784458 is red on: Decide …)
+#
+# while main's log said, in the breaker's own words, that main failed on exactly
+# that step. The breaker has never inherited a red on a real run.
+#
+# The recovery needs no new API: main's Decide step PRINTED its gate-step names.
+python3 - "$MAIN_LOG" "$JOB_NAME" >> "$TMPD/mains.txt" <<'PY' || :
+import re, sys
+want = sys.argv[2]
+head = "main-red-breaker: FAIL \u2014 '%s' failed on" % want
+for raw in open(sys.argv[1], errors="replace"):
+    line = raw.rstrip("\r\n")
+    i = line.find(head)
+    if i < 0:
+        continue
+    # ": A;B. This is not a pull_request run, …"  (main is always a push run)
+    # " a step main does not: A;B. (Main run …"   (defensive; not reachable on push)
+    m = re.search(r":\s*(.*?)\.\s+(?:This is not a pull_request run|\(Main run |Main's newest)", line[i + len(head):])
+    if not m:
+        continue
+    for name in m.group(1).split(";"):
+        name = name.strip()
+        if name:
+            print(name)
+PY
 MAINS="$(sort -u "$TMPD/mains.txt")"
 
 if [ -z "$MAINS" ]; then
@@ -156,6 +208,9 @@ if [ -z "$MAINS" ]; then
 fi
 
 NOT_ON_MAIN="$(comm -23 <(printf '%s\n' "$OURS") <(printf '%s\n' "$MAINS"))"
+# Did any of our steps match ONLY through main's log line, not the jobs API?
+LOG_DERIVED=0
+[ -n "$(comm -23 <(printf '%s\n' "$OURS") <(sort -u "$TMPD/mains-api.txt"))" ] && LOG_DERIVED=1
 if [ -n "$NOT_ON_MAIN" ]; then
   say "FAIL — '${JOB_NAME}' failed on a step main does not: $(printf '%s' "$NOT_ON_MAIN" | tr '\n' ';'). (Main run ${MAIN_RUN_ID} is red on: $(printf '%s' "$MAINS" | tr '\n' ';'); those are inherited, the rest is yours.)"
   exit 1
@@ -202,21 +257,27 @@ OUR_LOG="${BREAKER_ERROR_LOG:-${RUNNER_TEMP:-/nonexistent}/main-red-breaker-erro
 : > "$TMPD/our-sigs.txt"
 [ -s "$OUR_LOG" ] && sigfile "$OUR_LOG" > "$TMPD/our-sigs.txt"
 
-MAIN_LOG="$TMPD/main-job.log"; : > "$MAIN_LOG"
-if [ -n "${MAIN_RED_BREAKER_LOG_FIXTURE:-}" ]; then
-  cp -- "$MAIN_RED_BREAKER_LOG_FIXTURE" "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
-elif [ -z "${MAIN_RED_BREAKER_FIXTURE:-}" ] && [ -s "$TMPD/mainjob.id" ]; then
-  curl -sSL --max-time 20 "${auth[@]}" "${API}/actions/jobs/$(cat "$TMPD/mainjob.id")/logs" -o "$MAIN_LOG" 2>/dev/null || : > "$MAIN_LOG"
-fi
 : > "$TMPD/main-sigs.txt"
 [ -s "$MAIN_LOG" ] && sigfile "$MAIN_LOG" > "$TMPD/main-sigs.txt"
 
-if [ ! -s "$TMPD/our-sigs.txt" ]; then
-  SIG_NOTE=" SIGNATURE-UNVERIFIED: no gate step wrote ${OUR_LOG}, so this red was matched on STEP NAME ALONE — a different defect inside the same red step is indistinguishable from here."
-elif [ ! -s "$TMPD/main-sigs.txt" ]; then
-  SIG_NOTE=" SIGNATURE-UNVERIFIED: main's job log was empty or unreadable, so this red was matched on STEP NAME ALONE."
+if [ ! -s "$TMPD/our-sigs.txt" ] || [ ! -s "$TMPD/main-sigs.txt" ]; then
+  if [ ! -s "$TMPD/our-sigs.txt" ]; then
+    SIG_NOTE=" SIGNATURE-UNVERIFIED: no gate step wrote ${OUR_LOG}, so this red was matched on STEP NAME ALONE — a different defect inside the same red step is indistinguishable from here."
+  else
+    SIG_NOTE=" SIGNATURE-UNVERIFIED: main's job log was empty or unreadable, so this red was matched on STEP NAME ALONE."
+  fi
+  if [ "$LOG_DERIVED" = 1 ]; then
+    say "FAIL — '${JOB_NAME}' failed on: $(printf '%s' "$OURS" | tr '\n' ';'). Main's run (${MAIN_RUN_ID}) fails there too, but ONLY per its own Decide line — the jobs API reports every continue-on-error gate step as 'success', so the step names came from main's log. That match alone is not enough to wave a red through:${SIG_NOTE}" >&2
+    exit 1
+  fi
 else
-  NEW_SIG="$(comm -23 "$TMPD/our-sigs.txt" "$TMPD/main-sigs.txt")"
+  # LC_ALL=C: sigfile sorts in Python codepoint order, and `comm` compares under
+  # LC_COLLATE. Under a UTF-8 locale the runner actually uses, a line opening
+  # with a non-ASCII glyph — `  ✗ NOVEL …`, which is exactly how the doc-gates
+  # citation guard reports a novel lineref — collates BEFORE an ASCII line that
+  # codepoint order puts first, so comm reads both files as unsorted and reports
+  # a difference that is not there. Byte order on both sides or not at all.
+  NEW_SIG="$(LC_ALL=C comm -23 "$TMPD/our-sigs.txt" "$TMPD/main-sigs.txt")"
   if [ -n "$NEW_SIG" ]; then
     say "FAIL — '${JOB_NAME}' failed on the same step(s) main does ($(printf '%s' "$OURS" | tr '\n' ';')) but NOT with the same failure signature, so the red is this PR's OWN." >&2
     say "  THIS PR's signature line(s) that main does not have:" >&2; printf '    %s\n' "$NEW_SIG" >&2

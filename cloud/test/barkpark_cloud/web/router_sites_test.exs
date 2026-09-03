@@ -2168,9 +2168,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
       assert conn.status == 200
 
-      # The router writes this event with `_ = Accounts.record_audit(…)`: a
-      # changeset error is DISCARDED, so the 200 above says nothing about
-      # whether the row exists. Only the trail itself can answer.
+      # The router writes this event through a `case Accounts.record_audit(…)`
+      # whose error arm LOGS (post-commit best-effort: the box already rolled
+      # back, so a refused insert must not 500 a success). The 200 above still
+      # says nothing about whether the row exists — only the trail can answer.
+      # What the `case` buys is that the error is no longer thrown away and the
+      # console's "audit" push no longer fires over a row that was never
+      # written. `router_audit_discard_census_test.exs` keeps the shape.
       events = Accounts.list_audit_events(team)
       assert ev = Enum.find(events, &(&1.action == "site.rolled_back"))
       assert ev.team_id == team.id
@@ -2512,6 +2516,101 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       # The row is gone, and its deployments cascaded (on_delete: :delete_all).
       assert Registry.get_site(site.id) == nil
       assert Registry.list_deployments(site, 10) == []
+    end
+
+    test "the delete LANDS in the audit trail — it is the ONLY surviving record of the site" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      before_count = Repo.aggregate(BarkparkCloud.Accounts.AuditEvent, :count)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 200
+
+      # This route is the sharpest case in the audit register: `delete_site/1`
+      # is a hard `Repo.delete`, so after this request NOTHING else in the
+      # database can say the site existed or who removed it. Until this test
+      # nothing in `cloud/test` drove the route and read the trail — the 200 was
+      # the only thing anyone checked, and the 200 is also what a swallowed
+      # changeset error produced.
+      events = Accounts.list_audit_events(team)
+      assert ev = Enum.find(events, &(&1.action == "site.deleted"))
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "site"
+      assert ev.target_id == site.id
+      assert ev.metadata["slug"] == site.slug
+      assert ev.metadata["kind"] == site.kind
+
+      # A team+action-scoped read cannot tell "one row" from "two"; the global
+      # delta can, and it is the arm that reds if the converted `case` ever
+      # writes twice or the route stamps a second verb.
+      assert Repo.aggregate(BarkparkCloud.Accounts.AuditEvent, :count) == before_count + 1
+    end
+
+    ## THE AUDIT IS THE GATE, AND THESE TWO TESTS ARE WHAT "GATE" MEANS HERE.
+    ##
+    ## The row is written BEFORE `Sites.Deploy.teardown/2` and before
+    ## `Registry.delete_site/1`, so a refused insert answers 422 with NOTHING
+    ## torn down. The consequence is visible from the other side, and it is
+    ## pinned rather than discovered: because the write is first, it SURVIVES a
+    ## teardown that then fails. A trail that occasionally over-reports a
+    ## removal was the accepted cost of never under-reporting one.
+
+    test "the audit row is written BEFORE the teardown — a REFUSED teardown still leaves it" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # The box is unreachable: teardown refuses, nothing is deleted.
+      FakeBoxRelay.program(teardown: {:error, :econnrefused})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 502
+      assert json_body(conn)["error"] == "teardown_failed"
+
+      # The site row AND its box are untouched — the delete never ran.
+      refute Registry.get_site(site.id) == nil
+      refute Registry.get_barkpark(bp.id) == nil
+
+      # And the audit row is THERE, because it gated the attempt. Under the old
+      # shape — the write sitting in `delete_site/1`'s `:ok` branch — this
+      # assertion finds nothing, which is exactly the ordering it pins.
+      events = Accounts.list_audit_events(team)
+      assert ev = Enum.find(events, &(&1.action == "site.deleted"))
+      assert ev.target_id == site.id
+      assert ev.actor_user_id == user.id
+    end
+
+    test "the delete stamps slug and kind — read_token moved to the response, not the row" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 200
+
+      # `read_token` is the OUTCOME of the revoke inside `delete_site/1`. The
+      # gate runs before that call, so the fact does not exist yet and
+      # `audit_events` is append-only — there is no second write to add it. The
+      # caller still gets it here, and `mix barkpark_cloud.site_read_tokens` is
+      # the sweep for a credential nobody confirmed dead. This test states the
+      # trade so a reader does not think the metadata key was lost by accident.
+      assert Map.has_key?(json_body(conn), "read_token")
+
+      events = Accounts.list_audit_events(team)
+      assert ev = Enum.find(events, &(&1.action == "site.deleted"))
+      assert ev.metadata["slug"] == site.slug
+      assert ev.metadata["kind"] == site.kind
+      refute Map.has_key?(ev.metadata, "read_token")
     end
 
     ## W67 S2 (charter D820) — THE TWO CASCADES NOTHING ASSERTED.
