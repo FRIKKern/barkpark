@@ -66,21 +66,6 @@ jobs:
           fi
           echo "all Go files gofmt-clean"
 
-  # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
-  # which IS this job's rendered check-run context and IS a committed exclusion
-  # row (S4 PATHS-FILTERED) in .github/required-checks.json. Renaming it here
-  # would silently invalidate that ledger row, which is worse than the
-  # overclaim: the row's own reason is a 2000-word account of how this exact
-  # name went missing from the merge-authority census once already. The token
-  # means "blocking WITHIN this workflow" — the point of the sentence below —
-  # and the honest correction belongs in the ledger row's wording, not in a
-  # rename that breaks it.
-  # BLOCKING — its OWN job (NOT a step in the advisory `gofmt` job, whose
-  # continue-on-error would silently declaw it). Shrink-only gofmt drift ceiling:
-  # reds by name on any Go file that is gofmt-dirty and NOT on the committed
-  # roster (.go-format-drift-ceiling, currently empty = zero tolerance), and
-  # fails closed if gofmt is missing or the scan is implausibly small — an empty
-  # `gofmt -l` is never accepted as clean without confirming files were scanned.
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -98,6 +83,21 @@ jobs:
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
         run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
 
+  # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
+  # which IS this job's rendered check-run context and IS a committed exclusion
+  # row (S4 PATHS-FILTERED) in .github/required-checks.json. Renaming it here
+  # would silently invalidate that ledger row, which is worse than the
+  # overclaim: the row's own reason is a 2000-word account of how this exact
+  # name went missing from the merge-authority census once already. The token
+  # means "blocking WITHIN this workflow" — the point of the sentence below —
+  # and the honest correction belongs in the ledger row's wording, not in a
+  # rename that breaks it.
+  # BLOCKING — its OWN job (NOT a step in the advisory `gofmt` job, whose
+  # continue-on-error would silently declaw it). Shrink-only gofmt drift ceiling:
+  # reds by name on any Go file that is gofmt-dirty and NOT on the committed
+  # roster (.go-format-drift-ceiling, currently empty = zero tolerance), and
+  # fails closed if gofmt is missing or the scan is implausibly small — an empty
+  # `gofmt -l` is never accepted as clean without confirming files were scanned.
   gofmt-ceiling:
     name: gofmt drift ceiling (blocking)
     runs-on: ubuntu-latest
