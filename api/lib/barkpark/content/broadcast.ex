@@ -177,6 +177,110 @@ defmodule Barkpark.Content.Broadcast do
     end
   end
 
+  @doc """
+  Run a document write and its `tap_broadcast/7` tail inside ONE transaction, so
+  a `save_event` fault takes the document write down with it.
+
+  [acrc-publish-atomicity-txn-boundary] THE HOLE THIS CLOSES. `save_event/6` is
+  `Repo.insert!` — it RAISES — precisely so that a document mutation which
+  cannot be announced does not survive. That only ever worked inside
+  `apply_mutations`' transaction (`mutations.ex`). On the writer single-write
+  path (`Writer.upsert_after_gate/6`, `Writer.create_after_dedup/6`) and on the
+  publish path (`Lifecycle.publish_document/4`) the document write AUTO-COMMITTED
+  and `tap_broadcast` ran after it, so the raise arrived too late: a COMMITTED
+  document with no `mutation_events` row, and every consumer that reconciles off
+  the event stream — SSE, webhooks, nextjs revalidate, the push outbox — silently
+  missing that write forever. Nothing errors afterwards, nothing retries; the
+  symptom is the ABSENCE of a symptom, which is why it survived this long.
+
+  ## Why a transaction and not a retry/outbox
+
+  The event row lives in the SAME Postgres database as the document. Two rows in
+  one database is the case a transaction was invented for — an outbox or a
+  reconciler would add a second failure domain and a lag window to buy an
+  atomicity Postgres already sells. The cost usually charged against
+  "broadcast inside a transaction" is holding it open on network work; that cost
+  is NOT paid here, because the actual PubSub fan-out and webhook dispatch are
+  already DEFERRED out of the transaction by `maybe_broadcast/2` and
+  `maybe_dispatch_webhook/7`. Only the two INSERTs move inside.
+
+  ## The deferral is why this helper exists rather than a bare Repo.transaction
+
+  `maybe_broadcast/2` queues instead of publishing whenever `in_transaction?`,
+  and something must flush the queue. Wrapping a write in a plain
+  `Repo.transaction` would therefore SILENCE every broadcast and webhook on that
+  path — a worse version of the bug being fixed. This helper owns both halves:
+  `flush_deferred_broadcasts/0` on commit, `clear_deferred_broadcasts/0` on
+  rollback and on the way out of an exception, matching `apply_mutations`
+  (concern H) exactly.
+
+  ## Nesting
+
+  When a transaction is already open the function is run AS IS. An enclosing
+  owner (`apply_mutations`) already provides the atomicity and owns the deferred
+  queue; opening a second boundary here would hand a nested `Repo.rollback` the
+  power to doom it, and flushing here would fire broadcasts for state that can
+  still roll back.
+
+  `fun` must return `{:ok, %Document{}}` to commit. Any other term rolls the
+  transaction back and is returned to the caller UNCHANGED, so an
+  `{:error, changeset}` from the write, an `{:error, :rev_mismatch}` from a
+  fence, or a `{:halt, _}` from a hook keeps the exact shape its caller matches
+  on today.
+
+  ## One deliberate consequence, stated because it is a behaviour change
+
+  `tap_broadcast/7` also calls `emit_audit/6`, and a failed `Audit.emit/1` inside
+  a transaction ABORTS it (see the emit/1 doc — no savepoint, by design). So on
+  these paths an unwritable audit row now fails the document write instead of
+  logging a warning. That is the semantics `apply_mutations` has always had and
+  that `audit.ex` explicitly argues for ("an audit row that cannot be written
+  should take the unaudited change down with it") — this makes the single-write
+  paths agree with it rather than inventing a new rule.
+  """
+  @spec write_atomically((-> term())) :: term()
+  def write_atomically(fun) when is_function(fun, 0) do
+    if Repo.in_transaction?() do
+      fun.()
+    else
+      Process.put(:barkpark_deferred_broadcasts, [])
+      Process.put(:barkpark_deferred_webhooks, [])
+
+      try do
+        Repo.transaction(fn ->
+          case fun.() do
+            {:ok, %Document{}} = ok -> ok
+            other -> Repo.rollback({:barkpark_write_atomically, other})
+          end
+        end)
+      rescue
+        e ->
+          clear_deferred_broadcasts()
+          reraise e, __STACKTRACE__
+      catch
+        kind, reason ->
+          clear_deferred_broadcasts()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      else
+        {:ok, {:ok, %Document{}} = ok} ->
+          flush_deferred_broadcasts()
+          ok
+
+        # The write itself declined. Unwrap and hand back the caller's own term.
+        {:error, {:barkpark_write_atomically, other}} ->
+          clear_deferred_broadcasts()
+          other
+
+        # A nested `Repo.rollback/1` (the publish path's fenced draft delete, a
+        # joined `Audit.emit`) doomed the transaction from inside. Its reason is
+        # already the shape the caller matches on.
+        {:error, reason} ->
+          clear_deferred_broadcasts()
+          {:error, reason}
+      end
+    end
+  end
+
   # Append a content-mutation row to the append-only audit log. Atomic with the
   # mutation when tap_broadcast runs inside the mutate transaction.
   #
@@ -377,8 +481,18 @@ defmodule Barkpark.Content.Broadcast do
       # (`Revisions.get_revision_by_rev/3`); without it the hash pointed nowhere.
       rev: doc.rev,
       # WHO produced this revision — threaded from the mutation's user_id
-      # (nil for system / unattributed writes). Atomic-with-mutation: this
-      # insert already runs inside apply_mutations' Repo.transaction.
+      # (nil for system / unattributed writes).
+      #
+      # [acrc-publish-atomicity-txn-boundary] This used to read
+      # "Atomic-with-mutation: this insert already runs inside apply_mutations'
+      # Repo.transaction" as a blanket statement. It was true ONLY of the
+      # `apply_mutations` batch path. `tap_broadcast/7` is also reached from the
+      # writer single-write path and the publish path, which committed their
+      # document write FIRST and called this afterwards — and it is still
+      # reached from callers that open no transaction at all (`edges.ex`,
+      # `sheets.ex`, `Papers.BlockOps`). Atomicity here is a property of the
+      # CALLER, not of this function: it holds inside `apply_mutations`, and now
+      # inside `write_atomically/1`, and nowhere else.
       actor_user_id: actor_user_id,
       # Stamp the tenancy scope from the source document so workspace-scoped
       # history reads only surface a workspace's own revisions. `dataset_id` is
@@ -388,7 +502,17 @@ defmodule Barkpark.Content.Broadcast do
       workspace_id: doc.workspace_id,
       project_id: doc.project_id
     })
-    |> Repo.insert()
+    # `mode: :savepoint` is what KEEPS the log-and-continue below honest now that
+    # `write_atomically/1` puts this insert inside a transaction on the writer
+    # and publish paths. The changeset declares four FK constraints
+    # (`revision.ex`), and a violated one — a concurrently hard-deleted scope,
+    # the TOCTOU that comment describes — returns `{:error, changeset}`. Without
+    # a savepoint that rejection poisons the enclosing transaction, so "history
+    # failed, keep the content write" would silently become "history failed,
+    # LOSE the content write" — the exact inversion the error arm below refuses.
+    # Outside a transaction the option is inert, so the pre-existing callers
+    # (BlockOps batch revisions, ValueWriteback provenance) are unchanged.
+    |> Repo.insert(mode: :savepoint)
     |> case do
       {:ok, revision} ->
         {:ok, revision}
@@ -401,9 +525,13 @@ defmodule Barkpark.Content.Broadcast do
         # because history couldn't be persisted is worse than a logged, recoverable
         # gap. The sibling `save_event` stays `insert!` because the mutation-event
         # row drives SSE/webhooks/push-outbox — losing it desyncs live consumers,
-        # so there aborting IS correct. (Both run inside apply_mutations' txn; a
-        # returned `{:error, changeset}` is savepoint-protected, so this log-and-
-        # continue does not poison the surrounding transaction.)
+        # so there aborting IS correct.
+        #
+        # [acrc-publish-atomicity-txn-boundary] The parenthetical here used to
+        # assert that a returned `{:error, changeset}` was "savepoint-protected"
+        # and so could not poison the surrounding transaction. Nothing in the
+        # code made that true — no `mode: :savepoint` was passed. It is true NOW,
+        # and only because the insert above passes it explicitly.
         Logger.error(
           "revision insert failed for #{doc.type}/#{doc.doc_id} (#{action}): " <>
             inspect(changeset.errors)

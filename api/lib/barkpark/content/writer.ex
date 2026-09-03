@@ -210,17 +210,26 @@ defmodule Barkpark.Content.Writer do
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                existing
-                |> Document.changeset(enc_attrs)
-                |> fenced_or_plain_update(existing, opts)
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "update",
-                  existing.rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] The doc write and its
+                # `mutation_events` row land or fail TOGETHER. Before this wrap
+                # the `Repo.update` AUTO-COMMITTED and `tap_broadcast`'s
+                # `save_event` (`Repo.insert!`) raised afterwards, leaving a
+                # committed document no consumer ever hears about. The wrap is
+                # deliberately narrow — encryption and paper-body rendering stay
+                # OUTSIDE, so the transaction covers two INSERTs and nothing else.
+                Broadcast.write_atomically(fn ->
+                  existing
+                  |> Document.changeset(enc_attrs)
+                  |> fenced_or_plain_update(existing, opts)
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "update",
+                    existing.rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
 
             _ ->
@@ -239,17 +248,22 @@ defmodule Barkpark.Content.Writer do
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                %Document{}
-                |> Document.changeset(enc_attrs)
-                |> Repo.insert()
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "create",
-                  nil,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] See the update branch:
+                # birth is wrapped for the same reason, and a failed
+                # `save_event` now un-births the row instead of stranding it.
+                Broadcast.write_atomically(fn ->
+                  %Document{}
+                  |> Document.changeset(enc_attrs)
+                  |> Repo.insert()
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "create",
+                    nil,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
           end
 
@@ -661,34 +675,48 @@ defmodule Barkpark.Content.Writer do
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                existing
-                |> Document.changeset(enc_attrs)
-                |> fenced_or_plain_update(existing, opts)
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "update",
-                  existing.rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] The doc write and its
+                # `mutation_events` row land or fail TOGETHER. Before this wrap
+                # the `Repo.update` AUTO-COMMITTED and `tap_broadcast`'s
+                # `save_event` (`Repo.insert!`) raised afterwards, leaving a
+                # committed document no consumer ever hears about. The wrap is
+                # deliberately narrow — encryption and paper-body rendering stay
+                # OUTSIDE, so the transaction covers two INSERTs and nothing else.
+                Broadcast.write_atomically(fn ->
+                  existing
+                  |> Document.changeset(enc_attrs)
+                  |> fenced_or_plain_update(existing, opts)
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "update",
+                    existing.rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
 
             _ ->
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
-                %Document{}
-                |> Document.changeset(enc_attrs)
-                |> Repo.insert()
-                |> Broadcast.tap_broadcast(
-                  dataset,
-                  type,
-                  "create",
-                  nil,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
-                )
+                # [acrc-publish-atomicity-txn-boundary] See the update branch:
+                # birth is wrapped for the same reason, and a failed
+                # `save_event` now un-births the row instead of stranding it.
+                Broadcast.write_atomically(fn ->
+                  %Document{}
+                  |> Document.changeset(enc_attrs)
+                  |> Repo.insert()
+                  |> Broadcast.tap_broadcast(
+                    dataset,
+                    type,
+                    "create",
+                    nil,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id)
+                  )
+                end)
               end
           end
 
