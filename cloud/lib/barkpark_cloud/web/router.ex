@@ -138,6 +138,8 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
       PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      GET     /v1/teams/:id/tokens admin  list every PAT minted against the team (holder named; no secrets)
+      DELETE  /v1/teams/:id/tokens/:token_id admin  revoke a team member's PAT (foreign id → 404)
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
       POST    /v1/invitations/accept user    accept an invitation (join the team)
       POST    /v1/billing/checkout owner     open a hosted Checkout Session → {checkout_url}
@@ -6249,6 +6251,82 @@ defmodule BarkparkCloud.Web.Router do
         {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
       end
     end
+  end
+
+  ## Team-scoped PAT visibility (admin) — the OTHER half of the surface above.
+  ##
+  ## Everything above this comment is CALLER-scoped: a PAT is listable and
+  ## revocable by exactly one principal, its holder. That made a still-current
+  ## member's leaked credential un-killable by anyone else — a team owner could
+  ## not even ENUMERATE the programmatic credentials that act on their team, let
+  ## alone kill one, and PATs may be minted with no expiry at all. The
+  ## membership-scoped eviction (`revoke_team_pats/2`, on removal / demotion)
+  ## covers only a MEMBERSHIP CHANGE; these two routes cover the leak with the
+  ## membership intact.
+  ##
+  ## Same session-only firewall (they ride `with_team_role/3`, which calls
+  ## `Auth.require_user/2`), same 404-no-leak convention as the caller-scoped
+  ## routes: a foreign team is 404 (never 403 — do not confirm it exists) and a
+  ## token id from another team is 404, not a 403 that would confirm the id.
+
+  # GET /v1/teams/:id/tokens → 200 {tokens: [...]} — every PAT minted against
+  # THIS team, whoever holds it, newest first. admin+ (a plain member gets 403;
+  # a non-member / nonexistent team gets 404). Carries the holder (user_id +
+  # email) so an admin can act on the row; NEVER a hash and never a plaintext.
+  get "/v1/teams/:id/tokens" do
+    with_team_role(conn, "admin", fn conn, team ->
+      tokens = Accounts.list_team_personal_access_tokens(team)
+      json(conn, 200, %{tokens: Enum.map(tokens, &team_pat_json/1)})
+    end)
+  end
+
+  # DELETE /v1/teams/:id/tokens/:token_id → 200 {ok: true} — an admin kills a
+  # team member's PAT (idempotent). A token id belonging to another team is the
+  # same 404 as a nonexistent one.
+  #
+  # The audit action is `token.revoked`, the SAME verb the caller-scoped revoke
+  # writes — one act, one verb; the admin case is distinguished by metadata
+  # (`admin_revoke: true` plus the holder), not by a second word for the same
+  # thing. That keeps the closed vocabulary in cloud/priv/audit-actions.json
+  # (and the console label generated from it) unchanged.
+  delete "/v1/teams/:id/tokens/:token_id" do
+    with_team_role(conn, "admin", fn conn, team ->
+      audit_revoke =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "token.revoked",
+            target_type: "token",
+            target_id: conn.path_params["token_id"]
+          },
+          fn ->
+            Accounts.revoke_team_personal_access_token(team, conn.path_params["token_id"])
+          end,
+          fn token ->
+            %{
+              metadata: %{
+                admin_revoke: true,
+                name: token.name,
+                user_id: token.user_id,
+                email: token.user && token.user.email
+              }
+            }
+          end
+        )
+
+      case audit_revoke do
+        {:ok, _token} ->
+          push_event(team.id, "audit")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, cs} ->
+          json(conn, 422, %{error: "invalid", details: errors(cs)})
+      end
+    end)
   end
 
   # POST /v1/billing/checkout {plan} → 200 {checkout_url} — open a hosted
@@ -12398,6 +12476,17 @@ defmodule BarkparkCloud.Web.Router do
       revoked_at: t.revoked_at,
       inserted_at: t.inserted_at
     }
+  end
+
+  # The admin (team-scoped) PAT shape: `pat_json/1` plus WHO HOLDS IT. An admin
+  # list is useless without the holder — "revoke this one" needs a name attached
+  # — and the two extra fields are already visible to any admin through
+  # GET /v1/teams/:id/members. Still NEVER a token_hash and never a plaintext.
+  defp team_pat_json(t) do
+    t
+    |> pat_json()
+    |> Map.put(:user_id, t.user_id)
+    |> Map.put(:email, t.user && t.user.email)
   end
 
   # Map the requested expiry to a bounded day-count (or nil = never). The set
