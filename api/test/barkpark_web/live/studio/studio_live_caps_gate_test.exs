@@ -323,6 +323,52 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
     end
   end
 
+  # ── 2c. admin-tier structural mutation (arpss-schema-action-write-tier-ruling) ─
+
+  describe "structural mutation is admin-tier, not write-tier" do
+    # The three events named by the ruling PLUS the two confirm-modal steps that
+    # continue the same schema action (`confirm_modal_dryrun/1` dispatches
+    # `:dryrun`, `confirm_modal_real/1` dispatches `:real`) — the steps are where
+    # the mutation actually happens, so leaving them :write would gate the
+    # operation one tier too low at the step that performs it.
+    @structural_events ~w(schema_action bulk-publish bulk-unpublish
+                          confirm-modal-dryrun confirm-modal-real)
+
+    test "each structural event classifies to :admin" do
+      for event <- @structural_events do
+        assert Caps.classify(event) == :admin, "#{event} is not admin-tier"
+      end
+    end
+
+    test "a WRITE-capable NON-admin member is HALTED on every structural event", %{conn: conn} do
+      {:ok, view, _html} = token_view(conn, @member)
+
+      # NON-VACUITY: this principal HAS write. Any deny below is therefore the
+      # admin tier talking, not a missing write cap.
+      assert caps(view) == %{read: true, write: true, admin: false}
+
+      for event <- @structural_events do
+        render_hook(view, event, %{"name" => "not-a-real-action"})
+
+        assert flash_error(view) == "You don't have access to do that.",
+               "write-capable non-admin was NOT halted on #{event}"
+      end
+    end
+
+    test "an ADMIN is not over-denied — schema_action reaches the handler", %{conn: conn} do
+      {:ok, view, _html} = token_view(conn, @admin)
+      assert caps(view).admin == true
+
+      render_hook(view, "schema_action", %{"name" => "not-a-real-action"})
+
+      # The handler's own unknown-action branch flashed :info — only reachable
+      # PAST the gate, so this is a positive pass proof, not an absent deny.
+      state = :sys.get_state(view.pid).socket.assigns.flash
+      assert state["info"] == "Action not-a-real-action not yet wired"
+      refute state["error"] == "You don't have access to do that."
+    end
+  end
+
   # ── comprehensiveness: every privileged event is classified (default-deny) ───
 
   describe "gate comprehensiveness (default-deny by construction)" do

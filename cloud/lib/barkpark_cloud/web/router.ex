@@ -1577,7 +1577,7 @@ defmodule BarkparkCloud.Web.Router do
         # Both booleans come from Authz — the same module the SEVENTEEN
         # `require_team_admin` routes call (auth.ex `&Authz.team_admin?/2`), so
         # against THOSE the wire and the gate are one read. They are NOT the
-        # only admin gate: the SEVEN `require_primary_team_admin` routes (1591,
+        # only admin gate: the SEVEN `require_current_team_admin` routes (1591,
         # 2020, 2059, 3081, 3218, 3342, 3638) go through `Accounts.team_admin?/2`
         # -> `TeamMembership.admin?/1`, a RANK THRESHOLD over `@ranks`, while
         # this boolean is SET MEMBERSHIP over `Authz.@admin_roles` — two
@@ -1822,14 +1822,14 @@ defmodule BarkparkCloud.Web.Router do
   #   skip     — dismiss early (Coolify's skipBoarding) — stamps completed_at
   # RBAC: the mutations change TEAM state (they finish/dismiss the whole team's
   # onboarding + set the activation metric), so they are gated at owner/admin via
-  # `Auth.require_primary_team_admin/1` — a plain `member` gets 403. GET stays
+  # `Auth.require_current_team_admin/1` — a plain `member` gets 403. GET stays
   # readable to any member. (401 unauth, 403 no_team, 403 non-admin all handled
   # inside the gate.) Deliberate Coolify divergence: NO force-redirect middleware
   # — the checklist is a soft, dismissable SPA surface; the real launch gate stays
   # the existing 402 on /v1/go-live. On any state change we push an "onboarding"
   # invalidation so other tabs refetch.
   post "/v1/onboarding" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     if conn.halted do
       conn
@@ -2287,12 +2287,12 @@ defmodule BarkparkCloud.Web.Router do
   # is a real page of matches, not a filtered slice of the newest 50.
   #
   # RBAC: ADMIN-gated (rbac-roles). Reading the audit log is owner/admin-only —
-  # require_primary_team_admin halts 401 (no session) / 403 no_team / 403 (a plain
+  # require_current_team_admin halts 401 (no session) / 403 no_team / 403 (a plain
   # member). This is the docstring-promised tightening the swarm candidate could
   # only hint at: main now ships the team-role gate, so a plain member can no
   # longer read the trail.
   get "/v1/audit" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     if conn.halted do
       conn
@@ -2326,12 +2326,12 @@ defmodule BarkparkCloud.Web.Router do
   # → still 202). NON-live box (host nil) → delete the row now, 200 {status:
   # "removed"} (no live server to tear down).
   # ADMIN-gated: removing an instance (and tearing down a billed box) is
-  # privileged. require_primary_team_admin halts 401 / 403 no_team / 403 for a
+  # privileged. require_current_team_admin halts 401 / 403 no_team / 403 for a
   # member; a non-admin can no longer deprovision the team's infrastructure.
   delete "/v1/barkparks/:id" do
-    # Infra-destructive → team admin (owner/admin) only. require_primary_team_admin
+    # Infra-destructive → team admin (owner/admin) only. require_current_team_admin
     # gates the user's PRIMARY team (401 / 403 no_team / 403), matching the doc above.
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -2650,9 +2650,10 @@ defmodule BarkparkCloud.Web.Router do
             cond do
               # The caller tore box + DNS down itself and says so (see above).
               fleet_support_detach?(conn) ->
-                case Registry.delete_barkpark(support) do
+                case audited_delete_barkpark(conn, support, "fleet_support_detach") do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed", mode: "detach"})
 
                   {:error, %Ecto.Changeset{} = cs} ->
@@ -2679,9 +2680,10 @@ defmodule BarkparkCloud.Web.Router do
               # Non-live, nothing in flight: no box, no record — the row IS the
               # whole resource, so removing it strands nothing.
               true ->
-                case Registry.delete_barkpark(support) do
+                case audited_delete_barkpark(conn, support, "fleet_support_not_live") do
                   {:ok, _} ->
                     push_event(team.id, "fleet")
+                    push_event(team.id, "audit")
                     json(conn, 200, %{ok: true, status: "removed"})
 
                   {:error, %Ecto.Changeset{} = cs} ->
@@ -2882,6 +2884,43 @@ defmodule BarkparkCloud.Web.Router do
       {:ok, _event} -> push_event(team.id, "audit")
       {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
     end
+  end
+
+  # EVERY OTHER LANE THAT DELETES A BARKPARK ROW (the destructive-lane arm of
+  # audit_vocabulary_census_test.exs). Five lanes removed a row and wrote
+  # nothing: both arms of `DELETE /v1/fleet/supports/:id`, both arms of
+  # `POST /v1/internal/barkparks/:id/deprovision`, and the resurrect
+  # enqueue-failure rollback. The first four are removals of a resource a team
+  # can see, so they belong on that team's trail exactly as the non-live arm of
+  # `DELETE /v1/barkparks/:id` already does. (The fifth is NOT routed here and is
+  # allowlisted in the census with its reason: it rolls back a row this same
+  # request created seconds earlier, and its paired `barkpark.resurrected` is
+  # written only on the success branch, so the trail stays consistent — a
+  # `deleted` for a box that never existed would be noise, not evidence.)
+  #
+  # `Accounts.audit/3`, not `record_audit/1`: the row delete and the audit insert
+  # share ONE transaction, so there is never a removal the trail cannot name and
+  # never a recorded removal that did not happen. Returns the wrapper's
+  # `{:ok, barkpark} | {:error, reason}` — the same shape the call sites already
+  # matched on `Registry.delete_barkpark/1`.
+  #
+  # `actor_user_id` is read defensively: the internal deprovision route is
+  # WORKER-authenticated and has no user at all, and a PAT caller on the fleet
+  # route may have none either. A nil actor is the documented shape for a
+  # system-caused event (`list_audit_events/2`'s actor filter never matches one),
+  # not a hole — `team_id` comes off the row itself and is always present.
+  defp audited_delete_barkpark(conn, %Barkpark{} = bp, lane) do
+    Accounts.audit(
+      %{
+        team_id: bp.team_id,
+        actor_user_id: conn.assigns[:current_user] && conn.assigns.current_user.id,
+        action: "barkpark.deleted",
+        target_type: "barkpark",
+        target_id: bp.id,
+        metadata: %{name: bp.name, lane: lane}
+      },
+      fn -> Registry.delete_barkpark(bp) end
+    )
   end
 
   # A REFUSED WRITE LEAVES A NAMED ROW (cch-w63-s8). When the plane refuses to
@@ -3761,13 +3800,13 @@ defmodule BarkparkCloud.Web.Router do
   #                                             admin endpoint).
   #
   # ADMIN-gated: rewriting a live box's running code is privileged infra, like
-  # DELETE above — require_primary_team_admin halts 401 / 403 no_team / 403 for
+  # DELETE above — require_current_team_admin halts 401 / 403 no_team / 403 for
   # a plain member. TEAM-SCOPED fail-closed: wrong-team / nonexistent /
   # malformed id is the SAME 404 (no existence leak). 409 not_live while
   # provisioning; 404 no_admin_token for pre-feature rows; 502 when the
   # instance is unreachable; 500 on tampered ciphertext.
   post "/v1/barkparks/:id/self-update" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -3945,7 +3984,7 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id → the SAME 404 (no existence leak); 409 not_live while
   # provisioning; 404 no_admin_token; 500 decrypt_failed; 502 unreachable.
   post "/v1/barkparks/:id/rollback" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4094,11 +4133,11 @@ defmodule BarkparkCloud.Web.Router do
   # absent keys are left unchanged (cast ignores them).
   #
   # ADMIN-gated: a policy that governs unattended production deploys is
-  # privileged, like self-update above — require_primary_team_admin halts 401 /
+  # privileged, like self-update above — require_current_team_admin halts 401 /
   # 403 no_team / 403 for a plain member. TEAM-SCOPED fail-closed: wrong-team /
   # nonexistent / malformed id is the SAME 404 (no existence leak).
   patch "/v1/barkparks/:id/autoupdate" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -4745,11 +4784,11 @@ defmodule BarkparkCloud.Web.Router do
   # the SAME host again is still a 202 (the failed-attach recovery path).
   #
   # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
-  # privileged infra, like self-update above — require_primary_team_admin halts
+  # privileged infra, like self-update above — require_current_team_admin halts
   # 401 / 403 no_team / 403 for a plain member. TEAM-SCOPED fail-closed:
   # wrong-team / nonexistent / malformed id is the SAME 404 (no existence leak).
   post "/v1/barkparks/:id/domain" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_current_team_admin(conn)
 
     cond do
       conn.halted ->
@@ -5770,6 +5809,14 @@ defmodule BarkparkCloud.Web.Router do
   # a fan-out to nobody read as accepted to the console, to `bp` and to curl
   # alike. `ok: true` still means "the request was accepted"; `queued` is the
   # separate question of whether anything was sent, and the console reads it.
+  #
+  # cch-w32-bl: the CHAT leg spends the SAME per-team budget as the email leg —
+  # one `last_test_sent_at` stamp for the whole endpoint — so it too answers
+  # 429 {error: "rate_limited", retry_after}. One shared stamp means an email
+  # test holds the chat test for 10s and vice versa; that is the intent (one
+  # button, one team, one budget), and a per-leg stamp would have doubled the
+  # fan-out an admin token buys for free. A fan-out that reached ZERO channels
+  # does not burn the window — nothing was sent, so there is nothing to ration.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
@@ -5778,10 +5825,21 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       chat_test?(conn.body_params) ->
-        {:ok, queued} =
-          Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
+        # cch-w32-bl: the chat leg is reached BEFORE `test_email/1`, so it used
+        # to jump the 10s/team guard the email leg has honoured since day one —
+        # three rapid presses enqueued three fan-outs, each an outbound POST to
+        # a webhook URL of the caller's choosing. Both legs now spend the SAME
+        # per-team budget in `Notifications`, and this arm renders the SAME
+        # refusal `test_email/1` renders below, byte for byte: an already-shipped
+        # console arm reads `rate_limited` + `retry_after`, so a new reason key
+        # here would have been a new silent failure mode for an old one.
+        case Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"]) do
+          {:ok, queued} ->
+            json(conn, 202, %{ok: true, queued: queued})
 
-        json(conn, 202, %{ok: true, queued: queued})
+          {:error, {:rate_limited, retry_after}} ->
+            json(conn, 429, %{error: "rate_limited", retry_after: retry_after})
+        end
 
       true ->
         test_email(conn)
@@ -6431,18 +6489,18 @@ defmodule BarkparkCloud.Web.Router do
   # when the user has no team to bill.
   # OWNER-gated: billing is owner-only (`@action_min billing: [owner]`) — spending
   # money / changing the plan is the team owner's call, not any member or admin.
-  # require_primary_team_owner halts with 401 (no auth), 403 no_team, or 403
+  # require_current_team_owner halts with 401 (no auth), 403 no_team, or 403
   # (not-owner) before we reach here.
   post "/v1/billing/checkout" do
     # Spends money / changes plan → owner-only. Gated to the user's PRIMARY team
     # owner (401 / 403 no_team / 403), matching `@action_min billing: [owner]`.
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # UNREACHABLE belt-and-braces: require_current_team_owner above already
       # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
       # before it), so `conn.halted` catches that case one clause earlier. Kept
       # as a fail-closed guard, NOT as a contract this route can emit.
@@ -6508,13 +6566,13 @@ defmodule BarkparkCloud.Web.Router do
   # Coolify-anchor: getStripeCustomerPortalSession.
   # OWNER-gated: the portal exposes card/PII/cancel — owner-only, like checkout.
   post "/v1/billing/portal" do
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
         conn
 
-      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # UNREACHABLE belt-and-braces: require_current_team_owner above already
       # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
       # before it), so `conn.halted` catches that case one clause earlier. Kept
       # as a fail-closed guard, NOT as a contract this route can emit.
@@ -6547,7 +6605,7 @@ defmodule BarkparkCloud.Web.Router do
     # `confirm_password` check verifies the CALLER's own password (not authority),
     # so it must never be the sole gate on a destructive cancel. The owner gate
     # halts 401 / 403 no_team / 403 first.
-    conn = Auth.require_primary_team_owner(conn)
+    conn = Auth.require_current_team_owner(conn)
 
     cond do
       conn.halted ->
@@ -7425,9 +7483,10 @@ defmodule BarkparkCloud.Web.Router do
         %Barkpark{} = bp ->
           cond do
             detach? ->
-              case Registry.delete_barkpark(bp) do
+              case audited_delete_barkpark(conn, bp, "internal_deprovision_detach") do
                 {:ok, _} ->
                   push_event(bp.team_id, "fleet")
+                  push_event(bp.team_id, "audit")
                   json(conn, 200, %{ok: true, status: "removed"})
 
                 {:error, %Ecto.Changeset{} = cs} ->
@@ -7454,9 +7513,10 @@ defmodule BarkparkCloud.Web.Router do
               json(conn, 409, %{error: "provisioning_in_progress"})
 
             true ->
-              case Registry.delete_barkpark(bp) do
+              case audited_delete_barkpark(conn, bp, "internal_deprovision_not_live") do
                 {:ok, _} ->
                   push_event(bp.team_id, "fleet")
+                  push_event(bp.team_id, "audit")
                   json(conn, 200, %{ok: true, status: "removed"})
 
                 {:error, %Ecto.Changeset{} = cs} ->
@@ -10103,7 +10163,7 @@ defmodule BarkparkCloud.Web.Router do
     #   * a PAT must carry the `deploy` ability (Coolify's exclusive deploy-token).
     #   * a SESSION carries ["root"], so `require_ability` is a no-op for it — gate
     #     the session branch on TEAM-ADMIN inline here. NOT
-    #     `require_primary_team_admin/1`, which re-runs `require_user` and discards
+    #     `require_current_team_admin/1`, which re-runs `require_user` and discards
     #     the resolved PAT/session assigns.
     # The ROLE check precedes the entitlement (402) check, so a plain member gets
     # 403 (not 402) and the deploy-PAT path still works.
@@ -14670,30 +14730,31 @@ defmodule BarkparkCloud.Web.Router do
   defp require_user_sse(conn) do
     conn = Plug.Conn.fetch_query_params(conn)
 
-    {user, session_token_id} =
+    {user, session_token_id, session_token} =
       case Auth.bearer_token(conn) do
         header when is_binary(header) and header != "" ->
-          case Accounts.verify_user_session_token(header) do
-            %{} = user -> {user, Accounts.live_session_token_id(header)}
-            _ -> {nil, nil}
+          case Accounts.verify_user_session_token(header, touch: false) do
+            %{} = user -> {user, Accounts.live_session_token_id(header), header}
+            _ -> {nil, nil, nil}
           end
 
         _ ->
           case conn.query_params["ticket"] do
             ticket when is_binary(ticket) and ticket != "" ->
               case Accounts.consume_sse_ticket_binding(ticket) do
-                {user, session_token_id} -> {user, session_token_id}
-                nil -> {nil, nil}
+                {user, session_token_id} -> {user, session_token_id, nil}
+                nil -> {nil, nil, nil}
               end
 
             _ ->
-              {nil, nil}
+              {nil, nil, nil}
           end
       end
 
     case user do
       %{} = user ->
         conn
+        |> defer_sse_session_touch(session_token)
         |> assign(:current_user, user)
         |> assign(:current_team, Accounts.primary_team(user))
         |> assign(:sse_session_token_id, session_token_id)
@@ -14704,6 +14765,39 @@ defmodule BarkparkCloud.Web.Router do
         |> send_resp(401, Jason.encode!(%{error: "unauthorized"}))
         |> halt()
     end
+  end
+
+  # The SSE twin of `Web.Auth`'s deferred credential stamp, and it exists for the
+  # same reason: `last_used_at` is a LIVENESS claim the sessions card renders as
+  # "Active just now", but the header branch above runs during AUTHENTICATION —
+  # strictly before this route's own `no_team` ruling. The eager default stamped
+  # right there, so a TEAMLESS header client that was REFUSED 422 printed on the
+  # sessions card as a freshly active device. Measured: backdate the session row
+  # 3600s, fire ONE `GET /v1/events`, take the 422, and the stamp jumped a full
+  # hour past any throttle — a throttle cannot fix it, because an idle device
+  # satisfies any staleness window.
+  #
+  # `register_before_send/2` is the first point where the status is known and it
+  # runs for `send_chunked` too — so the served stream stamps at its 200, at the
+  # same instant the eager call used to, and NOTHING is deferred past the park.
+  # `status < 400` is the whole gate: served ⇒ claim activity, refused ⇒ claim
+  # nothing.
+  #
+  # The `nil` clause is the TICKET branch: `?ticket=` carries no session
+  # plaintext to stamp, and ticket redemption stamps nothing on the session row
+  # at all (driven). That is also the honest bound on this fix's reach — the
+  # console SPA opens this stream with `?ticket=`, so the over-stamp was only
+  # ever reachable by HEADER clients (curl, the CLI, an EventSource polyfill).
+  defp defer_sse_session_touch(conn, nil), do: conn
+
+  defp defer_sse_session_touch(conn, token) when is_binary(token) do
+    register_before_send(conn, fn sent ->
+      if is_integer(sent.status) and sent.status < 400 do
+        Accounts.touch_session_last_used(token)
+      end
+
+      sent
+    end)
   end
 
   # Subscribe the request process to the team's event group, then hold the

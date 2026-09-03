@@ -894,10 +894,91 @@ defmodule Barkpark.Content.Mutations do
     # raw lookup, which returns {:error, :not_found} rather than raising in
     # DraftId.draft_id/1.
     case id && Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
-      {:ok, doc} -> {:ok, doc}
-      _ -> Content.get_document(id, type, dataset, opts)
+      {:ok, doc} ->
+        warn_on_published_fork(id, type, dataset, opts, :stale_base)
+        {:ok, doc}
+
+      _ ->
+        case Content.get_document(id, type, dataset, opts) do
+          {:ok, doc} = ok ->
+            if is_binary(id) and not DraftId.draft?(id),
+              do: warn_on_published_fork(doc, :fresh_fork)
+
+            ok
+
+          other ->
+            other
+        end
     end
   end
+
+  # A patch naming a BARE published id returns 200 with `results[].id =
+  # "drafts.<id>"` and a fresh `_rev` that NO canonical reader will ever serve:
+  # `Writer.upsert_document` always draft-prefixes the write target, while
+  # `/v1/data/doc`, `/v1/tasks/:id`, the board and the queue are all
+  # published-first. The write is not lost — it is parked on a draft twin until
+  # something publishes it — but the receipt reads exactly like a landed edit,
+  # which is how 22 task rows came to carry a draft twin diverging from their
+  # published row on `lifecycle_status` with nobody noticing
+  # (pds-w33-bl-wrong-row-mutate-forks-published-tasks).
+  #
+  # There is already a Warnings channel that drains into the mutate success
+  # envelope, and it costs nothing to say so. Two shapes, two codes:
+  #
+  #   * `patch.forked_published` — no draft existed, so this patch MINTS the
+  #     twin off the published row. The content is right; only the visibility
+  #     is wrong until a publish.
+  #   * `patch.stale_draft_base` — a draft twin ALREADY existed, so the merge
+  #     base is that draft, not the published row an agent just read. This is
+  #     the dangerous half: the draft can be arbitrarily old (its
+  #     `lifecycle_status` may say `open` while the published row says `done`),
+  #     and publishing the result would carry that stale state forward. The
+  #     criteria half of that hazard is fenced at the publish door
+  #     (`Content.Lifecycle` refuses a publish that clears a stamped `met`),
+  #     but lifecycle_status is not, so the warning is the only signal.
+  #
+  # The `:stale_base` arm needs a published-row lookup it does not otherwise
+  # perform, so it is gated on `Warnings.listening?/0` — no collector, no read.
+  defp warn_on_published_fork(id, type, dataset, opts, :stale_base) do
+    if is_binary(id) and not DraftId.draft?(id) and Warnings.listening?() do
+      case Content.get_document(id, type, dataset, opts) do
+        {:ok, published} -> warn_on_published_fork(published, :stale_base)
+        _ -> :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp warn_on_published_fork(%{id: _} = published, kind) do
+    {code, why} =
+      case kind do
+        :stale_base ->
+          {"patch.stale_draft_base",
+           "the merge base was that EXISTING draft, not the published row — the draft may " <>
+             "carry stale fields (lifecycle_status among them) that this patch now inherits"}
+
+        :fresh_fork ->
+          {"patch.forked_published", "this patch minted a NEW draft twin off the published row"}
+      end
+
+    Warnings.put(
+      code,
+      "this patch names a published document but writes a DRAFT twin " <>
+        "(`drafts.#{doc_id_of(published)}`): #{why}. Every canonical reader " <>
+        "(/v1/data/doc, /v1/tasks/:id, the board, the queue) is published-first " <>
+        "and will keep serving the OLD row until the draft is published — " <>
+        "`bp doc publish #{type_of(published)} #{doc_id_of(published)}` (or the " <>
+        "sanctioned verb for this type) is what makes the edit visible.",
+      "warning"
+    )
+  end
+
+  defp doc_id_of(%{doc_id: doc_id}) when is_binary(doc_id), do: doc_id
+  defp doc_id_of(_), do: "<id>"
+
+  defp type_of(%{type: type}) when is_binary(type), do: type
+  defp type_of(_), do: "<type>"
 
   # Double-nest trap advisory (option 1 — make it LOUD, do NOT change semantics).
   # A `patch.set` map is merged INTO the document's `content`, so a `set` field

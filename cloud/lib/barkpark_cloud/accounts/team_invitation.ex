@@ -80,9 +80,18 @@ defmodule BarkparkCloud.Accounts.TeamInvitation do
     |> assoc_constraint(:team)
     |> assoc_constraint(:invited_by)
     |> unique_constraint(:token_hash)
-    |> unique_constraint([:team_id, :email],
+    # cch-w37-bl — KEYED ON THE FIELD THE INVITER TYPED. Ecto hangs a
+    # multi-field `unique_constraint` error on the FIRST field of the list, and
+    # this list opened with `:team_id` — a `belongs_to` foreign key nobody types
+    # into the invite form. The console renders `details` as
+    # `field.replace(/_/g," ") + " " + message`, so a second invite to the same
+    # address answered, verbatim: "team id already has a pending invitation for
+    # this email". Reordering keys the error on `:email`, which is exactly what
+    # the person filled in. The index NAME is given explicitly, so the order
+    # change moves the error field and nothing else.
+    |> unique_constraint([:email, :team_id],
       name: :team_invitations_team_email_pending_idx,
-      message: "already has a pending invitation for this email"
+      message: "already has a pending invitation for this team"
     )
   end
 

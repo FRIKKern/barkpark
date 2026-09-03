@@ -168,6 +168,16 @@ defmodule BarkparkCloud.Usage do
   @history_window_ms @history_window_days * 86_400_000
 
   @doc """
+  The closed vocabulary of typed FAILURE reasons a meter read can carry —
+  exported so a reader can compare it with the plane's OTHER closed vocabulary
+  for the same class of fact (`Registry.Barkpark.update_unavailable_reasons/0`)
+  instead of guessing. `BarkparkCloud.UnavailableVocabulary` states which words
+  of the two name the SAME fact, and a census pins it.
+  """
+  @spec unavailable_reasons() :: [String.t()]
+  def unavailable_reasons, do: @unavailable_reasons
+
+  @doc """
   Compose the full usage envelope from resolved inputs. Total — never raises.
   """
   @spec compose(map()) :: %{meters: map()}

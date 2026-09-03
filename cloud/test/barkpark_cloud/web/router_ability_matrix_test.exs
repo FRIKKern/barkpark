@@ -462,7 +462,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     # cch-w37-s3: the label is "team", not "primary_team" — the gate reads
     # conn.assigns[:current_team], which resolve_team/2 fills from the
     # x-barkpark-team header, so it judges the SELECTED team, not the primary one.
-    test "require_primary_team_admin names admin on the current team (the audit-trail exhibit)" do
+    test "require_current_team_admin names admin on the current team (the audit-trail exhibit)" do
       user = user_fixture()
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "member")
@@ -478,7 +478,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
-    test "require_primary_team_owner names owner, so an ADMIN is told what they still lack" do
+    test "require_current_team_owner names owner, so an ADMIN is told what they still lack" do
       user = user_fixture()
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "admin")
@@ -510,7 +510,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     # different contract and deliberately unchanged (`bp cloud support add` reads
     # that status; app.js's envVarsFailureCopy was the console half until the team
     # env-var feature was deleted — cch-w53-bl, Option A, 2026-09-02).
-    test "require_primary_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
+    test "require_current_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
       user = user_fixture()
 
       conn = session_call(:get, "/v1/audit", nil, user)
@@ -524,7 +524,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
-    test "require_primary_team_owner answers a TEAMLESS caller 403 no_team, not 422" do
+    test "require_current_team_owner answers a TEAMLESS caller 403 no_team, not 422" do
       user = user_fixture()
 
       conn = session_call(:post, "/v1/billing/checkout", %{}, user)

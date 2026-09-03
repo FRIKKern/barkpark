@@ -729,9 +729,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
     |> assoc_constraint(:team)
-    |> unique_constraint([:team_id, :slug],
+    # cch-w37-bl — see `TeamInvitation.changeset/2`. Opening the list with the
+    # `belongs_to` key made POST /v1/fleet/supports answer "team id already has
+    # a Barkpark with this slug" for a duplicate support name.
+    |> unique_constraint([:slug, :team_id],
       name: :barkparks_team_slug_unique_idx,
-      message: "already has a Barkpark with this slug"
+      message: "is already taken by another Barkpark on this team"
     )
     # Defense in depth: the resolved customer-facing FQDN (`url`) is GLOBALLY
     # unique. `provisioning_subdomain/1` already makes the label collision-free by

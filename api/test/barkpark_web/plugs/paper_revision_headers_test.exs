@@ -175,6 +175,35 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
 
       assert conn.status == 200
     end
+
+    # DELEGATION GUARD — this plug was the D11 reference implementation and now
+    # calls BarkparkWeb.Http.IfNoneMatch. Multi-line folding was the one D11
+    # clause this describe never pinned; it is also the clause the other three
+    # sites gained. Green before and after: it guards the extraction, not a
+    # behaviour change here.
+    test "a match on the SECOND If-None-Match header line matches", %{paper: paper} do
+      etag = weak_etag(stored_content(paper))
+
+      conn =
+        build_conn()
+        |> then(fn c ->
+          %{
+            c
+            | req_headers:
+                c.req_headers ++ [{"if-none-match", ~s("nope")}, {"if-none-match", etag}]
+          }
+        end)
+        |> get("/papers/conditional-paper")
+
+      assert conn.status == 304
+    end
+
+    # Empty list entries are dropped, never matched.
+    test "a header of nothing but separators stays a 200" do
+      conn = replay("/papers/conditional-paper", ", ,")
+
+      assert conn.status == 200
+    end
   end
 
   describe "live task blocks are excluded (D9)" do

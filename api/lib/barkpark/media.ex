@@ -590,6 +590,71 @@ defmodule Barkpark.Media do
   about-to-delete read is scoped through `get_file/2` so a delete in workspace B
   returns `{:error, :not_found}` for a blob owned by workspace A (barkpark-af50).
   An unscoped delete keeps the explicit-global behaviour for back-compat.
+
+  ## The `mediaAsset` DOCUMENT goes with the row, in the same transaction
+
+  A blob has a companion `mediaAsset` document (alt text, collection, rights).
+  Removing the row and leaving the document is what left Gyldendal with 517
+  dangling drafts, and the reason the old shape could do that while still
+  answering `{:ok, _}` is worth naming:
+
+    * The document delete was reached ONLY through the `after_media_delete`
+      plugin callback. `Registry.run_after_media_delete/1` walks the ENABLED
+      plugins, so with the media plugin off the document simply survived.
+    * `Barkpark.Plugins.Media.after_media_delete/1` discards
+      `Assets.delete_for_blob/3`'s result and hard-codes `:ok`, and
+      `delete_for_blob/3` used to discard every `Content.delete_document/4`
+      result with `_ =`. A `rev_mismatch` or a halted `before_delete` therefore
+      produced a successful DELETE over a surviving document.
+
+  So the delete runs `delete_asset_doc/1` DIRECTLY, inside one transaction that
+  also carries the row delete and the plugin hook, and a real document-delete
+  failure ROLLS THE ROW BACK. `:not_found` is not a failure — a blob with no
+  companion document deletes exactly as before, and a re-issued DELETE stays
+  idempotent.
+
+  ORDERING IS PRESERVED, deliberately: `asset_doc_for_file/2` still resolves the
+  webhook payload BEFORE anything is deleted. The document delete joins the
+  transaction underneath that read; it does not move above it, because the
+  payload must describe a document that still existed when the delete began.
+
+  ## NO `mode: :savepoint` — that is what 500'd every prod delete (#15827)
+
+  PR #15827 opened this transaction with `Repo.transaction(fun, mode: :savepoint)`.
+  That option is a NO-OP at best and a hard 500 at worst, and NEITHER branch is
+  reachable from `mix test`:
+
+    * NESTED (already inside a transaction) `DBConnection.transaction/3` matches
+      its `%DBConnection{conn_mode: :transaction}` clause, which takes `_opts`
+      and IGNORES them — no savepoint is ever issued. The "the failure is local
+      to this file" claim in #15827's comment was never true.
+    * TOP LEVEL (`:idle` connection — every real HTTP delete) `mode: :savepoint`
+      falls through `Postgrex.Protocol.handle_begin/2`'s last clause, returning
+      the connection status `:idle`. `DBConnection` turns that status into
+      `%DBConnection.TransactionError{message: "transaction is not started"}`,
+      DISCONNECTS the connection, and `rollback_or_raise/1` answers
+      `{:error, :rollback}` — a shape #15827's `case` had no clause for, hence
+      the `CaseClauseError` at media.ex:680 on guerrilla request
+      GNHlOfn4otoBOqYAACoR.
+
+  `Ecto.Adapters.SQL.Sandbox` issues a `BEGIN` on the checked-out connection and
+  never commits it, so under `mix test` the connection is NEVER `:idle`: the
+  savepoint clause matches, a real `SAVEPOINT` is issued, and the call succeeds.
+  That is the whole reason CI was green while every prod delete 500'd. See
+  `media_delete_savepoint_reproduction_test.exs`, which runs the same call
+  through `Sandbox.unboxed_run/2` and reproduces `{:error, :rollback}` — and
+  which also warns that `Repo.in_transaction?/0` is NOT the way to detect this
+  (it reads the process dictionary and answers false under the sandbox).
+
+  A plain nested `Repo.transaction` behaves identically to what `:savepoint`
+  actually delivered (a join), so nothing is lost by dropping it. When an inner
+  `Content` call rolls back, we still learn WHY — `Content.delete_document/4`
+  hands its own `{:error, reason}` back before our `Repo.rollback/1` unwinds —
+  and we re-raise it as a NAMED `{:error, {:asset_doc_delete_failed, reason}}`.
+  The bare `{:error, :rollback}` clause below is the belt-and-braces arm: an
+  in-transaction plugin hook that swallows a nested rollback poisons the
+  connection without telling us, and even THAT may not escape as an unmatched
+  tuple (criterion: no code path returns an unmatched `{:error, :rollback}`).
   """
   def delete_file(id, opts \\ []) do
     case get_file(id, opts) do
@@ -599,18 +664,16 @@ defmodule Barkpark.Media do
         # pointing at a live blob) and no phantom media.deleted fires.
         doc = asset_doc_for_file(file, file.dataset)
 
-        # A stale delete means a concurrent DELETE already consumed the row →
-        # {:error, :not_found} (both controllers 404 via FallbackController)
-        # instead of an uncaught Ecto.StaleEntryError (a 500).
-        case Repo.delete(file, stale_error_field: :id) do
+        case delete_row_with_asset_doc(file) do
           {:ok, deleted} ->
             # The FOUR irreversible non-DB effects — CDN edge purge, the
             # `media.deleted` webhook, the on-disk `File.rm`, and the rendition
-            # cache removal — are DEFERRED when we're inside a transaction so a
-            # later rollback cannot strand a surviving row's blob (phantom
-            # media). Outside a transaction they fire IMMEDIATELY (unchanged for
-            # the three non-transaction callers: ticket attachments + the two
-            # media controllers). See `defer_media_effect/1`.
+            # cache removal — are queued AFTER the DB transaction closes, and are
+            # DEFERRED again when an OUTER transaction is still open so a later
+            # rollback cannot strand a surviving row's blob (phantom media).
+            # Outside any transaction they fire IMMEDIATELY (unchanged for the
+            # three non-transaction callers: ticket attachments + the two media
+            # controllers). See `defer_media_effect/1`.
             defer_media_effect(fn ->
               Cdn.invalidate(file)
               Events.dispatch(file.dataset, "media.deleted", file, doc)
@@ -622,26 +685,78 @@ defmodule Barkpark.Media do
               Barkpark.Media.Renditions.delete_for_file(file.id)
             end)
 
-            # `run_after_media_delete` is a DB write and MUST stay inside the
-            # transaction so it rolls back with the row. HOOK CONTRACT: an
-            # `after_media_delete` plugin callback may only touch the DATABASE —
-            # NO file or HTTP I/O — because it runs before commit and would
-            # otherwise re-open exactly the phantom hole this deferral closes.
-            _ =
-              Barkpark.Plugins.Registry.run_after_media_delete(%{
-                media_file_id: file.id,
-                dataset: file.dataset
-              })
-
             {:ok, deleted}
 
-          {:error, cs} ->
+          # A stale delete means a concurrent DELETE already consumed the row →
+          # {:error, :not_found} (both controllers 404 via FallbackController)
+          # instead of an uncaught Ecto.StaleEntryError (a 500).
+          {:error, {:row, cs}} ->
             if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+
+          # The blob row is BACK (rolled back) and its blob was never touched —
+          # the deferred effects are queued only on the committed path. The
+          # caller sees WHY, and a retry after the concurrent edit settles
+          # succeeds. FallbackController unwraps this to the inner reason's own
+          # named status (rev_mismatch → 412, halted → 409).
+          {:error, {:asset_doc, reason}} ->
+            {:error, {:asset_doc_delete_failed, reason}}
+
+          # An in-transaction hook rolled back a nested transaction and swallowed
+          # the reason, so DBConnection aborted the connection under us and our
+          # own `conclude` threw `:rollback`. Nothing half-committed — but it
+          # leaves this function without a reason to report, so it gets a NAMED
+          # one rather than escaping as the unmatched tuple that 500'd prod.
+          {:error, :rollback} ->
+            {:error, {:asset_doc_delete_failed, :rollback}}
         end
 
       error ->
         error
     end
+  end
+
+  # ONE transaction for the two DB deletes (row + `mediaAsset` document) and the
+  # in-transaction plugin hook. `delete_file/2`'s docs above explain, at length,
+  # why NO transaction-mode option is passed here — a source pin in
+  # media_delete_atomicity_test.exs keeps one from creeping back.
+  defp delete_row_with_asset_doc(%MediaFile{} = file) do
+    Repo.transaction(fn ->
+      case Repo.delete(file, stale_error_field: :id) do
+        {:ok, deleted} ->
+          case delete_asset_doc(file) do
+            :ok ->
+              # `run_after_media_delete` is a DB write and MUST stay inside the
+              # transaction so it rolls back with the row. HOOK CONTRACT: an
+              # `after_media_delete` plugin callback may only touch the DATABASE
+              # — NO file or HTTP I/O — because it runs before commit and would
+              # otherwise re-open exactly the phantom hole the effect deferral
+              # closes. The media plugin's own callback is now a second,
+              # idempotent pass over an already-deleted document; other plugins
+              # still get theirs.
+              _ =
+                Barkpark.Plugins.Registry.run_after_media_delete(%{
+                  media_file_id: file.id,
+                  dataset: file.dataset
+                })
+
+              deleted
+
+            {:error, reason} ->
+              Repo.rollback({:asset_doc, reason})
+          end
+
+        {:error, cs} ->
+          Repo.rollback({:row, cs})
+      end
+    end)
+  end
+
+  # Remove the blob's companion `mediaAsset` document(s) inside the caller's
+  # transaction. Scoped EXACTLY as `asset_doc_for_file/2` resolved the webhook
+  # payload a few lines above (dataset + blob id, no workspace narrowing), so
+  # the delete can never miss a document the resolve just found.
+  defp delete_asset_doc(%MediaFile{} = file) do
+    Assets.delete_for_blob(file.id, file.dataset)
   end
 
   # ── Deferred media-delete effects (felix-phantom-media-atomicity) ──────────

@@ -217,4 +217,17 @@ defmodule BarkparkCloud.HealthErrorArmTest do
     assert body.db == :down
     assert Map.fetch!(body, :git_sha) == nil
   end
+
+  test "the 503 reason is a fixed category; the raw exception text goes to the log only" do
+    # Two-sided fence: the raw message MUST reach the log (so an operator can
+    # still diagnose) and MUST NOT reach the unauthenticated wire body.
+    {result, log} = ExUnit.CaptureLog.with_log(fn -> Health.health() end)
+
+    assert {:error, body} = result
+    assert Map.fetch!(body, :reason) == "database_unavailable"
+
+    [raw] = Regex.run(~r/SELECT 1 failed: (.+)/, log, capture: :all_but_first)
+    assert raw =~ "cannot find ownership process"
+    refute Jason.encode!(body) =~ String.slice(raw, 0, 40)
+  end
 end

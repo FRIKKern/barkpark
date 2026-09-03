@@ -1944,7 +1944,7 @@ const stBlocked = deployment({
   branch: "main",
   // The humanized born-failed github-push copy exactly as FailureCopy.humanize
   // emits it at the JSON boundary (the client re-map is idempotent on it).
-  failure_reason: "GitHub pushes are recorded but can’t be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.",
+  failure_reason: "This push predates GitHub source builds and can’t be built yet — push again to build this commit, or deploy it with bp deploy.",
   inserted_at: tMinus(90000),
   updated_at: tMinus(90000),
 });
@@ -5470,7 +5470,7 @@ export function route(name, method, path, state) {
   // the exact request the Activity chip row has always sent.
   if (p === "/v1/audit") {
     // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
-    // does. Auth.require_primary_team_admin answers this route with
+    // does. Auth.require_current_team_admin answers this route with
     // `forbidden(conn, required: "admin", scope: "team")` — "team", NOT
     // "primary_team": cch-w37-s3 renamed the label because the gate reads
     // conn.assigns[:current_team] (resolve_team/2 honours the x-barkpark-team

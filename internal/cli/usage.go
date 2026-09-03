@@ -427,7 +427,8 @@ func usageSuggestVerb(out *writer, tree *manifest.Tree, noun, typedVerb string) 
 
 // soleReadVerb reports the ONE verb a verbless invocation of n can safely be
 // re-dispatched to, and whether that inference may fire at all. See the rule
-// documented at the dispatch site (cli.go): exactly one verb, non-writing, and
+// documented at the dispatch site (cli.go): exactly one verb, AFFIRMATIVELY
+// declared non-writing (an undeclared `writes` key is UNKNOWN, not safe), and
 // the typed token must not be a near-typo of that verb (a mistyped verb is a
 // typo to correct, not an argument to forward) nor look like a flag.
 func soleReadVerb(n *manifest.TreeNoun, typed string) (*manifest.Command, bool) {
@@ -435,7 +436,13 @@ func soleReadVerb(n *manifest.TreeNoun, typed string) (*manifest.Command, bool) 
 		return nil, false
 	}
 	sole := n.Verbs[0]
-	if sole.Writes || strings.HasPrefix(typed, "-") || typed == "" {
+	// FAIL CLOSED on unknown write intent. The test is `NonWriting()` — the
+	// manifest AFFIRMATIVELY declared `"writes": false` — and NOT `!sole.Writes`,
+	// which a command that simply OMITS the key also satisfies via Go's zero
+	// value. This is an AUTO-EXECUTION gate: a single-verb noun shipped without
+	// the flag (a new plugin, or a server on an older manifest schema) must be
+	// SUGGESTED, never run. See manifest.Command.NonWriting.
+	if !sole.NonWriting() || strings.HasPrefix(typed, "-") || typed == "" {
 		return nil, false
 	}
 	if _, isTypo := nearestVerb(typed, []string{sole.Verb}); isTypo {

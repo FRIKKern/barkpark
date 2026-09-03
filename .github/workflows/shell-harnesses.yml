@@ -163,6 +163,9 @@ on:
       - "scripts/relandcheck-diff-producer.test.sh"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
+      - "scripts/breaker-capture.sh"
+      - ".github/workflows/security.yml"
+      - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -373,6 +376,9 @@ on:
       - "scripts/relandcheck-diff-producer.test.sh"
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
+      - "scripts/breaker-capture.sh"
+      - ".github/workflows/security.yml"
+      - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
       - "scripts/audit-paper-readers.sh"
@@ -663,6 +669,11 @@ jobs:
           tooling-harnesses scripts/relandcheck-diff-producer.test.sh
           tooling-harnesses scripts/main-red-breaker.sh
           tooling-harnesses scripts/main-red-breaker.test.sh
+          tooling-harnesses scripts/breaker-capture.sh
+          tooling-harnesses .github/workflows/doc-gates.yml
+          tooling-harnesses .github/workflows/security.yml
+          tooling-harnesses .github/workflows/compose-smoke.yml
+          tooling-harnesses .github/workflows/go-format.yml
           launcher-boot-selftest bin/barkpark
           launcher-boot-selftest scripts/barkpark-boot-selftest.sh
           workflow-portability scripts/workflow-portability-check.sh

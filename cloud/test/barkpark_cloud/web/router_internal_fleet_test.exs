@@ -10,7 +10,8 @@ defmodule BarkparkCloud.Web.RouterInternalFleetTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Accounts.AuditEvent
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -227,5 +228,72 @@ defmodule BarkparkCloud.Web.RouterInternalFleetTest do
       conn = call(:post, "/v1/internal/barkparks/#{Ecto.UUID.generate()}/deprovision", %{})
       assert conn.status == 401
     end
+  end
+
+  # THE TRAIL (task-55fb1f33a217249b). Both arms of this route removed a team's
+  # instance row and wrote NOTHING — the console's append-only audit list was
+  # silent about every box an operator took out through the internal surface.
+  # This route is WORKER-authenticated, so the row carries a nil actor: the
+  # documented shape for a system-caused event, never a missing team.
+  describe "POST /v1/internal/barkparks/:id/deprovision writes barkpark.deleted" do
+    test "the non-live arm lands on the row's own team trail, with a nil actor" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      assert audit_rows(team) == []
+
+      conn = call(:post, "/v1/internal/barkparks/#{bp.id}/deprovision", %{}, @worker_token)
+
+      assert conn.status == 200
+      assert Registry.get_barkpark(bp.id) == nil
+
+      assert [%AuditEvent{} = event] = audit_rows(team)
+      assert event.action == "barkpark.deleted"
+      assert event.target_type == "barkpark"
+      assert event.target_id == bp.id
+      assert event.team_id == team.id
+      assert is_nil(event.actor_user_id)
+      assert event.metadata["lane"] == "internal_deprovision_not_live"
+      assert event.metadata["name"] == bp.name
+    end
+
+    test "the detach arm lands too — a live row removed with no teardown" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.42"})
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/barkparks/#{bp.id}/deprovision",
+          %{mode: "detach"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert Registry.get_barkpark(bp.id) == nil
+
+      assert [%AuditEvent{} = event] = audit_rows(team)
+      assert event.action == "barkpark.deleted"
+      assert event.metadata["lane"] == "internal_deprovision_detach"
+    end
+
+    test "a lane that does NOT delete a row writes no deletion" do
+      # The control. Without it, an arm that stamped the verb on every request
+      # would read exactly as green as one that stamps it on the delete.
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _} = Registry.upsert_health(bp, %{host: "203.0.113.43"})
+
+      conn = call(:post, "/v1/internal/barkparks/#{bp.id}/deprovision", %{}, @worker_token)
+
+      assert conn.status == 202
+      assert Registry.get_barkpark(bp.id) != nil
+      assert audit_rows(team) == []
+    end
+  end
+
+  defp audit_rows(team) do
+    Repo.all(from(e in AuditEvent, where: e.team_id == ^team.id))
   end
 end

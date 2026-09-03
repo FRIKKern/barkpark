@@ -628,7 +628,38 @@ set -a; . ./.env; set +a
 arm_caddy_maintenance() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping maintenance page"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping maintenance page"; return 0; }
-  if grep -q 'BARKPARK_MAINTENANCE' "$CADDYFILE"; then log "caddy maintenance page already armed"; return 0; fi
+  if grep -q 'BARKPARK_MAINTENANCE' "$CADDYFILE"; then
+    # ALREADY ARMED — but possibly in the PRE-SCOPING shape. A bare
+    # `handle_errors {` catches EVERY error the site raises, and a `file_server`
+    # miss inside an armed `handle_path /sites/<slug>/*` raises 404 as an ERROR.
+    # Measured on guerrilla: every miss on a spawned static site answered 503
+    # "Back in a moment" instead of 404 — the maintenance page swallowed the
+    # whole 4xx surface of every static site on the box. The block's own header
+    # comment asserted the opposite ("fires ONLY on errors Caddy itself raises
+    # (dial failure / gateway timeout)"); a file_server 404 IS such an error.
+    # Re-arming is not an option (the marker guard exists for a reason), so
+    # UPGRADE in place: scope the existing handler to the gateway statuses it was
+    # always meant to cover. Same backup + validate + revert contract as the arm.
+    if grep -qE '^[[:space:]]*handle_errors[[:space:]]*\{[[:space:]]*$' "$CADDYFILE"; then
+      local ubak; ubak="${CADDYFILE}.bak.maint-scope.$(date -u +%Y%m%d%H%M%S)"
+      cp -a "$CADDYFILE" "$ubak"
+      local utmp; utmp="$(mktemp)"
+      sed -E 's/^([[:space:]]*)handle_errors[[:space:]]*\{[[:space:]]*$/\1handle_errors 502 503 504 {/' "$CADDYFILE" > "$utmp" \
+        && mv "$utmp" "$CADDYFILE" || { rm -f "$utmp"; mv "$ubak" "$CADDYFILE"; log "could not rewrite $CADDYFILE to scope the maintenance handler — Caddy untouched"; return 0; }
+      chmod --reference="$ubak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+      chown --reference="$ubak" "$CADDYFILE" 2>/dev/null || true
+      if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+        rm -f "$ubak"
+        systemctl reload caddy 2>/dev/null || true
+        log "scoped the already-armed maintenance handler to 502/503/504 (a static-site miss now 404s instead of 503)"
+      else
+        mv "$ubak" "$CADDYFILE"
+        log "caddy validate rejected the maintenance-handler scoping — reverted, Caddy untouched"
+      fi
+      return 0
+    fi
+    log "caddy maintenance page already armed"; return 0
+  fi
   # Slot ports ONLY: the /mcp route (if armed first) carries its own
   # `reverse_proxy localhost:4010` line, which must never become the
   # insertion anchor.
@@ -637,7 +668,7 @@ arm_caddy_maintenance() {
     return 0
   fi
   local block; block="$(cat <<'MAINT'
-	handle_errors {
+	handle_errors 502 503 504 {
 		header Retry-After "15"
 		respond 503 {
 			body <<BARKPARK_MAINTENANCE
