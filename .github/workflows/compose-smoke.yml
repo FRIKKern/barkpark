@@ -203,7 +203,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Refusal arm (container exit + log anchor, never HTTP)
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh refusal
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Refusal arm (container exit + log anchor, never HTTP)\"}"
+          JOB_NAME: "Refusal arm (short SECRET_KEY_BASE refuses at boot)"
+          WORKFLOW_FILE: compose-smoke.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/main-red-breaker.sh
+
 
   green-arm:
     # Build → boot → healthy → in-container probes. Also carries the two cheap
@@ -217,11 +234,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Env census (both runtime roots)
+        id: s1
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh census
       - name: Blessing-word grep (D23 — hedge word is "experimental")
+        id: s2
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh blessing-grep
       - name: Green arm (compose up → healthy → exec wget /api/schemas + /login)
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         run: bash scripts/compose-smoke.sh green
+      # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
+      # Every gate step above ran with continue-on-error; this step owns the
+      # job's verdict. A red that main's newest completed run already carries
+      # on the SAME step is INHERITED-FROM-MAIN (exit 0 + notice); any other
+      # red stands (exit 1). Never on push to main; never a required context.
+      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
+        if: always()
+        env:
+          STEP_OUTCOMES: ${{ toJSON(steps) }}
+          STEP_NAMES: "{\"s1\": \"Env census (both runtime roots)\", \"s2\": \"Blessing-word grep (D23 \u2014 hedge word is \\\"experimental\\\")\", \"s3\": \"Green arm (compose up \u2192 healthy \u2192 exec wget /api/schemas + /login)\"}"
+          JOB_NAME: "Green arm (build, boot, in-container probes)"
+          WORKFLOW_FILE: compose-smoke.yml
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/main-red-breaker.sh
+
 
   compose-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
