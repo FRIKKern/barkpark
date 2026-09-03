@@ -1188,6 +1188,66 @@ defmodule BarkparkWeb.TasksController do
   defp check_now_length(text) when byte_size(text) <= @pulse_now_max_bytes, do: :ok
   defp check_now_length(_), do: {:error, :now_too_long}
 
+  # ─── POST /v1/tasks/:doc_id/renew ───────────────────────────────────────
+  # The NON-HOLDER lease extension (Tasks.Renew — its moduledoc carries the
+  # decision, the rejected alternative, and the blast radius). Body shape:
+  #   { "pr": 15234, "state": "open" | "closed" | "merged", "reason": "open_pr" }
+  # `pr` is REQUIRED: an extension with no named reason is a blank cheque, and
+  # the clear is pr-matched so PR #2 closing cannot cancel PR #1's grace.
+  # NO worker_id and NO observed_epoch — the caller is CI, which can never hold
+  # the claim; that is the whole point of the verb, and it is why the epoch is
+  # not bumped (a bump would stale every lead's stamp/close CAS).
+
+  def renew(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, pr} <- parse_pr(params["pr"]),
+         {:ok, state} <- parse_pr_state(params["state"]),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        [pr: pr, state: state]
+        |> Params.put_opt(:reason, params["reason"])
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.renew_lease_by_id(task.id, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :invalid_pr} ->
+        bad_request(conn, "pr is required and must be a positive integer")
+
+      {:error, :invalid_state} ->
+        bad_request(conn, ~s|state must be one of "open", "closed", "merged"|)
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # `pr` arrives as an int (JSON body) or a string (`--pr 15234` through
+  # generic manifest dispatch / the query form). Absent is a 400, not a
+  # default: see the comment above.
+  defp parse_pr(n) when is_integer(n) and n > 0, do: {:ok, n}
+
+  defp parse_pr(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> {:ok, n}
+      _ -> {:error, :invalid_pr}
+    end
+  end
+
+  defp parse_pr(_), do: {:error, :invalid_pr}
+
+  # Absent state means "open" — the renew is the common call, the clear is the
+  # one a caller has to ask for by name.
+  defp parse_pr_state(nil), do: {:ok, "open"}
+  defp parse_pr_state(s) when s in ["open", "closed", "merged"], do: {:ok, s}
+  defp parse_pr_state(_), do: {:error, :invalid_state}
+
   # `criterion` arrives as an int (JSON body) or a string (`--criterion 2`
   # through generic dispatch / query form). Absent → {:ok, nil} (a plain
   # now-line names no lock). Negative / non-integer → honest 400.
