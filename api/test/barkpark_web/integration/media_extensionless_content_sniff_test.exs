@@ -54,8 +54,8 @@ defmodule BarkparkWeb.MediaExtensionlessContentSniffTest do
 
   # A real JPEG head (SOI + APP0/JFIF + SOF0 1x1) — enough for a magic-byte
   # sniff and for Probe.probe/2 to read dimensions off.
-  @jpeg <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 192, 0, 11,
-          8, 0, 1, 0, 1, 1, 1, 17, 0, 255, 217>>
+  @jpeg <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 192, 0,
+          11, 8, 0, 1, 0, 1, 1, 1, 17, 0, 255, 217>>
 
   @svg "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"/>"
 
