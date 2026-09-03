@@ -578,11 +578,36 @@ defmodule BarkparkWeb.TasksController.Params do
   def strip_draft_prefix(doc_id) when is_binary(doc_id),
     do: DraftId.published_id(doc_id)
 
-  # Augment the base render_doc map with the three count fields the
+  # Augment the base render_doc map with the four count fields the
   # `bp task` list/ready shapes carry (dependency_count + dependent_count
   # from batch_edge_counts; comment_count fixed at 0 until the comment
-  # substrate ships — TODO: wire when comment substrate exists).
-  def render_doc_with_counts(%Document{} = doc, counts) do
+  # substrate ships — TODO: wire when comment substrate exists;
+  # `child_count` from `batch_child_counts/2`, the SAME producer the brief
+  # card uses).
+  #
+  # ── ONE FIELD, ONE PLACE (task-3e0eda896a247776) ────────────────────────
+  #
+  # `child_count` used to answer THREE different things depending on which
+  # door a reader walked through:
+  #
+  #     GET /v1/tasks?view=brief   docs[].child_count        the real number
+  #     GET /v1/tasks   (default)  ABSENT                    -> reads as 0
+  #     GET /v1/tasks/:doc_id      TOP-LEVEL child_count,    -> doc.child_count
+  #                                absent from `doc`            reads as 0
+  #
+  # The fleet's standing triage heuristic is "skip a row with a high
+  # child_count — an epic parent is not lane-sized". Two of the three doors
+  # answer 0 for a `doc.child_count` read, so an epic ROOT passes that filter
+  # as a leaf: measured on guerrilla, `task-57451a6ce0a0505e` carries 189
+  # children and its 160 shards were swept toward a bulk-cancel list twice on
+  # exactly this misread. Emitting the field on the full card and INSIDE `doc`
+  # (`show` keeps its top-level copy for the readers already on it) makes
+  # `doc.child_count` one number with one meaning on every reader.
+  #
+  # `child_counts` defaults to `%{}` so the pre-existing arity-2 call sites
+  # keep compiling and keep their exact shape plus a `child_count: 0`; every
+  # caller inside this app passes the real map.
+  def render_doc_with_counts(%Document{} = doc, counts, child_counts \\ %{}) do
     {dep_count, dependent_count} = Map.get(counts, doc.id, {0, 0})
 
     doc
@@ -590,6 +615,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> Map.put(:dependency_count, dep_count)
     |> Map.put(:dependent_count, dependent_count)
     |> Map.put(:comment_count, 0)
+    |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
   end
 
   # C2: a lightweight child summary — just enough to render the rail without

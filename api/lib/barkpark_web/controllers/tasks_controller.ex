@@ -159,7 +159,11 @@ defmodule BarkparkWeb.TasksController do
 
       :full ->
         counts = Params.batch_edge_counts(docs)
-        Enum.map(docs, &Params.render_doc_with_counts(&1, counts))
+        # task-3e0eda896a247776: the SAME batched grouped query the brief card
+        # runs — the full card used to omit `child_count` entirely, so the
+        # DEFAULT view of the ledger answered "no children" for every epic root.
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_doc_with_counts(&1, counts, child_counts))
     end
   end
 
@@ -218,9 +222,11 @@ defmodule BarkparkWeb.TasksController do
 
           :full ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
+            child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(sealed_in_progress, &Params.render_doc_with_counts(&1, counts)),
-             Enum.map(sealed_ready, &Params.render_doc_with_counts(&1, counts))}
+            render = &Params.render_doc_with_counts(&1, counts, child_counts)
+
+            {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
         end
 
       events = if view == :brief, do: Enum.take(events, 5), else: events
@@ -503,9 +509,17 @@ defmodule BarkparkWeb.TasksController do
 
         # Field-visibility seal (fail-closed): the doc AND its child summaries
         # are rendered off content-redacted docs under the request's caller.
+        # task-3e0eda896a247776: `child_count` rides INSIDE `doc` as well as at
+        # the top level. `children` is already the authoritative list here, so
+        # the inner field is keyed off the SAME `length(children)` the envelope
+        # reports — one query, one number, and `doc.child_count` now means the
+        # same thing on `bp task get` as it does on a `bp task ls` / `ready`
+        # card. The top-level key is UNCHANGED for the readers already on it.
+        child_counts = %{Params.strip_draft_prefix(doc.doc_id) => length(children)}
+
         json(conn, %{
           ok: true,
-          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts),
+          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts, child_counts),
           children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
           child_count: length(children)
         })
@@ -2184,10 +2198,44 @@ defmodule BarkparkWeb.TasksController do
   # Single-doc fetch by exact doc_id string, scoped to workspace + project.
   # Everything is a task — the single `type == "task"` filter covers root
   # tasks (goals), phases, and leaf work-tasks.
+  #
+  # ── THE DATASET COLLISION (task-0c30e7b99ad87cec) ───────────────────────
+  #
+  # `documents` is unique on `(doc_id, type, dataset_id)` — NOT on
+  # `(doc_id, type)` (migration 20260527134000_flip_uniqueness_to_dataset_id).
+  # One task doc_id may therefore live in TWO datasets inside a single
+  # workspace/project, and this reader carries no dataset discriminator (by
+  # design: `bp task get <id>` names no dataset). Before this change the read
+  # was a bare `Repo.one/1`, so that shape raised `Ecto.MultipleResultsError`
+  # → a 500 on EVERY call, forever, for a row the ready queue happily lists:
+  # a listing that serves ids its own by-id reader cannot resolve. Measured on
+  # guerrilla 2026-09-02: `bp task ready` served `akbr-feedback-2026-08-epic`
+  # TWICE in one page (once per dataset) and three consecutive `bp task get`
+  # calls returned `internal_error`. An agent reads that as transient and
+  # retries blindly forever — the failure this row was filed for.
+  #
+  # The repair is the rule the CANONICAL slug resolver already spells
+  # (`Barkpark.Content.Graph.resolve_doc/3`, `@canonical capability:slug-resolve`):
+  # order deterministically, then `LIMIT 1`. This function is a fork of that
+  # resolver that kept the scoping and dropped the `limit(1)`. The order is
+  # TOTAL — published-first, then `dataset`, then `id` — so the same call
+  # returns the same row on every request and across every pooled connection;
+  # a partial order would trade a 500 for a silently-alternating answer, which
+  # is the worse defect (see queue.ex's `id` tiebreak, same reasoning).
+  #
+  # A `LIMIT 1` here can only ever CHANGE the outcome for a doc_id that has
+  # more than one row in scope — the shape that used to raise. A doc_id with
+  # exactly one row (every ordinary task) reads byte-identically.
   defp fetch_task_exact(doc_id, workspace_id, project_id) do
     base =
       from(d in Document,
-        where: d.doc_id == ^doc_id and d.type == "task"
+        where: d.doc_id == ^doc_id and d.type == "task",
+        order_by: [
+          asc: fragment("CASE WHEN ? = 'published' THEN 0 ELSE 1 END", d.status),
+          asc: d.dataset,
+          asc: d.id
+        ],
+        limit: 1
       )
 
     query =

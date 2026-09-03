@@ -3147,8 +3147,16 @@ defmodule BarkparkWeb.TasksControllerTest do
         assert Map.has_key?(doc, "content")
         assert Map.has_key?(doc, "type")
         assert Map.has_key?(doc, "dependency_count")
-        refute Map.has_key?(doc, "child_count")
         refute Map.has_key?(doc, "criteria_met")
+
+        # task-3e0eda896a247776: `child_count` is NO LONGER a view
+        # discriminator. It used to be brief-only, which meant the DEFAULT
+        # view of the ledger answered "no children" for every epic root and
+        # the fleet's "skip a high child_count" triage filter read a 189-child
+        # root as a claimable leaf. The field now rides BOTH cards with one
+        # meaning; `content` / `type` / `dependency_count` (full-only) and
+        # `criteria_met` (brief-only) are the markers that still discriminate.
+        assert Map.has_key?(doc, "child_count")
       end
     end
 
