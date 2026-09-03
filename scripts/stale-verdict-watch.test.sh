@@ -957,5 +957,39 @@ grep -q "this string is not in any verdict" <<<"$out" \
   || ok "a nonsense assertion fails, so the greps above are load-bearing"
 
 echo
+section "(m) the LIVE page loop: a GraphQL page above macOS total argv still appends to the population"
+
+# THE BUG THIS OWNS. Section (k) proves the --fixture path carries nothing by
+# argv. The LIVE path did not go through it: scripts/stale-verdict-watch.sh
+# accumulated pages with `jq -n --argjson a "$rows" --argjson b "$got"`, so the
+# whole population travelled as one argv word per page. Every run from
+# 2026-09-03 06:08Z died "jq: Argument list too long" and was read as
+# UNREACHABLE — the harness stayed green because (k) never paged. A stub `gh`
+# serves ONE oversized page here; the append must survive and classify it.
+LSTUB="$TMP/l-stub"; mkdir -p "$LSTUB/bin"
+LPAGE="$LSTUB/page.json"
+python3 - "$LPAGE" <<'PY'
+import json,sys
+nodes=[{"number":30000+i,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"%040d"%i,"updatedAt":"2026-08-01T00:00:00Z",
+        "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+          {"__typename":"CheckRun","name":"advisory-context-%d-a-realistically-long-workflow-job-name"%k,"status":"COMPLETED","conclusion":"SUCCESS",
+           "completedAt":"2026-09-01T00:00:00Z","detailsUrl":"https://github.com/FRIKKern/barkpark/actions/runs/1/job/1"} for k in range(60)]}}}}]}} for i in range(100)]
+page={"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":False,"endCursor":None},"nodes":nodes}}}}
+open(sys.argv[1],"w").write(json.dumps(page))
+PY
+printf '#!/usr/bin/env bash\ncase "$*" in *graphql*) cat "%s" ;; *) echo "{}" ;; esac\n' "$LPAGE" > "$LSTUB/bin/gh"; chmod +x "$LSTUB/bin/gh"
+lpage_bytes="$(wc -c < "$LPAGE" | tr -d ' ')"
+[ "${lpage_bytes:-0}" -ge "$SCALE_MIN" ] \
+  && ok "the generated live page is ${lpage_bytes}B ≥ ${SCALE_MIN}B" \
+  || bad "the live-page fixture is only ${lpage_bytes}B — below the ${SCALE_MIN}B bound"
+out="$(env PATH="$LSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
+        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1)"; rc=$?
+grep -qi "Argument list too long" <<<"$out" \
+  && bad "(m) execve E2BIG on the live page loop — the population still travels by argv" \
+  || ok "(m) no 'Argument list too long' on the live page loop"
+grep -qE "classified 100" <<<"$out" \
+  && ok "(m) the oversized page was appended and all 100 rows classified" \
+  || bad "(m) the page was not classified (rc=$rc): $(printf '%s' "$out" | grep -iE 'population|UNREACHABLE|classified' | head -2 | tr '\n' ' ')"
+
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1

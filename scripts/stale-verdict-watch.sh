@@ -405,7 +405,11 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
       return 2
     }
     [ -n "$got" ] || { red "  page $page normalised to nothing"; printf '%s' "$out"; return 2; }
-    rows="$(jq -c -n --argjson a "$rows" --argjson b "$got" '$a + $b')" || {
+    # Both arrays go through STDIN, never argv: `--argjson a "$rows"` put the whole
+    # accumulated population on the command line and, past a few hundred PRs of
+    # check-rollup rows, execve refused it — "jq: Argument list too long" on
+    # every run from 2026-09-03 06:08Z, read as UNREACHABLE (task-0a48c7b64d5ab0f1).
+    rows="$(printf '%s\n%s\n' "$rows" "$got" | jq -c -s '.[0] + .[1]')" || {
       red "  page $page could not be appended to the population"
       return 2
     }
