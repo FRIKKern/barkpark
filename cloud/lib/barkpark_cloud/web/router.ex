@@ -14711,30 +14711,31 @@ defmodule BarkparkCloud.Web.Router do
   defp require_user_sse(conn) do
     conn = Plug.Conn.fetch_query_params(conn)
 
-    {user, session_token_id} =
+    {user, session_token_id, session_token} =
       case Auth.bearer_token(conn) do
         header when is_binary(header) and header != "" ->
-          case Accounts.verify_user_session_token(header) do
-            %{} = user -> {user, Accounts.live_session_token_id(header)}
-            _ -> {nil, nil}
+          case Accounts.verify_user_session_token(header, touch: false) do
+            %{} = user -> {user, Accounts.live_session_token_id(header), header}
+            _ -> {nil, nil, nil}
           end
 
         _ ->
           case conn.query_params["ticket"] do
             ticket when is_binary(ticket) and ticket != "" ->
               case Accounts.consume_sse_ticket_binding(ticket) do
-                {user, session_token_id} -> {user, session_token_id}
-                nil -> {nil, nil}
+                {user, session_token_id} -> {user, session_token_id, nil}
+                nil -> {nil, nil, nil}
               end
 
             _ ->
-              {nil, nil}
+              {nil, nil, nil}
           end
       end
 
     case user do
       %{} = user ->
         conn
+        |> defer_sse_session_touch(session_token)
         |> assign(:current_user, user)
         |> assign(:current_team, Accounts.primary_team(user))
         |> assign(:sse_session_token_id, session_token_id)
@@ -14745,6 +14746,39 @@ defmodule BarkparkCloud.Web.Router do
         |> send_resp(401, Jason.encode!(%{error: "unauthorized"}))
         |> halt()
     end
+  end
+
+  # The SSE twin of `Web.Auth`'s deferred credential stamp, and it exists for the
+  # same reason: `last_used_at` is a LIVENESS claim the sessions card renders as
+  # "Active just now", but the header branch above runs during AUTHENTICATION —
+  # strictly before this route's own `no_team` ruling. The eager default stamped
+  # right there, so a TEAMLESS header client that was REFUSED 422 printed on the
+  # sessions card as a freshly active device. Measured: backdate the session row
+  # 3600s, fire ONE `GET /v1/events`, take the 422, and the stamp jumped a full
+  # hour past any throttle — a throttle cannot fix it, because an idle device
+  # satisfies any staleness window.
+  #
+  # `register_before_send/2` is the first point where the status is known and it
+  # runs for `send_chunked` too — so the served stream stamps at its 200, at the
+  # same instant the eager call used to, and NOTHING is deferred past the park.
+  # `status < 400` is the whole gate: served ⇒ claim activity, refused ⇒ claim
+  # nothing.
+  #
+  # The `nil` clause is the TICKET branch: `?ticket=` carries no session
+  # plaintext to stamp, and ticket redemption stamps nothing on the session row
+  # at all (driven). That is also the honest bound on this fix's reach — the
+  # console SPA opens this stream with `?ticket=`, so the over-stamp was only
+  # ever reachable by HEADER clients (curl, the CLI, an EventSource polyfill).
+  defp defer_sse_session_touch(conn, nil), do: conn
+
+  defp defer_sse_session_touch(conn, token) when is_binary(token) do
+    register_before_send(conn, fn sent ->
+      if is_integer(sent.status) and sent.status < 400 do
+        Accounts.touch_session_last_used(token)
+      end
+
+      sent
+    end)
   end
 
   # Subscribe the request process to the team's event group, then hold the

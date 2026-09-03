@@ -689,10 +689,18 @@ defmodule BarkparkCloud.Accounts do
   `Plug.Conn.register_before_send/2` once the status is known.
 
   `touch: true` remains the default for the callers that hold no `Plug.Conn` and
-  make no authorization decision of their own — notably the SSE stream open,
-  whose conn status is set ONCE at `send_chunked` and then parks for hours, so
-  deferring its stamp would buy nothing and risks under-reporting a device that
-  really is streaming.
+  make no authorization decision of their own.
+
+  THE SSE STREAM OPEN IS NO LONGER ONE OF THEM, and the paragraph that used to
+  say so was refuted by the route's own 422. `GET /v1/events` resolves its header
+  credential here and only THEN answers `no_team`, so the eager stamp made a
+  teamless header client that was REFUSED print as freshly active. The claim that
+  deferring "would buy nothing" rested on the conn status being set once at
+  `send_chunked` — true for the stream, false for the refusal, which never
+  reaches `send_chunked` at all. The router now passes `touch: false` there and
+  re-stamps from `register_before_send/2`, which fires for `send_chunked` as well
+  — so a served stream still stamps at its 200, at the same instant the eager
+  call did, and nothing is deferred past the park.
   """
   @spec verify_user_session_token(binary(), keyword()) :: User.t() | nil
   def verify_user_session_token(plaintext, opts) when is_binary(plaintext) and is_list(opts) do
