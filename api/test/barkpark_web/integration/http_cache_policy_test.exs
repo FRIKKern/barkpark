@@ -517,9 +517,20 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
     {:ok, port_num} = :inet.port(probe)
     :ok = :gen_tcp.close(probe)
 
-    start_supervised!(
-      {Bandit, plug: BarkparkWeb.Endpoint, scheme: :http, ip: {127, 0, 0, 1}, port: port_num}
-    )
+    start_supervised!({
+      Bandit,
+      # The SSE actions block in `receive` for the life of the connection, so at
+      # teardown ThousandIsland waits its default `shutdown_timeout` (15_000 ms)
+      # for each to drain before killing it: 3 tests x 15.0 s of pure wait in the
+      # Elixir Test job (main run 33797686877, ci-log-gap-census.sh). Nothing is
+      # in flight worth draining here — the assertion already passed on the
+      # response HEAD — so give the acceptors a quarter second and move on.
+      plug: BarkparkWeb.Endpoint,
+      scheme: :http,
+      ip: {127, 0, 0, 1},
+      port: port_num,
+      thousand_island_options: [shutdown_timeout: 250]
+    })
 
     port_num
   end
