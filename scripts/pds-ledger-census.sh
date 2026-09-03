@@ -477,8 +477,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
@@ -657,6 +655,23 @@ class HttpTransport(object):
         return self._request("%s%s" % (self.server, path))
 
     def _request(self, url):
+        # THE ONLY urllib CONSUMER IN THE FILE, AND THE REASON THE IMPORT IS
+        # HERE RATHER THAN AT MODULE TOP. `import urllib.request` costs more CPU
+        # on its own than every other import in this census combined, and the
+        # selftest forks the census hundreds of times -- every one of those forks
+        # paid for a transport that --fixture-dir replaces entirely.
+        # HttpTransport and FixtureTransport are mutually exclusive (built at the
+        # single dispatch below), so a fixture run must never pay for this.
+        # THE PRICE OF MOVING IT: a typo here is no longer startup-fatal, it is
+        # INVISIBLE to every fixture check -- none of them reaches _request. That
+        # regression is compensated in pds-ledger-census_test.sh, which resolves
+        # every function-scope import in this file through importlib.util
+        # .find_spec. If you add a lazy import, that arm covers it automatically;
+        # if you delete the last one, the arm REDS rather than going quietly
+        # blind.
+        import urllib.error
+        import urllib.request
+
         req = urllib.request.Request(url, headers={
             "Authorization": "Bearer %s" % self.token,
             "Accept": "application/json",
