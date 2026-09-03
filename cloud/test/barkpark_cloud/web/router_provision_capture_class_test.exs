@@ -7,14 +7,14 @@ defmodule BarkparkCloud.Web.RouterProvisionCaptureClassTest do
   ## The asymmetry
 
   `merge_job_status/4` humanizes `provision_error` / `deprovision_error` at the
-  serialization boundary, and `app.js:14718` paints that humanized sentence as the
+  serialization boundary, and `app.js` (`failureDetail`) paints that humanized sentence as the
   timeline's failureDetail. The step rows directly BENEATH it, and the live
   console beside it, were `scrub`-only — so one event told a person two stories in
   the same viewport: a plain-English class above, raw provider jargon below.
 
   ## Why NOT `humanize/1` here
 
-  `sites/deploy.ex:117` already rules on it: `humanize/1` is `classify |> scrub`,
+  `Sites.Deploy`'s `stage_caption/2` moduledoc already rules on it: `humanize/1` is `classify |> scrub`,
   and it would REPLACE the narration. On a deploy stage that is safe, because the
   raw capture survives one element away in `console[].line`. On a PROVISION step
   detail and a console line there is no such sibling — this payload holds the only

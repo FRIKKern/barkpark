@@ -11003,7 +11003,7 @@ defmodule BarkparkCloud.Web.Router do
   # HUMANIZED `provision_error` as the timeline's failureDetail while the step
   # rows directly beneath it carried raw provider jargon — one event, two stories,
   # the exact asymmetry wave 26 S3 closed in the provision_failed email. A bare
-  # `FailureCopy.humanize/1` is the WRONG remedy here (and `sites/deploy.ex:117`
+  # `FailureCopy.humanize/1` is the WRONG remedy here (and `Sites.Deploy`'s `stage_caption/2` moduledoc
   # says so): it REPLACES the narration, and this payload holds the only copy of
   # it. `class_then_capture/1` emits BOTH.
   defp merge_provision_steps(map, %{steps: steps}) when is_list(steps),
