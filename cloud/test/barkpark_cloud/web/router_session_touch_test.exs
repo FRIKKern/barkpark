@@ -142,4 +142,61 @@ defmodule BarkparkCloud.Web.RouterSessionTouchTest do
       """
     end
   end
+
+  ## The stamp must never be able to FAIL the request it is stamping
+
+  describe "a DB failure inside the deferred stamp" do
+    # A BEFORE UPDATE trigger on user_tokens: the verify SELECT still succeeds,
+    # and ONLY the stamp's `update_all` raises. That is the real fault shape —
+    # a transient write failure (pool timeout, dropped connection, deadlock)
+    # hitting a statement that runs inside `register_before_send/2`, AFTER the
+    # response has already been decided. It lives inside the sandbox
+    # transaction, so it rolls back with the test.
+    defp poison_token_writes! do
+      Repo.query!("""
+      CREATE OR REPLACE FUNCTION pg_temp.bp_touch_boom() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'db down'; END;
+      $$ LANGUAGE plpgsql;
+      """)
+
+      Repo.query!("""
+      CREATE TRIGGER bp_touch_boom BEFORE UPDATE ON user_tokens
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.bp_touch_boom();
+      """)
+
+      :ok
+    end
+
+    test "the request still returns its REAL status — a failed stamp is not a 500" do
+      user = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user, user_agent: "TestAgent")
+      backdate!(user, 3600)
+      poison_token_writes!()
+
+      # RED before the fix: an exception raised inside a before_send callback
+      # ESCAPES `send_resp`, so this raised Postgrex.Error out of `Router.call`
+      # and the platform answered 500 for a request it had already SERVED.
+      conn = call(:get, "/v1/me", token)
+
+      assert conn.status == 200, """
+      a transient DB failure while stamping "last seen" changed the answer the \
+      person received — the request was served, then reported as failed.
+      """
+    end
+
+    test "a failed stamp is OBSERVABLE — it logs, as the PAT path does" do
+      user = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user, user_agent: "TestAgent")
+      backdate!(user, 3600)
+      poison_token_writes!()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn -> assert call(:get, "/v1/me", token).status == 200 end)
+
+      assert log =~ "touch_session_last_used failed", """
+      the stamp failed SILENTLY — swallowing the error without a log makes a \
+      degraded liveness column indistinguishable from an idle fleet.
+      """
+    end
+  end
 end
