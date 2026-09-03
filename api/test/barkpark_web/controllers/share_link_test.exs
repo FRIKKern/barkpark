@@ -635,6 +635,96 @@ defmodule BarkparkWeb.ShareLinkTest do
     end
   end
 
+  describe "GET /v1/shares/links answers within the scope it was given" do
+    # `list/2` parsed the scope triple, validated the project, then DROPPED both
+    # and queried on workspace_id alone. A link minted for the SAME ref_id in a
+    # SIBLING project of the same workspace therefore came back under a scope
+    # that does not name it — with its live `/s/<token>` url. Not cross-tenant
+    # (the caller is a proven workspace admin of this workspace), but the
+    # response contradicted its own `scope=` parameter.
+    setup %{conn: conn, ws: ws} do
+      sibling = create_project!(ws, "sibling-proj-#{System.unique_integer([:positive])}")
+      sib_scope = [workspace_id: ws.id, project_id: sibling.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "type" => "string"}]
+          },
+          @dataset,
+          sib_scope
+        )
+
+      # The SAME ref_id as the setup's project — that collision is the fixture.
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "post1", "title" => "A Post in the sibling"},
+          @dataset,
+          sib_scope
+        )
+
+      {:ok, _} = Content.publish_document("post1", "post", @dataset, sib_scope)
+
+      %{"token" => sib_raw, "link" => %{"id" => sib_id}} =
+        mint(conn, %{
+          scope: "#{ws.slug}/#{sibling.slug}/#{@dataset}",
+          kind: "doc",
+          ref_type: "post",
+          ref_id: "post1"
+        })
+
+      %{sibling: sibling, sib_raw: sib_raw, sib_id: sib_id}
+    end
+
+    test "a sibling project's link for the same ref_id is not in this project's listing", %{
+      conn: conn,
+      ws: ws,
+      scope_str: scope,
+      sibling: sibling,
+      sib_raw: sib_raw,
+      sib_id: sib_id
+    } do
+      %{"token" => own_raw, "link" => %{"id" => own_id}} =
+        mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+
+      resp =
+        conn
+        |> admin()
+        |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
+
+      # ARRIVAL first — a 429 from the suite's limiter reads like a wrong body.
+      assert resp.status == 200, "listing → #{resp.status}: #{resp.resp_body}"
+      body = json_response(resp, 200)
+      ids = Enum.map(body["links"], & &1["id"])
+
+      # POSITIVE CONTROL: the listing is non-empty and DOES carry this
+      # project's own link, so the refutes below are not vacuously green.
+      assert own_id in ids
+      assert resp.resp_body =~ own_raw
+
+      refute sib_id in ids
+      refute resp.resp_body =~ sib_raw
+
+      # and the confinement is symmetric: the sibling's own scope sees ITS link
+      # and not this one.
+      sib_body =
+        conn
+        |> admin()
+        |> get(
+          "/v1/shares/links?scope=#{ws.slug}/#{sibling.slug}/#{@dataset}&kind=doc&ref_type=post&ref_id=post1"
+        )
+        |> json_response(200)
+
+      sib_ids = Enum.map(sib_body["links"], & &1["id"])
+      assert sib_id in sib_ids
+      refute own_id in sib_ids
+    end
+  end
+
   # Blank the ONE per-connection value in the v1 error envelope so two bodies
   # can be compared as bytes.
   defp blank_request_id(%Plug.Conn{} = conn) do

@@ -322,6 +322,34 @@ defmodule BarkparkWeb.ShareControllerTest do
       resp = conn |> admin_conn() |> post("/v1/shares", %{surfaces: "papers"})
       assert resp.status == 422
     end
+
+    test "422 when access is not a string, never a 500", %{conn: conn, admin: admin} do
+      # `access` was the one create attribute with no shape guard, and
+      # `do_create/4` INTERPOLATES it into `"#{scope}:#{surfaces}:#{access}"`.
+      # A map raised Protocol.UndefinedError (String.Chars is not implemented
+      # for Map) and a list of maps raised ArgumentError — both 500s, while
+      # every other malformed attribute on this action is a 422.
+      admin_ws!(admin, "gyldendal")
+
+      for bad <- [%{"x" => 1}, [%{"x" => 1}], %{}, [1, 2]] do
+        resp =
+          conn
+          |> admin_conn()
+          |> post("/v1/shares", %{
+            scope: "gyldendal/default/production",
+            surfaces: "papers",
+            access: bad
+          })
+
+        # ARRIVAL before verdict: a 429 from the suite's limiter reads like a
+        # wrong status, so name what actually came back.
+        assert resp.status == 422,
+               "POST access #{inspect(bad)} → #{resp.status}: #{resp.resp_body}"
+
+        # and nothing was stored under the interpolated garbage
+        refute Sharing.shared?("gyldendal", "default", "production", :papers)
+      end
+    end
   end
 
   # ── rm (DELETE) ─────────────────────────────────────────────────────────
