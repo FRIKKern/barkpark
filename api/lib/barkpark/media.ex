@@ -643,37 +643,37 @@ defmodule Barkpark.Media do
         txn =
           Repo.transaction(
             fn ->
-            # A stale delete means a concurrent DELETE already consumed the row →
-            # {:error, :not_found} (both controllers 404 via FallbackController)
-            # instead of an uncaught Ecto.StaleEntryError (a 500).
-            case Repo.delete(file, stale_error_field: :id) do
-              {:ok, deleted} ->
-                case delete_asset_doc(file) do
-                  :ok ->
-                    # `run_after_media_delete` is a DB write and MUST stay inside
-                    # the transaction so it rolls back with the row. HOOK
-                    # CONTRACT: an `after_media_delete` plugin callback may only
-                    # touch the DATABASE — NO file or HTTP I/O — because it runs
-                    # before commit and would otherwise re-open exactly the
-                    # phantom hole the effect deferral below closes. The media
-                    # plugin's own callback is now a second, idempotent pass over
-                    # an already-deleted document; other plugins still get theirs.
-                    _ =
-                      Barkpark.Plugins.Registry.run_after_media_delete(%{
-                        media_file_id: file.id,
-                        dataset: file.dataset
-                      })
+              # A stale delete means a concurrent DELETE already consumed the row →
+              # {:error, :not_found} (both controllers 404 via FallbackController)
+              # instead of an uncaught Ecto.StaleEntryError (a 500).
+              case Repo.delete(file, stale_error_field: :id) do
+                {:ok, deleted} ->
+                  case delete_asset_doc(file) do
+                    :ok ->
+                      # `run_after_media_delete` is a DB write and MUST stay inside
+                      # the transaction so it rolls back with the row. HOOK
+                      # CONTRACT: an `after_media_delete` plugin callback may only
+                      # touch the DATABASE — NO file or HTTP I/O — because it runs
+                      # before commit and would otherwise re-open exactly the
+                      # phantom hole the effect deferral below closes. The media
+                      # plugin's own callback is now a second, idempotent pass over
+                      # an already-deleted document; other plugins still get theirs.
+                      _ =
+                        Barkpark.Plugins.Registry.run_after_media_delete(%{
+                          media_file_id: file.id,
+                          dataset: file.dataset
+                        })
 
-                    deleted
+                      deleted
 
-                  {:error, reason} ->
-                    Repo.rollback({:asset_doc, reason})
-                end
+                    {:error, reason} ->
+                      Repo.rollback({:asset_doc, reason})
+                  end
 
-              {:error, cs} ->
-                Repo.rollback({:row, cs})
-            end
-          end,
+                {:error, cs} ->
+                  Repo.rollback({:row, cs})
+              end
+            end,
             mode: :savepoint
           )
 

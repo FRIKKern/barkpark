@@ -159,7 +159,9 @@ defmodule BarkparkWeb.Integration.V1MediaUploadReceiptTest do
   defp authed(conn), do: put_req_header(conn, "authorization", "Bearer barkpark-dev-token")
 
   defp png_upload do
-    tmp_path = Path.join(System.tmp_dir!(), "v1-receipt-#{System.unique_integer([:positive])}.png")
+    tmp_path =
+      Path.join(System.tmp_dir!(), "v1-receipt-#{System.unique_integer([:positive])}.png")
+
     File.write!(tmp_path, Base.decode64!(@png_b64))
 
     %Plug.Upload{path: tmp_path, filename: "pixel.png", content_type: "image/png"}
@@ -171,7 +173,10 @@ defmodule BarkparkWeb.Integration.V1MediaUploadReceiptTest do
   end
 
   defp scoped_conn(ws, proj) do
-    %{Phoenix.ConnTest.build_conn() | path_params: %{"workspace_slug" => ws, "project_slug" => proj}}
+    %{
+      Phoenix.ConnTest.build_conn()
+      | path_params: %{"workspace_slug" => ws, "project_slug" => proj}
+    }
   end
 
   defp rm_uploaded(%{"id" => id, "path" => relative}) do
