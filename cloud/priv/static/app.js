@@ -14457,8 +14457,10 @@
   // the call site, so escaping is unchanged).
   // dwb-webhook-deploy-artifact-gap (interim): the ONE predicate for the
   // born-failed GitHub-push family — a push conjures a deployment the builder
-  // can't run yet (needs the gh-1 App integration), so the CP marks it born-
-  // failed. Shared by failureCopy (what to say) and failureTone (how to paint
+  // could not run at the time — LEGACY rows, born failed before the router's
+  // `github_build_available?/1` became a real repo-present predicate; source
+  // builds have arrived, but no retro-build moves the rows already written.
+  // Shared by failureCopy (what to say) and failureTone (how to paint
   // it) so the two can never drift apart. FailureCopy.humanize on the Elixir
   // side maps the raw machine reason to human copy at the JSON boundary, so the
   // client usually already RECEIVES the human string — match a substring
@@ -14482,7 +14484,7 @@
   function failureCopy(reason) {
     if (!reason) return reason;
     if (isGithubPushBlocked(reason))
-      return "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+      return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
       return "This site has no build source yet. Connect a repo or run bp deploy.";
     if (reason.indexOf("artifact_url is empty") !== -1 ||

@@ -4879,13 +4879,16 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
 });
 
 // ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
-// The CP marks a GitHub push deployment born-failed (the builder can't run it
-// until the gh-1 App integration lands). FailureCopy.humanize maps the raw
+// The CP marked a GitHub push deployment born-failed when no source build was
+// available. Source builds have since arrived (the router's
+// `github_build_available?/1` is repo-present), so this family is now the
+// LEGACY tail plus the no-linked-repo defensive fallback — the copy explains
+// those rows and promises nothing. FailureCopy.humanize maps the raw
 // machine reason to human copy at the JSON boundary, so the client usually
 // already receives the human string — the mapping must be IDEMPOTENT.
 
 const GH_HUMAN =
-  "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+  "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
 
 test("failureCopy: raw github-push reason → the exact server-humanized copy", () => {
   assert.equal(
@@ -4906,7 +4909,7 @@ test("failureCopy/failureTone: byte-drifted server copy (case, U+2019, cannot) s
   // The Elixir FailureCopy twin owns the wire string; if its copy drifts by a
   // curly apostrophe, casing, or can't→cannot, the client must still recognize
   // the family (re-mapping to canonical copy is the bonus; the tone is the contract).
-  const curly = "GitHub pushes are recorded but can’t be built yet — automatic builds are coming.";
+  const curly = "This push predates GitHub source builds and can’t be built yet — push again to build.";
   assert.equal(hooks.failureCopy(curly), GH_HUMAN);
   assert.equal(hooks.failureTone(curly), "blocked");
   assert.equal(hooks.failureTone("GitHub Push Builds require the GitHub App integration"), "blocked");

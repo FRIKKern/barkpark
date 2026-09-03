@@ -1921,7 +1921,7 @@ const stBlocked = deployment({
   branch: "main",
   // The humanized born-failed github-push copy exactly as FailureCopy.humanize
   // emits it at the JSON boundary (the client re-map is idempotent on it).
-  failure_reason: "GitHub pushes are recorded but can’t be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.",
+  failure_reason: "This push predates GitHub source builds and can’t be built yet — push again to build this commit, or deploy it with bp deploy.",
   inserted_at: tMinus(90000),
   updated_at: tMinus(90000),
 });
