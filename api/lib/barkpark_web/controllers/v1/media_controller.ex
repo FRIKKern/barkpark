@@ -392,6 +392,17 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  def upload(conn, %{"dataset" => _dataset}) do
+    env =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, "missing 'file' field in multipart upload")
+
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
   # Patch the just-created `mediaAsset` doc with any inline metadata the
   # multipart carried, and return the document the receipt should render.
   #
@@ -435,17 +446,6 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   defp normalize_tags(metadata), do: metadata
-
-  def upload(conn, %{"dataset" => _dataset}) do
-    env =
-      {:error, :malformed}
-      |> Errors.to_envelope(conn)
-      |> Map.put(:message, "missing 'file' field in multipart upload")
-
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: Map.delete(env, :status)})
-  end
 
   def update(conn, %{"dataset" => dataset, "id" => id} = params) do
     metadata = metadata_params(params)

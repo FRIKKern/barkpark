@@ -46,10 +46,12 @@ defmodule Barkpark.Plugins.Media.PurgePaginationTailTest do
 
   @dataset "production"
 
-  # 32 rows, page size 8. Small enough to run fast, large enough that the tail
-  # has somewhere to go: 32 → 16 → 8 → 4 → 2 → 1 → 0.
+  # 32 rows, page size 4. Small enough to run fast, large enough that the tail
+  # has somewhere to go. The arithmetic is not approximate: a sweep that
+  # advances the offset deletes one page and skips the next, so it removes
+  # EXACTLY half. Measured: 32 -> 16 -> 8 -> 4 -> 0.
   @fixture_size 32
-  @page_size 8
+  @page_size 4
 
   describe "an offset-advancing purge loop leaves a decreasing, non-zero tail" do
     test "the tail halves each round instead of draining" do
@@ -74,6 +76,12 @@ defmodule Barkpark.Plugins.Media.PurgePaginationTailTest do
       assert tail == Enum.sort(tail, :desc), "the tail did not decrease: #{inspect(tail)}"
       assert Enum.uniq(tail) == tail, "the tail stalled instead of decreasing: #{inspect(tail)}"
       assert count_files() == 0, "the loop never terminated: #{inspect(tail)}"
+
+      # EXACT, because the fault is arithmetic and not a race: each sweep
+      # deletes one page and skips the next, so it removes exactly half. The
+      # customer's 186 / 79 / 67 / 38 is the same curve with a real client's
+      # partial failures on top of it.
+      assert tail == [16, 8, 4], "the tail was #{inspect(tail)}"
     end
   end
 
