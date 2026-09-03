@@ -84,7 +84,7 @@ vm.runInContext(
 // ── cch-w36-s1 · THE LAUNCH PAYWALL'S AUTHORITY SEAM ───────────────────────
 // The server refuses two DIFFERENT things on this one screen: launching needs
 // team-ADMIN (go_live's inline gate), paying needs OWNER
-// (Auth.require_primary_team_owner). So the 402 paywall used to hand a team
+// (Auth.require_current_team_owner). So the 402 paywall used to hand a team
 // admin a "Choose Supporter" button the server had already decided to refuse,
 // and a plain member's ROLE refusal rendered as "Plan limit reached".
 //
@@ -4879,13 +4879,16 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
 });
 
 // ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
-// The CP marks a GitHub push deployment born-failed (the builder can't run it
-// until the gh-1 App integration lands). FailureCopy.humanize maps the raw
+// The CP marked a GitHub push deployment born-failed when no source build was
+// available. Source builds have since arrived (the router's
+// `github_build_available?/1` is repo-present), so this family is now the
+// LEGACY tail plus the no-linked-repo defensive fallback — the copy explains
+// those rows and promises nothing. FailureCopy.humanize maps the raw
 // machine reason to human copy at the JSON boundary, so the client usually
 // already receives the human string — the mapping must be IDEMPOTENT.
 
 const GH_HUMAN =
-  "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+  "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
 
 test("failureCopy: raw github-push reason → the exact server-humanized copy", () => {
   assert.equal(
@@ -4906,7 +4909,7 @@ test("failureCopy/failureTone: byte-drifted server copy (case, U+2019, cannot) s
   // The Elixir FailureCopy twin owns the wire string; if its copy drifts by a
   // curly apostrophe, casing, or can't→cannot, the client must still recognize
   // the family (re-mapping to canonical copy is the bonus; the tone is the contract).
-  const curly = "GitHub pushes are recorded but can’t be built yet — automatic builds are coming.";
+  const curly = "This push predates GitHub source builds and can’t be built yet — push again to build.";
   assert.equal(hooks.failureCopy(curly), GH_HUMAN);
   assert.equal(hooks.failureTone(curly), "blocked");
   assert.equal(hooks.failureTone("GitHub Push Builds require the GitHub App integration"), "blocked");
@@ -13024,7 +13027,7 @@ test("isu-w5: updatePanelHtml escapes a hostile channel value (no markup injecti
 
 // ── cch-w45-s5: the two member-reachable instance writes are decided at OFFER
 // time ────────────────────────────────────────────────────────────────────────
-// BOTH routes are require_primary_team_admin server-side while every read this
+// BOTH routes are require_current_team_admin server-side while every read this
 // screen makes is `user`, so a plain member painted the whole instance and got a
 // 403 on click. Re-derived on the PRE-FIX tree by booting the committed
 // panel-overview-member scenario: #instance-body carried a LIVE
@@ -13208,7 +13211,7 @@ test("connect agent: the URL half is escaped and rides the shipped .detail-url g
 // ── cch-w47-s2: the FOUR autoupdate policy buttons are decided at OFFER time
 // too ────────────────────────────────────────────────────────────────────────
 // `patch "/v1/barkparks/:id/autoupdate"` (web/router.ex) opens with
-// Auth.require_primary_team_admin — the same tier as the Rollback button four
+// Auth.require_current_team_admin — the same tier as the Rollback button four
 // lines below it in the SAME button strip — yet the four `data-au` toggles were
 // appended with no authority argument at all. Same remedy, same grammar: the
 // live mount hook (`data-au=`) exists on the grant arm ONLY.
@@ -17071,7 +17074,7 @@ test("cch-w28-bl: deployDetailHtml — the terminal gate stops swallowing a refu
 // ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
 test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test (GR36)", () => {
   // Owner-only writes: only the literal "owner" role manages billing (stricter
-  // than admin — require_primary_team_owner).
+  // than admin — require_current_team_owner).
   assert.equal(hooks.billingCanManage("owner"), true);
   assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — billing is stricter");
   assert.equal(hooks.billingCanManage("member"), false);
@@ -21203,7 +21206,7 @@ test("cch-w38-s1: THE POST-CLICK ARMS AGREE WITH THE RAIL — a permanent refusa
 test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (its first assertion in this harness)", async () => {
   // attachDomain had ZERO assertions across 15k lines. Its 422 arm sat ABOVE
   // the friendly() fallthrough, so `422 {error:"no_team"}` — what
-  // require_primary_team_admin answers a caller with no team — was reported as
+  // require_current_team_admin answers a caller with no team — was reported as
   // "Only <name>.barkpark.cloud domains are supported for now."
   const drive = async (status, payload) => {
     const saved = { fetch: sandbox.fetch, document: sandbox.document };
@@ -21714,7 +21717,7 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   // DEVIATION FROM THE BRIEF, PINNED HERE SO IT IS VISIBLE RATHER THAN SILENT.
   // The slice brief predicted the five owner-gated billing writes would keep
   // ERRORS.forbidden verbatim, "because the owner gate's evidence is
-  // billing-scoped or absent". It is neither: Auth.require_primary_team_owner
+  // billing-scoped or absent". It is neither: Auth.require_current_team_owner
   // (cloud/lib/barkpark_cloud/web/auth.ex, the `forbidden(conn, required:
   // "owner", scope: "team")` arm) ships evidence, so the fence DOES fire
   // on POST /v1/billing/{checkout,portal,cancel} and they now read the owner
@@ -21729,7 +21732,7 @@ test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read t
   assert.ok(hooks.friendly(portal403, "Please try again in a moment.").indexOf("try again") === -1);
   // cch-w40-s1 — THE SHARPEST ATTACK ON D447'S INVERSION DIES HERE, and this is
   // the assertion that proves it. All three billing ROUTES (router.ex:5202/5243/
-  // 5278) gate first-statement on require_primary_team_owner, which sends
+  // 5278) gate first-statement on require_current_team_owner, which sends
   // `required: "owner"` — so forbiddenEvidenceCopy wins and the inverted default
   // is STRUCTURALLY UNREACHABLE from a billing screen. The arm above is the owner
   // arm and is untouched; the arm below is the BARE one, which is where the
@@ -22086,7 +22089,7 @@ test("cch-w40-s1 THE INVERSION CANNOT REACH A BILLING SCREEN — proved, not ass
   // The sharpest attack on D447 is "you just deleted the billing refusal copy".
   // It dies on TWO independent structures, and this test pins both.
   //
-  // (1) All three billing ROUTES gate first-statement on require_primary_team_owner,
+  // (1) All three billing ROUTES gate first-statement on require_current_team_owner,
   //     which sends `required: "owner"` — so forbiddenEvidenceCopy WINS there and
   //     the inverted default is unreachable from a billing refusal.
   assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "team" }, "Please try again in a moment."),

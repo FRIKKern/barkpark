@@ -244,7 +244,7 @@
     // PROVES. This key used to read "Only the team owner can manage billing."
     // (GR36, written when the billing writes were the only refusals that reached
     // it). Three waves of fences moved the ground under it: the billing gate
-    // itself (Auth.require_primary_team_owner) sends `required: "owner"`, so
+    // itself (Auth.require_current_team_owner) sends `required: "owner"`, so
     // forbiddenEvidenceCopy wins there and this string is now STRUCTURALLY
     // UNREACHABLE from every billing screen — it could only ever render where it
     // was FALSE. Measured on origin/main: friendly({error:"forbidden",
@@ -390,7 +390,7 @@
   // every caller falls through to exactly what it renders today. Deliberately
   // NOT composed from two other keys the payload also carries:
   //   • `scope` is NEVER interpolated. It is evidence for a log, not copy.
-  //     require_primary_team_admin reads conn.assigns[:current_team], which
+  //     require_current_team_admin reads conn.assigns[:current_team], which
   //     resolve_team fills from the x-barkpark-team header — so the label used
   //     to say "primary_team" even when a SECOND team refused an owner of their
   //     primary team. cch-w37-s3 renamed it to `scope: "team"`, which is what
@@ -8257,7 +8257,7 @@
   // cch-w45-s5 — THE OFFER-TIME AUTHORITY OF THE TWO MEMBER-REACHABLE INSTANCE
   // WRITES. POST /v1/barkparks/:id/domain (attachDomain) and POST
   // /v1/barkparks/:id/rollback (rollbackInstance) are both
-  // require_primary_team_admin server-side, while EVERY read this screen makes
+  // require_current_team_admin server-side, while EVERY read this screen makes
   // is `user` — so a plain member painted the instance in full and both writes
   // answered 403 on click. Measured, not assumed: booting the committed
   // panel-overview-member scenario served BOTH controls live.
@@ -8375,7 +8375,7 @@
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
-    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_primary_team_admin,
+    // cch-w45-s5: POST /v1/barkparks/:id/domain is require_current_team_admin,
     // so the OFFER is authority-gated too — a member gets the disabled control
     // and the server's own sentence instead of a 403 after the modal.
     // D437: the still-checking arm carries the page's ONE shipped exit
@@ -8979,7 +8979,7 @@
   // (decision 25 — a failed confirm never dies into a toast): terminal refusals
   // (rollbackRefusalTerminal) offer Close, transient ones Try again.
   //
-  // NO noBounce: this route is session-gated (require_primary_team_admin), so a 401
+  // NO noBounce: this route is session-gated (require_current_team_admin), so a 401
   // is a genuinely-expired session that SHOULD bounce to login. noBounce is ONLY
   // for the worker-gated fleet-banner probe (loadFleetRollout above) where a plain
   // session token 401s by design.
@@ -10199,7 +10199,7 @@
     if (acts.policy) {
       // cch-w47-s2: the four policy toggles are the SAME tier as Rollback four
       // lines below — `patch "/v1/barkparks/:id/autoupdate"` opens with
-      // Auth.require_primary_team_admin — and they were appended with no
+      // Auth.require_current_team_admin — and they were appended with no
       // authority argument at all, so a plain member was offered four writes the
       // server answers 403. Same seam, same grammar: the live `data-au` mount
       // hook exists on the grant arm only (D428/D439).
@@ -10214,7 +10214,7 @@
     // exists: a box with nothing to flip to gets the honest no_previous_slot typed
     // conflict on click, never a flip to garbage (charter D23).
     // cch-w45-s5: …but WHO may flip it is not for-every-hosted-box. POST
-    // /v1/barkparks/:id/rollback is require_primary_team_admin, and this button
+    // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
     // authority-gated (no exit here: the page's one [data-me-retry] rides the
@@ -14310,7 +14310,7 @@
           // carries ["root"], so require_ability can never refuse one and
           // Registry.get_team_site filters on TENANCY only — no role read exists
           // anywhere on that path. Gating it on instanceAdminAuthority (the
-          // INSTANCE Decommission's band, require_primary_team_admin — a
+          // INSTANCE Decommission's band, require_current_team_admin — a
           // strictly higher tier) would withhold a control the server honours.
           '<button class="btn btn-danger btn-sm" id="site-delete" type="button">Delete</button></div></div>' +
       '<div class="detail-grid">' +
@@ -14457,8 +14457,10 @@
   // the call site, so escaping is unchanged).
   // dwb-webhook-deploy-artifact-gap (interim): the ONE predicate for the
   // born-failed GitHub-push family — a push conjures a deployment the builder
-  // can't run yet (needs the gh-1 App integration), so the CP marks it born-
-  // failed. Shared by failureCopy (what to say) and failureTone (how to paint
+  // could not run at the time — LEGACY rows, born failed before the router's
+  // `github_build_available?/1` became a real repo-present predicate; source
+  // builds have arrived, but no retro-build moves the rows already written.
+  // Shared by failureCopy (what to say) and failureTone (how to paint
   // it) so the two can never drift apart. FailureCopy.humanize on the Elixir
   // side maps the raw machine reason to human copy at the JSON boundary, so the
   // client usually already RECEIVES the human string — match a substring
@@ -14482,7 +14484,7 @@
   function failureCopy(reason) {
     if (!reason) return reason;
     if (isGithubPushBlocked(reason))
-      return "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+      return "This push predates GitHub source builds and can't be built yet — push again to build this commit, or deploy it with bp deploy.";
     if (reason.indexOf("no build source") !== -1)
       return "This site has no build source yet. Connect a repo or run bp deploy.";
     if (reason.indexOf("artifact_url is empty") !== -1 ||
@@ -17406,7 +17408,7 @@
 
   // cch-w36-s1 — THE LAUNCH/CHECKOUT AUTHORITY SEAM. Two authorities disagree by
   // design: launching is TEAM-ADMIN (go_live's inline gate) while paying is
-  // OWNER-only (Auth.require_primary_team_owner). So the 402 paywall hands a
+  // OWNER-only (Auth.require_current_team_owner). So the 402 paywall hands a
   // team ADMIN a checkout door the server has already decided to refuse — the
   // console must not advertise it. The billing page already knows this shape
   // (renderTiers folds to renderBillingReadOnly for a non-owner); these two plan
@@ -17614,7 +17616,7 @@
   function activePlan() { return planFromSub(subCache); }
 
   // GR36: billing WRITES (Stripe portal + cancel) are owner-only —
-  // `require_primary_team_owner`, stricter than every other settings gate. The
+  // `require_current_team_owner`, stricter than every other settings gate. The
   // client signal is /v1/me's top-level `role` string (3-role vocab). Pure so a
   // node test pins the gate; the DOM branch reads it via billingIsOwner().
   // cch-w31-bl: the owner literal is CONSOLE_OWNER_ROLES now — the same one
@@ -18523,7 +18525,7 @@
   //     router.ex:10812-10815). Proven by a live probe: an admin pinned on team
   //     A writing team B gets 403 {scope:"team"}; a member pinned on B writing
   //     A gets 200.
-  //   * everything else → Auth.require_primary_team_admin/owner reads
+  //   * everything else → Auth.require_current_team_admin/owner reads
   //     :current_team, which resolve_team/2 fills FROM x-barkpark-team
   //     (auth.ex:122-130, :405-421). Its NAME lies ("primary"); its BEHAVIOUR
   //     agrees with meCache.
