@@ -5503,18 +5503,19 @@ defmodule BarkparkCloud.Web.Router do
             # is a post-commit best-effort record_audit/1 (the repo already exists
             # on GitHub — an audit-insert failure must never 500 the success). The
             # detail carries the repo name + template + file count, no secrets.
-            _ =
-              Accounts.record_audit(%{
-                team_id: team.id,
-                actor_user_id: conn.assigns.current_user.id,
-                action: "github.repo_pushed",
-                target_type: "github_repo",
-                target_id: full,
-                metadata: %{repo_full_name: full, template: template, pushed: pushed}
-              })
+            case Accounts.record_audit(%{
+                   team_id: team.id,
+                   actor_user_id: conn.assigns.current_user.id,
+                   action: "github.repo_pushed",
+                   target_type: "github_repo",
+                   target_id: full,
+                   metadata: %{repo_full_name: full, template: template, pushed: pushed}
+                 }) do
+              {:ok, _event} -> push_event(team.id, "audit")
+              {:error, cs} -> Logger.error("audit github.repo_pushed failed: #{inspect(cs)}")
+            end
 
             push_event(team.id, "github")
-            push_event(team.id, "audit")
 
             json(conn, 201, %{
               repo_full_name: full,
@@ -8001,26 +8002,27 @@ defmodule BarkparkCloud.Web.Router do
           # needs this nested case rather than a fourth outer arm.
           case Registry.delete_site(site) do
             {:ok, _, %{read_token: read_token}} ->
-              _ =
-                Accounts.record_audit(%{
-                  team_id: site.team_id,
-                  actor_user_id: conn.assigns.current_user.id,
-                  action: "site.deleted",
-                  target_type: "site",
-                  target_id: site.id,
-                  # ssw8: the credential half of the teardown is RECORDED, not
-                  # assumed. `read_token` is the one fact about this delete that
-                  # nothing else in the system can reconstruct afterwards — the
-                  # row that named the token is gone by the time anyone asks.
-                  metadata: %{
-                    slug: site.slug,
-                    kind: site.kind,
-                    read_token: to_string(read_token)
-                  }
-                })
+              case Accounts.record_audit(%{
+                     team_id: site.team_id,
+                     actor_user_id: conn.assigns.current_user.id,
+                     action: "site.deleted",
+                     target_type: "site",
+                     target_id: site.id,
+                     # ssw8: the credential half of the teardown is RECORDED, not
+                     # assumed. `read_token` is the one fact about this delete that
+                     # nothing else in the system can reconstruct afterwards — the
+                     # row that named the token is gone by the time anyone asks.
+                     metadata: %{
+                       slug: site.slug,
+                       kind: site.kind,
+                       read_token: to_string(read_token)
+                     }
+                   }) do
+                {:ok, _event} -> push_event(site.team_id, "audit")
+                {:error, cs} -> Logger.error("audit site.deleted failed: #{inspect(cs)}")
+              end
 
               push_event(site.team_id, "sites")
-              push_event(site.team_id, "audit")
 
               # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
               # The delete succeeded either way (the CP row is the truth, and a
@@ -8138,22 +8140,26 @@ defmodule BarkparkCloud.Web.Router do
                     # lost-race 200 re-uses an existing row and stamps nothing (no
                     # double-audit on a double-click). Detail carries git_ref + whether
                     # an artifact was supplied, never the artifact bytes.
-                    _ =
-                      Accounts.record_audit(%{
-                        team_id: site.team_id,
-                        actor_user_id: conn.assigns.current_user.id,
-                        action: "site.deploy_requested",
-                        target_type: "deployment",
-                        target_id: deployment.id,
-                        metadata: %{
-                          site_id: site.id,
-                          git_ref: attrs.git_ref,
-                          has_artifact: not is_nil(attrs.artifact_url)
-                        }
-                      })
+                    case Accounts.record_audit(%{
+                           team_id: site.team_id,
+                           actor_user_id: conn.assigns.current_user.id,
+                           action: "site.deploy_requested",
+                           target_type: "deployment",
+                           target_id: deployment.id,
+                           metadata: %{
+                             site_id: site.id,
+                             git_ref: attrs.git_ref,
+                             has_artifact: not is_nil(attrs.artifact_url)
+                           }
+                         }) do
+                      {:ok, _event} ->
+                        push_event(site.team_id, "audit")
+
+                      {:error, cs} ->
+                        Logger.error("audit site.deploy_requested failed: #{inspect(cs)}")
+                    end
 
                     push_event(site.team_id, "deployments")
-                    push_event(site.team_id, "audit")
                     json(conn, 201, %{deployment: deployment_json(deployment)})
 
                   {:error, %Ecto.Changeset{errors: errs} = cs} ->
@@ -8292,21 +8298,22 @@ defmodule BarkparkCloud.Web.Router do
 
           case Sites.Deploy.rollback(site, bp) do
             {:ok, result} ->
-              _ =
-                Accounts.record_audit(%{
-                  team_id: site.team_id,
-                  actor_user_id: conn.assigns.current_user.id,
-                  action: "site.rolled_back",
-                  target_type: "site",
-                  target_id: site.id,
-                  metadata: %{
-                    deployment_id: result.deployment_id,
-                    previous_deployment_id: result.previous_deployment_id
-                  }
-                })
+              case Accounts.record_audit(%{
+                     team_id: site.team_id,
+                     actor_user_id: conn.assigns.current_user.id,
+                     action: "site.rolled_back",
+                     target_type: "site",
+                     target_id: site.id,
+                     metadata: %{
+                       deployment_id: result.deployment_id,
+                       previous_deployment_id: result.previous_deployment_id
+                     }
+                   }) do
+                {:ok, _event} -> push_event(site.team_id, "audit")
+                {:error, cs} -> Logger.error("audit site.rolled_back failed: #{inspect(cs)}")
+              end
 
               push_event(site.team_id, "deployments")
-              push_event(site.team_id, "audit")
 
               json(conn, 200, %{
                 ok: true,
@@ -13484,15 +13491,17 @@ defmodule BarkparkCloud.Web.Router do
                  cf_zone_id: zone_id,
                  cf_record_id: record_id
                }) do
-          _ =
-            Accounts.record_audit(%{
-              team_id: site.team_id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "site.cloudflare_bound",
-              target_type: "site",
-              target_id: site.id,
-              metadata: %{site_id: site.id, cf_domain: domain, cf_zone_id: zone_id}
-            })
+          case Accounts.record_audit(%{
+                 team_id: site.team_id,
+                 actor_user_id: conn.assigns.current_user.id,
+                 action: "site.cloudflare_bound",
+                 target_type: "site",
+                 target_id: site.id,
+                 metadata: %{site_id: site.id, cf_domain: domain, cf_zone_id: zone_id}
+               }) do
+            {:ok, _event} -> :ok
+            {:error, cs} -> Logger.error("audit site.cloudflare_bound failed: #{inspect(cs)}")
+          end
 
           {:cont, bound_site}
         else
@@ -13621,20 +13630,22 @@ defmodule BarkparkCloud.Web.Router do
 
         case Sites.Deploy.enqueue(site, bp, force, "manual", nil, source) do
           {:ok, deployment} ->
-            _ =
-              Accounts.record_audit(%{
-                team_id: site.team_id,
-                actor_user_id: conn.assigns.current_user.id,
-                action: "site.deploy_requested",
-                target_type: "deployment",
-                target_id: deployment.id,
-                metadata: %{
-                  site_id: site.id,
-                  kind: site.kind,
-                  build_id: deployment.build_id,
-                  source: deployment.source
-                }
-              })
+            case Accounts.record_audit(%{
+                   team_id: site.team_id,
+                   actor_user_id: conn.assigns.current_user.id,
+                   action: "site.deploy_requested",
+                   target_type: "deployment",
+                   target_id: deployment.id,
+                   metadata: %{
+                     site_id: site.id,
+                     kind: site.kind,
+                     build_id: deployment.build_id,
+                     source: deployment.source
+                   }
+                 }) do
+              {:ok, _event} -> :ok
+              {:error, cs} -> Logger.error("audit site.deploy_requested failed: #{inspect(cs)}")
+            end
 
             # MINT-THEN-UPLOAD (charter D86), and the order is FORCED, not
             # preferred: `build_id` is baked INTO the bytes at build time
@@ -14927,22 +14938,26 @@ defmodule BarkparkCloud.Web.Router do
                 # record_audit/1 — an audit-insert failure must not strand a live
                 # GitHub webhook by rolling the local link back. Repo/branch only,
                 # never the webhook secret.
-                _ =
-                  Accounts.record_audit(%{
-                    team_id: team.id,
-                    actor_user_id: conn.assigns.current_user.id,
-                    action: "site.github_connected",
-                    target_type: "site",
-                    target_id: site.id,
-                    metadata: %{
-                      site_id: site.id,
-                      repo: updated.github_repo,
-                      branch: updated.github_branch
-                    }
-                  })
+                case Accounts.record_audit(%{
+                       team_id: team.id,
+                       actor_user_id: conn.assigns.current_user.id,
+                       action: "site.github_connected",
+                       target_type: "site",
+                       target_id: site.id,
+                       metadata: %{
+                         site_id: site.id,
+                         repo: updated.github_repo,
+                         branch: updated.github_branch
+                       }
+                     }) do
+                  {:ok, _event} ->
+                    push_event(team.id, "audit")
+
+                  {:error, cs} ->
+                    Logger.error("audit site.github_connected failed: #{inspect(cs)}")
+                end
 
                 push_event(team.id, "sites")
-                push_event(team.id, "audit")
 
                 json(conn, 200, %{
                   site: site_json(updated),
@@ -15474,15 +15489,17 @@ defmodule BarkparkCloud.Web.Router do
   defp start_prebuilt_deploy(conn, site, deployment, bytes, sha) do
     case Sites.Deploy.store_artifact(deployment, bytes, sha) do
       {:ok, stamped} ->
-        _ =
-          Accounts.record_audit(%{
-            team_id: site.team_id,
-            actor_user_id: conn.assigns.current_user.id,
-            action: "site.artifact_uploaded",
-            target_type: "deployment",
-            target_id: deployment.id,
-            metadata: %{site_id: site.id, sha256: sha, bytes: byte_size(bytes)}
-          })
+        case Accounts.record_audit(%{
+               team_id: site.team_id,
+               actor_user_id: conn.assigns.current_user.id,
+               action: "site.artifact_uploaded",
+               target_type: "deployment",
+               target_id: deployment.id,
+               metadata: %{site_id: site.id, sha256: sha, bytes: byte_size(bytes)}
+             }) do
+          {:ok, _event} -> :ok
+          {:error, cs} -> Logger.error("audit site.artifact_uploaded failed: #{inspect(cs)}")
+        end
 
         # ONLY NOW. The digest is committed, so the row can already name the
         # bytes it is about to serve; a driver started before this could reach

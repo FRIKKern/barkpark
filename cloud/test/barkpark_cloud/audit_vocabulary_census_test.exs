@@ -52,9 +52,12 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   ## Limits, stated so nobody over-reads a green run
 
     * It proves a verb HAS a producer, not that the producer is REACHABLE or
-      that the row is actually persisted. `Accounts.record_audit/1` errors are
-      discarded at 8 of 12 call sites — filed separately as
-      `cch-w51-bl-record-audit-errors-are-discarded-at-every-call-site`.
+      that the row is actually persisted. The eight silent `_ =` discards this
+      note used to name are gone — every `Accounts.record_audit/1` call site in
+      the router now binds its `{:error, changeset}` and logs it, and
+      `router_audit_discard_census_test.exs` is the tripwire that keeps the
+      discard idiom out. A row can still fail to persist; the difference is that
+      an operator now gets a line when it does.
     * It is a SOURCE scan, not a call graph: dead code counts as a producer.
     * ARM (c) IS ONE VERB WIDE, ON PURPOSE, AND THAT IS A LIMIT NOT A DESIGN.
       It pins the lanes of `barkpark.deleted` because that is the pair a wave

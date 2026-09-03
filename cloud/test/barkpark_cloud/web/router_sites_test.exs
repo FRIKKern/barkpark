@@ -2168,9 +2168,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
       assert conn.status == 200
 
-      # The router writes this event with `_ = Accounts.record_audit(…)`: a
-      # changeset error is DISCARDED, so the 200 above says nothing about
-      # whether the row exists. Only the trail itself can answer.
+      # The router writes this event through a `case Accounts.record_audit(…)`
+      # whose error arm LOGS (post-commit best-effort: the box already rolled
+      # back, so a refused insert must not 500 a success). The 200 above still
+      # says nothing about whether the row exists — only the trail can answer.
+      # What the `case` buys is that the error is no longer thrown away and the
+      # console's "audit" push no longer fires over a row that was never
+      # written. `router_audit_discard_census_test.exs` keeps the shape.
       events = Accounts.list_audit_events(team)
       assert ev = Enum.find(events, &(&1.action == "site.rolled_back"))
       assert ev.team_id == team.id
@@ -2512,6 +2516,39 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       # The row is gone, and its deployments cascaded (on_delete: :delete_all).
       assert Registry.get_site(site.id) == nil
       assert Registry.list_deployments(site, 10) == []
+    end
+
+    test "the delete LANDS in the audit trail — it is the ONLY surviving record of the site" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      before_count = Repo.aggregate(BarkparkCloud.Accounts.AuditEvent, :count)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 200
+
+      # This route is the sharpest case in the audit register: `delete_site/1`
+      # is a hard `Repo.delete`, so after this request NOTHING else in the
+      # database can say the site existed or who removed it. Until this test
+      # nothing in `cloud/test` drove the route and read the trail — the 200 was
+      # the only thing anyone checked, and the 200 is also what a swallowed
+      # changeset error produced.
+      events = Accounts.list_audit_events(team)
+      assert ev = Enum.find(events, &(&1.action == "site.deleted"))
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "site"
+      assert ev.target_id == site.id
+      assert ev.metadata["slug"] == site.slug
+      assert ev.metadata["kind"] == site.kind
+
+      # A team+action-scoped read cannot tell "one row" from "two"; the global
+      # delta can, and it is the arm that reds if the converted `case` ever
+      # writes twice or the route stamps a second verb.
+      assert Repo.aggregate(BarkparkCloud.Accounts.AuditEvent, :count) == before_count + 1
     end
 
     ## W67 S2 (charter D820) — THE TWO CASCADES NOTHING ASSERTED.
