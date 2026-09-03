@@ -27025,3 +27025,114 @@ test("cch-w45-bl: loadTheaterCatalog asks the conduit too — a catalog-less kin
     sandbox.fetch = realFetch;
   }
 });
+
+// ── cch-w45-bl · THE CONDUIT READ THAT NEVER ANSWERS, AND THE DOOR BEHIND IT ──
+//
+// FOUND BY THE BROWSER, NOT BY READING. The gate above is a READINESS narrowing
+// on top of a network read, and a narrowing placed in front of a door has two
+// ways to fail, not one: it can fail to withhold (the shipped tests cover that)
+// and it can fail OPEN-ENDED — withhold on an answer it never actually got. The
+// catalog panel is the ONLY thing that renders `.launch-connect-provider`, the
+// launch wizard's connect door, so a mount that stalls or refuses on an
+// unanswered conduit read costs the person the one control that lets them
+// connect a provider at all. The overflow guard measured exactly that class on
+// the PR head (10 findings across W24-cred-dialog-button-alive and
+// W25-launch-catalog-after-connect: "the launch wizard never rendered a
+// .launch-connect-provider door").
+//
+// `providerCapsCache` is ONE read per page life, so these arms cannot run in the
+// module sandbox — the tests above already resolved it. Each gets its own realm,
+// which is also what makes the assertion honest: it drives the mount's FIRST
+// conduit read, the only one whose failure the person can be standing in front
+// of. A fresh realm per arm; nothing here touches the shared sandbox.
+function w45FreshHooks() {
+  const h = {};
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading",
+      addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [],
+      getElementById: () => null,
+      createElement: () => ({ ...inertEl }),
+      documentElement: { ...inertEl, getAttribute: () => null },
+      body: { ...inertEl, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: storage, sessionStorage: storage, navigator: {},
+    URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
+    console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(fs.readFileSync(new URL("./app.js", import.meta.url), "utf8"), box);
+  return { h, box };
+}
+
+test("cch-w45-bl: a conduit read that FAILS still reaches the catalog — and the connect door with it", async () => {
+  // Every way the capability read can come back without a usable answer. Each
+  // one is "unknown", and unknown is not a refusal: the shipped path must run.
+  const ARMS = {
+    "a rejected fetch (offline / DNS / refused)": () => Promise.reject(new TypeError("Failed to fetch")),
+    "a 500 from the conduit itself": () => Promise.resolve({
+      ok: false, status: 500, headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ error: "internal" }),
+    }),
+    "a 200 carrying an HTML error page (a proxy in the way)": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "text/html" },
+      text: () => Promise.resolve("<html>502 Bad Gateway</html>"),
+    }),
+    "a 200 whose JSON body is null": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: () => Promise.resolve(null),
+    }),
+    "a 200 whose body is not the payload shape at all": () => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ providers: "not-an-object" }),
+    }),
+  };
+  const flushP = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  for (const [label, capAnswer] of Object.entries(ARMS)) {
+    const { h, box } = w45FreshHooks();
+    const wire = [];
+    box.fetch = (url) => {
+      const p = String(url).split("?")[0];
+      wire.push(p);
+      if (p.indexOf("/v1/providers/capabilities") !== -1) return capAnswer();
+      // The catalog read answers exactly as a control plane with no connected
+      // provider does — 404 no_provider — because THAT is the response the
+      // connect door is rendered from.
+      return Promise.resolve({
+        ok: false, status: 404, headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ error: "no_provider" }),
+      });
+    };
+    const slot = fakeNode();
+    slot.isConnected = true;
+    const host = fakeNode();
+    host.querySelector = (sel) => (sel === ".launch-catalog" ? slot : null);
+    host.querySelectorAll = () => [];
+
+    h.mountLaunchCatalog(host, {}, "hetzner", "gx");
+    await flushP();
+
+    assert.equal(wire.filter((p) => p.indexOf("/hetzner/catalog") !== -1).length, 1,
+      "with " + label + " the conduit told us NOTHING about hetzner, yet the catalog was not fetched — " +
+      "the gate withheld on an absence; wire: " + JSON.stringify(wire));
+    assert.match(slot.innerHTML, /launch-connect-provider/,
+      "with " + label + " the panel resolved no_provider but rendered no .launch-connect-provider door — " +
+      "the person has no way to connect a provider at all; panel: " + JSON.stringify(slot.innerHTML));
+    // Not the no_catalog arm: a conduit we could not read has not told us that
+    // this kind publishes no catalog, so its sentence must never appear.
+    assert.doesNotMatch(slot.innerHTML, /size-and-region catalog/,
+      "with " + label + " the console printed a no-catalog claim it cannot have; panel: " +
+      JSON.stringify(slot.innerHTML));
+    // And the mount is not stranded on its loading frame.
+    assert.doesNotMatch(slot.innerHTML, /Loading /,
+      "with " + label + " the mount never left its loading frame — the conduit read stranded it");
+  }
+});
