@@ -120,15 +120,17 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
 
       result = Media.delete_file(file.id)
 
-      assert {:error, {:asset_doc_delete_failed, _reason}} = result,
+      assert match?({:error, {:asset_doc_delete_failed, _reason}}, result),
              "delete_file/2 reported #{inspect(result)} while the mediaAsset document " <>
                "refused to delete — an ok over a surviving document is the bug"
 
       # BOTH halves survived. That is the point of "atomic": the blob row is
       # not allowed to outlive its document, and it is not allowed to die
       # without it either.
-      assert {:ok, _} = Media.get_file(file.id),
-             "the blob row was deleted even though its mediaAsset document survived"
+      row_after = Media.get_file(file.id)
+
+      assert match?({:ok, _}, row_after),
+             "the blob row was deleted even though its mediaAsset document survived — got #{inspect(row_after)}"
 
       assert Assets.find_by_media_file_id(file.id, @dataset)
     end
