@@ -791,3 +791,81 @@ test('control: the claude lane still streams and settles through the shared tail
   expect(fetchTailOf(effects)?.gen).toBe(1)
   expect(state.settling).toBe(true)
 })
+
+// ── the codex turn boundary advances the generation (criterion 1) ────────────
+//
+// The twin of internal/chat/reduce.go's turn_started arm. Before it, `gen` moved
+// at exactly one site — the claude system/init arm — so a codex session's D77
+// settle fence was INERT: every turn shared one generation, and `ev.gen ===
+// st.tailGen` was true for a settle GET issued a turn ago.
+test('a codex turn_started advances the generation and does NOTHING else', () => {
+  const before: ChatState = {
+    ...initialChatState('s1'),
+    gen: 3,
+    tailGen: 3,
+    tail: 'prior turn, still painted',
+    tailBytes: 'prior turn, still painted'.length,
+    phase: 'idle',
+    notice: 'a standing notice',
+    stableTurn: 7,
+    committedBytes: 41,
+    committedChars: 41,
+  }
+  const { state: after, effects } = drive(before, t0, runtimeFrame('turn_started'))
+
+  expect(after.gen).toBe(before.gen + 1)
+  expect(effects).toHaveLength(0)
+
+  // The tail is untouched: blanking it here would flash away the prior turn's
+  // still-painted text, which carries its own generation until its settle lands.
+  expect(after.tail).toBe(before.tail)
+  expect(after.tailGen).toBe(before.tailGen)
+  expect(after.tailBytes).toBe(before.tailBytes)
+  expect(after.phase).toBe(before.phase)
+  expect(after.notice).toBe(before.notice)
+
+  // THE CURSOR STAYS PUT — keyed on the SERVER turn, never on this client clock
+  // (pinned from the other side by __tests__/chatCursorTurnKeyed.test.ts).
+  expect(after.stableTurn).toBe(before.stableTurn)
+  expect(after.committedBytes).toBe(before.committedBytes)
+  expect(after.committedChars).toBe(before.committedChars)
+})
+
+// The mobile half of the two-turn codex interleave (criterion 2), driven
+// ENTIRELY off runtime frames — no claude system/init anywhere, which is exactly
+// the lane the fence used to be inert on. Turn 1 settles late; turn 2 is already
+// live when its GET lands; turn 2's text must survive.
+test('a stale turn-1 codex settle can no longer clear a live turn-2 tail', () => {
+  let { state } = drive(
+    initialChatState('s1'),
+    t0,
+    runtimeFrame('turn_started'),
+    runtimeTextFrame('text_delta', 'TURN ONE ANSWER'),
+  )
+
+  let effects: ChatEffect[]
+  ;({ state, effects } = drive(state, t0, runtimeFrame('turn_completed', { terminal_state: 'completed' })))
+  const staleGen = fetchTailOf(effects)?.gen ?? -1
+  expect(staleGen).toBeGreaterThanOrEqual(0)
+
+  // Turn 2 starts and streams while turn 1's GET is still in flight.
+  ;({ state } = drive(
+    state,
+    t0,
+    runtimeFrame('turn_started'),
+    runtimeTextFrame('text_delta', 'TURN TWO IS LIVE'),
+  ))
+  expect(state.tailGen).not.toBe(staleGen) // the fence is armed, not inert
+
+  // Turn 1's stale GET lands last.
+  ;({ state } = drive(state, t0, {
+    type: 'tailFetched',
+    gen: staleGen,
+    session: {
+      id: 's1',
+      messages: [{ seq: 1, role: 'assistant', source_markdown: 'TURN ONE ANSWER' }],
+    },
+  }))
+  expect(state.messages).toHaveLength(1) // turn one still settles into its row
+  expect(state.tail).toContain('TURN TWO IS LIVE') // …and turn two survives
+})
