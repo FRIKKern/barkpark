@@ -19910,6 +19910,106 @@
     center.appendChild(el);
   }
 
+  // ====================================================== EMAIL CONFIRMATION
+  // cch-w53-bl-the-emailed-confirmation-link-has-no-client — THE CLIENT HALF OF
+  // A FLOW THAT SHIPPED WITH ONLY ITS SERVER HALF.
+  //
+  // `Accounts.confirm_url/1` mails <dashboard>/?confirm=<token>, and the route
+  // that honours it has existed the whole time: POST /v1/auth/verify-email ->
+  // Accounts.confirm_user/1 sets confirmed_at and burns every live confirm
+  // token. What was missing was THIS: nothing under cloud/priv read ?confirm=
+  // or called that route, so clicking the emailed link landed you on the
+  // dashboard and nothing happened. The control plane was mailing a promise no
+  // code kept — the dead-flow shape, not an unbuilt seam.
+  //
+  // TWO RULES, both borrowed from bootOAuth directly below:
+  //
+  //   1. SCRUB FIRST, AND BY REPLACE. The token is single-use and it is sitting
+  //      in the address bar. It comes out of the URL — and out of the history
+  //      entry, so a Back press cannot resurrect it — BEFORE a byte goes on the
+  //      wire. Only the `confirm` key is dropped; a link that also carried
+  //      ?checkout= or ?billing= keeps them, because those have their own
+  //      readers on this same boot.
+  //
+  //   2. A FAILED VERIFY IS NOT A FAILED LOGIN. Confirming an address is
+  //      orthogonal to holding a session: a spent, expired or forged token must
+  //      never touch the session, never route to the sign-in screen, and never
+  //      borrow "Sign-in failed". It is an outcome reported on whatever screen
+  //      the person already landed on. Getting this wrong would turn a stale
+  //      bookmark into an apparent sign-out.
+  //
+  // NOT A NEW GATE. `confirmed_at` gates no authority anywhere in cloud/lib
+  // today — GET /v1/me reports it as `user.confirmed` and nothing reads that —
+  // so this makes an already-shipped flow honest rather than adding a wall.
+  // That is also why the outcome is a toast and not a screen: nothing the
+  // person can do next depends on it.
+
+  // Pure: the ?confirm= token out of a location.search string, or null. A
+  // malformed query degrades to null — never a throw on the boot path.
+  function confirmTokenFromSearch(search) {
+    var params;
+    try { params = new URLSearchParams(search || ""); }
+    catch (e) { return null; }
+    var token = (params.get("confirm") || "").trim();
+    return token === "" ? null : token;
+  }
+
+  // Drop ONLY the confirm key from the address bar, preserving every other
+  // parameter, the path and the fragment. replaceState, never pushState.
+  function scrubConfirmParam() {
+    if (typeof history === "undefined" || !history.replaceState) return;
+    var kept = (location.search || "").replace(/^\?/, "").split("&").filter(function (kv) {
+      return kv !== "" && kv.split("=")[0] !== "confirm";
+    });
+    var qs = kept.length ? "?" + kept.join("&") : "";
+    history.replaceState(null, "", (location.pathname || "/") + qs + (location.hash || ""));
+  }
+
+  // Pure: fold the verify-email response into the toast to show. THREE
+  // outcomes, and not one of them says anything about signing in.
+  //   200        — confirmed.
+  //   422        — the route's single opaque invalid_token: already used,
+  //                expired, or revoked. Named as spent, with the way to get a
+  //                fresh one, because there is nothing the person can retry.
+  //   anything   — a transport or server fault. Says only what is true: we
+  //                could not check right now, nothing else changed.
+  function emailConfirmOutcome(r) {
+    if (r && r.ok) {
+      return { kind: "success", title: "Email confirmed",
+        body: "Thanks — this address is verified." };
+    }
+    if (r && r.status === 422) {
+      return { kind: "info", title: "That confirmation link is spent",
+        body: "It was already used, or it expired. Send yourself a fresh one from Settings → Account." };
+    }
+    return { kind: "info", title: "We couldn't confirm this address just now",
+      body: "Nothing else changed. Open the link again in a moment." };
+  }
+
+  // The boot reader. Not an emailed confirm landing → `done()` on the spot, so
+  // a normal boot costs nothing.
+  function bootEmailConfirm(done) {
+    done = typeof done === "function" ? done : function () {};
+    var token = confirmTokenFromSearch(location.search);
+    if (!token) { done(); return; }
+
+    scrubConfirmParam();
+
+    api("POST", "/v1/auth/verify-email", { token: token }, { noAuth: true }).then(function (r) {
+      // noAuth on purpose: the token IS the credential (the route takes no
+      // session), and a logged-out person clicking the link must get the same
+      // answer as a logged-in one.
+      toast(emailConfirmOutcome(r));
+      done();
+    }).catch(function () {
+      // api() resolves its own rejections, so this covers a throw INSIDE the
+      // handler above. Report the neutral outcome and get out of the way —
+      // never leave the boot half-run over an email confirmation.
+      toast(emailConfirmOutcome(null));
+      done();
+    });
+  }
+
   // The boot gate. Runs ONCE, from init(), in place of the bare `render()` — it
   // resolves any OAuth landing first and then hands control to `done` (which IS
   // render). Not an OAuth landing → `done()` on the spot, so a normal boot costs
@@ -23590,6 +23690,14 @@
   // roster: GET /v1/teams/:id/members maps list_team_members/1 with no limit and
   // no offset, so `members` is complete in the same frame — not a page.
   //
+  // THAT PREMISE IS HELD BY A TEST, not by this sentence:
+  // BarkparkCloud.Web.RouterMembersRosterCompletenessTest
+  // (cloud/test/barkpark_cloud/web/router_members_roster_completeness_test.exs)
+  // reds if the route pages or if list_team_members/1 grows a limit/offset, and
+  // names this predicate in its failure message. Read it before touching either
+  // side: they are one contract (cch-w45-bl-no-tripwire-on-the-members-roster-
+  // completeness-premise).
+  //
   // Every arm below is a REASON TO HAVE NO OPINION, and no opinion means OFFER.
   // A predicate that fails CLOSED on a roster it cannot read would withhold a
   // control the server honours — the same lie running backwards.
@@ -25050,6 +25158,15 @@
     var activateTheme = $("#activate-theme-toggle");
     if (activateTheme) activateTheme.addEventListener("click", toggleTheme);
 
+    // cch-w53-bl-the-emailed-confirmation-link-has-no-client: an emailed
+    // ?confirm= landing is resolved on this same boot. DELIBERATELY NOT CHAINED
+    // in front of bootOAuth — confirming an address is orthogonal to signing in,
+    // so it must not delay the first paint, and a slow or failing verify must
+    // not hold the screen (which is one of the ways it would start looking like
+    // a sign-in failure). It scrubs the token synchronously before its own hop,
+    // so the two boot readers cannot see each other's parameters.
+    bootEmailConfirm();
+
     // The ONLY call-site edit in this file: an OAuth landing is resolved (code
     // exchanged for a session) BEFORE the first paint, then render() runs exactly
     // as it always did. render() itself stays synchronous and its other 8 call
@@ -25925,6 +26042,15 @@
       // the one-shot flag.
       oauthReturnFromHash: oauthReturnFromHash, bootOAuth: bootOAuth,
       handleOAuthReturn: handleOAuthReturn,
+      // cch-w53-bl-the-emailed-confirmation-link-has-no-client — the client half
+      // of the emailed ?confirm= link. Same three-part shape as the OAuth gate
+      // above: the pure reader, the pure outcome classifier, and the boot path
+      // itself (scrub by REPLACE before the hop, POST the token, report an
+      // outcome that never mentions signing in) — driven end-to-end in node
+      // against a stubbed fetch, because the defect this closes was the ABSENCE
+      // of a network hop and only a drive can see that.
+      confirmTokenFromSearch: confirmTokenFromSearch,
+      emailConfirmOutcome: emailConfirmOutcome, bootEmailConfirm: bootEmailConfirm,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,

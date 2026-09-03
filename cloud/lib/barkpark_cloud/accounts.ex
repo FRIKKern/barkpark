@@ -129,6 +129,12 @@ defmodule BarkparkCloud.Accounts do
 
   ## OAuth / SSO (oauth-sso)
 
+  @typedoc """
+  Which of `get_or_create_user_from_oauth/1`'s three precedence arms ran.
+  See that function's "The BRANCH is part of the return" section.
+  """
+  @type oauth_branch :: :existing | :linked | :created
+
   @doc """
   Resolve a Cloud User from a VERIFIED OAuth identity, birthing one (with its own
   team + owner membership + a self-serve trial + notification settings, in ONE
@@ -148,21 +154,47 @@ defmodule BarkparkCloud.Accounts do
        notification settings, all in one transaction, so a half-made account
        never strands.
 
-  Returns `{:ok, %User{}}` or `{:error, term}`. A concurrent double-callback that
-  races to link the same identity is reconciled to the now-linked user rather
-  than surfacing a 500.
+  Returns `{:ok, %User{}, branch}` or `{:error, term}`. A concurrent
+  double-callback that races to link the same identity is reconciled to the
+  now-linked user rather than surfacing a 500.
+
+  ## The BRANCH is part of the return, not an inference
+
+  The three precedence arms above are three DIFFERENT events, and until
+  cch-w53-bl-oauth-linked-needs-a-branch-reporting-return this function
+  collapsed them into one bare `{:ok, user}`. A caller that wanted to record
+  "this account gained a provider" had no way to tell arm 2 (a LINK onto an
+  account that already existed) from arm 3 (a first-ever signup), so any audit
+  producer wired to it would have stamped `oauth.linked` on every OAuth signup —
+  a trail entry describing a linking event that did not happen.
+
+  So the branch is reported:
+
+    * `:existing` — arm 1, plus the concurrent-callback reconcile. Nothing was
+      created and nothing was linked on THIS call; the identity was already
+      ours.
+    * `:linked` — arm 2. An account that already existed gained a new provider
+      identity. This is the ONE branch `oauth.linked` may be produced on.
+    * `:created` — arm 3. A first-ever signup. An identity row was inserted, but
+      there was no prior account for it to be "linked" to.
+
+  It is a three-value atom rather than a boolean on purpose: `:existing` and
+  `:created` are both "not a link" for the audit question and would collapse
+  under a boolean, while they are opposites for every other question a caller
+  could ask (one wrote no rows at all, the other birthed a user, a team, a
+  membership, a trial and a settings row).
   """
   @spec get_or_create_user_from_oauth(%{
           provider: String.t(),
           provider_uid: String.t(),
           email: String.t() | nil
-        }) :: {:ok, User.t()} | {:error, term()}
+        }) :: {:ok, User.t(), oauth_branch()} | {:error, term()}
   def get_or_create_user_from_oauth(%{provider: provider, provider_uid: uid} = identity)
       when is_binary(provider) and is_binary(uid) do
     email = Map.get(identity, :email)
 
     case get_user_by_external_identity(provider, uid) do
-      %User{} = user -> {:ok, user}
+      %User{} = user -> {:ok, user, :existing}
       nil -> birth_or_link_oauth(provider, uid, email)
     end
   end
@@ -3074,11 +3106,11 @@ defmodule BarkparkCloud.Accounts do
   defp birth_or_link_oauth(provider, uid, email) do
     result =
       Repo.transaction(fn ->
-        user = find_or_birth_oauth_user!(provider, uid, email)
+        {user, branch} = find_or_birth_oauth_user!(provider, uid, email)
 
         case link_external_identity(user, %{provider: provider, provider_uid: uid, email: email}) do
           {:ok, _identity} ->
-            user
+            {user, branch}
 
           {:error, %Ecto.Changeset{} = cs} ->
             if unique_violation?(cs),
@@ -3088,14 +3120,19 @@ defmodule BarkparkCloud.Accounts do
       end)
 
     case result do
-      {:ok, user} ->
-        {:ok, user}
+      {:ok, {user, branch}} ->
+        {:ok, user, branch}
 
       # A concurrent callback linked this identity first; its tx aborted ours on
       # the unique violation. Re-fetch OUTSIDE the aborted tx.
+      #
+      # The branch here is `:existing`, NOT the branch our aborted transaction
+      # was taking: whatever this call was about to do, it did not do it — the
+      # winner did. Reporting `:linked` from here would stamp a second
+      # `oauth.linked` row for the one link the other callback already recorded.
       {:error, :identity_conflict} ->
         case get_user_by_external_identity(provider, uid) do
-          %User{} = user -> {:ok, user}
+          %User{} = user -> {:ok, user, :existing}
           nil -> {:error, :identity_conflict}
         end
 
@@ -3111,17 +3148,24 @@ defmodule BarkparkCloud.Accounts do
   # Repo.rollbacks the whole thing. The convergence path returns the existing
   # user UNTOUCHED (no password/team/role mutation); only a new identity row is
   # later added by the caller.
+  #
+  # Returns `{user, branch}` — `:linked` for the convergence arm, `:created` for
+  # the birth arm. THE BRANCH IS DECIDED HERE AND NOWHERE ELSE: this `case` IS
+  # the difference between "an account gained a provider" and "an account was
+  # born", and a caller reconstructing it afterwards (e.g. by comparing
+  # inserted_at, or by counting identity rows) would be guessing at exactly the
+  # moment the guess stops being cheap.
   defp find_or_birth_oauth_user!(provider, uid, email) do
     case email && get_user_by_email(email) do
       %User{} = existing ->
-        existing
+        {existing, :linked}
 
       _ ->
         # No email match (or no email at all) → birth a fresh OAuth-only account
         # with the SAME entitlement chain as a password signup. A withheld email
         # gets a stable synthetic one so the email-required schema is satisfied;
         # the durable link is the (provider, uid) row, not this address.
-        birth_oauth_user!(email || synthetic_oauth_email(provider, uid))
+        {birth_oauth_user!(email || synthetic_oauth_email(provider, uid)), :created}
     end
   end
 

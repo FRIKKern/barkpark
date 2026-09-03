@@ -436,6 +436,7 @@ const PIN = [
 
   { fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
   { fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "bootEmailConfirm", verb: "POST", route: "/v1/auth/verify-email", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "cch-w53-bl-the-emailed-confirmation-link-has-no-client: pre-session by construction — the emailed single-use token IS the credential and the route takes no session, so a logged-out click must reach the same answer as a logged-in one. No predicate is possible or wanted: the console cannot know whether a token is live, and withholding the hop would recreate the dead flow this row closed" },
 
   // ── the /new flow (a second, parallel console surface)
   { fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
@@ -1118,7 +1119,13 @@ if (unresolved.length) {
 // they called, so `total`, `elevated` and `predicated` each fall by exactly two
 // (both rows were elevated AND predicated on assignableRoles). `unpredicated`
 // does NOT move — neither row was in it.
-const EXPECT = { total: 79, elevated: 39, predicated: 34, unpredicated: 5 };
+// 79 → 80 (cch-w53-bl-the-emailed-confirmation-link-has-no-client): ONE new write
+// call site, bootEmailConfirm → POST /v1/auth/verify-email. The other three
+// numbers are UNCHANGED and that is the load-bearing part of this bump: the row
+// is pre-session, so it adds nothing to `elevated` and therefore nothing to
+// `predicated`/`unpredicated`. A bump that moved `unpredicated` would mean the
+// console had grown an affordance the server can refuse — this one did not.
+const EXPECT = { total: 80, elevated: 39, predicated: 34, unpredicated: 5 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
