@@ -90,7 +90,20 @@ defmodule Barkpark.Tasks.Close do
   # land digest whose files overlap another in-progress task's claimed scope.
   @event_landed_under_you "task.landed_under_you"
 
+  # `close/3` keeps the contract every existing caller pattern-matches on:
+  # `{:ok, %Document{}}`. `close_with_receipt/3` is the same call that also says
+  # WHICH of the two success shapes happened — `:closed` for a write that landed
+  # here, `:already_closed` for a replay of one that landed earlier. The
+  # controller uses the receipt so the response body can say "already closed"
+  # instead of claiming this call did the closing; nobody else has to care.
   def close(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
+    case close_with_receipt(task_id, worker_id, opts) do
+      {:ok, doc, _receipt} -> {:ok, doc}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def close_with_receipt(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
     new_status = Keyword.get(opts, :lifecycle_status, "done")
     observed_rev_opt = Keyword.get(opts, :observed_rev)
@@ -389,7 +402,36 @@ defmodule Barkpark.Tasks.Close do
             cond do
               observed_rev_opt == nil and
                   Map.get(doc.content, "lifecycle_status") in @closed_lifecycle_statuses ->
-                {:error, :stale_claim}
+                # THE RETRY ARM (task-17224f58d3bda3bd). The guard below is
+                # right for two DIFFERENT closers racing; it was wrong for the
+                # SAME closer retrying. Measured 2026-09-02: five closes exited
+                # rc=6 `stale_claim` while their write had in fact landed, each
+                # with its own reason stored verbatim. Attempt 1 commits, its
+                # response is lost or times out under load, attempt 2 reads the
+                # now-terminal row and is told the write failed — and the
+                # natural recovery makes it worse, because a re-claim then
+                # fails `not_ready` on an already-closed row. Under this
+                # ledger's measured load (429s, pool saturation) a slow first
+                # response tripping a client retry is the ordinary case.
+                #
+                # So a replay by the SAME worker to the SAME terminal status is
+                # answered with the STORED row as a success receipt. Nothing is
+                # written: no event, no broadcast, no cascade — those already
+                # fired for the write that really happened, and re-firing them
+                # would double-count an unblock. The stored `close_reason`,
+                # `claim.closed_by` and `claim.closed_at` stay byte-identical,
+                # so the first close keeps its authorship and its reason.
+                #
+                # EVERYTHING ELSE STILL LOSES THE RACE. A row closed by ANOTHER
+                # worker, or closed to a DIFFERENT status than this call asks
+                # for, is a genuine lost race and keeps `stale_claim` — an
+                # idempotency that cannot tell a retry from a lost race would
+                # be worse than the bug it cures.
+                if idempotent_replay?(doc, worker_id, new_status) do
+                  {:already_closed, doc}
+                else
+                  {:error, :stale_claim}
+                end
 
               true ->
                 # The honesty gates sit HERE, on the `doc` read at the top of
@@ -482,13 +524,39 @@ defmodule Barkpark.Tasks.Close do
     case result do
       {:ok, {:ok, doc, broadcasts}} ->
         :ok = emit_broadcasts(broadcasts)
-        {:ok, doc}
+        {:ok, doc, :closed}
+
+      # The retry arm. No broadcasts to emit by construction — the write this
+      # call is replaying already emitted them.
+      {:ok, {:already_closed, doc}} ->
+        {:ok, doc, :already_closed}
 
       {:ok, {:error, reason}} ->
         {:error, reason}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # A REPLAY, not a race: this exact worker already closed this row to this
+  # exact status. `closed_by` is stamped by `apply_close_update/9` on every
+  # close that carries a claim, so it is the authorship record, and comparing
+  # it to the caller is what separates "your own write landed" from "somebody
+  # else got here first".
+  #
+  # A row with NO claim map is deliberately NOT a replay. Container and
+  # never-claimed rows close without a claim being invented, so they store no
+  # `closed_by` at all — there is nothing to compare, and answering `{:ok, …}`
+  # to an unidentifiable second caller would hand a success receipt to whoever
+  # asked last. Those keep `stale_claim`.
+  defp idempotent_replay?(%Document{content: content}, worker_id, new_status) do
+    case content do
+      %{"claim" => %{"closed_by" => closed_by}} ->
+        closed_by == worker_id and Map.get(content, "lifecycle_status") == new_status
+
+      _ ->
+        false
     end
   end
 
