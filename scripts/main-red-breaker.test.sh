@@ -209,4 +209,63 @@ else
   bad "16) scripts/breaker-capture.sh is missing"
 fi
 
+
+# ── 17. MAIN'S SIDE, AS THE API ACTUALLY RENDERS IT (task-2dbe8808f2a6f7b5) ──
+# Arms 2-5 and 11-14 feed main's jobs JSON with gate steps marked
+# `"conclusion": "failure"`. A real runner NEVER writes that: every gate step
+# carries `continue-on-error: true`, and such a step reports conclusion
+# "success" even when it failed — only its `outcome` is "failure", and `outcome`
+# is not in the jobs API. MEASURED on run 33788784458 job 100759983487 ('Doc
+# budgets + anchors'): 33 gate steps all `conclusion: success`, one `failure`,
+# the Decide step. So on every real run the step-name clause found a step "main
+# does not fail on" and exited one clause BEFORE the signature test — PR
+# #15854's own doc-gates job 100761669105 printed exactly that while main's log
+# said, in the breaker's own words, that main failed on that same step.
+# This fixture is main's shape as it really is.
+main_real="$TMP/main-real.json"; cat > "$main_real" <<'J'
+{"jobs":[{"id":100759983487,"name":"Doc budgets + anchors","conclusion":"failure","steps":[{"name":"Doc byte budgets (fails this job)","conclusion":"success"},{"name":"Code-comment citation guard (fails this job)","conclusion":"success"},{"name":"Tenant fail-open read baseline gate (fails this job)","conclusion":"success"},{"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+# Main's job log — its Decide step PRINTS the gate step names the API withholds.
+main_log_real="$TMP/main-real.log"; cat > "$main_log_real" <<'L'
+2026-09-03T18:14:43.4410599Z FAIL: lineref drift
+2026-09-03T18:14:43.4411203Z   ✗ NOVEL api/lib/barkpark/content/query.ex:661
+2026-09-03T18:14:43.8939295Z main-red-breaker: FAIL — 'Doc budgets + anchors' failed on: Code-comment citation guard (fails this job). This is not a pull_request run, so the red is main's state and stands.
+2026-09-03T18:14:43.8955306Z ##[error]Process completed with exit code 1.
+L
+our_same="$TMP/our-same.txt"; cat > "$our_same" <<'L'
+FAIL: lineref drift
+  ✗ NOVEL api/lib/barkpark/content/query.ex:663
+L
+our_diff="$TMP/our-diff.txt"; cat > "$our_diff" <<'L'
+FAIL: lineref drift
+  ✗ NOVEL web/app/page.tsx:12
+L
+# 17a. main red on the same step, recovered from its LOG, and the signature
+#      matches (the line drifted 661 -> 663) -> inherited. This is the verdict
+#      the breaker could not reach on any real run before.
+out="$(run "$out_s2" pull_request "$main_real" "$our_same" "$main_log_real")"
+has "$out" "INHERITED-FROM-MAIN" "17a) main's gate step read from its own Decide line => inherited"
+has "$out" "Signature matched too" "17a) and only because the signature agreed"
+has "$out" "RC=0" "17a) rc 0"
+# 17b. same step, DIFFERENT defect -> the PR's own red (the 2026-09-03 shape,
+#      now on main's real API shape rather than a hand-marked fixture).
+out="$(run "$out_s2" pull_request "$main_real" "$our_diff" "$main_log_real")"
+has "$out" "NOT with the same failure signature" "17b) a different defect in the same step is still the PR's own"
+has "$out" "RC=1" "17b) rc 1"
+# 17c. THE FAIL-CLOSED CLAUSE. A step name recovered only from main's log, with
+#      NO signature to check, must NOT inherit: turning the step-name clause on
+#      by itself would neutralise every known-inherited red in one commit on
+#      step name alone — precisely what #15842's SIGNATURE-UNVERIFIED fallback
+#      was chosen to avoid. The capture wiring is what unlocks inheritance.
+out="$(run "$out_s2" pull_request "$main_real" "$TMP/absent-capture.txt" "$main_log_real")"
+has "$out" "ONLY per its own Decide line" "17c) a log-derived match with no signature does NOT inherit"
+has "$out" "SIGNATURE-UNVERIFIED" "17c) and says which half was missing"
+has "$out" "RC=1" "17c) rc 1"
+case "$out" in *INHERITED-FROM-MAIN*) bad "17c) waved a red through on step name alone" ;; *) ok "17c) never claims INHERITED without a signature" ;; esac
+# 17d. the API path is untouched: when main's JSON DOES mark the gate step
+#      failed (arms 2/12/13/14's shape), an unverified signature still inherits.
+out="$(run "$out_s2" pull_request "$main_red_s2" "$TMP/absent-capture.txt" "$main_log_15650")"
+has "$out" "INHERITED-FROM-MAIN" "17d) the pre-existing API path keeps v1's fallback"
+has "$out" "RC=0" "17d) rc 0"
+
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
