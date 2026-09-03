@@ -140,8 +140,17 @@ defmodule BarkparkWeb.QueryController do
           |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
 
         schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
-        etag = list_etag(dataset, type, rendered, schema_hash)
-        respond(conn, inner, schema_hash, list_sync_tags(dataset, type, rendered), etag, t0)
+        etag = list_etag(dataset, type, rendered)
+
+        respond(
+          conn,
+          inner,
+          schema_hash,
+          list_sync_tags(dataset, type, rendered),
+          etag,
+          cache_validator(etag, schema_hash),
+          t0
+        )
     end
   end
 
@@ -484,9 +493,18 @@ defmodule BarkparkWeb.QueryController do
         |> hd()
 
       schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
-      etag = doc_etag(doc, schema_hash)
+      etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
-      respond(conn, rendered, schema_hash, sync_tags, etag, t0)
+
+      respond(
+        conn,
+        rendered,
+        schema_hash,
+        sync_tags,
+        etag,
+        cache_validator(etag, schema_hash),
+        t0
+      )
     end
   end
 
@@ -622,10 +640,12 @@ defmodule BarkparkWeb.QueryController do
   # `_rev` — so on the one branch that still emits a validator (anonymous +
   # unshaped) an editor marking a field `private` left the ETag identical and a
   # replayed If-None-Match answered 304 with the pre-redaction body still cached
-  # downstream. `list_etag/4` and `doc_etag/2` now fold
+  # downstream. `cache_validator/2` now folds
   # `Content.schema_hash_for_dataset/2` — the same value the envelope already
-  # carries as `schemaHash`, computed once per request and threaded down — so
-  # any schema change moves the validator. Suppression was not the right tool:
+  # carries as `schemaHash`, computed once per request and threaded down — on
+  # top of the document token, so any schema change moves the HEADER. The
+  # envelope BODY's `etag` is UNCHANGED: it is the SDK's `ifMatch` token, not a
+  # cache validator (see `cache_validator/2`). Suppression was not the right tool:
   # the anonymous unshaped read is exactly the one this file works to keep
   # cacheable, and the schema axis, unlike shaping and principal, has a cheap
   # exact discriminator already in hand.
@@ -685,7 +705,7 @@ defmodule BarkparkWeb.QueryController do
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
 
-  defp respond(conn, inner, schema_hash, sync_tags, etag, t0) do
+  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     conn =
@@ -694,11 +714,11 @@ defmodule BarkparkWeb.QueryController do
       |> maybe_vendor_content_type()
 
     if conditional_safe?(conn) do
-      conn = put_resp_header(conn, "etag", ~s("#{etag}"))
+      conn = put_resp_header(conn, "etag", ~s("#{validator}"))
 
       case get_req_header(conn, "if-none-match") do
         [hv | _] ->
-          if etag_matches?(hv, etag) do
+          if etag_matches?(hv, validator) do
             conn |> send_resp(304, "") |> halt()
           else
             respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
@@ -764,26 +784,43 @@ defmodule BarkparkWeb.QueryController do
   # set): an in-place edit (same id, new rev) or a reorder must change the ETag,
   # otherwise a conditional GET with If-None-Match returns a spurious 304 over
   # stale data. Genuinely-unchanged lists still hash identically → 304 fast-path.
-  #
-  # The SCHEMA HASH is folded in too (task-496f010fa8f4d9dc). The body is built
-  # by `Envelope.render/3`, whose per-field redaction reads the schema's
-  # `private` / `visibility` / `readable_by` attributes — and
-  # `Content.Schema.upsert_schema/3` writes the SchemaDefinition row and touches
-  # NO document, so marking a field private moved no `_rev` and left the
-  # validator identical. An anonymous caller replaying its pre-edit ETag got a
-  # 304 and kept serving the field the schema now hides (and a stale
-  # `schemaHash` in the envelope it already held). Adding an input can only ever
-  # WITHDRAW a 304 that used to be granted, never grant a new one.
-  defp list_etag(dataset, type, rendered, schema_hash) do
+  defp list_etag(dataset, type, rendered) do
     parts = Enum.map(rendered, fn d -> "#{d["_id"]}:#{d["_rev"] || ""}" end)
-    payload = "#{dataset}|#{type}|#{schema_hash}|" <> Enum.join(parts, ",")
+    payload = "#{dataset}|#{type}|" <> Enum.join(parts, ",")
     :crypto.hash(:sha256, payload) |> Base.encode16(case: :lower) |> binary_part(0, 32)
   end
 
-  defp doc_etag(doc, schema_hash), do: doc_rev(doc) <> "-" <> schema_hash
+  defp doc_etag(%{rev: rev}) when is_binary(rev) and rev != "", do: rev
+  defp doc_etag(_), do: "0"
 
-  defp doc_rev(%{rev: rev}) when is_binary(rev) and rev != "", do: rev
-  defp doc_rev(_), do: "0"
+  # THE CACHE VALIDATOR — deliberately NOT the body's `etag` (task-496f010fa8f4d9dc).
+  #
+  # Two different tokens ride one response and they answer different questions:
+  #
+  #   * the envelope BODY's `etag` answers "has this DOCUMENT changed?". It is a
+  #     documented SDK contract — `js/packages/core/src/doc.ts` returns it as
+  #     `DocResult.etag` ("Unquoted ETag ( = document _rev). Pass back as
+  #     ifMatch on writes") and `Content.Mutations.if_rev/1` compares `ifMatch`
+  #     to the stored rev. Folding anything into it turns every documented
+  #     read-then-write into a 412, so it stays EXACTLY what it was.
+  #
+  #   * the HTTP `ETag` header answers "is the cached REPRESENTATION still
+  #     valid?" (RFC 9110 §8.8.1). The representation is a function of the
+  #     SCHEMA too: `Envelope.render/3` reads the schema's `private` /
+  #     `visibility` / `readable_by` attributes per field, and
+  #     `Content.Schema.upsert_schema/3` writes the SchemaDefinition row and
+  #     touches NO document — so marking a field private moved no `_rev` and
+  #     left the validator identical. An anonymous caller replaying its pre-edit
+  #     ETag got a 304 and kept serving the field the schema now hides. So the
+  #     header folds the schema hash on top of the document token.
+  #
+  # Adding an input can only ever WITHDRAW a 304 that used to be granted, never
+  # grant a new one.
+  defp cache_validator(etag, schema_hash) do
+    :crypto.hash(:sha256, "#{etag}|#{schema_hash}")
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 32)
+  end
 
   defp list_sync_tags(dataset, type, rendered) do
     type_tag = "bp:ds:#{dataset}:type:#{type}"

@@ -22,14 +22,22 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
 
   ## The fix under test
 
-  `list_etag/4` and `doc_etag/2` fold `Content.schema_hash_for_dataset/2` — the
-  value the envelope already carries as `schemaHash`, now computed once per
-  request and threaded down instead of re-read in `envelope/5`.
+  `cache_validator/2` folds `Content.schema_hash_for_dataset/2` — the value the
+  envelope already carries as `schemaHash`, now computed once per request and
+  threaded down instead of re-read in `envelope/5` — on top of the document
+  token, and the HEADER plus the If-None-Match compare use that.
+
+  The envelope BODY's `etag` is deliberately NOT folded. It is a documented SDK
+  contract: `js/packages/core/src/doc.ts` returns it as `DocResult.etag`
+  ("Unquoted ETag ( = document _rev). Pass back as ifMatch on writes") and
+  `Content.Mutations.if_rev/1` compares `ifMatch` to the stored rev, so folding
+  anything into it would turn every documented read-then-write into a 412. The
+  two-token split is pinned by its own test below.
 
   ## Mutation proof
 
-  Drop the schema-hash segment from `list_etag/4`'s payload and make `doc_etag/2`
-  return the bare rev again: both `must answer 200` tests red with `304`.
+  Make `cache_validator/2` return its `etag` argument unchanged: both
+  `must answer 200` tests red with `304`.
 
   Two non-vacuity controls guard every pin: the field IS present in the first
   read (so a broken fixture cannot pass), and the two `schemaHash` values DIFFER
@@ -77,6 +85,15 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
   defp doc_path, do: "/v1/data/doc/#{@ds}/#{@type_name}/#{@doc_id}"
   defp list_path, do: "/v1/data/query/#{@ds}/#{@type_name}"
 
+  # Mirrors QueryController.cache_validator/2 — the test asserts the header IS
+  # this value, so a change to the fold reds here too rather than silently
+  # passing an "it is not the rev" check.
+  defp cache_validator(etag, schema_hash) do
+    :crypto.hash(:sha256, "#{etag}|#{schema_hash}")
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 32)
+  end
+
   defp etag_of(conn) do
     [etag] = get_resp_header(conn, "etag")
     etag
@@ -113,6 +130,37 @@ defmodule BarkparkWeb.Integration.HttpEtagSchemaHashTest do
       # CONTROL 2 — the schema hash really moved, so the pin above is not
       # passing on some unrelated change to the validator.
       assert after_body["schemaHash"] != hash_before
+    end
+  end
+
+  describe "the two tokens are SEPARATE (body etag = ifMatch, header = cache validator)" do
+    # MUTATION PROOF: fold the schema hash into `doc_etag/2` as well (i.e. put
+    # the validator in the body) and this reds — which is exactly the 412 a
+    # documented `DocResult.etag` -> `ifMatch` round-trip would hit.
+    test "the doc route's BODY etag is still the bare document _rev" do
+      resp = get(build_conn(), doc_path())
+      assert resp.status == 200, "request never arrived (status #{resp.status})"
+      body = json_response(resp, 200)
+
+      rev = body["result"]["_rev"]
+      assert is_binary(rev) and rev != ""
+      assert body["etag"] == rev, "the body etag is the SDK ifMatch token — it must stay the _rev"
+
+      # …while the HTTP validator has moved off the rev, because it must also
+      # answer to the schema.
+      header = etag_of(resp)
+      assert header == ~s("#{cache_validator(rev, body["schemaHash"])}")
+      refute header == ~s("#{rev}")
+    end
+
+    test "the list route's BODY etag is still main's ids/revs fold, not the validator" do
+      resp = get(build_conn(), list_path())
+      assert resp.status == 200, "request never arrived (status #{resp.status})"
+      body = json_response(resp, 200)
+
+      assert is_binary(body["etag"])
+      assert etag_of(resp) == ~s("#{cache_validator(body["etag"], body["schemaHash"])}")
+      refute etag_of(resp) == ~s("#{body["etag"]}")
     end
   end
 
