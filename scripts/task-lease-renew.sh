@@ -173,7 +173,12 @@ if mode == "reason":
 
 doc = payload.get("doc") or {}
 content = doc.get("content") or {}
-claim = content.get("claim") or {}
+# The live server renders the claim at doc.claim (Params.render_doc lifts it);
+# older fixtures and any pre-lift server put it under doc.content.claim. Read
+# both, top level first — measured 2026-09-03: 20 real renews were written and
+# answered 200 while this reader looked only under content and reported
+# "carried no claim.lease_extension.until".
+claim = doc.get("claim") or content.get("claim") or {}
 ext = claim.get("lease_extension") or {}
 if mode == "until":
     print(str(ext.get("until") or ""))
