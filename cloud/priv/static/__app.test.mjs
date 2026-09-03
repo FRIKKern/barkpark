@@ -17072,16 +17072,27 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers SIX toggles — the three producerless ones are gone", () => {
+test("cch-w30-s1: the matrix offers SEVEN toggles — the three producerless ones are still gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
-  // Six toggle rows × six columns = 36 cells, and not one of them names an
+  // Seven toggle rows × six columns = 42 cells, and not one of them names an
   // event nothing can send. A regressed row would fail the census below too;
   // this leg is the person-facing half — what the page actually draws.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 36, "6 events × 6 channels");
+  //
+  // cch-w29-bl moved this 36 → 42. The count is EXACT on purpose and the number
+  // is not the assertion: the two loops below are. A row moves this number only
+  // together with its producer, because arm (a) of the census below reds on an
+  // offer with nothing behind it.
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 42, "7 events × 6 channels");
   for (const dead of ["deployment_succeeded", "member_invited", "token_expiring"]) {
     assert.doesNotMatch(html, new RegExp(`data-event="${dead}"`),
       `${dead} has no producer in cloud/lib — it must not be offered as a toggle`);
+  }
+  // The seventh, drawn: the auto-deploy PREBUILT refusal
+  // (Sites.AutoDeployWorker.refuse/1 → Notifications.dispatch_site_event).
+  for (const live of ["deployment_failed", "deployment_refused"]) {
+    assert.match(html, new RegExp(`data-event="${live}"`),
+      `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }
 });
 

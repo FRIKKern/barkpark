@@ -2168,7 +2168,10 @@ const siteStatesDomains = {
 // the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
 //
-// SIX, NOT NINE (wave 30 S1). `deployment_succeeded`, `member_invited` and
+// SEVEN AS OF cch-w29-bl, and it was SIX, NOT NINE before that (wave 30 S1).
+// `deployment_refused` is the auto-deploy PREBUILT refusal: column, producer and
+// console row all landed together, so the fixture seeds it too.
+// `deployment_succeeded`, `member_invited` and
 // `token_expiring` were dropped from `EmailSettings` end to end — no column, no
 // producer, no toggle. A fixture that still seeded them was claiming to be
 // backend-true while describing a backend that no longer exists, which is the
@@ -2176,11 +2179,12 @@ const siteStatesDomains = {
 // census guards app.js but has no reach into this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
   "provision_succeeded", "provision_failed", "deployment_failed",
+  "deployment_refused",
   "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
-const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "agent_unreachable", "subscription_past_due"];
+const NOTIF_DEFAULT_ON = ["provision_failed", "deployment_failed", "deployment_refused", "agent_unreachable", "subscription_past_due"];
 function notifSettings(over) {
   const base = {
     transport: "instance",
