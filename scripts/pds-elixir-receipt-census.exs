@@ -3045,7 +3045,7 @@ defmodule PDS.Census do
   # index hands them back in REVERSE SOURCE ORDER, so the VERB-FREE fallback clause won
   # and the writing clause was discarded before bfs/7 ever saw it.
   # Barkpark.Accounts.confirm_user/1 is the worked example: the writing clause at
-  # accounts.ex:483 (Repo.transaction with delete!/update!) lost to
+  # accounts.ex:confirm_user/1's writing clause (Repo.transaction with delete!/update!) lost to
   # `def confirm_user(_), do: :error`.
   # PATCHING THIS ALONE CHANGES NOTHING, MEASURED: bfs_walk/9's `seen` key repeats the
   # identical collapse, so a clause this function now keeps is dropped one step later.
