@@ -108,9 +108,10 @@ jobs:
       #     and api/deps 6 MB (6,160,722 B). At the 100+ runs/day this workflow
       #     actually sees, a per-push key pushes multiple GB/day through the
       #     repo-wide 10 GB Actions cache, which is LRU — and the things it
-      #     would evict are the REQUIRED Elixir gate's dependency caches. An
-      #     advisory job must not evict a required one. Keyed on the lock, a
-      #     branch writes ONE archive no matter how many times it is pushed.
+      #     would evict are the dependency caches of the REQUIRED Elixir gate.
+      #     This job's cache churn must never evict a required job's cache.
+      #     Keyed on the lock, a branch writes ONE archive no matter how many
+      #     times it is pushed.
       #   * A restored tree can therefore be arbitrarily stale in SOURCES, and
       #     that is the intended, bounded staleness: it can never be stale in
       #     toolchain or in dependency versions, which is the near-miss that
