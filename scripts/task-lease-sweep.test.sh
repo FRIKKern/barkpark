@@ -35,7 +35,8 @@ cat > "$TMP/bin/gh" <<'STUB'
 echo "gh: stub — HTTP 502 from api.github.com" >&2; exit 1
 STUB
 chmod +x "$TMP/bin/curl" "$TMP/bin/gh"
-RENEW_200='{"ok":true,"doc":{"content":{"claim":{"worker":"lead-x","epoch":3,"lease_extension":{"until":"2026-09-03T06:00:00Z","renewals":2}}}}}'
+RENEW_200='{"ok":true,"doc":{"claim":{"worker":"lead-x","epoch":3,"lease_extension":{"until":"2026-09-03T06:00:00Z","renewals":2}},"content":{}}}'
+ACCEPTED_NO_ECHO_200='{"ok":true,"doc":{"content":{}}}'
 NOTCLAIMED_409='{"ok":false,"error":{"code":"conflict","reason":"not_claimed"}}'
 
 run() { # $1 = list file or "", $2 = codes, $3 = response ; rest = extra env assignments
@@ -88,6 +89,11 @@ out="$(run "$L7" 200 "$RENEW_200")"
 has "$out" "1 renewed" "7) the well-formed line is still renewed"
 has "$out" "1 unmeasured" "7) the malformed line is counted"
 has "$out" "RC=2" "7) rc 2"
+
+# ── 7b. a 200 whose answer carries no until is still a renew (the write happened; only the echo is missing) ──
+out="$(run "$L1" 200 "$ACCEPTED_NO_ECHO_200")"
+has "$out" "2 renewed" "7b) accepted-without-echo counts as renewed, not unclassified"
+has "$out" "0 unclassified" "7b) nothing left unclassified"
 
 # ── 8. the subject owns no Task: grammar of its own ──
 grep -qE 'Task:[^"]*\[' "$SUBJECT" && bad "8) subject carries its own Task: regex" || ok "8) subject delegates the trailer grammar (no Task: regex of its own)"

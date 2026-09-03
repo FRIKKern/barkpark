@@ -67,6 +67,7 @@ while IFS= read -r line; do
   # Classify from the subject's own words, so the tally cannot drift from what it did.
   case "$rc:$out" in
     0:*"keeps "*" claimed until"*) renewed=$((renewed + 1)); echo "PR #${num}: renewed" ;;
+    0:*"the ledger accepted the renew"*) renewed=$((renewed + 1)); echo "PR #${num}: renewed (accepted; the answer carried no until)" ;;
     0:*"names no task row"*|0:*"two or more DISTINCT"*) skipped=$((skipped + 1)); echo "PR #${num}: skipped (no single Task: trailer)" ;;
     0:*"HTTP 409"*|0:*"HTTP 404"*) declined=$((declined + 1)); echo "PR #${num}: declined by the ledger — $(printf '%s' "$out" | grep -oE 'HTTP 4[0-9]{2}[^)]*' | head -1)" ;;
     1:*) auth=$((auth + 1)); echo "PR #${num}: TOKEN REFUSED" ; printf '%s\n' "$out" | tail -2 >&2 ;;

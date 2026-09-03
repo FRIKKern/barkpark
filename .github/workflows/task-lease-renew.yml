@@ -59,6 +59,12 @@ on:
   # task-lease-sweep job below renews EVERY open PR's row every 20 minutes.
   schedule:
     - cron: "*/20 * * * *"
+  # GitHub delivers this repo's cron every 2-5 h, not every 20 min (measured
+  # 2026-09-03: zero schedule runs in the 3 h after this arm merged). A push to
+  # main happens every few minutes while the fleet is live, so each merge also
+  # sweeps; the per-sha group below keeps them from evicting each other.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # `pull_request`, never `pull_request_target` — the repo's stance, copied from
@@ -76,8 +82,8 @@ concurrency:
   # A bare `true` is honest here (never-cancel-main-check.sh: a
   # pull_request-only workflow cannot self-cancel a main run, because
   # github.ref is never refs/heads/main on this trigger).
-  group: task-lease-renew-${{ github.event.pull_request.number || 'sweep' }}
-  cancel-in-progress: true
+  group: task-lease-renew-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   task-lease-renew:

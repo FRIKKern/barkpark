@@ -90,8 +90,10 @@ exit 0
 STUB
 chmod +x "$TMP/bin/curl"
 
-RENEW_200='{"ok":true,"doc":{"content":{"claim":{"worker":"lead-gates","epoch":9,"lease_extension":{"until":"2026-09-02T13:45:00Z","pr":15234,"reason":"open_pr","renewals":3}}}}}'
-CLEAR_200='{"ok":true,"doc":{"content":{"claim":{"worker":"lead-gates","epoch":9}}}}'
+RENEW_200='{"ok":true,"doc":{"claim":{"worker":"lead-gates","epoch":9,"lease_extension":{"until":"2026-09-02T13:45:00Z","pr":15234,"reason":"open_pr","renewals":3}},"content":{}}}'
+# The shape a pre-lift server (or an old fixture) answers with — the reader must still see it.
+RENEW_200_LEGACY='{"ok":true,"doc":{"content":{"claim":{"worker":"lead-gates","epoch":9,"lease_extension":{"until":"2026-09-02T13:45:00Z","pr":15234,"reason":"open_pr","renewals":3}}}}}'
+CLEAR_200='{"ok":true,"doc":{"claim":{"worker":"lead-gates","epoch":9},"content":{}}}'
 
 run() { # env comes from the caller; $@ are subject flags
   ( export PATH="$TMP/bin:$PATH"
@@ -335,6 +337,11 @@ else
 fi
 
 echo
+# ── claim shape: the reader accepts doc.claim (live server) AND doc.content.claim (legacy) ──
+reset_stub
+out="$(PR_BODY=$'Fix\n\nTask: task-aaaaaaaaaaaaaaaa' PR_NUMBER=15234 PR_ACTION=synchronize LEDGER_TOKEN=tok FAKE_CURL_CODES=200 FAKE_CURL_RESPONSE="$RENEW_200_LEGACY" run)"
+case "$out" in *"keeps task-aaaaaaaaaaaaaaaa claimed until 2026-09-02T13:45:00Z"*) ok "legacy doc.content.claim shape still reads the until" ;; *) bad "legacy shape not read: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)" ;; esac
+
 echo "task-lease-renew.test.sh: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1
 [ "$PASS" -gt 0 ] || { echo "task-lease-renew.test: a green over ZERO cases is not a green" >&2; exit 2; }
