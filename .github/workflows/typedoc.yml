@@ -15,6 +15,11 @@ on:
       - "package.json"
       - ".github/workflows/typedoc.yml"
 
+concurrency:
+  # per-ref on PRs (a new push evicts the superseded run), per-sha on main.
+  group: typedoc-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   generate:
     name: Generate reference

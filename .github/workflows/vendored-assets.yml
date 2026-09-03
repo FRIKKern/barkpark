@@ -25,6 +25,11 @@ on:
       - "scripts/deploy-health-banner.test.sh"
       - ".github/workflows/vendored-assets.yml"
 
+concurrency:
+  # per-ref on PRs (a new push evicts the superseded run), per-sha on main.
+  group: vendored-assets-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   check:
     name: deploy.sh ↔ embedded asset in sync

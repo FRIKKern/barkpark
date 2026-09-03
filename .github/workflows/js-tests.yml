@@ -40,7 +40,7 @@ on:
       - "web/__tests__/fixtures/engine-errors.json"
 
 concurrency:
-  group: js-tests-${{ github.ref }}
+  group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
   # superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

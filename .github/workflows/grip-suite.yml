@@ -82,7 +82,7 @@ permissions:
   issues: write # so a failed run on main can surface itself to a human
 
 concurrency:
-  group: grip-suite-${{ github.ref }}
+  group: grip-suite-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   # NEVER a literal `true`: on push-to-main that self-cancels the suite dark
   # (never-cancel-main-check.sh / honest-gates D12). A no-op on PRs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

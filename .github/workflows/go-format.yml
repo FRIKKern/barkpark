@@ -40,6 +40,11 @@ on:
       - ".go-format-drift-ceiling"
 permissions:
   contents: read
+concurrency:
+  # per-ref on PRs (a new push evicts the superseded run), per-sha on main.
+  group: go-format-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   gofmt:
     name: gofmt -l (advisory)
