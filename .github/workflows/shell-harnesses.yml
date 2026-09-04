@@ -164,6 +164,9 @@ on:
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/breaker-capture.sh"
+      - "scripts/stale-tree-regression-check.sh"
+      - "scripts/stale-tree-ci-wiring.test.sh"
+      - ".github/workflows/required-checks-drift.yml"
       - ".github/workflows/security.yml"
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
@@ -377,6 +380,9 @@ on:
       - "scripts/main-red-breaker.sh"
       - "scripts/main-red-breaker.test.sh"
       - "scripts/breaker-capture.sh"
+      - "scripts/stale-tree-regression-check.sh"
+      - "scripts/stale-tree-ci-wiring.test.sh"
+      - ".github/workflows/required-checks-drift.yml"
       - ".github/workflows/security.yml"
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
@@ -670,6 +676,9 @@ jobs:
           tooling-harnesses scripts/main-red-breaker.sh
           tooling-harnesses scripts/main-red-breaker.test.sh
           tooling-harnesses scripts/breaker-capture.sh
+          tooling-harnesses scripts/stale-tree-regression-check.sh
+          tooling-harnesses scripts/stale-tree-ci-wiring.test.sh
+          tooling-harnesses .github/workflows/required-checks-drift.yml
           tooling-harnesses .github/workflows/doc-gates.yml
           tooling-harnesses .github/workflows/security.yml
           tooling-harnesses .github/workflows/compose-smoke.yml
@@ -1293,6 +1302,18 @@ jobs:
         run: |
           bash -n scripts/main-red-breaker.sh
           bash scripts/main-red-breaker.test.sh
+      - name: "stale-tree CI wiring (job, job-level if, concurrency, breaker arm, Decide step)"
+        # The `Head does not silently revert main (stale tree)` job in
+        # required-checks-drift.yml is a six-place change and five of those
+        # places fail SILENTLY — a deleted Decide step over three
+        # continue-on-error gate steps is a job that cannot go red. The harness
+        # mutates a COPY of the workflow for each clause and asserts the red.
+        # PyYAML is load-bearing: without it the harness exits 2
+        # (HARNESS-UNAVAILABLE, never a pass), so install rather than skip.
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash -n scripts/stale-tree-regression-check.sh
+          bash scripts/stale-tree-ci-wiring.test.sh
       - name: fleet-run verdict matrix
         run: bash tooling/fleet/fleet-run-verdict-test.sh
       - name: audit-paper-readers.sh syntax check
