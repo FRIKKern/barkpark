@@ -65,6 +65,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
+      {"batch_too_large/mutate-gate", {:error, {:batch_too_large, 1001, 1000}}, "batch_too_large",
+       422, [:details]},
       {"forbidden_origin", {:error, :forbidden_origin}, "cors_forbidden", 403, []},
       {"csrf_required", {:error, :csrf_required}, "csrf_required", 403, []},
       {"schema_unknown", {:error, :schema_unknown}, "schema_unknown", 404, []},
@@ -78,8 +80,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # OpenAPI Error.code enum stay unchanged — and it carries `details` naming
       # every offending path, which is the only way it differs from the row above.
       {"malformed_blocks",
-       {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}},
-       "malformed", 400, [:details]},
+       {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}}, "malformed",
+       400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
