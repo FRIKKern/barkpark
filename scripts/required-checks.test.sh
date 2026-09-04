@@ -3481,10 +3481,16 @@ fi
 # rather than the split going untested — a section that quietly stops testing
 # the split is the same vacuous green this suite exists to delete. The workflow
 # dir the two clauses below run against is therefore a variable, not a constant.
+#
+# NEVER `| head -1` HERE. This file runs under `set -euo pipefail`: `head` closes
+# the pipe on line one, the producer takes SIGPIPE, and the whole SUITE dies
+# mid-section with "printf: write error: Broken pipe" — measured, once, on the
+# first draft of this very clause. The first line is taken by expansion instead.
 RC19_WFDIR="$REPO_ROOT/.github/workflows"
-RC19_ADV="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC" | head -1)"
+RC19_ADV_ALL="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC")"
+RC19_ADV="${RC19_ADV_ALL%%$'\n'*}"
 if [ -n "$RC19_ADV" ]; then
-  ok "derived the advisory specimen from the live graph: \`$RC19_ADV\` carries continue-on-error and is in no required aggregator's needs (candidates: $(rc_advisory_specimen "$RC19_WFDIR" "$SPEC" | tr '\n' ' '))"
+  ok "derived the advisory specimen from the live graph: \`$RC19_ADV\` carries continue-on-error and is in no required aggregator's needs (candidates: $(tr '\n' ' ' <<<"$RC19_ADV_ALL"))"
 else
   RC19_WFDIR="$TMP/rc19-planted-workflows"
   rm -rf "$RC19_WFDIR"; mkdir -p "$RC19_WFDIR"
@@ -3498,7 +3504,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
 YAML
-  RC19_ADV="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC" | head -1)"
+  RC19_ADV_ALL="$(rc_advisory_specimen "$RC19_WFDIR" "$SPEC")"
+  RC19_ADV="${RC19_ADV_ALL%%$'\n'*}"
   if [ "$RC19_ADV" = "rc19-planted-advisory" ]; then
     ok "no advisory job survives on the live tree, so one is PLANTED in the fixture copy — the split below is still tested rather than skipped"
   else
@@ -3989,9 +3996,11 @@ rc20_strip_disclosure() { # <doc> <name> <out>
   ' "$1" > "$3"
 }
 
-RC20_ADV_SAVED="$(comm -12 \
+# Same SIGPIPE rule as §19: no `| head -1` under `pipefail`.
+RC20_ADV_SAVED_ALL="$(comm -12 \
   <(rc_advisory_specimen "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC" | sort -u) \
-  <(rc20_disclosure_saved "$MERGE_GATES_DOC" "$RC20_ALL" "$RC20_BLK" | sort -u) | head -1)"
+  <(rc20_disclosure_saved "$MERGE_GATES_DOC" "$RC20_ALL" "$RC20_BLK" | sort -u))"
+RC20_ADV_SAVED="${RC20_ADV_SAVED_ALL%%$'\n'*}"
 if [ -n "$RC20_ADV_SAVED" ]; then
   ok "derived the DELETE specimen: \`$RC20_ADV_SAVED\` is on the must-clear roster, carries continue-on-error, is in no required aggregator's needs, and is reported the moment its disclosure stops matching"
 else
