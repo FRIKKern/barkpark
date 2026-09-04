@@ -302,8 +302,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # Which inline "+ New" form the WorkspaceSwitcher shows: "workspace",
       # "project", or nil (both closed). The "＋" buttons toggle this via
       # `toggle-create`; a successful create or a re-click closes it. The
-      # affordances themselves are hidden when `api_token` is nil (no
-      # principal to own a new workspace) — see the layout's `can_create`.
+      # affordances themselves are hidden when there is no PRINCIPAL at all —
+      # neither a token nor an account-session %User{} (nobody to own a new
+      # workspace) — see the layout's `can_create`.
       create_open: nil
     )
     |> stream(:paper_blocks, [])
