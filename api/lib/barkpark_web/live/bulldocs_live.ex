@@ -104,7 +104,10 @@ defmodule BarkparkWeb.BulldocsLive do
     socket =
       socket
       |> assign(:viewer, socket.assigns[:viewer] || PaperViewer.anonymous())
-      |> assign(:can_edit?, PaperViewer.can_edit?(socket.assigns, paper.workspace_id))
+      # Slice 3 (task-8ac4f3918da1c433) passes the SLUG too: an item share link
+      # grades writable only for the ONE paper it binds, so the workspace alone
+      # is not enough to decide. The credential arm is unchanged.
+      |> assign(:can_edit?, PaperViewer.can_edit?(socket.assigns, paper.workspace_id, slug))
       # Slice 2 (task-633d25cac4262afc): edit-mode state + the event gate. The
       # gate is attached for EVERY viewer — it is what makes a `paper-*` edit
       # event unreachable without `:can_edit?`, so it must not be conditional
