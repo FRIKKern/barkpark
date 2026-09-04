@@ -249,6 +249,13 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   end
 
   @doc """
+  The pinned Stripe API version this gateway sends on every request. Public so a
+  test can assert the SHIPPED constant rather than a re-typed copy of it.
+  """
+  @spec api_version() :: String.t()
+  def api_version, do: @api_version
+
+  @doc """
   Pure builder for a Stripe API request — NO network. Returns a request map:
 
       %{
@@ -266,13 +273,6 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   body without anything leaving the box. `path` is appended to the Stripe API
   base; `params` is form-encoded (Stripe's API is form-encoded, not JSON).
   """
-  @doc """
-  The pinned Stripe API version this gateway sends on every request. Public so a
-  test can assert the SHIPPED constant rather than a re-typed copy of it.
-  """
-  @spec api_version() :: String.t()
-  def api_version, do: @api_version
-
   @spec build_request(String.t(), :get | :post | :delete, map()) :: %{
           method: :get | :post | :delete,
           url: String.t(),

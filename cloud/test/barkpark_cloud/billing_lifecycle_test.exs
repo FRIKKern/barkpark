@@ -91,11 +91,11 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       assert Billing.entitled?(team)
       refute reload_bp(bp).suspended
 
-      # Simulate the grace window elapsing: re-anchor the period end into the past
+      # Simulate the grace window elapsing: re-anchor grace_ends_at into the past
       # and re-enforce. No sweep detects this in production (charter D657 decided
       # against one) — elapsed grace is felt at request time, via entitled?/1.
       past = DateTime.add(DateTime.utc_now(), -1, :day)
-      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{grace_ends_at: past})
 
       refute Billing.entitled?(team)
       assert %Barkpark{suspended: true, suspended_reason: "billing_past_due"} = reload_bp(bp)
@@ -135,7 +135,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       past = DateTime.add(DateTime.utc_now(), -1, :day)
 
       assert {:ok, :already_past_due} =
-               Billing.mark_past_due(reload(sub), %{current_period_end: past})
+               Billing.mark_past_due(reload(sub), %{grace_ends_at: past})
 
       refute Billing.entitled?(team)
       assert %Barkpark{suspended: true, suspended_reason: "billing_past_due"} = reload_bp(bp)
@@ -144,26 +144,28 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
   # cch-w57-s2. billing.ex used to describe grace as a window that ends with the
   # team's boxes suspended. It never does on the webhook path: mark_past_due/2
-  # opens with Map.put_new_lazy(attrs, :current_period_end, &default_grace_anchor/0),
+  # opens with Map.put_new_lazy(attrs, :grace_ends_at, &default_grace_anchor/0),
   # so every attr-less redelivery slides the deadline @grace_days further out and
-  # maybe_enforce/1's :gt -> :ok arm always wins. This block DRIVES that slide, so
+  # maybe_enforce/1's in-window arm always wins. This block DRIVES that slide, so
   # the retracted prose is pinned by behaviour: delete the put_new_lazy and it reds.
+  # cch-w57-bl re-pointed it from current_period_end to grace_ends_at — the SAME
+  # property, now read off the column that actually carries the dunning anchor.
   describe "mark_past_due/2 — the grace anchor slides FORWARD on every attr-less call" do
-    test "two attr-less calls move current_period_end further out (grace never elapses here)" do
+    test "two attr-less calls move grace_ends_at further out (grace never elapses here)" do
       {team, sub} = subscribed_team()
       bp = barkpark_fixture(team)
 
       assert {:ok, %Subscription{status: "past_due"}} = Billing.mark_past_due(sub)
-      first = reload(sub).current_period_end
+      first = reload(sub).grace_ends_at
 
       assert %DateTime{} = first,
              "mark_past_due/2 anchored NO grace window — an attr-less call must " <>
-               "set current_period_end (Map.put_new_lazy/3), or a past_due team is entitled forever"
+               "set grace_ends_at (Map.put_new_lazy/3), or a past_due team is NOT entitled at all"
 
       # A webhook redelivery carrying no period end (the real invoice.payment_failed
       # shape). The anchor is RE-applied, not left standing.
       assert {:ok, :already_past_due} = Billing.mark_past_due(reload(sub))
-      second = reload(sub).current_period_end
+      second = reload(sub).grace_ends_at
 
       assert DateTime.compare(second, first) == :gt,
              "the grace anchor did NOT slide forward on the second attr-less call " <>
@@ -220,7 +222,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
         Billing.handle_webhook(event("invoice.payment_failed", sub.gateway_customer_id), sig())
 
       past = DateTime.add(DateTime.utc_now(), -1, :day)
-      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{grace_ends_at: past})
 
       assert reload_bp(bp).suspended
 
@@ -289,7 +291,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
       # Drive to past_due and past grace → suspended.
       past = DateTime.add(DateTime.utc_now(), -1, :day)
-      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{grace_ends_at: past})
       assert reload_bp(bp).suspended
 
       # A re-subscribe (the activating webhook path) must RECOVER the live row, not
@@ -322,7 +324,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
       {:ok, _} =
         Billing.mark_past_due(sub, %{
-          current_period_end: DateTime.add(DateTime.utc_now(), 3, :day)
+          grace_ends_at: DateTime.add(DateTime.utc_now(), 3, :day)
         })
 
       assert Billing.entitled?(team)
@@ -331,7 +333,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
 
       {:ok, _} =
         Billing.mark_past_due(sub, %{
-          current_period_end: DateTime.add(DateTime.utc_now(), -1, :day)
+          grace_ends_at: DateTime.add(DateTime.utc_now(), -1, :day)
         })
 
       refute Billing.entitled?(team)
@@ -581,7 +583,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
         Billing.handle_webhook(event("invoice.payment_failed", sub.gateway_customer_id), sig())
 
       past = DateTime.add(DateTime.utc_now(), -1, :day)
-      {:ok, _} = Billing.mark_past_due(reload(sub), %{current_period_end: past})
+      {:ok, _} = Billing.mark_past_due(reload(sub), %{grace_ends_at: past})
       :ok
     end
 
