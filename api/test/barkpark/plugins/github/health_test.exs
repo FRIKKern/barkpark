@@ -137,7 +137,7 @@ defmodule Barkpark.Plugins.Github.HealthTest do
 
   # A `gh-<num>` intake row — what `Intake` births from an outsider's issue and
   # what `Acknowledgement.census/2` counts as unanswered.
-  defp insert_intake_doc!(dataset, number, title \\ "an outsider's issue") do
+  defp insert_intake_doc!(dataset, number, title) do
     %Barkpark.Content.Document{}
     |> Ecto.Changeset.change(%{
       doc_id: "gh-#{number}",
@@ -359,7 +359,8 @@ defmodule Barkpark.Plugins.Github.HealthTest do
     test "open list is capped at 50 while total counts all scanned rows", %{ds: ds} do
       restore_config(nil)
 
-      for i <- 1..60, do: record_conflict!(%{dataset: ds, kind: "out_of_band_edit", issue: 1000 + i})
+      for i <- 1..60,
+          do: record_conflict!(%{dataset: ds, kind: "out_of_band_edit", issue: 1000 + i})
 
       c = Health.snapshot(ds).conflicts
 
