@@ -325,14 +325,32 @@ guard2() {
 # --file", exit 2). The refusal was invisible because stderr went to /dev/null.
 # So: `< /dev/null` on every ledger write inside a loop, and the reason is
 # printed beside the FAILED id, never swallowed.
+# PACED and RETRIED: the ledger's write bucket is 60/min per token. Run 2
+# (2026-09-04 06:2xZ) landed 318 of 424 and the other 106 came back
+# "bp: rate limited; retry later" — a refusal that writes nothing and means
+# WAIT, not FAIL. So each write is followed by PDS_SWEEP_PACE seconds (1.1 s
+# default, under the bucket's refill), and a rate-limited answer is retried up
+# to PDS_SWEEP_RETRIES times with a growing sleep before it counts as FAILED.
+PACE="${PDS_SWEEP_PACE:-1.1}"; RETRIES="${PDS_SWEEP_RETRIES:-5}"
 discard_one() {
-  local id="$1" err
-  if err="$(env -u BARKPARK_TOKEN "$BP" doc discard-draft "$DOC_TYPE" "$id" --yes 2>&1 >/dev/null < /dev/null)"; then
-    printf 'discarded %s\n' "$id"
-    return 0
-  fi
-  printf 'FAILED    %s :: %s\n' "$id" "$(printf '%s' "$err" | head -1 | cut -c1-160)" >&2
-  return 1
+  local id="$1" err attempt=0 wait=2
+  while :; do
+    if err="$(env -u BARKPARK_TOKEN "$BP" doc discard-draft "$DOC_TYPE" "$id" --yes 2>&1 >/dev/null < /dev/null)"; then
+      printf 'discarded %s\n' "$id"
+      sleep "$PACE"
+      return 0
+    fi
+    case "$err" in
+      *"rate limited"*|*rate_limited*)
+        attempt=$((attempt + 1))
+        if [ "$attempt" -le "$RETRIES" ]; then
+          printf 'rate-limited %s — retry %s/%s after %ss\n' "$id" "$attempt" "$RETRIES" "$wait" >&2
+          sleep "$wait"; wait=$((wait * 2)); continue
+        fi ;;
+    esac
+    printf 'FAILED    %s :: %s\n' "$id" "$(printf '%s' "$err" | head -1 | cut -c1-160)" >&2
+    return 1
+  done
 }
 
 run_write() {
