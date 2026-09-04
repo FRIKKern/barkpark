@@ -685,7 +685,13 @@ defmodule Barkpark.Content.Papers.CompositionMigration do
       |> Map.put("body_html", body_html)
       |> Map.put("body_html_sv", Render.body_html_render_version())
       |> Map.put("rev", next_content_rev(content))
-      |> Projection.project(new_blocks, Labels.render_opts(doc.dataset, scope))
+      # task-1d095b61a47bf057: the projected body rides the SAME `render_opts`
+      # the body_html cache above was rendered with (i.e. `paper_render_opts/3`,
+      # which now always names `:style, :article`). It used to call plain
+      # `Labels.render_opts/2` — style-less — so this backfill re-projected
+      # `content["body"]["html"]` on the renderer's `:email` default and put
+      # mail typography back into a screen surface on every sweep.
+      |> Projection.project(new_blocks, render_opts)
 
     doc
     |> Document.changeset(%{"content" => new_content, "rev" => generate_rev()})

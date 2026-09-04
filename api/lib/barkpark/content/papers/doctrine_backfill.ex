@@ -469,9 +469,11 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   #   * `content["body_html"]` + `body_html_sv` — the cached render, re-rendered
   #     with the paper's own `style` (the doctrine's render parity).
   #   * `content["body"]` / `content[fieldName]` — `Projection.project/3`, the
-  #     SAME call the write path makes (plain `Labels.render_opts/1`, no style —
-  #     mirroring `maybe_project`). Skipping it would leave the projected body
-  #     showing the pre-doctrine structure.
+  #     SAME call the write path makes, on the SAME `paper_render_opts/3` that
+  #     rendered the cache above (task-1d095b61a47bf057; it used to pass plain
+  #     style-less `Labels.render_opts/2` and re-project on the `:email`
+  #     default). Skipping it would leave the projected body showing the
+  #     pre-doctrine structure.
   #   * both revs — the streaming `content["rev"]` (+1) and a fresh opaque row
   #     `rev`, like every real content writer; a changed body under an unchanged
   #     rev would defeat rev-keyed consumers.
@@ -492,7 +494,13 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       |> Map.put("body_html", body_html)
       |> Map.put("body_html_sv", Render.body_html_render_version())
       |> Map.put("rev", next_content_rev(content))
-      |> Projection.project(new_blocks, Labels.render_opts(doc.dataset, scope))
+      # task-1d095b61a47bf057: the projected body rides the SAME `render_opts`
+      # the body_html cache above was rendered with (i.e. `paper_render_opts/3`,
+      # which now always names `:style, :article`). It used to call plain
+      # `Labels.render_opts/2` — style-less — so this backfill re-projected
+      # `content["body"]["html"]` on the renderer's `:email` default and put
+      # mail typography back into a screen surface on every sweep.
+      |> Projection.project(new_blocks, render_opts)
 
     title = title_block_text(new_blocks) || doc.title
 
