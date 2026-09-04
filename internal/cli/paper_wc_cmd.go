@@ -414,6 +414,9 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 		return exitGeneric
 	}
 
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): PaperSync
+	// refuses on !result.OK — "server answered 200 without ok:true" — so every
+	// poison body is a non-zero exit before any receipt below renders.
 	result, apiErr, err := paperWCClient(ctx).PaperSync(slug, string(local), anchor.Rev)
 	if err != nil {
 		out.userErr("paper push %s: %v", slug, err)

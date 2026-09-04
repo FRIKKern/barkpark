@@ -160,6 +160,10 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// renderTaskCreated.
 	warnings := mutateWarnings(respBody)
 
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): nothing below
+	// renders without a SERVER-GENERATED id out of results[0], and the publish
+	// arm repeats the same requirement on its own response. That is the fence's
+	// own discriminator plus a field check, not a status.
 	created, ok := firstMutationRecord(respBody)
 	if !ok {
 		out.userErr("task create: server returned no id")
