@@ -390,15 +390,19 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
   # fixes the defect it tracked.
   # cch-w53-bl env-var Option A: TWO → ONE. The resurrect `env` row went with the
   # emission (the resurrect claim is `claim_json/2` plus `bundle_ref`, so it lost
-  # the key at the same seam). `template` is untouched and still tracked.
-  @resurrect_known_open [
-    %{
-      claim: "resurrect",
-      key: "template",
-      site: "internal/provisioner/worker.go:1460 → resurrectClaimSpec",
-      tracker: "cch-w53-bl-the-resurrect-claim-discards-env-and-template"
-    }
-  ]
+  # the key at the same seam).
+  #
+  # ONE → EMPTY (cch-w53-bl-the-resurrect-claim-discards-env-and-template): the
+  # resurrect `template` row went with its EMISSION, not with a new Go field.
+  # `resurrect_claim_json/2` now `Map.drop([:template])`s the key, because a
+  # resurrect restores content from the BUNDLE and `internal/provisioner/
+  # restore.go` documents the content step as "Template bootstrap is suppressed"
+  # — structurally, since `translateResurrect` builds its JobSpec field by field
+  # and never sets `Template`. So `resurrectClaimSpec` having no `template` field
+  # was right and the emission was the defect. The list is EMPTY on purpose and
+  # stays declared: the equality below is what reds the moment a NEW key is
+  # emitted-and-discarded on this claim.
+  @resurrect_known_open []
 
   # ---------------------------------------------------------------------------
   # @reserved — EMPTY. Its mechanism is exercised every run regardless (ARM 5).
@@ -475,7 +479,10 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     ok_body!(worker_claim("/v1/internal/provision-jobs/claim"), "provision")
   end
 
-  # The resurrect claim = the full provision claim PLUS `bundle_ref`.
+  # The resurrect claim = the full provision claim PLUS `bundle_ref`, MINUS
+  # `template`. The barkpark is registered WITH a template on purpose: the
+  # anti-vacuity arm's `refute Map.has_key?(body, "template")` only means
+  # something while `base_claim_json/2` would otherwise have a slug to emit.
   defp resurrect_claim_body! do
     team = team!()
     n = System.unique_integer([:positive])
@@ -616,7 +623,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert_discarded("support", got, want, body, src)
     end
 
-    test "the RESURRECT claim discards exactly {template}" do
+    test "the RESURRECT claim discards NOTHING — @resurrect_known_open is empty" do
       src = go_sources()
       body = resurrect_claim_body!()
       got = discarded(body, src, "resurrect")
@@ -1119,12 +1126,20 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
       assert %Barkpark{} = Registry.verify_agent_token(body["agent_token"])
     end
 
-    test "the resurrect claim carries bundle_ref on top of the full provision claim" do
+    test "the resurrect claim carries bundle_ref on top of the provision claim, MINUS template" do
       body = resurrect_claim_body!()
 
       assert is_binary(body["bundle_ref"]) and body["bundle_ref"] != ""
       assert body["kind"] == "azure"
       refute Map.has_key?(body, "env")
+
+      # cch-w53-bl: the key is GONE, not merely nil. A `template: nil` would still
+      # be a key the worker discards (ARM 1 censuses emitted KEYS), so only an
+      # absent key retires the @resurrect_known_open row honestly. NOT VACUOUS:
+      # `resurrect_claim_body!` registers its barkpark with `template: "blog"`, so
+      # `base_claim_json/2` has a real slug to emit and this refute reds the moment
+      # `Map.drop([:template])` leaves `resurrect_claim_json/2`.
+      refute Map.has_key?(body, "template")
     end
 
     test "the support claim carries the nested support map AND the three discarded keys" do

@@ -10,10 +10,20 @@
 # rendered ZERO jobs, took 0 seconds, and did it on every push to main for nine
 # hours. Twenty-five shell harnesses were silently unexecuted the whole time.
 #
-# The rule GitHub enforces, and the only rule this script checks: a job is
+# The rule GitHub enforces, and the first rule this script checks: a job is
 # either a RUNNER job (`runs-on` AND a non-empty `steps` list) or a REUSABLE
 # WORKFLOW CALL (`uses`). Nothing else parses. A YAML syntax error is the same
 # failure one stage earlier, so it reds here too.
+#
+# THE SAME HAZARD ONE LEVEL DOWN — THE STEP CLAUSE (wave 42 finding).
+# A PR shipped two new `report main failure` steps carrying `name:` and `env:`
+# and NO `run:`. Valid YAML again; the job-shape clause above is satisfied
+# (runs-on present, steps non-empty); and again GitHub refuses the file, so the
+# very job whose purpose was to make a red main push reach a human never ran.
+# So: EVERY element of EVERY job's `steps:` list must carry EXACTLY ONE of
+# `run:` or `uses:`. Neither is the shipped defect; BOTH is equally invalid to
+# Actions and is what a half-finished edit from `uses:` to `run:` leaves behind.
+# A red names the file, the job id, the step INDEX and its `name:` if it has one.
 #
 # WHY THIS IS A SEPARATE SCRIPT AND NOT A NEW ARM OF workflow-portability-check.sh
 # (or -run-shell-check, or -trigger-coverage). Those three are wired ONLY in
@@ -24,8 +34,8 @@
 # instead, which is deliberately path-unfiltered and renders on every PR.
 #
 # EXIT CODES
-#   0  every job in every parsed file has a legal shape
-#   1  at least one job is malformed (or a file is unparseable) — named
+#   0  every job AND every step in every parsed file has a legal shape
+#   1  at least one job or step is malformed (or a file is unparseable) — named
 #   2  CANNOT MEASURE: zero files, zero jobs, no PyYAML, or a bad flag.
 #      Never a vacuous green: an empty scan is a failure, not a pass.
 #
@@ -100,6 +110,7 @@ if not files:
 
 bad = []
 jobs_seen = 0
+steps_seen = 0
 files_parsed = 0
 
 for path in files:
@@ -141,6 +152,36 @@ for path in files:
         has_runs_on = "runs-on" in job and job["runs-on"] not in (None, "", [], {})
         steps = job.get("steps")
         has_steps = isinstance(steps, list) and len(steps) > 0
+
+        # THE STEP CLAUSE. Walked for its own sake, not as part of the job
+        # verdict: a job can be perfectly shaped and still carry a step Actions
+        # refuses, and that is the wave-42 defect verbatim. Reported by INDEX
+        # because a step is not required to have a name, and the index is what
+        # survives a step whose only key was the one that got deleted.
+        if isinstance(steps, list):
+            for idx, step in enumerate(steps):
+                steps_seen += 1
+                label = "step[%d]" % idx
+                if isinstance(step, dict) and isinstance(step.get("name"), str):
+                    label += ' (name: "%s")' % step["name"]
+                if not isinstance(step, dict):
+                    bad.append((path, job_id, "%s is not a mapping" % label))
+                    continue
+                has_run = "run" in step and step["run"] not in (None, "")
+                has_step_uses = "uses" in step and step["uses"] not in (None, "")
+                if has_run and has_step_uses:
+                    bad.append((
+                        path, job_id,
+                        "%s has BOTH run: and uses: — a step may carry exactly "
+                        "one" % label,
+                    ))
+                elif not has_run and not has_step_uses:
+                    bad.append((
+                        path, job_id,
+                        "%s has neither run: nor uses: — the step cannot "
+                        "execute" % label,
+                    ))
+
         if has_runs_on and has_steps:
             continue
         missing = []
@@ -173,19 +214,19 @@ if bad:
         else:
             sys.stderr.write("RED  %s: job `%s` %s\n" % (path, job_id, why))
     sys.stderr.write(
-        "\nGitHub refuses the ENTIRE workflow file when a job has no legal shape: "
+        "\nGitHub refuses the ENTIRE workflow file when a job or a step has no legal shape: "
         "the run reports 'a workflow file issue', renders zero jobs, and every "
         "check in that file silently stops running.\n"
     )
     sys.stderr.write(
-        "workflow-job-shape-check: FAIL — %d problem(s) across %d file(s), %d job(s) inspected\n"
-        % (len(bad), len(files), jobs_seen)
+        "workflow-job-shape-check: FAIL — %d problem(s) across %d file(s), %d job(s) and %d step(s) inspected\n"
+        % (len(bad), len(files), jobs_seen, steps_seen)
     )
     sys.exit(1)
 
 print(
-    "workflow-job-shape-check: OK — %d file(s), %d job(s); every job has runs-on+steps or uses"
-    % (files_parsed, jobs_seen)
+    "workflow-job-shape-check: OK — %d file(s), %d job(s), %d step(s); every job has runs-on+steps or uses, and every step exactly one of run:/uses:"
+    % (files_parsed, jobs_seen, steps_seen)
 )
 sys.exit(0)
 PY
@@ -259,6 +300,11 @@ YML
 
   # _expect leaves the checker's own output in the global LAST_OUT so an
   # assertion can inspect WHAT the red said, not merely that it was red.
+  # NEVER `printf '%s' "$out" | grep -q ...`. grep -q exits on first match and
+  # closes the pipe; under `set -o pipefail` the printf takes SIGPIPE and the
+  # PIPELINE returns 141, so the assertion reads FAIL on output that matched.
+  # It only shows up when the match lands early enough to beat the writer —
+  # i.e. intermittently. Here-strings have no upstream process to kill.
   LAST_OUT=""
   _expect() { # label expected_rc  (rest = args to run_check)
     local label="$1" want="$2"; shift 2
@@ -276,14 +322,14 @@ YML
   local out
   _expect '(a) job with only name: reds' 1 "$tmp/only-name"
   out="$LAST_OUT"
-  if printf '%s' "$out" | grep -q 'compose-smoke-dispatcher'; then
+  if grep -q 'compose-smoke-dispatcher' <<<"$out"; then
     printf 'PASS  %-46s\n' '(a) the red NAMES the malformed job'
   else
     printf 'FAIL  %-46s\n' '(a) the red does not name the job'
     fails=$((fails + 1))
   fi
   # non-vacuity: the healthy sibling in the same file must NOT be reported.
-  if printf '%s' "$out" | grep -q 'healthy-job'; then
+  if grep -q 'healthy-job' <<<"$out"; then
     printf 'FAIL  %-46s\n' '(a) a healthy job was flagged too'
     fails=$((fails + 1))
   else
@@ -295,6 +341,114 @@ YML
   _expect '(d) unparseable YAML reds' 1 "$tmp/broken-yaml"
   _expect '(e) empty dir = CANNOT MEASURE, not green' 2 "$tmp/empty"
   _expect '(f) a single explicit file is checkable' 1 "$tmp/only-name/wf.yml"
+
+  # ── the step clause ───────────────────────────────────────────────────────
+  # (h) THE MUTATION PLANT, on a COPY OF A REAL WORKFLOW. A synthetic fixture
+  # proves the rule; deleting the `run:` line out of a file this repo actually
+  # ships proves the rule fires on the shape we actually write. The subject is
+  # this checker's own wiring step, so the plant is self-referential on purpose:
+  # if someone deletes that step's `run:`, this assertion is what notices.
+  local root real
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  real="${root:-.}/.github/workflows/required-checks-drift.yml"
+  if [ ! -f "$real" ]; then
+    # NOT a skip. The criterion this plant exists to satisfy is "a real step,
+    # mutated", and a plant that quietly opts out is the vacuous green the
+    # coverage floor above exists to forbid.
+    printf 'FAIL  %-46s\n' '(h) the real workflow to plant into is missing'
+    fails=$((fails + 1))
+  else
+    mkdir -p "$tmp/real-clean" "$tmp/real-planted"
+    cp "$real" "$tmp/real-clean/wf.yml"
+    _expect '(h) a copied REAL workflow is green' 0 "$tmp/real-clean"
+
+    local anchor n_before n_after
+    anchor='run: bash scripts/workflow-job-shape-check.sh --selftest'
+    n_before="$(grep -c -F -e "$anchor" "$tmp/real-clean/wf.yml" || true)"
+    grep -v -F -e "$anchor" "$tmp/real-clean/wf.yml" >"$tmp/real-planted/wf.yml" || true
+    n_after="$(grep -c -F -e "$anchor" "$tmp/real-planted/wf.yml" || true)"
+    # ASSERT THE MUTATION APPLIED before believing any red it produces: the
+    # anchor must have matched EXACTLY ONCE and be gone afterwards. A red from
+    # a plant that never landed is a red about nothing.
+    if [ "$n_before" = "1" ] && [ "$n_after" = "0" ] && \
+       ! cmp -s "$tmp/real-clean/wf.yml" "$tmp/real-planted/wf.yml"; then
+      printf 'PASS  %-46s\n' '(h) the plant APPLIED (anchor 1 -> 0, diff)'
+    else
+      printf 'FAIL  %-46s (before=%s after=%s)\n' \
+        '(h) the plant did not apply' "$n_before" "$n_after"
+      fails=$((fails + 1))
+    fi
+
+    _expect '(i) the de-run: real step reds' 1 "$tmp/real-planted"
+    out="$LAST_OUT"
+    # The red must be locatable: file, job id, and the step INDEX.
+    if grep -q 'real-planted/wf.yml' <<<"$out" &&
+       grep -q 'job `workflow-job-shape`' <<<"$out" &&
+       grep -qE 'step\[[0-9]+\]' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(i) red names file, job and step index'
+    else
+      printf 'FAIL  %-46s\n' '(i) red is not locatable'
+      printf '%s\n' "$out" | sed 's/^/      | /'
+      fails=$((fails + 1))
+    fi
+    # and it must name THAT step, not merely some step.
+    if grep -q 'Prove the shape checker on planted fixtures' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(i) red names the planted step by name:'
+    else
+      printf 'FAIL  %-46s\n' '(i) red does not name the planted step'
+      fails=$((fails + 1))
+    fi
+    # non-vacuity: the two SIBLING steps in the same job are still legal and
+    # must not be swept in with the planted one.
+    if grep -q 'step\[0\]' <<<"$out"; then
+      printf 'FAIL  %-46s\n' '(i) a healthy sibling step was flagged'
+      fails=$((fails + 1))
+    else
+      printf 'PASS  %-46s\n' '(i) healthy sibling steps are not flagged'
+    fi
+  fi
+
+  # (j) BOTH run: and uses: — equally invalid to Actions, and what a
+  # half-finished edit from one to the other leaves behind.
+  mkdir -p "$tmp/both-keys"
+  cat >"$tmp/both-keys/wf.yml" <<'YML'
+name: both-keys
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: legal
+        run: echo ok
+      - name: carries run and uses
+        uses: actions/checkout@v4
+        run: echo also
+YML
+  _expect '(j) a step with BOTH run: and uses: reds' 1 "$tmp/both-keys"
+  out="$LAST_OUT"
+  if grep -q 'BOTH run: and uses:' <<<"$out"; then
+    printf 'PASS  %-46s\n' '(j) the red says which clause fired'
+  else
+    printf 'FAIL  %-46s\n' '(j) the red does not say BOTH'
+    fails=$((fails + 1))
+  fi
+
+  # (k) a synthetic step with NEITHER key — the wave-42 shape verbatim
+  # (`name:` + `env:` and nothing to execute), in a job that is otherwise
+  # perfectly shaped, so only the step clause can catch it.
+  mkdir -p "$tmp/name-env-step"
+  cat >"$tmp/name-env-step/wf.yml" <<'YML'
+name: name-env-step
+on: [push]
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: File the failure
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+YML
+  _expect '(k) name:+env: step with no run: reds' 1 "$tmp/name-env-step"
 
   # (g) a bad flag must never exit 0. Run the SCRIPT, not run_check.
   local rc=0

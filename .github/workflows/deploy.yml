@@ -498,12 +498,56 @@ jobs:
           # — never split into extra words of the remote command line.
           $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.sh"
       - name: Smoke test
-        env:
-          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+        # THREE assertions, because the single `test "$code" = "200"` this step
+        # used to be covers the dead-pool class and NOTHING else (charter D369,
+        # which NARROWS D344 — it does not retract it: that predicate has fired,
+        # run 30686555528 caught `guerrilla /api/schemas = 500`).
+        #
+        # What one 200 could not lose on, and what each new arm closes:
+        #
+        #   AN EMPTY CATALOG. `/api/schemas` -> LegacyController.schemas/2 ->
+        #   Content.list_schemas/2 -> Repo.all(), and legacy_controller.ex's
+        #   `json(conn, Enum.map(schemas, ...))` has no emptiness check anywhere
+        #   in the chain. Mutation-proved: the old predicate scores 200 and
+        #   PASSES against a server answering `[]`. A wiped or wrong-database
+        #   box is a live box. So the catalog length is now asserted > 0 (live:
+        #   5 entries). jq failing on a non-JSON body fails the step too — a
+        #   Caddy error page is not a catalog.
+        #
+        #   THE ENTIRE AUTHENTICATED STACK. The route pipes through
+        #   [:api, LegacyDeprecation] only and is deliberately not token-gated:
+        #   it answers 200 with no Authorization header, so no amount of auth
+        #   breakage moves it. The bad-creds login probe below is an INDEPENDENT
+        #   second oracle over a DIFFERENT pipeline, transplanted byte-identical
+        #   from the control-plane smoke and from deploy/cp-deploy.sh:129-141,
+        #   whose comment names the 16 h outage the shallow gate slept through.
+        #   Live-verified 401 against guerrilla. No credential is introduced —
+        #   the address is invalid, on the reserved .example TLD.
+        #
+        # Still NOT covered here, by design, and named so nobody reads this step
+        # as complete: a deploy that exits 0 without moving (instance-deploy.sh
+        # coalesces on "already deployed healthy") and a flip lost onto a LIVE
+        # sibling slot serving old code. Both are the next step's job — "Assert
+        # the content instance serves this commit or a descendant" — not this
+        # one's. scripts/check-deploy-smoke.sh is the tripwire on all of it.
+        #
+        # No `env:` block: GUERRILLA_HOST is the SSH target (an address), never
+        # the public origin. Declaring it here and hardcoding the URL below let a
+        # secret repointed at one box certify another. The deploy steps above own
+        # that secret; this step asserts about the public name, and says so.
         run: |
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
+          code="$(curl -s -o /tmp/instance-schemas.json -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
+          count="$(jq -e 'if type == "array" then length else error("not a JSON array") end' /tmp/instance-schemas.json)"
+          echo "guerrilla /api/schemas catalog entries = $count"
+          test "$count" -gt 0
+          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            -X POST -H 'content-type: application/json' \
+            -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
+            "https://guerrilla.barkpark.cloud/v1/auth/login" || true)"
+          echo "https://guerrilla.barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
+          test "$dbcode" = "401"
       - name: Assert the content instance serves this commit or a descendant
         # The instance smoke above is `test "$code" = "200"` on /api/schemas. It
         # cannot fail on a lost Caddy flip onto a live sibling slot, nor on
