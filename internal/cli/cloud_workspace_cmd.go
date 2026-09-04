@@ -871,6 +871,8 @@ func putOneBlob(client *http.Client, base, token, slug, localPath, blobPath stri
 		Bytes *int64 `json:"bytes"`
 	}
 	_ = json.Unmarshal(body, &echo)
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): the success
+	// path REQUIRES an echoed byte count AND requires it to match what was sent.
 	if echo.Bytes == nil {
 		return 0, fmt.Errorf("target accepted the blob but echoed no byte count — the transfer cannot be verified"), exitGeneric
 	}

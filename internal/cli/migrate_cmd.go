@@ -532,6 +532,9 @@ func migrateWriteBatch(ep migrateEndpoint, dataset string, docs []json.RawMessag
 		ae := classifyError(status, respBody)
 		return 0, fmt.Errorf("status %d: %s", status, ae.errorMessage())
 	}
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): the count is
+	// the length of the SERVER's results array, and an absent or unparsable one
+	// is an error, never a full count.
 	return migrateBatchWritten(respBody)
 }
 

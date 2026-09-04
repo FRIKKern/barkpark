@@ -215,6 +215,9 @@ func hookPreToolUse(c *apiclient.Client, task, worker, nowLine string, dryRun bo
 		dbg("would pulse %s as %s with now-line %q", task, worker, nowLine)
 		return
 	}
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): TaskPulse goes
+	// through taskPost, which refuses anything but ok:true, then REQUIRES a
+	// decoded doc.claim.epoch>0 ("server returned no fencing epoch").
 	epoch, help, err := c.TaskPulse(task, worker, nowLine)
 	if err != nil {
 		// not_holder is the honest shape of "this pane no longer owns the row"
@@ -373,6 +376,8 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 // blocker that landed on this task (or the next-step templates) is a breadcrumb
 // for `BP_CMUX_DEBUG`, never a line on the agent's turn.
 func hookReclaimEpoch(c *apiclient.Client, task, worker string, dbg func(string, ...any)) (int, error) {
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): same taskPost
+	// ok:true wall, same claim.epoch>0 requirement as the pulse above.
 	epoch, notices, help, err := c.TaskClaimN(task, worker)
 	if err != nil {
 		return 0, err
@@ -422,6 +427,10 @@ func hookCloseAtEpoch(c *apiclient.Client, task, worker string, epoch int, dbg, 
 	// (close → 409 → fresh GET → close) while the undrifted path spends one
 	// FEWER (no fresh-rev GET at all). The server is the only authority on
 	// whether the brief moved — the hook holds nothing it could compare.
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): the close
+	// receipt needs `ok:true`, which only the server can supply — {}, null and
+	// {"result":null} decode to ok:false and become an error, and a non-JSON or
+	// empty body fails taskPostRaw's envelope decode outright.
 	closeNotices, closeHelp, cerr := c.TaskCloseN(task, worker, epoch)
 	if cerr == nil {
 		for _, n := range closeNotices {

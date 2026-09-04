@@ -583,6 +583,9 @@ func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site stri
 	if jerr := json.Unmarshal(respBody, &resp); jerr != nil {
 		return "", fmt.Errorf("parse mint response: %w", jerr)
 	}
+	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): this step's
+	// whole product is the server's token string, so a body that said nothing
+	// cannot produce a success.
 	if resp.Token == "" {
 		return "", fmt.Errorf("mint token: server returned no token")
 	}
