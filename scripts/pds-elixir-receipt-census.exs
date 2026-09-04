@@ -195,7 +195,7 @@ defmodule PDS.Census do
   #
   # THE LENS AND THE ENGINE THIS BASELINE WAS TAKEN WITH (PDS-D448a):
   #   lens    build-free AST (`Code.string_to_quoted`), substring counts via
-  #           :binary.matches/2 (no regex engine, no `\b`), route depth @max_depth = 6,
+  #           :binary.matches/2 (no regex engine, no `\b`), route depth @evidence_depth = 6,
   #           @write_verbs without `transaction`, corpus `api/lib/**/*.ex` = 804 files
   #   engine  Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · darwin arm64 (printed live by
   #           report_engine/0 on every run, so a re-derivation on another engine says so)
@@ -425,9 +425,15 @@ defmodule PDS.Census do
     phantom: 9,
     consumer: 4,
     emitted: 95,
-    write: 57,
-    read: 16,
-    unrouted: 22
+    # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
+    # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
+    # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
+    # their own), the capture edge and the variable-module-head edge. Engine and lens are
+    # printed live by the run above. Not one of these is a widened tolerance: each is a
+    # route the old lens could not see and the code has always taken.
+    write: 60,
+    read: 23,
+    unrouted: 12
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -470,23 +476,43 @@ defmodule PDS.Census do
                  stream reload reload!)a
   @repo_mods [:Repo, :Multi]
 
-  # DEPTH 6 IS THE CLOSURE OF THE ROUTE RELATION, NOT A TASTE. Sweeping the budget,
-  # write/read/unrouted reads 23/11/57 · 29/23/39 · 39/15/37 · 43/23/25 · 53/15/23 ·
-  # 54/14/23 for depths 1..6 and then 54/14/23 IDENTICALLY at 7,8,9,10,12,15,20,30 —
-  # the bfs seen-set makes the reachable set a finite closure and the route set is
-  # monotone in the budget. The SHAPE relation does NOT close until 12 (POST-READ 6
-  # here, 15/21/23/23/24 at 7/8/9/10/12), and every unit past 6 buys POST-READ
-  # inflation via cross-row certifiers, so above 6 this knob is a COMPLIANCE DIAL,
-  # not a lens. Printed at runtime by report_depth_sweep/2 so it cannot be read as
-  # taste. (The brief's 42/14/35 was the A+B+C lens WITHOUT the clause-collapse fix.)
-  @max_depth 6
+  # DEPTH 6 IS NOT THE CLOSURE OF THE ROUTE RELATION. It used to be — see the block
+  # below — and this comment used to say so with a sweep transcribed off a run whose lens
+  # could not see a capture or a dynamic module head. Every figure it carried is now
+  # printed live by report_depth_sweep/2 instead of typed here.
+  # ONE KNOB USED TO SERVE TWO PURPOSES, AND IT ONLY LOOKED LIKE ONE NUMBER BECAUSE THE
+  # LENS WAS BLIND (PDS-D480). Wave 35's census read the route relation as CLOSED at 6 —
+  # write/read/unrouted flat at 57/16/22 through 7..12 — and concluded that 6 was both
+  # "where the route stops growing" and "where the evidence has not yet started lying".
+  # The first half was an artefact of two dead seams in raw_calls/1 (a capture's inner
+  # node carries args = nil, and a `mod.f(...)` head is a variable, not an alias). With
+  # both repaired the route does NOT stop at 6: it climbs 60/60/63/72/74/77 across 6..12
+  # and only then goes flat. The second half still holds, and holds HARDER: POST-READ
+  # reads 19 at 6 and 53 at 12, so the depth that completes the route is the depth that
+  # nearly triples the compliance count via cross-row certifiers.
+  #
+  # SO THEY ARE TWO NUMBERS, AND NEITHER IS THE OTHER.
+  #   @route_depth     — the budget at which the ROUTE relation closes. It answers "is
+  #                      this receipt about a state change AT ALL", and completeness is
+  #                      the only thing it is allowed to be used for.
+  #   @evidence_depth  — the budget at which SHAPE evidence is admissible. Every unit past
+  #                      it buys POST-READ inflation from functions three modules away
+  #                      vouching for a row they never touched. It is a LENS; the other is
+  #                      a REACH.
+  # The classification the census ships (write?/read?/shape) is taken at @evidence_depth.
+  # @route_depth is reported as the FLOOR CEILING — what the route reaches when depth is
+  # not the binding constraint — and never silently substituted for the other. Both are
+  # checked against the run: ROUTE-DEPTH-IS-CLOSURE reds if @route_depth stops being the
+  # depth the table closes at, so neither literal can drift into a lie.
+  @evidence_depth 6
+  @route_depth 12
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
   # closes at 6 but the shape relation does not" is only worth printing if the run can
-  # still see it fail, so the sweep keeps going past @max_depth and the prose reads its
+  # still see it fail, so the sweep keeps going past @evidence_depth and the prose reads its
   # sentences off these rows. 12 is where wave 34 found the shape relation flat.
-  @beyond [7, 8, 9, 10, 12]
+  @beyond [7, 8, 9, 10, 12, 14, 16]
 
   @shapes ~w(POST-READ CAS-CONFIRMED-ECHO PURE-ECHO CATCH-ALL-TO-SUCCESS WRONG-ROW
              DISCARDED-POST-READ)
@@ -2229,8 +2255,8 @@ defmodule PDS.Census do
 
     report_lens(textual, ast_sites, phantoms, consumers, emitted)
     report_carriers(parsed, ast_sites)
-    report_split(classified)
-    report_depth_sweep(emitted, index)
+    report_split(classified, index)
+    route_closure = report_depth_sweep(emitted, index)
     report_shapes(classified)
     report_declared_register(classified)
     report_judgment_register(classified)
@@ -2245,7 +2271,7 @@ defmodule PDS.Census do
     ms = cpu1 - cpu0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed, falsifiers, routed)
+      parsed, falsifiers, routed, route_closure)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -2672,6 +2698,10 @@ defmodule PDS.Census do
       |> Enum.flat_map(& &1.defs)
       |> propagate_defaults()
       |> Enum.map(&Map.put(&1, :calls, raw_calls(&1)))
+      # Bound ONCE per def, beside :calls and for the same reason: callees/2 and callers/2
+      # both need it, and re-walking a body per lookup is what turned this seam from a
+      # 8 s census into a 48 s one.
+      |> Enum.map(&Map.put(&1, :binds, concat_bindings(&1[:body])))
 
     by_key = Enum.group_by(all, fn d -> {d.module, d.name} end)
     by_module = Enum.group_by(all, & &1.module)
@@ -2685,6 +2715,7 @@ defmodule PDS.Census do
         |> Enum.map(fn
           {:local, f, _a} -> {f, d}
           {:remote, _segs, f, _a} -> {f, d}
+          {:dynvar, _var, f, _a} -> {f, d}
         end)
       end)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
@@ -2742,7 +2773,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- routing
 
-  defp route(site, index, max \\ @max_depth) do
+  defp route(site, index, max \\ @evidence_depth) do
     start = site.def && resolve_exact(index, site.def)
 
     {verbs, depth, chain} =
@@ -2793,6 +2824,14 @@ defmodule PDS.Census do
       Enum.any?(c.calls, fn
         {:local, f, a} -> f == d.name and c.module == d.module and accepts?(d, a)
         {:remote, segs, f, a} -> f == d.name and suffix?(d.module, segs) and accepts?(d, a)
+        # A variable module head is a caller edge only once the variable BINDS — resolved
+        # against the concat bindings of the CALLER's own body, never guessed.
+        {:dynvar, var, f, a} ->
+          f == d.name and
+            case Map.fetch(c[:binds] || concat_bindings(c[:body]), var) do
+              {:ok, segs} -> suffix?(d.module, segs) and accepts?(d, a)
+              :error -> false
+            end
       end)
     end)
     |> Enum.reject(&(&1.module == d.module and &1.name == d.name))
@@ -2868,7 +2907,10 @@ defmodule PDS.Census do
           Map.put(out, b, {verbs, found_at, chain}))
 
       _ ->
-        key = {d.module, d.name, d.arity}
+        # THE LINE IS LOAD-BEARING — SAME COLLAPSE, SAME FIX, SEE callee_key/1. Without it
+        # `seen` claims a whole multi-clause def the first time ANY clause of it is
+        # visited, so the writing clause callee_key/1 just kept is skipped here instead.
+        key = callee_key(d)
 
         if MapSet.member?(seen, key) do
           bfs_walk(rest, index, seen, verbs, found_at, chain, max, pending, out)
@@ -2972,8 +3014,18 @@ defmodule PDS.Census do
   defp callees(%{body: nil}, _index), do: []
 
   defp callees(%{module: mod} = d, index) do
+    binds = d[:binds] || concat_bindings(d[:body])
+
     (d[:calls] || raw_calls(d))
     |> Enum.flat_map(fn
+      # THE VARIABLE IS THE KEY. An unbound variable head resolves to [], never to "some
+      # module in this body".
+      {:dynvar, var, f, a} ->
+        case Map.fetch(binds, var) do
+          {:ok, segs} -> resolve(index, segs, f, a)
+          :error -> []
+        end
+
       # A {:local, f, a} with no def of that name AND ARITY in the calling module is
       # either undefined or IMPORTED — and an imported call is a real edge, so follow it.
       {:local, f, a} ->
@@ -2985,14 +3037,74 @@ defmodule PDS.Census do
       {:remote, segs, f, a} ->
         resolve(index, segs, f, a)
     end)
-    |> Enum.uniq_by(&{&1.module, &1.name, &1.arity})
+    |> Enum.uniq_by(&callee_key/1)
   end
+
+  # THE CALLEE DEDUP KEY, AND THE LINE IN IT IS THE WHOLE FIX (PDS-D480a). This read
+  # `{module, name, arity}`, which collapses a multi-clause def to ONE clause — and the
+  # index hands them back in REVERSE SOURCE ORDER, so the VERB-FREE fallback clause won
+  # and the writing clause was discarded before bfs/7 ever saw it.
+  # Barkpark.Accounts.confirm_user/1 is the worked example: the writing clause at
+  # accounts.ex:confirm_user/1's writing clause (Repo.transaction with delete!/update!) lost to
+  # `def confirm_user(_), do: :error`.
+  # PATCHING THIS ALONE CHANGES NOTHING, MEASURED: bfs_walk/9's `seen` key repeats the
+  # identical collapse, so a clause this function now keeps is dropped one step later.
+  # Both keys carry the line, or neither is worth carrying. (Run: with only this key
+  # patched the census output is byte-identical to the unpatched one except the volatile
+  # `user cpu` line; with only the `seen` key patched, write/read/unrouted are 57/16/22
+  # either way. Together they move 57/16/22 -> 60/15/20 on the wave-35 lens.)
+  defp callee_key(d), do: {d.module, d.name, d.arity, d.line}
 
   defp imported_defs(index, mod, f, arity) do
     index.imports
     |> Map.get({mod, f}, [])
     |> Enum.flat_map(&resolve(index, &1, f, arity))
   end
+
+  # The arity literal of a capture, under BOTH spellings (see raw_calls/1).
+  defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: n
+  defp capture_arity(n) when is_integer(n), do: n
+  defp capture_arity(_), do: nil
+
+  # `mod = Module.concat(Barkpark.Plugins.Github, Intake)` -> %{mod: [:Barkpark, :Plugins,
+  # :Github, :Intake]}. KEYED ON THE BOUND VARIABLE, never paired positionally with the
+  # dynamic calls in the same body: a body holding two concats and two dynamic calls must
+  # resolve each call to ITS OWN module, and a body whose variable was never bound to a
+  # concat must resolve to NOTHING. Pairing by body would emit all four edges — the
+  # cross-product this map exists to refuse (CONCAT-BINDS-THE-VARIABLE in --selftest).
+  defp concat_bindings(nil), do: %{}
+
+  defp concat_bindings(body) do
+    {_, binds} =
+      Macro.prewalk(body, %{}, fn
+        {:=, _, [{var, _, vctx}, {{:., _, [{:__aliases__, _, [:Module]}, :concat]}, _, cargs}]} =
+            n,
+        acc
+        when is_atom(var) and not is_list(vctx) ->
+          case concat_segs(cargs) do
+            nil -> {n, acc}
+            segs -> {n, Map.put(acc, var, segs)}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    binds
+  end
+
+  # Module.concat(A.B, C) and Module.concat([A, B, C]) — alias arguments only. Anything
+  # computed (a variable, a Module.split pipeline) yields nil and the edge stays unresolved
+  # rather than guessed.
+  defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), do: a ++ b
+
+  defp concat_segs([list]) when is_list(list) do
+    if Enum.all?(list, &match?({:__aliases__, _, _}, &1)),
+      do: Enum.flat_map(list, fn {:__aliases__, _, s} -> s end),
+      else: nil
+  end
+
+  defp concat_segs(_), do: nil
 
   defp raw_calls(%{body: nil}), do: []
 
@@ -3001,6 +3113,54 @@ defmodule PDS.Census do
       body
       |> expand_pipes()
       |> Macro.prewalk([], fn
+        # A CAPTURE IS AN EDGE, AND THE PREWALK USED TO LOSE IT (PDS-D480 seam (a)).
+        # `&default_ingest/2` quotes as {:&,_,[{:/,_,[{:default_ingest,_,nil}, 2]}]}. `&`
+        # and `/` are operators, so both generic clauses below decline them, and the inner
+        # node {:default_ingest, _, nil} carries args = nil, NOT a list — so the
+        # `is_list(args)` guard declines it too and the chain simply ends. That is how
+        # github_webhook_controller's `intake_fun/0` resolved to ONLY
+        # [{:remote,[:Application],:get_env}] while its real route reaches a write.
+        # THE ARITY IS NOT A BARE INTEGER HERE. parse_file/1 parses with
+        # `literal_encoder: &{:ok, {:__block__, &2, [&1]}}`, so the 2 in `&f/2` arrives as
+        # {:__block__, _, [2]}. A naive `when is_integer(a)` guard is DEAD — it matches
+        # nothing and reports "changes nothing" while doing nothing at all. capture_arity/1
+        # reads BOTH spellings, and CAPTURE-EDGE-FIRES in --selftest proves this fires.
+        # The node is REPLACED by an inert atom rather than left in place: prewalk re-enters
+        # what the function returns, and `&Mod.f/2`'s inner {{:.,_,[alias,f]},_,[]} would
+        # otherwise ALSO be recorded as a remote call of arity 0 — a second, wrong edge.
+        {:&, _, [{:/, _, [{{:., _, [{:__aliases__, _, segs}, f]}, _, []}, a]}]}, acc
+        when is_atom(f) ->
+          case capture_arity(a) do
+            nil -> {:__pds_capture__, acc}
+            ar -> {:__pds_capture__, [{:remote, segs, f, ar} | acc]}
+          end
+
+        {:&, _, [{:/, _, [{f, _, ctx}, a]}]}, acc when is_atom(f) and not is_list(ctx) ->
+          case capture_arity(a) do
+            nil -> {:__pds_capture__, acc}
+            ar -> {:__pds_capture__, [{:local, f, ar} | acc]}
+          end
+
+        # A CALL ON A VARIABLE MODULE HEAD (PDS-D480 seam (b)). `mod.ingest(payload, opts)`
+        # quotes as {{:., _, [{:mod, _, nil}, :ingest]}, _, args}: the head is a VARIABLE,
+        # not an {:__aliases__, _, segs}, so the remote clause below declines it and the
+        # local clause declines it too (its `f` is a dot-tuple, not an atom). Recorded here
+        # as a :dynvar edge naming the VARIABLE; callees/2 resolves it against the
+        # Module.concat bindings of the SAME body, by name. It is deliberately NOT resolved
+        # here: raw_calls/1 sees one node, and pairing concats with dynamic calls at the
+        # body level would emit a cross-product in a body holding two of each.
+        # `no_parens: true` in the OUTER meta is what separates the CALL `mod.ingest(p, o)`
+        # from the FIELD ACCESS `changeset.errors` — both quote with a variable head, and
+        # the second is not an edge. Without this the census crashed on
+        # {:dynvar, :result, :errors, 0} the first time it ran.
+        {{:., _, [{var, _, vctx}, f]}, meta, args}, acc
+        when is_atom(var) and is_atom(f) and is_list(args) and not is_list(vctx) ->
+          if Keyword.get(meta, :no_parens, false) do
+            {{:__pds_field__, f}, acc}
+          else
+            {{:__pds_dyn__, f, args}, [{:dynvar, var, f, length(args)} | acc]}
+          end
+
         {{:., _, [{:__aliases__, _, segs}, f]}, _, args} = n, acc
         when is_atom(f) and is_list(args) ->
           {n, [{:remote, segs, f, length(args)} | acc]}
@@ -3098,7 +3258,7 @@ defmodule PDS.Census do
       [
         if(site.write?, do: "write-routed at depth #{site.depth}", else: nil),
         if(site.read? and not site.write?, do: "read-routed only", else: nil),
-        if(!site.write? and !site.read?, do: "no Repo verb within depth #{@max_depth}", else: nil),
+        if(!site.write? and !site.read?, do: "no Repo verb within depth #{@evidence_depth}", else: nil),
         if(writes != [], do: "local writes: #{Enum.map_join(writes, ",", &elem(&1, 0))}", else: nil),
         if(reads != [], do: "local reads: #{Enum.map_join(reads, ",", &elem(&1, 0))}", else: nil)
       ]
@@ -3479,23 +3639,23 @@ defmodule PDS.Census do
     p("")
   end
 
-  defp report_split(classified) do
+  defp report_split(classified, index) do
     w = Enum.count(classified, & &1.write?)
     r = Enum.count(classified, &(not &1.write? and &1.read?))
     u = Enum.count(classified, &(not &1.write? and not &1.read?))
 
-    p("WHAT EACH CLAIM IS ABOUT (route-following through defdelegate, depth #{@max_depth})")
+    p("WHAT EACH CLAIM IS ABOUT (route-following through defdelegate, depth #{@evidence_depth})")
     p(String.duplicate("-", 78))
     row("write-routed  (claims a state change)", w, nil, :write)
     row("read-routed   (claims a read)", r, nil, :read)
     row("unrouted      (no Repo verb reached)", u, nil, :unrouted)
     p("")
     p("  #{w} IS A FLOOR, NEVER A CEILING. The #{u} unrouted sites are unrouted because this")
-    p("  lens gave up at depth #{@max_depth} or could not resolve an alias — not because they")
+    p("  lens gave up at depth #{@evidence_depth} or could not resolve an alias — not because they")
     p("  touch no state. PDS-D448 judged them almost certainly writes. Read the write count")
     p("  as \"at least #{w} success claims are about a state change\".")
     p("")
-    report_clause_collapse(classified)
+    report_clause_collapse(classified, index)
   end
 
   # ATTRIBUTION INTEGRITY, PRINTED. Every site must be owned by a def clause whose line
@@ -3509,7 +3669,7 @@ defmodule PDS.Census do
   # resolver could not own AT ALL (owner == nil) was neither collapsed nor counted, and the
   # number printed here read 0 while attribution had failed outright. An unowned site is
   # the WORST attribution failure available, not the absence of one; it is counted here.
-  defp report_clause_collapse(classified) do
+  defp report_clause_collapse(classified, index) do
     {owned, unowned} = Enum.split_with(classified, & &1.owner)
     mis_owned = Enum.reject(owned, &(&1.owner.line <= &1.line and &1.line <= &1.owner.last))
     n = length(mis_owned) + length(unowned)
@@ -3517,6 +3677,7 @@ defmodule PDS.Census do
     p("  CLAUSE-COLLAPSE  #{n} of #{length(classified)} sites NOT attributed to a def clause that")
     p("  contains their line — #{length(mis_owned)} owned by a clause that does not contain them, #{length(unowned)} owned")
     p("  by no clause at all (0 is correct; wave 33's shipped lens read 15).")
+    report_callee_collapse(index)
 
     Enum.each(Enum.sort_by(mis_owned, &{&1.path, &1.line}), fn s ->
       p("      #{short(s.path)}:#{s.line} — owned by #{label(s.owner)} at :#{s.owner.line}-#{s.owner.last}")
@@ -3530,6 +3691,64 @@ defmodule PDS.Census do
     n
   end
 
+  # THE OTHER HALF OF CLAUSE COLLAPSE, AND THE SENTENCE ABOVE WOULD NOT HAVE MOVED FOR IT
+  # (PDS-D480a). CLAUSE-COLLAPSE audits ATTRIBUTION — which def clause owns a receipt's
+  # LINE. Callee RESOLUTION had the identical bug in a different key, and it is invisible
+  # from there: the printed `CLAUSE-COLLAPSE 0 of N` would read 0 even if callee-side
+  # collapse were TOTAL. A reader finished that line believing clause collapse was solved.
+  # It was half-solved, and the broken half silently deleted write evidence.
+  #
+  # TWO NUMBERS, AND THEY ARE NOT THE SAME NUMBER.
+  #   COLLAPSED  — what the SHIPPED key actually discards on this run. It is 0 because
+  #                callee_key/1 carries the def line; revert that line and it is not.
+  #   LATENT     — {module, name, arity} groups in the corpus where the clause the OLD
+  #                key would have kept carries NO Repo verb while a later clause does.
+  #                It is a measure of how much unsoundness the old key was exposed to,
+  #                NOT a count of mis-routed rows: most of these groups sit on no
+  #                receipt's route at all. Anyone quoting it as "N wrong rows" is quoting
+  #                it wrong.
+  defp report_callee_collapse(index) do
+    groups = Enum.group_by(index.defs, &{&1.module, &1.name, &1.arity})
+
+    latent =
+      Enum.count(groups, fn {_k, ds} ->
+        case ds do
+          [first | rest] -> not writes?(first) and Enum.any?(rest, &writes?/1)
+          _ -> false
+        end
+      end)
+
+    collapsed =
+      Enum.count(groups, fn {_k, ds} ->
+        length(ds) > 1 and length(Enum.uniq_by(ds, &callee_key/1)) < length(ds) and
+          Enum.any?(ds, &writes?/1)
+      end)
+
+    p("  CALLEE-COLLAPSE  #{collapsed} clause group(s) discarded by the callee resolver's own")
+    p("  dedup key on this run — the key carries the def LINE, so a multi-clause def is")
+    p("  followed clause by clause instead of collapsing to whichever one the index")
+    p("  returned first. #{latent} group(s) are LATENT resolver unsoundness: the clause the")
+    p("  OLD {module, name, arity} key would have kept has no Repo verb while a later")
+    p("  clause has one. THAT IS NOT #{latent} MIS-ROUTED ROWS — most sit on no receipt's")
+    p("  route at any depth; it is the exposure the old key carried. Quote it as latent.")
+    p("  (PDS-D480a's filing said 68, counted over the COARSER {module, name} grouping —")
+    p("  #{latent_by_name(index)} under that grouping on this tree. The resolver keys on ARITY too, so the")
+    p("  #{latent} above is the one that describes THIS lens. Both are latent, neither is live.)")
+  end
+
+  # The filing's grouping, kept so its 68 can be compared against something instead of
+  # being silently replaced by a different measure wearing the same name.
+  defp latent_by_name(index) do
+    index.defs
+    |> Enum.group_by(&{&1.module, &1.name})
+    |> Enum.count(fn {_k, ds} ->
+      case ds do
+        [first | rest] -> not writes?(first) and Enum.any?(rest, &writes?/1)
+        _ -> false
+      end
+    end)
+  end
+
   # WHY THE FLOOR IS A FLOOR, shown rather than asserted. The write count is a function
   # of the depth budget, not a property of the code: a controller that calls a context
   # that calls a query builder that calls Repo is 4 hops, and depth 3 cannot see it.
@@ -3538,10 +3757,10 @@ defmodule PDS.Census do
     p(String.duplicate("-", 78))
 
     rows = sweep_rows(emitted, index, @sweep ++ @beyond)
-    {inside, beyond} = Enum.split_with(rows, &(&1.depth <= @max_depth))
+    {inside, beyond} = Enum.split_with(rows, &(&1.depth <= @evidence_depth))
 
     Enum.each(inside, fn r ->
-      mark = if r.depth == @max_depth, do: "  <- the census depth", else: ""
+      mark = if r.depth == @evidence_depth, do: "  <- the census depth", else: ""
 
       p("  depth #{r.depth}   write #{pad(r.write)}   read #{pad(r.read)}   unrouted #{pad(r.unrouted)}   POST-READ #{pad(r.post_read)}#{mark}")
     end)
@@ -3551,32 +3770,51 @@ defmodule PDS.Census do
     end)
 
     p("")
-    p("  WHY #{@max_depth} AND NOT MORE. EVERY NUMBER IN THIS PARAGRAPH IS READ OFF THE TABLE ABOVE")
+    p("  TWO DEPTHS, NOT ONE. EVERY NUMBER IN THIS PARAGRAPH IS READ OFF THE TABLE ABOVE")
     p("  (PDS wave 35 — this paragraph used to hardcode a write sweep that its own table")
     p("  refuted at depths 2 and 3, and a POST-READ figure less than half the one printed")
     p("  above it. A lens whose commentary disagrees with its own measurement is the defect")
     p("  this epic keeps filing; the false numbers are not reprinted here, only replaced.)")
     p("")
-    at_max = Enum.find(rows, &(&1.depth == @max_depth))
-    p("  THE ROUTE RELATION CLOSES AT #{@max_depth}. Write-routed climbs #{Enum.map_join(inside, "/", &to_string(&1.write))} across depths")
-    p("  #{List.first(@sweep)}..#{@max_depth}, and then write #{at_max.write} / read #{at_max.read} / unrouted #{at_max.unrouted} is #{closure_word(rows, at_max)} at depths")
-    p("  #{Enum.map_join(@beyond, ", ", &to_string/1)} — the bfs seen-set makes the reachable set a finite closure, and the")
-    p("  route set is MONOTONE in the budget by construction (a larger budget explores a")
-    p("  superset), so nothing is lost by stopping at the closure.")
-    p("  THE SHAPE RELATION DOES NOT CLOSE THERE. POST-READ reads #{at_max.post_read} at depth #{@max_depth} and")
-    p("  #{Enum.map_join(beyond, "/", &to_string(&1.post_read))} at depths #{Enum.map_join(@beyond, "/", &to_string/1)} — #{launder_phrase(rows, at_max)}. Those extra")
-    p("  certifications are CROSS-ROW: at depth 7, six of them come from")
+    at_max = Enum.find(rows, &(&1.depth == @evidence_depth))
+    closes = route_closure_row(rows)
+    at_route = Enum.find(rows, &(&1.depth == @route_depth))
+    flat = Enum.filter(rows, &(&1.depth > closes.depth))
+
+    p("  THE ROUTE RELATION DOES NOT CLOSE AT #{@evidence_depth} — IT CLOSES AT #{closes.depth}, AND THAT IS THE WHOLE")
+    p("  POINT OF SPLITTING THE KNOB (PDS-D480). Write-routed climbs #{Enum.map_join(inside, "/", &to_string(&1.write))} across")
+    p("  depths #{List.first(@sweep)}..#{@evidence_depth} and KEEPS CLIMBING past it: #{Enum.map_join(beyond, "/", &to_string(&1.write))} at depths")
+    p("  #{Enum.map_join(@beyond, "/", &to_string/1)}. It goes flat at #{closes.depth} — write #{closes.write} / read #{closes.read} / unrouted #{closes.unrouted}, #{closure_word(rows, closes)} at")
+    p("  depth(s) #{Enum.map_join(flat, ", ", &to_string(&1.depth))} — because the bfs seen-set makes the reachable set a finite")
+    p("  closure and the route set is MONOTONE in the budget. Until wave 35's two dead seams")
+    p("  in raw_calls/1 were repaired (a capture, and a `mod.f(...)` variable module head)")
+    p("  the table went flat at #{@evidence_depth} instead, and this census read that artefact as a property")
+    p("  of the code. @route_depth is #{@route_depth}; ROUTE-DEPTH-IS-CLOSURE below reds if it stops matching.")
+    p("")
+    p("  NEITHER WRITE FIGURE MAY BE QUOTED ALONE. THE PAIR IS THE UNIT:")
+    p("      @evidence_depth #{@evidence_depth}   write #{at_max.write}  ·  POST-READ #{at_max.post_read}   <- the classification this census SHIPS")
+    p("      @route_depth   #{String.pad_trailing(to_string(@route_depth), 2)}   write #{at_route.write}  ·  POST-READ #{at_route.post_read}   <- REACH ONLY. NOT an evidence figure.")
+    p("  The write floor rises #{at_max.write} -> #{at_route.write} (+#{at_route.write - at_max.write}) between them, and POST-READ rises #{at_max.post_read} -> #{at_route.post_read}")
+    p("  (x#{Float.round(at_route.post_read / max(at_max.post_read, 1), 1)}). A reader handed \"#{at_route.write}\" without \"POST-READ #{at_route.post_read}\" beside it has been handed")
+    p("  the over-claim this epic exists to stop: the depth that completes the route is the")
+    p("  depth at which unrelated rows start certifying each other.")
+    p("")
+    p("  THE SHAPE RELATION IS WHY THE EVIDENCE DEPTH STAYS AT #{@evidence_depth}. POST-READ reads #{at_max.post_read} at depth")
+    p("  #{@evidence_depth} and #{Enum.map_join(beyond, "/", &to_string(&1.post_read))} at depths #{Enum.map_join(@beyond, "/", &to_string/1)} — #{launder_phrase(rows, at_max)}. Those")
+    p("  extra certifications are CROSS-ROW: at depth 7, six of them come from")
     p("  Barkpark.Webhooks.record_endpoint_failure/2 — a real `select:` on a WEBHOOK FAILURE")
     p("  COUNTER vouching for a session-revoke receipt (auth_controller.ex:329) and for")
     p("  WebAuthn registration. A read of an unrelated row is not a post-read.")
-    p("  ABOVE #{@max_depth} THIS KNOB IS A COMPLIANCE DIAL, NOT A LENS. #{@max_depth} is where the route stops")
-    p("  growing and the evidence has not yet started lying.")
+    p("  ABOVE #{@evidence_depth} THE EVIDENCE KNOB IS A COMPLIANCE DIAL, NOT A LENS. What is NO LONGER")
+    p("  claimed here is that #{@evidence_depth} is also where the route stops growing. It is not.")
     p("")
+    report_route_residual(emitted, index, rows)
     p("  PDS-D448 recorded write=#{@recorded.write} read=#{@recorded.read} unrouted=#{@recorded.unrouted}. That is NOT this lens at")
-    p("  depth #{@max_depth}; it is what a deeper (or hand-followed) route sees. Both are honest and")
+    p("  depth #{@evidence_depth}; it is what a deeper (or hand-followed) route sees. Both are honest and")
     p("  neither is a ceiling — which is the point. A success-claim census reports the")
     p("  budget it measured with, or its integer means nothing.")
     p("")
+    closes
   end
 
   # ONE ROW PER DEPTH, ONE WALK PER SITE. `sweep_row/3` used to take the whole `emitted`
@@ -3684,12 +3922,93 @@ defmodule PDS.Census do
 
   defp pad(n), do: String.pad_leading(to_string(n), 3)
 
-  defp closure_word(rows, at_max) do
-    beyond = Enum.filter(rows, &(&1.depth > @max_depth))
+  # THE DEPTH THE ROUTE RELATION CLOSES AT, DERIVED FROM THE TABLE. The shallowest row
+  # whose {write, read, unrouted} triple is repeated by EVERY deeper row in the sweep.
+  # Falls back to the deepest row measured, which is the honest answer to "it had not
+  # closed by the time we stopped looking".
+  defp route_closure_row(rows) do
+    triple = &{&1.write, &1.read, &1.unrouted}
 
-    if Enum.all?(beyond, &(&1.write == at_max.write and &1.read == at_max.read)),
-      do: "IDENTICAL",
-      else: "NOT identical (the closure claim no longer holds — read the table)"
+    Enum.find(rows, List.last(rows), fn r ->
+      rows
+      |> Enum.filter(&(&1.depth > r.depth))
+      |> Enum.all?(&(triple.(&1) == triple.(r)))
+    end)
+  end
+
+  # THE RESIDUAL, NAMED RATHER THAN LEFT SILENT (PDS-D480, criterion 6). An unrouted site
+  # is unrouted for one of two reasons and they are NOT the same finding:
+  #   (a) THE BUDGET. It routes once depth is not the binding constraint — a property of
+  #       @evidence_depth, not of the code, and the split above is what makes it visible.
+  #   (b) THE LENS. It is STILL unrouted at @route_depth, where depth has stopped being an
+  #       excuse. Wave 35's two seam repairs took this class from a hypothesis to a short
+  #       list, and a short list of named sites is a FINDING. A third blind spot is not
+  #       excluded; budget exhaustion through a wide helper is the standing hypothesis.
+  defp report_route_residual(emitted, index, rows) do
+    at_ev = Enum.find(rows, &(&1.depth == @evidence_depth))
+    per_site = Enum.map(emitted, &route_budgets(&1, index, [@evidence_depth, @route_depth]))
+    unrouted? = &(not &1.write? and not &1.read?)
+
+    still =
+      per_site
+      |> Enum.filter(&(unrouted?.(Map.fetch!(&1, @evidence_depth)) and unrouted?.(Map.fetch!(&1, @route_depth))))
+      |> Enum.map(&Map.fetch!(&1, @evidence_depth))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    budget_only =
+      per_site
+      |> Enum.filter(&(unrouted?.(Map.fetch!(&1, @evidence_depth)) and not unrouted?.(Map.fetch!(&1, @route_depth))))
+      |> Enum.map(&Map.fetch!(&1, @evidence_depth))
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    p("  UNROUTED SPLITS IN TWO, AND ONLY ONE HALF IS ABOUT THE CODE.")
+    p("      #{length(budget_only)} of #{at_ev.unrouted} unrouted @#{@evidence_depth} ROUTE at @route_depth #{@route_depth} — the budget, not the code:")
+
+    budget_only
+    |> Enum.group_by(& &1.path)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.each(fn {path, sites} ->
+      lines = sites |> Enum.map(&to_string(&1.line)) |> Enum.join(", ")
+      p("        #{short(path)}  :#{lines}  (#{length(sites)} site(s))")
+    end)
+
+    p("      PDS-D480 left these NOT EXPLAINED and named a third resolver blind spot as a")
+    p("      live possibility. They are the depth budget: every one of them reaches a Repo")
+    p("      verb once the route is allowed to close. That is the split, doing its job.")
+    p("      #{length(still)} of #{at_ev.unrouted} are STILL unrouted at #{@route_depth}. THAT is the residual FINDING:")
+
+    still
+    |> Enum.group_by(& &1.path)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.each(fn {path, sites} ->
+      lines = sites |> Enum.map(&to_string(&1.line)) |> Enum.join(", ")
+      p("        #{short(path)}  :#{lines}  (#{length(sites)} site(s))")
+    end)
+
+    if still == [] do
+      p("        (none — every unrouted site at #{@evidence_depth} routes by #{@route_depth})")
+    else
+      p("      These reach NO Repo verb even where depth has stopped being the constraint.")
+      p("      They are NOT certified write-free: a third resolver blind spot is not excluded,")
+      p("      and PDS-D480 named budget exhaustion through a wide helper as the hypothesis.")
+      p("      Printed by name so the next wave audits a LIST, never a residual integer.")
+    end
+
+    p("")
+  end
+
+  # ANCHORED ON THE ROW IT IS ASKED ABOUT, not on @evidence_depth. It used to filter
+  # `&1.depth > @evidence_depth` no matter which row it was handed, which was harmless
+  # only while the two depths were the same number — the exact silent reuse PDS-D480
+  # splits apart. Asked about the closure row it now reads the rows BELOW that closure.
+  defp closure_word(rows, at) do
+    beyond = Enum.filter(rows, &(&1.depth > at.depth))
+
+    cond do
+      beyond == [] -> "the deepest budget measured (closure NOT proven — look further)"
+      Enum.all?(beyond, &(&1.write == at.write and &1.read == at.read)) -> "IDENTICAL"
+      true -> "NOT identical (the closure claim no longer holds — read the table)"
+    end
   end
 
   defp launder_phrase(rows, at_max) do
@@ -6096,7 +6415,7 @@ defmodule PDS.Census do
 
     last = List.last(rows)
     closes = Enum.find(rows, last, &(&1.full == last.full))
-    at_max = Enum.find(rows, last, &(&1.depth == @max_depth))
+    at_max = Enum.find(rows, last, &(&1.depth == @evidence_depth))
     monotone? = rows |> Enum.map(& &1.full) |> then(&(&1 == Enum.sort(&1)))
 
     p("    WRITE-REACHING BY DEPTH — EVERY ROW A FLOOR, BOTH REASONS PRINTED BELOW")
@@ -6105,9 +6424,9 @@ defmodule PDS.Census do
     Enum.each(rows, fn r ->
       mark =
         cond do
-          r.depth == @max_depth -> "   <- @max_depth, the census budget"
+          r.depth == @evidence_depth -> "   <- @evidence_depth, the census budget"
           r.depth == closes.depth -> "   <- the relation CLOSES here"
-          r.depth > @max_depth -> "   (past the census depth)"
+          r.depth > @evidence_depth -> "   (past the census depth)"
           true -> ""
         end
 
@@ -6122,17 +6441,17 @@ defmodule PDS.Census do
     at7 = Enum.find(rows, at_max, &(&1.depth == 7))
     p("      A TRANSCRIBED FIGURE IS REFUTED HERE: this run reads #{at7.routed} / #{nr} @7, so a note")
     p("      carrying #{last.full} / #{nr} @7 is off by #{last.full - at7.routed} / #{nr} and was copied, not measured.")
-    p("      @max_depth is #{@max_depth} and is NOT changed by this block: #{at_max.routed} / #{nr} @#{@max_depth} is what the")
+    p("      @evidence_depth is #{@evidence_depth} and is NOT changed by this block: #{at_max.routed} / #{nr} @#{@evidence_depth} is what the")
     p("      census's own budget sees; #{closes.full} / #{nr} @#{closes.depth} is what the relation closes at. BOTH")
     p("      are printed, because a lens that prints one of them is choosing an answer.")
-    p("      FLOOR, REASON 1 — THE DEPTH BUDGET. #{at_max.routed} / #{nr} @#{@max_depth} rises to #{closes.routed} / #{nr} @#{closes.depth}.")
+    p("      FLOOR, REASON 1 — THE DEPTH BUDGET. #{at_max.routed} / #{nr} @#{@evidence_depth} rises to #{closes.routed} / #{nr} @#{closes.depth}.")
     p("      FLOOR, REASON 2 — THE KEY. bfs/7's seen-set and callees/2's uniq_by are BOTH")
     p("      {module, name, arity}, so exactly ONE clause per callee key is ever entered. A")
     p("      write living in a SECOND clause of an already-visited key is invisible at")
     p("      EVERY depth, and no budget buys it back. Neither reason is an estimate.")
     p("      THE SWEEP IS DENOMINATOR-BLIND: the routed and full NUMERATORS are identical")
     p("      at every depth above (all #{nc} / #{nc} component clauses are write-FALSE at every")
-    p("      depth), so only the FRACTION tells the two lenses apart — #{lv_pct(at_max.routed, nr)} vs #{lv_pct(at_max.full, n)} @#{@max_depth}.")
+    p("      depth), so only the FRACTION tells the two lenses apart — #{lv_pct(at_max.routed, nr)} vs #{lv_pct(at_max.full, n)} @#{@evidence_depth}.")
     p("      A bare integer here could not be caught by any run output. Hence none is bare.")
     p("")
 
@@ -6155,7 +6474,7 @@ defmodule PDS.Census do
         end)
       end
 
-    rc_max = routed_cross.(@max_depth)
+    rc_max = routed_cross.(@evidence_depth)
     rc_close = routed_cross.(closes)
 
     comp_vis = Enum.map(comp, fn c -> {c, elem(lv_bfs(c, index, deep), 1)} end)
@@ -6186,7 +6505,7 @@ defmodule PDS.Census do
     p("                       #{length(cross_files)} / #{length(Enum.uniq(Enum.map(comp, & &1.path)))} component file(s). Depth-invariant: they cross at")
     p("                       every budget measured.")
     p("        #{length(rc_close)} / #{nr} @#{closes}   routed clause(s) that cross a boundary and are NOT")
-    p("                       write-reaching (#{length(rc_max)} / #{nr} @#{@max_depth}). These sit in NO write column")
+    p("                       write-reaching (#{length(rc_max)} / #{nr} @#{@evidence_depth}). These sit in NO write column")
     p("                       above — the third term a two-way sum drops on the floor.")
     p("        #{length(tags)} / #{map_size(hc_by_tag)}        handle_call/3 LITERAL TAG(S) the crossing clauses join")
     p("                       to, out of every literal-tagged handle_call/3 in the corpus:")
@@ -6194,7 +6513,7 @@ defmodule PDS.Census do
     Enum.each(tags, fn t ->
       Enum.each(Map.fetch!(hc_by_tag, t), fn d ->
         prof =
-          Enum.map_join([4, @max_depth, closes, 10, 12], " ", fn depth ->
+          Enum.map_join([4, @evidence_depth, closes, 10, 12], " ", fn depth ->
             "#{depth}:#{if elem(lv_bfs(d, index, depth), 0), do: "W", else: "-"}"
           end)
 
@@ -6211,7 +6530,7 @@ defmodule PDS.Census do
     p("      credits #{length(comp_cross)} / #{nc} at the WRONG depth, and the measured answer is #{length(comp_cross)} / #{nc}")
     p("      reaching a handle_call clause itself write-reaching only from the depth in the")
     p("      row above. A WAVE-40 FIGURE IS RETIRED HERE: any single number that adds a")
-    p("      depth-#{@max_depth} count over the routed #{nr} to a depth-invariant count over the #{nc}")
+    p("      depth-#{@evidence_depth} count over the routed #{nr} to a depth-invariant count over the #{nc}")
     p("      is not a bigger truth, it is two denominators in a trench coat.")
     p("")
   end
@@ -6283,12 +6602,12 @@ defmodule PDS.Census do
 
     h = length(hole)
     files = hole |> Enum.map(& &1.path) |> Enum.uniq() |> length()
-    w_max = Enum.count(hole, &elem(lv_bfs(&1, index, @max_depth), 0))
+    w_max = Enum.count(hole, &elem(lv_bfs(&1, index, @evidence_depth), 0))
     w_close = Enum.count(hole, &elem(lv_bfs(&1, index, closes), 0))
 
     p("    A NAMED HOLE, WITH ITS OWN DENOMINATOR: handle_info/2 + handle_params/3")
     p("      #{h} / #{length(index.defs)} corpus def(s), over #{files} / #{MapSet.size(paths)} live file(s) (#{MapSet.size(paths)} / #{length(parsed)} corpus file(s)")
-    p("      carry a live module or a LiveComponent). Write-reaching #{w_max} / #{h} @#{@max_depth} and")
+    p("      carry a live module or a LiveComponent). Write-reaching #{w_max} / #{h} @#{@evidence_depth} and")
     p("      #{w_close} / #{h} @#{closes} — #{w_close - w_max} / #{h} clause(s) bigger at closure than at the census")
     p("      depth, on a surface no column above counts at all. These are writes a USER")
     p("      NEVER CLICKED: a timer, a PubSub delivery, a live patch. NOTHING in this")
@@ -7486,7 +7805,7 @@ defmodule PDS.Census do
     {verbs, depth, chain} =
       case close do
         nil -> {%{}, nil, []}
-        d -> bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], @max_depth)
+        d -> bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], @evidence_depth)
       end
 
     write? = Map.has_key?(verbs, :write)
@@ -8012,14 +8331,14 @@ defmodule PDS.Census do
       mut: nil,
       exit: 0,
       expect: [
-        "0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget",
+        "0 / 4   (0.0%)    0 / 5   (0.0%)   <- @evidence_depth, the census budget",
         "1 / 4  (25.0%)    1 / 5  (20.0%)   <- the relation CLOSES here",
         "5 == population 5",
         "2 / 2  clause(s) whose EVERY live_session chain",
         "2 / 2  reachable clause(s) covered by a deny-by-default gate",
         "PASS  LIVEVIEW-REACH-CLOSES"
       ],
-      proves: "the routed fixture LiveView's write sits ONE HOP past @max_depth, so the sweep prints FALSE at the budget and TRUE at closure — and BOTH cells are asserted as fractions, numerator AND denominator, over a routed 1 and a population 2 that a bare integer could not distinguish"
+      proves: "the routed fixture LiveView's write sits ONE HOP past @evidence_depth, so the sweep prints FALSE at the budget and TRUE at closure — and BOTH cells are asserted as fractions, numerator AND denominator, over a routed 1 and a population 2 that a bare integer could not distinguish"
     },
     %{
       name: "LIVEVIEW-DEPTH-NOT-CONSTANT",
@@ -8044,8 +8363,8 @@ defmodule PDS.Census do
       mut: {"bfs_budgets([{d, 0" <> ", [label(d)]}], index, depths)",
             "bfs_budgets([{d, -1, [label(d)]}], index, depths)"},
       exit: 0,
-      expect: ["1 / 4  (25.0%)    1 / 5  (20.0%)   <- @max_depth, the census budget"],
-      refute: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
+      expect: ["1 / 4  (25.0%)    1 / 5  (20.0%)   <- @evidence_depth, the census budget"],
+      refute: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @evidence_depth, the census budget"],
       proves: "the printed FRACTION at the budget moves from 0 / 1 to 1 / 1 when the write moves one hop — so it is a measurement of the tree and not a constant the block prints either way"
     },
     %{
@@ -8063,7 +8382,7 @@ defmodule PDS.Census do
       # mutation, now aimed at the expression the block actually consults.
       mut: {"Map.has_key?(elem(Map.fetch!(snap, depth), 0)" <> ", :write)", "false"},
       exit: 0,
-      expect: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
+      expect: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @evidence_depth, the census budget"],
       refute: ["1 / 4  (25.0%)    1 / 5  (20.0%)"],
       proves: "a write flag forced false empties every depth cell and the case REDS on the missing 1 / 4 — the exact mutation that used to survive at exit 0 with every arm printing PASS"
     },
@@ -8278,6 +8597,54 @@ defmodule PDS.Census do
     # GONE the first time `unrouted` moved — loud rather than wrong, and still a red this
     # arm has no business printing.
     # The FAIL sentence carries the re-derivation command so the repair is one run.
+    # THE TWO SEAM REPAIRS, EACH WITH ITS OWN MUTANT ON ITS OWN CLAUSE (PDS-D480).
+    #
+    # THE ASSERTION IS THE ARTEFACT ITSELF, WHICH IS WHY IT IS WORTH MAKING. Disable
+    # either resolution and the route relation goes flat at 6 again — ROUTE-DEPTH-IS-CLOSURE
+    # reds with "the route relation closes at 6 on this run", which is wave 35's shipped
+    # sentence, reproduced on demand. That is the claim this slice refutes, restored by a
+    # one-clause mutation and named in the output. A drift row rides along as the second
+    # half: killing a live edge cannot leave the population untouched.
+    #
+    # WHY THE REPO CORPUS. Both seams are api/lib shapes (`&default_ingest/2`,
+    # `mod = Module.concat(...)` then `mod.ingest(...)`). The synthetic tree carries
+    # neither, so a mutant there would disable a resolution that resolved nothing — PDS-D541's
+    # unmutatability wearing a new name. Thirteen cases already ride `corpus: :repo`.
+    #
+    # THE ANCHOR IS SPLIT so the mut tuple does not match ITSELF; apply_mutation/2 refuses
+    # an ambiguous anchor and a literal that occurs twice IS one.
+    %{
+      name: "CAPTURE-EDGE-FIRES",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"defp capture_arity({:__block__, _, [n]}) when is_integer(n), " <> "do: n",
+         "defp capture_arity({:__block__, _, [n]}) when is_integer(n), do: (n && nil)"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "the route relation closes at 6 on this run",
+        "FAIL  D448-DRIFT-REFUSES"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "the capture edge is LIVE, not decorative: read the arity literal as nil — which is what a naive `when is_integer(a)` guard does to a literal_encoder-wrapped 2 — and `intake_fun/0` resolves to Application.get_env alone again, the whole github seam falls back into UNROUTED, and the depth table goes flat at 6. The census then prints wave 35's own closure sentence, so the case asserts the artefact this slice removes rather than a number that moved"
+    },
+    %{
+      name: "CONCAT-BINDS-THE-VARIABLE",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), " <> "do: a ++ b",
+         "defp concat_segs([{:__aliases__, _, a}, {:__aliases__, _, b}]), do: (a && b && nil)"},
+      exit: 1,
+      expect: [
+        "FAIL  ROUTE-DEPTH-IS-CLOSURE",
+        "the route relation closes at 6 on this run",
+        "FAIL  D448-DRIFT-REFUSES"
+      ],
+      refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
+      proves: "the Module.concat binding is LIVE: refuse to read the two-alias concat and every `mod.f(...)` edge loses its module, so `default_ingest/2` resolves to Module.concat alone and the table goes flat at 6 again. The mutation keeps a and b in scope (`a && b && nil`) so it is a RESOLUTION failure and not an unused-variable warning — the clause still runs, it just declines to bind"
+    },
     %{
       name: "D448-BASELINE-REFUSES",
       corpus: :repo,
@@ -8941,7 +9308,7 @@ defmodule PDS.Census do
 
     # THE LIVEVIEW FIXTURE (PDS wave 42), IN THREE COUPLED FILES. The routed LiveView's
     # write sits EXACTLY ONE HOP BEYOND the census budget — handle_event is depth 0 and
-    # hop7/2 is depth 7, one past @max_depth — so the depth sweep prints a FALSE cell and a
+    # hop7/2 is depth 7, one past @evidence_depth — so the depth sweep prints a FALSE cell and a
     # TRUE one past it, and both are asserted as FRACTIONS. A bare numerator could not
     # tell the routed lens from the repo-wide one: they are identical at every depth by
     # construction, here and on the real tree.
@@ -9128,7 +9495,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed, route_closure) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -9202,7 +9569,8 @@ defmodule PDS.Census do
         routed_checks(routed) ++
         register_checks(classified, parsed) ++
         roster_freshness_checks(classified, parsed) ++
-        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified)
+        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified) ++
+        route_depth_checks(route_closure, classified)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -9214,7 +9582,7 @@ defmodule PDS.Census do
     p("")
     p("DRIFT vs THE WAVE-47 RE-DERIVED BASELINE (ARMED — a DRIFT line here exits 1)")
     p(String.duplicate("-", 78))
-    p("  lens: build-free AST, substring counts (no regex engine), route depth #{@max_depth},")
+    p("  lens: build-free AST, substring counts (no regex engine), route depth #{@evidence_depth},")
     p("  `transaction` NOT a write verb · engine printed above · re-derive with")
     p("  `elixir scripts/pds-elixir-receipt-census.exs` from the repo root and amend")
     p("  @rederived WITH the lens and the engine in the same commit (PDS-D448a, PDS-D678).")
@@ -9885,6 +10253,34 @@ defmodule PDS.Census do
   # baseline, so an unconditional arm would red the selftest on its own commit. That is
   # why the cases proving this arm CAN go red census the REPO (`corpus: :repo`) — an arm
   # proven only where it is scoped out is proven nowhere (PDS-D541).
+
+  # THE SAME SCOPE RULE baseline_checks/2 USES, AND FOR THE SAME REASON (PDS-D541). Over
+  # the synthetic selftest corpus the route relation closes wherever a five-file fixture
+  # happens to close; @route_depth describes api/lib and nothing else, so an unconditional
+  # arm here reds every case that censuses the fixture at exit 0. Proven where it is in
+  # scope: CAPTURE-EDGE-FIRES and CONCAT-BINDS-THE-VARIABLE both ride `corpus: :repo` and
+  # both red THIS arm by name.
+  defp route_depth_checks(route_closure, classified) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real -> [route_depth_check(route_closure)]
+    end
+  end
+
+  defp route_depth_check(route_closure) do
+    # THE LITERAL CANNOT DRIFT INTO A LIE. @route_depth is typed; the depth the route
+    # relation actually closes at is measured by report_depth_sweep/2 off the same walk
+    # that prints the table. If a corpus change moves the closure, this reds instead of
+    # letting a stale 12 keep describing a route that now needs 14 — which is exactly
+    # how @evidence_depth spent two waves describing a closure that was an artefact.
+    {"ROUTE-DEPTH-IS-CLOSURE", route_closure.depth == @route_depth,
+     if route_closure.depth == @route_depth do
+       "@route_depth #{@route_depth} IS the measured closure: write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, flat at every deeper budget swept (POST-READ #{route_closure.post_read} there — never quote the write without it)"
+     else
+       "@route_depth is typed #{@route_depth} but the route relation closes at #{route_closure.depth} on this run (write #{route_closure.write} / read #{route_closure.read} / unrouted #{route_closure.unrouted}, POST-READ #{route_closure.post_read}) — RE-DERIVE the literal, never re-type it, and widen @beyond if the closure ran off the end of the sweep"
+     end}
+  end
+
   defp baseline_checks(drift_rows, classified) do
     case register_scope(classified) do
       :scoped_out -> []
