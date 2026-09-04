@@ -84,22 +84,38 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
     val = Map.get(assigns.editor_form, name, "")
-    has_selection = val in opts
+    options = Barkpark.Content.SelectOptions.normalize(opts)
+    has_selection = val in Enum.map(options, & &1.value)
     required = get_in(f, ["validation", "required"]) == true
 
     assigns =
       assign(assigns,
         n: name,
-        opts: opts,
+        opts: options,
         v: val,
         show_placeholder: not has_selection,
-        required: required
+        required: required,
+        radio: Barkpark.Content.SelectOptions.radio?(f)
       )
 
     ~H"""
-    <select id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
+    <%!-- Gyldendal parity E1.5 — options normalise through
+         `Barkpark.Content.SelectOptions` (bare values or {value,title} pairs;
+         the TITLE is shown, the VALUE stored) and `"layout": "radio"` renders
+         Sanity's radio list. An optional radio group with no stored value has
+         NO checked input: nothing serialises, so the field stays absent — the
+         same "no selection" idiom the placeholder <option> gives the <select>. --%>
+    <div :if={@radio} class="form-radio-group" role="radiogroup" data-field={@n}>
+      <%= for o <- @opts do %>
+        <label class="form-radio">
+          <input type="radio" name={"doc[#{@n}]"} value={o.value} checked={o.value == @v} required={@required} phx-debounce="100" />
+          <span><%= o.label %></span>
+        </label>
+      <% end %>
+    </div>
+    <select :if={not @radio} id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
       <option :if={@show_placeholder} value="" selected disabled={@required}>Select…</option>
-      <%= for o <- @opts do %><option value={o} selected={o == @v}><%= o %></option><% end %>
+      <%= for o <- @opts do %><option value={o.value} selected={o.value == @v}><%= o.label %></option><% end %>
     </select>
     """
   end

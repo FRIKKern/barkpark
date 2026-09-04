@@ -812,9 +812,13 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         field = Map.get(o, "field") || Map.get(o, :field)
         dir = Map.get(o, "direction") || Map.get(o, :direction) || "asc"
 
-        if is_binary(field) and field != "" and dir in ["asc", "desc"],
-          do: [{:field, field, String.to_atom(dir)}],
-          else: []
+        # The direction is user-authored schema data: map the two accepted
+        # words explicitly rather than atomising input (Sobelow DOS.StringToAtom).
+        case {is_binary(field) and field != "", dir} do
+          {true, "asc"} -> [{:field, field, :asc}]
+          {true, "desc"} -> [{:field, field, :desc}]
+          _ -> []
+        end
 
       _ ->
         []

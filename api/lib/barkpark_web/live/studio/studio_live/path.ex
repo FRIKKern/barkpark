@@ -212,9 +212,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
   # based on the arrayOf element's declared type. composite → empty map;
   # arrayOf → empty list; localizedText → empty map; everything else → nil.
   @doc false
+  # A new composite row is seeded with each subfield's declared `default`
+  # (Sanity's `initialValue` on an array member — Gyldendal parity E1.5), so a
+  # freshly added feature card already reads linkType=document / variant=auto
+  # instead of every select sitting on "— Select —".
   def empty_for_of(%{"of" => %{"type" => "composite"} = of}) do
     Enum.reduce(of["fields"] || [], %{}, fn sub, acc ->
-      Map.put(acc, sub["name"], empty_for_type(sub["type"]))
+      Map.put(acc, sub["name"], Map.get(sub, "default", empty_for_type(sub["type"])))
     end)
   end
 
