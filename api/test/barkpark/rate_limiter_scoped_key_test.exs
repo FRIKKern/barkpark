@@ -103,6 +103,52 @@ defmodule Barkpark.RateLimiterScopedKeyTest do
     end
   end
 
+  describe "C3: a 429 inside an auth-verdict assertion names the limiter" do
+    # The guard `media_flat_decayed_bearer_test.exs` and
+    # `require_token_write_gate_test.exs` call before every status assertion. If
+    # it went vacuous, a throttled response would resume arriving dressed as
+    # "TENANT SWAP BY CREDENTIAL DECAY" or "OVER-REACH".
+    test "it raises on a 429, naming the limiter and refusing the tempting fixes" do
+      throttled = %{
+        Phoenix.ConnTest.build_conn()
+        | status: 429,
+          resp_body: ~s({"error":{"code":"rate_limited","message":"slow down"}})
+      }
+
+      err =
+        assert_raise RuntimeError, fn ->
+          BarkparkWeb.ConnCase.refute_rate_limited!(throttled)
+        end
+
+      # The three things a reader needs and a bare `assert status == 401` hides.
+      assert err.message =~ "429"
+      assert err.message =~ "rate_limited"
+      assert err.message =~ "Barkpark.RateLimiter"
+      assert err.message =~ "scoped_conn/0"
+      assert err.message =~ "NOT a tenant swap"
+      assert err.message =~ "Do NOT raise a limit"
+    end
+
+    test "it reports an unparseable body rather than crashing on it" do
+      throttled = %{Phoenix.ConnTest.build_conn() | status: 429, resp_body: "<html>429</html>"}
+
+      err =
+        assert_raise RuntimeError, fn ->
+          BarkparkWeb.ConnCase.refute_rate_limited!(throttled)
+        end
+
+      assert err.message =~ "<unparseable body>"
+    end
+
+    test "it is a pass-through for every non-429 response" do
+      # It must NOT swallow or rewrite the statuses the verdict assertions read.
+      for status <- [200, 201, 401, 403, 404, 500] do
+        conn = %{Phoenix.ConnTest.build_conn() | status: status, resp_body: "{}"}
+        assert BarkparkWeb.ConnCase.refute_rate_limited!(conn) == conn
+      end
+    end
+  end
+
   describe "MUTATION: two test processes no longer share the revoke bucket" do
     # The real bucket options from AppTokenController (@revoke_bucket_capacity).
     @revoke_opts [capacity: 10, refill_per_sec: 10 / 60]
