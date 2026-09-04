@@ -121,17 +121,17 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       bind_grant!(ws, user, grant_ladder(project))
 
       # in-scope dataset+type → EXACTLY the granted row
-      assert titles(query(build_conn(), raw, @granted_ds, "post")) == ["in-scope"]
+      assert titles(query(scoped_conn(), raw, @granted_ds, "post")) == ["in-scope"]
 
       # containment (non-vacuous): the OTHER dataset HAS a readable row
       # ("wrong-dataset") that an unowned token DOES see — but the grantee is
       # narrowed to their ladder, so it is invisible here.
-      other = query(build_conn(), raw, @other_ds, "post")
+      other = query(scoped_conn(), raw, @other_ds, "post")
       assert other["count"] == 0
       assert other["documents"] == []
 
       # the granted type is the only readable type — the note yields nothing
-      assert query(build_conn(), raw, @granted_ds, "note")["count"] == 0
+      assert query(scoped_conn(), raw, @granted_ds, "note")["count"] == 0
     end
   end
 
@@ -148,7 +148,7 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       bind_grant!(ws, user, grant_ladder(project))
 
       # request the OTHER dataset — a fail-open bug would leak "wrong-dataset"
-      assert query(build_conn(), raw, @other_ds, "post")["count"] == 0
+      assert query(scoped_conn(), raw, @other_ds, "post")["count"] == 0
     end
   end
 
@@ -158,16 +158,16 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
     test "an unowned service token reads the whole Default dataset as before" do
       {raw, _} = unowned_token()
       # sees the other-dataset row (no narrowing) — the flat path's prior behavior
-      assert titles(query(build_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
-      assert titles(query(build_conn(), raw, @granted_ds, "post")) == ["in-scope"]
+      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
+      assert titles(query(scoped_conn(), raw, @granted_ds, "post")) == ["in-scope"]
     end
 
     test "an owned token whose owner has NO covering grant is NOT narrowed" do
       user = register_user()
       {raw, _} = owned_token(user)
       # no grant bound → no flag → full Default read, byte-identical to unowned
-      assert titles(query(build_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
-      assert titles(query(build_conn(), raw, @granted_ds, "post")) == ["in-scope"]
+      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
+      assert titles(query(scoped_conn(), raw, @granted_ds, "post")) == ["in-scope"]
     end
   end
 
@@ -189,13 +189,13 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       body = %{"mutations" => [%{"create" => %{"_type" => "post", "title" => "x"}}]}
 
       owned_status =
-        build_conn()
+        scoped_conn()
         |> auth(owned_raw)
         |> post("/v1/data/mutate/#{@granted_ds}", body)
         |> Map.fetch!(:status)
 
       unowned_status =
-        build_conn()
+        scoped_conn()
         |> auth(unowned_raw)
         |> post("/v1/data/mutate/#{@granted_ds}", body)
         |> Map.fetch!(:status)
@@ -236,13 +236,13 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       # An ACTIVE grant would deny this out-of-scope dataset (zero rows — proven
       # in "fail-closed" above). The EXPIRED grant does not narrow, so the read
       # reverts to the token's back-compat Default view — the row is visible.
-      assert titles(query(build_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
+      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
 
       # And byte-identical to an owned token with NO grant at all (no residue).
       {plain_raw, _} = owned_token(register_user())
 
-      assert query(build_conn(), raw, @granted_ds, "post") ==
-               query(build_conn(), plain_raw, @granted_ds, "post")
+      assert query(scoped_conn(), raw, @granted_ds, "post") ==
+               query(scoped_conn(), plain_raw, @granted_ds, "post")
     end
 
     test "a REVOKED grant stops narrowing — the out-of-scope deny lifts, back-compat returns",
@@ -251,12 +251,12 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       {raw, _} = owned_token(user)
       bind_grant!(ws, user, grant_ladder(project, %{revoked_at: DateTime.utc_now()}))
 
-      assert titles(query(build_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
+      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
 
       {plain_raw, _} = owned_token(register_user())
 
-      assert query(build_conn(), raw, @granted_ds, "post") ==
-               query(build_conn(), plain_raw, @granted_ds, "post")
+      assert query(scoped_conn(), raw, @granted_ds, "post") ==
+               query(scoped_conn(), plain_raw, @granted_ds, "post")
     end
   end
 end

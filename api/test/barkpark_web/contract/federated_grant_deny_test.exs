@@ -82,7 +82,7 @@ defmodule BarkparkWeb.Contract.FederatedGrantDenyTest do
   end
 
   defp federated_titles(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> get("/v1/search/#{@ds}?q=#{@term}&surfaces=documents")
     |> json_response(200)

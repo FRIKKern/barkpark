@@ -90,7 +90,7 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
   end
 
   defp create!(ctx, doc_id, content) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer " <> ctx.token)
     |> put_req_header("content-type", "application/json")
     |> post(
@@ -172,7 +172,7 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
   describe "NEGATIVE ARM — the create door's EXISTING refusals are untouched" do
     test "a create with no _type is still refused 422, not silently accepted", ctx do
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> ctx.token)
         |> put_req_header("content-type", "application/json")
         |> post(

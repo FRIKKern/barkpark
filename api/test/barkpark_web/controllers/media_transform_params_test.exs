@@ -65,7 +65,7 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
   end
 
   defp get_scoped(ctx, path) do
-    build_conn()
+    scoped_conn()
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> ctx.token)
     |> get("/w/#{ctx.ws.slug}/p/#{ctx.project.slug}" <> path)
   end

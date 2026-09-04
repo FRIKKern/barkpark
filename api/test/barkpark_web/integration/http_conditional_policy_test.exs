@@ -110,14 +110,14 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
       assert [etag] = etag_of(conn)
       assert etag != ""
 
-      replay = get(put_req_header(build_conn(), "if-none-match", etag), doc_path())
+      replay = get(put_req_header(scoped_conn(), "if-none-match", etag), doc_path())
       assert replay.status == 304
       assert replay.resp_body == ""
     end
 
     test "the seeded document really is readable and really has a body to project", %{conn: conn} do
       full = json_response(get(conn, doc_path()), 200)
-      projected = json_response(get(build_conn(), doc_path("?fields=title")), 200)
+      projected = json_response(get(scoped_conn(), doc_path("?fields=title")), 200)
 
       assert full != projected,
              "fixture is vacuous: ?fields= did not change the body, so nothing here is a projection test"
@@ -134,7 +134,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
           {"?resolve=tasks snapshotting", "?resolve=tasks"}
         ] do
       test "single doc — #{label} suppresses the etag" do
-        conn = get(build_conn(), doc_path(unquote(qs)))
+        conn = get(scoped_conn(), doc_path(unquote(qs)))
         assert conn.status == 200
 
         assert etag_of(conn) == [],
@@ -142,7 +142,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
       end
 
       test "list — #{label} suppresses the etag" do
-        conn = get(build_conn(), list_path(unquote(qs)))
+        conn = get(scoped_conn(), list_path(unquote(qs)))
         assert conn.status == 200
         assert etag_of(conn) == []
       end
@@ -154,7 +154,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
       [etag] = etag_of(get(conn, doc_path()))
 
       shaped =
-        build_conn()
+        scoped_conn()
         |> put_req_header("if-none-match", etag)
         |> get(doc_path("?fields=title"))
 
@@ -162,7 +162,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
              "the server answered a PROJECTED request 304 from a FULL representation's validator"
 
       body = json_response(shaped, 200)
-      refute body == json_response(get(build_conn(), doc_path()), 200)
+      refute body == json_response(get(scoped_conn(), doc_path()), 200)
     end
   end
 
@@ -171,7 +171,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
     # `conditional_safe?/1` and both tests red.
     test "a token-bearing read gets no etag, even unshaped" do
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> read_token!())
         |> get(doc_path())
 
@@ -182,10 +182,10 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
     end
 
     test "a token-bearing read cannot be answered 304 from an anonymous validator" do
-      [anon_etag] = etag_of(get(build_conn(), doc_path()))
+      [anon_etag] = etag_of(get(scoped_conn(), doc_path()))
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> read_token!())
         |> put_req_header("if-none-match", anon_etag)
         |> get(doc_path())
@@ -202,7 +202,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
     end
 
     test "rides the query response that DROPS its etag" do
-      conn = get(build_conn(), doc_path("?fields=title"))
+      conn = get(scoped_conn(), doc_path("?fields=title"))
       assert "authorization" in vary_of(conn)
     end
 
@@ -221,7 +221,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
     # the whole point of merging rather than setting.
     test "and does not clobber a vary another plug already set" do
       conn =
-        build_conn()
+        scoped_conn()
         |> Plug.Conn.put_resp_header("vary", "origin")
         |> get(doc_path())
 
@@ -237,7 +237,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
       assert [etag] = etag_of(first)
 
       replay =
-        build_conn()
+        scoped_conn()
         |> put_req_header("if-none-match", etag)
         |> get("/v1/capabilities")
 
@@ -255,7 +255,7 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
       {:ok, _} = Auth.create_token(admin_raw, "hcp-admin", @ds, ["read", "write", "admin"])
 
       [admin_etag] =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> admin_raw)
         |> get("/v1/capabilities")
         |> etag_of()

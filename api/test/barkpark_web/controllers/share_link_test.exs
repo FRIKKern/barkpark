@@ -184,11 +184,11 @@ defmodule BarkparkWeb.ShareLinkTest do
     # P5 (Scoped-by-URL): the short link 302s to the CANONICAL scoped
     # reader with the token riding as ?share= — and following it serves
     # the paper anonymously through RequireShareScope's item-token arm.
-    resp = get(build_conn(), "/s/#{token}")
+    resp = get(scoped_conn(), "/s/#{token}")
     target = redirected_to(resp, 302)
     assert target =~ ~r{^/w/[^/]+/p/[^/]+/papers/demo-paper\?share=}
 
-    followed = get(build_conn(), target)
+    followed = get(scoped_conn(), target)
     assert followed.status == 200
     assert followed.resp_body =~ "Shared via a direct link"
   end
@@ -270,7 +270,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     # Deterministically force the redirect lookup to miss while retaining the
     # link's real workspace/project ids for the static reader scope.
     resp =
-      build_conn()
+      scoped_conn()
       |> Plug.Conn.put_private(:share_link_tenancy, MissingRedirectTenancy)
       |> get("/s/#{token}")
 
@@ -318,7 +318,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
-    body = get(build_conn(), "/s/#{token}") |> json_response(200)
+    body = get(scoped_conn(), "/s/#{token}") |> json_response(200)
     assert body["_id"] == "post1"
     assert body["title"] == "A Post"
   end
@@ -358,7 +358,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token} =
       mint(conn, %{scope: scope_str, kind: "doc", ref_type: "post", ref_id: "postsec"})
 
-    body = get(build_conn(), "/s/#{token}") |> json_response(200)
+    body = get(scoped_conn(), "/s/#{token}") |> json_response(200)
     assert body["_id"] == "postsec"
     assert body["title"] == "Secret Post"
     refute Map.has_key?(body, "ssn")
@@ -374,7 +374,7 @@ defmodule BarkparkWeb.ShareLinkTest do
   } do
     %{"token" => token} = mint(conn, %{scope: scope, kind: "media", ref_id: media.id})
 
-    resp = get(build_conn(), "/s/#{token}")
+    resp = get(scoped_conn(), "/s/#{token}")
     assert resp.status == 200
     assert resp.resp_body == "PNG-BYTES"
 
@@ -394,7 +394,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     evil = put_dangerous_media!(ws, proj)
     %{"token" => token} = mint(conn, %{scope: scope, kind: "media", ref_id: evil.id})
 
-    resp = get(build_conn(), "/s/#{token}")
+    resp = get(scoped_conn(), "/s/#{token}")
 
     assert resp.status == 200
     # Served, but as a non-executable download — never inline image/svg+xml on
@@ -412,7 +412,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{"token" => token, "link" => link} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
 
-    assert get(build_conn(), "/s/#{token}").status == 200
+    assert get(scoped_conn(), "/s/#{token}").status == 200
 
     assert conn
            |> admin()
@@ -420,11 +420,11 @@ defmodule BarkparkWeb.ShareLinkTest do
            |> json_response(200)
            |> Map.get("revoked") == true
 
-    assert get(build_conn(), "/s/#{token}").status == 404
+    assert get(scoped_conn(), "/s/#{token}").status == 404
   end
 
   test "a garbage token is 404", %{} do
-    assert get(build_conn(), "/s/not-a-real-token").status == 404
+    assert get(scoped_conn(), "/s/not-a-real-token").status == 404
   end
 
   # ── admin gating + validation ─────────────────────────────────────────────
@@ -659,7 +659,7 @@ defmodule BarkparkWeb.ShareLinkTest do
 
       # POSITIVE CONTROL for the drop: the token minted BEFORE the column went
       # away still resolves. Lookups were always by `token_hash`.
-      served = get(build_conn(), "/s/#{raw}")
+      served = get(scoped_conn(), "/s/#{raw}")
       assert served.status in [200, 302]
 
       revoked = conn |> admin() |> delete("/v1/shares/links/#{link_id}") |> json_response(200)

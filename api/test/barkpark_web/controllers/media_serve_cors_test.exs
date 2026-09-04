@@ -125,7 +125,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
 
   describe "the four public media serve GETs carry ACAO: *" do
     test "GET /media/files/*path — 200, the asciinema cast case" do
-      conn = build_conn() |> cross_origin() |> get("/media/files/#{@path}")
+      conn = scoped_conn() |> cross_origin() |> get("/media/files/#{@path}")
 
       assert conn.status == 200
       assert conn.resp_body == @bytes
@@ -133,14 +133,14 @@ defmodule BarkparkWeb.MediaServeCorsTest do
     end
 
     test "GET /media/files/*path — 404 carries it too (route-level, not content-level)" do
-      conn = build_conn() |> cross_origin() |> get("/media/files/2026/09/no-such-blob.bin")
+      conn = scoped_conn() |> cross_origin() |> get("/media/files/2026/09/no-such-blob.bin")
 
       assert conn.status == 404
       assert_open_and_uncredentialed(conn)
     end
 
     test "GET /media — the index, 200" do
-      conn = build_conn() |> cross_origin() |> get("/media")
+      conn = scoped_conn() |> cross_origin() |> get("/media")
 
       assert conn.status == 200
       assert %{"files" => _, "count" => _} = json_response(conn, 200)
@@ -148,14 +148,14 @@ defmodule BarkparkWeb.MediaServeCorsTest do
     end
 
     test "GET /media/:id/meta — 200", ctx do
-      conn = build_conn() |> cross_origin() |> get("/media/#{ctx.media_file.id}/meta")
+      conn = scoped_conn() |> cross_origin() |> get("/media/#{ctx.media_file.id}/meta")
 
       assert conn.status == 200
       assert_open_and_uncredentialed(conn)
     end
 
     test "GET /media/:id/meta — 404 on an unknown id" do
-      conn = build_conn() |> cross_origin() |> get("/media/#{Ecto.UUID.generate()}/meta")
+      conn = scoped_conn() |> cross_origin() |> get("/media/#{Ecto.UUID.generate()}/meta")
 
       assert conn.status == 404
       assert_open_and_uncredentialed(conn)
@@ -163,7 +163,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
 
     test "GET /media/renditions/:id/:preset — 404 on an unknown id" do
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> get("/media/renditions/#{Ecto.UUID.generate()}/thumb")
 
@@ -173,7 +173,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
 
     test "serves the header even on the strict-bearer 401 (the CORS mount runs FIRST)" do
       conn =
-        build_conn()
+        scoped_conn()
         |> cross_origin()
         |> put_req_header("authorization", "Bearer definitely-not-a-real-token")
         |> get("/media/files/#{@path}")
@@ -183,7 +183,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
     end
 
     test "HEAD /media/files/*path carries it (Plug.Head routes HEAD onto the GET)" do
-      conn = build_conn() |> cross_origin() |> head("/media/files/#{@path}")
+      conn = scoped_conn() |> cross_origin() |> head("/media/files/#{@path}")
 
       assert conn.status == 200
       assert_open_and_uncredentialed(conn)
@@ -200,7 +200,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
       assert signed =~ "_="
       assert signed =~ "exp="
 
-      conn = build_conn() |> cross_origin() |> get(signed)
+      conn = scoped_conn() |> cross_origin() |> get(signed)
 
       assert conn.status == 200
       assert conn.resp_body == @bytes
@@ -210,14 +210,14 @@ defmodule BarkparkWeb.MediaServeCorsTest do
 
   describe "media WRITE routes gain NO CORS header" do
     test "POST /media/upload — 401, and no ACAO" do
-      conn = build_conn() |> cross_origin() |> post("/media/upload", %{})
+      conn = scoped_conn() |> cross_origin() |> post("/media/upload", %{})
 
       assert conn.status == 401
       assert_no_cors(conn)
     end
 
     test "DELETE /media/:id — 401, and no ACAO", ctx do
-      conn = build_conn() |> cross_origin() |> delete("/media/#{ctx.media_file.id}")
+      conn = scoped_conn() |> cross_origin() |> delete("/media/#{ctx.media_file.id}")
 
       assert conn.status == 401
       assert_no_cors(conn)
@@ -239,10 +239,10 @@ defmodule BarkparkWeb.MediaServeCorsTest do
       {:ok, _} = Tenancy.Auth.create_membership(ctx.ws.id, user.id, "admin", "user")
       {:ok, session_raw} = Accounts.create_user_session_token(user)
 
-      bare = build_conn() |> cross_origin() |> get("/media/files/#{@path}")
+      bare = scoped_conn() |> cross_origin() |> get("/media/files/#{@path}")
 
       with_session =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{
           "user_session" => session_raw,
           "api_token" => "a-session-token-this-pipeline-never-reads"
@@ -263,10 +263,10 @@ defmodule BarkparkWeb.MediaServeCorsTest do
     end
 
     test "the meta read is session-invariant too", ctx do
-      bare = build_conn() |> cross_origin() |> get("/media/#{ctx.media_file.id}/meta")
+      bare = scoped_conn() |> cross_origin() |> get("/media/#{ctx.media_file.id}/meta")
 
       with_session =
-        build_conn()
+        scoped_conn()
         |> Plug.Test.init_test_session(%{
           "api_token" => "a-session-token-this-pipeline-never-reads"
         })
@@ -283,7 +283,7 @@ defmodule BarkparkWeb.MediaServeCorsTest do
   describe "the endpoint-level DatasetCors reflector is untouched" do
     test "an ALLOWLISTED origin still gets the reflected origin, not the wildcard" do
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("origin", "https://barkpark.cloud")
         |> get("/media/files/#{@path}")
 

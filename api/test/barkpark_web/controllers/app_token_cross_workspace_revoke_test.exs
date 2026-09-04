@@ -69,7 +69,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
   end
 
   defp json_conn(bearer) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{bearer}")
     |> put_req_header("content-type", "application/json")
   end

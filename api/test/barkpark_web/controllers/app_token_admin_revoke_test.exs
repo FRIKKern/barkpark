@@ -40,7 +40,7 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp json_conn(raw), do: as(build_conn(), raw)
+  defp json_conn(raw), do: as(scoped_conn(), raw)
   defp email, do: "apptok-#{System.unique_integer([:positive])}@example.com"
 
   # Mint an app token whose label does NOT follow the `app:<email>` convention —

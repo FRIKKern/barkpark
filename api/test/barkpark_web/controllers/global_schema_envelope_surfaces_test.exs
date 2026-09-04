@@ -176,7 +176,7 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
       token_hash: Links.hash_token(raw)
     })
 
-    body = build_conn() |> get("/s/#{raw}") |> json_response(200)
+    body = scoped_conn() |> get("/s/#{raw}") |> json_response(200)
 
     # Non-vacuity: the public field proves the envelope really rendered THIS doc.
     assert body["name"] == "public-#{@uniq}"
@@ -231,7 +231,7 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
     {:ok, _} = Content.publish_document(asset_doc_id, "mediaAsset", @ds, scope)
 
     result =
-      build_conn()
+      scoped_conn()
       |> get("/v1/media/#{@ds}/#{file.id}")
       |> json_response(200)
       |> Map.fetch!("result")
@@ -270,7 +270,7 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
     [%{id: rev_id} | _] = Content.list_revisions(doc_id, @gtype, @ds, scope)
 
     body =
-      build_conn()
+      scoped_conn()
       |> bearer(@reader_token)
       |> get(scoped(ws, proj, "/v1/data/revision/#{@ds}/#{rev_id}"))
       |> json_response(200)
@@ -297,7 +297,7 @@ defmodule BarkparkWeb.GlobalSchemaEnvelopeSurfacesTest do
     publish_doc!(@stype, "gsf-search-s-#{@uniq}", "#{@needle} scoped", @scoped_secret, scope)
 
     body =
-      build_conn()
+      scoped_conn()
       |> bearer(@reader_token)
       |> get(scoped(ws, proj, "/v1/data/search/#{@ds}"), q: @needle)
       |> json_response(200)

@@ -93,7 +93,7 @@ defmodule BarkparkWeb.MediaExtensionlessContentSniffTest do
   end
 
   defp served_content_type(file) do
-    conn = build_conn() |> get("/media/files/#{file.path}")
+    conn = scoped_conn() |> get("/media/files/#{file.path}")
     assert conn.status == 200, "serve GET for #{file.path} answered #{conn.status}"
     conn |> get_resp_header("content-type") |> List.first() |> to_string()
   end
@@ -198,7 +198,7 @@ defmodule BarkparkWeb.MediaExtensionlessContentSniffTest do
 
       assert file.mime_type == "application/octet-stream"
 
-      conn = build_conn() |> get("/media/files/#{file.path}")
+      conn = scoped_conn() |> get("/media/files/#{file.path}")
       assert conn.status == 200
       assert get_resp_header(conn, "content-type") |> List.first() =~ "application/octet-stream"
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
@@ -219,7 +219,7 @@ defmodule BarkparkWeb.MediaExtensionlessContentSniffTest do
           set: [mime_type: "text/html"]
         )
 
-      conn = build_conn() |> get("/media/files/#{file.path}")
+      conn = scoped_conn() |> get("/media/files/#{file.path}")
       assert conn.status == 200
       assert get_resp_header(conn, "content-type") |> List.first() =~ "application/octet-stream"
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]

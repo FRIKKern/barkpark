@@ -100,10 +100,10 @@ defmodule BarkparkWeb.BulldocsSourceContractTest do
     published = conn |> get("#{base}/#{slug}/source?perspective=published") |> json_response(200)
 
     drafts =
-      build_conn() |> get("#{base}/#{slug}/source?perspective=drafts") |> json_response(200)
+      scoped_conn() |> get("#{base}/#{slug}/source?perspective=drafts") |> json_response(200)
 
     raw =
-      build_conn()
+      scoped_conn()
       |> get("#{base}/drafts.#{slug}/source?perspective=raw")
       |> json_response(200)
 
@@ -119,7 +119,7 @@ defmodule BarkparkWeb.BulldocsSourceContractTest do
     )
 
     pinned =
-      build_conn()
+      scoped_conn()
       |> get("#{base}/#{slug}/source?perspective=drafts")
       |> json_response(200)
 

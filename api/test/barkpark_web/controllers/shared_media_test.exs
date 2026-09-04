@@ -362,7 +362,7 @@ defmodule BarkparkWeb.SharedMediaTest do
         })
         |> Repo.insert!()
 
-      served = build_conn() |> get(serve_path(ws_a, proj_a, row))
+      served = scoped_conn() |> get(serve_path(ws_a, proj_a, row))
       assert served.status == 200
       assert served.resp_body == body
     end
@@ -583,7 +583,7 @@ defmodule BarkparkWeb.SharedMediaTest do
 
       # Read-back through the EXISTING GET blob path, not a File.read.
       with_shares(share(ws_a, proj_a, :media))
-      served = build_conn() |> get(serve_path(ws_a, proj_a, file_a))
+      served = scoped_conn() |> get(serve_path(ws_a, proj_a, file_a))
       assert served.status == 200
       assert served.resp_body == body
     end

@@ -103,7 +103,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
   describe "ANTI-VACUITY: the listings are non-empty for the right inputs" do
     test "flat GET /media lists Default's seeded file for an anonymous caller",
          %{default_file: default_file} do
-      ids = build_conn() |> get("/media") |> json_response(200) |> Map.get("files") |> ids()
+      ids = scoped_conn() |> get("/media") |> json_response(200) |> Map.get("files") |> ids()
 
       assert default_file.id in ids,
              "POSITIVE CONTROL FAILED: /media did not list the seeded Default file " <>
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
 
     test "GET /v1/media/:dataset lists Default's seeded file for an anonymous caller",
          %{default_file: default_file} do
-      ids = v1_asset_ids(build_conn() |> get("/v1/media/#{@dataset}"))
+      ids = v1_asset_ids(scoped_conn() |> get("/v1/media/#{@dataset}"))
 
       assert default_file.id in ids,
              "POSITIVE CONTROL FAILED: /v1/media/#{@dataset} did not list the seeded " <>
@@ -139,7 +139,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
     # bearer must not be turned into a 401. Filed separately as a follow-up.
     test "a VALID workspace-B bearer is served (not refused) and never sees Default's row",
          %{raw_live: raw_live, default_file: default_file} do
-      conn = bearer(build_conn(), raw_live) |> get("/v1/media/#{@dataset}")
+      conn = bearer(scoped_conn(), raw_live) |> get("/v1/media/#{@dataset}")
 
       assert conn.status == 200,
              "OVER-REACH: a VALID bearer must not be refused. Got #{conn.status}: " <>
@@ -155,21 +155,21 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
 
   describe "flat /media — a decayed bearer must be refused, not tenant-swapped" do
     test "GET /media", %{raw_dead: raw_dead, default_file: default_file} do
-      conn = bearer(build_conn(), raw_dead) |> get("/media")
+      conn = bearer(scoped_conn(), raw_dead) |> get("/media")
 
       assert conn.status == 401, decayed_msg("GET /media", conn, default_file.id)
       assert_unauthorized_envelope(conn)
     end
 
     test "GET /media/:id/meta", %{raw_dead: raw_dead, default_file: default_file} do
-      conn = bearer(build_conn(), raw_dead) |> get("/media/#{default_file.id}/meta")
+      conn = bearer(scoped_conn(), raw_dead) |> get("/media/#{default_file.id}/meta")
 
       assert conn.status == 401, decayed_msg("GET /media/:id/meta", conn, default_file.id)
       assert_unauthorized_envelope(conn)
     end
 
     test "GET /media/files/*path", %{raw_dead: raw_dead, default_file: default_file} do
-      conn = bearer(build_conn(), raw_dead) |> get("/media/files/#{default_file.path}")
+      conn = bearer(scoped_conn(), raw_dead) |> get("/media/files/#{default_file.path}")
 
       assert conn.status == 401, decayed_msg("GET /media/files/*path", conn, default_file.id)
 
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
     end
 
     test "GET /media/renditions/:id/:preset", %{raw_dead: raw_dead, default_file: default_file} do
-      conn = bearer(build_conn(), raw_dead) |> get("/media/renditions/#{default_file.id}/thumb")
+      conn = bearer(scoped_conn(), raw_dead) |> get("/media/renditions/#{default_file.id}/thumb")
 
       assert conn.status == 401,
              decayed_msg("GET /media/renditions/:id/:preset", conn, default_file.id)
@@ -188,7 +188,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
   describe "flat /media — the controls a blanket 401 would break" do
     test "no Authorization header keeps the anonymous Default public read",
          %{default_file: default_file} do
-      conn = get(build_conn(), "/media")
+      conn = get(scoped_conn(), "/media")
 
       assert conn.status == 200,
              "OVER-REACH: a header-less caller must keep its 200 — the public/browser " <>
@@ -204,7 +204,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
     # bearer keeps its 200.
     test "a VALID workspace-B bearer is served (not refused)",
          %{raw_live: raw_live, default_file: default_file} do
-      conn = bearer(build_conn(), raw_live) |> get("/media")
+      conn = bearer(scoped_conn(), raw_live) |> get("/media")
 
       assert conn.status == 200,
              "OVER-REACH: a VALID bearer must not be refused. Got #{conn.status}: " <>
@@ -216,7 +216,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
 
     test "a non-Bearer Authorization scheme is untouched", %{default_file: default_file} do
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Preview some-preview-key")
         |> get("/media")
 
@@ -244,14 +244,14 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
             "/v1/media/#{@dataset}/collections/#{Ecto.UUID.generate()}/assets",
             "/v1/media/#{@dataset}/share/some-share-token"
           ] do
-        conn = bearer(build_conn(), raw_dead) |> get(path)
+        conn = bearer(scoped_conn(), raw_dead) |> get(path)
 
         assert conn.status == 401, decayed_msg("GET #{path}", conn, default_file.id)
       end
     end
 
     test "the canonical 401 envelope on the /v1/media index", %{raw_dead: raw_dead} do
-      conn = bearer(build_conn(), raw_dead) |> get("/v1/media/#{@dataset}")
+      conn = bearer(scoped_conn(), raw_dead) |> get("/v1/media/#{@dataset}")
       assert_unauthorized_envelope(conn)
     end
 
@@ -261,7 +261,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
       before = interaction_count(default_ws)
 
       conn =
-        bearer(build_conn(), raw_dead)
+        bearer(scoped_conn(), raw_dead)
         |> post("/v1/media/#{@dataset}/search/interaction", %{
           "queryEventId" => parent.id,
           "objectId" => "asset-decayed-bearer",
@@ -284,7 +284,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
   describe "flat /v1/media — the controls a blanket 401 would break" do
     test "no Authorization header keeps the anonymous Default read",
          %{default_file: default_file} do
-      conn = get(build_conn(), "/v1/media/#{@dataset}")
+      conn = get(scoped_conn(), "/v1/media/#{@dataset}")
 
       assert conn.status == 200,
              "OVER-REACH: the header-less anonymous read must be untouched. " <>
@@ -299,7 +299,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
       parent = seed_search_event!(default_ws)
 
       conn =
-        post(build_conn(), "/v1/media/#{@dataset}/search/interaction", %{
+        post(scoped_conn(), "/v1/media/#{@dataset}/search/interaction", %{
           "queryEventId" => parent.id,
           "objectId" => "asset-anonymous",
           "type" => "click"
@@ -314,7 +314,7 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
 
     test "a VALID workspace-B bearer is unaffected on the search route",
          %{raw_live: raw_live} do
-      conn = bearer(build_conn(), raw_live) |> get("/v1/media/#{@dataset}/search?q=a")
+      conn = bearer(scoped_conn(), raw_live) |> get("/v1/media/#{@dataset}/search?q=a")
 
       assert conn.status == 200,
              "OVER-REACH: a VALID bearer must not be refused. Got #{conn.status}: " <>

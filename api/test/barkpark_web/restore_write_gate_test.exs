@@ -109,7 +109,7 @@ defmodule BarkparkWeb.RestoreWriteGateTest do
       base = "/w/restore-wg/p/default/v1/data"
 
       mutate = fn raw, mutations ->
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> raw)
         |> put_req_header("content-type", "application/json")
         |> post("#{base}/mutate/#{@dataset}", Jason.encode!(%{mutations: mutations}))
@@ -124,7 +124,7 @@ defmodule BarkparkWeb.RestoreWriteGateTest do
              ]).status == 200
 
       hist =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> write_raw)
         |> get("#{base}/history/#{@dataset}/post/swg1")
 
@@ -140,7 +140,7 @@ defmodule BarkparkWeb.RestoreWriteGateTest do
     end
 
     defp scoped_restore(base, raw, rev_id) do
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer " <> raw)
       |> put_req_header("content-type", "application/json")
       |> post("#{base}/revision/#{@dataset}/#{rev_id}/restore", Jason.encode!(%{type: "post"}))

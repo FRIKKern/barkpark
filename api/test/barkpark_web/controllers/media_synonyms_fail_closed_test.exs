@@ -76,7 +76,7 @@ defmodule BarkparkWeb.MediaSynonymsFailClosedTest do
   end
 
   defp auth(raw) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
   end

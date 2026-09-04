@@ -85,7 +85,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
   defp scoped(ws_slug, rest), do: "/w/#{ws_slug}/p/default/v1/secrets#{rest}"
 
   defp put_scoped(raw, ws_slug, name, value) do
-    build_conn()
+    scoped_conn()
     |> authed(raw)
     |> put(scoped(ws_slug, "/#{name}"), Jason.encode!(%{value: value}))
   end
@@ -94,23 +94,23 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     test "PUT → GET reveals unmasked → list masked → DELETE → 404", %{admin_a_raw: raw} do
       assert put_scoped(raw, "sec-scope-a", "slack_token", "xoxb-secret-9876").status == 200
 
-      reveal = build_conn() |> authed(raw) |> get(scoped("sec-scope-a", "/slack_token"))
+      reveal = scoped_conn() |> authed(raw) |> get(scoped("sec-scope-a", "/slack_token"))
       assert reveal.status == 200
       payload = Jason.decode!(reveal.resp_body)
       assert payload["name"] == "slack_token"
       assert payload["value"] == "xoxb-secret-9876"
 
-      list = build_conn() |> authed(raw) |> get(scoped("sec-scope-a", ""))
+      list = scoped_conn() |> authed(raw) |> get(scoped("sec-scope-a", ""))
       assert list.status == 200
       row = Jason.decode!(list.resp_body)["secrets"] |> Enum.find(&(&1["name"] == "slack_token"))
       assert row["value"] == "********9876"
 
-      assert build_conn()
+      assert scoped_conn()
              |> authed(raw)
              |> delete(scoped("sec-scope-a", "/slack_token"))
              |> Map.get(:status) == 200
 
-      assert build_conn()
+      assert scoped_conn()
              |> authed(raw)
              |> get(scoped("sec-scope-a", "/slack_token"))
              |> Map.get(:status) == 404
@@ -143,7 +143,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     end
 
     test "ws-B admin's own scoped list never contains ws-A's secret", %{admin_b_raw: raw_b} do
-      list = build_conn() |> authed(raw_b) |> get(scoped("sec-scope-b", ""))
+      list = scoped_conn() |> authed(raw_b) |> get(scoped("sec-scope-b", ""))
       assert list.status == 200
       names = Jason.decode!(list.resp_body)["secrets"] |> Enum.map(& &1["name"])
       refute "ws_a_only" in names, "ws-B's scoped list LEAKED ws-A's secret — CROSS-TENANT LEAK"
@@ -152,7 +152,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     test "ws-B admin cannot reveal ws-A's secret through their own scope (opaque 404)", %{
       admin_b_raw: raw_b
     } do
-      resp = build_conn() |> authed(raw_b) |> get(scoped("sec-scope-b", "/ws_a_only"))
+      resp = scoped_conn() |> authed(raw_b) |> get(scoped("sec-scope-b", "/ws_a_only"))
       assert resp.status == 404
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
     end
@@ -161,7 +161,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
       admin_b_raw: raw_b,
       ws_a: ws_a
     } do
-      resp = build_conn() |> authed(raw_b) |> delete(scoped("sec-scope-b", "/ws_a_only"))
+      resp = scoped_conn() |> authed(raw_b) |> delete(scoped("sec-scope-b", "/ws_a_only"))
       assert resp.status == 404
       # ws-A's row is untouched.
       assert Secrets.get("ws_a_only", ws_a.id) == "ws-a-value"
@@ -181,7 +181,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     test "ws-B admin hitting ws-A's route is stopped at the membership gate (403)", %{
       admin_b_raw: raw_b
     } do
-      resp = build_conn() |> authed(raw_b) |> get(scoped("sec-scope-a", ""))
+      resp = scoped_conn() |> authed(raw_b) |> get(scoped("sec-scope-a", ""))
       assert resp.status == 403
     end
   end
@@ -189,7 +189,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
   describe "global tier stays invisible through the scoped route" do
     setup %{global_raw: global_raw} do
       resp =
-        build_conn()
+        scoped_conn()
         |> authed(global_raw)
         |> put("/v1/secrets/instance_cred", Jason.encode!(%{value: "global-value"}))
 
@@ -198,11 +198,11 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     end
 
     test "scoped list omits the global secret; scoped reveal 404s it", %{admin_a_raw: raw} do
-      list = build_conn() |> authed(raw) |> get(scoped("sec-scope-a", ""))
+      list = scoped_conn() |> authed(raw) |> get(scoped("sec-scope-a", ""))
       names = Jason.decode!(list.resp_body)["secrets"] |> Enum.map(& &1["name"])
       refute "instance_cred" in names, "scoped list LEAKED an instance-global credential"
 
-      assert build_conn()
+      assert scoped_conn()
              |> authed(raw)
              |> get(scoped("sec-scope-a", "/instance_cred"))
              |> Map.get(:status) == 404
@@ -214,11 +214,11 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     } do
       assert put_scoped(raw, "sec-scope-a", "tenant_cred", "tenant-value").status == 200
 
-      flat_list = build_conn() |> authed(global_raw) |> get("/v1/secrets")
+      flat_list = scoped_conn() |> authed(global_raw) |> get("/v1/secrets")
       names = Jason.decode!(flat_list.resp_body)["secrets"] |> Enum.map(& &1["name"])
       refute "tenant_cred" in names, "flat list LEAKED a workspace-scoped secret"
 
-      assert build_conn()
+      assert scoped_conn()
              |> authed(global_raw)
              |> get("/v1/secrets/tenant_cred")
              |> Map.get(:status) == 404
@@ -233,7 +233,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
       # conn.assigns on the FLAT route too — the scope seam must key off the
       # ROUTE (path_params), or this write would land in Default's tier.
       resp =
-        build_conn()
+        scoped_conn()
         |> authed(global_raw)
         |> put("/v1/secrets/flat_probe", Jason.encode!(%{value: "flat-value"}))
 
@@ -249,18 +249,18 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
 
   describe "scoped-admin gate" do
     test "a member of the workspace (global admin perms) → 403", %{member_raw: raw} do
-      assert build_conn() |> authed(raw) |> get(scoped("sec-scope-a", "")) |> Map.get(:status) ==
+      assert scoped_conn() |> authed(raw) |> get(scoped("sec-scope-a", "")) |> Map.get(:status) ==
                403
     end
 
     test "a non-member global admin → 403", %{global_raw: raw} do
-      assert build_conn() |> authed(raw) |> get(scoped("sec-scope-a", "")) |> Map.get(:status) ==
+      assert scoped_conn() |> authed(raw) |> get(scoped("sec-scope-a", "")) |> Map.get(:status) ==
                403
     end
 
     test "anonymous → 401/403/404", %{} do
       resp =
-        build_conn()
+        scoped_conn()
         |> put_req_header("content-type", "application/json")
         |> get(scoped("sec-scope-a", ""))
 
@@ -275,7 +275,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     # call the controller directly. On a naive scope passthrough every verb
     # here raises Ecto.Query.CastError (a 500 on the wire) instead of 404.
     defp forged_call(action, params) do
-      build_conn()
+      scoped_conn()
       |> Map.put(:path_params, %{"workspace_slug" => "forged", "project_slug" => "default"})
       |> Map.put(:params, params)
       |> assign(:current_workspace, %Tenancy.Workspace{id: "not-a-uuid", slug: "forged"})
@@ -310,7 +310,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
       # path_params say "scoped" but no resolver ran — never fall back to
       # :global (that would leak instance credentials through a scoped URL).
       conn =
-        build_conn()
+        scoped_conn()
         |> Map.put(:path_params, %{"workspace_slug" => "forged", "project_slug" => "default"})
         |> Map.put(:params, %{})
         |> SecretController.call(SecretController.init(:index))

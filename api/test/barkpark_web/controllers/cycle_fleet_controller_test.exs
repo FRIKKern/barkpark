@@ -40,7 +40,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
           {:public_release_smoke_compensation_failed, {:database, "sensitive detail"}}
         ] do
       response =
-        build_conn()
+        scoped_conn()
         |> BarkparkWeb.CycleFleetController.release_verification_unavailable(reason)
 
       assert response.status == 503
@@ -108,7 +108,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     _opened = open_epic(prefix <> "/wave-1", token, ["unit-1"])
 
     rejected =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(prefix <> "/wave-2/open", %{
         "correction_of" => %{"version" => "correction_of-v1"},
@@ -133,7 +133,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     refute opened["cycle_ledger"]["capacity"]["sealed"]
 
     rejected =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/seal", seal_params())
       |> json_response(422)
@@ -144,7 +144,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     complete_http_experiments(base, token)
 
     sealed =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/seal", seal_params())
       |> json_response(200)
@@ -178,7 +178,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
           {"failure_threshold", [0.05]}
         ] do
       response =
-        build_conn()
+        scoped_conn()
         |> bearer(token)
         |> post(base <> "/seal", Map.put(seal_params(), field, malformed))
         |> json_response(422)
@@ -198,7 +198,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     open_legendary(base, token, 1)
     complete_http_experiments(base, token)
 
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/seal", seal_params())
     |> json_response(200)
@@ -290,7 +290,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert opened["correction_lifecycle"]["superseded"] == []
 
     malformed =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/quarantine", %{
         "idempotency_key" => "quarantine-malformed",
@@ -305,7 +305,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert malformed["error"]["details"]["reason"] =~ "invalid_correction_receipt"
 
     ambiguous =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/promote", %{
         "idempotency_key" => "promote-ambiguous",
@@ -320,7 +320,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert ambiguous["error"]["details"]["reason"] =~ "ambiguous_correction_receipt"
 
     invalid_rollback =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/rollback", %{
         "idempotency_key" => "rollback-without-head",
@@ -334,7 +334,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert invalid_rollback["error"]["details"]["reason"] =~ "invalid_rollback_target"
 
     flat_response =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post("/v1/cycles/#{epic_id}/wave-1/quarantine", %{
         "correction_receipt_json" => "{}"
@@ -367,7 +367,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     }
 
     created =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", params)
       |> json_response(201)
@@ -377,7 +377,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert binding.task_id == task.id
 
     omitted_replay =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", Map.delete(params, "task_id"))
       |> json_response(201)
@@ -386,7 +386,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert Repo.get!(AssignmentTask, assignment_id).task_id == task.id
 
     replayed =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", params)
       |> json_response(201)
@@ -397,7 +397,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert replayed_binding.inserted_at == binding.inserted_at
 
     conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", Map.put(params, "task_id", other_task.id))
       |> json_response(409)
@@ -414,7 +414,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     }
 
     unbound =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", unbound_params)
       |> json_response(201)
@@ -422,7 +422,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     refute Repo.get(AssignmentTask, unbound["assignment"]["id"])
 
     retroactive =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", Map.put(unbound_params, "task_id", task.id))
       |> json_response(409)
@@ -458,7 +458,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
           {"foreign-workspace-task", other_workspace_task.id}
         ] do
       rejected =
-        build_conn()
+        scoped_conn()
         |> bearer(token)
         |> post(base <> "/assignments", %{
           "assignment_id" => logical_id,
@@ -577,10 +577,10 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     read = scoped_token!(workspace, ["read"], "cycle-read")
 
     for path <- [flat, scoped] do
-      denied = build_conn() |> bearer(public_read) |> get(path)
+      denied = scoped_conn() |> bearer(public_read) |> get(path)
       assert json_response(denied, 403)["error"]["code"] == "forbidden"
 
-      allowed = build_conn() |> bearer(read) |> get(path) |> json_response(200)
+      allowed = scoped_conn() |> bearer(read) |> get(path) |> json_response(200)
       assert allowed["cycle_ledger"]["profile"] == "epic"
     end
 
@@ -594,7 +594,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     # rides `Plugs.PublicRead` (router.ex:187/:488) and its message never moves,
     # so diffing it would look like the mount did nothing (a second vacuity
     # trap). Unmount the plug from `:cycle_api` and EXACTLY this line reds.
-    flat_denied = build_conn() |> bearer(public_read) |> get(flat)
+    flat_denied = scoped_conn() |> bearer(public_read) |> get(flat)
 
     assert json_response(flat_denied, 403)["error"]["message"] ==
              "public-read tokens may only read published public documents"
@@ -624,14 +624,14 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     read = scoped_token!(workspace, ["read"], "cycle-mixed-control-read")
 
     for path <- [flat, scoped] do
-      denied = build_conn() |> bearer(mixed) |> get(path)
+      denied = scoped_conn() |> bearer(mixed) |> get(path)
       assert json_response(denied, 403)["error"]["code"] == "forbidden"
 
       # Positive controls: the seal is a tier test, not a blanket denial.
-      allowed = build_conn() |> bearer(read) |> get(path) |> json_response(200)
+      allowed = scoped_conn() |> bearer(read) |> get(path) |> json_response(200)
       assert allowed["cycle_ledger"]["profile"] == "epic"
 
-      admin = build_conn() |> bearer(write_token) |> get(path) |> json_response(200)
+      admin = scoped_conn() |> bearer(write_token) |> get(path) |> json_response(200)
       assert admin["cycle_ledger"]["profile"] == "epic"
     end
   end
@@ -645,7 +645,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
     open_epic(base, token, ["unit-1"])
 
-    assert build_conn()
+    assert scoped_conn()
            |> bearer(token)
            |> post(base <> "/open", %{
              "profile" => "epic",
@@ -655,7 +655,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
            |> json_response(201)
 
     wave_conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/open", %{
         "profile" => "epic",
@@ -675,13 +675,13 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     }
 
     created =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", assignment_params)
       |> json_response(201)
 
     replayed =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", assignment_params)
       |> json_response(201)
@@ -708,7 +708,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
            ]
 
     assignment_conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(
         base <> "/assignments",
@@ -739,7 +739,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     }
 
     missing =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments/build-1/results", missing_receipts)
       |> json_response(422)
@@ -753,13 +753,13 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
         Jason.encode!(valid_payload)
       )
 
-    assert build_conn()
+    assert scoped_conn()
            |> bearer(token)
            |> post(base <> "/assignments/build-1/results", result_params)
            |> json_response(201)
 
     idempotency_conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(
         base <> "/assignments/build-1/results",
@@ -780,7 +780,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert idempotency_conflict["error"]["details"]["reason"] == "idempotency_conflict"
 
     terminal_conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(
         base <> "/assignments/build-1/results",
@@ -803,7 +803,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     create_http_epic_assignment(base, token, "build-1")
 
     conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "verify-retry",
@@ -830,7 +830,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     create_http_epic_assignment(base, token, "build-1")
 
     invalid_agent =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "build-invalid-agent",
@@ -846,7 +846,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
              "replacement_agent_type_mismatch"
 
     pending_predecessor =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "build-pending-retry",
@@ -866,7 +866,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     })
 
     non_replaceable =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "build-completed-retry",
@@ -903,7 +903,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
              })
 
     conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "cycle-build-retry",
@@ -934,7 +934,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     create_http_epic_assignment(first, token, "build-1")
 
     not_found =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(second <> "/assignments", %{
         "assignment_id" => "build-retry",
@@ -969,7 +969,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     Application.put_env(:barkpark, :capabilities_base_url, "http://127.0.0.1:4000")
 
     local =
-      build_conn()
+      scoped_conn()
       |> Map.put(:host, "spoofed.cloud.example")
       |> bearer(token)
       |> get(base)
@@ -981,7 +981,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     Application.put_env(:barkpark, :capabilities_base_url, "https://api.barkpark.cloud")
 
     remote =
-      build_conn()
+      scoped_conn()
       |> Map.put(:host, "localhost")
       |> bearer(token)
       |> get(base)
@@ -1016,19 +1016,19 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     end
 
     for index <- 1..3 do
-      assert build_conn()
+      assert scoped_conn()
              |> bearer(token)
              |> post(base <> "/assignments", params.(index))
              |> json_response(201)
     end
 
-    assert build_conn()
+    assert scoped_conn()
            |> bearer(token)
            |> post(base <> "/assignments", params.(3))
            |> json_response(201)
 
     conflict =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(
         base <> "/assignments",
@@ -1039,7 +1039,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert conflict["error"]["details"]["reason"] == "assignment_conflict"
 
     exhausted =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", params.(4))
       |> json_response(422)
@@ -1058,13 +1058,13 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     open_legendary(base, token, 2)
     complete_http_experiments(base, token)
 
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/seal", seal_params())
     |> json_response(200)
 
     too_wide =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "build-too-wide",
@@ -1078,7 +1078,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     assert too_wide["error"]["details"]["reason"] =~ "proven_batch_capacity_exceeded"
 
     post_seal =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => "experiment-after-seal",
@@ -1102,7 +1102,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     open_epic(base, token, ["gate-unit"])
 
     body =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/release-gates/open", %{"idempotency_key" => "k1"})
       |> json_response(422)
@@ -1121,7 +1121,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     open_epic(base, token, ["gate-unit"])
 
     body =
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/release-gates/#{Ecto.UUID.generate()}/papers/author/stage", %{
         "content" => "not-an-object",
@@ -1134,7 +1134,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   end
 
   defp open_epic(base, token, inventory) do
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/open", %{
       "profile" => "epic",
@@ -1148,7 +1148,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
     count = max(count, 15)
     inventory = Enum.map(1..count, &%{"unit_id" => "unit-#{&1}"})
 
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/open", %{
       "profile" => "legendary",
@@ -1163,7 +1163,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
         candidate <- 1..3 do
       id = "experiment-#{round_index + 1}-#{candidate}"
 
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments", %{
         "assignment_id" => id,
@@ -1174,7 +1174,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       })
       |> json_response(201)
 
-      build_conn()
+      scoped_conn()
       |> bearer(token)
       |> post(base <> "/assignments/#{id}/results", %{
         "idempotency_key" => "terminal-#{id}",
@@ -1198,14 +1198,14 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
 
     params = if replaces, do: Map.put(params, "replaces_assignment_id", replaces), else: params
 
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/assignments", params)
     |> json_response(201)
   end
 
   defp create_http_epic_assignment(base, token, id) do
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/assignments", %{
       "assignment_id" => id,
@@ -1225,7 +1225,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
         payload
       end
 
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> post(base <> "/assignments/#{assignment_id}/results", %{
       "idempotency_key" => "terminal-#{assignment_id}",
@@ -1348,7 +1348,7 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
   end
 
   defp get_cycle(base, token) do
-    build_conn()
+    scoped_conn()
     |> bearer(token)
     |> get(base)
     |> json_response(200)

@@ -95,7 +95,7 @@ defmodule BarkparkWeb.LoginTicketTest do
       first = get(conn, "/login/ticket/#{ticket}")
       assert get_session(first, "api_token") == @admin_token
 
-      second = get(build_conn(), "/login/ticket/#{ticket}")
+      second = get(scoped_conn(), "/login/ticket/#{ticket}")
       assert redirected_to(second, 302) == "/login"
       assert get_session(second, "api_token") == nil
     end
@@ -109,12 +109,12 @@ defmodule BarkparkWeb.LoginTicketTest do
       # used
       {:ok, t_used} = Auth.mint_login_ticket(@admin_token)
       assert {:ok, _} = Auth.consume_login_ticket(t_used)
-      used = get(build_conn(), "/login/ticket/#{t_used}")
+      used = get(scoped_conn(), "/login/ticket/#{t_used}")
 
       # expired (mint, then age the row past its TTL)
       {:ok, t_exp} = Auth.mint_login_ticket(@admin_token)
       expire_ticket(t_exp)
-      expired = get(build_conn(), "/login/ticket/#{t_exp}")
+      expired = get(scoped_conn(), "/login/ticket/#{t_exp}")
 
       for c <- [unknown, used, expired] do
         assert redirected_to(c, 302) == "/login"

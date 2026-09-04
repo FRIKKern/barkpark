@@ -76,7 +76,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
 
     test "GET /studio/onixedit/ping returns 200 with the pilot body marker" do
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> init_test_session(%{"api_token" => @admin_token})
         |> get(@pilot_path)
 
@@ -183,7 +183,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
       raw_token: raw
     } do
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
         |> init_test_session(%{"api_token" => raw})
         |> get("/w/default/p/default/studio/onixedit/ping")
@@ -200,7 +200,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
       raw_token: raw
     } do
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
         |> init_test_session(%{"api_token" => raw})
         |> get("/w/scoped-plugin-other-ws/p/other-proj/studio/onixedit/ping")
@@ -211,7 +211,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
 
     test "scoped admin LV → 404 for an unknown workspace slug", %{raw_token: raw} do
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
         |> init_test_session(%{"api_token" => raw})
         |> get("/w/no-such-ws/p/default/studio/onixedit/ping")
@@ -222,7 +222,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
 
     test "flat /studio/onixedit/ping still works (Default-scoped back-compat)", %{raw_token: raw} do
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> init_test_session(%{"api_token" => raw})
         |> get(@pilot_path)
 

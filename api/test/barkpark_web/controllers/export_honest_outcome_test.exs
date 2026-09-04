@@ -54,7 +54,7 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
   end
 
   defp export(path) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> get(path)
   end
