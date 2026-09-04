@@ -457,6 +457,15 @@ func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 		return ae.exit
 	}
 
+	// "The receipt IS the contract" is exactly why it has to be READABLE first:
+	// renderRaw echoes whatever arrived, so an HTML proxy page on a 200 was
+	// handed to a machine consumer as the import receipt at rc=0, and the human
+	// branch's importCounts({}) reported `0 row(s) across 0 table(s)` as a
+	// completed import.
+	if rc, handled := screenBuiltinWriteReceipt(out, "workspace import", resp.StatusCode, body); handled {
+		return rc
+	}
+
 	// Machine consumers get the response bytes verbatim (the receipt IS the
 	// contract). The human view names the workspace and the {tables,total_rows}
 	// the engine reported.

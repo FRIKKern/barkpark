@@ -451,6 +451,16 @@ func migrateSchemas(out *writer, machineOut bool, plan migratePlan) (int, []stri
 			errs = append(errs, fmt.Sprintf("POST schema: status %d: %s", st, ae.errorMessage()))
 			continue
 		}
+		// count++ used to fire on the STATUS alone — nothing here ever read rb —
+		// so a gateway page or an empty 200 per schema still produced
+		// `✓ schemas: N POSTed to target` AND put N in the -o json receipt. Its
+		// sibling migrateWriteBatch already refuses to report a number it could
+		// not measure (migrateBatchWritten); this arm is that same law applied to
+		// the schema half, which was measuring nothing at all.
+		if serr := builtinWriteReceiptErr("POST schema", st, rb); serr != nil {
+			errs = append(errs, serr.Error())
+			continue
+		}
 		count++
 	}
 	if !machineOut && count > 0 {
