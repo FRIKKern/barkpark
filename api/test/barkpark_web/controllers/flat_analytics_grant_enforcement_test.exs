@@ -188,7 +188,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
 
     test "the grantee reaches AnalyticsController at all over the FLAT route", ctx do
       g = grantee(ctx.ws, ctx.project, ctx.ds, ctx.in_type)
-      conn = analytics(build_conn(), g.raw, ctx.ds)
+      conn = analytics(scoped_conn(), g.raw, ctx.ds)
 
       assert conn.status == 200,
              "PRECONDITION FAILED: the owned-token grantee did not reach the flat " <>
@@ -202,7 +202,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
   describe "owned-token grantee on the FLAT route — narrowed to the grant ladder" do
     test "document_stats names no type outside the grant ladder", ctx do
       g = grantee(ctx.ws, ctx.project, ctx.ds, ctx.in_type)
-      body = build_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
 
       assert ctx.in_type in types_in(body),
              "the grant's OWN type must still be counted — narrowing must not blank " <>
@@ -216,7 +216,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
 
     test "total_documents counts no row outside the grant ladder", ctx do
       g = grantee(ctx.ws, ctx.project, ctx.ds, ctx.in_type)
-      body = build_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
 
       assert body["total_documents"] == 1,
              "LEAK: total_documents disclosed the VOLUME of the Default workspace " <>
@@ -225,7 +225,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
 
     test "recent_activity surfaces no doc_id outside the grant ladder", ctx do
       g = grantee(ctx.ws, ctx.project, ctx.ds, ctx.in_type)
-      body = build_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
 
       leaked = Enum.filter(body["recent_activity"], &(&1["type"] == ctx.out_type))
 
@@ -239,7 +239,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
       # Same workspace, a ladder pinned to a dataset that does not exist here. A
       # fail-OPEN read would return the whole census; the fold must return none of it.
       g = grantee(ctx.ws, ctx.project, "flatanalytics-elsewhere", ctx.in_type)
-      body = build_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(g.raw, ctx.ds) |> json_response(200)
 
       assert body["total_documents"] == 0,
              "FAIL-OPEN: a grant whose ladder misses this dataset still counted rows"
@@ -254,7 +254,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
   describe "grants only ADD access — every other principal is unchanged" do
     test "a Default MEMBER token still reads the full census", ctx do
       raw = member_token!(ctx.ws)
-      body = build_conn() |> analytics(raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(raw, ctx.ds) |> json_response(200)
 
       # Also the colliding-fixture proof: the out-of-grant row IS visible on this
       # route, so the grantee refutes above refute something that exists.
@@ -271,7 +271,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
 
     test "an unowned SERVICE token reads the full census, as before", ctx do
       {raw, _} = unowned_token()
-      body = build_conn() |> analytics(raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(raw, ctx.ds) |> json_response(200)
 
       assert ctx.out_type in types_in(body),
              "OVER-REACH: an unowned token resolves no user, so AssignGrantScope " <>
@@ -282,7 +282,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
 
     test "an OWNED token whose owner holds NO covering grant is not narrowed", ctx do
       {raw, _} = owned_token(register_user())
-      body = build_conn() |> analytics(raw, ctx.ds) |> json_response(200)
+      body = scoped_conn() |> analytics(raw, ctx.ds) |> json_response(200)
 
       assert ctx.out_type in types_in(body),
              "OVER-REACH: an owned token with no grant must keep its back-compat " <>
@@ -292,7 +292,7 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
     end
 
     test "an anonymous caller is still 401 — the route stays token-required", ctx do
-      conn = get(build_conn(), "/v1/data/analytics/#{ctx.ds}")
+      conn = get(scoped_conn(), "/v1/data/analytics/#{ctx.ds}")
 
       assert conn.status == 401,
              "the grant overlay must layer AFTER :require_token — an anonymous " <>

@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
     do: ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{current_bucket()}")
 
   defp replay(path, if_none_match) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("if-none-match", if_none_match)
     |> get(path)
   end
@@ -185,7 +185,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
       etag = weak_etag(stored_content(paper))
 
       conn =
-        build_conn()
+        scoped_conn()
         |> then(fn c ->
           %{
             c
@@ -235,7 +235,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
       assert flat.status == 200
       assert get_resp_header(flat, "etag") == []
 
-      prefixed = get(build_conn(), "/d/#{@dataset}/papers/live-task-paper")
+      prefixed = get(scoped_conn(), "/d/#{@dataset}/papers/live-task-paper")
       assert prefixed.status == 200
       assert get_resp_header(prefixed, "etag") == []
 

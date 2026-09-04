@@ -66,7 +66,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingScopeAndBrickTest do
   defp callback_conn,
     do:
       put_req_header(
-        build_conn(),
+        scoped_conn(),
         "authorization",
         "Bearer test-media-processing-callback-token"
       )

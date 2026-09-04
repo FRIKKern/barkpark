@@ -285,7 +285,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       seed_thumb_cache!(file)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> init_test_session(%{"api_token" => raw_token})
         |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
 
@@ -301,7 +301,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       seed_thumb_cache!(file)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{raw_token}")
         |> get("/w/#{ws.slug}/p/#{proj.slug}/media/renditions/#{file.id}/thumb")
 
@@ -425,7 +425,7 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       |> Repo.insert!()
 
       scoped =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer #{raw_token}")
         |> get("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@dataset}")
         |> json_response(200)

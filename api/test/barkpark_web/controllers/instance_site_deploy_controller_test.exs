@@ -259,13 +259,13 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       # `await_in_flight/3` the fall-back assertion at the end of this test uses.
       assert await_idle_box() == 0
 
-      idle = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      idle = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert idle["door"]["observed_in_flight"] == 0
       assert idle["door"]["in_flight_slugs"] == []
       refusals_before = idle["door"]["refusals_total"]
 
       assert %{"ok" => true} =
-               build_conn()
+               scoped_conn()
                |> admin_conn()
                |> post("/v1/admin/site-deploy", %{
                  "slug" => "census-wire",
@@ -274,7 +274,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
                })
                |> json_response(202)
 
-      busy = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      busy = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
 
       # THE NUMBER. A constant cannot do this.
       assert busy["door"]["observed_in_flight"] == 1
@@ -287,7 +287,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       # A second site is refused at the door while the first builds — and the
       # box now counts what it used to only mention in a log line.
       assert %{"error" => %{"code" => "box_at_capacity"}} =
-               build_conn()
+               scoped_conn()
                |> admin_conn()
                |> post("/v1/admin/site-deploy", %{
                  "slug" => "census-wire-two",
@@ -296,7 +296,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
                })
                |> json_response(409)
 
-      refused = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      refused = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert refused["door"]["refusals_total"] == refusals_before + 1
       assert is_binary(refused["door"]["refusals_since"])
 
@@ -304,7 +304,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       assert await_in_flight(token, 0) == 0
 
       # A read that changed nothing did not invent a refusal.
-      settled = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      settled = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert settled["door"]["refusals_total"] == refusals_before + 1
     end
   end
@@ -377,7 +377,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
   end
 
   defp do_await_in_flight(token, target, deadline) do
-    body = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+    body = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
     observed = body["door"]["observed_in_flight"]
 
     cond do
@@ -399,7 +399,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       provisionable_box()
       put_runner_cfg(enabled: false)
 
-      off = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      off = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert off["configured"] == false
 
       assert %{"error" => %{"code" => "feature_not_configured"}} =
@@ -418,11 +418,11 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
         command: {"bash", ["-c", "echo 'BPSTAGE name=PLAN status=ok build_id=b1'\nexit 0"]}
       )
 
-      on = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      on = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert on["configured"] == true
 
       accepted =
-        build_conn()
+        scoped_conn()
         |> admin_conn()
         |> post("/v1/admin/site-deploy", %{
           "slug" => "cap-probe-on",

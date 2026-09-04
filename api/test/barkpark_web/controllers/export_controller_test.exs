@@ -67,7 +67,7 @@ defmodule BarkparkWeb.ExportControllerTest do
 
   defp raw_export(token) do
     resp =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{token}")
       |> get("/v1/data/export/#{@dataset}")
 

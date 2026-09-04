@@ -115,14 +115,14 @@ defmodule Barkpark.SheetsM1ProofTest do
   # ── HTTP helpers (fresh conn per request — actors run in Tasks) ──────────
 
   defp mutate(mutations) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer " <> @write_token)
     |> put_req_header("content-type", "application/json")
     |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => mutations}))
   end
 
   defp ingest_paper(body) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer " <> @ingest_token)
     |> put_req_header("content-type", "application/json")
     |> post("/v1/plugins/bulldocs/papers", Jason.encode!(body))
@@ -133,7 +133,7 @@ defmodule Barkpark.SheetsM1ProofTest do
   # so the 3570 assertion doubles as a type-preservation check.
   defp ops_post(ops) do
     resp =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer " <> @ingest_token)
       |> put_req_header("content-type", "application/json")
       |> post(
@@ -147,7 +147,7 @@ defmodule Barkpark.SheetsM1ProofTest do
 
   defp persisted_cells do
     resp =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer " <> @write_token)
       |> get("/v1/data/doc/#{@dataset}/sheet/#{@draft_id}")
 
@@ -164,7 +164,7 @@ defmodule Barkpark.SheetsM1ProofTest do
   end
 
   defp read_paper do
-    build_conn() |> get("/papers/#{@paper_slug}") |> html_response(200)
+    scoped_conn() |> get("/papers/#{@paper_slug}") |> html_response(200)
   end
 
   defp op(ref, raw), do: %{"op" => "set_cell", "tab" => 0, "ref" => ref, "raw" => raw}

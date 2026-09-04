@@ -80,7 +80,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert [etag] = get_resp_header(conn200, "etag")
 
       conn304 =
-        build_conn()
+        scoped_conn()
         |> put_req_header("if-none-match", etag)
         |> get(paper_path(ws, project, "shared-paper"))
 

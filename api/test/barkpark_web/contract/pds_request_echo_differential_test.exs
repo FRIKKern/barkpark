@@ -177,7 +177,7 @@ defmodule BarkparkWeb.Contract.PDSRequestEchoDifferentialTest do
       assert is_nil(before_row.revoked_at)
 
       body =
-        build_conn() |> as(raw) |> delete("/v1/auth/app-tokens/current") |> json_response(200)
+        scoped_conn() |> as(raw) |> delete("/v1/auth/app-tokens/current") |> json_response(200)
 
       after_row = Repo.get(ApiToken, before_row.id)
       refute is_nil(after_row.revoked_at), "receipt said revoked but revoked_at was never stamped"
@@ -205,7 +205,7 @@ defmodule BarkparkWeb.Contract.PDSRequestEchoDifferentialTest do
       assert is_nil(before_row.revoked_at)
 
       body =
-        build_conn()
+        scoped_conn()
         |> as(admin)
         |> delete("/v1/auth/app-tokens", Jason.encode!(%{token: raw}))
         |> json_response(200)
@@ -317,7 +317,7 @@ defmodule BarkparkWeb.Contract.PDSRequestEchoDifferentialTest do
   # Mint through the REAL endpoint — the revoke path must kill exactly what the
   # exchange mints, so no fixture shortcut.
   defp mint_app_token(admin, ws) do
-    build_conn()
+    scoped_conn()
     |> as(admin)
     |> post(
       "/v1/auth/app-tokens",

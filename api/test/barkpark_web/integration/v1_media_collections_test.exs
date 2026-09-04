@@ -166,7 +166,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
       token = share["result"]["token"]
 
       public =
-        build_conn()
+        scoped_conn()
         |> get("/v1/media/production/share/#{token}")
         |> json_response(200)
 
@@ -179,7 +179,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
       |> json_response(200)
 
       expired =
-        build_conn()
+        scoped_conn()
         |> get("/v1/media/production/share/#{token}")
 
       assert expired.status == 410

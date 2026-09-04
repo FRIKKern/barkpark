@@ -117,7 +117,7 @@ defmodule BarkparkWeb.MediaCollectionsShareViewScopeTest do
   end
 
   defp share_get(token) do
-    build_conn()
+    scoped_conn()
     |> get("/v1/media/#{@dataset}/share/#{token}")
     |> json_response(200)
   end
