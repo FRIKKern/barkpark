@@ -206,9 +206,13 @@ trap 'rm -rf "$tmp"' EXIT
 ck() { # name want_rc must_say must_not_say rc out
   local name="$1" want="$2" yes="$3" no="$4" rc="$5" out="$6"
   if [ "$rc" -ne "$want" ]; then say "  FAIL  $name — expected exit $want, got $rc"; fails=$((fails+1)); return; fi
-  if [ -n "$yes" ] && ! printf '%s' "$out" | grep -q -e "$yes"; then
+  # HERE-STRINGS, never `printf … | grep -q` (D37). grep -q exits at the first
+  # match, printf dies of SIGPIPE, and under `set -o pipefail` 141 wins — so a
+  # MATCH reads as a MISS, intermittently, under load. Measured in this very
+  # file: the same case passed alone and failed when the harness was piped.
+  if [ -n "$yes" ] && ! grep -q -e "$yes" <<<"$out"; then
     say "  FAIL  $name — exit $rc right, but the message never says '$yes'"; fails=$((fails+1)); return; fi
-  if [ -n "$no" ] && printf '%s' "$out" | grep -q -e "$no"; then
+  if [ -n "$no" ] && grep -q -e "$no" <<<"$out"; then
     say "  FAIL  $name — the message ALSO says '$no'"; fails=$((fails+1)); return; fi
   say "  ok    $name (exit $rc)"
 }

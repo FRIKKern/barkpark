@@ -1533,7 +1533,11 @@ PY
   assert_fact agg_matrix False
   assert_fact agg_if "always()"
   assert_fact agg_name "Elixir gate"
-  assert_fact coe_jobs format
+  # EMPTY since task-e31b816b4b416db6. `format` was elixir.yml's only
+  # continue-on-error job and it stopped being one when its verdict became
+  # diff-scoped and load-bearing; nothing else may quietly become advisory
+  # here, which is what this now-stricter equality says.
+  assert_fact coe_jobs ""
   assert_fact coe_in_needs ""
   # Every blocking job must be in the aggregator's needs set. Without this, a
   # future slice (S4's format ceiling is the next one) can add a blocking job
