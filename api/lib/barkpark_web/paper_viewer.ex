@@ -55,11 +55,27 @@ defmodule BarkparkWeb.PaperViewer do
 
   A mount whose session records an anonymous share grant
   (`PluginScopeSession.build/1` wrote `scoped_share_public`) resolves to
-  `%{kind: :share, grant: :item | :section}`. `can_edit?/2` is `false` for
-  every share viewer today: item links are read-only, and section edit access
-  rides an opaque `share-edit-*` API token, never an anonymous browser
-  session. Slice 3 (task-8ac4f3918da1c433) extends this arm with per-paper
-  edit links — it must extend `can_edit?/2`, not bypass it.
+  `%{kind: :share, grant: :item | :section, id:, access:, ref_id:,
+  workspace_id:}`. The item arm carries the LINK's own access level and the
+  resource it binds, both read off the LIVE row every mount.
+
+  `can_edit?/2` stays credential-only and is `false` for EVERY share viewer:
+  it knows the paper's workspace but not its slug, and an item link that
+  binds a sibling paper in the same workspace must never grade writable.
+  Slice 3 (task-8ac4f3918da1c433) adds `can_edit?/3`, which takes the mounted
+  SLUG as well and grants an item share exactly one extra way: access `:edit`
+  AND `ref_id == slug` AND the link's own workspace is the paper's. That is
+  an EXTENSION of this hook, not a bypass — the credential arm is unchanged,
+  and a share viewer never reaches `Tenancy.Auth`.
+
+  ## What a share-edit grant is NOT
+
+  It is not write permission. No membership row is created, no `%ApiToken{}`
+  exists, and `Tenancy.Auth.permits?/2` never learns about share-edit (the
+  June ruling behind `share-edit` tokens). The ONLY thing an item edit link
+  opens is the reader's own LiveView op path for the ONE slug it binds:
+  `POST /v1/data/mutate/:dataset` rejects the raw link token outright (it is
+  not an api token), and Studio never sees it as a credential.
   """
 
   import Phoenix.Component, only: [assign: 3]
@@ -75,15 +91,34 @@ defmodule BarkparkWeb.PaperViewer do
   # never written.
   @session_share_public "scoped_share_public"
   @session_share_token "scoped_share_token"
+  @session_share_access "scoped_share_access"
 
   @anonymous %{kind: :anonymous}
+
+  # A share grant that is NOT a resolvable item link: the section-share arm,
+  # which grants the whole scope for READS and never edits.
+  @section_viewer %{
+    kind: :share,
+    grant: :section,
+    id: nil,
+    access: :read,
+    ref_id: nil,
+    workspace_id: nil
+  }
 
   @typedoc "The scalar principal summary the reader carries as `@viewer`."
   @type viewer ::
           %{kind: :anonymous}
           | %{kind: :user, id: binary(), label: String.t() | nil}
           | %{kind: :token, id: binary(), label: String.t() | nil}
-          | %{kind: :share, grant: :item | :section, id: binary() | nil}
+          | %{
+              kind: :share,
+              grant: :item | :section,
+              id: binary() | nil,
+              access: :read | :edit,
+              ref_id: binary() | nil,
+              workspace_id: binary() | nil
+            }
 
   @doc "The anonymous viewer — what a mount without this hook should assume."
   @spec anonymous() :: viewer()
@@ -122,6 +157,39 @@ defmodule BarkparkWeb.PaperViewer do
 
   def can_edit?(_assigns, _workspace_id), do: false
 
+  @doc """
+  Whether the mounted viewer may EDIT the paper `slug` owned by `workspace_id`.
+
+  The 3-arity the reader actually calls. It is `can_edit?/2` (the credential
+  arm, unchanged) OR the ONE extra grant slice 3 adds: an ITEM share link whose
+  live row carries `access: "edit"`, binds exactly THIS slug, and belongs to
+  THIS paper's workspace. All three must hold; a link bound to a sibling paper
+  in the same workspace grades false, which is why the slug has to reach here
+  at all.
+
+  Nothing about this arm touches `Barkpark.Tenancy.Auth`: a share viewer has no
+  membership row and no permission list, and gaining one would make the flat
+  `POST /v1/data/mutate/:dataset` reachable. The grant is confined to the
+  reader's own op path by construction.
+  """
+  @spec can_edit?(map(), binary() | nil, binary() | nil) :: boolean()
+  def can_edit?(assigns, workspace_id, slug) do
+    can_edit?(assigns, workspace_id) or share_can_edit?(assigns, workspace_id, slug)
+  end
+
+  defp share_can_edit?(assigns, workspace_id, slug)
+       when is_map(assigns) and is_binary(workspace_id) and is_binary(slug) do
+    case Map.get(assigns, :viewer) do
+      %{kind: :share, grant: :item, access: :edit, ref_id: ref_id, workspace_id: link_ws} ->
+        ref_id == slug and link_ws == workspace_id
+
+      _ ->
+        false
+    end
+  end
+
+  defp share_can_edit?(_assigns, _workspace_id, _slug), do: false
+
   @doc false
   @spec viewer(User.t() | nil, ApiToken.t() | nil, map()) :: viewer()
   def viewer(%User{id: id} = user, _token, _session),
@@ -132,7 +200,7 @@ defmodule BarkparkWeb.PaperViewer do
 
   def viewer(nil, nil, session) when is_map(session) do
     if session[@session_share_public] == true do
-      share_viewer(session[@session_share_token])
+      share_viewer(session[@session_share_token], session[@session_share_access])
     else
       @anonymous
     end
@@ -140,14 +208,35 @@ defmodule BarkparkWeb.PaperViewer do
 
   def viewer(_user, _token, _session), do: @anonymous
 
-  defp share_viewer(raw) when is_binary(raw) and raw != "" do
+  # The item arm reads the LIVE row every mount (`Links.resolve/1` filters
+  # revoked + expired), so a revoked edit link resolves to nothing and falls to
+  # the section arm, which is read-only.
+  defp share_viewer(raw, session_access) when is_binary(raw) and raw != "" do
     case Links.resolve(raw) do
-      {:ok, %{id: id}} -> %{kind: :share, grant: :item, id: id}
-      _ -> %{kind: :share, grant: :section, id: nil}
+      {:ok, link} ->
+        %{
+          kind: :share,
+          grant: :item,
+          id: link.id,
+          access: effective_access(link.access, session_access),
+          ref_id: link.ref_id,
+          workspace_id: link.workspace_id
+        }
+
+      _ ->
+        @section_viewer
     end
   end
 
-  defp share_viewer(_), do: %{kind: :share, grant: :section, id: nil}
+  defp share_viewer(_raw, _session_access), do: @section_viewer
+
+  # An INTERSECTION, not a lookup: the grant is `:edit` only when the LIVE row
+  # says edit AND the dead render that signed this session recorded edit. Either
+  # half alone is enough to fall back to `:read`, which is the fail-closed
+  # answer for a session minted before an access change or for a row edited
+  # underneath an open socket.
+  defp effective_access("edit", "edit"), do: :edit
+  defp effective_access(_link_access, _session_access), do: :read
 
   defp user_from_session(session) do
     case session["user_session"] do

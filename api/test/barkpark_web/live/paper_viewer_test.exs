@@ -238,7 +238,18 @@ defmodule BarkparkWeb.PaperViewerTest do
       assert html =~ "Shared probe"
 
       assigns = assigns_of(view)
-      assert assigns.viewer == %{kind: :share, grant: :item, id: link.id}
+      # Slice 3 (task-8ac4f3918da1c433) widened the item arm with the LINK's
+      # own access level and the resource it binds; a `read` link still grades
+      # `access: :read` and still cannot edit.
+      assert assigns.viewer == %{
+               kind: :share,
+               grant: :item,
+               id: link.id,
+               access: :read,
+               ref_id: slug,
+               workspace_id: ws.id
+             }
+
       assert assigns.can_edit? == false
       assert assigns.current_user == nil
       assert assigns.api_token == nil

@@ -219,7 +219,10 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
 
   defp maybe_grant_item_token(conn, ws_slug, project_slug, dataset) do
     with raw when is_binary(raw) and raw != "" <- conn.query_params["share"],
-         # Item links are read capabilities — never an unsafe method.
+         # An item link only ever GRANTS OVER HTTP for a safe read, including
+         # an `access: "edit"` link (slice 3, task-8ac4f3918da1c433). The edit
+         # half of such a link rides the reader LiveView socket, never an
+         # unsafe HTTP method, so this guard stays exactly as strict as it was.
          true <- conn.method in @safe_read_methods,
          {:ok, link} <- Barkpark.Sharing.Links.resolve(raw),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
@@ -232,7 +235,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       |> assign(:current_workspace, workspace)
       |> assign(:current_project, project)
       |> assign(:share_public, true)
-      |> assign(:share_access, :read)
+      |> assign(:share_access, item_access(link))
       |> assign(:share_grant, :item)
       |> assign(:share_dataset, dataset)
       |> strip_item_grant_walk_params()
@@ -257,6 +260,17 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
   # AND `conn.query_params` (what a re-fetch or a downstream plug would see)
   # are dropped, so neither copy of the param survives to the controller.
   @strippable_walk_params ~w(expand resolve)
+
+  # The link's OWN access level, replacing a hard-coded `:read`. It changes
+  # nothing on the HTTP side (the safe-method guard above still bounds every
+  # item grant to a read); it is the fact the SOCKET side needs, carried into
+  # the signed session by `BarkparkWeb.PluginScopeSession.build/1` and turned
+  # into an edit verdict by `BarkparkWeb.PaperViewer.can_edit?/3`.
+  #
+  # `BarkparkWeb.AnonPerspective` deliberately does NOT read this `:edit` as a
+  # drafts unlock; see the `share_grant != :item` clause there.
+  defp item_access(%{access: "edit"}), do: :edit
+  defp item_access(_link), do: :read
 
   defp strip_item_grant_walk_params(conn) do
     %{

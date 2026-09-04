@@ -196,6 +196,13 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   SECTION): this mints a direct, stable `/s/<token>` link to the single open
   item, with Copy + Revoke. Admin-only (the handlers re-check server-side).
 
+  Two mint buttons, one per access level (`phx-value-access` "read" / "edit").
+  Both land on the SAME `item-share-create` handler and the same
+  `Barkpark.Sharing.Links.create/1`; nothing about the edit level is decided
+  here. An edit link opens the paper reader's own block editor for that ONE
+  slug (`BarkparkWeb.PaperViewer.can_edit?/3`) and carries no write permission
+  anywhere else.
+
   `@links` is a pre-flattened list of `%{id, access, url}`, where `url` is nil
   for every link this socket did not JUST mint: the raw token is no longer
   stored (`arpss-w8-bl-share-link-raw-token-at-rest`, RULED 2026-09-02), so a
@@ -280,14 +287,22 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <p :if={@error} class="shares-error"><%= @error %></p>
 
             <div class="item-share-footer">
-              <span class="shares-note">Edit links are coming next.</span>
+              <span class="shares-note">An edit link opens this one paper in the reader's editor.</span>
               <button
                 type="button"
-                class="btn btn-primary btn-sm"
+                class="btn btn-ghost btn-sm"
                 phx-click="item-share-create"
                 phx-value-access="read"
               >
                 Create view link
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                phx-click="item-share-create"
+                phx-value-access="edit"
+              >
+                Create edit link
               </button>
             </div>
           </div>
