@@ -1437,7 +1437,24 @@ defmodule Barkpark.Content.Writer do
       }
       |> maybe_put_preview_url(type, attrs)
 
-    Map.put(Labels.render_opts(dataset, scope), :preview, preview)
+    # :style :article — task-605ba8bfbd54c871. This map used to carry NO :style,
+    # so `Render.render_block/2`'s `Map.get(opts, :style, :email)` decided, and
+    # the canonical `content["body"]["html"]` stored on EVERY document written
+    # through this path was EMAIL html — the surface that inlines mail-client
+    # typography on every element because mail clients strip stylesheets. The
+    # row's census found ZERO readers that want that: the Studio editor source
+    # textarea (forms.ex classic_form_value/1) and the v1 read envelope both
+    # want neutral html, search subtracts the key entirely, and the one consumer
+    # that genuinely wants inline email html — bulldocs_email_controller.ex —
+    # passes `style: :email` itself and re-renders from blocks. So the write
+    # path now NAMES its surface: :article, whose `<p>` is bare by contract
+    # (`.bp-paper-surface` owns body typography). Only documents written after
+    # this change move; existing rows re-project by attrition on their next
+    # blocks write. The renderer's four :email defaults, labels.ex's non-article
+    # fallback and the two style-less mix backfills are a filed follow-on.
+    Labels.render_opts(dataset, scope)
+    |> Map.put(:preview, preview)
+    |> Map.put(:style, :article)
   end
 
   defp maybe_put_preview_url(preview, "paper", %{"doc_id" => doc_id}) when is_binary(doc_id) do
