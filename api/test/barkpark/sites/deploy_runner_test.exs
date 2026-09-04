@@ -2316,4 +2316,202 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       end
     end
   end
+
+  # ── the run-state dir census (dr-w23) ─────────────────────────────────────
+
+  # A manifest planted BY HAND, so a sweep can be driven without 33 real builds
+  # and so a manifest can name paths a real launch would never write (the whole
+  # point of the containment test below). Fields mirror `encode_manifest/1`.
+  defp plant_manifest(dir, slug, started_at, overrides \\ %{}) do
+    payload =
+      Map.merge(
+        %{
+          "slug" => slug,
+          "run_tag" => "#{slug}-t1",
+          "build_id" => "t1",
+          "content_rev" => nil,
+          "mode" => "deploy",
+          "runtime_target" => "static",
+          "unit_name" => "bp-site-build-#{slug}-t1-1.service",
+          "status_file" => Path.join(dir, "#{slug}-t1.status"),
+          "log_file" => Path.join(dir, "#{slug}-t1.log"),
+          "build_env_file" => Path.join(dir, "#{slug}-t1.env"),
+          "prebuilt_dir" => nil,
+          "prebuilt_sha256" => nil,
+          "started_at" => DateTime.to_iso8601(started_at)
+        },
+        overrides
+      )
+
+    File.write!(Path.join(dir, "#{slug}.manifest.json"), Jason.encode!(payload))
+  end
+
+  # @max_tracked_runs is 32 and the sweep only fires ABOVE it, so fill the dir
+  # past the cap with manifests NEWER than the one under test — that makes the
+  # one under test the eviction candidate. The fillers must still be OLDER than
+  # `now`: the launch that DRIVES the sweep writes its own manifest at `now`,
+  # and fillers dated into the FUTURE evict the very run driving the sweep —
+  # which is how this helper first read as a passing containment test while the
+  # drive's own quartet was the thing being deleted.
+  defp fill_past_manifest_cap(dir, count \\ 34) do
+    now = DateTime.utc_now()
+
+    for i <- 1..count,
+        do: plant_manifest(dir, "filler#{i}", DateTime.add(now, -60 - i, :second))
+  end
+
+  defp terminal_names(dir),
+    do: dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".terminal.json")) |> Enum.sort()
+
+  describe "every record in the run-state dir is swept with a stated bound (dr-w23)" do
+    test "the 10,000-record cap is the REAL default, so the overridden one is a stand-in" do
+      recorder_cfg(run_dir())
+
+      assert DeployRunner.retention_caps().max_terminal_records == 10_000
+    end
+
+    test "the terminal-record cap prunes to the cap, keeps the NEWEST, and spares other names" do
+      dir = run_dir()
+      # 5, not 10_000: seeding the real cap means 10,001 real files. The cap is
+      # read from config by the same expression prod reads, and the test above
+      # pins the production default — so the path under test is the prod path.
+      recorder_cfg(dir, max_terminal_records: 5)
+
+      base = System.os_time(:second) - 10_000
+
+      for i <- 1..12 do
+        path = Path.join(dir, "census-r#{String.pad_leading("#{i}", 2, "0")}.terminal.json")
+        File.write!(path, Jason.encode!(%{"slug" => "census", "run_tag" => "r#{i}"}))
+        # Distinct mtimes: higher i is NEWER, so r08..r12 must survive.
+        File.touch!(path, base + i)
+      end
+
+      # Names the record sweep must NOT touch: a different suffix, the
+      # fixed-name serving-memory record, and a near-miss suffix.
+      decoys = ~w(keepme.txt serving-memory.json census-r03.terminal.json.bak)
+      for name <- decoys, do: File.write!(Path.join(dir, name), "keep me")
+
+      report = DeployRunner.retention_sweep()
+
+      assert report.caps.max_terminal_records == 5
+
+      assert terminal_names(dir) == ~w(
+               census-r08.terminal.json
+               census-r09.terminal.json
+               census-r10.terminal.json
+               census-r11.terminal.json
+               census-r12.terminal.json
+             )
+
+      for name <- decoys,
+          do: assert(File.exists?(Path.join(dir, name)), "the sweep took #{name}")
+    end
+
+    test "a .status/.env/.prebuilt no manifest names any more is swept (it was unbounded)" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      # The orphan class: the manifest is slug-keyed and the files are
+      # tag-keyed, so a REDEPLOY overwrites the only pointer to the previous
+      # run's status/env — before this sweep nothing could name them again.
+      orphans = ~w(gone-t1.status gone-t1.env)
+      for name <- orphans, do: File.write!(Path.join(dir, name), "stranded")
+
+      staging = Path.join(dir, "gone.prebuilt.staging-7")
+      stale_tree = Path.join(dir, "gone.prebuilt")
+      for d <- [staging, stale_tree], do: File.mkdir_p!(d)
+      for d <- [staging, stale_tree], do: File.write!(Path.join(d, "index.html"), "<html>")
+
+      # A run whose manifest DOES name its status file must survive the sweep
+      # even when it is just as old — age is not what condemns an orphan.
+      deploy_and_finalize("orphankeep", "k1")
+      kept_status = Path.join(dir, "orphankeep-k1.status")
+      assert File.exists?(kept_status)
+
+      old = System.os_time(:second) - 7200
+
+      for path <- [kept_status, staging, stale_tree | Enum.map(orphans, &Path.join(dir, &1))],
+          do: File.touch!(path, old)
+
+      # Inside the grace window: a launch writes its files BEFORE the manifest
+      # that names them, so a fresh unreferenced file is not yet an orphan.
+      fresh = Path.join(dir, "toonew-t9.status")
+      File.write!(fresh, "in flight")
+
+      assert %{orphans: 4} = DeployRunner.retention_sweep()
+
+      for name <- orphans, do: refute(File.exists?(Path.join(dir, name)))
+      refute File.exists?(staging)
+      refute File.exists?(stale_tree)
+      assert File.exists?(kept_status)
+      assert File.exists?(fresh)
+    end
+
+    test "a record placed inside <slug>.prebuilt dies with the slug when the quartet is evicted" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      tree = Path.join(dir, "evicted.prebuilt")
+      File.mkdir_p!(tree)
+      inner = Path.join(tree, "note.json")
+      File.write!(inner, ~s({"a":1}))
+
+      status = Path.join(dir, "evicted-t1.status")
+      File.write!(status, "BPSTAGE name=SWITCH status=ok build_id=t1")
+
+      # Oldest of the lot, and the ONLY one naming a prebuilt tree.
+      plant_manifest(dir, "evicted", DateTime.add(DateTime.utc_now(), -86_400, :second), %{
+        "prebuilt_dir" => tree
+      })
+
+      fill_past_manifest_cap(dir)
+
+      # The quartet sweep runs at LAUNCH — so drive a real launch.
+      deploy_and_finalize("censusdrive", "d1")
+
+      refute File.exists?(Path.join(dir, "evicted.manifest.json"))
+      refute File.exists?(status)
+      refute File.exists?(tree), "the staged tree survived its slug's eviction"
+
+      refute File.exists?(inner),
+             "a per-slug record inside <slug>.prebuilt survived the rm_rf — anything sited " <>
+               "there is deleted WITH the slug, so nothing may rely on it"
+    end
+
+    test "a manifest naming a path OUTSIDE the run-state dir is refused, not followed" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      outside = Path.join(System.tmp_dir!(), "bp-dr-decoy-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(outside)
+      on_exit(fn -> File.rm_rf(outside) end)
+
+      decoy_status = Path.join(outside, "precious.status")
+      decoy_log = Path.join(outside, "precious.log")
+      decoy_env = Path.join(outside, "precious.env")
+      decoy_tree = Path.join(outside, "precious.prebuilt")
+      File.mkdir_p!(decoy_tree)
+      for f <- [decoy_status, decoy_log, decoy_env], do: File.write!(f, "not yours")
+      File.write!(Path.join(decoy_tree, "keep"), "not yours")
+
+      plant_manifest(dir, "planted", DateTime.add(DateTime.utc_now(), -86_400, :second), %{
+        "status_file" => decoy_status,
+        "log_file" => decoy_log,
+        "build_env_file" => decoy_env,
+        "prebuilt_dir" => decoy_tree
+      })
+
+      fill_past_manifest_cap(dir)
+
+      log = capture_log(fn -> deploy_and_finalize("censusdrive2", "d2") end)
+
+      # NON-VACUITY: the sweep really did evict this manifest — so the decoys
+      # surviving is containment, not a sweep that never ran.
+      refute File.exists?(Path.join(dir, "planted.manifest.json"))
+      assert log =~ "refused to follow"
+
+      for f <- [decoy_status, decoy_log, decoy_env], do: assert(File.exists?(f))
+      assert File.exists?(Path.join(decoy_tree, "keep"))
+    end
+  end
 end
