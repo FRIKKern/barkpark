@@ -823,7 +823,16 @@ function bootScenario(name, opts) {
   // without a click having created the registry entry first — reading it off
   // `registry` alone answers undefined for every id the boot never touched,
   // which is indistinguishable from an element that booted visible.
-  return { registry, byId, hooks: captured.hooks, calls, fixtureState, resolveMe, localStorage, reloads };
+  // cch-w12-followup-login-fixture-gap: `location` joins the handed-back set for
+  // the same reason `localStorage` and `reloads` did — a capability no check
+  // could reach otherwise. A drive that signs OUT and back IN cannot stay on the
+  // screen it started on: submitAuth() sets `location.hash = "#overview"` before
+  // it re-renders, so any post-sign-in assertion about another view has to be
+  // able to navigate there. Paired with the already-exported `hooks.applyRoute`,
+  // that is a warm hash navigation — the same two lines the app's own
+  // hashchange listener runs, and pointedly NOT a reload (a reload kills every
+  // module variable, which would make every cache assertion vacuous).
+  return { registry, byId, hooks: captured.hooks, calls, fixtureState, resolveMe, localStorage, reloads, location };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -5238,6 +5247,144 @@ const EXPECTATIONS = {
         "…and it POSTs /retry exactly once — the primitive the note names in words");
     },
   },
+
+  // ── cch-w12-followup-login-fixture-gap · THE IDENTITY CHANGE, DRIVEN ────────
+  // THE SEAM. render()'s logged-out arm serves the sign-out click AND the 401
+  // auto-bounce, and NEITHER reloads — so every per-account cache standing in
+  // this module has to be dropped by that arm, in code, or the next account
+  // reads the previous one's data on a page that never blanked. Five clears sit
+  // there today (clearMe(), subCache, capCache, overviewData.*, and cch-w12-s1's
+  // activityActors/activityActorsTried), and until this scenario existed EVERY
+  // ONE of them was pinned by SOURCE SHAPE alone: this harness answered
+  // POST /v1/auth/login from one fixture, that fixture returned
+  // `two_factor_required`, and so no drive here had ever completed a sign-in at
+  // all. An account change could not be produced, so it could not be observed.
+  //
+  // WHY THE `activityActors` CLEAR IS THE ONE THIS DRIVES. It is the clear whose
+  // failure is LEGIBLE AS A SENTENCE rather than as a stale number: the Who axis
+  // renders the previous team's members BY NAME, on a screen belonging to
+  // somebody who has never met them. The two rosters are disjoint by
+  // construction (teamMembers vs teamMembersBeta share no user_id), so a `lin`
+  // chip after the switch has no innocent reading. The other four clears ride
+  // the same arm and the same drive; naming them one at a time is the follow-up
+  // this row's own criteria stopped at, deliberately.
+  //
+  // THE MUTATION THAT REDS IT (run it, do not take this comment's word):
+  // delete the two lines
+  //     activityActors = null;
+  //     activityActorsTried = false;
+  // from render()'s logged-out arm in cloud/priv/static/app.js. The latch stays
+  // burned, so ensureActivityActors() returns at its first line after the second
+  // sign-in, the second team's roster is NEVER FETCHED, and §5 below reds
+  // naming lin and rex.
+  "activity-identity-change": {
+    what: "THE IDENTITY ORACLE — a real sign-out and a real sign-in as ANOTHER TEAM, with no reload: the Activity Who axis names the new team's roster and NOT ONE of the previous team's members",
+    async check(reg, hooks, ctx) {
+      // ─ 1. identity one, on Activity: the Who axis caches ada / lin / rex ───
+      // A warm hash navigation, which is the ordering that matters: nothing
+      // here is a boot, so every read below is a read the module chose to make.
+      ctx.location.hash = "#activity";
+      hooks.applyRoute();
+      await ctx.settle();
+
+      const teamOne = SCENARIOS["activity-identity-change"].data.me.team.id;
+      assert.equal(ctx.countCalls("GET", "/v1/teams/" + teamOne + "/members"), 1,
+        "the first team's roster must be read exactly once on entering Activity — if it is 0 the Who axis " +
+        "below is degraded rather than cached, and the whole drive is vacuous");
+
+      const whoOf = () => {
+        const filters = (reg.get("activity-filters") || {}).innerHTML || "";
+        assert.ok(filters.includes("Who</span>"),
+          "#activity-filters carries no Who segment at all — the actor axis did not render, so nothing " +
+          "below is measuring the axis it names; got: " + JSON.stringify(filters.slice(0, 200)));
+        return filters.split("Who</span>")[1] || "";
+      };
+
+      // ANTI-VACUITY, AND IT IS THE LOAD-BEARING HALF. If the axis never held
+      // lin and rex, "the axis does not hold lin and rex" is true of a blank
+      // page and proves nothing about any cache.
+      const whoBefore = whoOf();
+      assert.ok(whoBefore.includes('data-actfilter="usr_lin"') && whoBefore.includes(">lin<"),
+        "the first team's roster never reached the Who axis, so there is no stale state for the sign-out " +
+        "to fail to clear; got: " + JSON.stringify(whoBefore.slice(0, 240)));
+      assert.ok(whoBefore.includes('data-actfilter="usr_rex"') && whoBefore.includes(">rex<"),
+        "rex is missing from the Who axis before the switch — same vacuity as above");
+
+      // ─ 2. SIGN OUT, by the control a person actually uses ─────────────────
+      assert.equal(reg.get("acct-btn").click(), 1, "#acct-btn must open the account modal");
+      await ctx.settle();
+      assert.ok((reg.get("modal-body").innerHTML || "").includes('id="modal-logout"'),
+        "the account modal painted no Sign out control — the registry auto-creates a node for any id, so " +
+        "the RENDER is what proves the control exists");
+      assert.ok(ctx.localStorage.getItem("bpcloud.session"),
+        "no session is held before the sign-out, so 'the session was cleared' would be vacuously true");
+      assert.equal(reg.get("modal-logout").click(), 1, "Sign out dispatched no click handler — it is DEAD");
+      await ctx.settle();
+
+      assert.equal(ctx.countCalls("DELETE", "/v1/auth/logout"), 1, "exactly one sign-out reached the wire");
+      assert.equal(ctx.localStorage.getItem("bpcloud.session"), null,
+        "clearSession() did not run, so render() never took its logged-out arm — the arm under test here");
+      assert.equal(ctx.state.loggedOut, true,
+        "the fixture did not observe the revocation, so the reads after it are not the reads of a signed-out " +
+        "browser and the sign-in below is not a sign-IN");
+
+      // ─ 3. SIGN IN AS THE OTHER TEAM, through the real form ────────────────
+      // NO RELOAD happens anywhere in this check, and that is the point: a
+      // reload destroys every module variable and would make every assertion
+      // below green by construction. Asserted, not assumed, at §6.
+      ctx.byId("auth-email").value = "zed@beta.io";
+      ctx.byId("auth-password").value = "hunter2hunter2";
+      ctx.byId("auth-team").value = "";
+      ctx.byId("auth-remember").checked = true;
+      const submitted = ctx.byId("auth-form").dispatchEvent({ type: "submit" });
+      assert.equal(submitted, 1,
+        "#auth-form has no \"submit\" handler — init() never wired submitAuth, and no sign-in can be driven");
+      await ctx.settle();
+
+      assert.ok(ctx.localStorage.getItem("bpcloud.session"),
+        "the successful login minted no local session — loginResponseKind() did not fold this 200 to " +
+        "\"session\", so nobody is signed in and the switch never happened");
+      assert.equal(ctx.state.secondIdentity, true,
+        "the fixture's login arm never recorded the account change — its success branch (status < 400) is " +
+        "the branch no committed scenario could reach before this one, and it is still unreached");
+
+      // ─ 4. back to Activity, warm ──────────────────────────────────────────
+      const teamTwo = SCENARIOS["activity-identity-change"].data.secondIdentity.me.team.id;
+      assert.notEqual(teamTwo, teamOne, "the two identities must belong to DIFFERENT teams or there is no switch");
+      ctx.location.hash = "#activity";
+      hooks.applyRoute();
+      await ctx.settle();
+
+      // ─ 5. THE ASSERTION ───────────────────────────────────────────────────
+      const whoAfter = whoOf();
+      assert.ok(!whoAfter.includes('data-actfilter="usr_lin"') && !whoAfter.includes(">lin<"),
+        "THE PREVIOUS TEAM'S MEMBER lin IS STILL ON THE WHO AXIS. The person now signed in has never met " +
+        "them: the sign-out did not drop `activityActors`, the members latch stayed burned, and the second " +
+        "team's roster was never read. Got: " + JSON.stringify(whoAfter.slice(0, 240)));
+      assert.ok(!whoAfter.includes('data-actfilter="usr_rex"') && !whoAfter.includes(">rex<"),
+        "the previous team's member rex is still on the Who axis; got: " + JSON.stringify(whoAfter.slice(0, 240)));
+      // The POSITIVE half — an axis that merely went blank would satisfy the two
+      // refusals above while being just as broken, so the new roster must be
+      // there, read from the new team, and the caller must be the new caller.
+      assert.equal(ctx.countCalls("GET", "/v1/teams/" + teamTwo + "/members"), 1,
+        "the SECOND team's roster was never fetched — ensureActivityActors() returned at its latch, which " +
+        "is exactly what the cleared `activityActorsTried` exists to prevent");
+      assert.ok(whoAfter.includes('data-actfilter="usr_qi"') && whoAfter.includes(">qi<"),
+        "the new team's member qi is absent from the Who axis — the axis is blank, not merely stale; got: " +
+        JSON.stringify(whoAfter.slice(0, 240)));
+      assert.ok(whoAfter.includes('data-actfilter="usr_zed"') && whoAfter.includes(">Just me<"),
+        "the new caller does not render as Just me — /v1/me is still answering the previous identity; got: " +
+        JSON.stringify(whoAfter.slice(0, 240)));
+
+      // ─ 6. …AND NOTHING RELOADED ───────────────────────────────────────────
+      // Without this the whole check could be certifying a page refresh, which
+      // clears every module variable for free and proves nothing about any of
+      // the five clears in render()'s logged-out arm.
+      assert.equal(ctx.reloads.length, 0,
+        "the app reloaded during this drive (" + ctx.reloads.length + " times) — a reload wipes every module " +
+        "variable, so every assertion above would hold on a console with no cache clearing at all");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
@@ -5295,7 +5442,7 @@ function armConfirmSheet(reg, resourceName) {
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
-  const { registry, hooks, calls, fixtureState, localStorage } = bootScenario(name);
+  const { registry, byId, hooks, calls, fixtureState, localStorage, location, reloads } = bootScenario(name);
   await flush();
 
   if (exp.check) {
@@ -5312,6 +5459,19 @@ async function runScenario(name) {
       // local consequence — clearSession() — and that consequence is invisible
       // in every innerHTML in the registry.
       localStorage,
+      // cch-w12-followup-login-fixture-gap: the sandbox's own `location`, so a
+      // check can navigate between views without a reload. See bootScenario.
+      location,
+      // …and the reload LEDGER beside it, so a check that claims "no reload
+      // happened" can prove it rather than assert it by omission.
+      reloads,
+      // `byId` is the SAME lookup app.js's $() makes, and it is here for the
+      // ids a check has to reach BEFORE the app has touched them: `registry`
+      // answers undefined for those, which is indistinguishable from an element
+      // that does not exist. The sign-in form is exactly that case — nothing in
+      // a logged-out render() writes to #auth-email, so it is absent from the
+      // registry until something types into it.
+      byId,
       // How many times METHOD PATH was requested — the wire assertion.
       countCalls(method, path) {
         return calls.filter((c) => c.method === method && c.path === path).length;

@@ -413,7 +413,16 @@ const PIN_MEMBER_SCENARIOS = 9;
 // sweep refused by name (`the committed corpus grew to 120 scenario(s), pinned
 // at 118`) before it was written. 120 was RE-DERIVED by RUNNING this sweep and
 // reading what it PRINTED, never by adding 2 to a number in a brief.
-const PIN_TOTAL_SCENARIOS = 120;
+// 120 -> 121 (cch-w12-followup-login-fixture-gap): `activity-identity-change` is
+// the corpus's first and only successful-login fixture — the one that lets a
+// drive COMPLETE a sign-in, so render()'s logged-out arm can be entered and left
+// with an account change across it. Its actor is the same OWNER
+// `me("Acme Inc", …)` the rest of the corpus carries (and its second identity is
+// an owner too), so the member slice is unmoved and PIN_MEMBER_SCENARIOS stays
+// at 9 — the case the note above forbids bumping. 121 was RE-DERIVED by RUNNING
+// this sweep and reading what it PRINTED ("the committed corpus grew to 121
+// scenario(s), pinned at 120"), never by adding one.
+const PIN_TOTAL_SCENARIOS = 121;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
