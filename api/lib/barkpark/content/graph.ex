@@ -86,6 +86,17 @@ defmodule Barkpark.Content.Graph do
   # of exhausting the node.
   @corpus_scan_limit 5_000
 
+  @doc """
+  The derived-corpus scan bound (`orphans_bounded/1` / `dangling_bounded/1`).
+
+  Config-overridable (`:barkpark, :graph_corpus_scan_limit`) for TESTS ONLY —
+  the same escape hatch `/v1/graph`'s node budget has, and for the same reason:
+  a bound whose only proof needs 5,001 fixture rows is a bound nobody tests.
+  """
+  @spec corpus_scan_limit() :: pos_integer()
+  def corpus_scan_limit,
+    do: Application.get_env(:barkpark, :graph_corpus_scan_limit, @corpus_scan_limit)
+
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Edge, Scope}
@@ -959,17 +970,18 @@ defmodule Barkpark.Content.Graph do
         order_by: [asc: d.inserted_at, asc: d.id],
         # +1 PROBE ROW: read one past the bound so a full page can be told
         # apart from an exactly-full corpus. The probe is dropped below.
-        limit: ^(@corpus_scan_limit + 1)
+        limit: ^(corpus_scan_limit() + 1)
       )
       |> Repo.all()
       |> Enum.map(fn d ->
         %{id: d.id, doc_id: d.doc_id, type: d.type, title: d.title}
       end)
 
-    truncated = length(rows) > @corpus_scan_limit
-    rows = Enum.take(rows, @corpus_scan_limit)
+    limit = corpus_scan_limit()
+    truncated = length(rows) > limit
+    rows = Enum.take(rows, limit)
 
-    %{orphans: rows, count: length(rows), limit: @corpus_scan_limit, truncated: truncated}
+    %{orphans: rows, count: length(rows), limit: limit, truncated: truncated}
   end
 
   @doc """
@@ -1004,11 +1016,12 @@ defmodule Barkpark.Content.Graph do
       scoped_docs_query(opts)
       |> order_by([d], asc: d.inserted_at, asc: d.id)
       # +1 probe row, exactly as in `orphans_bounded/1`.
-      |> limit(^(@corpus_scan_limit + 1))
+      |> limit(^(corpus_scan_limit() + 1))
       |> Repo.all()
 
-    scan_truncated = length(scanned) > @corpus_scan_limit
-    docs = Enum.take(scanned, @corpus_scan_limit)
+    limit = corpus_scan_limit()
+    scan_truncated = length(scanned) > limit
+    docs = Enum.take(scanned, limit)
 
     # ONE schema read for the whole fold (per distinct dataset) instead of one
     # per document — see `schema_prefetch_fun/2` and the `edges.ex` `:schemas`
@@ -1025,13 +1038,13 @@ defmodule Barkpark.Content.Graph do
         end)
       end)
 
-    row_truncated = length(rows) > @corpus_scan_limit
-    rows = Enum.take(rows, @corpus_scan_limit)
+    row_truncated = length(rows) > limit
+    rows = Enum.take(rows, limit)
 
     %{
       dangling: rows,
       count: length(rows),
-      limit: @corpus_scan_limit,
+      limit: limit,
       truncated: scan_truncated or row_truncated
     }
   end
