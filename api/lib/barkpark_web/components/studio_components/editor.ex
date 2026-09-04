@@ -242,6 +242,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # in which case the primary control falls back to the desk root.
   attr :list_href, :string, default: nil
   attr :desk_href, :string, required: true
+  # `:not_found` triage (Gyldendal 35c, `Shared.triage_not_found/2`): the CAUSE
+  # the card names — `:absent` | `:elsewhere` | `:out_of_reach` | nil (untriaged,
+  # renders as absent). Only `:elsewhere` may mention another workspace, and
+  # then it NAMES it and links to the document there.
+  attr :cause, :atom, default: nil
+  attr :elsewhere_name, :string, default: nil
+  attr :elsewhere_href, :string, default: nil
+  attr :grant_scope, :string, default: nil
 
   def unresolved_document_notice(%{reason: :nothing_selected} = assigns) do
     ~H"""
@@ -265,28 +273,46 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       data-reason={@reason}
       data-doc-id={@doc_id}
       data-doc-type={@doc_type}
+      data-cause={@cause}
     >
       <p class="bp-paper-unrenderable-title">
         Studio could not open this document.
       </p>
-      <p :if={@reason == :not_found} class="bp-paper-unrenderable-reason">
+      <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
+        No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this workspace —
+        but a document with that id lives in the workspace <strong><%= @elsewhere_name %></strong>.
+      </p>
+      <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
+        <%= if @reason == :unknown_node do %>The type <code><%= @doc_type %></code> exists in this dataset<% else %>A <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset<% end %>, but your
+        access grant does not cover it<%= if @grant_scope && @grant_scope != "" do %> (it covers <%= @grant_scope %>)<% end %>.
+        Ask whoever shared access with you to widen the grant.
+      </p>
+      <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
         No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset. It may
-        have been deleted, or it may live in another workspace or project.
+        have been deleted.
       </p>
       <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
         No schema for <code><%= @doc_type %></code> is installed in this dataset, so Studio has no
         fields to show its documents with<%= if @doc_id && @doc_id != @doc_type do %> (you asked for <code><%= @doc_id %></code>)<% end %>.
         Whatever is stored under that type is untouched.
       </p>
-      <p :if={@reason == :unknown_node} class="bp-paper-unrenderable-reason">
+      <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
         This desk has no section named <code><%= @doc_type %></code>, so the path could not be
         walked to a document<%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
         The link may predate a structure change, or the plugin that owned it may be disabled.
       </p>
       <div class="bp-paper-unrenderable-actions">
         <a
-          href={@list_href || @desk_href}
+          :if={@cause == :elsewhere and @elsewhere_href}
+          href={@elsewhere_href}
           class="btn btn-primary btn-sm"
+          data-test-id="studio-unresolved-open-elsewhere"
+        >
+          Open it in <%= @elsewhere_name %>
+        </a>
+        <a
+          href={@list_href || @desk_href}
+          class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
           data-test-id="studio-unresolved-recovery"
         >
           <%= if @list_href, do: "Back to the #{@doc_type} list", else: "Back to the desk" %>
