@@ -38,6 +38,34 @@ defmodule BarkparkCloud.Notifications.Delivery do
   # notifications-chat widened this beyond email to the chat egress channels.
   @channels ~w(email discord slack telegram pushover webhook)
 
+  # cch-w52-s3 — THE CARRIER: what actually carried this send, as opposed to
+  # `channel`, which is the EGRESS FAMILY. Every email transport collapses to the
+  # single channel `"email"`, so before this field a row reading `sent` could not
+  # answer "sent by what": a team on `transport: "smtp"` whose `smtp_override/1`
+  # failed to decrypt rode the PLATFORM mailer and got a row byte-identical to a
+  # carried one.
+  #
+  # THREE MEMBERS, and the third is not a placeholder:
+  #
+  #   * `platform`   — Barkpark's own mailer. Every `kind: "transactional"` send
+  #                    rides it by construction (`Mailer`'s moduledoc), and so
+  #                    does an `smtp` team whose override could not be built.
+  #   * `team_smtp`  — the team's OWN relay actually carried it.
+  #   * `unknown`    — a FIRST-CLASS state, never a NULL and never a blank. Rows
+  #                    written before this field existed cannot prove their
+  #                    carrier (charter D362 forbids inferring one from a
+  #                    settings row that has no history table), and the console
+  #                    renders this as a sentence rather than omitting the
+  #                    segment.
+  #
+  # NO `api` MEMBER. cch-w52-s1 deleted that transport because nothing ever
+  # carried it; re-minting the word inside the fix that makes carriers legible
+  # would repeat the crown defect.
+  #
+  # The write seam is `Notifications.deliver_alert/2`, which RETURNS the carrier
+  # it used, and `record_delivery/6`, which stores it.
+  @carriers ~w(platform team_smtp unknown)
+
   schema "notification_deliveries" do
     field :recipient, :string
     field :event, :string
@@ -48,6 +76,7 @@ defmodule BarkparkCloud.Notifications.Delivery do
     field :last_error, :string
     # notifications-chat: the provider HTTP status for a chat send (null for email).
     field :http_status, :integer
+    field :carrier, :string
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -58,6 +87,7 @@ defmodule BarkparkCloud.Notifications.Delivery do
 
   def statuses, do: @statuses
   def kinds, do: @kinds
+  def carriers, do: @carriers
 
   def changeset(delivery, attrs) do
     delivery
@@ -70,7 +100,8 @@ defmodule BarkparkCloud.Notifications.Delivery do
       :status,
       :attempts,
       :last_error,
-      :http_status
+      :http_status,
+      :carrier
     ])
     # team_id is nullable: user-scoped identity emails (password-reset / verify /
     # email-change-code) belong to a user, not a team, so their delivery rows carry
@@ -79,6 +110,7 @@ defmodule BarkparkCloud.Notifications.Delivery do
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:channel, @channels)
+    |> validate_inclusion(:carrier, @carriers)
     |> validate_publishable_last_error()
     |> assoc_constraint(:team)
   end

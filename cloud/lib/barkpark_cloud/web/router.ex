@@ -11495,6 +11495,11 @@ defmodule BarkparkCloud.Web.Router do
       attempts: d.attempts,
       last_error: d.last_error,
       http_status: d.http_status,
+      # cch-w52-s3: WHAT CARRIED IT. `channel` is the egress family (every email
+      # transport collapses to "email"); `carrier` is the mechanism. Emitted RAW,
+      # including `null` for rows written before the column existed — the console
+      # renders that absence as its own sentence rather than inventing a value.
+      carrier: d.carrier,
       inserted_at: d.inserted_at
     }
   end

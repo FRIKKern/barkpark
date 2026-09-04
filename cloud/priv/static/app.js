@@ -4098,6 +4098,32 @@
     return "Pending";
   }
 
+  // cch-w52-s3 — the carrier meta segment. `channel` is the EGRESS FAMILY (every
+  // email transport collapses to "email"); this names the MECHANISM that carried
+  // the send, which is the question a row reading "sent" could not answer.
+  //
+  // QUIET ON PURPOSE, and that is a measured decision rather than a timid one:
+  // the live census says nobody has ever configured a non-platform email
+  // transport, so nobody is staring at a log wondering whether their own relay
+  // carried it. A louder treatment would be volume with no signal behind it.
+  //
+  // `unknown` — and a MISSING carrier, which is the same epistemic state — reads
+  // as a SENTENCE, never a blank and never an omitted segment: rows written
+  // before the column existed genuinely cannot prove their carrier, and the
+  // house style of this epic is that unknown is a state, not an absence. Any
+  // other value (a legacy chat row backfilled to its channel) is rendered
+  // verbatim rather than mapped to "unknown", because it IS known.
+  //
+  // NO NEW CLASS: the segment is plain text inside the existing `.wh-del-meta`,
+  // so it introduces no rule `__css_check` would have to police.
+  function notifDeliveryCarrierLabel(d) {
+    var c = d && d.carrier != null ? String(d.carrier) : "";
+    if (c === "" || c === "unknown") return "carrier not recorded";
+    if (c === "platform") return "via the Barkpark platform mailer";
+    if (c === "team_smtp") return "via this team\u2019s own SMTP relay";
+    return "via " + c;
+  }
+
   // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
   // recipient leads (mono), a toned status pill, then channel · event · attempts,
   // the relative time, and — on a failure — the verbatim last_error on its own line.
@@ -4110,7 +4136,8 @@
     var attempts = d.attempts != null
       ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
       : null;
-    var meta = [channel, event].concat(attempts ? [attempts] : []).join(" &middot; ");
+    var carrier = esc(notifDeliveryCarrierLabel(d));
+    var meta = [channel, event, carrier].concat(attempts ? [attempts] : []).join(" &middot; ");
     var err = d.last_error != null && String(d.last_error) !== ""
       ? '<span class="wh-del-err">' + esc(d.last_error) + "</span>"
       : "";
@@ -27092,6 +27119,7 @@
       notifTransportLabel: notifTransportLabel,
       notifDeliveryTone: notifDeliveryTone, notifDeliveryStatusLabel: notifDeliveryStatusLabel,
       notifDeliveryRowHtml: notifDeliveryRowHtml, notifDeliveriesHtml: notifDeliveriesHtml,
+      notifDeliveryCarrierLabel: notifDeliveryCarrierLabel,
       notifDeliveriesErrorHtml: notifDeliveriesErrorHtml,
       notifEmailSectionHtml: notifEmailSectionHtml, notifChannelsSectionHtml: notifChannelsSectionHtml,
       notifChannelRowHtml: notifChannelRowHtml, notifMatrixSectionHtml: notifMatrixSectionHtml,
