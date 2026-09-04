@@ -235,14 +235,18 @@ defmodule Barkpark.Plugins.Bulldocs do
   def register_routes(_ctx) do
     [
       {:live, "/papers/:slug", BarkparkWeb.BulldocsLive, :index,
-       auth: :public_root, root_layout: {BarkparkWeb.Layouts, :bulldocs}},
+       auth: :public_root,
+       root_layout: {BarkparkWeb.Layouts, :bulldocs},
+       on_mount: [{BarkparkWeb.PaperViewer, :viewer}]},
       # Dataset-scoped reader (mirrors the studio `/d/:dataset/...` convention):
       # SAME live mount, SAME `:public_root` bucket + bulldocs root layout as the
       # flat reader above. The `:dataset` path param is read in BulldocsLive's
       # mount and threaded to the public-paper fetch; absent on the flat route it
       # defaults to `Content.paper_default_dataset()` (back-compat).
       {:live, "/d/:dataset/papers/:slug", BarkparkWeb.BulldocsLive, :index,
-       auth: :public_root, root_layout: {BarkparkWeb.Layouts, :bulldocs}},
+       auth: :public_root,
+       root_layout: {BarkparkWeb.Layouts, :bulldocs},
+       on_mount: [{BarkparkWeb.PaperViewer, :viewer}]},
       {:get, "/papers/:slug/source", BarkparkWeb.BulldocsSourceController, :show,
        auth: :public_root},
       {:get, "/d/:dataset/papers/:slug/source", BarkparkWeb.BulldocsSourceController, :show,

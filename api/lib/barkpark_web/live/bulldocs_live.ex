@@ -49,6 +49,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
+  alias BarkparkWeb.PaperViewer
 
   defmodule NotFound do
     @moduledoc "Raised when a canonical Paper identity is missing or unpublished."
@@ -89,6 +90,15 @@ defmodule BarkparkWeb.BulldocsLive do
 
     paper ||
       raise NotFound, message: "no published paper #{inspect(slug)}"
+
+    # Edit-on-the-link slice 1 (task-0c242c8dc61f6b13): the viewer was
+    # resolved by `BarkparkWeb.PaperViewer.on_mount/4`; the EDIT verdict needs
+    # the paper's OWN workspace, known only now. Fail-closed: a mount without
+    # the hook (no `:viewer` assign) is anonymous and can never edit.
+    socket =
+      socket
+      |> assign(:viewer, socket.assigns[:viewer] || PaperViewer.anonymous())
+      |> assign(:can_edit?, PaperViewer.can_edit?(socket.assigns, paper.workspace_id))
 
     reader_source =
       case Content.Papers.reader_source(paper, dataset, reader_scope) do
