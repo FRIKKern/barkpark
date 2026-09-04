@@ -346,13 +346,27 @@ run_verify() {
   printf '\nExpected after a clean sweep: DISCARD=0 (only LIST and BY-HAND remain).\n\n'
   [ -s "$DISCARDED" ] || { printf 'no discarded-id list at %s — sample skipped\n' "$DISCARDED"; return 0; }
   printf 'SAMPLE OF THREE DISCARDED IDS (published side must be unchanged)\n'
-  local id
+  # The draft column is a SEPARATE read of `drafts.<id>`. Deriving it from the
+  # published response instead — "does the returned _id start with drafts.?" —
+  # answers "yes, gone" for every row, including rows whose draft is very much
+  # still there, because a bare-id get is published-first by contract. A column
+  # that cannot say NO is not a measurement.
+  local id pub drafts_body
   while read -r id; do
     [ -n "$id" ] || continue
-    env -u BARKPARK_TOKEN "$BP" doc get "$DOC_TYPE" "$id" -o json 2>/dev/null \
-      | jq -r --arg id "$id" '
-          (.result // .document // .) as $r
-          | "\($id)\tstatus=\($r.lifecycle_status // "MISSING")\tclose_reason=\(($r.close_reason // "-")|tostring|.[0:40])\trev=\($r._rev // "-")\tdraft_gone=\(if ($r._id // "") | startswith("drafts.") then "NO" else "yes" end)"'
+    pub="$(env -u BARKPARK_TOKEN "$BP" doc get "$DOC_TYPE" "$id" -o json 2>/dev/null)"
+    drafts_body="$(env -u BARKPARK_TOKEN "$BP" doc get "$DOC_TYPE" "drafts.$id" -o json 2>/dev/null)"
+    local draft_state
+    if [ -z "$drafts_body" ]; then
+      draft_state="gone"
+    elif printf '%s' "$drafts_body" | jq -e '(.result // .document // .) | ._id? // empty' >/dev/null 2>&1; then
+      draft_state="STILL-PRESENT"
+    else
+      draft_state="gone"
+    fi
+    printf '%s' "$pub" | jq -r --arg id "$id" --arg draft "$draft_state" '
+      (.result // .document // .) as $r
+      | "\($id)\tstatus=\($r.lifecycle_status // "MISSING")\tclose_reason=\(($r.close_reason // "-")|tostring|.[0:40])\trev=\($r._rev // "-")\tdraft=\($draft)"'
   done < <(head -3 "$DISCARDED")
 }
 
