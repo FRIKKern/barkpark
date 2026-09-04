@@ -7,6 +7,8 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  alias Barkpark.QueryCounter
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Pulse
@@ -15,8 +17,6 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
   @admin_token "pulse-dashboard-admin-test-token"
 
   # Default Ecto telemetry event for a repo with `otp_app: :barkpark`.
-  @repo_query_event [:barkpark, :repo, :query]
-
   setup do
     {:ok, _} =
       Auth.create_token(@admin_token, "pulse dashboard admin", "production", [
@@ -168,28 +168,30 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
     end
   end
 
-  # The connected mount runs in a spawned LiveView process, so the counter must
-  # see queries from ANY process during the block (safe — this module is
-  # async: false, so nothing else runs concurrently).
+  # Count Repo queries against `pulse_counters` within `fun` — the unique signature of
+  # `load_rows/1` -> `Pulse.total`.
+  #
+  # LINEAGE-SCOPED, via the shared `Barkpark.QueryCounter`. The connected mount
+  # runs in a spawned LiveView process, so a `self()` filter would drop the very
+  # leg being measured — but an unscoped handler is NODE-global and counts the
+  # application's own background processes too, which `async: false` does not
+  # fence (it fences sibling TEST processes, not the supervision tree). The
+  # counter therefore reports from any process and decides ownership afterwards:
+  # this test process, the LiveView pid named below, and their
+  # `$callers`/`$ancestors` lineage. See `Barkpark.QueryCounterTest`.
   defp count_pulse_counter_queries(fun) do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-    handler_id = {__MODULE__, make_ref()}
+    QueryCounter.count_source(
+      fn ->
+        result = fun.()
 
-    :telemetry.attach(
-      handler_id,
-      @repo_query_event,
-      fn _event, _measurements, %{source: source}, _config ->
-        if source == "pulse_counters", do: Agent.update(counter, &(&1 + 1))
+        case result do
+          {:ok, %Phoenix.LiveViewTest.View{pid: pid}, _html} -> QueryCounter.own(pid)
+          _ -> :ok
+        end
+
+        result
       end,
-      nil
+      "pulse_counters"
     )
-
-    try do
-      result = fun.()
-      {result, Agent.get(counter, & &1)}
-    after
-      :telemetry.detach(handler_id)
-      Agent.stop(counter)
-    end
   end
 end
