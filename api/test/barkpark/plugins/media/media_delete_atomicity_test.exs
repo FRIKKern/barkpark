@@ -194,7 +194,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
 
       refute result == {:error, :rollback},
              "delete_file/2 leaked DBConnection's bare {:error, :rollback} — the exact tuple " <>
-               "#15827's case had no clause for (CaseClauseError, media.ex:680, HTTP 500)"
+               "#15827's case had no clause for (CaseClauseError inside delete_file/2, HTTP 500)"
 
       assert match?({:error, {:asset_doc_delete_failed, _reason}}, result),
              "expected a NAMED asset-doc failure, got #{inspect(result)}"

@@ -634,7 +634,7 @@ defmodule Barkpark.Media do
       `%DBConnection.TransactionError{message: "transaction is not started"}`,
       DISCONNECTS the connection, and `rollback_or_raise/1` answers
       `{:error, :rollback}` — a shape #15827's `case` had no clause for, hence
-      the `CaseClauseError` at media.ex:680 on guerrilla request
+      the `CaseClauseError` in `Media.delete_file/2` (the site at the time of #15827) on guerrilla request
       GNHlOfn4otoBOqYAACoR.
 
   `Ecto.Adapters.SQL.Sandbox` issues a `BEGIN` on the checked-out connection and
