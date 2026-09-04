@@ -48,6 +48,7 @@ defmodule Barkpark.Structure do
   `Barkpark.Plugins.Enablement.effective/1`.
   """
 
+  require Logger
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
   alias Barkpark.Plugins.Enablement
@@ -74,7 +75,13 @@ defmodule Barkpark.Structure do
       # child nodes
       items: [],
       # what opens when selected
-      child: nil
+      child: nil,
+      # Gyldendal parity E3.2 — a `:document` node may pin a specific document
+      # id (Sanity's `documentId`); nil = the legacy "id == type name" singleton.
+      doc_id: nil,
+      # Gyldendal parity E3.2 — a `:document_type_list` node may carry its own
+      # sort ([%{"field", "direction"}]); nil = the schema's `desk.orderings`.
+      orderings: nil
     ]
   end
 
@@ -206,11 +213,24 @@ defmodule Barkpark.Structure do
     # partition it by the `singleton` flag ALONE, so they are kept adjacent
     # here on purpose (one catch-all immediately followed by the other).
     host_main =
-      curated ++
-        [
-          build_generic_types_group(schemas, owned_map, curated_types),
-          build_settings_group(schemas, owned_map, curated_types)
-        ]
+      case declared_desk(schemas, dataset, opts) do
+        # Gyldendal parity E3.2 — a `deskStructure` document declares the MAIN
+        # tier: order, dividers, nested lists, filtered type lists and pinned
+        # singletons. It replaces the curated + generic + settings host groups
+        # ONLY; plugin tiers and the …Rest census below are untouched, so a type
+        # the declaration forgot still surfaces (the never-hide invariant).
+        # ONE group: the declaration's own dividers are explicit nodes, so
+        # `maybe_join/2` must not interleave positional dividers between them.
+        {:ok, declared} ->
+          [declared]
+
+        :none ->
+          curated ++
+            [
+              build_generic_types_group(schemas, owned_map, curated_types),
+              build_settings_group(schemas, owned_map, curated_types)
+            ]
+      end
 
     # ── Placement-driven host groups: books follow OnixEdit, media follows
     # the media plugin. Each returns {main_placed_nodes, plugins_placed_nodes}. ──
@@ -989,6 +1009,116 @@ defmodule Barkpark.Structure do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  # ── Gyldendal parity E3.2 — the declared desk ──────────────────────────────
+  #
+  # A per-dataset `deskStructure` document (the consumer registers the schema;
+  # `singleton: true`, one `items` field) holds an ordered tree in a small
+  # data-only vocabulary that maps 1:1 onto existing %Node{} types, so
+  # /v1/structure and the Go TUI need no wire change:
+  #
+  #   {"kind":"singleton","type":"frontpage","documentId":"frontpage","title":"Forside","icon":"home"}
+  #   {"kind":"divider","title":"Filtrert"}
+  #   {"kind":"list","title":"Utgivelser","icon":"book","items":[…]}
+  #   {"kind":"documentTypeList","type":"publication","title":"Uten omslag",
+  #      "filter":{"content.cover":{"is":"null"}},"orderings":[{"field":"title","direction":"asc"}]}
+  #
+  # Read under the PUBLISHED perspective ("publish to apply"), scoped to the
+  # caller's workspace. Absent → :none (the hardcoded tree). A malformed
+  # document degrades to :none with a logged reason — never a blank desk.
+  @desk_structure_type "deskStructure"
+
+  defp declared_desk(_schemas, dataset, opts) do
+    scope = Keyword.take(opts, [:workspace_id])
+
+    case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
+      {:ok, %{content: %{"items" => items}}} when is_list(items) and items != [] ->
+        nodes =
+          items
+          |> Enum.with_index()
+          |> Enum.map(fn {item, i} -> declared_item_to_node(item, "desk-#{i}") end)
+          |> Enum.reject(&is_nil/1)
+
+        if nodes == [] do
+          Logger.warning(
+            "deskStructure for #{dataset} declares no recognisable items — using the default desk"
+          )
+
+          :none
+        else
+          {:ok, nodes}
+        end
+
+      {:ok, _} ->
+        Logger.warning("deskStructure for #{dataset} has no items list — using the default desk")
+        :none
+
+      _ ->
+        :none
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "deskStructure for #{dataset} could not be read (#{Exception.message(e)}) — using the default desk"
+      )
+
+      :none
+  end
+
+  defp declared_item_to_node(%{"kind" => "singleton"} = item, idx) do
+    type = item["type"]
+
+    if is_binary(type) and type != "" do
+      %Node{
+        id: item["id"] || "#{idx}-#{type}",
+        title: item["title"] || type,
+        icon: item["icon"],
+        type: :document,
+        type_name: type,
+        doc_id: item["documentId"] || type,
+        visibility: :private
+      }
+    end
+  end
+
+  defp declared_item_to_node(%{"kind" => "divider"} = item, idx),
+    do: %Node{type: :divider, id: item["id"] || idx, title: item["title"]}
+
+  defp declared_item_to_node(%{"kind" => "list"} = item, idx) do
+    children =
+      (item["items"] || [])
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.map(fn {child, j} -> declared_item_to_node(child, "#{idx}-#{j}") end)
+      |> Enum.reject(&is_nil/1)
+
+    %Node{
+      id: item["id"] || idx,
+      title: item["title"] || "Group",
+      icon: item["icon"],
+      type: :list,
+      items: children
+    }
+  end
+
+  defp declared_item_to_node(%{"kind" => "documentTypeList"} = item, idx) do
+    type = item["type"]
+
+    if is_binary(type) and type != "" do
+      %Node{
+        id: item["id"] || "#{idx}-#{type}",
+        title: item["title"] || type,
+        icon: item["icon"],
+        type: :document_type_list,
+        type_name: type,
+        visibility: :public,
+        filter: if(is_map(item["filter"]), do: item["filter"], else: nil),
+        orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
+      }
+    end
+  end
+
+  defp declared_item_to_node(_item, _idx), do: nil
 
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)
