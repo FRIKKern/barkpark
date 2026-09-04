@@ -11059,6 +11059,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "Keyset page cursor over (updated_at, id) — pass empty for page 1, then echo page.next_cursor. Walks past the 1000-row limit cap, so a missing task means closed/absent, not rotated out. Not with offset.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
