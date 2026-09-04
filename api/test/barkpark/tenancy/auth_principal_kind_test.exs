@@ -29,8 +29,22 @@ defmodule Barkpark.Tenancy.AuthPrincipalKindTest do
 
   Semantics-preserved for the shipped call sites lives in
   `test/barkpark/tenancy_auth_test.exs`, which this task leaves BYTE-UNTOUCHED.
+
+  WHY THIS MODULE IS SYNCHRONOUS (task-4f7caaab44c132c1). Three rows in
+  "SEMANTICS PRESERVED" claim the mis-typed signal stays SILENT — they refute a
+  match on the captured log rather than assert one. `capture_log/2` mutes the
+  default handler and captures the whole Logger device, and its own docs say so:
+  "when `async` is set to `true` ... messages from other tests might be captured
+  ... typically by using the `=~/2` operator to perform PARTIAL matches." A
+  presence assert survives foreign lines; an absence claim is exactly the case
+  that doc sentence excludes, because a concurrent module can only ADD text, and
+  text it adds can only make an absence claim red. Narrowing the needle to a
+  fresh UUID makes that unlikely, not sound. Synchronous modules run alone, after
+  every concurrent one, so the capture here holds this test's output and nothing
+  else. Do NOT restore concurrency here while those rows refute the log — see
+  `scripts/refute-on-absence-capture-log-check.sh`, which pins the combination.
   """
-  use Barkpark.DataCase, async: true
+  use Barkpark.DataCase, async: false
 
   import ExUnit.CaptureLog
 
