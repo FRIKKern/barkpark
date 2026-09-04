@@ -161,6 +161,7 @@ defmodule BarkparkWeb.GraphDerivedReadsTest do
     # truncated, which is exactly the dishonesty the bare list shipped.
     setup do
       prev = Application.get_env(:barkpark, :graph_corpus_scan_limit)
+
       on_exit(fn ->
         if is_nil(prev),
           do: Application.delete_env(:barkpark, :graph_corpus_scan_limit),
