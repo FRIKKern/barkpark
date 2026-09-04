@@ -17244,12 +17244,19 @@ test("cch-w28-bl: deployDetailHtml — the terminal gate stops swallowing a refu
   assert.match(hooks.deployDetailHtml({ detail: "Pushing image…", console: ["x"] }, "building"), /Pushing image/);
 });
 
-// ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
-test("billingCanManage / billingHasPaidPlan: owner-honest gate + paid-plan test (GR36)", () => {
-  // Owner-only writes: only the literal "owner" role manages billing (stricter
-  // than admin — require_current_team_owner).
+// ── gr-p4-billing (G-01): the launch-step role helper + the paid-plan test ──
+// cch-w49-s6 RE-TITLED THIS. billingCanManage(role) is no longer the billing
+// gate's owner test — billingOwnerAuthority() is, and it reads the SERVER's
+// team_authority.owner rather than a role string. This helper survives as
+// launchCheckoutAuthority's (app.js: `grep -n 'function launchCheckoutAuthority'`),
+// which is the /new PLAN step and fails OPEN on unknown by shipped design. Left
+// unchanged on purpose; what it answers is pinned here, what BILLING answers is
+// pinned by the driven tests at the tail of this file.
+test("billingCanManage (launchCheckoutAuthority's helper) / billingHasPaidPlan: the role read + the paid-plan test (GR36)", () => {
+  // Owner-only: only the literal "owner" role passes this set membership
+  // (stricter than admin — require_current_team_owner).
   assert.equal(hooks.billingCanManage("owner"), true);
-  assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — billing is stricter");
+  assert.equal(hooks.billingCanManage("admin"), false, "admin is NOT an owner — the launch PLAN step is stricter too");
   assert.equal(hooks.billingCanManage("member"), false);
   assert.equal(hooks.billingCanManage(undefined), false);
   // A real paid plan (a non-free catalog plan in an active/past_due state) has a
@@ -22789,8 +22796,14 @@ test("cch-w39-s1: D444 — the retry lives INSIDE the unknown arm's subtree, nev
   // Manage region holds the unknown block and NOTHING else — so the retry can
   // never be a sibling of the loaded content smoke pins at #billing-manage.
   const billing = appRegion(src, "  function renderBilling(", "\n  function showBillingSection(");
-  const unknownAt = billing.indexOf('meState() !== "loaded"');
-  const refusalAt = billing.indexOf("if (!billingIsOwner())");
+  // cch-w49-s6 — RE-ANCHORED ON THE BAND. This pin used to read
+  // `meState() !== "loaded"` and `if (!billingIsOwner())`; both literals are
+  // gone, because a moved team pin leaves meState() at "loaded" and the boolean
+  // then routed a real owner to the refusal. The ORDERING claim is unchanged
+  // and is all this pin ever asserted — the fence itself is now guarded by the
+  // DRIVEN tests at the tail of this file, not by these substrings.
+  const unknownAt = billing.indexOf('band !== "grant" && band !== "refuse"');
+  const refusalAt = billing.indexOf('band === "refuse"');
   assert.ok(unknownAt > 0 && refusalAt > unknownAt,
     "the unknown arm must be decided BEFORE the refusal — that ordering IS the fix");
   const unknownFn = appRegion(src, "  function renderBillingMeUnknown(", "\n  }\n");
@@ -27587,4 +27600,272 @@ test("cch-w65-bl G2 CONTROL: registering a fence slug reds the shadow-law guard"
   assert.equal(mutantHooks.friendly({ error: "instance_not_live", detail: "wait for provisioning" }, CCHW65_FB),
     "The instance has no URL yet.",
     "the curated rung swallows the relay — which is why the guard above must red");
+});
+
+
+// ── cch-w49-s6 · THE MONEY FENCE, GUARDED BY BEHAVIOUR (charter D556/D557) ──
+//
+// WHAT THIS REPLACES, and why a replacement was needed. Until this block the
+// billing owner fence's ONLY reacting unit assertion was a source-text
+// `billing.indexOf("if (!billingIsOwner())")` inside the D444 ORDERING pin
+// above — it protected the fence by substring ACCIDENT. Measured on origin/main
+// (162406dd8), the double dissociation that proves a grep is not a guard:
+//
+//   * inserting `if (1) { renderPlanState(box); renderBillingManage(true);
+//     renderBillingCancel(true); return; }` immediately ABOVE the intact fence
+//     left the suite 1298 pass / 0 fail GREEN — while a plain member got the
+//     plan state, Manage and Cancel. A FULL BYPASS, invisible.
+//   * rewriting the fence as the behaviour-identical `if (billingIsOwner() !==
+//     true)` RED the suite — a rename it should never have noticed.
+//
+// The binding census is blind to it too (deleting the fence outright leaves its
+// output byte-identical at rc 0), and no billing scenario in the preview corpus
+// carries an admin actor. So the fence is pinned by RUNNING renderBilling here.
+//
+// Each case gets its own vm realm: renderBilling's module state (subLoaded /
+// subCache / meCache / meTeamPin) is IIFE-scoped and would otherwise leak
+// between cases — and a fresh realm is also what lets the two mutation CONTROLS
+// below run the mutant bytes through the identical driver.
+
+const W49S6_ME_OWNER = {
+  role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" },
+  team_authority: { team_id: "t1", role: "owner", admin: true, owner: true },
+};
+// THE TRAP FIXTURE. admin:true / owner:false is the one envelope that separates
+// the admin band from the owner band, and it is the account that would be handed
+// the Stripe portal, the plan grid and Cancel by a "convert billing to
+// teamAuthorityState()" fix. The whole corpus had no billing-route admin actor.
+const W49S6_ME_ADMIN = {
+  role: "admin", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "grace@acme.com" },
+  team_authority: { team_id: "t1", role: "admin", admin: true, owner: false },
+};
+const W49S6_ME_MEMBER = {
+  role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u4", email: "kim@acme.com" },
+  team_authority: { team_id: "t1", role: "member", admin: false, owner: false },
+};
+// Teamless: /v1/me sends team_authority nil for exactly this.
+const W49S6_ME_TEAMLESS = { role: "owner", user: { id: "u9", email: "solo@acme.com" } };
+const W49S6_SUB = { plan: "supporter", status: "active", current_period_end: "2030-01-01T00:00:00Z" };
+const W49S6_REFUSAL = "Only the team owner can manage billing.";
+
+// A realm whose document/localStorage/fetch this file can swap — the shared
+// `sandbox` above is deliberately inert, and renderBilling needs a DOM.
+function w49s6Realm(source) {
+  const h = {};
+  const el = {
+    addEventListener: noop, removeEventListener: noop, setAttribute: noop, removeAttribute: noop,
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    style: {}, hidden: false, value: "", innerHTML: "", textContent: "",
+    querySelector: () => null, querySelectorAll: () => [],
+  };
+  const box = {
+    __bpTestHook(x) { Object.assign(h, x); },
+    document: {
+      readyState: "loading", addEventListener: noop, removeEventListener: noop,
+      querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+      createElement: () => ({ ...el }), documentElement: { ...el, getAttribute: () => null },
+      body: { ...el, appendChild: noop },
+    },
+    window: { addEventListener: noop, removeEventListener: noop, open: () => null, matchMedia: () => ({ matches: false, addEventListener: noop }) },
+    location: { hash: "", pathname: "/", search: "", origin: "http://localhost" },
+    localStorage: memStore(), sessionStorage: memStore(), navigator: {}, URL: URL, URLSearchParams: URLSearchParams,
+    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    EventSource: function () { return { addEventListener: noop, close: noop }; },
+    setTimeout: noop, clearTimeout: noop, setInterval: () => 1, clearInterval: noop, console,
+  };
+  box.globalThis = box;
+  vm.createContext(box);
+  vm.runInContext(source, box, { filename: "app.js (cch-w49-s6 realm)" });
+  return { h, box };
+}
+
+// The billing screen's real node set, recording. Every selector renderBilling's
+// subtree can reach resolves to a node that KEEPS its innerHTML, so the
+// assertions below read rendered BYTES rather than a branch we assumed ran.
+function w49s6MountBilling(box) {
+  const nodes = {};
+  const make = () => ({
+    innerHTML: "", hidden: false, disabled: false,
+    addEventListener: noop, removeEventListener: noop,
+    querySelector: () => null, querySelectorAll: () => [],
+  });
+  for (const sel of [
+    "#billing-recommended", "#billing-tiers", "#billing-manage-section", "#billing-manage",
+    "#billing-cancel-section", "#billing-cancel", "#plan-portal", "#plan-cancel",
+    "#plan-continue", "#plan-more", "#sub-retry",
+  ]) nodes[sel] = make();
+  box.document.querySelector = (sel) => nodes[sel] || null;
+  return nodes;
+}
+
+async function w49s6Settle() { for (let i = 0; i < 24; i++) await Promise.resolve(); }
+
+// Drive /v1/me through the REAL loadMe (absorbMe takes the pin here, which is
+// what makes the stale case reachable at all).
+async function w49s6DriveMe(box, h, status, payload) {
+  const saved = box.fetch;
+  box.fetch = fetchStub(status, payload);
+  try { h.loadMe(); await w49s6Settle(); } finally { box.fetch = saved; }
+}
+
+// Paint the billing screen through the REAL renderBilling: the first pass finds
+// no subscription and re-enters itself through loadSubscription().then(...).
+async function w49s6Paint(box, h, sub) {
+  const nodes = w49s6MountBilling(box);
+  const saved = box.fetch;
+  box.fetch = fetchStub(200, { subscription: sub });
+  try { h.renderBilling(); await w49s6Settle(); } finally { box.fetch = saved; }
+  return nodes;
+}
+
+// One case, end to end: a fresh realm, a pin, a /v1/me, a subscription, a paint.
+async function w49s6Case(source, me, opts) {
+  opts = opts || {};
+  const { h, box } = w49s6Realm(source || APP_SRC);
+  box.localStorage.setItem("bp.active-team", "t1");
+  if (me) await w49s6DriveMe(box, h, opts.meStatus || 200, me);
+  if (opts.movePin) box.localStorage.setItem("bp.active-team", "t2");
+  const nodes = await w49s6Paint(box, h, opts.sub === undefined ? W49S6_SUB : opts.sub);
+  return { h, box, nodes };
+}
+
+test("cch-w49-s6: billingOwnerAuthority is a NEW five-valued band on team_authority.owner — and billingIsOwner stays BOOLEAN through all five", async () => {
+  // D439, literally: the band is a string, the delegating predicate is not.
+  // Every arm is DRIVEN through loadMe, never poked into the cache.
+  const arms = [
+    ["loading", null, {}],                                   // never asked
+    ["failed", { error: "server_error" }, { meStatus: 500 }], // the read did not arrive
+    ["grant", W49S6_ME_OWNER, {}],
+    ["refuse", W49S6_ME_MEMBER, {}],
+    ["refuse", W49S6_ME_TEAMLESS, {}],                       // teamless: nil is a determinate NO
+    ["stale", W49S6_ME_OWNER, { movePin: true }],            // the pin moved under the answer
+  ];
+  const seen = [];
+  for (const [want, me, opts] of arms) {
+    const { h } = await w49s6Case(null, me, opts);
+    assert.equal(typeof h.billingOwnerAuthority, "function", "the band must be node-pinned");
+    assert.equal(h.billingOwnerAuthority(), want, "band arm: expected " + want);
+    assert.equal(typeof h.billingOwnerAuthority(), "string", "the band is a STRING — that is why it is a sibling");
+    // THE D439 CLAUSE. If someone widens billingIsOwner() into the band itself,
+    // `if (billingIsOwner())` becomes true for "failed"/"loading" — a fail-open.
+    assert.equal(typeof h.billingIsOwner(), "boolean",
+      "billingIsOwner() must stay two-valued on the " + want + " arm (it was exported by NOTHING before this slice)");
+    assert.equal(h.billingIsOwner(), want === "grant", "…and it must be exactly `band === \"grant\"`");
+    seen.push(want);
+  }
+  assert.deepEqual([...new Set(seen)].sort(), ["failed", "grant", "loading", "refuse", "stale"],
+    "all five band values were really reached — a case that silently collapsed would show up here");
+});
+
+test("cch-w49-s6: THE TRAP — an admin:true/owner:false actor is GRANTED by the admin band and REFUSED by the owner band, in one assertion", async () => {
+  const { h, nodes } = await w49s6Case(null, W49S6_ME_ADMIN, {});
+  // The one assertion the row demands: converting billing to teamAuthorityState()
+  // would ship green everywhere else and hand THIS person the Stripe portal.
+  assert.deepEqual(
+    { team: h.teamAuthorityState(), billing: h.billingOwnerAuthority(), isOwner: h.billingIsOwner() },
+    { team: "grant", billing: "refuse", isOwner: false },
+    "the ADMIN band grants and the OWNER band refuses the SAME envelope — that difference is the whole slice");
+
+  // …and the refusal is real on the screen, not just in the predicate.
+  assert.ok(nodes["#billing-manage"].innerHTML.includes(W49S6_REFUSAL),
+    "a non-owner admin reads the honest owner-gate sentence");
+  assert.equal(nodes["#billing-manage"].innerHTML.indexOf('id="plan-portal"'), -1, "…and is offered no Stripe portal");
+  assert.equal(nodes["#billing-cancel"].innerHTML, "", "…and no Cancel");
+  assert.equal(nodes["#billing-cancel-section"].hidden, true, "…with the Cancel section closed");
+  assert.equal(nodes["#billing-tiers"].hidden, true, "…and the plan grid closed");
+});
+
+test("cch-w49-s6: THE STALE REGRESSION — a moved team pin must NOT print the owner refusal to a real owner", async () => {
+  // The naive one-line delegation ships this bug: meState() is still "loaded"
+  // under a moved pin, so the old `meState() !== "loaded"` arm could not fire and
+  // control reached renderBillingReadOnly -> renderBillingManage(false).
+  const { h, nodes } = await w49s6Case(null, W49S6_ME_OWNER, { movePin: true });
+  assert.equal(h.billingOwnerAuthority(), "stale", "the pin moved, so the cached answer is not about this team");
+  assert.equal(h.meState(), "loaded", "…and meState() is STILL loaded — which is exactly why branching on it is not enough");
+
+  const manage = nodes["#billing-manage"].innerHTML;
+  assert.equal(manage.indexOf(W49S6_REFUSAL), -1,
+    "the accusing sentence must be unreachable from a stale answer — rendered bytes: " + JSON.stringify(manage.slice(0, 400)));
+  assert.ok(manage.includes("data-me-retry"), "…and the surface carries the exit that actually resolves the band");
+  assert.equal(manage.indexOf('id="plan-portal"'), -1, "fail-closed: no portal on an answer about another team");
+  assert.equal(nodes["#billing-cancel"].innerHTML, "", "fail-closed: no Cancel either");
+  assert.equal(nodes["#billing-tiers"].hidden, true, "…and the plan grid stays closed");
+
+  // THE AUTHORED STALE COPY (the row's fifth criterion): a stale answer does not
+  // borrow the unknown sentence. "Until it answers" is false here — the server
+  // answered fine, about a different team.
+  assert.ok(manage.includes("This answer was fetched for a different team"),
+    "the stale arm states ITS OWN reason, not the in-flight one");
+  assert.equal(manage.indexOf("Until it answers"), -1, "…and does not silently reuse the in-flight sentence");
+});
+
+test("cch-w49-s6: the three not-an-answer bands all route to the unknown surface, and only a DETERMINATE refuse reaches the member surface", async () => {
+  for (const [name, me, opts] of [
+    ["loading", null, {}],
+    ["failed", { error: "server_error" }, { meStatus: 500 }],
+    ["stale", W49S6_ME_OWNER, { movePin: true }],
+  ]) {
+    const { nodes } = await w49s6Case(null, me, opts);
+    const manage = nodes["#billing-manage"].innerHTML;
+    assert.ok(manage.includes("data-me-retry"), name + ": the unknown surface, which carries a retry");
+    assert.equal(manage.indexOf(W49S6_REFUSAL), -1, name + ": is NOT the member refusal surface");
+  }
+  const member = await w49s6Case(null, W49S6_ME_MEMBER, {});
+  assert.ok(member.nodes["#billing-manage"].innerHTML.includes(W49S6_REFUSAL),
+    "a CONFIRMED member still reads the honest sentence — the positive control that catches an over-wide fix");
+  assert.equal(member.nodes["#billing-manage"].innerHTML.indexOf("data-me-retry"), -1,
+    "…and is offered no retry, because nothing failed");
+});
+
+test("cch-w49-s6: the owner still gets the whole money screen — the fence is a fence, not a wall", async () => {
+  const { nodes } = await w49s6Case(null, W49S6_ME_OWNER, {});
+  assert.ok(nodes["#billing-manage"].innerHTML.includes('id="plan-portal"'), "an owner gets the Stripe portal button");
+  assert.ok(nodes["#billing-cancel"].innerHTML.includes('id="plan-cancel"'), "…and Cancel plan");
+  assert.equal(nodes["#billing-manage-section"].hidden, false, "…with the Manage section open");
+  assert.equal(nodes["#billing-cancel-section"].hidden, false, "…and the Cancel section open");
+  assert.equal(nodes["#billing-manage"].innerHTML.indexOf(W49S6_REFUSAL), -1, "…and no refusal sentence anywhere");
+});
+
+// ── THE TWO MUTATION CONTROLS — the guard proving it can LOSE ───────────────
+// Both mutate app.js in memory and run the MUTANT through the identical driver.
+// They are the standing answer to "would this file have noticed?", which the
+// indexOf pin could not give: it greened on the first mutation and reddened on
+// a rename.
+
+test("cch-w49-s6 CONTROL: a FULL BYPASS above the fence is now caught (it left origin/main 1298/0 GREEN)", async () => {
+  const anchor = "    var band = billingOwnerAuthority();\n";
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const bypass = "    if (1) { renderPlanState(box); renderBillingManage(true); renderBillingCancel(true); return; }\n";
+  const mutant = APP_SRC.replace(anchor, bypass + anchor);
+  assert.ok(mutant.includes(bypass) && mutant.length > APP_SRC.length, "the mutation must have APPLIED");
+
+  // A plain member, driven through the mutant: the bypass hands them the
+  // owner's whole screen. On the shipped bytes the same drive refuses them
+  // (pinned by the member case above), so this assertion is the dissociation.
+  const { nodes } = await w49s6Case(mutant, W49S6_ME_MEMBER, {});
+  assert.ok(nodes["#billing-manage"].innerHTML.includes('id="plan-portal"'),
+    "the bypass really does hand a member the Stripe portal — that is the harm the grep could not see");
+  assert.ok(nodes["#billing-cancel"].innerHTML.includes('id="plan-cancel"'), "…and Cancel");
+  assert.equal(nodes["#billing-manage"].innerHTML.indexOf(W49S6_REFUSAL), -1, "…and the refusal is gone");
+});
+
+test("cch-w49-s6 CONTROL: the band's terminal line reading ta.admin instead of ta.owner is caught BY NAME", async () => {
+  // The trap, as a mutation: this is precisely "convert billing to the admin
+  // band", and it is behaviour-identical for owners and members — only the
+  // admin:true/owner:false envelope separates them.
+  const anchor = "    return ta.owner ? \"grant\" : \"refuse\";\n  }\n\n  function billingIsOwner()";
+  assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
+  const mutant = APP_SRC.replace(anchor, anchor.replace("ta.owner", "ta.admin"));
+  assert.ok(mutant !== APP_SRC, "the mutation must have APPLIED");
+
+  const { h, nodes } = await w49s6Case(mutant, W49S6_ME_ADMIN, {});
+  assert.equal(h.billingOwnerAuthority(), "grant",
+    "the mutant grants a non-owner admin — which is why the shipped assertion above must say refuse");
+  assert.ok(nodes["#billing-manage"].innerHTML.includes('id="plan-portal"'),
+    "…and the harm is the live Stripe portal on the money screen, not a predicate value");
+
+  // The owner arm is UNCHANGED by the mutation, so a test that only drove an
+  // owner would have shipped this green. That is the point of the fixture.
+  const owner = await w49s6Case(mutant, W49S6_ME_OWNER, {});
+  assert.equal(owner.h.billingOwnerAuthority(), "grant", "an owner is granted by BOTH the mutant and the shipped bytes");
 });
