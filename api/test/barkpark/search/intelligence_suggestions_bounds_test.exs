@@ -58,7 +58,6 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
 
   describe "SQL bounds (fail-before harness)" do
     test "every popular/nohits GROUP BY aggregate carries a SQL LIMIT" do
-
       # Seed one crystal with BOTH success_count>0 and zero_hit_count>0 so the two
       # crystal helpers fire, plus events with zero_hits false/true so the two
       # event helpers fire — all four aggregates exercised in one suggestions/5 call.
@@ -117,7 +116,6 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
     end
 
     test "distinct correction-session count emits COUNT(DISTINCT …), not a full fetch" do
-
       {{:ok, _}, sqls} =
         QueryCounter.sql(fn ->
           Intelligence.record_correction(

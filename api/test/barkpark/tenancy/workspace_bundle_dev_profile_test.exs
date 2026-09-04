@@ -548,7 +548,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
     QueryCounter.sql(fun)
   end
 
-
   defp insert_dataset!(project_id, slug) do
     Repo.query!(
       "INSERT INTO datasets (id, project_id, slug, name, inserted_at, updated_at) " <>
