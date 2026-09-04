@@ -121,9 +121,8 @@ defmodule BarkparkWeb.MutateTaskPublishedFirstTest do
     assert get_task(id)["content"]["note"] == "after",
            "a 200 that the task API cannot see is the defect this row was filed for"
 
-    assert {:error, :not_found} =
-             Content.get_document(DraftId.draft_id(id), "task", @dataset, scope),
-           "no invisible twin may be left behind"
+    twin = Content.get_document(DraftId.draft_id(id), "task", @dataset, scope)
+    assert twin == {:error, :not_found}, "no invisible twin may be left behind"
   end
 
   test "a patch is REFUSED, naming drafts.<id>, when a twin already exists", %{scope: scope} do

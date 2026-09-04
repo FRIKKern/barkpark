@@ -107,8 +107,9 @@ defmodule Barkpark.Content.PatchTaskPublishedFirstTest do
       {:ok, reread} = Content.get_document(id, "task", @dataset, scope)
       assert reread.content["note"] == "after"
 
-      assert {:error, :not_found} =
-               Content.get_document(DraftId.draft_id(id), "task", @dataset, scope),
+      twin = Content.get_document(DraftId.draft_id(id), "task", @dataset, scope)
+
+      assert twin == {:error, :not_found},
              "landing publishes the draft it wrote — no twin may survive the patch"
     end
 
@@ -158,7 +159,9 @@ defmodule Barkpark.Content.PatchTaskPublishedFirstTest do
       {:ok, reread} = Content.get_document(DraftId.draft_id(id), "task", @dataset, scope)
       assert reread.content["note"] == "after"
 
-      assert {:error, :not_found} = Content.get_document(id, "task", @dataset, scope),
+      published = Content.get_document(id, "task", @dataset, scope)
+
+      assert published == {:error, :not_found},
              "no published row existed and none may be minted — this is find_task_by_doc_id's own fallback"
     end
   end
