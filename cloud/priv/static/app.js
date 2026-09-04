@@ -8507,7 +8507,28 @@
   // is DROPPED, because `position: fixed` on a control nobody may press would
   // float a dead button over every screen of the page forever and strand its
   // own reason span back at the timeline. Emphasis belongs to the offer.
-  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml, emphasis) {
+  //
+  // cch-w47-rv-bl — THE SENTENCE GETS ONE OWNER PER BUTTON GROUP, NOT PER
+  // BUTTON. Measured on origin/main@b2529b02c, not taken from the filing: a
+  // refused member's instance-detail render (instanceDetailHtml, the
+  // #instance-body seam cch-w45-s5 counts over) on a LIVE, BEHIND,
+  // policy-bearing box carried FORBIDDEN_ROLE_COPY.admin THIRTEEN times —
+  // header strip 3 controls x (title + reason span) = 6, updates strip 3
+  // controls x 2 = 6, plus the fleet-support card's empty state = 1. (The row
+  // said nine and named four autoupdate toggles; autoupdateActions is two
+  // mutually-exclusive PAIRS, so at most two of them ever render at once. The
+  // count is higher than filed and the arithmetic behind it is different.)
+  //
+  // `groupReasonId` names a span the CALLER emits once per strip
+  // (adminWriteGroupReasonHtml below). Given it, the non-grant arms drop BOTH
+  // per-control copies of the sentence and point at that one span with
+  // `aria-describedby` — so a screen-reader user still hears the refusal on
+  // every disabled control (the description is read with the button), while the
+  // screen says it once per group. Withheld, the two arms are byte-identical to
+  // what shipped: the two SINGLETON sites (the timeline's Retry setup, the
+  // verify note's Re-provision) are their own group of one and keep the shipped
+  // title + reason pair, which is already the two-occurrence budget.
+  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml, emphasis, groupReasonId) {
     if (authority !== "refuse" && authority !== "unknown") {
       if (emphasis === "primary") {
         return '<button class="btn btn-primary btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
@@ -8521,6 +8542,15 @@
       return '<button class="btn btn-ghost btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
     }
     var reason = authority === "refuse" ? FORBIDDEN_ROLE_COPY.admin : "";
+    if (groupReasonId) {
+      // The explanation lives once, in the group's span; this control carries a
+      // POINTER to it. `aria-describedby` is the same relationship the visible
+      // span already had (an explanation attached to a control), stated in
+      // markup instead of by proximity — and it holds on BOTH non-grant arms,
+      // so the unknown arm's "Checking capabilities…" is announced too.
+      return '<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled' +
+        ' aria-describedby="' + esc(groupReasonId) + '">' + labelHtml + "</button></div>";
+    }
     return '<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled' +
       (reason ? ' title="' + esc(reason) + '"' : "") + ">" + labelHtml + "</button>" +
       (reason
@@ -8528,6 +8558,35 @@
         : '<span class="inst-life-note">Checking capabilities&hellip;</span>' + (exitHtml || "")) +
       "</div>";
   }
+
+  // cch-w47-rv-bl — the group's ONE sentence, addressed by the id every disabled
+  // control in the strip points `aria-describedby` at. Emits nothing on grant
+  // (an offered strip explains nothing) and nothing when the strip drew no
+  // grouped control at all, which is why the call sites test the rendered bytes
+  // for the pointer rather than re-deriving which arm they took. The copy and
+  // the two span classes are the rail's, verbatim — this mints neither.
+  // `exitHtml` rides the unknown arm only, and now ONCE per strip rather than
+  // once per control (wireMeRetry takes the first match, so the copies it
+  // replaces were already dead bytes).
+  function adminWriteGroupReasonHtml(authority, groupReasonId, exitHtml) {
+    if (!groupReasonId) return "";
+    if (authority === "refuse") {
+      return '<span class="inst-life-reason" id="' + esc(groupReasonId) + '">' +
+        esc(FORBIDDEN_ROLE_COPY.admin) + "</span>";
+    }
+    if (authority === "unknown") {
+      return '<span class="inst-life-note" id="' + esc(groupReasonId) + '">Checking capabilities&hellip;</span>' +
+        (exitHtml || "");
+    }
+    return "";
+  }
+
+  // The two ids the strips above and below address. Named constants because the
+  // control and its reason must agree byte for byte — a typo on either side is
+  // an aria-describedby pointing at nothing, which reads to a screen reader
+  // exactly like the refusal never being spoken.
+  var HEADER_ACTIONS_REASON_ID = "inst-header-actions-reason";
+  var UPDATE_ACTIONS_REASON_ID = "inst-update-actions-reason";
 
   // cch-w46-rv — THE AUTHORITY-BEARING HALF OF THE HEADER, LIFTED OUT WHOLE.
   //
@@ -8562,7 +8621,7 @@
     var updateBtn = lc.live && bp.update_state === "behind"
       ? adminWriteControlHtml(authority,
           esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update"),
-          'id="inst-update"', "", "primary")
+          'id="inst-update"', "", "primary", HEADER_ACTIONS_REASON_ID)
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
@@ -8573,7 +8632,7 @@
     // (meRetryHtml's [data-me-retry]), wired by wireMeRetry at the render site,
     // so a /v1/me that never landed is a state you can leave.
     var domainBtn = lc.live && !bp.custom_host
-      ? adminWriteControlHtml(authority, "Attach domain", 'id="inst-domain"', meRetryHtml())
+      ? adminWriteControlHtml(authority, "Attach domain", 'id="inst-domain"', "", "", HEADER_ACTIONS_REASON_ID)
       : "";
 
     // cloud-agent onramp: reveal this instance's admin credential so an agent
@@ -8586,7 +8645,7 @@
     // a suspended one is refused 409 by design (cch-w54-s2), so neither is
     // offered a control that could only fail.
     var connectBtn = lc.live
-      ? adminWriteControlHtml(authority, "Connect agent", 'id="inst-connect-agent"', meRetryHtml())
+      ? adminWriteControlHtml(authority, "Connect agent", 'id="inst-connect-agent"', "", "", HEADER_ACTIONS_REASON_ID)
       : "";
 
     // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
@@ -8617,7 +8676,7 @@
           // whole actions strip in the removeFailed state — nothing else on it
           // carries the exit, so the still-checking arm gets meRetryHtml() here
           // (unlike the live-box CTAs above, which sit beside connectBtn's).
-          ? adminWriteControlHtml(authority, "Retry removal", 'id="inst-remove-retry"', meRetryHtml(), "primary")
+          ? adminWriteControlHtml(authority, "Retry removal", 'id="inst-remove-retry"', "", "primary", HEADER_ACTIONS_REASON_ID)
           : lc.failed
             ? cliToggle
             : lc.suspended
@@ -8632,7 +8691,15 @@
                   '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
                   connectBtn + domainBtn + cliToggle
                 : "";
-    return actions;
+    // cch-w47-rv-bl: ONE reason for the strip, appended only when the arm that
+    // fired actually drew a grouped control (the cliToggle-only arms — failed,
+    // suspended — draw none, and a reason with nothing to describe is the
+    // nagging this slice deletes). The strip is the page's home for the
+    // still-checking exit, so meRetryHtml() rides HERE now, once, instead of on
+    // each of the three CTAs that used to carry a copy of it.
+    return actions + (actions.indexOf('aria-describedby="' + HEADER_ACTIONS_REASON_ID + '"') === -1
+      ? ""
+      : adminWriteGroupReasonHtml(authority, HEADER_ACTIONS_REASON_ID, meRetryHtml()));
   }
 
   // cch-w45-s5: `authority` is instanceAdminAuthority()'s three-valued answer,
@@ -10475,10 +10542,10 @@
       // authority argument at all, so a plain member was offered four writes the
       // server answers 403. Same seam, same grammar: the live `data-au` mount
       // hook exists on the grant arm only (D428/D439).
-      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "");
-      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "");
-      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "");
-      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "");
+      if (acts.showPause) buttons += adminWriteControlHtml(authority, "Pause autoupdate", 'data-au="pause"', "", "", UPDATE_ACTIONS_REASON_ID);
+      if (acts.showResume) buttons += adminWriteControlHtml(authority, "Resume autoupdate", 'data-au="resume"', "", "", UPDATE_ACTIONS_REASON_ID);
+      if (acts.showPin) buttons += adminWriteControlHtml(authority, "Pin version", 'data-au="pin"', "", "", UPDATE_ACTIONS_REASON_ID);
+      if (acts.showUnpin) buttons += adminWriteControlHtml(authority, "Unpin", 'data-au="unpin"', "", "", UPDATE_ACTIONS_REASON_ID);
     }
     // isu-w6: Rollback is offered for every hosted box (this panel only renders
     // when the box has a host). It's a DISTINCT affordance from the policy toggles
@@ -10491,8 +10558,13 @@
     // write on the screen and got a 403 on the confirm. The offer is now
     // authority-gated (no exit here: the page's one [data-me-retry] rides the
     // header, where the still-checking arm first appears).
-    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "");
-    return buttons;
+    buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "", "", UPDATE_ACTIONS_REASON_ID);
+    // cch-w47-rv-bl: ONE reason for the strip. The pointer test (rather than
+    // re-deriving which arms fired) keeps this correct if a future control is
+    // added or a policy block goes missing — no grouped control, no span.
+    return buttons + (buttons.indexOf('aria-describedby="' + UPDATE_ACTIONS_REASON_ID + '"') === -1
+      ? ""
+      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, ""));
   }
 
   function updatePanelHtml(bp, authority) {

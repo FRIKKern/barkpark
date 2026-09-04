@@ -3411,6 +3411,32 @@ const EXPECTATIONS = {
         "an ANSWERED /v1/me is not a checking state on the body either");
       assert.ok(!body.includes("data-me-retry"),
         "and an answered read offers no /v1/me retry — the exit belongs to the unknown arm alone");
+
+      // ── cch-w47-rv-bl: THE SENTENCE HAS ONE OWNER PER BUTTON GROUP ────────
+      // The five wrappers above are five CONTROLS, and until this slice each of
+      // them stated the refusal TWICE (a `title` and a visible span) — so this
+      // rendered screen said one sentence ten times, plus once more in the
+      // fleet-support card's control-less empty state. The count is asserted on
+      // the SAME bytes the wrapper count above reads, so the two cannot drift:
+      // controls stay five, sentences drop to one per strip plus that prose.
+      const w47RvBlSentence = "You need the admin role on this team — an admin on this team can grant it.";
+      assert.equal(countMatches(body, w47RvBlSentence), 3,
+        "the refusal must be stated once per button strip (#inst-header-actions, #inst-update-actions) plus " +
+        "the support card's control-less empty state — got " + countMatches(body, w47RvBlSentence));
+      // …AND NOT AT THE COST OF THE EXPLANATION. Every disabled control still
+      // names the refusal in its accessible description, and the id it names
+      // must resolve to a span that actually carries the sentence — an
+      // aria-describedby pointing at nothing is silence, and the count assertion
+      // above would certify it happily.
+      const w47RvBlPointers = [...body.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)].map((m) => m[1]);
+      assert.equal(w47RvBlPointers.length, 5,
+        "all five disabled controls must point at their strip's reason; got " + w47RvBlPointers.length);
+      for (const id of new Set(w47RvBlPointers)) {
+        assert.ok(body.includes('<span class="inst-life-reason" id="' + id + '">' + w47RvBlSentence + "</span>"),
+          'aria-describedby="' + id + '" resolves to no reason span carrying the server\'s sentence');
+      }
+      assert.ok(!/disabled[^>]*title="You need the admin role/.test(body),
+        "a grouped control kept its own title — that is the per-control repetition this slice deletes");
     },
   },
 
