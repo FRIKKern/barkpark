@@ -150,8 +150,13 @@ classify() {
     # THE WORK FIELDS (the byte-equality set main ruled). Absent and null are the same
     # absence; an absent list is an empty list. Nothing else is normalised —
     # a met flag, a tag strength, a trailing space: each counts as a difference.
+    # acceptance_criteria compares by criterion TEXT and count only (main, DECISIONS
+    # 2026-09-04 05:55Z): met/evidence are the close path STAMPS on the published
+    # side and carry nothing; a draft that merely lacks them is the snapshot.
+    def crit_text: ((.acceptance_criteria // []) | map(.criterion // null));
+    def met_set: ((.acceptance_criteria // []) | to_entries | map(select(.value.met == true) | .key));
     def work: {title: (.title // null), description: (.description // null),
-               brief: (.brief // null), acceptance_criteria: (.acceptance_criteria // []),
+               brief: (.brief // null), acceptance_criteria: crit_text,
                tags: (.tags // [])};
     def differing: . as [$a,$b] | [ ($a|keys[]) | select($a[.] != $b[.]) ];
 
@@ -171,7 +176,10 @@ classify() {
         | ($closed_at != null and ($closed_at|tostring) != "") as $has_close_ts
         | ($has_close_ts and (($d._updatedAt|tostring) < ($closed_at|tostring))) as $pre_close
         | ([($p|work), ($d|work)] | differing) as $diff
-        | (($diff|length) == 0) as $equal
+        # THE EXTRA GUARD: a draft holding a met flag the published row LACKS is a
+        # live edit (someone stamped on the draft) -> LIST, never DISCARD.
+        | (($d|met_set) - ($p|met_set)) as $extra_met
+        | ((($diff|length) == 0) and (($extra_met|length) == 0)) as $equal
         # ONE decision, read out twice. The verdict and the reason are both
         # derived from $code, so each clause of guard 1 has exactly ONE place it
         # can be deleted from — measured the hard way: when verdict and why were
@@ -181,7 +189,8 @@ classify() {
         # a mutation cannot find.
         | (if   ($BH | index($id))  then "BY-HAND"
            elif ($sealed | not)     then "NOT-SEALED"
-           elif ($equal | not)      then "WORK-DIFFERS"
+           elif (($diff|length) > 0)     then "WORK-DIFFERS"
+           elif (($extra_met|length) > 0) then "DRAFT-EXTRA-MET"
            else "WORK-EQUAL" end) as $code
         | {
             id: $id,
@@ -202,6 +211,7 @@ classify() {
               if   $code == "BY-HAND"     then "named by main; never in the bulk write"
               elif $code == "NOT-SEALED"  then "published twin is NOT sealed (\($ps)) — a live row"
               elif $code == "WORK-DIFFERS" then "draft work fields DIFFER from the published (\($diff|join(","))) — a live edit or the only copy of something"
+              elif $code == "DRAFT-EXTRA-MET" then "draft carries met flag(s) the published row lacks (criteria \($extra_met|map(tostring)|join(","))) — a live stamp on the draft"
               else "sealed twin; work fields byte-equal — the draft says nothing the published row does not\(if $pre_close then "" else " (draft touched after the close: \($d._updatedAt) vs \($closed_at))" end)" end)
           })
     | .[] | select(.diverging)
@@ -407,6 +417,12 @@ selftest() {
  {"_id":"drafts.met-differs-pair","_rev":"d3","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"open","title":"t",
   "claim":null,"acceptance_criteria":[{"met":false}]},
 
+ {"_id":"draft-extra-met-pair","_rev":"p9","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"done","title":"t",
+  "close_reason":"shipped","claim":{"epoch":2,"closed_at":"2026-08-30T09:00:00Z"},
+  "acceptance_criteria":[{"criterion":"a","met":true},{"criterion":"b","met":false}]},
+ {"_id":"drafts.draft-extra-met-pair","_rev":"d9","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"open","title":"t",
+  "claim":null,"acceptance_criteria":[{"criterion":"a","met":true},{"criterion":"b","met":true}]},
+
  {"_id":"not-sealed-pair","_rev":"p4","_updatedAt":"2026-09-01T10:00:00Z","lifecycle_status":"open",
   "claim":null,"acceptance_criteria":[{"met":false},{"met":false},{"met":false}]},
  {"_id":"drafts.not-sealed-pair","_rev":"d4","_updatedAt":"2026-08-01T00:00:00Z","lifecycle_status":"cancelled",
@@ -452,7 +468,8 @@ JSON
   printf 'GUARD 1 — the discard rule\n'
   expect_verdict equal-pair       DISCARD
   expect_verdict differs-pair     LIST
-  expect_verdict met-differs-pair LIST
+  expect_verdict met-differs-pair DISCARD
+  expect_verdict draft-extra-met-pair LIST
   expect_verdict not-sealed-pair  LIST
 
   # THE VERDICT ALONE DOES NOT REACH CLAUSE (b). Both (b) and (c) answer LIST
@@ -475,7 +492,8 @@ JSON
     esac
   }
   expect_reason differs-pair     "DIFFER from the published (description)"         "differs-pair is listed BY CLAUSE (b) and names the field"
-  expect_reason met-differs-pair "DIFFER from the published (acceptance_criteria)" "a met-flag difference is a work-field difference (byte-equality, not a heuristic)"
+  expect_reason met-differs-pair "work fields byte-equal" "a draft that only LACKS the close's met stamps is the snapshot — criterion text and count are what compare"
+  expect_reason draft-extra-met-pair "met flag(s) the published row lacks (criteria 1)" "a met flag on the draft that the published lacks is a live stamp -> LIST, naming the criterion"
   expect_reason equal-pair       "draft touched after the close"                   "equal-pair is DISCARDED despite the post-close touch — the timestamp gates nothing"
   expect_reason not-sealed-pair  "NOT sealed"                  "not-sealed-pair is listed BY CLAUSE (a)"
   printf 'THE TWO BY-HAND ROWS\n'
@@ -485,16 +503,16 @@ JSON
   printf 'THE POPULATION ITSELF\n'
   # NON-VACUITY: if the table were empty every expect_verdict above would still
   # have to have failed, but these two arms pin the population's shape directly.
-  if [ "$(grep -c '' "$tmp/table.tsv")" = "6" ]; then ok "exactly 6 diverging twins in the fixture"
-  else bad "population" "expected 6 diverging rows, got $(grep -c '' "$tmp/table.tsv")"; fi
+  if [ "$(grep -c '' "$tmp/table.tsv")" = "7" ]; then ok "exactly 7 diverging twins in the fixture"
+  else bad "population" "expected 7 diverging rows, got $(grep -c '' "$tmp/table.tsv")"; fi
   if [ -z "$(verdict_of agreeing-twin)" ]; then ok "a twin whose two sides AGREE is not in the population"
   else bad "agreeing-twin" "a non-diverging twin leaked into the table"; fi
   if [ -z "$(verdict_of lonely-published)" ] && [ -z "$(verdict_of lonely-draft)" ]; then
     ok "an unpaired published row and an unpaired draft are both out of scope"
   else bad "lonely" "an unpaired document entered the table — discard-draft on one of those DELETES it"; fi
-  if [ "$(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')" = "1" ]; then
-    ok "exactly 1 DISCARD — the guards are not waving the fixture through"
-  else bad "discard-count" "expected 1 DISCARD, got $(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')"; fi
+  if [ "$(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')" = "2" ]; then
+    ok "exactly 2 DISCARD (equal-pair, met-differs-pair) — the guards are not waving the fixture through"
+  else bad "discard-count" "expected 2 DISCARD, got $(awk -F'\t' '$12=="DISCARD"' "$tmp/table.tsv" | grep -c '')"; fi
 
   printf 'GUARD 2 — the count fence\n'
   if out="$(guard2 10 10 0 2>&1)"; then ok "exact match passes (10 vs 10, tolerance 0)"
