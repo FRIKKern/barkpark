@@ -27964,6 +27964,7 @@ test("cch-w49-s6 CONTROL: the band's terminal line reading ta.admin instead of t
   // owner would have shipped this green. That is the point of the fixture.
   const owner = await w49s6Case(mutant, W49S6_ME_OWNER, {});
   assert.equal(owner.h.billingOwnerAuthority(), "grant", "an owner is granted by BOTH the mutant and the shipped bytes");
+});
 // ---------------------------------------------------------------------------
 // cch-w72-bl — THE GITHUB ARM SPEAKS: three curated truths, two honest silences.
 //
