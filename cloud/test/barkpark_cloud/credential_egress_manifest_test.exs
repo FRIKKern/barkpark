@@ -358,7 +358,7 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
     user
   end
 
-  defp user_with_team(role \\ "owner") do
+  defp user_with_team(role) do
     user = user_fixture()
     n = System.unique_integer([:positive])
     {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
@@ -436,8 +436,7 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
 
     Fake.program(%{
       "/v1/auth/login-tickets" => ok(201, ~s({"ticket":"bplt_egress","expires_in":60})),
-      "/v1/auth/app-tokens" =>
-        ok(201, ~s({"token":"apptok_x","revoked":true,"revoked_count":1})),
+      "/v1/auth/app-tokens" => ok(201, ~s({"token":"apptok_x","revoked":true,"revoked_count":1})),
       "/v1/admin/self-update" => ok(200, ~s({"check":{"state":"current"},"apply_enabled":true})),
       "/v1/admin/rollback" => ok(202, "{}"),
       "/v1/capabilities" => ok(200, "{}"),
@@ -502,12 +501,11 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
   # seam its row names. Isolation per thunk is what lets two sites share a wire
   # path without their markers colliding.
   defp record(site, thunk) do
-    row = row!(site)
     program_upstream()
     VerifyRecorder.reset()
     thunk.()
 
-    case row do
+    case row!(site) do
       %{seam: :verify} -> VerifyRecorder.requests()
       _ -> Fake.requests()
     end
@@ -534,17 +532,20 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
     covered =
       for {site, thunk} <- list, reduce: MapSet.new() do
         acc ->
-          row = row!(site)
+          requests = record(site, thunk)
 
-          # A driven site with no row cannot be checked at all — say so loudly
-          # rather than silently dropping it from the covered set (which would
-          # read as STALE and blame the wrong side).
-          assert row, "#{inspect(site)} is DRIVEN but carries no register row"
+          # A DRIVEN site with no register row still EGRESSED, so it belongs in
+          # the covered set — that is what makes the ADD direction flow through
+          # the ONE drift arm below and name it, rather than dying here on a
+          # lookup. A registered site is covered only when the exact wire
+          # signature its row declares was actually observed.
+          observed? =
+            case row!(site) do
+              nil -> requests != []
+              row -> find_request(row, requests) != nil
+            end
 
-          case find_request(row, record(site, thunk)) do
-            nil -> acc
-            _req -> MapSet.put(acc, site)
-          end
+          if observed?, do: MapSet.put(acc, site), else: acc
       end
 
     # ANTI-VACUITY, arm 2: an empty covered set must never read as "nothing to
@@ -587,6 +588,7 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
        ctx do
     for {site, thunk} <- driven(ctx) do
       row = row!(site)
+      assert row, "#{inspect(site)} is DRIVEN but carries no register row"
       requests = record(site, thunk)
       req = find_request(row, requests)
 
@@ -614,6 +616,7 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
        ctx do
     for {site, thunk} <- driven(ctx) do
       row = row!(site)
+      assert row, "#{inspect(site)} is DRIVEN but carries no register row"
       req = find_request(row, record(site, thunk))
       assert req, "#{inspect(site)} put nothing on the wire"
 
@@ -632,7 +635,8 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
   ## ── THE DECLARED-EMPTY CLASS (read by SCANNING) ──────────────────────────
 
   test "the vendor-constant class is DECLARED empty of row-derived egress, with its reason, and every member's destination is still a compile-time literal" do
-    assert @vendor_constant_class.reason =~ "compile-time destination cannot be influenced by a row"
+    assert @vendor_constant_class.reason =~
+             "compile-time destination cannot be influenced by a row"
 
     for key <- @required_keys do
       assert Map.has_key?(@vendor_constant_class, key),
@@ -706,33 +710,42 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
        ctx do
     Fake.program([ok(401, "")])
 
-    {:error, :identity_refused} = Registry.refresh_update_status(ctx.bp)
-
+    # NOT `{:error, :identity_refused} = ...`: a bare match raises MatchError
+    # before the named assertion below can say what actually broke, and the
+    # PERSISTED column — not the return value — is what cch-w58-s1 shipped.
+    result = Registry.refresh_update_status(ctx.bp)
     reloaded = Repo.get!(BarkparkCloud.Registry.Barkpark, ctx.bp.id)
 
     assert reloaded.update_unavailable_reason == "identity_refused",
            "a 401 from the box's own admin route left update_unavailable_reason as " <>
              "#{inspect(reloaded.update_unavailable_reason)} — cch-w58-s1's persisted verdict is " <>
              "gone and 'unknown' is unreadable again"
+
+    assert result == {:error, :identity_refused},
+           "refresh_update_status/1 returned #{inspect(result)} for a 401 — the box's own refusal " <>
+             "no longer reaches the caller either"
   end
 
   # cch-w58-s3 (PR #11104). A box that ANSWERED and said no is not "unreachable".
   test "POSITIVE CONTROL (cch-w58-s3): refused and unreachable are DIFFERENT persisted verdicts",
        ctx do
     Fake.program([ok(401, "")])
-    {:error, :identity_refused} = Registry.refresh_update_status(ctx.bp)
+    _ = Registry.refresh_update_status(ctx.bp)
     refused = Repo.get!(BarkparkCloud.Registry.Barkpark, ctx.bp.id).update_unavailable_reason
 
     Fake.program([{:error, :nxdomain}])
-    {:error, :unreachable} = Registry.refresh_update_status(ctx.bp)
+    _ = Registry.refresh_update_status(ctx.bp)
     unreachable = Repo.get!(BarkparkCloud.Registry.Barkpark, ctx.bp.id).update_unavailable_reason
 
     assert refused != unreachable,
            "a box that ANSWERED 401 and a box that never answered persist the SAME verdict " <>
              "(#{inspect(refused)}) — cch-w58-s3's split has collapsed"
 
-    assert refused == "identity_refused"
-    assert unreachable == "unreachable"
+    assert refused == "identity_refused",
+           "a 401 from the box persisted #{inspect(refused)}, not \"identity_refused\""
+
+    assert unreachable == "unreachable",
+           "a transport failure persisted #{inspect(unreachable)}, not \"unreachable\""
   end
 
   # cch-w60-s4's refusal on the shared admin POST seam, which the register's
@@ -750,7 +763,7 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
         ] do
       program_upstream()
 
-      assert {:error, :identity_refused} = thunk.(),
+      assert thunk.() == {:error, :identity_refused},
              "#{label} on an identity-refuted box no longer refuses"
 
       assert Fake.requests() == [],
