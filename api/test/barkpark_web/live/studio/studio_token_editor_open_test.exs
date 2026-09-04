@@ -116,7 +116,12 @@ defmodule BarkparkWeb.Studio.StudioTokenEditorOpenTest do
         |> element(~s(button.bp-doc-row-body[phx-value-id="#{pub_id}"]))
         |> render_click()
 
-      assert_patch(view, desk_url(ws, proj) <> "/publication/#{pub_id}")
+      # The click patches to the CANONICAL path — the pane stack's own address
+      # (#35a/#35b: a desk-group-normalized type gains its group segment), so
+      # assert the tail, not the exact short form the deep link used.
+      path = assert_patch(view)
+      assert String.ends_with?(path, "/publication/#{pub_id}"), path
+      assert String.starts_with?(path, desk_url(ws, proj) <> "/"), path
 
       refute html =~ "Studio could not open this document"
       assert html =~ ~s(value="Over My Dead Body")
