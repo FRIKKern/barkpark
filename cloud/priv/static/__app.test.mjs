@@ -13133,8 +13133,13 @@ const CCH_W45_S5_LIVE = {
   provision_status: "succeeded", update_state: "current", provider: "hetzner",
 };
 // The reason span's TEXT, or null when no reason was rendered at all.
+// cch-w47-rv-bl: the span the STRIPS emit now carries an `id` (the target every
+// disabled control in the strip points aria-describedby at), so the id is
+// OPTIONAL here — the singleton sites (timeline Retry, verify-note Re-provision)
+// still emit the bare span. Widening this reader keeps every assertion below
+// asserting the SENTENCE rather than accidentally asserting the markup shape.
 function cchW45S5Reason(html) {
-  const m = html.match(/<span class="inst-life-reason">([^<]*)<\/span>/);
+  const m = html.match(/<span class="inst-life-reason"(?: id="[^"]*")?>([^<]*)<\/span>/);
   return m ? m[1] : null;
 }
 
@@ -13202,8 +13207,37 @@ test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (ins
   // bytes the server's own 403 renders through friendly(). That is the property
   // this row exists to hold, and the split() count is what makes a hand-written
   // lookalike sentence unable to pass here.
-  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 7,
-    "every refused affordance on the screen carries the server's sentence");
+  //
+  // cch-w47-rv-bl: 7 → 3. Not because a control left the screen — the same
+  // affordances render, all still disabled-and-explained — but because the
+  // sentence now has ONE owner per BUTTON GROUP instead of two per BUTTON.
+  // The three that remain, named so a future drift is legible:
+  //   1. #inst-header-actions' one .inst-life-reason (Update, Connect agent,
+  //      Attach domain all point aria-describedby at it)
+  //   2. #inst-update-actions' one .inst-life-reason (the autoupdate toggles +
+  //      Roll back, same pointer)
+  //   3. the fleet-support card's empty state, which has NO disabled control to
+  //      describe (D514 omits the add affordance outright) and so states the
+  //      sentence in prose, exactly as it did before.
+  // On the POLICY-BEARING fixture the row was filed against the pre-fix number
+  // is THIRTEEN, not the nine the filing claimed — see the count test below,
+  // which drives that fixture on purpose.
+  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 3,
+    "the sentence has one owner per button group, plus the support card's control-less prose");
+  // …and it is still on the screen for EVERY refused affordance: each disabled
+  // control names the span that carries it. A dedupe that dropped the pointer
+  // would satisfy the count above while costing a screen-reader user the
+  // explanation entirely.
+  const describedBy = [...refused.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)].map((m) => m[1]);
+  // Three on THIS fixture (no policy block, update_state "current"): Connect
+  // agent + Attach domain in the header strip, Roll back in the updates strip.
+  // The policy-bearing fixture is driven by the dedicated count test below.
+  assert.ok(describedBy.length >= 3,
+    "every grouped disabled control must point at its group's reason; got " + describedBy.length);
+  for (const id of new Set(describedBy)) {
+    assert.ok(refused.includes('<span class="inst-life-reason" id="' + id + '">' + CCH_W45_S5_ADMIN_SENTENCE + "</span>"),
+      "aria-describedby=\"" + id + "\" points at a span that does not exist with the server's sentence in it");
+  }
   // The new verb specifically: the click hook is GONE on refuse and PRESENT on
   // grant. Without this pair the count above could be satisfied by a control
   // that renders its excuse and stays clickable anyway.
@@ -13342,6 +13376,139 @@ test("cch-w47-s2: the autoupdate policy toggles are authority-gated — grant ke
   const legacy = hooks.updatePanelHtml({ id: "b-2", host: "h", update_state: "current" }, "grant");
   assert.doesNotMatch(legacy, /data-au=/);
   assert.doesNotMatch(legacy, /Pause autoupdate/);
+});
+
+// ── cch-w47-rv-bl: ONE REFUSAL SENTENCE PER BUTTON GROUP ─────────────────────
+//
+// THE PREMISE, RE-DERIVED ON origin/main@b2529b02c RATHER THAN READ OFF THE ROW.
+// The row says NINE and names "four controls x 2". Both numbers are wrong, and
+// wrong in opposite directions:
+//   * autoupdateActions returns two MUTUALLY EXCLUSIVE PAIRS (pause XOR resume,
+//     pin XOR unpin), so at most TWO policy toggles ever render at once — never
+//     four. The row's per-control arithmetic overcounts that strip.
+//   * …and it undercounts the screen, because it omits the HEADER strip
+//     entirely. On a live, BEHIND, policy-bearing box the pre-fix
+//     instanceDetailHtml render carried the sentence THIRTEEN times:
+//       header  — Update + Connect agent + Attach domain, each title + span = 6
+//       updates — Pause + Pin + Roll back,               each title + span = 6
+//       support — the fleet-support card's control-less empty state        = 1
+// The AFTER contract, pinned below: THREE — one per button group, plus that
+// same control-less prose. Per GROUP the budget is what the row asks for: at
+// most twice (here, exactly once — the accessible name is a POINTER, not a
+// second copy of the sentence).
+//
+// This fixture carries an autoupdate policy block ON PURPOSE (the row's carried
+// criterion): a box without one draws no toggles and the count would prove
+// nothing about the strip this slice re-grammars.
+const CCH_W47_RV_BL_BOX = {
+  id: "b-1", name: "Gyldendal", host: "5.75.169.183", url: "https://g.barkpark.cloud",
+  health_status: "up", agent_status: "online", version: "0.2.25",
+  provision_status: "succeeded", provider: "hetzner",
+  update_state: "behind", update_latest_release: "v0.5.0", update_running_release: "v0.4.0",
+  // the CP's real policy block, at the migrations' column defaults
+  autoupdate_enabled: true, autoupdate_paused: false, channel: "prod", pinned_release: null,
+};
+const CCH_W47_RV_BL_STRIPS = [
+  ["#inst-header-actions", (a) => hooks.instanceHeaderActionsHtml(CCH_W47_RV_BL_BOX, a), "inst-header-actions-reason", 3],
+  ["#inst-update-actions", (a) => hooks.updatePanelActionsHtml(CCH_W47_RV_BL_BOX, a), "inst-update-actions-reason", 3],
+];
+
+test("cch-w47-rv-bl: a refused member's instance screen states the admin refusal ONCE per button group, not once per button", () => {
+  const S = CCH_W45_S5_ADMIN_SENTENCE;
+  const refused = hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}, "refuse");
+
+  // THE COUNT. Pre-fix this was 13 on exactly this fixture.
+  assert.equal(refused.split(S).length - 1, 3,
+    "the whole instance-detail render must state the refusal three times — one per button group, " +
+    "plus the fleet-support card's control-less empty state; got " + (refused.split(S).length - 1) +
+    ":\n" + refused);
+
+  // PER GROUP, which is the row's actual bound: at most twice. Asserted on the
+  // strip's own bytes so a future third group cannot quietly relax it.
+  for (const [name, render, groupId, controls] of CCH_W47_RV_BL_STRIPS) {
+    const strip = render("refuse");
+    assert.equal(strip.split('<div class="inst-life-disabled">').length - 1, controls,
+      name + ": expected " + controls + " disabled controls on this fixture; got:\n" + strip);
+    assert.ok(strip.split(S).length - 1 <= 2,
+      name + ": the refusal is stated " + (strip.split(S).length - 1) +
+      " times in one button strip — the budget is a per-group reason plus, at most, an accessible name.");
+    // …and the ONE it states is the server's own sentence in the shipped span,
+    // carrying the id its controls point at.
+    assert.ok(strip.includes('<span class="inst-life-reason" id="' + groupId + '">' + S + "</span>"),
+      name + ": the group's one reason span is missing or does not carry FORBIDDEN_ROLE_COPY.admin verbatim");
+
+    // THE DEDUPE MUST NOT COST THE EXPLANATION. Every disabled control in the
+    // strip still names the refusal in its accessible description — and the id
+    // it names must resolve, or a screen reader hears nothing at all.
+    const controlsHtml = [...strip.matchAll(/<button([^>]*)disabled([^>]*)>/g)];
+    assert.equal(controlsHtml.length, controls, name + ": disabled-button scan disagrees with the wrapper count");
+    for (const m of controlsHtml) {
+      const attrs = m[1] + m[2];
+      assert.ok(attrs.includes('aria-describedby="' + groupId + '"'),
+        name + ": a disabled control carries no pointer to the group reason — attrs: " + attrs);
+      assert.ok(!attrs.includes("title="),
+        name + ": a grouped control kept its own title — that is the per-control repetition this row deletes");
+    }
+  }
+
+  // NO COPY WAS REWORDED OR SHORTENED (the carried criterion): the sentence on
+  // screen is FORBIDDEN_ROLE_COPY.admin, authored once in app.js, and no
+  // lookalike appeared beside it.
+  const appSrc = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.ok(appSrc.includes("admin: " + JSON.stringify(S) + ","),
+    "the sentence must still be FORBIDDEN_ROLE_COPY.admin verbatim, authored once in app.js");
+  for (const r of refused.match(/<span class="inst-life-reason"(?: id="[^"]*")?>[^<]*<\/span>/g) || []) {
+    assert.equal(r.replace(/ id="[^"]*"/, ""), '<span class="inst-life-reason">' + S + "</span>",
+      "a reason span carries copy that is NOT the server's sentence — " + r);
+  }
+
+  // AND THE ADMIN ARM IS UNTOUCHED. A dedupe that broke the offer would satisfy
+  // every assertion above — this is the half a member-only test cannot see.
+  const granted = hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}, "grant");
+  assert.equal(granted.split(S).length - 1, 0, "an admin is accused of nothing");
+  assert.match(granted, /id="inst-domain"/);
+  assert.match(granted, /id="inst-update"/);
+  assert.match(granted, /data-au="pause"/);
+  assert.match(granted, /data-rollback="1"/);
+  assert.equal(hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}), granted,
+    "an omitted authority is still the shipped screen, byte for byte");
+});
+
+// The UNKNOWN arm, counted in the same pass (the row's carried criterion asks
+// for this number reported whether or not it moved — it moved: 7 → 3).
+test("cch-w47-rv-bl: the unknown arm dedupes the same way — one 'Checking capabilities' note per group, one shared Retry", () => {
+  const S = CCH_W45_S5_ADMIN_SENTENCE;
+  const NOTE = "Checking capabilities&hellip;";
+  const unknown = hooks.instanceDetailHtml(CCH_W47_RV_BL_BOX, "overview", {}, "unknown");
+
+  // Pre-fix on this fixture: 7 (header 3 + updates 3 + the support card's 1).
+  assert.equal(unknown.split(NOTE).length - 1, 3,
+    "the still-checking note must be stated three times — one per button group plus the support card's " +
+    "control-less empty state; got " + (unknown.split(NOTE).length - 1));
+
+  for (const [name, render, groupId, controls] of CCH_W47_RV_BL_STRIPS) {
+    const strip = render("unknown");
+    assert.equal(strip.split(NOTE).length - 1, 1, name + ": the note is stated once per strip");
+    assert.ok(strip.includes('<span class="inst-life-note" id="' + groupId + '">' + NOTE + "</span>"),
+      name + ": the group's one note is missing or does not carry the rail's shipped words");
+    assert.equal(strip.split('<div class="inst-life-disabled">').length - 1, controls);
+    for (const m of strip.matchAll(/<button([^>]*)disabled([^>]*)>/g)) {
+      assert.ok((m[1] + m[2]).includes('aria-describedby="' + groupId + '"'),
+        name + ": an unknown-arm control does not point at the group note");
+    }
+    // AND IT ACCUSES NOBODY. An unanswered /v1/me is not evidence of membership.
+    assert.ok(strip.indexOf(S) === -1, name + ": the unknown arm borrowed the refusal's sentence");
+  }
+
+  // ONE shared exit, unchanged: wireMeRetry binds the FIRST [data-me-retry], so
+  // the copies this slice removed were already dead bytes. It rides the header
+  // strip — the page's shipped home for it.
+  assert.equal(unknown.split("data-me-retry").length - 1, 1,
+    "exactly one /v1/me retry on the screen; got " + (unknown.split("data-me-retry").length - 1));
+  assert.match(hooks.instanceHeaderActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
+    "…and it is the header strip's, where it shipped");
+  assert.doesNotMatch(hooks.updatePanelActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
+    "a second exit in the updates strip would be a control nothing binds");
 });
 
 test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
@@ -21028,6 +21195,16 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
     provision_error: "SECRET_KEY_BASE too short (32 bytes)", provision_steps: [], provision_console: [],
   };
   const ghostDead = (label) => '<button class="btn btn-ghost btn-sm" type="button" disabled title="' + S + '">' + label + "</button>";
+  // cch-w47-rv-bl: a control inside a BUTTON GROUP no longer titles itself with
+  // the sentence — the strip owns one .inst-life-reason and each disabled
+  // control points aria-describedby at it. `groupDead` is the exact bytes for
+  // that shape; `ghostDead` above is still the exact bytes for the two SINGLETON
+  // sites (the timeline's Retry setup, the verify note's Re-provision), which
+  // are a group of one and keep the shipped title+span pair.
+  const groupDead = (label, groupId) =>
+    '<button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="' + groupId + '">' + label + "</button>";
+  const HDR = "inst-header-actions-reason";
+  const UPD = "inst-update-actions-reason";
 
   // ELEVEN OFFER SITES over SEVEN verbs — the count differs because two verbs
   // are offered from more than one surface, and gating one site of a verb while
@@ -21043,40 +21220,40 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
     { verb: "rollbackInstance", route: "POST /v1/barkparks/:id/rollback", where: "the Updates panel",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back&hellip;</button>',
-      dead: ghostDead("Roll back&hellip;") },
+      dead: groupDead("Roll back&hellip;", UPD) },
 
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (pause)",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>',
-      dead: ghostDead("Pause autoupdate") },
+      dead: groupDead("Pause autoupdate", UPD) },
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (pin)",
       render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>',
-      dead: ghostDead("Pin version") },
+      dead: groupDead("Pin version", UPD) },
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (resume)",
       render: (a) => hooks.updatePanelHtml(PAUSED_PINNED_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="resume">Resume autoupdate</button>',
-      dead: ghostDead("Resume autoupdate") },
+      dead: groupDead("Resume autoupdate", UPD) },
     { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (unpin)",
       render: (a) => hooks.updatePanelHtml(PAUSED_PINNED_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" data-au="unpin">Unpin</button>',
-      dead: ghostDead("Unpin") },
+      dead: groupDead("Unpin", UPD) },
 
     { verb: "attachDomain", route: "POST /v1/barkparks/:id/domain", where: "the instance header",
       render: (a) => hooks.instanceHeaderHtml(LIVE_BP, a),
       live: '<button class="btn btn-ghost btn-sm" type="button" id="inst-domain">Attach domain</button>',
-      dead: ghostDead("Attach domain") },
+      dead: groupDead("Attach domain", HDR) },
 
     // ── the three this commit closes ────────────────────────────────────────
     { verb: "updateInstance", route: "POST /v1/barkparks/:id/self-update", where: "the instance header CTA",
       render: (a) => hooks.instanceHeaderHtml(LIVE_BP, a),
       live: '<button class="btn btn-primary btn-sm" type="button" id="inst-update">Update to v0.5.0</button>',
-      dead: ghostDead("Update to v0.5.0") },
+      dead: groupDead("Update to v0.5.0", HDR) },
 
     { verb: "removeInstance", route: "DELETE /v1/barkparks/:id", where: "the removal-failed header",
       render: (a) => hooks.instanceHeaderHtml(REMOVE_FAILED_BP, a),
       live: '<button class="btn btn-primary btn-sm" type="button" id="inst-remove-retry">Retry removal</button>',
-      dead: ghostDead("Retry removal") },
+      dead: groupDead("Retry removal", HDR) },
 
     { verb: "retryInstance", route: "POST /v1/barkparks/:id/retry", where: "the provisioning timeline",
       render: (a) => hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, a),
@@ -21113,16 +21290,37 @@ test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — 
 
     // VISIBLE, not hover-only: a `title` is unreachable on touch and to a
     // screen reader browsing the page, so the sentence rides the shipped span.
-    assert.ok(refused.includes('<span class="inst-life-reason">' + S + "</span>"),
+    // cch-w47-rv-bl: the span may now carry the group's `id` (the target the
+    // grouped controls point aria-describedby at), so BOTH shapes are accepted
+    // — what is asserted is that the sentence is on screen in a reason span,
+    // not which of the two markups it arrived in.
+    assert.ok(refused.includes('<span class="inst-life-reason">' + S + "</span>") ||
+      /<span class="inst-life-reason" id="[^"]*">/.test(refused),
       at + ": the refusal is title-only. The sentence must also ride the VISIBLE .inst-life-reason span — a tooltip is not an explanation on a phone.");
 
     // NO NEW COPY: every reason this markup carries is the server's own.
-    const reasons = refused.match(/<span class="inst-life-reason">[^<]*<\/span>/g) || [];
+    const reasons = refused.match(/<span class="inst-life-reason"(?: id="[^"]*")?>[^<]*<\/span>/g) || [];
     assert.ok(reasons.length > 0, at + ": no reason span at all in the member's markup");
     for (const r of reasons) {
-      assert.equal(r, '<span class="inst-life-reason">' + S + "</span>",
+      assert.equal(r.replace(/ id="[^"]*"/, ""), '<span class="inst-life-reason">' + S + "</span>",
         at + ": a reason span carries copy that is NOT FORBIDDEN_ROLE_COPY.admin — " + r);
     }
+
+    // cch-w47-rv-bl, THE DEDUPE'S PRICE, PAID IN THE SAME LOOP: a control that
+    // dropped its title must point at a reason that EXISTS. An aria-describedby
+    // naming an absent id is silence to a screen reader — the exact regression a
+    // "the screen says it once now" count assertion would happily certify.
+    for (const m of refused.matchAll(/<button[^>]*disabled aria-describedby="([^"]*)"/g)) {
+      assert.ok(refused.includes('<span class="inst-life-reason" id="' + m[1] + '">' + S + "</span>"),
+        at + ': a disabled control points aria-describedby at "' + m[1] +
+        '" and no reason span with that id carries the sentence — the refusal is unannounced.');
+    }
+
+    // …and the sentence is not repeated per control. This is the row's bound,
+    // asserted at the strip: ONE owner per group, never one per button.
+    assert.ok(refused.split(S).length - 1 <= 2,
+      at + ": the refusal sentence appears " + (refused.split(S).length - 1) +
+      " times in this strip's bytes — the budget is a per-group reason plus, at most, what an accessible name needs.");
 
     // …and no live mount hook survives, so the wiring has nothing to re-arm.
     assert.ok(!refused.includes(o.live),
@@ -21155,16 +21353,32 @@ test("cch-w38-s1: while /v1/me is outstanding the three newly-gated verbs say CH
     provision_error: "boom", provision_steps: [], provision_console: [],
   };
 
+  // cch-w47-rv-bl: the two HEADER frames are inside a button group now, so their
+  // disabled control points aria-describedby at the strip's one note instead of
+  // carrying its own copy; the two SINGLETON frames below keep the bare shape.
+  // Both are still UNTITLED, which is the property this test exists to hold.
+  const HDR_NOTE = "inst-header-actions-reason";
   const frames = [
-    ["updateInstance", hooks.instanceHeaderHtml(LIVE_BP, "unknown"), "Update to v0.5.0"],
-    ["removeInstance", hooks.instanceHeaderHtml(REMOVE_FAILED_BP, "unknown"), "Retry removal"],
-    ["retryInstance", hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "unknown"), "Retry setup"],
-    ["retryInstance", hooks.verifyNoteHtml("no_admin_token", PROVISION_FAILED_BP, "unknown"), "Re-provision"],
+    ["updateInstance", hooks.instanceHeaderHtml(LIVE_BP, "unknown"), "Update to v0.5.0", HDR_NOTE],
+    ["removeInstance", hooks.instanceHeaderHtml(REMOVE_FAILED_BP, "unknown"), "Retry removal", HDR_NOTE],
+    ["retryInstance", hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "unknown"), "Retry setup", null],
+    ["retryInstance", hooks.verifyNoteHtml("no_admin_token", PROVISION_FAILED_BP, "unknown"), "Re-provision", null],
   ];
-  for (const [verb, html, label] of frames) {
-    assert.ok(html.includes('<button class="btn btn-ghost btn-sm" type="button" disabled>' + label + "</button>"),
-      verb + ": the still-checking arm must draw the control disabled and UNTITLED — got:\n" + html);
-    assert.match(html, /inst-life-note">Checking capabilities&hellip;</,
+  for (const [verb, html, label, groupId] of frames) {
+    const expected = groupId
+      ? '<button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="' + groupId + '">' + label + "</button>"
+      : '<button class="btn btn-ghost btn-sm" type="button" disabled>' + label + "</button>";
+    assert.ok(html.includes(expected),
+      verb + ": the still-checking arm must draw the control disabled and UNTITLED — expected:\n  " + expected + "\ngot:\n" + html);
+    assert.ok(!/disabled[^>]*title=/.test(html),
+      verb + ": an unanswered /v1/me must title NOTHING — a title is a claim we have not earned");
+    if (groupId) {
+      assert.ok(html.includes('<span class="inst-life-note" id="' + groupId + '">Checking capabilities&hellip;</span>'),
+        verb + ": the group's one checking note must exist with the id its controls point at");
+      assert.equal(html.split("Checking capabilities&hellip;").length - 1, 1,
+        verb + ": the still-checking note is stated ONCE per button strip, not once per button");
+    }
+    assert.match(html, /inst-life-note"(?: id="[^"]*")?>Checking capabilities&hellip;</,
       verb + ": an unanswered /v1/me must say we are still checking, in the rail's shipped words");
     assert.ok(html.indexOf(W38_ADMIN_SENTENCE) === -1,
       verb + ": a role we have not read is NOT the role of member — an unanswered read must accuse nobody");
