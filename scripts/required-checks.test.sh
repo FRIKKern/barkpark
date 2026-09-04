@@ -3421,7 +3421,12 @@ rc_coe_jobs() { # <workflow-dir>
       injobs && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
         j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); job = j; next
       }
-      injobs && job != "" && /^    continue-on-error:[[:space:]]*true[[:space:]]*$/ { print job }
+      # A TRAILING COMMENT IS THE COMMON SHAPE, not the exception:
+      # reland-check.yml writes `continue-on-error: true # advisory — report,
+      # never block`, and an end-anchored `true$` dropped it silently — measured,
+      # the derived candidate list came back one job short and §20 clause 5 had
+      # nothing to mutate.
+      injobs && job != "" && /^    continue-on-error:[[:space:]]*true([[:space:]]*#.*)?[[:space:]]*$/ { print job }
     ' "$f"
   done | sort -u
 }
