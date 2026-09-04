@@ -318,6 +318,23 @@ guard2() {
   return 0
 }
 
+# ONE discard, stdin CLOSED, stderr KEPT. The first live write run (2026-09-04
+# 06:09Z, --expect 425) discarded ONE row and printed FAILED for 424: the loop
+# fed bp its own id list on inherited stdin, and bp refuses a piped stdin it
+# does not use ("piped stdin is unused and doc discard-draft does not accept
+# --file", exit 2). The refusal was invisible because stderr went to /dev/null.
+# So: `< /dev/null` on every ledger write inside a loop, and the reason is
+# printed beside the FAILED id, never swallowed.
+discard_one() {
+  local id="$1" err
+  if err="$(env -u BARKPARK_TOKEN "$BP" doc discard-draft "$DOC_TYPE" "$id" --yes 2>&1 >/dev/null < /dev/null)"; then
+    printf 'discarded %s\n' "$id"
+    return 0
+  fi
+  printf 'FAILED    %s :: %s\n' "$id" "$(printf '%s' "$err" | head -1 | cut -c1-160)" >&2
+  return 1
+}
+
 run_write() {
   local raw="$1" table="$2" docs twins tol measured rc=0
   [ -n "$EXPECT" ] || die "write mode needs --expect <N> as well as --yes" 2
@@ -336,11 +353,9 @@ run_write() {
   : > "$DISCARDED"
   local id
   while IFS=$'\t' read -r id _; do
-    if env -u BARKPARK_TOKEN "$BP" doc discard-draft "$DOC_TYPE" "$id" --yes >/dev/null 2>&1; then
+    if discard_one "$id"; then
       printf '%s\n' "$id" >> "$DISCARDED"
-      printf 'discarded %s\n' "$id"
     else
-      printf 'FAILED    %s\n' "$id" >&2
       rc=4
     fi
   done < <(awk -F'\t' '$12=="DISCARD"{print $1}' "$table")
@@ -541,6 +556,27 @@ JSON
   else bad "diagnostic" "expected 3, got: $diag"; fi
   if printf '%s' "$diag" | grep -q 'NEVER gated'; then ok "labelled as never gated"
   else bad "diagnostic-label" "the diagnostic must say out loud that it gates nothing: $diag"; fi
+
+  printf 'THE WRITE LOOP CLOSES STDIN\n'
+  # A stub bp that does what the real one does: refuse a piped stdin it does
+  # not use (exit 2, the sentence quoted from bp). Driven through a pipe the way
+  # run_write drives discard_one — from inside a `while read` over the id list.
+  cat > "$tmp/stub-bp" <<'STUB'
+#!/bin/bash
+if IFS= read -r -t 1 _ 2>/dev/null; then
+  echo 'bp: piped stdin is unused and doc discard-draft does not accept --file' >&2; exit 2
+fi
+echo '{"results":[]}'
+STUB
+  chmod +x "$tmp/stub-bp"
+  local wl
+  wl="$(printf 'id-a\nid-b\nid-c\n' | { BP="$tmp/stub-bp"; while IFS= read -r id; do discard_one "$id"; done; } 2>&1)"
+  if [ "$(printf '%s\n' "$wl" | grep -c '^discarded ')" = "3" ] && ! printf '%s' "$wl" | grep -q FAILED; then
+    ok "three discards from inside a piped while-read all land (stdin closed per write)"
+  else bad "write-loop-stdin" "expected 3 discarded / 0 FAILED, got: $wl"; fi
+  case "$wl" in *"::"*) bad "write-loop-reason" "a reason was printed on a green run: $wl" ;; *) ok "no FAILED reason on a green run" ;; esac
+  wl="$(printf 'x\n' | { BP="$tmp/stub-bp"; DOC_TYPE=task; env -u BARKPARK_TOKEN "$tmp/stub-bp" doc discard-draft task x --yes 2>&1 >/dev/null; true; })"
+  case "$wl" in *"piped stdin is unused"*) ok "the stub refuses a piped stdin the way bp does (the arm is not vacuous)" ;; *) bad "stub-refuses" "the stub did not refuse: $wl" ;; esac
 
   printf 'TOLERANCE MEASUREMENT\n'
   # Five published rows carry claim.closed_at 2026-09-01T09:00:00Z; the cutoff
