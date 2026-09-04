@@ -335,7 +335,37 @@
     // reader (submitSiteGithub -> friendly(r.data, "Please try again.")) without
     // relaying any server reason. It names the state and the ONE remedy — regrant
     // then reconnect — with no transience verb.
-    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect."
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.",
+    // cch-w72-bl (charter D875/D878) — the github arm's two remaining unread
+    // refusals. Both are minted BARE (`%{error: slug}`, no detail, no reason), so
+    // nothing here is a relay: the curated rung is the only thing a person can
+    // read, and today all three github_error sites and the invalid_name site
+    // render their caller's generic ("Couldn't load your repositories." /
+    // "Please try again.").
+    //
+    // github_error — ONE entry covers all three emit sites (router.ex
+    // GET /v1/github/repos, the create_repo_from_template 502 arm of
+    // POST /v1/github/repos, and connect_site_github). Every one of them matches
+    // the cause away (`{:error, _reason}` / `{:error, {:github_error, _reason}}`)
+    // before minting the slug, so outage, rate-limit and token-death are
+    // INDISTINGUISHABLE at the wire. The sentence therefore names NO specific
+    // cause; it states only what the refusal proves — the failure is upstream of
+    // the reader's input. Readers: openSiteGithub, newCreateRepo,
+    // submitSiteGithub, all via friendly(r.data, …), so the curated rung wins
+    // first and no 5xx body can reach copy past it. (The 5xx exclusion binds
+    // detail RELAYS, not curated entries — this slug carries no detail to relay.)
+    github_error: "GitHub did not respond as expected — the problem is on GitHub's side or the connection, not your input. Try again shortly.",
+    // invalid_name — the 422 from POST /v1/github/repos. MEASURED, and it is NOT
+    // what the wave's filing assumed: the slug is minted by the router's OWN
+    // `valid_repo_name?/1` pre-check (router.ex:12708 — non-empty, not "." or
+    // "..", ≤ 100 chars, ^[A-Za-z0-9._-]+$), which runs BEFORE any GitHub call.
+    // GitHub never sees the name, so a sentence saying "GitHub refused …" would
+    // be exactly the class of lie this wave is hunting. The state is DETERMINISTIC
+    // and permanent for that name, so there is no transience verb: the sentence
+    // names the refused thing, the rule it broke, and the only remedy. Reader:
+    // newCreateRepo (#new-gh-name free text), whose sibling repo_exists 409
+    // already has its own honest arm — this closes the in-file parity gap.
+    invalid_name: "That repository name isn't allowed — use only letters, numbers, dots, dashes and underscores, up to 100 characters, and pick a different name."
   };
   // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
   // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND
