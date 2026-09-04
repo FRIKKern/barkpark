@@ -365,7 +365,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # `orderings` win, else the schema's `desk.orderings` (Sanity's
         # `orderings`, first entry = default). Absent → today's order.
         list_opts =
-          case desk_order(active_group, schema) do
+          case desk_order(active_group, schema, Map.get(node, :orderings)) do
             [] -> list_opts
             order -> Keyword.put(list_opts, :order, order)
           end
@@ -389,7 +389,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         {panes ++ [doc_pane], editor}
 
-      %{type: :document, type_name: type_name} ->
+      %{type: :document, type_name: type_name} = node ->
         schema =
           case Content.resolve_schema(type_name, dataset, scope(opts)) do
             {:ok, s} -> s
@@ -397,8 +397,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           end
 
         if schema do
+          # Gyldendal parity E3.2 — a declared singleton pins its own document
+          # id; the legacy desk's singletons keep id == type name.
+          doc_id = Map.get(node, :doc_id) || type_name
+
           {doc, is_draft, has_pub} =
-            Content.fetch_doc_with_draft(type_name, type_name, dataset, scope(opts))
+            Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
 
           editor =
             if doc do
@@ -791,7 +795,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # %{"field" => f, "direction" => "asc"|"desc"} becomes {:field, f, dir}; an
   # entry the changeset would have refused is skipped, never raised on.
   @doc false
-  def desk_order(active_group, schema) do
+  def desk_order(active_group, schema, node_orderings \\ nil) do
     group_orderings =
       active_group && (Map.get(active_group, "orderings") || Map.get(active_group, :orderings))
 
@@ -801,7 +805,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         _ -> nil
       end
 
-    (group_orderings || schema_orderings || [])
+    (group_orderings || node_orderings || schema_orderings || [])
     |> List.wrap()
     |> Enum.flat_map(fn
       %{} = o ->
