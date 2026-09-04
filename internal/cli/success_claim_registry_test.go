@@ -65,6 +65,23 @@ package cli
 // site receipt unchecked until someone remembered it, which is the same
 // nobody-looked shape the registry exists to kill.
 //
+// THE GRANDFATHER CLAUSE IS NARROWED (pds-w27, the support rows). As written above
+// the clause was a SILENCE: the provenance arm simply `continue`d past every row
+// outside its scope, so a new identity-only row could join the registry and be
+// checked by nothing that arm runs — nobody had to write anything down. It is now
+// an EXPLICIT, SHRINK-ONLY set (provenanceOutOfScope) held by
+// TestProvenanceGrandfatherSetCannotGrowSilently, which asserts three things:
+//
+//   - every registry row is EITHER in the provenance arm's scope OR named in the
+//     set, so the next row lands RED until a human writes its name down;
+//   - every name in the set is still enrolled, so the set can only shrink;
+//   - and — the tooth — every grandfathered row carries a disposition with a
+//     non-empty Post in success_claim_disposition_test.go. Grandfathering is
+//     scoped to PROVENANCE (where the probe value came from) and NEVER to
+//     RELEVANCE (whether the pair varies on something the verb changed). An
+//     identity-only row is a RELEVANCE failure, so it cannot hide here: it reds
+//     the disposition arms whether or not it is on this list.
+//
 // MUTATION-PROVEN: reverting the cloud_autoupdate_cmd.go fix (each verb's sentence
 // keyed on the local verb again) turns TestSuccessClaimsChangeWhenTheResponseDoes
 // RED on four entries. A gate not proven by mutation has not shipped.
@@ -76,6 +93,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -342,6 +360,15 @@ func successClaimRegistry() []claimSite {
 			// edit that stops printing the capacity reds this row instead of
 			// leaving it probing a sentence the CLI no longer composes. The three
 			// mirror consts and their pinning arm are gone with it.
+			// pds-w27 ADJUDICATION (the filing that named these rows vacuous). The
+			// repair above HOLDS, re-proven at this tree: replacing this Render with
+			// a closure carrying no receipt code at all —
+			// `out.outf("%s", "✓ online — listener ONLINE with measured capacity")` —
+			// reds TestSuccessClaimsChangeWhenTheResponseDoes ("prints the SAME line
+			// whether the server backs the claim or contradicts it") AND
+			// TestClaimProbesAttributeEveryPostConditionPerSurface on BOTH declared
+			// paths, on table and json. The pre-repair [2]string pair the filing
+			// condemned would pass none of that.
 			Name: "supportAddRun.done/online-roster-row",
 			Render: func(out *writer, resp any) {
 				(&supportAddRun{out: out}).done("online",
@@ -379,6 +406,11 @@ func successClaimRegistry() []claimSite {
 			// moves only WHICH record the zone said it deleted, so the swept
 			// branch's payload — the names, qualified against the zone — is
 			// attributed on both surfaces in its own right.
+			// pds-w27 ADJUDICATION: same proof on the teardown side. A no-receipt-code
+			// closure (`out.outf("%s", "✓ dns — 1 A record(s) deleted")`) reds the
+			// behavioral gate and the per-surface attribution of "#0" — the row varies
+			// on WHICH record the ZONE said it deleted, which is a value the response
+			// supplies, not a string this probe authored.
 			Name: "supportRemoveRun.done/dns-swept-names",
 			Render: func(out *writer, resp any) {
 				(&supportRemoveRun{out: out}).done("dns",
@@ -593,6 +625,18 @@ func successClaimRegistry() []claimSite {
 			// prints it ("box: … at …") and so does the envelope, which is why this
 			// row attributes on both surfaces. The measured max_class gets its own
 			// row below — see supportAddRun.success/max-class.
+			// pds-w27 ADJUDICATION. This row is NOT recorded as grandfathered-vacuous:
+			// it varies on the address the PROVIDER assigned while the identity (ID,
+			// Name) is held fixed and proven fixed by mutating the shared
+			// supportAddIdentity fixture, and the MEASURED post-condition the verb's
+			// summary claims gets its own two rows below (/max-class and
+			// /max-class-degraded, both keyed on the box's raw capacity stdout).
+			// Re-proven here: a closure carrying no receipt code
+			// (`out.outf("%s", "✓ support sup-1 is ONLINE …")`) reds three arms —
+			// the behavioral gate, the shared-identity-fixture arm (neither half moves
+			// when the fixture moves), and the per-surface attribution of "IP".
+			// The filing's condemnation described the PRE-D405 pair, which moved
+			// host.Name AND host.IP together; that pair is gone.
 			Name: "supportAddRun.success",
 			Render: func(out *writer, resp any) {
 				r := supportAddIdentity
@@ -1080,6 +1124,130 @@ var siteResponseTypedRows = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
+}
+
+// provenanceOutOfScope is the EXPLICIT grandfather set for
+// TestSiteClaimsAreProbedWithResponseTypes — the registry basenames its
+// provenance arm does not check, each because internal/cloudclient is not the
+// package that hands its probe back (hcloud-go, apiclient, taskboard, a decoded
+// map, cloud.Server). Widening that arm to cover them was REFUTED by mutation,
+// not skipped: see success_claim_disposition_test.go's header, which records the
+// renderSiteStampVerdict rename that made the arm fire and then reject a type the
+// store genuinely returns.
+//
+// THIS SET IS A CEILING, NOT A FLOOR: it may only shrink. It exists so the
+// clause is written down rather than being a `continue` nobody can see, and every
+// name on it is covered for RELEVANCE by claimDispositions — asserted below, so a
+// name cannot be parked here to buy silence.
+var provenanceOutOfScope = []string{
+	"autoupdateReceipt",
+	"autoupdatePolicySummary",
+	"renderRollbackResult",
+	"renderProvisioned",
+	"hzDone",
+	"hzPartial",
+	"hzResDone",
+	"instTransferDone",
+	"emitDeviceLoginSuccess",
+	"emitFrontierClaim",
+	"supportAddRun.done",
+	"supportRemoveRun.done",
+	"supportAddRun.success",
+	"renderStampVerdict",
+	"renderCloseVerdict",
+	"renderPulseVerdict",
+	"migrateTypeReceipt",
+	"renderTaskCreated",
+}
+
+// TestProvenanceGrandfatherSetCannotGrowSilently closes the provenance arm's own
+// silence. Before this, a registry row outside that arm's scope was skipped by a
+// bare `continue`: the NEXT identity-only row would join the registry, be checked
+// by nothing the arm runs, and nobody would have had to write a line.
+//
+// MUTATION-PROVEN, both directions: appending a fresh basename to
+// provenanceOutOfScope reds the shrink-only arm (it names no enrolled row), and
+// deleting "supportAddRun.success" from it reds the coverage arm (an enrolled row
+// that is neither in scope nor written down).
+func TestProvenanceGrandfatherSetCannotGrowSilently(t *testing.T) {
+	inScope := func(base string) bool {
+		for _, n := range siteResponseTypedRows {
+			if n == base {
+				return true
+			}
+		}
+		return strings.HasPrefix(base, siteRenderPrefix)
+	}
+	grandfathered := map[string]bool{}
+	for _, n := range provenanceOutOfScope {
+		if inScope(n) {
+			t.Errorf("%q is IN the provenance arm's scope and must not be grandfathered — "+
+				"the set is for rows that arm cannot reach, never a way to opt one out", n)
+		}
+		grandfathered[n] = true
+	}
+
+	// A grandfathered name must still name an enrolled row: the set only shrinks.
+	enrolled := map[string]bool{}
+	rows := successClaimRegistry()
+	if len(rows) == 0 {
+		t.Fatal("the success-claim registry is empty — every arm here would pass vacuously")
+	}
+	for _, site := range rows {
+		enrolled[strings.SplitN(site.Name, "/", 2)[0]] = true
+	}
+	for _, n := range provenanceOutOfScope {
+		if !enrolled[n] {
+			t.Errorf("%q is grandfathered out of the provenance check but names no enrolled row — "+
+				"the grandfather set may only SHRINK; delete the line in the same commit as the row", n)
+		}
+	}
+
+	// And every enrolled row is either checked or written down. A new row that is
+	// neither lands here, which is the silence this arm exists to end.
+	for _, base := range sortedEnrollmentNames(enrolled) {
+		if inScope(base) || grandfathered[base] {
+			continue
+		}
+		t.Errorf("%q is enrolled but the provenance check neither covers it nor grandfathers it. Probe it with a "+
+			"type internal/cloudclient RETURNS, or add it to provenanceOutOfScope with the package that hands its "+
+			"probe back — a row nobody had to write down is a row nobody looked at", base)
+	}
+
+	// THE TOOTH. Grandfathered on PROVENANCE never means grandfathered on
+	// RELEVANCE: each grandfathered row must carry a disposition declaring a
+	// non-empty post-condition axis, so an identity-only row cannot park itself
+	// here.
+	//
+	// Keyed on the EXACT row name, never the basename. Measured: a basename key
+	// let supportAddRun.success/max-class vouch for supportAddRun.success —
+	// emptying the base row's Post stayed green, which is the corrected-sibling
+	// shape where one repaired variant covers for a stale one.
+	posts := map[string]int{}
+	for _, d := range claimDispositions {
+		posts[d.Name] = len(d.Post)
+	}
+	for _, site := range rows {
+		if !grandfathered[strings.SplitN(site.Name, "/", 2)[0]] {
+			continue
+		}
+		if posts[site.Name] == 0 {
+			t.Errorf("%q is grandfathered out of the provenance check and declares NO post-condition axis in "+
+				"claimDispositions — that combination is exactly the identity-only row this clause must not hide. "+
+				"A sibling variant's axis does not cover this row", site.Name)
+		}
+	}
+}
+
+// sortedEnrollmentNames makes the arm above report deterministically, so a failure
+// names the same row on every run.
+func sortedEnrollmentNames(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // renderClaim runs one enrolled render against one response and returns
